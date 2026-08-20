@@ -1,0 +1,16 @@
+[package]
+name = "libjay"
+description = "Embedded J/APL: compile array-language expressions from string literals and run them in parallel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "jay"
+
+[dependencies]
+
+[dev-dependencies]
+rstest = "0.25"

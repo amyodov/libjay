@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "libjay"
+description = "Embedded J and APL: compile array-language expressions and run them in parallel"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Alex Myodov", email = "amyodov@gmail.com" }]
+requires-python = ">=3.10"
+keywords = ["j", "apl", "array", "dataframe", "arrow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Interpreters",
+]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/amyodov/libjay"
+
+[project.scripts]
+libjay = "libjay._cli:main"
+
+[tool.maturin]
+manifest-path = "crates/libjay-python/Cargo.toml"
+module-name = "libjay._jay"
+python-source = "python"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]

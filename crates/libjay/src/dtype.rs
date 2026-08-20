@@ -1,0 +1,37 @@
+//! Element types. The set is deliberately small for now; nothing here may
+//! assume it stays small (boxes, decimals, complex arrive later).
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DType {
+    Bool,
+    I64,
+    F64,
+    Char,
+}
+
+impl DType {
+    pub fn name(self) -> &'static str {
+        match self {
+            DType::Bool => "boolean",
+            DType::I64 => "integer",
+            DType::F64 => "float",
+            DType::Char => "character",
+        }
+    }
+
+    pub fn is_numeric(self) -> bool {
+        matches!(self, DType::Bool | DType::I64 | DType::F64)
+    }
+
+    /// Common type two numeric operands widen to. None if incompatible.
+    pub fn promote(a: DType, b: DType) -> Option<DType> {
+        use DType::*;
+        match (a, b) {
+            (Char, Char) => Some(Char),
+            (Char, _) | (_, Char) => None,
+            (F64, _) | (_, F64) => Some(F64),
+            (I64, _) | (_, I64) => Some(I64),
+            (Bool, Bool) => Some(Bool),
+        }
+    }
+}

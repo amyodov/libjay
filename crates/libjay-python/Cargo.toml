@@ -1,0 +1,17 @@
+[package]
+name = "libjay-python"
+description = "Python binding for libjay"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "_jay"
+crate-type = ["cdylib"]
+
+[dependencies]
+libjay = { path = "../libjay" }
+pyo3 = { version = "0.25", features = ["abi3-py310"] }
