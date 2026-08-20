@@ -146,13 +146,14 @@ pub fn compile_parts(
 }
 
 fn compile_source_parts(lang: Lang, sp: SourceParts, dialect: &Dialect) -> Result<Program> {
-    let (stmts, agreement, fmt) = match lang {
+    let (mut stmts, agreement, fmt) = match lang {
         Lang::J => (j::parse(&sp)?, Agreement::LeadingPrefix, FmtOpts::J),
         Lang::Apl => {
             let origin = dialect.index_origin.unwrap_or(1);
             (apl::parse(&sp, origin)?, Agreement::ExactOrScalar, FmtOpts::APL)
         }
     };
+    crate::fuse::pass(&mut stmts);
     let params = sp.param_names.into_iter().map(|name| ParamSpec { name }).collect();
     Ok(Program { stmts, params, display_src: sp.display, agreement, fmt })
 }

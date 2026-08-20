@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::array::Array;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::fmt::{format_array, FmtOpts};
+use crate::fuse::FusedKernel;
 use crate::verb::{Agreement, Ctx, EvalCfg, Verb};
 
 #[derive(Clone, Debug)]
@@ -21,6 +22,10 @@ pub enum Expr {
     Dyad { verb: Verb, x: Box<Expr>, y: Box<Expr>, span: Span },
     /// APL `⎕← expr`: print, pass the value through.
     PrintPass { value: Box<Expr>, span: Span },
+    /// A chain of elementwise verbs evaluated in one blockwise pass (see
+    /// [`crate::fuse`]). `inputs` are the subtrees the chain reads; `orig`
+    /// is the chain itself, which runs whenever the kernel declines.
+    Fused { kernel: FusedKernel, inputs: Vec<Expr>, orig: Box<Expr>, span: Span },
 }
 
 impl Expr {
@@ -30,7 +35,8 @@ impl Expr {
             Expr::Assign { span, .. }
             | Expr::Monad { span, .. }
             | Expr::Dyad { span, .. }
-            | Expr::PrintPass { span, .. } => *span,
+            | Expr::PrintPass { span, .. }
+            | Expr::Fused { span, .. } => *span,
         }
     }
 
@@ -119,6 +125,19 @@ fn eval(
             (ctx.out)(&text);
             (ctx.out)("\n");
             Ok(v)
+        }
+        Expr::Fused { kernel, inputs, orig, .. } => {
+            let mut vals = Vec::with_capacity(inputs.len());
+            for e in inputs {
+                vals.push(eval(e, args, env, ctx)?);
+            }
+            match crate::fuse::eval(kernel, &vals) {
+                Some(a) => Ok(a),
+                // The kernel does not cover this data. The chain it came
+                // from does, including whatever error it raises; it runs
+                // over the values just computed, not over the leaves again.
+                None => eval(&crate::fuse::fallback_tree(kernel, orig, &vals), args, env, ctx),
+            }
         }
     }
 }
