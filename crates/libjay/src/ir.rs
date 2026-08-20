@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::array::Array;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::fmt::{format_array, FmtOpts};
-use crate::verb::{Agreement, Ctx, Verb};
+use crate::verb::{Agreement, Ctx, EvalCfg, Verb};
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -69,7 +69,8 @@ impl Program {
                 args.len()
             )));
         }
-        let mut ctx = Ctx { agreement: self.agreement, fmt: self.fmt, out };
+        let cfg = EvalCfg { agreement: self.agreement, fmt: self.fmt };
+        let mut ctx = Ctx { cfg, out };
         let mut env: HashMap<String, Array> = HashMap::new();
         let mut last = None;
         for stmt in &self.stmts {
@@ -114,7 +115,7 @@ fn eval(
         }
         Expr::PrintPass { value, .. } => {
             let v = eval(value, args, env, ctx)?;
-            let text = format_array(&v, &ctx.fmt);
+            let text = format_array(&v, &ctx.cfg.fmt);
             (ctx.out)(&text);
             (ctx.out)("\n");
             Ok(v)

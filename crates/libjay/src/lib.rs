@@ -10,6 +10,7 @@ pub mod error;
 pub mod fmt;
 pub mod frontend;
 pub mod ir;
+mod par;
 pub mod verb;
 
 pub use array::{Array, Buf, Data, Owner};

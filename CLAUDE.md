@@ -137,6 +137,19 @@ Choices made during implementation, with reasoning. No entry = still open.
   only (rlib would collide with the core's libjay.rlib) → libjay.dylib/.so +
   libjay.a, -ljay, hand-written include/jay.h. Inputs copied at the C
   boundary for now (no lifetime contract in the ABI yet); docs/embedding.md.
+- 2026-08-20 — Threading (delegated): rayon; one pool owned by the core
+  crate (not rayon's global one, so an embedding host keeps its own), sized
+  by available_parallelism or LIBJAY_THREADS, read once. Parallel:
+  elementwise monad/dyad passes (chunked; integer overflow folded per chunk,
+  then the pass redone in f64), rank-machinery cells when the verb is pure
+  (`Verb::is_pure` — false iff the tree contains echo), and leading-axis
+  reduce (wide items split by column, which preserves the fold order for any
+  verb; narrow items split into chunks of items, associative verbs only —
+  the float reassociation is the §5.9 contract). Nothing splits below 65,536
+  element operations. `Ctx` splits into a Copy `EvalCfg` plus the output
+  sink, so a parallel path cannot capture the sink. Numbers, and the two
+  things that now cost more than threading buys (deep copies on naming a
+  value; no fusion), are in bench/README.md.
 - 2026-08-20 — Benchmarks run in .venv-bench (Python 3.12): numba wheels for
   Intel macs stop at numba 0.61/llvmlite 0.44, so the bench venv pins
   numba<0.62 (the dev venv stays 3.14).
@@ -145,5 +158,4 @@ Open: APL oracle;
 pure-expression assertion flag; primitive ordering; complex column naming;
 sandbox surfacing; FFT-class operations.
 Delegated (owner has no opinion, decide and log): codegen backend, IR design,
-threading, crate structure, CLI implementation language, caching/dispatch
-internals.
+crate structure, CLI implementation language, caching/dispatch internals.

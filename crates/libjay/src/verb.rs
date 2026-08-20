@@ -10,6 +10,7 @@ use crate::array::{Array, Data};
 use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::fmt::FmtOpts;
+use crate::par;
 
 /// Infinite rank (applies to the argument as a whole).
 pub const RANK_INF: i64 = i64::MAX;
@@ -24,10 +25,27 @@ pub enum Agreement {
     ExactOrScalar,
 }
 
-/// Execution context threaded through evaluation.
-pub struct Ctx<'a> {
+/// The effect-free half of the execution context. Copyable, so a path that
+/// runs cells on other threads can carry it there; the output sink cannot
+/// go along, which is what keeps those paths pure by construction.
+#[derive(Clone, Copy, Debug)]
+pub struct EvalCfg {
     pub agreement: Agreement,
     pub fmt: FmtOpts,
+}
+
+impl EvalCfg {
+    /// Run `f` with a context whose sink is never reached. Only a verb that
+    /// [`Verb::is_pure`] accepted is given one of these.
+    fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
+        let mut sink = |_: &str| debug_assert!(false, "a pure verb wrote to the output sink");
+        f(&mut Ctx { cfg: self, out: &mut sink })
+    }
+}
+
+/// Execution context threaded through evaluation.
+pub struct Ctx<'a> {
+    pub cfg: EvalCfg,
     /// Sink for explicit output (`echo`, `⎕←`). stdout by default per the
     /// sandbox contract; the host may redirect.
     pub out: &'a mut dyn FnMut(&str),
@@ -230,6 +248,21 @@ impl Verb {
         }
     }
 
+    /// True when applying this verb does nothing beyond producing its
+    /// result. Output (`echo`, `⎕←`) is the only effect a verb can have, and
+    /// only a pure verb may have its cells run out of order on several
+    /// threads. Deliberately conservative: a new effect must be added here.
+    pub fn is_pure(&self) -> bool {
+        match self {
+            Verb::Prim(p) => !matches!(p.monad, MonadOp::Echo),
+            Verb::Rank(v, _) | Verb::Reduce(v) => v.is_pure(),
+            Verb::Fork(f, g, h) => f.is_pure() && g.is_pure() && h.is_pure(),
+            Verb::NounFork(_, g, h) | Verb::Hook(g, h) | Verb::Atop(g, h) => {
+                g.is_pure() && h.is_pure()
+            }
+        }
+    }
+
     /// Full monadic application including rank/frame machinery.
     pub fn monad(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         match self {
@@ -245,10 +278,9 @@ impl Verb {
                 }
                 let frame = y.shape[..frame_rank].to_vec();
                 let n: usize = frame.iter().product();
-                let mut cells = Vec::with_capacity(n);
-                for i in 0..n {
-                    cells.push(monad_op(p, &y.cell_at(frame_rank, i), ctx, span)?);
-                }
+                let cells = each_cell(n, y.count(), self.is_pure(), ctx, |i, c| {
+                    monad_op(p, &y.cell_at(frame_rank, i), c, span)
+                })?;
                 assemble(&frame, cells, span)
             }
             Verb::Rank(v, r) => {
@@ -260,10 +292,9 @@ impl Verb {
                 }
                 let frame = y.shape[..frame_rank].to_vec();
                 let n: usize = frame.iter().product();
-                let mut cells = Vec::with_capacity(n);
-                for i in 0..n {
-                    cells.push(v.monad(&y.cell_at(frame_rank, i), ctx, span)?);
-                }
+                let cells = each_cell(n, y.count(), self.is_pure(), ctx, |i, c| {
+                    v.monad(&y.cell_at(frame_rank, i), c, span)
+                })?;
                 assemble(&frame, cells, span)
             }
             Verb::Reduce(v) => reduce(v, y, ctx, span),
@@ -321,28 +352,28 @@ impl Verb {
             // Both cells are elements: run the flat elementwise path instead
             // of materialising one Array per element.
             if let Some(op) = self.scalar_dyad_op() {
-                return scalar_dyad(op, x, y, ctx.agreement, span);
+                return scalar_dyad(op, x, y, ctx.cfg.agreement, span);
             }
         }
         let fxl = x.rank() - er_l;
         let fyl = y.rank() - er_r;
-        let p = agree(&x.shape[..fxl], &y.shape[..fyl], &x.shape, &y.shape, ctx.agreement, span)?;
+        let p = agree(&x.shape[..fxl], &y.shape[..fyl], &x.shape, &y.shape, ctx.cfg.agreement, span)?;
         if p.frame.is_empty() {
             return self.dyad_cell(x, y, ctx, span);
         }
-        let mut cells = Vec::with_capacity(p.n);
-        for i in 0..p.n {
+        let work = x.count().max(y.count());
+        let cells = each_cell(p.n, work, self.is_pure(), ctx, |i, c| {
             let xc = x.cell_at(fxl, i / p.x_div);
             let yc = y.cell_at(fyl, i / p.y_div);
-            cells.push(self.dyad_cell(&xc, &yc, ctx, span)?);
-        }
+            self.dyad_cell(&xc, &yc, c, span)
+        })?;
         assemble(&p.frame, cells, span)
     }
 
     /// The meaning applied to one pair of cells by `dyad_ranked`.
     fn dyad_cell(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         match self {
-            Verb::Prim(p) => dyad_op(p, x, y, ctx.agreement, span),
+            Verb::Prim(p) => dyad_op(p, x, y, ctx.cfg.agreement, span),
             Verb::Rank(v, _) => v.dyad(x, y, ctx, span),
             _ => Err(Error::internal("dyad_cell on a verb without cell ranks")),
         }
@@ -370,6 +401,31 @@ pub fn effective_rank(r: i64, arg_rank: usize) -> usize {
     } else {
         arg_rank.saturating_sub(r.unsigned_abs() as usize)
     }
+}
+
+/// Apply `f` to the `n` cells of a frame, in index order.
+///
+/// Cells are independent, so a pure verb runs them on several threads and
+/// the results are framed afterwards; an impure one keeps the caller's
+/// context, and with it the order its output appears in. `work` is the
+/// number of elements the whole application touches, which decides whether
+/// splitting is worth it. Either way the first failing cell in index order
+/// supplies the error.
+fn each_cell<F>(
+    n: usize,
+    work: usize,
+    pure: bool,
+    ctx: &mut Ctx<'_>,
+    f: F,
+) -> Result<Vec<Array>>
+where
+    F: Fn(usize, &mut Ctx<'_>) -> Result<Array> + Sync + Send,
+{
+    if pure && n > 1 && par::worth_it(work) {
+        let cfg = ctx.cfg;
+        return par::map_indexed(n, |i| cfg.pure(|c| f(i, c))).into_iter().collect();
+    }
+    (0..n).map(|i| f(i, ctx)).collect()
 }
 
 // ---------------------------------------------------------------- naming
@@ -643,6 +699,14 @@ fn borrow_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>) -> &'a [f64] {
     }
 }
 
+/// Numeric data as f64, borrowed when it already is that.
+fn as_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>, span: Span) -> Result<&'a [f64]> {
+    if d.dtype() == DType::Char {
+        return Err(char_arith(span));
+    }
+    Ok(borrow_f64(d, tmp))
+}
+
 /// The type an arithmetic pair computes in. Booleans count as integers.
 fn arith_type(a: DType, b: DType, span: Span) -> Result<DType> {
     match DType::promote(a, b) {
@@ -657,6 +721,222 @@ fn arith_type(a: DType, b: DType, span: Span) -> Result<DType> {
     }
 }
 
+/// Apply `f` to the argument pair behind every element of one output chunk.
+/// Element `start + k` of the result pairs `xs[xoff + (start+k)/xdiv]` with
+/// `ys[yoff + (start+k)/ydiv]`, so broadcasting and folding both run without
+/// materialising cells.
+///
+/// The two shapes that carry the work — one element per element, and one
+/// element spread over a whole chunk — become plain loops over slices, which
+/// is what lets the compiler vectorise the pass; anything else keeps the
+/// general index arithmetic. `f` returns false to abandon the chunk.
+#[allow(clippy::too_many_arguments)]
+#[inline]
+fn zip_chunk<T, U, F>(
+    xs: &[T],
+    xoff: usize,
+    xdiv: usize,
+    ys: &[T],
+    yoff: usize,
+    ydiv: usize,
+    start: usize,
+    out: &mut [U],
+    mut f: F,
+) -> bool
+where
+    T: Copy,
+    F: FnMut(T, T, &mut U) -> bool,
+{
+    let len = out.len();
+    if len == 0 {
+        return true;
+    }
+    let last = start + len - 1;
+    let one_x = xdiv > 1 && start / xdiv == last / xdiv;
+    let one_y = ydiv > 1 && start / ydiv == last / ydiv;
+    if xdiv == 1 && ydiv == 1 {
+        let xc = &xs[xoff + start..xoff + start + len];
+        let yc = &ys[yoff + start..yoff + start + len];
+        for ((slot, &a), &b) in out.iter_mut().zip(xc).zip(yc) {
+            if !f(a, b, slot) {
+                return false;
+            }
+        }
+    } else if xdiv == 1 && one_y {
+        let b = ys[yoff + start / ydiv];
+        let xc = &xs[xoff + start..xoff + start + len];
+        for (slot, &a) in out.iter_mut().zip(xc) {
+            if !f(a, b, slot) {
+                return false;
+            }
+        }
+    } else if one_x && ydiv == 1 {
+        let a = xs[xoff + start / xdiv];
+        let yc = &ys[yoff + start..yoff + start + len];
+        for (slot, &b) in out.iter_mut().zip(yc) {
+            if !f(a, b, slot) {
+                return false;
+            }
+        }
+    } else {
+        for (k, slot) in out.iter_mut().enumerate() {
+            let i = start + k;
+            if !f(xs[xoff + i / xdiv], ys[yoff + i / ydiv], slot) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// One integer step. None means the result left i64 — an overflow, or a
+/// value that is not an integer — and the whole pass is redone in f64.
+#[inline]
+fn i64_op(op: ScalarDyad, a: i64, b: i64) -> Option<i64> {
+    use ScalarDyad::*;
+    Some(match op {
+        Add => a.checked_add(b)?,
+        Sub => a.checked_sub(b)?,
+        Mul => a.checked_mul(b)?,
+        Min => a.min(b),
+        Max => a.max(b),
+        Residue => {
+            if a == 0 {
+                b
+            } else {
+                // wrapping_rem: i64::MIN % -1 is mathematically 0.
+                let mut r = b.wrapping_rem(a);
+                if r != 0 && (r < 0) != (a < 0) {
+                    r += a;
+                }
+                r
+            }
+        }
+        Pow => {
+            if b < 0 {
+                return None;
+            }
+            a.checked_pow(u32::try_from(b).ok()?)?
+        }
+        _ => return None,
+    })
+}
+
+/// One float step.
+#[inline]
+fn f64_op(op: ScalarDyad, a: f64, b: f64, span: Span) -> Result<f64> {
+    use ScalarDyad::*;
+    Ok(match op {
+        Add => a + b,
+        Sub => a - b,
+        Mul => a * b,
+        Min => a.min(b),
+        Max => a.max(b),
+        DivJ => {
+            if b == 0.0 {
+                if a == 0.0 { 0.0 } else { f64::INFINITY.copysign(a) }
+            } else {
+                a / b
+            }
+        }
+        DivApl => {
+            if b == 0.0 {
+                if a == 0.0 {
+                    1.0
+                } else {
+                    return Err(Error::domain("division by zero", span));
+                }
+            } else {
+                a / b
+            }
+        }
+        Pow => {
+            if a == 0.0 && b == 0.0 {
+                1.0
+            } else {
+                a.powf(b)
+            }
+        }
+        Residue => {
+            if a == 0.0 {
+                b
+            } else {
+                b - a * (b / a).floor()
+            }
+        }
+        Log => {
+            if a < 0.0 || b < 0.0 {
+                return Err(Error::not_yet("complex numbers", span));
+            }
+            b.ln() / a.ln()
+        }
+        Root => {
+            if b < 0.0 {
+                return Err(Error::not_yet("complex numbers", span));
+            }
+            b.powf(1.0 / a)
+        }
+        _ => return Err(Error::internal("non-arithmetic op in the float path")),
+    })
+}
+
+/// One chunk of an integer pass. False means the chunk left i64 and the
+/// caller redoes the whole operation in f64.
+#[allow(clippy::too_many_arguments)]
+fn dyad_i64_chunk(
+    op: ScalarDyad,
+    xs: &[i64],
+    xoff: usize,
+    xdiv: usize,
+    ys: &[i64],
+    yoff: usize,
+    ydiv: usize,
+    start: usize,
+    out: &mut [i64],
+) -> bool {
+    use ScalarDyad::*;
+    // The overflow of the three growing operations is folded into a flag
+    // rather than breaking the loop: that keeps the pass branch-free, and an
+    // overflowing chunk is thrown away and redone in f64 in any case.
+    macro_rules! overflowing {
+        ($m:ident) => {{
+            let mut over = false;
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut i64| {
+                let (v, o) = i64::$m(a, b);
+                *slot = v;
+                over |= o;
+                true
+            });
+            !over
+        }};
+    }
+    macro_rules! plain {
+        ($step:expr) => {{
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut i64| {
+                *slot = $step(a, b);
+                true
+            })
+        }};
+    }
+    match op {
+        Add => overflowing!(overflowing_add),
+        Sub => overflowing!(overflowing_sub),
+        Mul => overflowing!(overflowing_mul),
+        Min => plain!(i64::min),
+        Max => plain!(i64::max),
+        _ => zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut i64| {
+            match i64_op(op, a, b) {
+                Some(v) => {
+                    *slot = v;
+                    true
+                }
+                None => false,
+            }
+        }),
+    }
+}
+
+/// One elementwise integer pass. None means it left i64 anywhere.
 #[allow(clippy::too_many_arguments)]
 fn dyad_i64(
     op: ScalarDyad,
@@ -668,41 +948,62 @@ fn dyad_i64(
     ydiv: usize,
     n: usize,
 ) -> Option<Vec<i64>> {
+    let (out, ok) = par::fill(n, |start, part| {
+        dyad_i64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part)
+    });
+    ok.then_some(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dyad_f64_chunk(
+    op: ScalarDyad,
+    xs: &[f64],
+    xoff: usize,
+    xdiv: usize,
+    ys: &[f64],
+    yoff: usize,
+    ydiv: usize,
+    start: usize,
+    out: &mut [f64],
+    span: Span,
+) -> Result<()> {
     use ScalarDyad::*;
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let a = xs[xoff + i / xdiv];
-        let b = ys[yoff + i / ydiv];
-        // A None anywhere means "redo the whole operation in f64".
-        let v = match op {
-            Add => a.checked_add(b)?,
-            Sub => a.checked_sub(b)?,
-            Mul => a.checked_mul(b)?,
-            Min => a.min(b),
-            Max => a.max(b),
-            Residue => {
-                if a == 0 {
-                    b
-                } else {
-                    // wrapping_rem: i64::MIN % -1 is mathematically 0.
-                    let mut r = b.wrapping_rem(a);
-                    if r != 0 && (r < 0) != (a < 0) {
-                        r += a;
-                    }
-                    r
-                }
-            }
-            Pow => {
-                if b < 0 {
-                    return None;
-                }
-                a.checked_pow(u32::try_from(b).ok()?)?
-            }
-            _ => return None,
-        };
-        out.push(v);
+    // The arithmetic that cannot fail is picked before the loop, so the
+    // compiler sees one operation per pass instead of a match per element.
+    macro_rules! plain {
+        ($step:expr) => {{
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
+                *slot = $step(a, b);
+                true
+            });
+            return Ok(());
+        }};
     }
-    Some(out)
+    match op {
+        Add => plain!(|a: f64, b: f64| a + b),
+        Sub => plain!(|a: f64, b: f64| a - b),
+        Mul => plain!(|a: f64, b: f64| a * b),
+        Min => plain!(f64::min),
+        Max => plain!(f64::max),
+        _ => {}
+    }
+    let mut err = None;
+    zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
+        match f64_op(op, a, b, span) {
+            Ok(v) => {
+                *slot = v;
+                true
+            }
+            Err(e) => {
+                err = Some(e);
+                false
+            }
+        }
+    });
+    match err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -717,66 +1018,9 @@ fn dyad_f64(
     n: usize,
     span: Span,
 ) -> Result<Vec<f64>> {
-    use ScalarDyad::*;
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let a = xs[xoff + i / xdiv];
-        let b = ys[yoff + i / ydiv];
-        let v = match op {
-            Add => a + b,
-            Sub => a - b,
-            Mul => a * b,
-            Min => a.min(b),
-            Max => a.max(b),
-            DivJ => {
-                if b == 0.0 {
-                    if a == 0.0 { 0.0 } else { f64::INFINITY.copysign(a) }
-                } else {
-                    a / b
-                }
-            }
-            DivApl => {
-                if b == 0.0 {
-                    if a == 0.0 {
-                        1.0
-                    } else {
-                        return Err(Error::domain("division by zero", span));
-                    }
-                } else {
-                    a / b
-                }
-            }
-            Pow => {
-                if a == 0.0 && b == 0.0 {
-                    1.0
-                } else {
-                    a.powf(b)
-                }
-            }
-            Residue => {
-                if a == 0.0 {
-                    b
-                } else {
-                    b - a * (b / a).floor()
-                }
-            }
-            Log => {
-                if a < 0.0 || b < 0.0 {
-                    return Err(Error::not_yet("complex numbers", span));
-                }
-                b.ln() / a.ln()
-            }
-            Root => {
-                if b < 0.0 {
-                    return Err(Error::not_yet("complex numbers", span));
-                }
-                b.powf(1.0 / a)
-            }
-            _ => return Err(Error::internal("non-arithmetic op in the float path")),
-        };
-        out.push(v);
-    }
-    Ok(out)
+    par::try_fill(n, |start, part| {
+        dyad_f64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, span)
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -814,35 +1058,40 @@ fn compare_data(
         let (Data::Char(a), Data::Char(b)) = (x, y) else {
             return Err(Error::internal("character comparison on non-character data"));
         };
-        let mut out = Vec::with_capacity(n);
-        for i in 0..n {
-            let e = a[xoff + i / xdiv] == b[yoff + i / ydiv];
-            out.push(if op == Eq { e as u8 } else { !e as u8 });
-        }
+        let (out, _) = par::fill(n, |start, part: &mut [u8]| {
+            zip_chunk(a, xoff, xdiv, b, yoff, ydiv, start, part, |p, q, slot| {
+                let e = p == q;
+                *slot = if op == Eq { e as u8 } else { !e as u8 };
+                true
+            })
+        });
         return Ok(Data::Bool(out.into()));
     }
-    let mut out = Vec::with_capacity(n);
     // Floats compare exactly. J's comparison tolerance (!:) is a known
     // divergence, to revisit together with the rest of the tolerance rules.
-    if DType::promote(dx, dy) == Some(DType::F64) {
+    let out = if DType::promote(dx, dy) == Some(DType::F64) {
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
         let xs = borrow_f64(x, &mut tx);
         let ys = borrow_f64(y, &mut ty);
-        for i in 0..n {
-            let a = xs[xoff + i / xdiv];
-            let b = ys[yoff + i / ydiv];
-            out.push(cmp_result(op, a.partial_cmp(&b)) as u8);
-        }
+        par::fill(n, |start, part: &mut [u8]| {
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
+                *slot = cmp_result(op, a.partial_cmp(&b)) as u8;
+                true
+            })
+        })
+        .0
     } else {
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
         let xs = borrow_i64(x, &mut tx);
         let ys = borrow_i64(y, &mut ty);
-        for i in 0..n {
-            let a = xs[xoff + i / xdiv];
-            let b = ys[yoff + i / ydiv];
-            out.push(cmp_result(op, Some(a.cmp(&b))) as u8);
-        }
-    }
+        par::fill(n, |start, part: &mut [u8]| {
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
+                *slot = cmp_result(op, Some(i64::cmp(&a, &b))) as u8;
+                true
+            })
+        })
+        .0
+    };
     Ok(Data::Bool(out.into()))
 }
 
@@ -909,29 +1158,33 @@ fn lcm_gcd_data(
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
         (borrow_i64(x, &mut tx).to_vec(), borrow_i64(y, &mut ty).to_vec())
     };
-    let mut out = Vec::with_capacity(n);
-    let mut fits = true;
-    for i in 0..n {
-        let a = xs[xoff + i / xdiv] as i128;
-        let b = ys[yoff + i / ydiv] as i128;
-        let g = gcd_i128(a, b);
-        let v = if op == ScalarDyad::Gcd {
-            g
-        } else if g == 0 {
-            0
-        } else {
-            a / g * b
-        };
-        fits &= i64::try_from(v).is_ok();
-        out.push(v);
-    }
+    // The chunk flag carries "every value fits an i64", so the whole pass
+    // widens to float exactly when the sequential one would.
+    let (out, fits) = par::fill(n, |start, part: &mut [i128]| {
+        let mut fits = true;
+        zip_chunk(&xs, xoff, xdiv, &ys, yoff, ydiv, start, part, |a, b, slot| {
+            let (a, b) = (a as i128, b as i128);
+            let g = gcd_i128(a, b);
+            let v = if op == ScalarDyad::Gcd {
+                g
+            } else if g == 0 {
+                0
+            } else {
+                a / g * b
+            };
+            fits &= i64::try_from(v).is_ok();
+            *slot = v;
+            true
+        });
+        fits
+    });
     if !fits || float {
-        return Ok(Data::F64(out.iter().map(|&v| v as f64).collect()));
+        return Ok(Data::F64(par::map(&out, |&v| v as f64).into()));
     }
     if both_bool {
-        return Ok(Data::Bool(out.iter().map(|&v| v as u8).collect()));
+        return Ok(Data::Bool(par::map(&out, |&v| v as u8).into()));
     }
-    Ok(Data::I64(out.iter().map(|&v| v as i64).collect()))
+    Ok(Data::I64(par::map(&out, |&v| v as i64).into()))
 }
 
 /// One elementwise dyadic pass over two buffers. Element `i` of the result
@@ -994,6 +1247,9 @@ fn fits_i64(v: f64) -> bool {
 fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
     use ScalarMonad::*;
     let d = &y.data;
+    // The float-only operations borrow float data as it lies; anything else
+    // is widened once into `tmp` first.
+    let mut tmp = Vec::new();
     let data = match op {
         Conj => match d {
             // Identity on reals; conjugation matters once complex arrives.
@@ -1001,22 +1257,20 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
             _ => d.clone(),
         },
         Neg => match d {
-            Data::Bool(v) => Data::I64(v.iter().map(|&b| -(b as i64)).collect()),
-            Data::I64(v) => match v.iter().map(|&x| x.checked_neg()).collect::<Option<Vec<_>>>() {
+            Data::Bool(v) => Data::I64(par::map(v, |&b| -(b as i64)).into()),
+            Data::I64(v) => match par::try_map(v, i64::checked_neg) {
                 Some(out) => Data::I64(out.into()),
-                None => Data::F64(v.iter().map(|&x| -(x as f64)).collect()),
+                None => Data::F64(par::map(v, |&x| -(x as f64)).into()),
             },
-            Data::F64(v) => Data::F64(v.iter().map(|&x| -x).collect()),
+            Data::F64(v) => Data::F64(par::map(v, |&x| -x).into()),
             Data::Char(_) => return Err(char_arith(span)),
         },
         Signum => match d {
-            Data::Bool(v) => Data::I64(v.iter().map(|&b| b as i64).collect()),
-            Data::I64(v) => Data::I64(v.iter().map(|&x| x.signum()).collect()),
+            Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
+            Data::I64(v) => Data::I64(par::map(v, |&x| x.signum()).into()),
             // NaN has no sign here; it yields 0.
             Data::F64(v) => Data::F64(
-                v.iter()
-                    .map(|&x| if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 })
-                    .collect(),
+                par::map(v, |&x| if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }).into(),
             ),
             Data::Char(_) => return Err(char_arith(span)),
         },
@@ -1024,39 +1278,41 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
             // 1 % 0 is infinity, the J rule. APL's ÷0 is a domain error; a
             // ScalarMonad cannot tell the two languages apart, so the APL
             // divergence is left to revisit when monadic ops carry a dialect.
-            let v = y.to_f64_vec().ok_or_else(|| char_arith(span))?;
-            Data::F64(v.iter().map(|&x| if x == 0.0 { f64::INFINITY } else { 1.0 / x }).collect())
+            let v = as_f64(d, &mut tmp, span)?;
+            Data::F64(par::map(v, |&x| if x == 0.0 { f64::INFINITY } else { 1.0 / x }).into())
         }
         Sqrt => {
-            let v = y.to_f64_vec().ok_or_else(|| char_arith(span))?;
+            let v = as_f64(d, &mut tmp, span)?;
             if v.iter().any(|&x| x < 0.0) {
                 return Err(Error::not_yet("complex numbers", span));
             }
-            Data::F64(v.iter().map(|&x| x.sqrt()).collect())
+            Data::F64(par::map(v, |&x| x.sqrt()).into())
         }
         Exp => {
-            let v = y.to_f64_vec().ok_or_else(|| char_arith(span))?;
-            Data::F64(v.iter().map(|&x| x.exp()).collect())
+            let v = as_f64(d, &mut tmp, span)?;
+            Data::F64(par::map(v, |&x| x.exp()).into())
         }
         Abs => match d {
             Data::Bool(_) => d.clone(),
-            Data::I64(v) => match v.iter().map(|&x| x.checked_abs()).collect::<Option<Vec<_>>>() {
+            Data::I64(v) => match par::try_map(v, i64::checked_abs) {
                 Some(out) => Data::I64(out.into()),
-                None => Data::F64(v.iter().map(|&x| (x as f64).abs()).collect()),
+                None => Data::F64(par::map(v, |&x| (x as f64).abs()).into()),
             },
-            Data::F64(v) => Data::F64(v.iter().map(|&x| x.abs()).collect()),
+            Data::F64(v) => Data::F64(par::map(v, |&x| x.abs()).into()),
             Data::Char(_) => return Err(char_arith(span)),
         },
         Floor | Ceil => match d {
-            Data::Bool(v) => Data::I64(v.iter().map(|&b| b as i64).collect()),
+            Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
             Data::I64(_) => d.clone(),
             Data::F64(v) => {
-                let out: Vec<f64> =
-                    v.iter().map(|&x| if op == Floor { x.floor() } else { x.ceil() }).collect();
-                if out.iter().all(|&x| fits_i64(x)) {
-                    Data::I64(out.iter().map(|&x| x as i64).collect())
-                } else {
-                    Data::F64(out.into())
+                let round = |x: f64| if op == Floor { x.floor() } else { x.ceil() };
+                // Integer when every rounded value is one, as in J.
+                match par::try_map(v, |x| {
+                    let r = round(x);
+                    fits_i64(r).then_some(r as i64)
+                }) {
+                    Some(out) => Data::I64(out.into()),
+                    None => Data::F64(par::map(v, |&x| round(x)).into()),
                 }
             }
             Data::Char(_) => return Err(char_arith(span)),
@@ -1064,91 +1320,82 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
         Inc | Dec => {
             let step = if op == Inc { 1i64 } else { -1 };
             match d {
-                Data::Bool(v) => Data::I64(v.iter().map(|&b| b as i64 + step).collect()),
-                Data::I64(v) => {
-                    match v.iter().map(|&x| x.checked_add(step)).collect::<Option<Vec<_>>>() {
-                        Some(out) => Data::I64(out.into()),
-                        None => Data::F64(v.iter().map(|&x| x as f64 + step as f64).collect()),
-                    }
-                }
-                Data::F64(v) => Data::F64(v.iter().map(|&x| x + step as f64).collect()),
+                Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64 + step).into()),
+                Data::I64(v) => match par::try_map(v, |x: i64| x.checked_add(step)) {
+                    Some(out) => Data::I64(out.into()),
+                    None => Data::F64(par::map(v, |&x| x as f64 + step as f64).into()),
+                },
+                Data::F64(v) => Data::F64(par::map(v, |&x| x + step as f64).into()),
                 Data::Char(_) => return Err(char_arith(span)),
             }
         }
         Double | Square => match d {
-            Data::Bool(v) => Data::I64(
-                v.iter().map(|&b| if op == Double { 2 * b as i64 } else { b as i64 }).collect(),
-            ),
+            Data::Bool(v) => {
+                Data::I64(par::map(v, |&b| if op == Double { 2 * b as i64 } else { b as i64 }).into())
+            }
             Data::I64(v) => {
                 let f = |x: i64| if op == Double { x.checked_mul(2) } else { x.checked_mul(x) };
-                match v.iter().map(|&x| f(x)).collect::<Option<Vec<_>>>() {
+                match par::try_map(v, f) {
                     Some(out) => Data::I64(out.into()),
                     None => Data::F64(
-                        v.iter()
-                            .map(|&x| {
-                                let x = x as f64;
-                                if op == Double { x + x } else { x * x }
-                            })
-                            .collect(),
+                        par::map(v, |&x| {
+                            let x = x as f64;
+                            if op == Double { x + x } else { x * x }
+                        })
+                        .into(),
                     ),
                 }
             }
-            Data::F64(v) => Data::F64(
-                v.iter().map(|&x| if op == Double { x + x } else { x * x }).collect(),
-            ),
+            Data::F64(v) => {
+                Data::F64(par::map(v, |&x| if op == Double { x + x } else { x * x }).into())
+            }
             Data::Char(_) => return Err(char_arith(span)),
         },
         Halve => {
-            let v = y.to_f64_vec().ok_or_else(|| char_arith(span))?;
-            Data::F64(v.iter().map(|&x| x / 2.0).collect())
+            let v = as_f64(d, &mut tmp, span)?;
+            Data::F64(par::map(v, |&x| x / 2.0).into())
         }
         Ln => {
-            let v = y.to_f64_vec().ok_or_else(|| char_arith(span))?;
+            let v = as_f64(d, &mut tmp, span)?;
             if v.iter().any(|&x| x < 0.0) {
                 return Err(Error::not_yet("complex numbers", span));
             }
             // ln(0) is negative infinity, which is what J prints as __.
-            Data::F64(v.iter().map(|&x| x.ln()).collect())
+            Data::F64(par::map(v, |&x| x.ln()).into())
         }
         OneMinus => match d {
-            Data::Bool(v) => Data::Bool(v.iter().map(|&b| 1 - b).collect()),
-            Data::I64(v) => {
-                match v.iter().map(|&x| 1i64.checked_sub(x)).collect::<Option<Vec<_>>>() {
-                    Some(out) => Data::I64(out.into()),
-                    None => Data::F64(v.iter().map(|&x| 1.0 - x as f64).collect()),
-                }
-            }
-            Data::F64(v) => Data::F64(v.iter().map(|&x| 1.0 - x).collect()),
+            Data::Bool(v) => Data::Bool(par::map(v, |&b| 1 - b).into()),
+            Data::I64(v) => match par::try_map(v, |x: i64| 1i64.checked_sub(x)) {
+                Some(out) => Data::I64(out.into()),
+                None => Data::F64(par::map(v, |&x| 1.0 - x as f64).into()),
+            },
+            Data::F64(v) => Data::F64(par::map(v, |&x| 1.0 - x).into()),
             Data::Char(_) => return Err(char_arith(span)),
         },
         Not => {
-            let bad = || {
-                Error::domain("logical negation needs values of 0 or 1", span)
-            };
+            let bad = || Error::domain("logical negation needs values of 0 or 1", span);
             match d {
-                Data::Bool(v) => Data::Bool(v.iter().map(|&b| 1 - b).collect()),
+                Data::Bool(v) => Data::Bool(par::map(v, |&b| 1 - b).into()),
                 Data::I64(v) => {
-                    let mut out = Vec::with_capacity(v.len());
-                    for &x in v {
-                        match x {
-                            0 => out.push(1),
-                            1 => out.push(0),
-                            _ => return Err(bad()),
-                        }
-                    }
+                    let out = par::try_map(v, |x: i64| match x {
+                        0 => Some(1u8),
+                        1 => Some(0u8),
+                        _ => None,
+                    })
+                    .ok_or_else(bad)?;
                     Data::Bool(out.into())
                 }
                 Data::F64(v) => {
-                    let mut out = Vec::with_capacity(v.len());
-                    for &x in v {
+                    let out = par::try_map(v, |x: f64| {
                         if x == 0.0 {
-                            out.push(1);
+                            Some(1u8)
                         } else if x == 1.0 {
-                            out.push(0);
+                            Some(0u8)
                         } else {
-                            return Err(bad());
+                            None
                         }
-                    }
+                    })
+                    .ok_or_else(bad)?;
                     Data::Bool(out.into())
                 }
                 Data::Char(_) => return Err(bad()),
@@ -1645,7 +1892,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             Ok(Array::from_i64((0..n).map(|i| origin + i).collect()))
         }
         MonadOp::Echo => {
-            (ctx.out)(&format!("{}\n", crate::fmt::format_array(y, &ctx.fmt)));
+            (ctx.out)(&format!("{}\n", crate::fmt::format_array(y, &ctx.cfg.fmt)));
             Ok(Array::empty(DType::I64))
         }
         MonadOp::Same => Ok(y.clone()),
@@ -1817,6 +2064,168 @@ fn reduce_identity(v: &Verb, n: usize) -> Option<Data> {
     })
 }
 
+/// Of the operations the typed fold covers, the ones whose reduction may be
+/// regrouped: folding the items in chunks and combining the chunks gives the
+/// same result, exactly for integers and to within the tolerance the float
+/// contract allows (§5.9). LCM and GCD associate too but reduce through the
+/// general path, which carries their type rules.
+fn is_associative(op: ScalarDyad) -> bool {
+    use ScalarDyad::*;
+    matches!(op, Add | Mul | Min | Max)
+}
+
+/// Fold items `lo .. hi` into `acc`, right to left, taking only the columns
+/// that start at `j0` — `acc.len()` of them. False when a step left the
+/// element type; the accumulator is then meaningless.
+#[inline]
+fn fold_range<T, F>(v: &[T], m: usize, lo: usize, hi: usize, j0: usize, acc: &mut [T], step: &F) -> bool
+where
+    T: Copy,
+    F: Fn(T, T) -> (T, bool),
+{
+    let w = acc.len();
+    let base = (hi - 1) * m + j0;
+    acc.copy_from_slice(&v[base..base + w]);
+    // Overflow is folded into a flag rather than breaking the loop: the
+    // whole reduction is redone by the general path either way.
+    let mut over = false;
+    for i in (lo..hi - 1).rev() {
+        let row = &v[i * m + j0..i * m + j0 + w];
+        for (slot, &x) in acc.iter_mut().zip(row) {
+            let (r, o) = step(x, *slot);
+            *slot = r;
+            over |= o;
+        }
+    }
+    !over
+}
+
+/// Fold `n` single-element items, right to left. Associative steps fold in
+/// chunks on several threads.
+fn fold_flat<T, F>(v: &[T], n: usize, assoc: bool, step: &F) -> Option<T>
+where
+    T: Copy + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    if assoc && par::worth_it(n) {
+        return par::try_fold_chunks(&v[..n], |a, b| {
+            let (r, o) = step(a, b);
+            (!o).then_some(r)
+        });
+    }
+    let mut acc = v[n - 1];
+    let mut over = false;
+    for &x in v[..n - 1].iter().rev() {
+        let (r, o) = step(x, acc);
+        acc = r;
+        over |= o;
+    }
+    (!over).then_some(acc)
+}
+
+/// Fold the `n` items of a flat buffer into one item of `m` elements, right
+/// to left. None when a step left the element type (integer overflow): the
+/// caller then re-folds through the general path, which knows how to widen.
+///
+/// Three shapes, each yielding what one sequential pass would:
+/// * a wide item splits into ranges of columns, and every element folds its
+///   own column in order, so any step at all is safe;
+/// * a one-element item folds in a register;
+/// * a narrow item splits into chunks of items, which regroups the fold and
+///   is taken only for an associative step.
+fn fold_items<T, F>(v: &[T], n: usize, m: usize, assoc: bool, step: F) -> Option<Vec<T>>
+where
+    T: Copy + Default + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    if m >= par::WIDE_ITEM {
+        let (out, ok) = par::fill_wide(m, n * m, |j0, acc: &mut [T]| {
+            fold_range(v, m, 0, n, j0, acc, &step)
+        });
+        return ok.then_some(out);
+    }
+    if m == 1 {
+        return fold_flat(v, n, assoc, &step).map(|x| vec![x]);
+    }
+    let chunks = if assoc { par::chunks(n, n * m) } else { 1 };
+    if chunks < 2 {
+        let mut acc = vec![T::default(); m];
+        return fold_range(v, m, 0, n, 0, &mut acc, &step).then_some(acc);
+    }
+    let per = n.div_ceil(chunks);
+    let parts = par::map_indexed(n.div_ceil(per), |c| {
+        let mut acc = vec![T::default(); m];
+        let ok = fold_range(v, m, c * per, ((c + 1) * per).min(n), 0, &mut acc, &step);
+        ok.then_some(acc)
+    });
+    // The chunk results combine right to left, the order the chunks
+    // themselves were folded in.
+    let mut it = parts.into_iter().rev();
+    let mut acc = it.next()??;
+    for part in it {
+        let part = part?;
+        let mut over = false;
+        for (slot, &x) in acc.iter_mut().zip(&part) {
+            let (r, o) = step(x, *slot);
+            *slot = r;
+            over |= o;
+        }
+        if over {
+            return None;
+        }
+    }
+    Some(acc)
+}
+
+fn fold_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize) -> Option<Vec<i64>> {
+    use ScalarDyad::*;
+    let assoc = is_associative(op);
+    match op {
+        Add => fold_items(v, n, m, assoc, i64::overflowing_add),
+        Sub => fold_items(v, n, m, assoc, i64::overflowing_sub),
+        Mul => fold_items(v, n, m, assoc, i64::overflowing_mul),
+        Min => fold_items(v, n, m, assoc, |a: i64, b: i64| (a.min(b), false)),
+        Max => fold_items(v, n, m, assoc, |a: i64, b: i64| (a.max(b), false)),
+        _ => None,
+    }
+}
+
+fn fold_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize) -> Option<Vec<f64>> {
+    use ScalarDyad::*;
+    let assoc = is_associative(op);
+    match op {
+        Add => fold_items(v, n, m, assoc, |a: f64, b: f64| (a + b, false)),
+        Sub => fold_items(v, n, m, assoc, |a: f64, b: f64| (a - b, false)),
+        Mul => fold_items(v, n, m, assoc, |a: f64, b: f64| (a * b, false)),
+        Min => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.min(b), false)),
+        Max => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.max(b), false)),
+        _ => None,
+    }
+}
+
+/// Reduce a numeric buffer with one of the arithmetic operations, without
+/// an intermediate array per step. None means this path does not apply and
+/// the general fold must run.
+fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
+    use ScalarDyad::*;
+    // The rest — comparisons, LCM/GCD, the float-only divisions — decide
+    // their result type by rules the general path already carries.
+    if !matches!(op, Add | Sub | Mul | Min | Max) {
+        return None;
+    }
+    match d {
+        Data::F64(v) => Some(Data::F64(fold_f64(op, v, n, m)?.into())),
+        Data::I64(v) => Some(Data::I64(fold_i64(op, v, n, m)?.into())),
+        // Booleans reduce as integers, which is what promotion says the
+        // general path would produce; widen once and fold.
+        Data::Bool(v) => {
+            let widened = par::map(v, |&b| b as i64);
+            Some(Data::I64(fold_i64(op, &widened, n, m)?.into()))
+        }
+        Data::Char(_) => None,
+    }
+}
+
 /// Insert `v` between the items of `y`, folding right to left.
 fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     if y.rank() == 0 {
@@ -1840,6 +2249,13 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     if y.dtype().is_numeric() {
         if let Verb::Prim(p) = v {
             if let DyadOp::Scalar(op) = p.dyad {
+                // The typed fold covers the arithmetic reductions and runs
+                // in parallel wherever the fold order allows; it declines
+                // (integer overflow, an operation with its own type rules)
+                // by returning None, and then the general fold below runs.
+                if let Some(d) = reduce_typed(op, &y.data, n, m) {
+                    return Ok(Array::new(cell_shape, d));
+                }
                 // Fold over the raw buffer, one whole item per step, without
                 // materialising item arrays.
                 let mut acc = y.data.slice((n - 1) * m, n * m);
@@ -1866,7 +2282,10 @@ mod tests {
         ($name:ident, $agreement:expr) => {
             let mut sink = |_: &str| {};
             #[allow(unused_mut)]
-            let mut $name = Ctx { agreement: $agreement, fmt: FmtOpts::J, out: &mut sink };
+            let mut $name = Ctx {
+                cfg: EvalCfg { agreement: $agreement, fmt: FmtOpts::J },
+                out: &mut sink,
+            };
         };
         ($name:ident) => {
             ctx!($name, Agreement::LeadingPrefix);
@@ -2732,5 +3151,246 @@ mod tests {
         assert!(e.msg.contains("copy"), "{}", e.msg);
         // Echo's output formatting belongs to fmt; only its result is checked.
         let _ = echo_v();
+    }
+
+    // ----------------------------------------------------- parallel paths
+    //
+    // Every case here runs the same application twice, on a pool of one
+    // thread and on a pool of four, and compares the two: the sequential
+    // result is the contract, and the argument sizes are chosen to be over
+    // the threshold so the parallel path is really taken.
+
+    /// The result of `f` under one thread and under four.
+    fn seq_par<T: Send>(f: impl Fn() -> T + Sync + Send) -> (T, T) {
+        (par::with_threads(1, &f), par::with_threads(4, &f))
+    }
+
+    /// A deterministic spread of values, positive and negative.
+    fn noise(n: usize) -> Vec<f64> {
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+            })
+            .collect()
+    }
+
+    fn f64_mat(rows: usize, cols: usize) -> Array {
+        Array::new(vec![rows, cols], Data::F64(noise(rows * cols).into()))
+    }
+
+    /// Above `par::MIN_WORK`, so anything elementwise splits.
+    const BIG: usize = 200_000;
+
+    #[test]
+    fn an_elementwise_dyad_splits_into_the_same_result() {
+        let x = Array::from_f64(noise(BIG));
+        let y = Array::from_f64(noise(BIG).iter().map(|v| v + 0.25).collect());
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            times().dyad(&x, &y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(floats(&one), floats(&many));
+        // A scalar left argument takes the broadcasting shape of the loop.
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            plus().dyad(&Array::scalar_f64(0.5), &y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(floats(&one), floats(&many));
+    }
+
+    #[test]
+    fn an_elementwise_dyad_that_overflows_widens_the_same_way() {
+        // One pair overflows i64, so the whole pass is redone in floats
+        // however the chunks fell.
+        let mut v = vec![1i64; BIG];
+        v[BIG - 3] = i64::MAX;
+        let x = Array::from_i64(v);
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            plus().dyad(&x, &x, &mut c, sp()).unwrap()
+        });
+        assert_eq!(one.dtype(), DType::F64);
+        assert_eq!(floats(&one), floats(&many));
+    }
+
+    #[test]
+    fn an_elementwise_monad_splits_into_the_same_result() {
+        let y = Array::from_f64(noise(BIG));
+        for v in [minus(), sqrt_v(), floor_v(), pct()] {
+            let (one, many) = seq_par(|| {
+                ctx!(c);
+                v.monad(&Array::from_f64(y.as_f64_slice().unwrap().iter().map(|x| x.abs()).collect()), &mut c, sp())
+                    .unwrap()
+            });
+            assert_eq!(one.data, many.data, "{}", v.name());
+        }
+    }
+
+    #[test]
+    fn monadic_cells_run_in_parallel_and_frame_in_order() {
+        // 400 cells of 512 elements: over the threshold, and every cell
+        // yields a different value, so a misplaced cell would show.
+        let y = f64_mat(400, 512);
+        let v = Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1]);
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            v.monad(&y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(one.shape, vec![400]);
+        assert_eq!(floats(&one), floats(&many));
+    }
+
+    #[test]
+    fn dyadic_cells_run_in_parallel_and_frame_in_order() {
+        let x = f64_mat(400, 512);
+        let y = f64_mat(400, 512);
+        // Rank 1: the frame is the rows, and each row pair is one cell.
+        let v = Verb::Rank(b(plus()), [1, 1, 1]);
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            v.dyad(&x, &y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(one.shape, vec![400, 512]);
+        assert_eq!(floats(&one), floats(&many));
+    }
+
+    #[test]
+    fn a_verb_that_writes_output_is_not_pure() {
+        assert!(plus().is_pure());
+        assert!(Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1]).is_pure());
+        assert!(!echo_v().is_pure());
+        assert!(!Verb::Rank(b(Verb::Atop(b(echo_v()), b(plus()))), [1, 1, 1]).is_pure());
+    }
+
+    #[test]
+    fn an_impure_verb_keeps_its_cells_in_order() {
+        // Enough elements to pass the threshold; the cells must still be
+        // written one after another, in index order.
+        let y = Array::new(vec![16, 8192], Data::I64((0..16 * 8192).collect::<Vec<i64>>().into()));
+        let v = Verb::Rank(b(Verb::Atop(b(echo_v()), b(head_v()))), [1, 1, 1]);
+        let mut seen: Vec<i64> = Vec::new();
+        let mut sink = |s: &str| {
+            if let Some(first) = s.split_whitespace().next() {
+                if let Ok(n) = first.parse::<i64>() {
+                    seen.push(n);
+                }
+            }
+        };
+        let mut c = Ctx {
+            cfg: EvalCfg { agreement: Agreement::LeadingPrefix, fmt: FmtOpts::J },
+            out: &mut sink,
+        };
+        v.monad(&y, &mut c, sp()).unwrap();
+        assert_eq!(seen, (0..16).map(|i| i * 8192).collect::<Vec<i64>>());
+    }
+
+    #[test]
+    fn a_wide_item_reduce_folds_every_column_in_order() {
+        // item_size over par::WIDE_ITEM: each output element folds its own
+        // column, so even a non-associative fold matches exactly.
+        let y = f64_mat(300, 512);
+        for v in [plus(), minus(), floor_v()] {
+            let (one, many) = seq_par(|| {
+                ctx!(c);
+                Verb::Reduce(b(v.clone())).monad(&y, &mut c, sp()).unwrap()
+            });
+            assert_eq!(one.shape, vec![512]);
+            assert_eq!(floats(&one), floats(&many), "{}", v.name());
+        }
+    }
+
+    #[test]
+    fn a_wide_item_integer_reduce_is_exact() {
+        let n = 300;
+        let m = 512;
+        let y = Array::new(
+            vec![n, m],
+            Data::I64((0..(n * m) as i64).map(|i| i % 977 - 400).collect::<Vec<i64>>().into()),
+        );
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            Verb::Reduce(b(minus())).monad(&y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(ints(&one), ints(&many));
+    }
+
+    #[test]
+    fn a_narrow_item_reduce_chunks_the_items() {
+        // item_size under par::WIDE_ITEM and an associative verb: the items
+        // are chunked, which reassociates a float sum (§5.9) but not an
+        // integer one.
+        let y = f64_mat(300_000, 8);
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            Verb::Reduce(b(plus())).monad(&y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(one.shape, vec![8]);
+        for (p, q) in floats(&one).iter().zip(floats(&many)) {
+            assert!((p - q).abs() <= 1e-12 * p.abs().max(1.0), "{p} vs {q}");
+        }
+        let ints_y = Array::new(
+            vec![300_000, 8],
+            Data::I64((0..300_000 * 8).map(|i| (i % 101) as i64 - 50).collect::<Vec<i64>>().into()),
+        );
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            Verb::Reduce(b(plus())).monad(&ints_y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(ints(&one), ints(&many));
+    }
+
+    #[test]
+    fn a_vector_reduce_folds_the_flat_buffer() {
+        let y = Array::from_f64(noise(BIG * 4));
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            Verb::Reduce(b(plus())).monad(&y, &mut c, sp()).unwrap()
+        });
+        let (p, q) = (floats(&one)[0], floats(&many)[0]);
+        assert!((p - q).abs() <= 1e-12 * p.abs().max(1.0), "{p} vs {q}");
+
+        // Integers are exact, and a non-associative fold is not regrouped
+        // at all, so it matches to the bit.
+        let ints_y = Array::from_i64((0..BIG as i64 * 4).map(|i| i % 1009 - 500).collect());
+        for v in [plus(), minus(), ceil_v()] {
+            let (one, many) = seq_par(|| {
+                ctx!(c);
+                Verb::Reduce(b(v.clone())).monad(&ints_y, &mut c, sp()).unwrap()
+            });
+            assert_eq!(ints(&one), ints(&many), "{}", v.name());
+        }
+    }
+
+    #[test]
+    fn a_reduce_that_overflows_falls_back_to_the_sequential_widening() {
+        let mut v: Vec<i64> = vec![1; BIG];
+        v[7] = i64::MAX;
+        let y = Array::from_i64(v);
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            Verb::Reduce(b(plus())).monad(&y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(one.dtype(), DType::F64);
+        assert_eq!(floats(&one), floats(&many));
+    }
+
+    #[test]
+    fn a_boolean_reduce_matches_the_sequential_promotion() {
+        let n = BIG;
+        let y = Array::new(
+            vec![n],
+            Data::Bool((0..n).map(|i| (i % 3 == 0) as u8).collect::<Vec<u8>>().into()),
+        );
+        let (one, many) = seq_par(|| {
+            ctx!(c);
+            Verb::Reduce(b(plus())).monad(&y, &mut c, sp()).unwrap()
+        });
+        assert_eq!(one.dtype(), DType::I64);
+        assert_eq!(ints(&one), ints(&many));
+        assert_eq!(ints(&one)[0], n.div_ceil(3) as i64);
     }
 }
