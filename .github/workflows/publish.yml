@@ -23,14 +23,19 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
+            smoke: true
           - os: ubuntu-latest
-            target: aarch64
-          - os: macos-13 # Intel
-            target: x86_64
+            target: aarch64 # cross-compiled; cannot run here
+            smoke: false
+          - os: macos-14 # Intel wheel, cross-compiled from the arm runner
+            target: x86_64 # (GitHub's Intel macOS runners are being retired)
+            smoke: false
           - os: macos-14 # Apple Silicon
             target: aarch64
+            smoke: true
           - os: windows-latest
             target: x64
+            smoke: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -42,9 +47,8 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist
           manylinux: auto
-      # Cold-import the wheel we just built (native targets only; the
-      # cross-compiled linux-aarch64 wheel cannot run on this runner).
-      - if: matrix.target != 'aarch64' || startsWith(matrix.os, 'macos')
+      # Cold-import the wheel we just built (native targets only).
+      - if: matrix.smoke
         shell: bash
         run: |
           pip install dist/*.whl

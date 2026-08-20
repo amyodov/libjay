@@ -157,6 +157,14 @@ Choices made during implementation, with reasoning. No entry = still open.
   free (std_named 703→235 ms / 532→130 ms). Buf's Send/Sync bounds
   tightened to T: Send + Sync. Known remaining copy: `Buf::slice` on owned
   data (cells/items) — deliberate, revisit with the layout-aware runtime.
+- 2026-08-20 — uv is the tool of choice for everything Python: venvs,
+  installs, running (owner). `uvx libjay` is the recommended try-it-now
+  path once published.
+- 2026-08-20 — Lockfiles: Cargo.lock committed (reproducible CI and release
+  wheels; crate consumers ignore it anyway). uv.lock not used: the wheel has
+  no runtime deps, and dev/test deps deliberately float so CI tests against
+  the polars/pyarrow users actually install; revisit if upstream churn makes
+  CI flaky (then: locked default + scheduled latest job).
 - 2026-08-20 — Benchmarks run in .venv-bench (Python 3.12): numba wheels for
   Intel macs stop at numba 0.61/llvmlite 0.44, so the bench venv pins
   numba<0.62 (the dev venv stays 3.14). Both venvs share
