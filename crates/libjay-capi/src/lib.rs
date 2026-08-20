@@ -221,7 +221,7 @@ fn dtype_tag(d: DType) -> i32 {
         DType::Char => JAY_CHAR,
         DType::Complex => JAY_COMPLEX,
         // Refused by `jay_run` before a result is built.
-        DType::Box => 0,
+        DType::Ext | DType::Rat | DType::Box => 0,
     }
 }
 
@@ -416,14 +416,22 @@ pub unsafe extern "C" fn jay_run(
         };
         match program.prog.run(&arrays, &mut sink) {
             Ok(value) => {
-                // A boxed result has no descriptor in this ABI yet: its
-                // elements are arrays, not numbers.
-                if value.as_ref().is_some_and(|a| a.dtype() == DType::Box) {
-                    store_error(
-                        err,
-                        value_error("boxed results are not in the C ABI yet"),
-                        src,
-                    );
+                // Boxed and exact results have no descriptor in this ABI
+                // yet: their elements are arrays and bignums, not numbers.
+                let unsupported = match value.as_ref().map(|a| a.dtype()) {
+                    Some(DType::Box) => Some("boxed results are not in the C ABI yet"),
+                    Some(DType::Ext) => Some(
+                        "extended-precision results are not in the C ABI yet; \
+                         convert with `_1 x:` first",
+                    ),
+                    Some(DType::Rat) => Some(
+                        "rational results are not in the C ABI yet; \
+                         convert with `_1 x:` first",
+                    ),
+                    _ => None,
+                };
+                if let Some(what) = unsupported {
+                    store_error(err, value_error(what), src);
                     return JAY_ERR;
                 }
                 if out.is_null() {
@@ -516,7 +524,7 @@ pub unsafe extern "C" fn jay_result_data(result: *const jay_result) -> *const c_
             Some(Data::F64(v)) => v.as_ptr() as *const c_void,
             Some(Data::Complex(v)) => v.as_ptr() as *const c_void,
             Some(Data::Char(_)) => r.chars.as_ptr() as *const c_void,
-            Some(Data::Box(_)) => ptr::null(),
+            Some(Data::Ext(_) | Data::Rat(_) | Data::Box(_)) => ptr::null(),
             None => ptr::null(),
         }
     })

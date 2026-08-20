@@ -236,6 +236,8 @@ fn format_atom(data: &Data, i: usize, opts: &FmtOpts) -> String {
     match data {
         Data::Bool(v) => (if v[i] != 0 { "1" } else { "0" }).to_string(),
         Data::I64(v) => format_i64(v[i], opts),
+        Data::Ext(v) => with_neg_sign(&v[i].to_string(), opts),
+        Data::Rat(v) => with_neg_sign(&v[i].to_string(), opts),
         Data::F64(v) => format_f64(v[i], opts),
         Data::Complex(v) => format_complex(v[i], opts),
         Data::Char(v) => v[i].to_string(),
@@ -256,10 +258,17 @@ fn format_complex(z: crate::complex::Cx, opts: &FmtOpts) -> String {
 }
 
 fn format_i64(v: i64, opts: &FmtOpts) -> String {
-    let s = v.to_string();
+    with_neg_sign(&v.to_string(), opts)
+}
+
+/// A Rust-formatted number with its leading `-` replaced by the language’s
+/// own negative sign. An extended integer and a rational both arrive here
+/// already spelled the way J spells them (`123`, `_1r2` once the sign is
+/// swapped), so nothing else has to be rewritten.
+fn with_neg_sign(s: &str, opts: &FmtOpts) -> String {
     match s.strip_prefix('-') {
-        Some(digits) => with_sign(digits, opts),
-        None => s,
+        Some(rest) => with_sign(rest, opts),
+        None => s.to_string(),
     }
 }
 

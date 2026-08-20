@@ -210,11 +210,14 @@ fn multiples_of_pi_and_e(#[case] src: &str, #[case] want: f64) {
     assert!((got[0] - want).abs() < 1e-12, "{src}: {got:?} vs {want}");
 }
 
+/// `1x1` is a multiple of e and `1x` an extended integer: the suffix and
+/// the constant share a letter, and the digits after it tell them apart.
 #[test]
-fn an_extended_precision_literal_is_still_a_named_gap() {
-    let e = fails(Lang::J, "1x");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("extended"), "{}", e.msg);
+fn the_extended_suffix_and_the_e_constant_share_a_letter() {
+    let got = run(Lang::J, "1x").expect("a value");
+    assert_eq!(got.dtype(), jay::DType::Ext);
+    let got = run(Lang::J, "1x1").expect("a value").to_f64_vec().expect("numeric");
+    assert!((got[0] - std::f64::consts::E).abs() < 1e-12);
 }
 
 // --- APL: dfns ------------------------------------------------------------

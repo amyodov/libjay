@@ -13,7 +13,7 @@ use pyo3::types::{
 };
 
 use jay::fmt::{format_array, FmtOpts};
-use jay::{Array, Data, DType, Dialect, Lang};
+use jay::{Array, Data, DType, Device, Dialect, Ext, Lang, Precision, Rat};
 
 create_exception!(_jay, JayError, PyException, "A libjay compile or run error.");
 
@@ -31,6 +31,9 @@ fn parse_lang(name: &str) -> PyResult<Lang> {
 #[pyclass(frozen, module = "libjay._jay")]
 struct Kernel {
     program: Arc<jay::Program>,
+    /// Where this kernel's fused nodes run. None is the plain CPU path,
+    /// which is what a kernel that was never deployed has.
+    device: Option<Device>,
 }
 
 #[pymethods]
@@ -40,15 +43,72 @@ impl Kernel {
         self.program.params.iter().map(|p| p.name.clone()).collect()
     }
 
+    /// A copy of this kernel placed on a device. `where` is "gpu" or "cpu";
+    /// `precision` is "f64" (the default) or "f32".
+    #[pyo3(signature = (place, precision=None))]
+    fn deploy(&self, place: &str, precision: Option<&str>) -> PyResult<Kernel> {
+        let device = match place.trim().to_ascii_lowercase().as_str() {
+            "cpu" => Device::cpu(),
+            "gpu" | "default" => Device::default_gpu().ok_or_else(|| {
+                JayError::new_err(
+                    "no GPU adapter was found; jay.devices() lists what this machine offers",
+                )
+            })?,
+            other => {
+                return Err(JayError::new_err(format!(
+                    "unknown device: {other:?} (expected 'gpu' or 'cpu')"
+                )))
+            }
+        };
+        let device = match precision {
+            None => device,
+            Some(p) => device.with_precision(Precision::from_name(p).ok_or_else(|| {
+                JayError::new_err(format!(
+                    "unknown precision: {p:?} (expected 'f64' or 'f32')"
+                ))
+            })?),
+        };
+        Ok(Kernel { program: Arc::clone(&self.program), device: Some(device) })
+    }
+
+    /// What this kernel is deployed on, or None for the plain CPU path.
+    #[getter]
+    fn device(&self) -> Option<(String, String, String, bool, String)> {
+        let d = self.device.as_ref()?;
+        Some(match d.info() {
+            None => ("cpu".into(), String::new(), "CPU".into(), true, "f64".into()),
+            Some(i) => (
+                i.name.clone(),
+                i.backend.clone(),
+                i.kind.clone(),
+                i.f64,
+                d.precision().name().to_string(),
+            ),
+        })
+    }
+
+    /// `value` with its elements resident on this kernel's device.
+    fn upload(&self, value: &Bound<'_, PyAny>) -> PyResult<DeviceArray> {
+        let device = self
+            .device
+            .clone()
+            .ok_or_else(|| JayError::new_err("this kernel is not deployed on a device"))?;
+        let array = py_to_array(value)?;
+        let array = device.upload(&array).map_err(|e| JayError::new_err(e.to_string()))?;
+        Ok(DeviceArray { array, device, fmt: self.program.fmt })
+    }
+
     /// Run with positional values (one per parameter). `out` receives
     /// explicit output (echo / ⎕←). Returns (result, display) where
     /// `display` is the formatted last value when `want_display` is set.
+    #[pyo3(signature = (values, out, want_display, keep_on_device=false))]
     fn run(
         &self,
         py: Python<'_>,
         values: Vec<Bound<'_, PyAny>>,
         out: Bound<'_, PyAny>,
         want_display: bool,
+        keep_on_device: bool,
     ) -> PyResult<(PyObject, Option<String>)> {
         let args: Vec<Array> =
             values.iter().map(py_to_array).collect::<PyResult<_>>()?;
@@ -60,7 +120,10 @@ impl Kernel {
                 }
             }
         };
-        let result = self.program.run(&args, &mut sink);
+        let result = match &self.device {
+            None => self.program.run(&args, &mut sink),
+            Some(d) => self.program.run_on(d, &args, &mut sink),
+        };
         if let Some(e) = write_err {
             return Err(e);
         }
@@ -70,6 +133,21 @@ impl Kernel {
         } else {
             None
         };
+        if keep_on_device {
+            let device = self
+                .device
+                .clone()
+                .ok_or_else(|| JayError::new_err("this kernel is not deployed on a device"))?;
+            let value = match result {
+                None => py.None(),
+                Some(a) => {
+                    let array =
+                        device.upload(&a).map_err(|e| JayError::new_err(e.to_string()))?;
+                    Py::new(py, DeviceArray { array, device, fmt: self.program.fmt })?.into_any()
+                }
+            };
+            return Ok((value, display));
+        }
         let value = match result {
             None => py.None(),
             Some(a) => array_to_py(py, a, self.program.fmt)?,
@@ -86,7 +164,60 @@ impl Kernel {
             None => None,
             Some(v) => Some(v.iter().map(py_to_array).collect::<PyResult<_>>()?),
         };
-        Ok(self.program.explain(args.as_deref()))
+        Ok(match &self.device {
+            None => self.program.explain(args.as_deref()),
+            Some(d) => self.program.explain_on(d, args.as_deref()),
+        })
+    }
+}
+
+/// An array whose elements are resident on a device.
+///
+/// It reads as an ordinary value — shape, dtype, `download()` — and it is
+/// one: the host copy is there. What it also carries is the device
+/// allocation, so passing it to a run on the same device uploads nothing.
+#[pyclass(frozen, name = "DeviceArray", module = "libjay._jay")]
+struct DeviceArray {
+    array: Array,
+    device: Device,
+    fmt: FmtOpts,
+}
+
+#[pymethods]
+impl DeviceArray {
+    #[getter]
+    fn shape(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(PyTuple::new(py, &self.array.shape)?.unbind().into())
+    }
+
+    #[getter]
+    fn dtype(&self) -> &'static str {
+        self.array.dtype().name()
+    }
+
+    fn __len__(&self) -> usize {
+        self.array.items()
+    }
+
+    /// True while this array's buffer is still the device's own.
+    #[getter]
+    fn resident(&self) -> bool {
+        self.device.holds(&self.array)
+    }
+
+    /// The value as ordinary Python data.
+    fn download(&self, py: Python<'_>) -> PyResult<PyObject> {
+        array_to_py(py, self.array.clone(), self.fmt)
+    }
+
+    fn __repr__(&self) -> String {
+        let what = self.device.info().map_or("cpu".to_string(), |i| i.name.clone());
+        let shape: Vec<String> = self.array.shape.iter().map(usize::to_string).collect();
+        format!(
+            "<DeviceArray {} $ {} on {what}>",
+            shape.join(" "),
+            self.array.dtype().name()
+        )
     }
 }
 
@@ -168,10 +299,30 @@ fn nested_list(
     Ok(PyList::new(py, items)?.unbind().into())
 }
 
+/// An arbitrary-precision integer as a Python `int`. Python's own integers
+/// are unbounded, so the value crosses whole; the decimal spelling is the
+/// only representation both sides already agree on.
+fn ext_to_py(py: Python<'_>, v: &Ext) -> PyResult<PyObject> {
+    if let Some(small) = jay::exact::ext_to_i64(v) {
+        return Ok(small.into_pyobject(py)?.unbind().into());
+    }
+    Ok(py.get_type::<PyInt>().call1((v.to_string(),))?.unbind())
+}
+
+/// A rational as a `fractions.Fraction`, which is Python's exact ratio.
+fn rat_to_py(py: Python<'_>, v: &Rat) -> PyResult<PyObject> {
+    let fraction = py.import("fractions")?.getattr("Fraction")?;
+    let num = ext_to_py(py, v.numer())?;
+    let den = ext_to_py(py, v.denom())?;
+    Ok(fraction.call1((num, den))?.unbind())
+}
+
 fn element_to_py(py: Python<'_>, data: &Data, i: usize) -> PyResult<PyObject> {
     Ok(match data {
         Data::Bool(v) => (v[i] != 0).into_pyobject(py)?.to_owned().unbind().into(),
         Data::I64(v) => v[i].into_pyobject(py)?.unbind().into(),
+        Data::Ext(v) => ext_to_py(py, &v[i])?,
+        Data::Rat(v) => rat_to_py(py, &v[i])?,
         Data::F64(v) => v[i].into_pyobject(py)?.unbind().into(),
         // Python's own complex; a value whose imaginary part is zero is
         // still complex, as it is in J.
@@ -223,6 +374,26 @@ fn array_to_py(py: Python<'_>, a: Array, fmt: FmtOpts) -> PyResult<PyObject> {
     Ok(Py::new(py, Value { array: a, fmt })?.into_any())
 }
 
+/// A `fractions.Fraction` as a rational. None for anything else; the
+/// import is what keeps a look-alike with `numerator`/`denominator`
+/// attributes from passing for one.
+fn fraction_to_rat(obj: &Bound<'_, PyAny>) -> PyResult<Option<Rat>> {
+    let py = obj.py();
+    let fraction = py.import("fractions")?.getattr("Fraction")?;
+    if !obj.is_instance(&fraction)? {
+        return Ok(None);
+    }
+    let read = |name: &str| -> PyResult<Ext> {
+        let text = obj.getattr(name)?.str()?.to_string_lossy().into_owned();
+        text.parse::<Ext>()
+            .map_err(|_| JayError::new_err(format!("cannot read {text} as an integer")))
+    };
+    let (num, den) = (read("numerator")?, read("denominator")?);
+    Rat::new(num, den)
+        .map(Some)
+        .ok_or_else(|| JayError::new_err("a Fraction with a zero denominator is not a number"))
+}
+
 fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     // bool first: PyBool is a PyInt subclass.
     if let Ok(b) = obj.downcast::<PyBool>() {
@@ -231,11 +402,20 @@ fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     if obj.downcast::<PyInt>().is_ok() {
         return match obj.extract::<i64>() {
             Ok(v) => Ok(Array::scalar_i64(v)),
-            Err(_) => Err(JayError::new_err(
-                "integer does not fit 64 bits; \
-                 extended-precision integers are not supported yet",
-            )),
+            // Python's integers are unbounded; one that does not fit a
+            // machine word arrives as J's extended type rather than as a
+            // refusal or a rounding.
+            Err(_) => {
+                let text = obj.str()?.to_string_lossy().into_owned();
+                let v: Ext = text.parse().map_err(|_| {
+                    JayError::new_err(format!("cannot read {text} as an integer"))
+                })?;
+                Ok(Array { shape: vec![], data: Data::Ext(vec![v].into()) })
+            }
         };
+    }
+    if let Some(r) = fraction_to_rat(obj)? {
+        return Ok(Array { shape: vec![], data: Data::Rat(vec![r].into()) });
     }
     if obj.downcast::<PyFloat>().is_ok() {
         return Ok(Array::scalar_f64(obj.extract::<f64>()?));
@@ -255,6 +435,10 @@ fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
         });
     }
     if let Ok(v) = obj.downcast::<Value>() {
+        return Ok(v.get().array.clone());
+    }
+    // A device array is an array; the residency travels with the buffer.
+    if let Ok(v) = obj.downcast::<DeviceArray>() {
         return Ok(v.get().array.clone());
     }
     if let Some(imported) = data::try_import(obj) {
@@ -316,7 +500,17 @@ fn compile(lang: &str, source: &str, index_origin: Option<i64>) -> PyResult<Kern
     let lang = parse_lang(lang)?;
     let dialect = Dialect { index_origin };
     let program = jay::compile(lang, source, &dialect).map_err(|e| jay_err(source, &e))?;
-    Ok(Kernel { program: Arc::new(program) })
+    Ok(Kernel { program: Arc::new(program), device: None })
+}
+
+/// Every adapter this machine offers, as (name, backend, kind, has f64).
+/// Empty where there is no GPU, which is not an error.
+#[pyfunction]
+fn devices() -> Vec<(String, String, String, bool)> {
+    jay::device::available()
+        .into_iter()
+        .map(|i| (i.name, i.backend, i.kind, i.f64))
+        .collect()
 }
 
 #[pyfunction]
@@ -337,7 +531,7 @@ fn compile_parts(
             let display = jay::frontend::SourceParts::from_parts(&part_refs, &name_refs).display;
             jay_err(&display, &e)
         })?;
-    Ok(Kernel { program: Arc::new(program) })
+    Ok(Kernel { program: Arc::new(program), device: None })
 }
 
 #[pymodule]
@@ -346,7 +540,9 @@ fn _jay(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("JayError", m.py().get_type::<JayError>())?;
     m.add_class::<Kernel>()?;
     m.add_class::<Value>()?;
+    m.add_class::<DeviceArray>()?;
     m.add_function(wrap_pyfunction!(compile, m)?)?;
     m.add_function(wrap_pyfunction!(compile_parts, m)?)?;
+    m.add_function(wrap_pyfunction!(devices, m)?)?;
     Ok(())
 }

@@ -18,7 +18,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 99 green / 23 partial / 61 red of 183 valences in the inventory.**
+**J: 100 green / 24 partial / 59 red of 183 valences in the inventory.**
 
 **APL: 62 green / 21 partial / 33 red of 116 valences in the inventory.**
 
@@ -57,7 +57,7 @@ tables are listed separately and not counted.
 | `q:` | 🟢 prime factors | 🔴 prime exponents |
 | `?` | 🟡 roll; libjay's own stream, not J's | 🟡 deal; same |
 | `?.` | 🟡 roll, fixed seed; libjay's own stream | 🟡 deal, fixed seed; same |
-| `x:` | 🔴 extend precision | 🔴 to rational |
+| `x:` | 🟢 extend precision | 🟡 to rational; forms 1, 2, `_1`, `_2` |
 
 ### Comparison and logic
 
@@ -199,8 +199,8 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Comparison tolerance (default `=`, `!.`) | 🟢 2⁻⁴⁴, and `u!.n` |
 | Integer, float, `_` negative, `1e_3` exponent literals | 🟢 |
 | Complex literals `1j2`, `1ad45`, `1ar1` | 🟢 |
-| Extended literal `1x` | 🔴 |
-| Rational literal `1r2` | 🔴 |
+| Extended literal `1x` | 🟢 |
+| Rational literal `1r2` | 🟢 |
 | Base and constant literals `16b1f`, `1p1`, `1x1` | 🟢 |
 | `'strings'`, `NB.` comments, multi-sentence programs | 🟢 |
 | `{name}` host-data interpolation | 🟢 |
@@ -348,8 +348,8 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | i8/i16/i32, u8/u16/u32, f32, `Date32`, `Time32`, `Boolean` at the boundary | 🟡 widened or unpacked by one copy on entry |
 | u64 | 🟡 refused above 2⁶³−1 |
 | Complex | 🟢 core type, `[re, im]` pairs; numpy `complex128` zero-copy, Arrow `struct<re, im>` |
+| Extended integer, rational | 🟢 core types, heap-backed; exact arithmetic, Python `int` and `fractions.Fraction` at the boundary |
 | Decimal128 | 🔴 |
-| Bigint, rational | 🔴 |
 | float16, byte-swapped data | 🔴 |
 | Arrow string, binary, list, dictionary columns | 🔴 |
 | Nulls | ⚪ neither language has a missing value; the column is named and refused |
@@ -357,14 +357,17 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Non-contiguous numpy views | ⚪ refused rather than silently copied |
 | Arrow zero-copy in (i64, f64, i64-physical temporal) | 🟢 |
 | DataFrame M×N → matrix, rows leading | 🟡 two or more columns are rewoven row-major, one copy |
-| Zero-copy out | 🟡 rank-1 numeric only; rank ≥ 2, chars and boxes go via `.tolist()` |
+| Zero-copy out | 🟡 rank-1 machine-numeric only; rank ≥ 2, chars, boxes and the exact types go via `.tolist()` |
+| Arrow carrier for the exact types | 🔴 Arrow has none; `.tolist()` gives exact Python objects, `_1 x:` machine numbers |
 | Parallel execution (own pool, `LIBJAY_THREADS`) | 🟢 |
 | Expression fusion (blockwise kernels) | 🟢 |
 | SIMD dispatch | 🟢 hot loops (arithmetic, reductions, fused kernels); x86-64 baseline/v2/v3 and NEON, runtime-detected; no AVX-512 rung — no stable `target_feature` name on rustc 1.85 |
-| GPU / device backend | 🔴 |
+| GPU / device backend | 🟡 fused kernels only, via wgpu (Metal/Vulkan/DX12), compiled into the one artifact and dormant without an adapter. f64 needs `SHADER_F64`, which Metal has not; on such an adapter an f64 chain stays on the CPU unless the caller asks for `precision="f32"`. Integer chains, non-float results and `^` in f64 stay on the CPU. The f64 path is generated and validated but has not been executed anywhere yet — see [decisions.md](decisions.md) |
+| Device placement API (`deploy`, `upload`, `DeviceArray`) | 🟡 `jay.j(...)` has no device by design; a result kept on the device is still materialised on the host once |
 | C ABI: compile, bind, execute, errors, spans | 🟢 |
 | C ABI: complex (`JAY_COMPLEX`, interleaved doubles) | 🟢 |
 | C ABI: boxed results | 🔴 no descriptor for a box yet |
+| C ABI: extended and rational results | 🔴 no descriptor for a bignum yet; `_1 x:` converts |
 | Python: `jay.j`, t-strings, samples as live defaults | 🟢 |
 | Rust compile-time checking of an expression (macro) | 🔴 |
 | Sandbox: stdio open, other I/O closed | 🟢 no primitive reaches the filesystem or the network |

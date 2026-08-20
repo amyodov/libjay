@@ -8,13 +8,43 @@ kernel. ``jay.apl`` is the same thing for APL.
 from __future__ import annotations
 
 import sys
+from typing import NamedTuple
 
 from . import _jay
 
-__all__ = ["j", "apl", "compile", "Kernel", "JayError"]
+__all__ = [
+    "j",
+    "apl",
+    "compile",
+    "devices",
+    "Kernel",
+    "Device",
+    "DeviceArray",
+    "JayError",
+]
 __version__ = _jay.__version__
 
 JayError = _jay.JayError
+DeviceArray = _jay.DeviceArray
+
+
+class Device(NamedTuple):
+    """One adapter, as the machine reports it."""
+
+    name: str
+    backend: str
+    kind: str
+    f64: bool
+    """Whether shaders on this adapter can compute in double precision."""
+
+
+def devices() -> list[Device]:
+    """Every GPU adapter this machine offers, best first.
+
+    An empty list is the ordinary answer on a machine without one; nothing
+    else changes, since every expression already runs on the CPU.
+    """
+    return [Device(*d) for d in _jay.devices()]
 
 _HAVE_TSTRINGS = sys.version_info >= (3, 14)
 
@@ -46,9 +76,51 @@ class Kernel:
         self._check_names(data)
         return Kernel(self._inner, {**self._defaults, **data})
 
-    def __call__(self, data: dict | None = None):
+    def deploy(self, device: str = "gpu", *, precision: str | None = None) -> "Kernel":
+        """Return a new kernel whose fused chains run on `device`.
+
+        Placement is not binding: the bound values, the result and every
+        diagnostic are what they were, and whatever the device will not take
+        runs on the CPU — :meth:`explain` names each and says why. `device`
+        is "gpu" or "cpu".
+
+        `precision` is "f64" (the default) or "f32". libjay computes in f64
+        and most adapters have no f64 in shaders at all; on those, an f64
+        kernel stays on the CPU rather than quietly losing precision, and
+        "f32" is how you say you want single precision anyway.
+        """
+        return Kernel(self._inner.deploy(device, precision), dict(self._defaults))
+
+    @property
+    def device(self) -> Device | None:
+        """The adapter this kernel is deployed on, or None for the CPU."""
+        d = self._inner.device
+        return None if d is None else Device(*d[:4])
+
+    @property
+    def precision(self) -> str | None:
+        """The type this kernel's device computes in, or None for the CPU."""
+        d = self._inner.device
+        return None if d is None else d[4]
+
+    def upload(self, value) -> DeviceArray:
+        """`value` with its elements resident on this kernel's device.
+
+        The result reads as an ordinary value and also carries the device
+        allocation, so passing it back uploads nothing.
+        """
+        return self._inner.upload(value)
+
+    def __call__(self, data: dict | None = None, *, keep_on_device: bool = False):
         """Execute; call-time values override bound ones. Returns the value
-        of the last sentence, or None when it yields no value."""
+        of the last sentence, or None when it yields no value.
+
+        `keep_on_device` returns the value as a :class:`DeviceArray` left
+        resident on this kernel's device, so the next call that reads it
+        uploads nothing. (The host copy is materialised at the same time:
+        handing a result straight to the next kernel without touching the
+        host is not implemented yet.)
+        """
         values = self._defaults if not data else {**self._defaults, **self._check_names(data)}
         missing = [p for p in self._inner.params if p not in values]
         if missing:
@@ -56,7 +128,7 @@ class Kernel:
                 "missing value(s) for parameter(s): " + ", ".join(missing)
             )
         ordered = [values[p] for p in self._inner.params]
-        result, _ = self._inner.run(ordered, _write_stdout, False)
+        result, _ = self._inner.run(ordered, _write_stdout, False, keep_on_device)
         return result
 
     def explain(self, data: dict | None = None) -> str:
@@ -129,7 +201,13 @@ class _Lang:
         return kernel.bind(data) if data else kernel
 
     def __call__(self, source, data: dict | None = None, **opts):
-        """Compile, bind and execute in one call; returns the value."""
+        """Compile, bind and execute in one call; returns the value.
+
+        The shortcut runs on the CPU and has no device placement: there is
+        nowhere in one call to say where, and uploading data for a single
+        run would rarely pay for itself. Compile a kernel and
+        :meth:`Kernel.deploy` it to use a device.
+        """
         return self.compile(source, data, **opts)()
 
 

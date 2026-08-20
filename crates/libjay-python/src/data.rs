@@ -306,8 +306,8 @@ fn interleave(columns: &[Data], rows: usize) -> Data {
             let s: Vec<&[[f64; 2]]> = columns.iter().map(as_complex).collect();
             Data::Complex(weave(&s, rows).into())
         }
-        DType::Char | DType::Box => {
-            unreachable!("character and boxed columns are refused on import")
+        DType::Ext | DType::Rat | DType::Char | DType::Box => {
+            unreachable!("Arrow carries none of these; import refuses them")
         }
     }
 }
@@ -349,10 +349,12 @@ fn check_agreement(columns: &[Column]) -> PyResult<()> {
         .max_by_key(|d| match d {
             DType::Bool => 0,
             DType::I64 => 1,
-            DType::F64 => 2,
-            DType::Complex => 3,
-            DType::Char => 4,
-            DType::Box => 5,
+            DType::Ext => 2,
+            DType::Rat => 3,
+            DType::F64 => 4,
+            DType::Complex => 5,
+            DType::Char => 6,
+            DType::Box => 7,
         })
         .expect("at least one column");
     let Some(odd) = columns.iter().position(|c| c.data.dtype() != widest) else {
@@ -379,6 +381,8 @@ fn arrow_name_for(dtype: DType) -> &'static str {
         DType::I64 => "Int64",
         DType::F64 => "Float64",
         DType::Complex => "a struct of re/im, or a _re/_im column pair",
+        DType::Ext => "an arbitrary-precision integer column",
+        DType::Rat => "a rational column",
         DType::Char => "Utf8",
         DType::Box => "a nested column",
     }
@@ -754,6 +758,13 @@ pub fn export_capsules<'py>(
     py: Python<'py>,
     array: &Array,
 ) -> PyResult<(Bound<'py, PyCapsule>, Bound<'py, PyCapsule>)> {
+    if array.dtype().is_exact() {
+        return Err(JayError::new_err(format!(
+            "Arrow has no carrier for {} values; use .tolist() for exact \
+             Python objects, or convert with `_1 x:` for machine numbers",
+            array.dtype().name()
+        )));
+    }
     if array.rank() != 1 || matches!(array.dtype(), DType::Char | DType::Box) {
         return Err(JayError::new_err(format!(
             "cannot export a rank-{} {} result through Arrow yet; use \
@@ -790,7 +801,9 @@ pub fn export_capsules<'py>(
                 .map_err(arrow_err)?,
             )
         }
-        Data::Char(_) | Data::Box(_) => unreachable!("refused above"),
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => {
+            unreachable!("refused above")
+        }
     };
     let (ffi_array, ffi_schema) = to_ffi(&arrow.to_data()).map_err(arrow_err)?;
     let schema_capsule =

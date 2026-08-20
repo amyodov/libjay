@@ -1,3 +1,6 @@
+import math
+from fractions import Fraction
+
 import pytest
 
 import jay
@@ -145,6 +148,48 @@ class TestBoxes:
         assert j("5").__class__ is int
         assert j("1 2 3").depth == 1
         assert j("i. 2 3").depth == 1
+
+
+class TestExactNumbers:
+    """J's extended integers and rationals across the Python boundary."""
+
+    def test_a_big_result_is_an_exact_python_int(self):
+        assert j("! 30x") == 265252859812191058636308480000000
+        assert j("2 ^ 100x") == 2**100
+        assert j("*/ >: i. 25x") == math.factorial(25)
+
+    def test_a_big_python_int_arrives_exact(self):
+        big = 2**100
+        assert j("{n} + 1", {"n": big}) == big + 1
+        assert j("{n} = {n}", {"n": big}) == 1
+
+    def test_a_rational_result_is_a_fraction(self):
+        v = j("1r2 + 1r3")
+        assert v == Fraction(5, 6)
+        assert isinstance(v, Fraction)
+
+    def test_a_fraction_argument_arrives_as_a_rational(self):
+        assert j("{a} + {b}", {"a": Fraction(1, 2), "b": Fraction(1, 3)}) == Fraction(5, 6)
+        assert j("{a} * 6", {"a": Fraction(1, 2)}) == 3
+
+    def test_a_vector_of_exact_values_converts_element_by_element(self):
+        assert j("1 2 3x * {n}", {"n": 10**21}).tolist() == [
+            10**21,
+            2 * 10**21,
+            3 * 10**21,
+        ]
+        assert j("1r2 1r3").tolist() == [Fraction(1, 2), Fraction(1, 3)]
+
+    def test_dtype_names(self):
+        assert j("1 2 3x").dtype == "extended"
+        assert j("1r2 1r3").dtype == "rational"
+
+    def test_arrow_has_no_carrier_for_them(self):
+        pa = pytest.importorskip("pyarrow")
+        with pytest.raises(JayError, match="no carrier"):
+            pa.array(j("1 2 3x"))
+        # The conversion back to machine numbers is the way out.
+        assert pa.array(j("_1 x: 1 2 3x")).to_pylist() == [1, 2, 3]
 
 
 class TestKernel:

@@ -301,6 +301,70 @@ number's parts, so their answer is real however complex the argument was —
 J reports them as floats, and libjay does the same. A k outside ¯12..12, or
 a fractional one, is a domain error.
 
+## The numeric tower and the exact types
+
+Six element types, ordered:
+
+    boolean < integer < extended < rational < float < complex
+
+A dyadic pair computes in the higher of its two types, which is what keeps
+`1x + 1r2` exact and lets `1x + 1.5` round. The two EXACT types are J's:
+`extended` is an arbitrary-precision integer and `rational` an exact ratio
+of two of them, held in lowest terms with a positive denominator. Both are
+heap-backed pointer arrays, like boxes — never foreign memory, never fused,
+never vectorised. APL has neither type, and none of this reaches it.
+
+Where a machine integer overflows, libjay widens to float; that rule is
+untouched. `9223372036854775807 + 1` is still `9.22337e18`, and only an
+explicitly extended computation is exact:
+`9223372036854775807x + 1` is `9223372036854775808`.
+
+**What stays exact.** `+ - * % ^ | <. >. +. *. !` and the reductions and
+scans built on them, plus `%:` where the root really is one. The type of an
+answer follows one rule: compute exactly, then answer with an extended
+integer when BOTH arguments were extended AND every value is whole, and
+with a rational otherwise. That is why `4x % 2` is extended, `1x % 3` is
+rational, and `1r2 - 1r2` is a rational zero — a rational never falls back
+down the tower, which is what the reference reports of it. Rounding and the
+sign are the exceptions that always answer whole: `<. 7r2`, `>. 7r2` and
+`* 1r2` are extended.
+
+**What falls to float.** Anything with no exact answer, by the same
+mechanism an overflowing machine integer uses: `%: 2x`, `^ 1x`, `^. 2x`,
+`o. 1x`, `! 1r2`, a fractional power (`2x ^ 0.5`), a division by zero
+(`1x % 0` is `_`), and `x %: y` on rationals — the reference answers
+`3 %: 8r27` with `0.666667`, not with `2r3`, so exact roots are looked for
+between whole numbers only. A negative exact value under `%:` leaves the
+reals exactly as a negative float does: `%: _4x` is `0j2`.
+
+**Comparison.** Two exact values compare exactly — no tolerance stands
+between them, so `(10x^30) = 1 + 10x^30` is 0 where the float answer would
+be 1. Against a float the pair's type is float, and the float rule applies
+tolerance and all: `1r3 = 0.333333333333333333` is 1. Grade, nub and
+membership order and match exact values by value, so `2r4` grades and
+matches exactly where `1r2` does.
+
+**Display.** No `x` suffix is shown — `123x` prints as `123` — and a
+rational prints as `numerator r denominator`, or as the integer alone when
+its denominator is 1. `":` formats them the same way.
+
+**`x:`.** The monad converts to the exact types: whole values become
+extended integers, and anything else becomes the SIMPLEST rational within
+the comparison tolerance of the float, which is what makes `x: 0.1` a tenth
+rather than the binary fraction a double really holds. An integral double
+is exact, so `x: 1e30` keeps all thirty-one digits it carries. The dyad
+takes the form on the left: `1 x: y` is the rational form, `2 x: y` the
+numerator and denominator as a new trailing axis, `_1 x: y` the conversion
+back to a machine number, and `_2 x: y` the argument unchanged. Any other
+left argument is a domain error, as it is in J.
+
+**Limits.** A bignum grows without warning, so a power whose result would
+need more than 2²⁶ bits is refused by name rather than exhausting the
+machine. `i.` carries an extended length into extended indices, so
+`*/ >: i. 25x` is the exact factorial; `#.`, `#:`, `p:` and `q:` answer
+with machine integers whose values agree with the reference but whose type
+is `integer` where J reports `extended`.
+
 ## Comparison tolerance
 
 Both languages compare reals with a relative tolerance, and libjay carries
@@ -444,9 +508,21 @@ J's base and constant forms: `16b1f` is 31, `2b101` is 5, a fractional or
 negative base works (`2.5b10`, `_16b11`), a `_` in front of the digits
 negates the value (`16b_1`), and digits run `0`–`9` then `a`–`z`. `1p1` is
 π and `1p2` is π², `1x1` is e and `2x1` is 2e — `apb` is a×π^b and `axb` is
-a×e^b, with either part allowed a sign, a fraction or an exponent. `1x` with
-nothing after it is still an extended-precision integer, which is a named
-gap, as `1r2` (rational) is.
+a×e^b, with either part allowed a sign, a fraction or an exponent.
+
+`1x` with nothing after it is an extended-precision integer and `1r2` a
+rational — the two exact types, described below. The `x` reads as the
+suffix only when nothing follows it, so `1x1` stays a multiple of e; the
+suffix takes whole decimal digits alone, and `1.5x` and `1e10x` are
+ill-formed numbers, as they are in the reference. A rational's two halves
+each take J's negative sign, and the value is reduced on sight, so `2r6` is
+`1r3` and `1r_2` is `_1r2`. A denominator of zero is not a rational at all:
+J reads `1r0` as infinity and `0r0` as 0, and so does libjay — the value
+leaves the exact types where it is written.
+
+Digits that overflow a machine word and carry no `x` become a float, as
+they do in J: `1000000000000000000000` is `1e21`, and the suffix is what
+asks for the exact value instead.
 
 Complex literals: `3j4` in J and `3J4` in APL are the rectangular form. J
 also has the polar ones — `1ad45` takes the angle in degrees, `1ar1` in
@@ -487,7 +563,22 @@ is its contents at whatever shape they have, so `<'abc'` is `"abc"`.
 
 The C ABI has no descriptor for a box — its elements are arrays, not
 numbers — so a boxed result comes back from `jay_run` as the error "boxed
-results are not in the C ABI yet".
+results are not in the C ABI yet". An extended or rational result takes the
+same path, and its message names `_1 x:` as the way to a machine number.
+
+### The exact types at the boundary
+
+Python's integers are unbounded, so they map onto J's extended type in both
+directions: an `int` too large for a machine word arrives as an extended
+value rather than as a refusal, and an extended result comes back as an
+`int` with every digit. A rational maps onto `fractions.Fraction` — a
+`Fraction` argument becomes a rational, and a rational result a `Fraction`.
+
+Arrow has no carrier for either, so `polars.Series(v)` and `pyarrow.array(v)`
+refuse an exact result by name. The two ways out are `.tolist()`, which
+gives exact Python objects, and `_1 x:`, which converts to integers and
+floats inside the expression. Decimal128 is a separate future carrier and
+is not one of them.
 
 Nothing crosses in the other direction except through the Arrow C data
 interface: a rank-1 numeric result has `__arrow_c_array__`, so
@@ -554,6 +645,85 @@ rank ≥ 2 or of boxes. An Arrow list column, and any struct that is not the
 `re`/`im` pair above, is still refused rather than boxed: the mapping from
 Arrow nesting to box nesting is its own decision and has not been taken.
 
+## Device placement
+
+Where an expression runs is not part of what it means. A compiled kernel is
+bound to data with `bind` and placed on a processor with `deploy`; the two
+are separate, both return a new kernel, and neither changes the value, the
+shape, the dtype or the diagnostics. Whatever a device cannot run runs on
+the CPU, and `explain` names each fused node's placement and, when it is the
+CPU, the reason.
+
+```python
+import jay
+
+jay.devices()          # [Device(name='AMD Radeon Pro 560', backend='metal',
+                       #         kind='discrete GPU', f64=False)]
+
+k = jay.j.compile("+/ {w} * {x}").bind({"w": w, "x": x})
+g = k.deploy("gpu", precision="f32")
+g()                    # the same answer, computed on the GPU
+g.explain()            # ... device: AMD Radeon Pro 560 (metal, discrete GPU) ...
+                       # fused kernel (2 ops: * +; +/ absorbed) [kernel ran; device: gpu]
+```
+
+`jay.j(...)` — compile, bind and execute in one call — has no device and
+never will: there is nowhere in one call to say where, and uploading data
+for a single run rarely pays for itself.
+
+**What runs on a device.** Fused elementwise chains, and only those. The
+fusion pass already reduces a chain of scalar verbs to a postfix program
+over blocks with an optional reduction folded in; that program is compiled
+to WGSL at run time and dispatched as one compute pass (a map) or a
+workgroup reduction whose partials are folded on the host (a reduction).
+Everything else — structural verbs, sorts, windows, anything the fusion pass
+did not reach — runs where it always ran. The generated shader has no
+per-primitive hand-written code in it: one arm of the generator per scalar
+operation is the whole of it, as one block loop per operation is the whole
+of the CPU kernel.
+
+**A chain stays on the CPU when** its working type is i64 (WGSL has no
+64-bit integer arithmetic on most adapters); its result is not a float array
+(a comparison at the root, a tally); it holds `^` and the device computes in
+f64 (the exponential is a 32-bit builtin in both SPIR-V and MSL); the data
+is smaller than half a million elements, below which the dispatch and
+readback cost more than the whole pass; or the fused kernel would have
+declined it anyway. Each of these is reported by `explain`, in the same
+sentence as the kernel's own decline reason.
+
+**Precision.** libjay computes floats in f64. WGSL can express f64 and
+naga validates it, but almost no adapter implements it: Metal has no double
+at all, and on Vulkan it is the optional `SHADER_F64` feature. On an adapter
+without it an f64 chain is **declined to the CPU** rather than quietly
+computed in f32 — losing precision is not a performance decision libjay
+takes on anyone's behalf. `deploy(..., precision="f32")` is the caller
+saying they want single precision anyway.
+
+**How close the answers are.** Elementwise `+`, `-` and `*` in f64 are
+exactly what IEEE says they are on both processors, so a map is
+bit-identical; division and the transcendentals may differ by an ulp. A
+reduction regroups an associative fold, which is the same licence the
+parallel CPU path already takes (see the float contract), so it is compared
+with a relative tolerance: 1e-14 in f64, and in f32 whatever single
+precision is worth — about 1e-4 for a sum over millions of values, and a few
+parts in ten thousand for a product over half a million factors.
+
+**Residency.** `kernel.upload(x)` returns a `DeviceArray`: an ordinary value
+— shape, dtype, `download()` — that also carries the device allocation, so
+passing it to a later run on the same device uploads nothing. It stays
+readable by the CPU path, which is what lets a fallback use it without
+asking anyone. `kernel(data, keep_on_device=True)` returns the result as one
+of these. Known limitation: the host copy is materialised at the same time,
+so a result handed straight to the next kernel still costs one readback; a
+device-to-device hand-off is not implemented yet.
+
+**Build and artifact.** The backend is compiled into the one artifact per
+platform and asks the machine at run time what it has, exactly as the CPU
+feature levels do. There is no feature flag, no second wheel, and no shader
+compiled at build time: WGSL is generated and handed to the driver when a
+program first runs on a device, and the compiled pipelines are cached per
+kernel and entry point.
+
 ## The reference oracles
 
 Two interpreters are run as black-box subprocesses — fed an expression on
@@ -599,6 +769,17 @@ the decimal point, and that is typography, not semantics.
   answer fits i64; J switches to float earlier (`28 ! 56` prints
   `7.64869e15` there and exactly here). The values agree to well within the
   differential tolerance; only the printed form differs.
+- `x:` of an infinity is a domain error here; J answers `_` unchanged.
+  Refusing beats guessing at which exact number an infinity was meant to be.
+- `x:` of a float with no nice rational near it picks the simplest
+  convergent within the comparison tolerance; J picks a different, larger
+  one (`x: 3.14159265358979` is `5419351r1725033` here and
+  `6686425096436r2128355211423` there). Both are within tolerance of the
+  argument, and every value with a nice rational nearby — `0.1`, `1.5`,
+  `2.5` — agrees exactly.
+- `$`, `#`, `#.`, `#:`, `p:` and `q:` answer with machine integers where J
+  answers with extended ones. The values agree; only the type J's `3!:0`
+  reports differs.
 - A bonded noun (`n&v`, `u&n`) has to be a literal, as a noun fork's left
   tine does; a computed one says "bonds over a non-literal noun is not
   supported yet".

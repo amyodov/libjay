@@ -26,7 +26,11 @@ use crate::verb::{Enclose, Power, Verb, WindowKind, RANK_INF};
 /// Width of one level of the outline.
 const STEP: usize = 2;
 
-pub(crate) fn explain(p: &Program, args: Option<&[Array]>) -> String {
+pub(crate) fn explain(
+    p: &Program,
+    args: Option<&[Array]>,
+    device: Option<&crate::device::Device>,
+) -> String {
     let none: [Array; 0] = [];
     // A program with no parameters has everything it needs already.
     let args = match args {
@@ -41,7 +45,7 @@ pub(crate) fn explain(p: &Program, args: Option<&[Array]>) -> String {
     if let Some(a) = args {
         // Output the program makes belongs to the program, not here.
         let mut sink = |_: &str| {};
-        let (result, t) = p.trace(a, &mut sink);
+        let (result, t) = p.trace(a, &mut sink, device);
         trace = t;
         if let Err(e) = result {
             failure = Some(p.render_error(&e));
@@ -63,6 +67,17 @@ pub(crate) fn explain(p: &Program, args: Option<&[Array]>) -> String {
             out,
             "inlined into kernels: {} (elided; errors guarded by tally)",
             inlined.join(", ")
+        );
+    }
+    if let Some(d) = device {
+        let _ = writeln!(
+            out,
+            "device: {}",
+            match d.info() {
+                None => "cpu".to_string(),
+                Some(i) => format!("{} ({}, {}), computing in {}", i.name, i.backend, i.kind,
+                    d.precision().name()),
+            }
         );
     }
     if args.is_none() {
@@ -269,16 +284,25 @@ fn note(e: &Expr, tr: &Trace) -> String {
     }
 }
 
-/// Whether the kernel itself produced the value, and why not when it did not.
+/// Whether the kernel itself produced the value, and why not when it did
+/// not; and, for a run that named a device, where the arithmetic happened.
 fn kernel_note(e: &Expr, tr: &Trace) -> String {
-    match tr.get(&key(e)).and_then(|n| n.kernel_ran.map(|r| (r, n.decline))) {
-        None => String::new(),
-        Some((true, _)) => "  [kernel ran]".to_string(),
-        Some((false, reason)) => format!(
-            "  [kernel declined: {}]",
-            reason.map_or("the chain ran instead", fuse::Decline::reason)
-        ),
+    let Some(n) = tr.get(&key(e)) else { return String::new() };
+    let Some(ran) = n.kernel_ran else { return String::new() };
+    let mut s = if ran {
+        "  [kernel ran".to_string()
+    } else {
+        format!(
+            "  [kernel declined: {}",
+            n.decline.map_or("the chain ran instead", fuse::Decline::reason)
+        )
+    };
+    if n.placement != crate::device::Placement::Default {
+        s.push_str("; ");
+        s.push_str(&n.placement.to_string());
     }
+    s.push(']');
+    s
 }
 
 fn shape_dtype(shape: &[usize], dtype: DType) -> String {

@@ -58,16 +58,19 @@ Once published, `uvx libjay -e '...'` will do all of that with no setup.
 ## Status
 
 Early. What's implemented, feature by feature, is the
-[status matrix](docs/status.md): 99 green / 23 partial / 61 red of 183 J
+[status matrix](docs/status.md): 100 green / 24 partial / 59 red of 183 J
 valences, 62 green / 21 partial / 33 red of 116 APL valences. Both primitive
-sets are differential-tested against the reference implementations: 3310
+sets are differential-tested against the reference implementations: 3483
 J and 895 APL expressions, recorded as snapshots from black-box runs of the
 reference interpreters and replayed on every test run, 100% agreement. A
 20-period Bollinger z-score written as one J kernel runs 20M rows in 437 ms
-against the equivalent Polars pipeline's 768, agreeing to 8.7e-10. Dense numeric arrays, complex numbers and boxes; things the
-languages have but libjay doesn't yet (bigints, rationals, a GPU backend, …)
-fail with an explicit "not supported yet". Next on the roadmap: more of
-both languages, GPU.
+against the equivalent Polars pipeline's 768, agreeing to 8.7e-10. Dense numeric arrays, complex numbers, boxes, and J's exact
+types — extended-precision integers and rationals; things the languages
+have but libjay doesn't yet fail with an explicit "not supported yet".
+Fused kernels can be placed on a GPU (`kernel.deploy("gpu")`, wgpu over
+Metal/Vulkan/DX12, in the ordinary wheel and dormant without an adapter);
+resident data runs 1.5x to 5x the 8-thread CPU at 20M rows. Next on the
+roadmap: more of both languages.
 
 ## License
 

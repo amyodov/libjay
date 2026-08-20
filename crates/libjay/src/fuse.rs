@@ -100,6 +100,13 @@ impl FusedKernel {
             _ => None,
         }
     }
+
+    /// The comparison tolerance the program was compiled with. A backend
+    /// that generates its own code for this kernel needs it, so that a
+    /// comparison answers there as it answers everywhere else.
+    pub fn tol(&self) -> Tol {
+        self.tol
+    }
 }
 
 /// How often a fused node has handed its work back to the original subtree.
@@ -1000,12 +1007,14 @@ fn dyad_type(op: ScalarDyad, a: DType, b: DType) -> Option<DType> {
 /// and float arguments declines about half the time — and the way out is a
 /// stack whose entries carry their own type rather than one type per
 /// kernel. Nothing measured so far needs it.
-fn working_type(k: &FusedKernel, inputs: &[Array]) -> Option<(DType, DType)> {
+pub(crate) fn working_type(k: &FusedKernel, inputs: &[Array]) -> Option<(DType, DType)> {
     let mut stack: Vec<DType> = Vec::with_capacity(k.slots);
     let mut lets: Vec<DType> = Vec::new();
     let mut float = false;
     let mut integer_step = false;
-    if inputs.iter().any(|a| a.dtype() == DType::Complex) {
+    // The exact types and the complex ones have no blockwise kernel: a
+    // fused chain over them declines and the general path evaluates it.
+    if inputs.iter().any(|a| a.dtype() == DType::Complex || a.dtype().is_exact()) {
         return None;
     }
     for ins in &k.code {
@@ -1548,6 +1557,12 @@ fn step_i64(op: ScalarDyad, a: i64, b: i64) -> Option<i64> {
     }
 }
 
+/// One fold step of an absorbed float reduction, for a backend that mapped
+/// the values elsewhere and brings its partials back here to combine.
+pub(crate) fn step(op: ScalarDyad, a: f64, b: f64) -> Option<f64> {
+    step_f64(op, a, b)
+}
+
 fn step_f64(op: ScalarDyad, a: f64, b: f64) -> Option<f64> {
     use ScalarDyad::*;
     match op {
@@ -1570,7 +1585,9 @@ fn to_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
             Data::Bool(d) => d[0] as f64,
             Data::I64(d) => d[0] as f64,
             Data::F64(d) => d[0],
-            Data::Complex(_) | Data::Char(_) | Data::Box(_) => return Some(Vec::new()),
+            Data::Ext(_) | Data::Rat(_) | Data::Complex(_) | Data::Char(_) | Data::Box(_) => {
+                return Some(Vec::new());
+            }
         };
         return Some(vec![v; w]);
     }
@@ -1578,7 +1595,9 @@ fn to_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
         Data::F64(_) => None,
         Data::I64(d) => Some(par::map(d, |&x| x as f64)),
         Data::Bool(d) => Some(par::map(d, |&x| x as f64)),
-        Data::Complex(_) | Data::Char(_) | Data::Box(_) => Some(Vec::new()),
+        Data::Ext(_) | Data::Rat(_) | Data::Complex(_) | Data::Char(_) | Data::Box(_) => {
+            Some(Vec::new())
+        }
     }
 }
 
@@ -1601,7 +1620,7 @@ fn to_i64(a: &Array, w: usize) -> Option<Vec<i64>> {
 
 /// The shape every element of the result has: identical for all non-scalar
 /// inputs, since anything else needs the agreement machinery.
-fn common_shape(inputs: &[Array]) -> Option<Option<Vec<usize>>> {
+pub(crate) fn common_shape(inputs: &[Array]) -> Option<Option<Vec<usize>>> {
     let mut shape: Option<&Vec<usize>> = None;
     for a in inputs {
         if a.rank() == 0 {
@@ -1910,12 +1929,30 @@ fn dyad_name(op: ScalarDyad) -> &'static str {
 
 /// Evaluate a fused node from its already-evaluated inputs, or report that
 /// the original subtree must run instead.
-pub(crate) fn eval(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
+///
+/// This is the one place a device gets to run libjay's arithmetic. With a
+/// device attached the kernel is offered to it first; everything it will not
+/// take comes back here with a reason, and the CPU path runs exactly as it
+/// runs with no device in sight. The device therefore cannot change a
+/// result's shape, dtype or error — only where the arithmetic happened.
+pub(crate) fn eval_on(
+    device: Option<&crate::device::Device>,
+    k: &FusedKernel,
+    inputs: &[Array],
+) -> (Option<Array>, crate::device::Placement) {
+    use crate::device::Placement;
+    let mut placement = Placement::Default;
+    if let Some(d) = device.filter(|d| d.is_gpu()) {
+        match crate::device::try_run(d, k, inputs) {
+            Ok(a) => return (Some(a), Placement::Gpu),
+            Err(why) => placement = Placement::Cpu(why),
+        }
+    }
     let r = run(k, inputs);
     if r.is_none() {
         note_fallback();
     }
-    r
+    (r, placement)
 }
 
 #[cfg(test)]

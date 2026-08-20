@@ -1,0 +1,195 @@
+// Extended-precision integers and rationals: the two exact types.
+// Literals, the numeric tower, exact arithmetic, and `x:`.
+
+// literals and display
+123x
+_5x
+1r3
+2r6
+_1r2
+1r_2
+12r4
+2r1
+1 2 3x
+100 200 300x
+1r2 1r3 1r6
+_1r2 3r4
+2 2 $ 1r2 1r3 1r4 1r5
+1 2 30000000000000000000000x
+123456789012345678901234567890x
+": 123x
+": 1r3
+": 1r3 1r7
+< 1r2
+(< 1x) , < 1r2
+
+// the tower: what a mixed pair computes in
+1x + 1
+1 2 3x + 1 2 3
+1x + 1r2
+1r2 + 1
+1x + 1.5
+1r2 + 0.25
+1x + 1j2
+1r2 + 1j2
+123x , 1.5
+123x , 1r2
+9223372036854775807 + 1
+9223372036854775807x + 1
+
+// exact arithmetic
+1r2 + 1r3
+1r2 - 1r3
+1r2 * 2r3
+1r2 % 1r3
+1r2 - 1r2
+1r5 + 1r5
+1x % 3
+4x % 2
+1 2 3x % 2
+2 ^ 100x
+2x ^ 100
+2x ^ _1
+2 ^ _3x
+1r2 ^ 3
+1r2 ^ _2
+10x ^ 30
+_2x ^ 3
+! 30x
+! 5x
+! 0x
+2 ! 5x
+3 ! 5x
+5x ! 2
+6 ! 5x
+123456789012345678901234567890x + 1
+- 123456789012345678901234567890x
+*/ >: i. 25x
+
+// rounding, residue, gcd and lcm
+<. 7r2
+>. 7r2
+<. _7r2
+- 1r2
+| _1r2
+| _5x
+* _5x
+* 1r2
+>: 1r2
+<: 1r2
++: 1r2
+-: 1x
+-: 3x
+% 2x
+-. 1r2
+3 | 10x
+2x | _7
+_2x | 7
+1r3 | 1
+1r2 | 1r3
+5x +. 15
+5x *. 15
+1r2 +. 1r3
+2 <. 3x
+1r2 <. 1r3
+
+// roots, powers and the operations that leave the exact types
+%: 4x
+%: 9x
+%: 2x
+%: 1r4
+%: 1r2
+%: _4x
+3 %: 27x
+5 %: 32x
+2 %: 8x
+3 %: 8r27
+_2x ^ 1r2
+2x ^ 0.5
+^. 2x
+^ 1x
+o. 1x
+
+// comparison is exact between exact values, tolerant against a float
+1x = 1
+1x < 2
+2x > 1r2
+1r2 <: 1r2
+1x -: 1
+1x -: 1r1
+1r3 = 1r3
+1r2 < 1r3
+(10x^30) = 1 + 10x^30
+(10x^30) < 1 + 10x^30
+1r3 = 0.333333333333333333
+1r3 < 0.333333333333333333
+1 2 3x = 1 2 3
+1x ~: 2
+
+// reductions and scans
++/ 1 2 3x
+*/ 1r2 1r3
++/ 1r2 1r3 1r6
++/ 1r2 1r2
++/\\ 1 2 3x
+>./ 1r2 1r3 5r6
+
+// structure over exact values
+$ 1 2 3x
+2 2 $ 1 2 3 4x
+3 {. 1 2 3 4 5x
+_2 {. 1 2 3x
+1 2 3x , 4 5x
+|. 1 2 3x
+# 1 2 3x
+0 { 1 2 3x
+2 |. 1 2 3 4x
+/: 10x 2x 33x
+\\: 3 1 2x
+/: 1r2 1r3 1r6
+~. 1 1 2x
+~. 1r2 2r4 1r3
+1 2 3x e. 2
+1 2 3x i. 2
+1 2 3x #~ 1 0 1
+i. 5x
+#. 1 0 1x
+#: 5x
+p: 100x
+q: 1000000x
+
+// x:
+x: 2
+x: 1 2 3
+x: 1.5
+x: 0.1
+x: 2.5
+x: _0.5
+x: 1e30
+x: 1 2 3.5
+x: 1r3
+x: 123x
+1 x: 1r3
+1 x: 1.5
+1 x: 1 2 3
+2 x: 1r3
+2 x: 3.5
+2 x: 2x
+2 x: 1 2 3
+_1 x: 1r3
+_1 x: 1 2 3x
+_2 x: 1r3
+_2 x: 2
+
+// the boundary between a machine literal and an exact one
+1000000000000000000000
+99999999999999999999
+1000000000000000000000x
+2 x: 2 2 $ 1r2 1r3 1r4 1r5
+4 {. 1 2x
++/ i. 0x
+1 2 3x , 1r2
+5 %: 1024x
+_1 x: 1r2
+1r2 ^ 100
+2 %: 1r9

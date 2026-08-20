@@ -223,7 +223,12 @@ fn take_colon_definition(
     };
     let body = match &body_arr.data {
         // `3 : 0`: the body is written on the lines below, ending with `)`.
-        Data::I64(_) | Data::F64(_) | Data::Bool(_) | Data::Complex(_) => {
+        Data::I64(_)
+        | Data::F64(_)
+        | Data::Bool(_)
+        | Data::Ext(_)
+        | Data::Rat(_)
+        | Data::Complex(_) => {
             if body_arr.to_f64_vec().as_deref() != Some(&[0.0]) {
                 return Err(Error::parse("an explicit definition takes 0 or a string", body_span));
             }
@@ -847,6 +852,9 @@ fn primitive(word: &str) -> Option<Prim> {
             D::IntervalIndex { offset: 0 },
             [1, 1, INF],
         ),
+        // The dyad reads the whole argument: `2 x: y` gives every value a
+        // numerator and a denominator, which becomes a trailing axis.
+        "x:" => prim("x:", M::ToExact, D::ExactForm, [INF, 0, INF]),
         "p:" => prim("p:", M::NthPrime, D::NotYet("prime metadata (dyadic p:)"), [0, 0, 0]),
         "q:" => prim("q:", M::PrimeFactors, D::NotYet("prime exponents (dyadic q:)"), [0, 0, 0]),
         "%." => prim("%.", M::MatrixInverse, D::MatrixDivide, [2, INF, 2]),
@@ -957,10 +965,14 @@ fn lex(src: &SourceParts) -> Result<Vec<Vec<Frag>>> {
 
 /// A numeric word's value. Kept apart from `Array` so that a list of words
 /// can pick one element type for the whole vector.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Num {
     I(i64),
     F(f64),
+    /// An extended-precision integer: `123x`.
+    X(crate::exact::Ext),
+    /// A rational: `1r3`.
+    R(crate::exact::Rat),
     C(crate::complex::Cx),
 }
 
@@ -1150,7 +1162,13 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
     // binds LOOSEST: `1ar1p1` is the polar value `1ar1` scaled by π.
     if let Some(k) = word.find(['p', 'x']) {
         if word[k + 1..].is_empty() {
-            return Err(Error::not_yet("extended-precision integers", span));
+            // A trailing `x` is the extended-precision suffix, and only a
+            // whole decimal number carries it: `1.5x` and `1e10x` are
+            // ill-formed, as they are in the reference.
+            if word.as_bytes()[k] == b'x' {
+                return extended_literal(&word[..k], word, span);
+            }
+            return Err(Error::parse(format!("invalid number: {word}"), span));
         }
         let base =
             if word.as_bytes()[k] == b'p' { std::f64::consts::PI } else { std::f64::consts::E };
@@ -1180,13 +1198,59 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
             }));
         }
     }
-    if word.contains('r') {
-        return Err(Error::not_yet("rationals", span));
+    // `3r4` is a rational, and `1r_2` spells its negative denominator with
+    // J's own negative sign. A `b` earlier in the word makes the `r` a
+    // base-literal digit instead.
+    if let Some(k) = word.find('r') {
+        if !word[..k].contains('b') {
+            return rational_literal(&word[..k], &word[k + 1..], word, span);
+        }
     }
     if let Some(k) = word.find('b') {
         return base_literal(&word[..k], &word[k + 1..], word, span);
     }
     plain_number(word, word, span)
+}
+
+/// `123x`: the digits as an extended-precision integer. The value is exact
+/// however many digits it has, which is the whole point of the suffix.
+fn extended_literal(digits: &str, word: &str, span: Span) -> Result<Num> {
+    Ok(Num::X(whole_digits(digits, word, span)?))
+}
+
+/// `3r4`: a rational. A zero denominator is J's infinity rather than a
+/// number — the only spelling that leaves the exact types on sight.
+fn rational_literal(num: &str, den: &str, word: &str, span: Span) -> Result<Num> {
+    use num_traits::Zero;
+    let num = whole_digits(num, word, span)?;
+    let den = whole_digits(den, word, span)?;
+    if den.is_zero() {
+        if num.is_zero() {
+            return Ok(Num::I(0));
+        }
+        return Ok(Num::F(if num.sign() == num_bigint::Sign::Minus {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        }));
+    }
+    Ok(Num::R(
+        crate::exact::Rat::new(num, den).ok_or_else(|| Error::internal("a zero denominator"))?,
+    ))
+}
+
+/// One run of decimal digits, with J's `_` as the negative sign.
+fn whole_digits(word: &str, whole: &str, span: Span) -> Result<crate::exact::Ext> {
+    let invalid = || Error::parse(format!("invalid number: {whole}"), span);
+    let (digits, negative) = match word.strip_prefix('_') {
+        Some(rest) => (rest, true),
+        None => (word, false),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    let v: crate::exact::Ext = digits.parse().map_err(|_| invalid())?;
+    Ok(if negative { -v } else { v })
 }
 
 /// A mantissa scaled by a power of π or e. Either half may be complex —
@@ -1211,6 +1275,8 @@ fn as_f64(n: Num) -> f64 {
     match n {
         Num::I(v) => v as f64,
         Num::F(v) => v,
+        Num::X(v) => crate::exact::ext_to_f64(&v),
+        Num::R(v) => v.to_f64(),
         // A complex part is itself written as a plain number, so this is
         // never reached from a well-formed literal.
         Num::C(z) => z[0],
@@ -1255,7 +1321,7 @@ fn plain_number(word: &str, whole: &str, span: Span) -> Result<Num> {
     if word.is_empty() {
         return Err(Error::parse(format!("invalid number: {whole}"), span));
     }
-    if word.contains(['j', 'p', 'x', 'b']) || word.contains("ad") || word.contains("ar") {
+    if word.contains(['j', 'p', 'x', 'b', 'r']) || word.contains("ad") || word.contains("ar") {
         return parse_number(word, span);
     }
     parse_plain(word, span)
@@ -1283,45 +1349,62 @@ fn parse_plain(word: &str, span: Span) -> Result<Num> {
     }
     // Exponent notation yields a float, as a fractional part does.
     if norm.contains('.') || norm.contains('e') {
-        norm.parse::<f64>().map(Num::F).map_err(|_| invalid())
-    } else {
-        norm.parse::<i64>().map(Num::I).map_err(|_| invalid())
+        return norm.parse::<f64>().map(Num::F).map_err(|_| invalid());
+    }
+    // Digits that overflow a machine word are a float, as they are in J;
+    // the `x` suffix is what asks for an exact value instead.
+    match norm.parse::<i64>() {
+        Ok(v) => Ok(Num::I(v)),
+        Err(_) => norm.parse::<f64>().map(Num::F).map_err(|_| invalid()),
     }
 }
 
+/// One numeric word list as an array. The widest type any word reached
+/// carries the whole vector: `1 2 3x` is extended throughout, and one
+/// rational or float among the words pulls its neighbours up with it.
 fn num_array(nums: &[Num]) -> Array {
+    use crate::exact::{Ext, Rat};
     let shape = if nums.len() == 1 { vec![] } else { vec![nums.len()] };
-    if nums.iter().any(|n| matches!(n, Num::C(_))) {
-        let data = nums
-            .iter()
-            .map(|n| match n {
-                Num::I(v) => [*v as f64, 0.0],
-                Num::F(v) => [*v, 0.0],
-                Num::C(z) => *z,
-            })
-            .collect();
+    let has = |f: fn(&Num) -> bool| nums.iter().any(f);
+    if has(|n| matches!(n, Num::C(_))) {
+        let data = nums.iter().map(|n| as_cx(n.clone())).collect();
         return Array::new(shape, Data::Complex(data));
     }
-    if nums.iter().any(|n| matches!(n, Num::F(_))) {
-        let data = nums
-            .iter()
-            .map(|n| match n {
-                Num::I(v) => *v as f64,
-                Num::F(v) => *v,
-                Num::C(z) => z[0],
-            })
-            .collect();
-        Array::new(shape, Data::F64(data))
-    } else {
-        let data = nums
-            .iter()
-            .map(|n| match n {
-                Num::I(v) => *v,
-                Num::F(_) | Num::C(_) => 0,
-            })
-            .collect();
-        Array::new(shape, Data::I64(data))
+    if has(|n| matches!(n, Num::F(_))) {
+        let data = nums.iter().map(|n| as_f64(n.clone())).collect();
+        return Array::new(shape, Data::F64(data));
     }
+    if has(|n| matches!(n, Num::R(_))) {
+        let data = nums
+            .iter()
+            .map(|n| match n {
+                Num::I(v) => Rat::from_int(Ext::from(*v)),
+                Num::X(v) => Rat::from_int(v.clone()),
+                Num::R(v) => v.clone(),
+                Num::F(_) | Num::C(_) => Rat::zero(),
+            })
+            .collect();
+        return Array::new(shape, Data::Rat(data));
+    }
+    if has(|n| matches!(n, Num::X(_))) {
+        let data = nums
+            .iter()
+            .map(|n| match n {
+                Num::I(v) => Ext::from(*v),
+                Num::X(v) => v.clone(),
+                _ => Ext::default(),
+            })
+            .collect();
+        return Array::new(shape, Data::Ext(data));
+    }
+    let data = nums
+        .iter()
+        .map(|n| match n {
+            Num::I(v) => *v,
+            _ => 0,
+        })
+        .collect();
+    Array::new(shape, Data::I64(data))
 }
 
 // ------------------------------------------------------------------ parser
@@ -2754,18 +2837,18 @@ mod tests {
         assert_eq!(e.span, Some(Span::new(2, 4)));
     }
 
+    /// The exact suffixes read; the forms that spell no number do not.
     #[rstest]
-    #[case("12x", "extended-precision integers", 0, 3)]
-    #[case("3r4", "rationals", 0, 3)]
-    fn unsupported_number_forms(
+    #[case("1.5x", 0, 4)]
+    #[case("1e10x", 0, 5)]
+    fn a_fractional_extended_literal_is_ill_formed(
         #[case] src: &str,
-        #[case] msg: &str,
         #[case] start: usize,
         #[case] end: usize,
     ) {
         let e = err(src);
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains(msg), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Parse);
+        assert!(e.msg.contains("invalid number"), "{}", e.msg);
         assert_eq!(e.span, Some(Span::new(start, end)));
     }
 

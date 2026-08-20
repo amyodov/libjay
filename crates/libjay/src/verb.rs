@@ -11,6 +11,7 @@ use crate::array::{Array, Data};
 use crate::complex::{self as cx, Cx};
 use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
+use crate::exact::{self, Ext, Rat};
 use crate::fmt::FmtOpts;
 use crate::par;
 use crate::simd::multiversioned;
@@ -139,7 +140,7 @@ impl EvalCfg {
     fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let mut sink = |_: &str| debug_assert!(false, "a pure verb wrote to the output sink");
         let mut env = Env::new(Vec::new());
-        f(&mut Ctx { cfg: self, out: &mut sink, env: &mut env })
+        f(&mut Ctx { cfg: self, out: &mut sink, env: &mut env, device: None })
     }
 }
 
@@ -256,13 +257,16 @@ pub struct Ctx<'a> {
     pub out: &'a mut dyn FnMut(&str),
     /// The names the program has bound so far.
     pub env: &'a mut Env,
+    /// Where the run was placed. None is the CPU, which is also what every
+    /// path that cannot use a device does; only a fused node reads it.
+    pub device: Option<&'a crate::device::Device>,
 }
 
 impl Ctx<'_> {
     /// Run `f` in this context with the comparison tolerance replaced.
     fn with_tol<R>(&mut self, tol: Tol, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let cfg = EvalCfg { tol, ..self.cfg };
-        f(&mut Ctx { cfg, out: &mut *self.out, env: &mut *self.env })
+        f(&mut Ctx { cfg, out: &mut *self.out, env: &mut *self.env, device: self.device })
     }
 }
 
@@ -430,6 +434,9 @@ pub enum MonadOp {
     Indices { origin: i64, boxed_coords: bool },
     /// J `i:`: the integers from `-y` to `y`, one step apart.
     Steps,
+    /// J `x:`: the argument in the exact types — extended when every value
+    /// is whole, rational otherwise.
+    ToExact,
     /// J `p:`: the y-th prime, counting from zero.
     NthPrime,
     /// J `q:`: y's prime factors, ascending, with multiplicity.
@@ -523,6 +530,10 @@ pub enum DyadOp {
     SelectAxis { axis: usize, rank: usize, origin: i64 },
     /// J `x {:: y`: follow the path x into y, opening a level a step.
     Fetch,
+    /// J `x x: y`: which exact form. 1 is the rational one, 2 the pair of
+    /// numerator and denominator, `_1` the conversion back to a machine
+    /// number, `_2` the argument unchanged.
+    ExactForm,
     /// J `x ? y` / `x ?. y` and APL `x ? y`: deal — x distinct values from
     /// the y below `origin + y`.
     Deal { origin: i64, fixed: bool },
@@ -1103,6 +1114,8 @@ fn push_elem(dst: &mut Data, src: &Data, i: usize) {
     match (dst, src) {
         (Data::Bool(a), Data::Bool(b)) => a.push(b[i]),
         (Data::I64(a), Data::I64(b)) => a.push(b[i]),
+        (Data::Ext(a), Data::Ext(b)) => a.push(b[i].clone()),
+        (Data::Rat(a), Data::Rat(b)) => a.push(b[i].clone()),
         (Data::F64(a), Data::F64(b)) => a.push(b[i]),
         (Data::Complex(a), Data::Complex(b)) => a.push(b[i]),
         (Data::Char(a), Data::Char(b)) => a.push(b[i]),
@@ -1515,6 +1528,14 @@ fn borrow_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>) -> &'a [f64] {
             *tmp = v.iter().map(|&x| x as f64).collect();
             &tmp[..]
         }
+        Data::Ext(v) => {
+            *tmp = v.iter().map(exact::ext_to_f64).collect();
+            &tmp[..]
+        }
+        Data::Rat(v) => {
+            *tmp = v.iter().map(Rat::to_f64).collect();
+            &tmp[..]
+        }
         _ => &[],
     }
 }
@@ -1523,6 +1544,14 @@ fn borrow_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>) -> &'a [f64] {
 fn borrow_cx<'a>(d: &'a Data, tmp: &'a mut Vec<Cx>) -> &'a [Cx] {
     match d {
         Data::Complex(v) => v,
+        Data::Ext(v) => {
+            *tmp = v.iter().map(|x| [exact::ext_to_f64(x), 0.0]).collect();
+            &tmp[..]
+        }
+        Data::Rat(v) => {
+            *tmp = v.iter().map(|x| [x.to_f64(), 0.0]).collect();
+            &tmp[..]
+        }
         Data::F64(v) => {
             *tmp = v.iter().map(|&x| [x, 0.0]).collect();
             &tmp[..]
@@ -2401,6 +2430,11 @@ fn compare_data(
         });
         return Ok(Data::Bool(out.into()));
     }
+    if DType::promote(dx, dy).is_some_and(DType::is_exact) {
+        if let Some(d) = exact_compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n) {
+            return Ok(d);
+        }
+    }
     if dx == DType::Complex || dy == DType::Complex {
         if !equality {
             return Err(no_complex_order(span));
@@ -2509,6 +2543,11 @@ fn lcm_gcd_data(
         // The Gaussian-integer versions, which is what both references give.
         return complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
     }
+    if t.is_exact() {
+        if let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)? {
+            return Ok(d);
+        }
+    }
     let both_bool = x.dtype() == DType::Bool && y.dtype() == DType::Bool;
     let float = t == DType::F64;
     let (xs, ys) = if float {
@@ -2556,6 +2595,297 @@ fn lcm_gcd_data(
     Ok(Data::I64(par::map(&out, |&v| v as i64).into()))
 }
 
+// ------------------------------------------------------- the exact types
+
+/// Numeric data widened to rationals. None for a type above the exact part
+/// of the tower, which has no exact reading.
+fn to_rat_vec(d: &Data) -> Option<Vec<Rat>> {
+    Some(match d {
+        Data::Bool(v) => v.iter().map(|&b| Rat::from_int(Ext::from(b))).collect(),
+        Data::I64(v) => v.iter().map(|&x| Rat::from_int(Ext::from(x))).collect(),
+        Data::Ext(v) => v.iter().map(|x| Rat::from_int(x.clone())).collect(),
+        Data::Rat(v) => v.to_vec(),
+        Data::F64(_) | Data::Complex(_) | Data::Char(_) | Data::Box(_) => return None,
+    })
+}
+
+/// The elements one pass really reads, as rationals: indices
+/// `off .. off + (n-1)/div`, rebased to zero.
+///
+/// A fold hands the SAME buffer to every step with a different offset, so
+/// converting the whole of it each time would make the fold quadratic. The
+/// window is the whole buffer in the ordinary elementwise case, and one
+/// element in a fold step.
+fn rat_window(d: &Data, off: usize, div: usize, n: usize) -> Option<Vec<Rat>> {
+    if n == 0 {
+        return Some(Vec::new());
+    }
+    let end = off + (n - 1) / div + 1;
+    if off == 0 && end == d.len() {
+        return to_rat_vec(d);
+    }
+    to_rat_vec(&d.slice(off, end))
+}
+
+/// A finished exact pass as data: extended when the arguments were extended
+/// AND every answer is whole, rational otherwise.
+///
+/// That one rule is the whole demotion story. It makes `4x % 2` extended and
+/// `1x % 3` rational, and it leaves `1r2 - 1r2` rational even though the
+/// answer is zero — a rational never falls back down the tower, which is
+/// what the reference reports of it.
+fn exact_data(t: DType, out: Vec<Rat>) -> Data {
+    if t == DType::Ext && out.iter().all(Rat::is_integer) {
+        return Data::Ext(out.iter().map(|r| r.to_int().expect("whole")).collect());
+    }
+    Data::Rat(out.into())
+}
+
+/// The complaint a power too large to hold makes.
+fn too_large(span: Span) -> Error {
+    Error::domain(
+        format!(
+            "the exact result needs more than {} bits; use floats for a value this large",
+            exact::MAX_BITS
+        ),
+        span,
+    )
+}
+
+/// `a ^ b` in the exact types. None when the answer is not exact — a
+/// fractional exponent, or zero raised to a negative one.
+fn exact_pow(a: &Rat, b: &Rat, span: Span) -> Result<Option<Rat>> {
+    let Some(e) = b.to_int().as_ref().and_then(exact::ext_to_i64) else {
+        return Ok(None);
+    };
+    if let Some(v) = a.pow(e) {
+        return Ok(Some(v));
+    }
+    // `pow` declines for two reasons; only one of them is an error.
+    if a.is_zero() && e < 0 { Ok(None) } else { Err(too_large(span)) }
+}
+
+/// One elementwise dyadic pass in the exact types. `Ok(None)` means the
+/// operation has no exact answer for these arguments, and the caller widens
+/// to float exactly as it would for a machine integer that overflowed.
+#[allow(clippy::too_many_arguments)]
+fn exact_dyad_data(
+    op: ScalarDyad,
+    t: DType,
+    x: &Data,
+    xoff: usize,
+    xdiv: usize,
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+    span: Span,
+) -> Result<Option<Data>> {
+    use ScalarDyad::*;
+    let (Some(xs), Some(ys)) = (rat_window(x, xoff, xdiv, n), rat_window(y, yoff, ydiv, n))
+    else {
+        return Ok(None);
+    };
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let a = &xs[i / xdiv];
+        let b = &ys[i / ydiv];
+        let v = match op {
+            Add => a.add(b),
+            Sub => a.sub(b),
+            Mul => a.mul(b),
+            // A zero divisor is an infinity, which no rational spells.
+            DivJ | DivApl => match a.div(b) {
+                Some(v) => v,
+                None => return Ok(None),
+            },
+            Min => a.min(b).clone(),
+            Max => a.max(b).clone(),
+            Residue => exact::rat_residue(a, b),
+            Gcd => exact::rat_gcd(a, b),
+            Lcm => exact::rat_lcm(a, b),
+            Pow => match exact_pow(a, b, span)? {
+                Some(v) => v,
+                None => return Ok(None),
+            },
+            Binomial => match (a.to_int(), b.to_int()) {
+                (Some(k), Some(m)) => match exact::ext_binomial(&k, &m) {
+                    Some(v) => Rat::from_int(v),
+                    None => return Ok(None),
+                },
+                _ => return Ok(None),
+            },
+            // An exact root exists only between whole numbers: the
+            // reference answers `3 %: 8r27` with a float, not with `2r3`.
+            Root if t == DType::Ext => {
+                let (Some(k), Some(m)) = (a.to_int(), b.to_int()) else {
+                    return Ok(None);
+                };
+                let Some(k) = exact::ext_to_i64(&k).and_then(|k| u32::try_from(k).ok()) else {
+                    return Ok(None);
+                };
+                match exact::exact_root(k, &m) {
+                    Some(v) => Rat::from_int(v),
+                    None => return Ok(None),
+                }
+            }
+            Root | Log | Circle | MakeComplex | PolarBy => return Ok(None),
+            // Comparisons never reach here; `compare_data` takes them.
+            Eq | Ne | Lt | Le | Gt | Ge => return Ok(None),
+        };
+        out.push(v);
+    }
+    Ok(Some(exact_data(t, out)))
+}
+
+/// Elementwise monadic application in the exact types. `Ok(None)` widens to
+/// float, as in the dyadic pass.
+fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
+    use ScalarMonad::*;
+    let v = to_rat_vec(&y.data)?;
+    let shape = y.shape.clone();
+    // The three that answer with a whole number whatever they were given:
+    // `<. 7r2` is the extended 3, not the rational 3.
+    if matches!(op, Floor | Ceil | Signum) {
+        let out: Vec<Ext> = v
+            .iter()
+            .map(|r| match op {
+                Floor => r.floor(),
+                Ceil => r.ceil(),
+                _ => r.signum(),
+            })
+            .collect();
+        return Some(Array { shape, data: Data::Ext(out.into()) });
+    }
+    let two = Rat::from_int(Ext::from(2));
+    let mut out = Vec::with_capacity(v.len());
+    for r in &v {
+        let value = match op {
+            Conj => r.clone(),
+            Neg => r.neg(),
+            Abs => r.abs(),
+            Recip => r.recip()?,
+            Inc => r.add(&Rat::one()),
+            Dec => r.sub(&Rat::one()),
+            OneMinus => Rat::one().sub(r),
+            Double => r.add(r),
+            Halve => r.div(&two).expect("two is not zero"),
+            Square => r.mul(r),
+            Sqrt => r.sqrt()?,
+            Factorial => Rat::from_int(r.to_int().as_ref().and_then(exact::ext_factorial)?),
+            // No exact answer: the transcendentals, the two that make a
+            // complex value, and logical negation.
+            Exp | Ln | Pi | Imaginary | Polar | Not => return None,
+            Floor | Ceil | Signum => unreachable!("handled above"),
+        };
+        out.push(value);
+    }
+    Some(Array { shape, data: exact_data(y.dtype(), out) })
+}
+
+/// `x: y`: the argument in the exact types. Whole values become extended
+/// integers; anything else becomes the simplest rational within the
+/// dialect's comparison tolerance of it, so `x: 0.1` is `1r10` rather than
+/// the binary fraction a double really holds.
+fn to_exact(y: &Array, span: Span) -> Result<Array> {
+    let data = match &y.data {
+        Data::Ext(_) | Data::Rat(_) => return Ok(y.clone()),
+        Data::Bool(v) => Data::Ext(v.iter().map(|&b| Ext::from(b)).collect()),
+        Data::I64(v) => Data::Ext(v.iter().map(|&x| Ext::from(x)).collect()),
+        Data::F64(v) => {
+            let mut out = Vec::with_capacity(v.len());
+            for &x in v.iter() {
+                out.push(exact::f64_to_rat(x).ok_or_else(|| {
+                    Error::domain("an infinity has no exact value", span)
+                })?);
+            }
+            exact_data(DType::Ext, out)
+        }
+        Data::Complex(_) | Data::Char(_) | Data::Box(_) => {
+            return Err(Error::domain(
+                format!("x: needs real numbers, not {} data", y.dtype().name()),
+                span,
+            ));
+        }
+    };
+    Ok(Array { shape: y.shape.clone(), data })
+}
+
+/// `_1 x: y`: an exact value back as a machine number — an extended integer
+/// as an integer where it fits, a rational as a float.
+fn from_exact(y: &Array) -> Array {
+    let shape = y.shape.clone();
+    match &y.data {
+        Data::Ext(v) => match v.iter().map(exact::ext_to_i64).collect::<Option<Vec<i64>>>() {
+            Some(out) => Array { shape, data: Data::I64(out.into()) },
+            None => Array { shape, data: Data::F64(v.iter().map(exact::ext_to_f64).collect()) },
+        },
+        Data::Rat(v) => Array { shape, data: Data::F64(v.iter().map(Rat::to_f64).collect()) },
+        _ => y.clone(),
+    }
+}
+
+/// `x x: y`: the exact form named by x.
+fn exact_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    match one_whole(x, "the form x: converts to", span)? {
+        1 => {
+            let e = to_exact(y, span)?;
+            e.cast(DType::Rat).ok_or_else(|| Error::internal("an exact value has no rational form"))
+        }
+        2 => {
+            let e = to_exact(y, span)?;
+            let v = to_rat_vec(&e.data).ok_or_else(|| Error::internal("x: gave an inexact value"))?;
+            let mut out = Vec::with_capacity(2 * v.len());
+            for r in &v {
+                out.push(r.numer().clone());
+                out.push(r.denom().clone());
+            }
+            let mut shape = y.shape.clone();
+            shape.push(2);
+            Ok(Array::new(shape, Data::Ext(out.into())))
+        }
+        -1 => Ok(from_exact(y)),
+        // The one that leaves an inexact argument alone.
+        -2 => {
+            if !y.dtype().is_numeric() {
+                return Err(Error::domain(
+                    format!("x: needs real numbers, not {} data", y.dtype().name()),
+                    span,
+                ));
+            }
+            Ok(y.clone())
+        }
+        n => Err(Error::domain(
+            format!("x: converts to form 1, 2, _1 or _2, not {n}"),
+            span,
+        )),
+    }
+}
+
+/// Exact comparison of two exact buffers. No tolerance applies: two exact
+/// values are equal when they are the same number, which is why
+/// `(10x^30) = 1 + 10x^30` is 0 where the float answer would be 1.
+#[allow(clippy::too_many_arguments)]
+fn exact_compare_data(
+    op: ScalarDyad,
+    x: &Data,
+    xoff: usize,
+    xdiv: usize,
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+) -> Option<Data> {
+    let (xs, ys) = (rat_window(x, xoff, xdiv, n)?, rat_window(y, yoff, ydiv, n)?);
+    let out: Vec<u8> = (0..n)
+        .map(|i| {
+            let ord = xs[i / xdiv].cmp(&ys[i / ydiv]);
+            cmp_result(op, Some(ord)) as u8
+        })
+        .collect();
+    Some(Data::Bool(out.into()))
+}
+
 /// One elementwise dyadic pass over two buffers. Element `i` of the result
 /// pairs `x[xoff + i / xdiv]` with `y[yoff + i / ydiv]`, so broadcasting and
 /// folding both run without materialising cells.
@@ -2580,6 +2910,12 @@ fn scalar_dyad_data(
         return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
     }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
+    if t.is_exact() {
+        if let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)? {
+            return Ok(d);
+        }
+        // No exact answer: widen, exactly as an integer overflow does.
+    }
     if t == DType::I64 && !matches!(op, DivJ | DivApl | Log | Root | Circle) {
         // Binomial reaches this path: a whole pair has a whole answer, and
         // the i64 step declines (None) exactly where J widens to float.
@@ -2637,6 +2973,8 @@ fn monad_leaves_reals(op: ScalarMonad, d: &Data) -> bool {
         Sqrt | Ln => match d {
             Data::I64(v) => v.iter().any(|&x| x < 0),
             Data::F64(v) => v.iter().any(|&x| x < 0.0),
+            Data::Ext(v) => v.iter().any(|x| x.sign() == num_bigint::Sign::Minus),
+            Data::Rat(v) => v.iter().any(|x| x < &Rat::zero()),
             _ => false,
         },
         _ => false,
@@ -2692,6 +3030,12 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
     let d = &y.data;
     if d.dtype() == DType::Complex || monad_leaves_reals(op, d) {
         return complex_monad(op, y, span);
+    }
+    if d.dtype().is_exact() {
+        if let Some(a) = exact_monad(op, y) {
+            return Ok(a);
+        }
+        // No exact answer: the float pass below takes over.
     }
     // The float-only operations borrow float data as it lies; anything else
     // is widened once into `tmp` first.
@@ -2905,7 +3249,15 @@ fn iota_j(y: &Array, span: Span) -> Result<Array> {
         out.push(v as i64);
         odometer(&mut coord, &shape);
     }
-    Ok(Array::new(shape, Data::I64(out.into())))
+    let data = Data::I64(out.into());
+    // An extended length generates extended indices, so `*/ >: i. 25x` is
+    // the exact factorial rather than the overflowing machine one.
+    let data = if y.dtype() == DType::Ext {
+        data.cast(DType::Ext).ok_or_else(|| Error::internal("integers have no extended form"))?
+    } else {
+        data
+    };
+    Ok(Array::new(shape, data))
 }
 
 /// The first item, or a cell of fills when there are no items.
@@ -3028,8 +3380,9 @@ fn elem_key(d: &Data, i: usize) -> u64 {
         }
         Data::Complex(v) => cx_key(v[i]),
         Data::Char(v) => v[i] as u64,
-        // Boxes have no cheap key; their callers compare them by content.
-        Data::Box(_) => 0,
+        // Neither a box nor an exact value has a cheap key; their callers
+        // compare them by content.
+        Data::Ext(_) | Data::Rat(_) | Data::Box(_) => 0,
     }
 }
 
@@ -3045,8 +3398,8 @@ fn num_key(d: &Data, i: usize) -> u64 {
         }
         Data::Complex(v) => cx_key(v[i]),
         Data::Char(v) => v[i] as u64,
-        // As in `elem_key`: never reached for boxed data.
-        Data::Box(_) => 0,
+        // As in `elem_key`: never reached for boxed or exact data.
+        Data::Ext(_) | Data::Rat(_) | Data::Box(_) => 0,
     }
 }
 
@@ -3064,9 +3417,9 @@ fn nub(y: &Array, tol: Tol) -> Array {
     let n = y.items();
     let m = y.item_size();
     let mut keep = Vec::new();
-    if y.dtype() == DType::Box {
-        // Boxed items are compared by content, one against the ones kept
-        // so far: there is no key to hash.
+    if y.dtype() == DType::Box || y.dtype().is_exact() {
+        // Boxed and exact items are compared by content, one against the
+        // ones kept so far: there is no key to hash.
         for i in 0..n {
             if !keep.iter().any(|&j| arrays_match(&y.item(i), &y.item(j), tol)) {
                 keep.push(i);
@@ -3120,6 +3473,10 @@ fn cmp_items(d: &Data, i: usize, j: usize, m: usize) -> std::cmp::Ordering {
             .unwrap_or(Equal)
             .then_with(|| v[a + k][1].partial_cmp(&v[b + k][1]).unwrap_or(Equal)),
         Data::Char(v) => v[a + k].cmp(&v[b + k]),
+        // The exact types order by value, however they are spelled: `2r4`
+        // grades exactly where `1r2` does.
+        Data::Ext(v) => v[a + k].cmp(&v[b + k]),
+        Data::Rat(v) => v[a + k].cmp(&v[b + k]),
         // Grading a boxed array is refused before it gets here.
         Data::Box(_) => Equal,
     };
@@ -3221,6 +3578,10 @@ pub(crate) fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
             let b = borrow_cx(&y.data, &mut tb);
             a.iter().zip(b).all(|(p, q)| tol.eq_cx(*p, *q))
         }
+        Some(t) if t.is_exact() => match (to_rat_vec(&x.data), to_rat_vec(&y.data)) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        },
         Some(_) => {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
             let a = borrow_i64(&x.data, &mut ta);
@@ -3254,9 +3615,14 @@ fn member_j(x: &Array, y: &Array, tol: Tol) -> Array {
 /// `x ∊ y`: for every element of x, does that value occur anywhere in y?
 fn member_apl(x: &Array, y: &Array, tol: Tol) -> Array {
     let n = x.count();
-    if x.dtype() == DType::Box || y.dtype() == DType::Box {
-        // The elements are whole arrays, so they are compared by content;
-        // a box never equals a plain number or character.
+    if x.dtype() == DType::Box
+        || y.dtype() == DType::Box
+        || x.dtype().is_exact()
+        || y.dtype().is_exact()
+    {
+        // A box's elements are whole arrays and an exact value has no cheap
+        // key, so both are compared by content; a box never equals a plain
+        // number or character.
         let out: Vec<u8> = (0..n)
             .map(|i| {
                 let e = atom(x, i);
@@ -3518,7 +3884,7 @@ fn narrow(values: Vec<f64>, integral: bool) -> Data {
 
 /// True when the array holds whole numbers only.
 fn is_integral(a: &Array) -> bool {
-    !matches!(a.dtype(), DType::F64 | DType::Char)
+    !matches!(a.dtype(), DType::F64 | DType::Rat | DType::Char)
 }
 
 /// `x #. y` / `x ⊥ y`: the digits y read in the radices x. A scalar x is the
@@ -3748,6 +4114,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             where_indices(y, origin, boxed_coords, span)
         }
         MonadOp::Steps => steps(y, span),
+        MonadOp::ToExact => to_exact(y, span),
         MonadOp::NthPrime => {
             let n = y
                 .to_i64_vec()
@@ -3970,6 +4337,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         }
         DyadOp::Fetch => fetch(x, y, span),
         DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, span),
+        DyadOp::ExactForm => exact_form(x, y, span),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -4241,7 +4609,9 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
             let widened = par::map(v, |&b| b as i64);
             Some(Data::I64(fold_i64(op, &widened, n, m)?.into()))
         }
-        Data::Char(_) | Data::Box(_) => None,
+        // A bignum has no blockwise form: the exact types fold, scan and
+        // window through the general path, one step at a time.
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
     }
 }
 
@@ -4471,7 +4841,9 @@ fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Optio
         Data::Complex(v) => Some(Data::Complex(scan_cx(op, v, n, m, back)?.into())),
         Data::I64(v) => Some(ints(v)),
         Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
-        Data::Char(_) | Data::Box(_) => None,
+        // A bignum has no blockwise form: the exact types fold, scan and
+        // window through the general path, one step at a time.
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
     }
 }
 
@@ -4698,7 +5070,9 @@ fn window_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, w: usize) -> Optio
         Data::Complex(v) => Some(Data::Complex(window_cx(op, v, n, m, w)?.into())),
         Data::I64(v) => Some(ints(v)),
         Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
-        Data::Char(_) | Data::Box(_) => None,
+        // A bignum has no blockwise form: the exact types fold, scan and
+        // window through the general path, one step at a time.
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
     }
 }
 
@@ -5916,6 +6290,8 @@ fn put_element(dst: &mut Data, at: usize, src: &Data, from: usize) {
     match (dst, src) {
         (Data::Bool(d), Data::Bool(s)) => d.to_mut()[at] = s.as_slice()[from],
         (Data::I64(d), Data::I64(s)) => d.to_mut()[at] = s.as_slice()[from],
+        (Data::Ext(d), Data::Ext(s)) => d.to_mut()[at] = s.as_slice()[from].clone(),
+        (Data::Rat(d), Data::Rat(s)) => d.to_mut()[at] = s.as_slice()[from].clone(),
         (Data::F64(d), Data::F64(s)) => d.to_mut()[at] = s.as_slice()[from],
         (Data::Char(d), Data::Char(s)) => d.to_mut()[at] = s.as_slice()[from],
         (Data::Box(d), Data::Box(s)) => d.to_mut()[at] = s.as_slice()[from].clone(),
@@ -5938,6 +6314,7 @@ mod tests {
                 cfg: EvalCfg { agreement: $agreement, fmt: FmtOpts::J, tol: Tol::J },
                 out: &mut sink,
                 env: &mut env,
+                device: None,
             };
         };
         ($name:ident) => {
@@ -6992,6 +7369,7 @@ mod tests {
             cfg: EvalCfg { agreement: Agreement::LeadingPrefix, fmt: FmtOpts::J, tol: Tol::J },
             out: &mut sink,
             env: &mut env,
+            device: None,
         };
         v.monad(&y, &mut c, sp()).unwrap();
         assert_eq!(seen, (0..16).map(|i| i * 8192).collect::<Vec<i64>>());

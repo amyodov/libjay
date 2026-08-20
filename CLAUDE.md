@@ -53,8 +53,9 @@ or a guess disagrees with the reference, THE ORACLE WINS.
 - Data: Arrow (`arrow-rs`), not Polars; zero-copy is mandatory. DataFrame
   M×N → matrix, rows leading. Refuse nulls, mixed columns, non-contiguous
   views — report and stop rather than guess on the user's behalf. Boxes,
-  bigints, rationals come later — nothing is excluded permanently, so don't
-  bake rectangular/homogeneous in as an unrelaxable invariant.
+  bigints and rationals are in; nothing is excluded permanently, so don't
+  bake rectangular/homogeneous in as an unrelaxable invariant. Arrow carries
+  neither exact type — `.tolist()` or `_1 x:` is the way out.
 - Build: one artifact per platform, runtime CPU/GPU dispatch; stable Rust;
   abi3 wheels, user never sees rustc; compilation stays hermetic. Zero
   hand-written per-primitive SIMD kernels — vectorisation is the backend's
@@ -89,8 +90,9 @@ commits. Decisions with reasoning go to docs/decisions.md, not here.
   feature level (`baseline`, `v2`, `v3`, `native`), read once per process.
 - Phases (original roadmap): 1–6 done (frontends, IR, Arrow, parallelism,
   time series, SIMD dispatch) + C ABI, fusion, dual oracles, boxes,
-  explicit definitions and control structures, complex numbers; next:
-  7 GPU/device, 8 bigints/rationals.
+  explicit definitions and control structures, complex numbers, bigints
+  and rationals, 7 GPU/device (wgpu, fused kernels only; f64 shaders are
+  unvalidated for want of an adapter that has them).
 
 ## Open
 

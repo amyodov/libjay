@@ -76,6 +76,31 @@ An associative float reduction may be regrouped across chunks, which
 reorders the rounding; everything else is bit-identical to the sequential
 path.
 
+## Devices
+
+Where a program runs is separate from what it is bound to, and the CPU is
+one of the answers:
+
+```rust
+let device = jay::Device::default_gpu();          // None where there is none
+let value = match &device {
+    Some(d) => program.run_on(d, &args, &mut sink)?,
+    None => program.run(&args, &mut sink)?,
+};
+```
+
+`jay::device::available()` lists the adapters. What reaches a GPU is the
+fused elementwise kernels, generated as WGSL at run time and dispatched
+through wgpu (Metal, Vulkan, DX12); everything else, and any chain the
+device will not take, runs on the CPU, and `Program::explain_on` names each
+placement and its reason. The backend is in every build and dormant without
+an adapter — there is no feature flag and no second artifact.
+
+libjay computes floats in f64 and will not lose that quietly: on an adapter
+without `SHADER_F64` — Metal has none — an f64 chain stays on the CPU unless
+the caller asks for `Precision::F32`. `Device::upload` returns an array that
+carries its own device allocation, so repeated runs over it upload nothing.
+
 ## More
 
 - [Language coverage](https://github.com/amyodov/libjay/blob/main/docs/coverage.md)

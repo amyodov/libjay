@@ -431,3 +431,158 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   complex matrix inverse and matrix divide (`%.` / `⌹` stay f64), complex
   decode and encode (`#.`/`⊥`, `#:`/`⊤`), and rationals, which is the last
   of the Group-1 types.
+
+- 2026-08-20 — **Extended-precision integers and rationals** (Group 4,
+  category 2: present in J, absent from every APL, and the last of the
+  "present in the language, not yet implemented" types).
+
+  **Where they sit.** The numeric tower is
+  `boolean < integer < extended < rational < float < complex`, oracle-checked
+  pair by pair. Above the machine integers, so `1x + 1r2` stays exact; below
+  the floats, so `1x + 1.5` rounds. The i64-overflow→f64 rule is untouched:
+  `9223372036854775807 + 1` is still a float, and only an explicitly
+  extended computation is exact. That keeps the fast path fast and makes
+  exactness something the user asks for by writing `x`.
+
+  **One rule decides the answer's type.** Compute exactly as rationals, then
+  answer with an extended integer when both arguments were extended AND
+  every value is whole; answer with a rational otherwise. That single rule
+  reproduces every case the oracle showed: `4x % 2` extended, `1x % 3`
+  rational, `1r2 - 1r2` a rational zero (a rational never falls back down
+  the tower), `-: 1x` rational, `-: 2x` extended. Rounding and the sign are
+  the named exceptions — `<.`, `>.` and `*` always answer whole. Computing
+  everything through one rational kernel rather than two typed ones costs a
+  denominator of 1 on the integer path, which a whole-number fast path in
+  `Rat::add`/`sub`/`mul` takes back. An exact pass converts only the WINDOW
+  of the buffer it really reads: a fold hands the same buffer to every step
+  with a different offset, and converting all of it each time made `+/` over
+  an extended vector quadratic (22 s at 20k elements, 0.05 s after).
+
+  **Exact versus tolerant.** Two exact values compare exactly; no tolerance
+  stands between them, so `(10x^30) = 1 + 10x^30` is 0. Against a float the
+  pair's type is float and the ordinary tolerant rule applies — which is why
+  `1r3 = 0.333333333333333333` is 1 and `1r3 < 0.333333333333333333` is 0.
+  The reference agrees with both, and the two together are the whole rule:
+  tolerance is a property of the TYPE the comparison happens in, not of the
+  verb.
+
+  **Our own rational, not `num-rational`.** `num-bigint` 0.5 is already in
+  the tree (arrow pulls it into the Python crate); `num-rational` 0.4 is the
+  newest published version and depends on `num-bigint` 0.4, which would put
+  two incompatible bignums in one build. A rational in lowest terms is a
+  gcd, a normalisation and eight operators — `crates/libjay/src/exact.rs` —
+  and writing it keeps one bignum in the tree and puts J's own rules (the
+  exactness tests, the residue's sign, the gcd of two rationals) where they
+  are read.
+
+  **Heap-backed, so no fusion and no SIMD.** `Data::Ext` and `Data::Rat` are
+  pointer arrays like `Data::Box`: never foreign memory, never a blockwise
+  kernel, never a typed fold. `working_type` declines them exactly as it
+  declines complex, and tests/extended.rs runs the same chain both ways to
+  check the fallback agrees. The generic cell machinery carries structure —
+  reshape, take, catenate, grade, nub — for free.
+
+  **Limits are named, not discovered.** A power whose result would need more
+  than 2²⁶ bits is a domain error rather than an allocation the machine
+  cannot serve. `x:` of an infinity is refused rather than passed through as
+  J passes it, on the "refuse rather than guess" rule.
+
+  **`x:` on a float.** J converts a non-integral double to a rational near
+  it rather than to the exact binary fraction, so `x: 0.1` is `1r10`. libjay
+  walks the continued fraction and stops at the first convergent within the
+  comparison tolerance, which agrees with the reference on every value with
+  a nice rational nearby and picks a smaller denominator than J's on values
+  with none (recorded in coverage.md). An integral double converts exactly:
+  `x: 1e30` keeps all thirty-one digits the double really holds.
+
+  **The boundary.** Python has unbounded `int` and `fractions.Fraction`, so
+  both types cross in both directions with nothing lost. Arrow has neither,
+  and inventing a carrier would be a convention no consumer reads: an exact
+  result refuses the Arrow export by name and points at `.tolist()` and
+  `_1 x:`. Decimal128 stays a separate, later carrier. The C ABI takes the
+  same path boxes take.
+
+- 2026-08-20 — Phase 7, GPU/device execution.
+
+  **Backend: wgpu, always compiled in.** One artifact per platform is a
+  fixed point, so the device backend is not a cargo feature, not a second
+  wheel and not a build-time choice: `wgpu` (Metal, Vulkan, DX12 behind one
+  API, stable Rust, MSRV 1.84) is an ordinary dependency, and on a machine
+  with no adapter it finds none and everything runs on the CPU as before.
+  Shaders are WGSL text generated at RUN time and handed to the driver, so
+  the build compiles no shader and knows nothing about the machine that will
+  run it — the same hermetic rule the CPU feature levels follow. It lives in
+  `device/` behind a `Backend` trait (`info`, `upload`, `dispatch`) so that a
+  CUDA backend later is a second implementation rather than a rewrite: the
+  code generator and the placement rules above it name no GPU API.
+  It costs 4.55 MiB in the release cdylib — 5,912,576 bytes without it
+  against 10,688,536 with, measured by building the same tree both ways —
+  which is the price of one artifact that runs everywhere.
+
+  **Scope: fused kernels only.** The fusion pass already reduces a chain of
+  scalar verbs to a postfix program over blocks with an optional reduction
+  absorbed — that IS a kernel description, and it is the only one libjay has.
+  `device/codegen.rs` walks it and writes WGSL, exactly as `fuse.rs`'s block
+  executor walks it and calls block loops. So the owner invariant holds on
+  the device too: there is no hand-written shader per primitive, one arm of
+  the generator per scalar operation is the whole of it, and adding a verb to
+  the fusable set adds one arm. Everything outside a fused node runs where it
+  always ran.
+
+  **Placement is not binding.** `bind` gives a kernel data; `deploy` gives it
+  a processor. Both return a new kernel, neither changes the value, the
+  shape, the dtype or a diagnostic. In the core it is `Program::run_on`, and
+  the device reaches exactly one place in the evaluator — `fuse::eval_on`,
+  which offers the kernel to the device and runs the CPU kernel with a
+  recorded reason when the device will not take it. A device therefore cannot
+  change a result; it can only change where the arithmetic happened, and
+  `explain` prints that as `device: gpu` or `device: cpu (reason)` beside the
+  kernel's own decline reason. `jay.j(...)` keeps no device by design: there
+  is nowhere in one call to say where, and one run rarely pays for an upload.
+
+  **f32 is opt-in, never a fallback.** WGSL can express f64 and naga
+  validates it, but almost no adapter implements it: Metal has no `double` at
+  all, and on Vulkan `SHADER_F64` is optional. Silently computing an f64
+  program in f32 to get it onto a GPU would be trading the user's precision
+  for our benchmark, so an adapter without f64 DECLINES the chain to the CPU
+  unless the caller passed `precision="f32"`. The other declines are the same
+  shape and reported the same way: an i64 working type (WGSL has no 64-bit
+  integer arithmetic on most adapters), a result that is not a float array,
+  `^` in f64 (the exponential is a 32-bit builtin in both SPIR-V and MSL),
+  and anything below half a million elements, where the dispatch and readback
+  cost more than the whole CPU pass.
+
+  **Residency rides on the buffer.** `Device::upload` hands back an ordinary
+  `Array` whose buffer is foreign and whose owner handle holds the device
+  allocation, so an uploaded value carries its own location without becoming
+  a different kind of value — the CPU path can still read it, which is what
+  makes a fallback transparent. That needed one new accessor,
+  `Buf::owner`/`Data::owner`. Known limitation, named rather than hidden:
+  `keep_on_device` materialises the host mirror at the same time, so a result
+  handed straight to the next kernel still costs one readback. A device-to-
+  device hand-off wants an array that can exist with no host pointer at all,
+  which is a change to `Array` and belongs to its own phase.
+
+  **Equivalence.** Elementwise `+ - *` in f64 are IEEE on both processors, so
+  a map is bit-identical; division and transcendentals may differ by an ulp.
+  A reduction regroups an associative fold, which §5.9 already licenses for
+  the parallel CPU path, so it is compared with a tolerance: 1e-14 in f64,
+  ~1e-4 in f32, and a few parts in ten thousand for a product over half a
+  million factors. `tests/device.rs` is the battery and skips cleanly with no
+  adapter; CI has none and stays green.
+
+  **The validation gap (for the owner).** The measuring machine is a 2017
+  MacBook Pro with a Radeon Pro 560 behind Metal, and Metal has no f64 in
+  shaders. So on this machine ONLY the opted-in f32 path has ever executed.
+  The f64 path is generated, parsed and type-checked — `naga` validates every
+  chain's f64 WGSL under `Capabilities::FLOAT64` in a unit test — but no f64
+  shader has run anywhere. It needs a Linux/Vulkan or Windows/DX12 box with
+  an adapter that reports `SHADER_F64`. Until then the status matrix says
+  🟡 and this entry is the reason.
+
+  Measured at 20M rows against the 8-thread CPU (f32 on the device, f64 on
+  the CPU): 1.5x on a weighted sum, 1.6x on the one-sentence standard
+  deviation, 4.7x on a polynomial, 5.1x on a sum of exponentials — with the
+  data already resident. Uploading 20M elements costs about 120 ms, ten to
+  thirty times the kernel, so a device is worth naming only for data that
+  stays there. Details in bench/README.md.

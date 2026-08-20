@@ -187,6 +187,9 @@ pub(crate) struct Note {
     /// the reason it declined when it did not.
     pub kernel_ran: Option<bool>,
     pub decline: Option<crate::fuse::Decline>,
+    /// For a fused node in a run that was given a device: where the
+    /// arithmetic happened.
+    pub placement: crate::device::Placement,
 }
 
 /// Notes from one run, keyed by the address of the node in the tree that
@@ -202,7 +205,21 @@ impl Program {
     /// Execute with one value per parameter, in `params` order.
     /// Returns None when the last sentence yields no value.
     pub fn run(&self, args: &[Array], out: &mut dyn FnMut(&str)) -> Result<Option<Array>> {
-        self.exec(args, out, &mut None)
+        self.exec(args, out, &mut None, None)
+    }
+
+    /// Execute with the fused kernels placed on `device`.
+    ///
+    /// Placement is not binding: the program, its data and its diagnostics
+    /// are the same whatever device is named here. What a device will not
+    /// take runs on the CPU, and `explain` says which and why.
+    pub fn run_on(
+        &self,
+        device: &crate::device::Device,
+        args: &[Array],
+        out: &mut dyn FnMut(&str),
+    ) -> Result<Option<Array>> {
+        self.exec(args, out, &mut None, Some(device))
     }
 
     /// Execute and record every node's result shape and dtype. The trace is
@@ -212,9 +229,10 @@ impl Program {
         &self,
         args: &[Array],
         out: &mut dyn FnMut(&str),
+        device: Option<&crate::device::Device>,
     ) -> (Result<Option<Array>>, Trace) {
         let mut rec = Some(Trace::new());
-        let r = self.exec(args, out, &mut rec);
+        let r = self.exec(args, out, &mut rec, device);
         (r, rec.expect("the recorder stays in place"))
     }
 
@@ -223,6 +241,7 @@ impl Program {
         args: &[Array],
         out: &mut dyn FnMut(&str),
         rec: &mut Option<Trace>,
+        device: Option<&crate::device::Device>,
     ) -> Result<Option<Array>> {
         if args.len() != self.params.len() {
             return Err(Error::internal(format!(
@@ -233,7 +252,7 @@ impl Program {
         }
         let cfg = EvalCfg { agreement: self.agreement, fmt: self.fmt, tol: self.tol };
         let mut env = Env::new(args.to_vec());
-        let mut ctx = Ctx { cfg, out, env: &mut env };
+        let mut ctx = Ctx { cfg, out, env: &mut env, device };
         let mut last = None;
         for stmt in &self.stmts {
             // A control word cannot reach the top level in either language,
@@ -261,7 +280,18 @@ impl Program {
     /// has the ordinary effects; output it makes is discarded here, and an
     /// error stops the annotations and is reported at the end.
     pub fn explain(&self, args: Option<&[Array]>) -> String {
-        crate::explain::explain(self, args)
+        crate::explain::explain(self, args, None)
+    }
+
+    /// [`Program::explain`], with the run placed on `device`: every fused
+    /// node then also says where its arithmetic happened, and why it was
+    /// not the device when it was not.
+    pub fn explain_on(
+        &self,
+        device: &crate::device::Device,
+        args: Option<&[Array]>,
+    ) -> String {
+        crate::explain::explain(self, args, Some(device))
     }
 }
 
@@ -321,7 +351,13 @@ fn eval_stmt(
     if let (Some(t), Some(v)) = (rec.as_mut(), v.as_ref()) {
         t.insert(
             key(e),
-            Note { shape: v.shape.clone(), dtype: v.dtype(), kernel_ran: None, decline: None },
+            Note {
+                shape: v.shape.clone(),
+                dtype: v.dtype(),
+                kernel_ran: None,
+                decline: None,
+                placement: crate::device::Placement::Default,
+            },
         );
     }
     Ok((v, flow))
@@ -344,6 +380,8 @@ fn is_true(a: &Array, span: Span) -> Result<bool> {
         Data::Bool(v) => Ok(v.as_slice()[0] != 0),
         Data::Char(v) => Ok(v.as_slice()[0] as u32 != 0),
         Data::Complex(v) => Ok(v.as_slice()[0] != crate::complex::ZERO),
+        Data::Ext(v) => Ok(v.as_slice()[0] != crate::exact::Ext::default()),
+        Data::Rat(v) => Ok(!v.as_slice()[0].is_zero()),
         Data::Box(_) => Err(Error::domain("a condition must be numeric, not boxed", span)),
     }
 }
@@ -532,11 +570,13 @@ fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
     let v = eval_node(e, ctx, rec)?;
     if let Some(t) = rec.as_mut() {
         // A fused node has already left what it knows about its kernel.
-        let (kernel_ran, decline) =
-            t.get(&key(e)).map_or((None, None), |n| (n.kernel_ran, n.decline));
+        let (kernel_ran, decline, placement) = t.get(&key(e)).map_or(
+            (None, None, crate::device::Placement::Default),
+            |n| (n.kernel_ran, n.decline, n.placement.clone()),
+        );
         t.insert(
             key(e),
-            Note { shape: v.shape.clone(), dtype: v.dtype(), kernel_ran, decline },
+            Note { shape: v.shape.clone(), dtype: v.dtype(), kernel_ran, decline, placement },
         );
     }
     Ok(v)
@@ -599,7 +639,7 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
             for e in inputs {
                 vals.push(eval(e, ctx, rec)?);
             }
-            let ran = crate::fuse::eval(kernel, &vals);
+            let (ran, placement) = crate::fuse::eval_on(ctx.device, kernel, &vals);
             if let Some(t) = rec.as_mut() {
                 let decline =
                     if ran.is_none() { crate::fuse::decline_reason(kernel, &vals) } else { None };
@@ -612,6 +652,7 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
                         dtype: crate::dtype::DType::I64,
                         kernel_ran: Some(ran.is_some()),
                         decline,
+                        placement,
                     },
                 );
             }

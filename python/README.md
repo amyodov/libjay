@@ -130,6 +130,52 @@ kernel ran or handed the work back to the chain, and why. With a parameter
 missing, the structure is printed alone. `libjay --explain -e '...'` is the
 same thing from the shell.
 
+## Device placement
+
+Where an expression runs is separate from what it is bound to. `bind` gives
+a kernel data; `deploy` gives it a processor. Both return a new kernel, and
+neither changes the answer.
+
+```python
+jay.devices()
+# [Device(name='AMD Radeon Pro 560', backend='metal',
+#         kind='discrete GPU', f64=False)]
+
+k = jay.j.compile("+/ {w} * {x}").bind({"w": w, "x": x})
+g = k.deploy("gpu")
+g()                                  # the same value, computed on the GPU
+```
+
+What reaches the GPU is the fused elementwise chains — the same blockwise
+kernels `explain` shows, generated as shader code at run time. Everything
+else runs on the CPU, and so does any chain the device cannot take;
+`explain` says which and why (`device: gpu`, `device: cpu (…)`). Nothing
+here is a separate build: the backend is in the ordinary wheel and is
+dormant on a machine with no adapter.
+
+**Precision is not silently traded away.** libjay computes floats in f64,
+and most adapters have no f64 in shaders at all — Metal has none. On those
+an f64 chain simply stays on the CPU. Single precision is available by
+asking for it:
+
+```python
+g = k.deploy("gpu", precision="f32")   # yes, I want f32
+```
+
+**Data can stay where it is computed.** `upload` returns a value that
+carries its own location, so calling a kernel repeatedly over it uploads
+nothing after the first time:
+
+```python
+g = jay.j.compile("+/ {w} * {x}").deploy("gpu")
+pinned = g.bind({"w": g.upload(w), "x": g.upload(x)})
+pinned()                              # no upload
+```
+
+The one-call shortcut `jay.j("...")` has no device: there is nowhere in one
+call to say where, and uploading data for a single run rarely pays for
+itself.
+
 ## The CLI
 
 ```sh

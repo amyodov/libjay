@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use crate::complex::Cx;
 use crate::dtype::DType;
+use crate::exact::{Ext, Rat};
 
 /// Anything that keeps a foreign buffer's memory alive: the importing side
 /// stores its release guards here and the buffer outlives nothing else.
@@ -66,6 +67,20 @@ impl<T> Buf<T> {
     /// True while the buffer still borrows foreign memory.
     pub fn is_foreign(&self) -> bool {
         matches!(self.repr, Repr::Foreign { .. })
+    }
+
+    /// The handle keeping this buffer's memory alive, for a borrowed
+    /// buffer.
+    ///
+    /// What the handle holds is the importing side's business, and a reader
+    /// that recognises one of its own can act on it: a device upload leaves
+    /// the device allocation in here, which is how an array carries its
+    /// location without becoming a different kind of array.
+    pub fn owner(&self) -> Option<&Owner> {
+        match &self.repr {
+            Repr::Owned(_) => None,
+            Repr::Foreign { owner, .. } => Some(owner),
+        }
     }
 
     pub fn as_slice(&self) -> &[T] {
@@ -197,6 +212,12 @@ impl<T> FromIterator<T> for Buf<T> {
 pub enum Data {
     Bool(Buf<u8>),
     I64(Buf<i64>),
+    /// Arbitrary-precision integers. Like boxes, these are heap-backed
+    /// pointers rather than machine words: never foreign, never fused,
+    /// never vectorised.
+    Ext(Buf<Ext>),
+    /// Exact ratios, each in lowest terms. Heap-backed, as `Ext` is.
+    Rat(Buf<Rat>),
     F64(Buf<f64>),
     /// Complex numbers, interleaved `[re, im]` — the layout numpy, C and a
     /// pair of Arrow float columns all share.
@@ -213,6 +234,8 @@ impl Data {
         match self {
             Data::Bool(_) => DType::Bool,
             Data::I64(_) => DType::I64,
+            Data::Ext(_) => DType::Ext,
+            Data::Rat(_) => DType::Rat,
             Data::F64(_) => DType::F64,
             Data::Complex(_) => DType::Complex,
             Data::Char(_) => DType::Char,
@@ -224,6 +247,8 @@ impl Data {
         match self {
             Data::Bool(v) => v.len(),
             Data::I64(v) => v.len(),
+            Data::Ext(v) => v.len(),
+            Data::Rat(v) => v.len(),
             Data::F64(v) => v.len(),
             Data::Complex(v) => v.len(),
             Data::Char(v) => v.len(),
@@ -240,6 +265,8 @@ impl Data {
         match self {
             Data::Bool(v) => v.is_foreign(),
             Data::I64(v) => v.is_foreign(),
+            Data::Ext(v) => v.is_foreign(),
+            Data::Rat(v) => v.is_foreign(),
             Data::F64(v) => v.is_foreign(),
             Data::Complex(v) => v.is_foreign(),
             Data::Char(v) => v.is_foreign(),
@@ -247,10 +274,27 @@ impl Data {
         }
     }
 
+    /// The handle keeping this payload's memory alive, for a borrowed one.
+    /// See [`Buf::owner`].
+    pub fn owner(&self) -> Option<&Owner> {
+        match self {
+            Data::Bool(v) => v.owner(),
+            Data::I64(v) => v.owner(),
+            Data::Ext(v) => v.owner(),
+            Data::Rat(v) => v.owner(),
+            Data::F64(v) => v.owner(),
+            Data::Complex(v) => v.owner(),
+            Data::Char(v) => v.owner(),
+            Data::Box(v) => v.owner(),
+        }
+    }
+
     pub fn slice(&self, start: usize, end: usize) -> Data {
         match self {
             Data::Bool(v) => Data::Bool(v.slice(start, end)),
             Data::I64(v) => Data::I64(v.slice(start, end)),
+            Data::Ext(v) => Data::Ext(v.slice(start, end)),
+            Data::Rat(v) => Data::Rat(v.slice(start, end)),
             Data::F64(v) => Data::F64(v.slice(start, end)),
             Data::Complex(v) => Data::Complex(v.slice(start, end)),
             Data::Char(v) => Data::Char(v.slice(start, end)),
@@ -262,6 +306,8 @@ impl Data {
         match dtype {
             DType::Bool => Data::Bool(Buf::new()),
             DType::I64 => Data::I64(Buf::new()),
+            DType::Ext => Data::Ext(Buf::new()),
+            DType::Rat => Data::Rat(Buf::new()),
             DType::F64 => Data::F64(Buf::new()),
             DType::Complex => Data::Complex(Buf::new()),
             DType::Char => Data::Char(Buf::new()),
@@ -275,6 +321,8 @@ impl Data {
         match self {
             Data::Bool(v) => v.push(0),
             Data::I64(v) => v.push(0),
+            Data::Ext(v) => v.push(Ext::default()),
+            Data::Rat(v) => v.push(Rat::zero()),
             Data::F64(v) => v.push(0.0),
             Data::Complex(v) => v.push(crate::complex::ZERO),
             Data::Char(v) => v.push(' '),
@@ -286,6 +334,8 @@ impl Data {
         match (self, other) {
             (Data::Bool(a), Data::Bool(b)) => a.extend_from_slice(b),
             (Data::I64(a), Data::I64(b)) => a.extend_from_slice(b),
+            (Data::Ext(a), Data::Ext(b)) => a.extend_from_slice(b),
+            (Data::Rat(a), Data::Rat(b)) => a.extend_from_slice(b),
             (Data::F64(a), Data::F64(b)) => a.extend_from_slice(b),
             (Data::Complex(a), Data::Complex(b)) => a.extend_from_slice(b),
             (Data::Char(a), Data::Char(b)) => a.extend_from_slice(b),
@@ -304,11 +354,32 @@ impl Data {
             (Data::Bool(v), DType::I64) => Some(Data::I64(v.iter().map(|&x| x as i64).collect())),
             (Data::Bool(v), DType::F64) => Some(Data::F64(v.iter().map(|&x| x as f64).collect())),
             (Data::I64(v), DType::F64) => Some(Data::F64(v.iter().map(|&x| x as f64).collect())),
+            (Data::Bool(v), DType::Ext) => Some(Data::Ext(v.iter().map(|&x| Ext::from(x)).collect())),
+            (Data::I64(v), DType::Ext) => Some(Data::Ext(v.iter().map(|&x| Ext::from(x)).collect())),
+            (Data::Bool(v), DType::Rat) => {
+                Some(Data::Rat(v.iter().map(|&x| Rat::from_int(Ext::from(x))).collect()))
+            }
+            (Data::I64(v), DType::Rat) => {
+                Some(Data::Rat(v.iter().map(|&x| Rat::from_int(Ext::from(x))).collect()))
+            }
+            (Data::Ext(v), DType::Rat) => {
+                Some(Data::Rat(v.iter().map(|x| Rat::from_int(x.clone())).collect()))
+            }
+            (Data::Ext(v), DType::F64) => {
+                Some(Data::F64(v.iter().map(crate::exact::ext_to_f64).collect()))
+            }
+            (Data::Rat(v), DType::F64) => Some(Data::F64(v.iter().map(Rat::to_f64).collect())),
             (Data::Bool(v), DType::Complex) => {
                 Some(Data::Complex(v.iter().map(|&x| [x as f64, 0.0]).collect()))
             }
             (Data::I64(v), DType::Complex) => {
                 Some(Data::Complex(v.iter().map(|&x| [x as f64, 0.0]).collect()))
+            }
+            (Data::Ext(v), DType::Complex) => {
+                Some(Data::Complex(v.iter().map(|x| [crate::exact::ext_to_f64(x), 0.0]).collect()))
+            }
+            (Data::Rat(v), DType::Complex) => {
+                Some(Data::Complex(v.iter().map(|x| [x.to_f64(), 0.0]).collect()))
             }
             (Data::F64(v), DType::Complex) => {
                 Some(Data::Complex(v.iter().map(|&x| [x, 0.0]).collect()))
@@ -449,6 +520,22 @@ impl Array {
         }
     }
 
+    /// The extended integers, if the array holds them.
+    pub fn as_ext_slice(&self) -> Option<&[Ext]> {
+        match &self.data {
+            Data::Ext(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// The rationals, if the array holds them.
+    pub fn as_rat_slice(&self) -> Option<&[Rat]> {
+        match &self.data {
+            Data::Rat(v) => Some(v),
+            _ => None,
+        }
+    }
+
     pub fn as_complex_slice(&self) -> Option<&[Cx]> {
         match &self.data {
             Data::Complex(v) => Some(v),
@@ -461,6 +548,8 @@ impl Array {
         match &self.data {
             Data::Bool(v) => Some(v.iter().map(|&x| [x as f64, 0.0]).collect()),
             Data::I64(v) => Some(v.iter().map(|&x| [x as f64, 0.0]).collect()),
+            Data::Ext(v) => Some(v.iter().map(|x| [crate::exact::ext_to_f64(x), 0.0]).collect()),
+            Data::Rat(v) => Some(v.iter().map(|x| [x.to_f64(), 0.0]).collect()),
             Data::F64(v) => Some(v.iter().map(|&x| [x, 0.0]).collect()),
             Data::Complex(v) => Some(v.to_vec()),
             Data::Char(_) | Data::Box(_) => None,
@@ -472,6 +561,8 @@ impl Array {
         match &self.data {
             Data::Bool(v) => Some(v.iter().map(|&x| x as f64).collect()),
             Data::I64(v) => Some(v.iter().map(|&x| x as f64).collect()),
+            Data::Ext(v) => Some(v.iter().map(crate::exact::ext_to_f64).collect()),
+            Data::Rat(v) => Some(v.iter().map(Rat::to_f64).collect()),
             Data::F64(v) => Some(v.to_vec()),
             // A complex value is not a real one, even when its imaginary
             // part is zero: the caller wants a real and must ask for it.
@@ -484,6 +575,12 @@ impl Array {
         match &self.data {
             Data::Bool(v) => Some(v.iter().map(|&x| x as i64).collect()),
             Data::I64(v) => Some(v.to_vec()),
+            // An exact value converts only when it really is a machine
+            // integer; anything else is a refusal, not a rounding.
+            Data::Ext(v) => v.iter().map(crate::exact::ext_to_i64).collect(),
+            Data::Rat(v) => {
+                v.iter().map(|x| x.to_int().as_ref().and_then(crate::exact::ext_to_i64)).collect()
+            }
             Data::F64(v) => {
                 let mut out = Vec::with_capacity(v.len());
                 for &x in v.iter() {

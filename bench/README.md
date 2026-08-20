@@ -440,6 +440,47 @@ this machine and the real step is `v3`. The shipped extension carries 12
 dispatchers and 34 AVX2 clones; had `-C target-cpu` leaked in above `v3` the
 dispatchers would have been elided and there would be none.
 
+## GPU placement
+
+Phase 7. `bench/device.py` times the same fused kernels on the CPU and on
+this machine's GPU, at 20M f64 rows, three ways: the CPU with the whole
+thread pool, the device with ordinary arguments (so every call uploads
+them), and the device with the arguments already resident.
+
+```sh
+.venv-bench/bin/python bench/device.py
+```
+
+The measuring machine is a 2017 MacBook Pro: an AMD Radeon Pro 560 behind
+Metal. **Metal has no `double` in shaders**, so `SHADER_F64` is absent and
+libjay's f64 chains stay on the CPU there; the only thing measurable on this
+machine is the explicitly opted-in f32 path, and the table says so. The CPU
+column is f64 and the numpy column is f32, so the two are not the same
+computation — the drift column is how far apart the answers ended up.
+
+| kernel | J | libjay CPU (8 threads, f64) | libjay GPU, f32, uploading each call | libjay GPU, f32, resident | speedup, resident | numpy f32 | drift vs CPU |
+|---|---|---:|---:|---:|---:|---:|---:|
+| weighted sum | `+/ {w} * {x}` | 13.4 | 249.5 | 8.7 | 1.53x | 36.2 | 1.1e-07 |
+| std, one sentence | `%: (+/ ({x} - (+/ {x}) % # {x}) * …) % # {x}` | 22.7 | 136.3 | 14.1 | 1.61x | 63.0 | 2.7e-10 |
+| polynomial | `+/ 2.5 + {x} * 1.5 + {x} * 0.5 * {x}` | 20.8 | 125.4 | 4.4 | 4.74x | 89.9 | 1.2e-10 |
+| sum of exponentials | `+/ ^ {x} % 100` | 36.9 | 120.6 | 7.2 | 5.10x | 71.5 | 9.9e-10 |
+
+What the numbers say:
+
+- **Upload dominates.** Sending 20M elements costs about 120 ms — ten to
+  thirty times the kernel itself. A device is worth naming only for data
+  that stays there, which is what `upload` and `keep_on_device` are for.
+- **Arithmetic per element decides the win.** The weighted sum moves two
+  columns and does one multiply: 1.5x, because both processors are waiting
+  on memory. The polynomial does five operations on one column and the sum
+  of exponentials a transcendental: 4.7x and 5.1x. The pattern is the same
+  one the SIMD section found — the width was never the limit, the memory
+  was — read the other way round.
+- **The standard deviation is a mixed placement**, and honestly so: the two
+  `+/ {x}` passes it needs are single verbs, which the fusion pass does not
+  fuse and the device therefore never sees. Only the map-reduce over them
+  runs on the GPU, and the row's 1.6x is what that is worth.
+
 ## Next
 
 In the order the measurements rank them:
