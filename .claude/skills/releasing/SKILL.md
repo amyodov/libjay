@@ -7,7 +7,8 @@ disable-model-invocation: true
 
 # Release a version of libjay
 
-One release reaches PyPI (a matrix of native wheels plus an sdist), the git
+One release reaches PyPI (a matrix of native wheels plus an sdist),
+crates.io (the `libjay` core crate — once bootstrapped, see step 5), the git
 tag, and the GitHub release. Releases only happen when the user asks for one
 — `disable-model-invocation` enforces that, and nothing in this file
 overrides it. The version being released is `$1` (e.g. `0.2.0`): a bare
@@ -22,8 +23,10 @@ loudly at the first failure rather than improvising past it.
 ## 1. Preconditions
 
 - Working tree clean, on `main`, in sync with `origin/main` (`git status -sb`).
-- `$1` is not already released: absent from `git tag` and from
-  `https://pypi.org/pypi/libjay/json`.
+- `$1` is not already released: absent from `git tag`, from
+  `https://pypi.org/pypi/libjay/json`, and from
+  `https://crates.io/api/v1/crates/libjay` (send a User-Agent or it 403s).
+- `cargo publish -p libjay --dry-run` packages cleanly.
 - The full local suite passes, including the differential corpus against the
   reference J (the oracle must be present — see CLAUDE.md):
   `cargo test -p libjay -p libjay-capi` and
@@ -84,10 +87,28 @@ Then confirm the release is real from a user's seat:
   `uvx --refresh libjay -e '(+/ % #) 1 2 3 4'` → `2.5`, and
   `uvx --refresh libjay -e "⎕←'hello'" --lang apl` → `hello`.
 
-## 5. Not part of this pipeline (yet)
+## 5. crates.io
 
-- **crates.io** (`libjay` core crate) is a separate, manual decision — the
-  name is reserved-by-availability only; publishing the Rust crate needs a
-  `cargo publish` review pass of its own.
-- No MCP registry, no Context7 — libjay is a library, not an MCP server;
-  revisit Context7 once docs/ is worth indexing.
+The `crates` job in publish.yml publishes the core crate with the same
+version, via crates.io trusted publishing (OIDC), after PyPI succeeds. It is
+gated on the repo variable `CRATES_PUBLISH == "true"`.
+
+Bootstrap (first release only, owner actions): crates.io cannot attach a
+trusted publisher to a crate that does not exist, so the first publish is
+manual — `cargo publish -p libjay` with the owner's token — then on
+crates.io: Settings → Trusted Publishing → add GitHub `amyodov/libjay`,
+workflow `publish.yml`, environment `crates`; create the `crates`
+environment on GitHub; set the repo variable
+(`gh variable set CRATES_PUBLISH --body true`). From the next release the
+job runs by itself. Verify: `https://crates.io/api/v1/crates/libjay` reports
+`$1`, and docs.rs builds (`https://docs.rs/libjay`).
+
+The binding crate (`libjay-python`) and the C ABI crate (`libjay-capi`) stay
+`publish = false`: wheel users get the binding inside the wheel, C users
+need artifacts and a header rather than a crate. Revisit capi publishing if
+someone asks for `cargo add libjay-capi`.
+
+## 6. Not part of this pipeline
+
+No MCP registry, no Context7 — libjay is a library, not an MCP server;
+revisit Context7 once docs/ is worth indexing.

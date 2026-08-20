@@ -1,6 +1,9 @@
 [package]
 name = "libjay"
-description = "Embedded J/APL: compile array-language expressions from string literals and run them in parallel"
+description = "Embedded J and APL: compile array-language expressions from string literals, run them in parallel"
+readme = "../../README.md"
+keywords = ["j", "apl", "array", "vectorization", "language"]
+categories = ["compilers", "mathematics", "science"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

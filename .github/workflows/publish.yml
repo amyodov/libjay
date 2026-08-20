@@ -106,3 +106,24 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           ~/.local/bin/uvx --refresh libjay -e "(+/ % #) 1 2 3 4" | grep -qx "2.5"
+
+  # The Rust crate ships with the same release, once the crate exists on
+  # crates.io with trusted publishing configured. Dormant until the repo
+  # variable CRATES_PUBLISH is set to "true": crates.io can only be given a
+  # trusted publisher for an EXISTING crate, so the very first publish is a
+  # manual `cargo publish -p libjay` by the owner.
+  crates:
+    if: github.event_name == 'release' && vars.CRATES_PUBLISH == 'true'
+    needs: [publish]
+    runs-on: ubuntu-latest
+    environment: crates
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish -p libjay
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
