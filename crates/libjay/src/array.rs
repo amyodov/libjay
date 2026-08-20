@@ -198,6 +198,10 @@ pub enum Data {
     I64(Buf<i64>),
     F64(Buf<f64>),
     Char(Buf<char>),
+    /// Boxes: every element is a whole array. Foreign memory never holds
+    /// these, so a boxed buffer is always owned and cloning it is a
+    /// refcount bump like any other.
+    Box(Buf<Array>),
 }
 
 impl Data {
@@ -207,6 +211,7 @@ impl Data {
             Data::I64(_) => DType::I64,
             Data::F64(_) => DType::F64,
             Data::Char(_) => DType::Char,
+            Data::Box(_) => DType::Box,
         }
     }
 
@@ -216,6 +221,7 @@ impl Data {
             Data::I64(v) => v.len(),
             Data::F64(v) => v.len(),
             Data::Char(v) => v.len(),
+            Data::Box(v) => v.len(),
         }
     }
 
@@ -230,6 +236,7 @@ impl Data {
             Data::I64(v) => v.is_foreign(),
             Data::F64(v) => v.is_foreign(),
             Data::Char(v) => v.is_foreign(),
+            Data::Box(v) => v.is_foreign(),
         }
     }
 
@@ -239,6 +246,7 @@ impl Data {
             Data::I64(v) => Data::I64(v.slice(start, end)),
             Data::F64(v) => Data::F64(v.slice(start, end)),
             Data::Char(v) => Data::Char(v.slice(start, end)),
+            Data::Box(v) => Data::Box(v.slice(start, end)),
         }
     }
 
@@ -248,16 +256,19 @@ impl Data {
             DType::I64 => Data::I64(Buf::new()),
             DType::F64 => Data::F64(Buf::new()),
             DType::Char => Data::Char(Buf::new()),
+            DType::Box => Data::Box(Buf::new()),
         }
     }
 
-    /// The fill element used by overtaking and framing.
+    /// The fill element used by overtaking and framing. The boxed fill is
+    /// J's `a:`, a box holding an empty numeric list.
     pub fn push_fill(&mut self) {
         match self {
             Data::Bool(v) => v.push(0),
             Data::I64(v) => v.push(0),
             Data::F64(v) => v.push(0.0),
             Data::Char(v) => v.push(' '),
+            Data::Box(v) => v.push(Array::box_fill()),
         }
     }
 
@@ -267,6 +278,7 @@ impl Data {
             (Data::I64(a), Data::I64(b)) => a.extend_from_slice(b),
             (Data::F64(a), Data::F64(b)) => a.extend_from_slice(b),
             (Data::Char(a), Data::Char(b)) => a.extend_from_slice(b),
+            (Data::Box(a), Data::Box(b)) => a.extend_from_slice(b),
             _ => return false,
         }
         true
@@ -324,6 +336,17 @@ impl Array {
 
     pub fn empty(dtype: DType) -> Array {
         Array { shape: vec![0], data: Data::empty(dtype) }
+    }
+
+    /// `y` as a scalar box (J `<`).
+    pub fn boxed(value: Array) -> Array {
+        Array { shape: vec![], data: Data::Box(vec![value].into()) }
+    }
+
+    /// The element that fills a boxed array: J's `a:`, a box holding an
+    /// empty numeric list.
+    pub fn box_fill() -> Array {
+        Array::empty(DType::I64)
     }
 
     pub fn dtype(&self) -> DType {
@@ -391,6 +414,14 @@ impl Array {
         }
     }
 
+    /// The boxed elements, if the array holds boxes.
+    pub fn as_boxes(&self) -> Option<&[Array]> {
+        match &self.data {
+            Data::Box(v) => Some(v),
+            _ => None,
+        }
+    }
+
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
         match &self.data {
             Data::F64(v) => Some(v),
@@ -404,7 +435,7 @@ impl Array {
             Data::Bool(v) => Some(v.iter().map(|&x| x as f64).collect()),
             Data::I64(v) => Some(v.iter().map(|&x| x as f64).collect()),
             Data::F64(v) => Some(v.to_vec()),
-            Data::Char(_) => None,
+            Data::Char(_) | Data::Box(_) => None,
         }
     }
 
@@ -423,7 +454,7 @@ impl Array {
                 }
                 Some(out)
             }
-            Data::Char(_) => None,
+            Data::Char(_) | Data::Box(_) => None,
         }
     }
 }

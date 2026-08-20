@@ -225,6 +225,24 @@ const KNOWN_DIVERGENCES: &[(&str, &str)] = &[
     ("!¯1", "the factorial of a negative integer is ∞ here, DOMAIN ERROR there"),
     ("¯7○1", "artanh 1 is ∞ here, DOMAIN ERROR there"),
     ("⍴+\\,5", "scan keeps the shape here, drops a length-1 axis there"),
+    // Nested arrays. A vector of simple scalars of different types is a
+    // simple MIXED array in APL2 and has no representation here yet.
+    ("1 'a'", "a mixed simple vector there, a named gap here"),
+    // Catenating a simple array to a nested one encloses the simple
+    // items there; libjay refuses the pair rather than guess the depth.
+    ("1 2,⊂3 4", "the simple items are enclosed there, a type error here"),
+    // Overtaking a nested array fills with the first item's prototype
+    // there and with the empty box (J's `a:`) here.
+    ("4↑(1 2)(3 4)", "the fill is the item prototype there, an empty box here"),
+    // GNU APL spaces a nested display more widely than libjay does, which
+    // the whitespace-insensitive comparison above only sees through the
+    // length of `⍕`.
+    ("⍴⍕(1 2)(3 4)", "one space between items here, two there"),
+    // Named gaps: ordering boxes needs J's total array ordering, and
+    // these two glyphs have their nested valence still to come.
+    ("⍋(1 2)(3 4)", "graded there, a `grading boxed arrays` gap here"),
+    ("1⊂1 2 3", "partitioned enclose there, a named gap here"),
+    ("1 2⊃(1 2)(3 4)", "pick there, a named gap here"),
 ];
 
 #[test]
@@ -594,6 +612,68 @@ const FIXED: &[&str] = &[
     "0∧5",
     "0∨0",
     "1 2 3∘.=1 2",
+    // --- nested arrays -------------------------------------------------
+    // The nested DISPLAY is libjay's own approximation (see
+    // KNOWN_DIVERGENCES), so what is compared here is structure: shape,
+    // depth, tally, and the leaves enlist brings back into the open.
+    "⍴⊂1 2 3",
+    "≡⊂1 2 3",
+    "⊂5",
+    "≡⊂5",
+    "≡⊂⊂1 2",
+    "⊃'ab' 'cd'",
+    "⍴⊃'ab' 'cd'",
+    "⊃3",
+    "⊃⊂1 2",
+    "⊃(1 2)(3 4 5)",
+    "⍴⊃(1 2)(3 4 5)",
+    "⍴⊃⍳0",
+    "⊃'abc'",
+    "2×¨1 2 3",
+    "≢¨'ab' 'cde'",
+    "+/¨(1 2)(3 4)",
+    "∊⍴¨'ab' 'cde'",
+    "∊1+¨(1 2)(3 4)",
+    "∊(1 2)+¨(1 2)(3 4)",
+    "⍴(1 2)(3 4)",
+    "≡(1 2)(3 4)",
+    "⍴'ab' 'cd'",
+    "≡'ab' 'cd'",
+    "⍴1 2 3",
+    "≡1 2 3",
+    "⍴1 (2 3)",
+    "⍴1 2 (3 4)",
+    "⍴'ab' 1 2",
+    "∊(1 2)(3 4 5)",
+    "∊'ab' 'cd'",
+    "∊2 3⍴⍳6",
+    "⍴∊5",
+    "∊(1 2)((3 4)(5 6))",
+    "≡1",
+    "≡'abc'",
+    "≡1(2(3 4))",
+    "↑(1 2)(3 4)",
+    "↑1 2 3",
+    "⍴↑1 2 3",
+    "↑2 3⍴⍳6",
+    "↑⍳0",
+    "⍴2 2⍴(1 2)(3 4)(5 6)(7 8)",
+    "≡2 2⍴(1 2)(3 4)(5 6)(7 8)",
+    "∊2 2⍴(1 2)(3 4)(5 6)(7 8)",
+    "⍴∪(1 2)(3 4)(1 2)",
+    "∊∪(1 2)(3 4)(1 2)",
+    "⍴,⊂1 2",
+    "∊⌽(1 2)(3 4)",
+    "⍴2↑(1 2)(3 4)(5 6)",
+    "∊2↑(1 2)(3 4)(5 6)",
+    "⍴1↓(1 2)(3 4)(5 6)",
+    "(1 2)(3 4)⍳⊂3 4",
+    "(1 2)(3 4)⍳(3 4)",
+    "(1 2)∊(1 2)(3 4)",
+    "'ab' 'cd'∊'ab' 'xy'",
+    "≢(1 2)(3 4)(5 6)",
+    "⍴(⊂1 2),⊂3 4",
+    "∊(⊂1 2),⊂3 4",
 ];
 
 /// Deterministic pseudo-random sentences over the shared surface: no

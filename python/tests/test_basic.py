@@ -61,9 +61,52 @@ class TestData:
         with pytest.raises(JayError, match="unknown"):
             k({"b": 2})
 
-    def test_ragged_input_rejected(self):
-        with pytest.raises((JayError, ValueError)):
+    def test_ragged_input_becomes_boxes(self):
+        # A list whose items do not share a shape is a boxed vector, not
+        # an error: the dense path is tried first and only then this one.
+        v = j("{m}", {"m": [[1, 2], [3]]})
+        assert v.dtype == "boxed"
+        assert v.tolist() == [[1, 2], [3]]
+        # Arithmetic still needs the boxes opened.
+        with pytest.raises(JayError, match="boxed"):
             j("+/ {m}", {"m": [[1, 2], [3]]})
+
+    def test_list_of_strings_is_a_boxed_vector(self):
+        assert j("# &.> {names}", {"names": ["ab", "cde"]}).tolist() == [2, 3]
+        assert apl("≢¨{names}", {"names": ["ab", "cde"]}).tolist() == [2, 3]
+        v = j("{names}", {"names": ["ab", "cde"]})
+        assert v.dtype == "boxed"
+        assert v.tolist() == ["ab", "cde"]
+        assert j("; {names}", {"names": ["ab", "cde"]}) == "abcde"
+
+
+class TestBoxes:
+    def test_boxed_result_converts_to_nested_python_data(self):
+        v = j("1;2 3;'abc'")
+        assert v.dtype == "boxed"
+        assert v.shape == (3,)
+        assert v.depth == 2
+        assert v.tolist() == [1, [2, 3], "abc"]
+
+    def test_a_box_hands_back_what_it_holds(self):
+        # A rank-0 box is its contents at whatever shape they have.
+        assert j("<'abc'") == "abc"
+        assert j("< 1 2 3").tolist() == [1, 2, 3]
+        assert j("< 5") == 5
+
+    def test_repr_is_the_j_box_drawing(self):
+        assert repr(j("1;2 3")) == "+-+---+\n|1|2 3|\n+-+---+"
+
+    def test_apl_nesting(self):
+        assert apl("≡(1 2)(3 4)") == 2
+        assert apl("∊(1 2)(3 4 5)").tolist() == [1, 2, 3, 4, 5]
+        assert apl("(1 2)(3 4)").tolist() == [[1, 2], [3, 4]]
+        assert apl("⊂1 2 3").tolist() == [1, 2, 3]
+
+    def test_depth_of_simple_values(self):
+        assert j("5").__class__ is int
+        assert j("1 2 3").depth == 1
+        assert j("i. 2 3").depth == 1
 
 
 class TestKernel:
@@ -115,7 +158,7 @@ class TestErrors:
 
     def test_not_yet_wording(self):
         with pytest.raises(JayError, match="not supported yet"):
-            j("< 5")
+            j("/: 1;2")
 
     def test_parse_error(self):
         with pytest.raises(JayError):

@@ -12,7 +12,7 @@ use crate::error::{Error, Result, Span};
 use crate::frontend::{Segment, SourceParts};
 use crate::ir::Expr;
 use crate::verb::{
-    DyadOp, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
+    DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
 };
 
 /// Parse a J program (one sentence per line) into IR statements.
@@ -132,8 +132,8 @@ fn primitive(word: &str) -> Option<Prim> {
         "<." => prim("<.", M::Scalar(SM::Floor), D::Scalar(SD::Min), [0, 0, 0]),
         ">." => prim(">.", M::Scalar(SM::Ceil), D::Scalar(SD::Max), [0, 0, 0]),
         "=" => prim("=", M::NotYet("self-classify (monadic =)"), D::Scalar(SD::Eq), [INF, 0, 0]),
-        "<" => prim("<", M::NotYet("boxed arrays"), D::Scalar(SD::Lt), [INF, 0, 0]),
-        ">" => prim(">", M::NotYet("boxed arrays (open)"), D::Scalar(SD::Gt), [0, 0, 0]),
+        "<" => prim("<", M::Enclose(Enclose::Always), D::Scalar(SD::Lt), [INF, 0, 0]),
+        ">" => prim(">", M::Open, D::Scalar(SD::Gt), [0, 0, 0]),
         "<:" => prim("<:", M::Scalar(SM::Dec), D::Scalar(SD::Le), [0, 0, 0]),
         ">:" => prim(">:", M::Scalar(SM::Inc), D::Scalar(SD::Ge), [0, 0, 0]),
         "+:" => prim("+:", M::Scalar(SM::Double), D::NotYet("nor (dyadic +:)"), [0, 0, 0]),
@@ -182,6 +182,13 @@ fn primitive(word: &str) -> Option<Prim> {
             "\\:",
             M::GradeDown { origin: 0 },
             D::GradeSelect { down: true },
+            [INF, INF, INF],
+        ),
+        ";" => prim(";", M::Raze, D::Link, [INF, INF, INF]),
+        "L." => prim(
+            "L.",
+            M::NotYet("level of (L.)"),
+            D::None,
             [INF, INF, INF],
         ),
         "]" => prim("]", M::Same, D::Right, [INF, INF, INF]),
@@ -744,6 +751,12 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
         }
         "&" => compose(u, v, false, span),
         "&:" => compose(u, v, true, span),
+        // `u&.>` is the one under libjay has: open each box, apply u, box
+        // the result again. The general conjunction needs verb inverses.
+        "&." if is_open(&v) => {
+            let f = verb_operand(u, span)?;
+            Ok(Frag::Verb(VerbFrag::V(Verb::Each(Box::new(f), Enclose::Always)), span))
+        }
         "&." | "&.:" => Err(Error::not_yet("under (&.) — needs verb inverses", span)),
         "^:" => {
             let f = verb_operand(u, span)?;
@@ -798,6 +811,12 @@ fn bond_noun(f: &Frag, span: Span) -> Result<Array> {
     as_const(f)
         .cloned()
         .ok_or_else(|| Error::not_yet("bonds over a non-literal noun", span))
+}
+
+/// True for the fragment holding the primitive `>`, the only right operand
+/// `&.` accepts.
+fn is_open(f: &Frag) -> bool {
+    matches!(f, Frag::Verb(VerbFrag::V(Verb::Prim(p)), _) if p.monad == MonadOp::Open)
 }
 
 fn verb_operand(f: Frag, span: Span) -> Result<Verb> {

@@ -26,6 +26,11 @@ pub enum Expr {
     /// [`crate::fuse`]). `inputs` are the subtrees the chain reads; `orig`
     /// is the chain itself, which runs whenever the kernel declines.
     Fused { kernel: FusedKernel, inputs: Vec<Expr>, orig: Box<Expr>, span: Span },
+    /// A marker the fusion pass leaves when it has rewritten the program
+    /// across sentence boundaries: it does nothing and yields nothing, and
+    /// carries the sentences the program was compiled from so that
+    /// [`crate::fuse::unfused`] can rebuild them.
+    Elided { orig: Vec<Expr>, span: Span },
 }
 
 impl Expr {
@@ -36,14 +41,16 @@ impl Expr {
             | Expr::Monad { span, .. }
             | Expr::Dyad { span, .. }
             | Expr::PrintPass { span, .. }
-            | Expr::Fused { span, .. } => *span,
+            | Expr::Fused { span, .. }
+            | Expr::Elided { span, .. } => *span,
         }
     }
 
-    /// Sentences whose top level is an assignment (or explicit output)
-    /// yield no value to the sequence.
+    /// Sentences whose top level is an assignment, explicit output, or the
+    /// pass's record of what the program was yield no value to the
+    /// sequence.
     fn is_silent(&self) -> bool {
-        matches!(self, Expr::Assign { .. } | Expr::PrintPass { .. })
+        matches!(self, Expr::Assign { .. } | Expr::PrintPass { .. } | Expr::Elided { .. })
     }
 }
 
@@ -136,8 +143,15 @@ fn eval(
                 // The kernel does not cover this data. The chain it came
                 // from does, including whatever error it raises; it runs
                 // over the values just computed, not over the leaves again.
-                None => eval(&crate::fuse::fallback_tree(kernel, orig, &vals), args, env, ctx),
+                None => {
+                    let tree = crate::fuse::fallback_tree(kernel, orig, &vals);
+                    let v = eval(&tree, args, env, ctx)?;
+                    Ok(crate::fuse::fallback_finish(kernel, v))
+                }
             }
         }
+        // A record of what the program was, which the evaluator steps
+        // over: the sentence is silent, so this value is never read.
+        Expr::Elided { .. } => Ok(Array::scalar_i64(0)),
     }
 }

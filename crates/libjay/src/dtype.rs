@@ -7,6 +7,8 @@ pub enum DType {
     I64,
     F64,
     Char,
+    /// A box: every element is itself an array (J `<`, APL `⊂`).
+    Box,
 }
 
 impl DType {
@@ -16,6 +18,7 @@ impl DType {
             DType::I64 => "integer",
             DType::F64 => "float",
             DType::Char => "character",
+            DType::Box => "boxed",
         }
     }
 
@@ -27,6 +30,8 @@ impl DType {
     pub fn promote(a: DType, b: DType) -> Option<DType> {
         use DType::*;
         match (a, b) {
+            (Box, Box) => Some(Box),
+            (Box, _) | (_, Box) => None,
             (Char, Char) => Some(Char),
             (Char, _) | (_, Char) => None,
             (F64, _) | (_, F64) => Some(F64),

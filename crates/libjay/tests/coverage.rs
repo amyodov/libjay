@@ -673,11 +673,9 @@ fn newly_spelled_words_name_what_they_still_lack() {
         (Lang::J, "*. 1 2", "length/angle"),
         (Lang::J, "+. 1 2", "real/imaginary"),
         (Lang::J, "~: 1 2", "nub sieve"),
-        (Lang::Apl, "∊1 2", "enlist"),
         (Lang::Apl, "1 2∪3", "union"),
         (Lang::Apl, "∩1 2", "intersection"),
         (Lang::Apl, "1 2∩3", "intersection"),
-        (Lang::Apl, "≡1 2", "depth"),
         (Lang::Apl, "1 2⍋3 1 2", "collation"),
         (Lang::Apl, "1 2⍒3 1 2", "collation"),
         (Lang::Apl, "1 2⍱0 1", "nor"),
@@ -688,6 +686,13 @@ fn newly_spelled_words_name_what_they_still_lack() {
         (Lang::J, "+ &. - 1", "under (&.)"),
         (Lang::J, "+ &.: - 1", "under (&.)"),
         (Lang::Apl, "1 2 3+∘×1 2 3", "beside (∘)"),
+        // Boxes arrived; what they still lack is named too.
+        (Lang::J, "/: 1;2", "grading boxed arrays"),
+        (Lang::J, "L. 1;2", "level of"),
+        (Lang::Apl, "⍋⊂1 2", "grading boxed arrays"),
+        (Lang::Apl, "1⊂1 2 3", "partitioned enclose"),
+        (Lang::Apl, "1⊃(1 2)(3 4)", "pick"),
+        (Lang::Apl, "↓2 3⍴⍳6", "split"),
     ];
     for (lang, src, what) in cases {
         let e = err(lang, src);

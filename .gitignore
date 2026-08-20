@@ -9,3 +9,6 @@ uv.lock
 *.so
 *.pyd
 *.dylib
+/lj.png
+/lj-social.jpg
+/control-640x320.png

@@ -103,6 +103,13 @@ impl Value {
         nested_list(py, &self.array, 0, 0, self.array.count())
     }
 
+    /// How deeply the value nests: 0 for a scalar, 1 for a simple array,
+    /// one more than the deepest box for a boxed one (APL `≡`).
+    #[getter]
+    fn depth(&self) -> i64 {
+        depth(&self.array)
+    }
+
     fn __repr__(&self) -> String {
         format_array(&self.array, &self.fmt)
     }
@@ -153,11 +160,40 @@ fn element_to_py(py: Python<'_>, data: &Data, i: usize) -> PyResult<PyObject> {
         Data::I64(v) => v[i].into_pyobject(py)?.unbind().into(),
         Data::F64(v) => v[i].into_pyobject(py)?.unbind().into(),
         Data::Char(v) => v[i].to_string().into_pyobject(py)?.unbind().into(),
+        // A box converts to whatever its contents convert to: Python
+        // holds nested data as nested lists and strings, not as wrappers.
+        Data::Box(v) => contents_to_py(py, &v[i])?,
     })
+}
+
+/// A whole array as plain Python data: a character vector is a string, a
+/// scalar is a number, anything else is a (nested) list.
+fn contents_to_py(py: Python<'_>, a: &Array) -> PyResult<PyObject> {
+    if a.rank() == 1 && a.dtype() == DType::Char {
+        let s: String = match &a.data {
+            Data::Char(v) => v.iter().collect(),
+            _ => unreachable!("checked the dtype"),
+        };
+        return Ok(PyString::new(py, &s).unbind().into());
+    }
+    nested_list(py, a, 0, 0, a.count())
+}
+
+/// The value's depth, as APL's `≡` counts it.
+fn depth(a: &Array) -> i64 {
+    match &a.data {
+        Data::Box(v) => 1 + v.iter().map(depth).max().unwrap_or(0),
+        _ => i64::from(a.rank() > 0),
+    }
 }
 
 fn array_to_py(py: Python<'_>, a: Array, fmt: FmtOpts) -> PyResult<PyObject> {
     if a.rank() == 0 {
+        // A scalar box hands back what it holds, at whatever shape that
+        // has: `<1 2 3` is the vector 1 2 3, `<'abc'` the string.
+        if let Data::Box(v) = &a.data {
+            return array_to_py(py, v[0].clone(), fmt);
+        }
         return element_to_py(py, &a.data, 0);
     }
     if a.rank() == 1 {
@@ -210,7 +246,10 @@ fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     )))
 }
 
-/// Stack a Python sequence of equally-shaped values into one array.
+/// Stack a Python sequence into one array: a dense one when the items
+/// agree on shape and element type, a vector of boxes when they do not —
+/// which is what makes a list of strings, or of unequal lists, an argument
+/// rather than an error.
 fn sequence_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     let mut items = Vec::new();
     for item in obj.try_iter()? {
@@ -220,23 +259,25 @@ fn sequence_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
         return Ok(Array::empty(DType::I64));
     }
     let cell_shape = items[0].shape.clone();
-    let mut dtype = items[0].dtype();
-    for it in &items[1..] {
-        if it.shape != cell_shape {
-            return Err(JayError::new_err(format!(
-                "ragged nested list: an item of shape {:?} next to shape {:?}",
-                it.shape, cell_shape
-            )));
-        }
-        dtype = DType::promote(dtype, it.dtype()).ok_or_else(|| {
-            JayError::new_err("mixed characters and numbers in one array")
-        })?;
+    let dense = items[1..].iter().all(|it| it.shape == cell_shape)
+        && items[1..]
+            .iter()
+            .try_fold(items[0].dtype(), |t, it| DType::promote(t, it.dtype()))
+            .is_some();
+    if !dense {
+        let n = items.len();
+        return Ok(Array::new(vec![n], Data::Box(items.into())));
     }
+    let dtype = items
+        .iter()
+        .try_fold(items[0].dtype(), |t, it| DType::promote(t, it.dtype()))
+        .expect("checked above");
     let mut data = Data::empty(dtype);
     for it in &items {
-        let cast = it.data.cast(dtype).ok_or_else(|| {
-            JayError::new_err("mixed characters and numbers in one array")
-        })?;
+        let cast = it
+            .data
+            .cast(dtype)
+            .ok_or_else(|| JayError::new_err("mixed characters and numbers in one array"))?;
         data.extend_from(&cast);
     }
     let mut shape = vec![items.len()];

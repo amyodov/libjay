@@ -2,7 +2,7 @@
 //! what the chain it replaced computes, on data of every dtype the kernel
 //! claims, and hand back to that chain wherever it does not.
 
-use jay::fuse::{fallback_count, is_fused, unfused};
+use jay::fuse::{fallback_count, is_fused, is_inlined, unfused};
 use jay::{compile, Array, Data, DType, Dialect, Lang, Program};
 
 // ---------------------------------------------------------------- fixtures
@@ -174,6 +174,201 @@ fn a_sequence_fuses_every_sentence() {
     for n in [1_000usize, 100_000] {
         same(Lang::J, src, n);
     }
+}
+
+// ------------------------------------------------- across the sentences
+
+/// Every program here names a value that nothing needs as an array, so the
+/// pass moves it into the sentences that read it. Each is checked against
+/// the sentences it was compiled from, which is what `unfused` returns.
+const NAMED: &[&str] = &[
+    // The standard deviation, in the spelling this pass exists for: the
+    // deviations are a whole column, and no one wants them.
+    "d =. {x} - (+/ {x}) % # {x}\n%: (+/ d * d) % # d",
+    // The same, with the mean named too, so the moves are transitive.
+    "m =. (+/ {x}) % # {x}\nd =. {x} - m\n%: (+/ d * d) % # d",
+    // One use, and the sentence that reads it needs no array either.
+    "d =. {x} * 2\n+/ d + 1",
+    "d =. {x} + 1\n# d",
+    // Two names, read by one sentence.
+    "u =. {x} + 1\nv2 =. {w} * 2\n+/ u * v2",
+    // One name, read by two sentences.
+    "d =. {x} + 1\ns =. +/ d * d\ns + +/ d * {w}",
+    // A name read twice inside one kernel, and once inside another.
+    "d =. {a} + 1\n(+/ d * d) + +/ d * {b}",
+    // Integers and booleans through the same machinery.
+    "d =. {a} * {b}\n+/ d + d",
+    "d =. {x} > 0.5\n+/ d + d",
+    "d =. {p} + {q}\n+/ d * d",
+    // Work worth doing once: the kernel keeps the exponentials of a block
+    // in a slot rather than computing them for each use.
+    "d =. ^ {x}\n+/ d * d",
+    "d =. ^ {x} - {w}\n(+/ d) % # d",
+    // A chain that leaves i64 mid-way, so the kernel declines and the
+    // sentences it was made from run instead.
+    "d =. {big} * {big}\n+/ d + d",
+    // A reduction of its own is a scalar already: it stays a sentence, and
+    // the sentence that reads it splats it into the kernel.
+    "s =. +/ {x} * {w}\nd =. {x} - s\n+/ d * d",
+    // An assignment the pass cannot move, in the same program as one it can.
+    "z =. {x} + 1\ny2 =. 3 }. z\n(+/ z * z) + # y2",
+    // APL, whose assignment is the same edge under another spelling.
+    "d ← {x} - (+/ {x}) ÷ ≢ {x}\n(+/ d × d) ÷ ≢ d",
+];
+
+#[test]
+fn a_named_value_computes_what_the_sentences_computed() {
+    for src in NAMED {
+        let lang = if src.contains('←') { Lang::Apl } else { Lang::J };
+        for n in [1usize, 2, 3, 1_000, 100_000] {
+            same(lang, src, n);
+        }
+    }
+}
+
+#[test]
+fn the_two_spellings_of_the_standard_deviation_now_fuse_alike() {
+    let named = program(Lang::J, "d =. {x} - (+/ {x}) % # {x}\n%: (+/ d * d) % # d");
+    assert!(is_inlined(&named), "the named deviations were still materialised");
+    let args = vec![data("x", 100_000)];
+    let one = program(
+        Lang::J,
+        "%: (+/ ({x} - (+/ {x}) % # {x}) * {x} - (+/ {x}) % # {x}) % # {x}",
+    );
+    // Both are now one pass for the mean and one fused map-reduce over it —
+    // the same kernel over the same scalars, so they agree to the last bit
+    // rather than merely to the float contract the two folds are held to.
+    assert_eq!(run(&named, &args), run(&one, &args));
+    same(Lang::J, "d =. {x} - (+/ {x}) % # {x}\n%: (+/ d * d) % # d", 100_000);
+}
+
+/// The programs the pass must leave exactly as they are, each with the
+/// reason it must: the value would have to be materialised anyway.
+#[test]
+fn a_use_a_kernel_cannot_take_keeps_the_name() {
+    let cases: &[&str] = &[
+        // Displayed: the array itself is the point.
+        "d =. {x} + 1\nd",
+        // Printed on the way past.
+        "d =. {x} + 1\necho d\n+/ d * d",
+        // Read by a verb no kernel covers.
+        "d =. {x} + 1\n+/\\ d",
+        "d =. {x} + 1\n3 }. d",
+        // Read once inside a kernel and once as a whole array.
+        "d =. {x} + 1\n(+/ d * d) , d",
+        // Assigned again later, so the copies would not all mean the same.
+        "d =. {x} + 1\ns =. +/ d * d\nd =. 5\ns",
+        // Defined in terms of itself.
+        "d =. {x} + 1\nd =. d + 1\n+/ d * d",
+        // A single verb: moving it would move a whole pass, not remove one.
+        "d =. 3 }. {x}\n+/ d * d",
+        // The moving sum of the Bollinger kernel: a window verb never joins
+        // a kernel, so `s` is a whole array however often it is read, and
+        // copying it into the two places that read it would compute the
+        // moving sum twice.
+        "s =. 20 +/\\ {x}\n((20 * 19 }. {x}) - s) % %: (20 * 20 +/\\ *: {x}) - s * s",
+        // Nothing reads it at all.
+        "d =. {x} + 1\n+/ {x} * {x}",
+    ];
+    for src in cases {
+        assert!(!is_inlined(&program(Lang::J, src)), "`{src}` moved a name it must not");
+        for n in [3usize, 1_000] {
+            same(Lang::J, src, n);
+        }
+    }
+}
+
+#[test]
+fn an_assignment_as_the_last_sentence_still_yields_nothing() {
+    for src in ["d =. {x} + 1\n+/ d * d\ne =. {x} * 2", "d =. {x} + 1\ne =. +/ d * d"] {
+        let p = program(Lang::J, src);
+        let args = vec![data("x", 1_000)];
+        assert_eq!(run(&p, &args), Ok(None), "`{src}`");
+        assert_eq!(run(&p, &args), run(&unfused(&p), &args));
+    }
+}
+
+#[test]
+fn output_between_the_sentences_happens_once_and_in_place() {
+    let src = "d =. {x} + 1\necho 2 + 2\n+/ d * d";
+    let p = program(Lang::J, src);
+    assert!(is_inlined(&p), "an unrelated output must not block the move");
+    let args = vec![data("x", 1_000)];
+    let mut fused = String::new();
+    let a = p.run(&args, &mut |s| fused.push_str(s)).expect("run");
+    let mut plain = String::new();
+    let b = unfused(&p).run(&args, &mut |s| plain.push_str(s)).expect("run");
+    assert_eq!(fused, plain);
+    assert_eq!(fused.matches('\n').count(), 1, "{fused:?}");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn the_error_a_named_value_raised_is_raised_where_it_was() {
+    // The sentence that assigned `d` is gone, but the tally that replaces
+    // it reaches the same type error, before the sentence that reads it.
+    let src = "d =. {c} + 1\necho 5\n+/ d * d";
+    let p = program(Lang::J, src);
+    let args = vec![data("c", 100)];
+    let mut fused = String::new();
+    let a = p.run(&args, &mut |s| fused.push_str(s)).map_err(|e| p.render_error(&e));
+    let plain_p = unfused(&p);
+    let mut plain = String::new();
+    let b = plain_p.run(&args, &mut |s| plain.push_str(s)).map_err(|e| plain_p.render_error(&e));
+    assert!(a.is_err(), "the type error survived the move");
+    assert_eq!(a, b);
+    assert_eq!(fused, plain, "the error moved past an output");
+    assert!(fused.is_empty(), "the error must come first: {fused:?}");
+}
+
+#[test]
+fn a_length_error_in_a_named_value_reads_the_same() {
+    let src = "d =. {w} * {x}\n+/ d * d";
+    let p = program(Lang::J, src);
+    let args = vec![data("w", 4), data("x", 3)];
+    let fused = run(&p, &args);
+    assert_eq!(fused, run(&unfused(&p), &args));
+    let text = fused.unwrap_err();
+    assert!(text.contains("length error"), "{text}");
+    // The caret still points into the sentence that wrote the value.
+    assert!(text.contains("\n       ^"), "{text}");
+}
+
+#[test]
+fn a_named_map_matches_the_unfused_one_bit_for_bit() {
+    let src = "d =. {x} * {w}\nd + d % {v}";
+    let p = program(Lang::J, src);
+    assert!(is_inlined(&p));
+    for n in [1_000usize, 300_000] {
+        let args: Vec<Array> = p.params.iter().map(|s| data(&s.name, n)).collect();
+        let f = run(&p, &args).unwrap().unwrap();
+        let u = run(&unfused(&p), &args).unwrap().unwrap();
+        assert!(identical(&f, &u), "at {n} elements");
+    }
+}
+
+// ------------------------------------------------------------ the tally
+
+#[test]
+fn a_tally_over_a_chain_counts_without_computing_it() {
+    for src in ["# {x} - {w}", "# 2 * {x}", "1 + # {x} * {w}", "(+/ {x} * {w}) % # {x} - {w}"] {
+        assert!(is_fused(&program(Lang::J, src)), "`{src}` did not fuse");
+        for n in [1usize, 3, 1_000, 100_000] {
+            same(Lang::J, src, n);
+        }
+    }
+    // A chain the kernel declines still gets its count from the chain.
+    let p = program(Lang::J, "# {m} * {x}");
+    let m = Array::new(vec![3, 4], Data::F64((0..12).map(|i| i as f64).collect()));
+    let args = vec![m, Array::from_f64(vec![1.0, 2.0, 3.0])];
+    assert_eq!(run(&p, &args), run(&unfused(&p), &args));
+    assert_eq!(run(&p, &args).unwrap().unwrap(), Array::scalar_i64(3));
+    // And a chain that would fail reports what it fails with.
+    let p = program(Lang::J, "# 1 + 2 * {c}");
+    let args = vec![data("c", 10)];
+    let got = run(&p, &args);
+    assert_eq!(got, run(&unfused(&p), &args));
+    assert!(got.unwrap_err().contains("character and numeric"));
 }
 
 // ----------------------------------------------------------- the dtypes
@@ -362,16 +557,23 @@ const MONADS: &[&str] = &["+", "-", "|", "*", "%", "<.", ">.", ">:", "<:", "+:",
 const DYADS: &[&str] = &["+", "-", "*", "%", "<.", ">.", "|", "=", "~:", "<", "<:", ">", ">:"];
 const LEAVES: &[&str] = &["{x}", "{w}", "{v}", "{a}", "{b}", "{p}", "{q}", "2", "_3", "0.5", "0"];
 
-fn expr(rng: &mut Rng, depth: u32) -> String {
+/// The same, plus a name assigned by an earlier sentence.
+const NAMED_LEAVES: &[&str] = &["{x}", "{w}", "{a}", "{p}", "2", "0.5", "dd", "dd", "dd"];
+
+fn expr_of(rng: &mut Rng, depth: u32, leaves: &[&str]) -> String {
     if depth == 0 || rng.next() % 5 == 0 {
-        return LEAVES[(rng.next() % LEAVES.len() as u64) as usize].to_string();
+        return leaves[(rng.next() % leaves.len() as u64) as usize].to_string();
     }
     if rng.next() % 3 == 0 {
         let op = MONADS[(rng.next() % MONADS.len() as u64) as usize];
-        return format!("({op} {})", expr(rng, depth - 1));
+        return format!("({op} {})", expr_of(rng, depth - 1, leaves));
     }
     let op = DYADS[(rng.next() % DYADS.len() as u64) as usize];
-    format!("({} {op} {})", expr(rng, depth - 1), expr(rng, depth - 1))
+    format!("({} {op} {})", expr_of(rng, depth - 1, leaves), expr_of(rng, depth - 1, leaves))
+}
+
+fn expr(rng: &mut Rng, depth: u32) -> String {
+    expr_of(rng, depth, LEAVES)
 }
 
 /// Bit-for-bit array equality, with NaN equal to itself: a fused map does
@@ -413,8 +615,43 @@ fn random_chains_agree_with_the_interpreter() {
 }
 
 #[test]
+fn random_named_programs_agree_with_the_interpreter() {
+    let mut rng = Rng::new(20_260_821);
+    let mut moved = 0;
+    let mut ran = 0;
+    for i in 0..400 {
+        let body = expr_of(&mut rng, 3, NAMED_LEAVES);
+        if !body.contains("dd") {
+            continue;
+        }
+        ran += 1;
+        let def = expr(&mut rng, 3);
+        // Every third one is reduced, and every fifth counts the name
+        // rather than reading it.
+        let src = match i % 5 {
+            0 => format!("dd =. {def}\n+/ {body}"),
+            1 => format!("dd =. {def}\n(# dd) + {body}"),
+            _ => format!("dd =. {def}\n{body}"),
+        };
+        let p = program(Lang::J, &src);
+        if is_inlined(&p) {
+            moved += 1;
+        }
+        let args: Vec<Array> = p.params.iter().map(|s| data(&s.name, 97)).collect();
+        match (run(&p, &args), run(&unfused(&p), &args)) {
+            (Ok(Some(f)), Ok(Some(u))) => {
+                assert!(identical(&f, &u), "`{src}`\n  fused {f:?}\n  plain {u:?}")
+            }
+            (f, u) => assert_eq!(f, u, "`{src}`"),
+        }
+    }
+    assert!(moved * 2 > ran, "only {moved} of {ran} named programs moved the name");
+}
+
+#[test]
 fn integer_chains_are_exact_however_they_split() {
     let p = program(Lang::J, "+/ {a} * {b} + 1");
     let args = vec![data("a", 200_000), data("b", 200_000)];
     assert_eq!(run(&p, &args), run(&unfused(&p), &args));
 }
+

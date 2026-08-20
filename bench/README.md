@@ -10,6 +10,11 @@ item this file used to head its own list of what to do next. Both the
 before and the after numbers were taken in one session on the machine
 described below, by building with the pass and without it.
 
+The five-row table was then taken again, whole, after the pass learned to
+move a named value into the sentences that read it — the item that used to
+head the list of what to do next. The tables under it are from the fusion
+session and the code they measure has not moved since.
+
 ```sh
 uv pip install --python .venv-bench maturin
 VIRTUAL_ENV=$PWD/.venv-bench .venv-bench/bin/maturin develop --release
@@ -37,7 +42,9 @@ multi-threaded by default; numpy and plain numba are single-threaded.
 
 ## Results
 
-Measured 2026-08-20 on the machine below. Times in milliseconds.
+Measured 2026-08-20 on the machine below, in one quiet session after the
+pass learned to move a named value into the sentences that read it. Times
+in milliseconds.
 
 ```
 machine   macOS-13.7.8-x86_64-i386-64bit
@@ -49,14 +56,15 @@ method    best of 5 after one warmup, wall time in ms
 
 | scenario | J | libjay 1 thread | libjay 8 threads | speedup | polars | numba | numba prange | numpy |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| weighted sum | `+/ {w} * {x}` | 45.7 | 14.6 | 3.12x | 118.7 | 26.0 | 13.1 | 127.8 |
-| column sums | `+/ {m}` | 14.2 | 5.4 | 2.62x | 5.6 | 14.1 | 28.8 | 33.4 |
-| std, named value | `d =. {x} - (+/ {x}) % # {x}` … `%: (+/ d * d) % # d` | 204.1 | 80.9 | 2.52x | 23.5 | 51.4 | 13.6 | 138.0 |
-| std, one sentence | `%: (+/ ({x} - (+/ {x}) % # {x}) * {x} - (+/ {x}) % # {x}) % # {x}` | 149.4 | 38.3 | 3.90x | 23.1 | 52.0 | 17.5 | 149.1 |
-| sum of exponentials | `+/ ^ {x}` | 153.5 | 33.0 | 4.66x | 237.1 | 167.2 | 27.4 | 217.2 |
+| weighted sum | `+/ {w} * {x}` | 41.2 | 13.7 | 3.00x | 105.4 | 25.5 | 12.4 | 113.0 |
+| column sums | `+/ {m}` | 9.2 | 5.3 | 1.72x | 5.5 | 14.3 | 39.0 | 32.3 |
+| std, named value | `d =. {x} - (+/ {x}) % # {x}` … `%: (+/ d * d) % # d` | 90.2 | 18.1 | 4.98x | 22.0 | 50.0 | 17.6 | 128.4 |
+| std, one sentence | `%: (+/ ({x} - (+/ {x}) % # {x}) * {x} - (+/ {x}) % # {x}) % # {x}` | 86.4 | 21.0 | 4.11x | 20.1 | 47.6 | 12.9 | 136.2 |
+| sum of exponentials | `+/ ^ {x}` | 137.6 | 29.2 | 4.71x | 208.2 | 162.4 | 27.9 | 210.5 |
 
 What fusion moved, libjay only, the same five scenarios built without the
-pass and with it:
+pass and with it. These two columns are one session of their own, taken on
+a laptop that had another build on it:
 
 | scenario | 1 thread before | after | 8 threads before | after |
 |---|---:|---:|---:|---:|
@@ -66,17 +74,25 @@ pass and with it:
 | std, one sentence | 411.5 | 149.4 | 221.6 | 38.3 |
 | sum of exponentials | 246.1 | 153.5 | 72.2 | 33.0 |
 
+The standard deviation then moved again, and further, when the named value
+was allowed to move into the kernel — the three states of the same two
+programs, 20M rows:
+
+| standard deviation | no fusion | fused | the name moved too |
+|---|---:|---:|---:|
+| named value, 1 thread | 235.1 | 204.1 | 90.2 |
+| named value, 8 threads | 136.4 | 80.9 | 18.1 |
+| one sentence, 1 thread | 411.5 | 149.4 | 86.4 |
+| one sentence, 8 threads | 221.6 | 38.3 | 21.0 |
+
 The column-sums row fuses nothing — `+/ {m}` is one verb over one array —
 and it is the noisiest row in the file, being the only one that finishes in
-ten milliseconds. Its two figures here are the best of five separate runs
-of that scenario alone; the 14.2 in the table above is the same work
-measured once, while another build was running on the same laptop. Read it
-as unchanged, which is what it should be.
+ten milliseconds: 9.2, 9.8 and 10.7 ms on one thread are three measurements
+of identical work. Read it as unchanged, which is what it should be.
 
-The whole session was measured on a laptop that had other work on it, and
-repeating a row moves it by up to 20% — enough to reorder two figures that
-are already within a few per cent of each other, not nearly enough to touch
-what fusion did, which is factors.
+Repeating a row moves it by a few per cent on a quiet laptop and by up to
+20% on a busy one — enough to reorder two figures that are already close,
+not nearly enough to touch what these two passes did, which is factors.
 
 Scaling, weighted sum, 20M rows:
 
@@ -95,20 +111,23 @@ did not.
 
 ## What the numbers say
 
-**The gate was scaling, and it scales** — 2.5x to 4.7x on four cores now
-that fusion has taken memory traffic out of the work, against 1.6x to 3.3x
-before it. Nothing regressed: `LIBJAY_THREADS=1` takes the same sequential
-code as before, and the differential corpora and every other suite pass
-unchanged, fused and unfused alike.
+**The gate was scaling, and it scales** — 3.0x to 5.0x on four cores for the
+four scenarios that fuse anything, now that a kernel has taken the memory
+traffic out of the work, against 1.6x to 3.3x before fusion. (Column sums
+fuses nothing and scales 1.7x to 2.6x depending on the run; it is the row
+that finishes in five milliseconds.) Nothing regressed: `LIBJAY_THREADS=1`
+takes the same sequential code as before, and the differential corpora and
+every other suite pass unchanged, fused and unfused alike.
 
-**Where libjay stands.** On eight threads it is faster than numpy on all
-five scenarios, than a serial numba loop on four, than Polars on three, and
-than numba's parallel loop on one (column sums). The two it lost by a wide
-margin before fusion it now loses by a little: the weighted sum is 14.6 ms
-against `numba prange`'s 13.1 and the sum of exponentials 33.0 against 27.4,
-both of which repeat runs put within a few per cent either way. The real
-remaining gap is the standard deviations, where numba's one pass computes
-the mean and the variance together and libjay reduces twice.
+**Where libjay stands.** On eight threads it is faster than numpy and than
+a serial numba loop on all five scenarios, faster than Polars on four and
+level with it on the fifth (column sums, 5.3 against 5.5), and faster than
+numba's parallel loop on one. The rest it loses by a little: the weighted
+sum is 13.7 ms against `numba prange`'s 12.4, the sum of exponentials 29.2
+against 27.9, and the standard deviations 18.1 and 21.0 against 17.6 and
+12.9 — which are two measurements of one numba kernel, and say what the
+spread of these figures is. Nothing is left where libjay loses by a
+factor.
 
 **Fusion is what moved them.** `+/ {w} * {x}` used to materialise the 160 MB
 product and read it back to reduce it: three streams of memory traffic where
@@ -132,19 +151,48 @@ What is left is *No SIMD*: a reduction is a serial dependency chain
 reassociate floats on its own. libjay may (§5.9) and does so across chunks,
 but inside a chunk it still runs a single accumulator. That is phase 6.
 
-**The one-sentence standard deviation now beats the named one**, which is
-the other way round from before fusion, and both are right for their own
-reason. Naming a value has been free since owned buffers became refcounted
-(`Buf::Owned` is an `Arc<Vec<T>>`, copy-on-write through `Arc::make_mut`,
-which took this scenario from 703.1 / 532.1 ms to 235.1 / 130.2 with no new
-parallelism), so the named spelling's advantage is that it computes the mean
-once. But `d =. {x} - mean` is a single verb over an array: there is no
-chain to fuse, so it writes a 160 MB temporary that the next sentence reads
-back. The one-sentence spelling computes the mean twice and then runs
-`+/ (x - mean) * (x - mean)` as one fused map-reduce that writes nothing at
-all — 38.3 ms against 80.9. Fusing across an assignment, so that a named
-value can stay in the block too, is the obvious next thing here and is not
-done.
+**Both spellings of the standard deviation now run the same way**, and it is
+the way the hand-written kernel runs. The two used to differ by a factor of
+two in either direction depending on which cost was paid: the named spelling
+computed the mean once but wrote a 160 MB column of deviations that the next
+sentence read back (80.9 ms), and the one-sentence spelling wrote nothing but
+summed the column twice to get the mean twice (38.3 ms). Both are now 18-21
+ms: four times faster than the named spelling was, twice as fast as the
+one-sentence one.
+
+The pass now moves a named value into the sentences that read it, when
+nothing there needs it as an array — `d =. {x} - m` and `+/ d * d` are one
+chain written in two sentences, and the name is for the reader. Four rules
+make that pay:
+
+- the value's own leaves are hoisted into sentences of their own, so the
+  copies the move makes share the work the original did once. `+/ {x}` is
+  one such leaf, which is what makes this two passes rather than three;
+- a leaf written twice inside one kernel is one input, so the one-sentence
+  spelling's two `+/ {x}` become one as well;
+- a value the kernel reads twice — `d * d` — is computed once per block
+  into a slot of its own and read from there, which is the assignment the
+  source made, at block scale;
+- `# d` is answered from the chain's shape, without computing the chain: a
+  tally wants the count, and the shapes have it before any arithmetic runs.
+
+What is left in both spellings is two passes over the 160 MB column — the
+sum, then the map-reduce of the squared deviations against the mean it gives
+— which is instruction for instruction what `nb_std` in `bench.py` does by
+hand. The times say so: 18.1 and 21.0 ms on eight threads, against that
+loop's 17.6 and 12.9, and against the 136.4 and 221.6 ms the two spellings
+started at. What is left between libjay and the loop is the single
+accumulator inside a chunk, which is phase 6.
+
+It moves conservatively, too. A named value moves only where the name is
+pure dataflow: the value is replayable and is a chain, no later sentence
+assigns the name or anything the value reads, and every use lands inside a
+kernel — one use that would have to hold the whole array (`echo d`, `+/\ d`,
+`d` on its own) leaves the program exactly as it was. The sentence the
+assignment stood in becomes the tally of its chain, which reaches every leaf
+and every rule the kernel has and computes nothing else, so whatever the
+assignment would have raised is still raised there, before any later
+sentence runs.
 
 **Streaming elementwise passes do not benefit from threads on this
 machine.** One core already saturates the memory bus for a two-in/one-out
@@ -239,6 +287,14 @@ subtraction. Both moving sums take the O(n) window path.
 
 Without fusion, in the same session: 1288.3 / 675.5 ms, which is the
 phase-5 measurement (1307.3 / 687.2) repeated within 2%.
+
+The `s` of this kernel is a named value read twice, which is the shape the
+standard deviation above has — and the pass leaves it exactly where it is,
+because `+/\` is a window verb and no window verb joins a kernel. `s` is
+therefore not a chain a block can recompute: moving it would fold every
+window twice instead of once. The compiled program is unchanged — a test
+holds it to that — and a repeat of the row measured 787.5 / 415.6 ms, the
+same work on a quieter laptop.
 
 **The gate is met with room to spare**: 437 ms against Polars' 768, where
 before fusion it was 675 against 748. The two still agree to 8.7e-10

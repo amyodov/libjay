@@ -13,14 +13,20 @@
 //! would narrow, an integer overflow — declines at run time and the original
 //! subtree, kept inside the node, evaluates instead. Fusion therefore cannot
 //! change a result or an error message.
+//!
+//! A chain does not have to be written as one sentence. `d =. {x} - m`
+//! followed by `+/ d * d` names a value that nothing needs as an array, and
+//! the pass moves such a value into the sentences that read it — see
+//! [`inline_once`] for the rules that keep that sound.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::array::{Array, Data};
 use crate::dtype::DType;
+use crate::error::Span;
 use crate::ir::{Expr, Program};
 use crate::par;
-use crate::verb::{DyadOp, MonadOp, ScalarDyad, ScalarMonad, Verb};
+use crate::verb::{DyadOp, MonadOp, ScalarDyad, ScalarMonad, Verb, RANK_INF};
 
 /// Elements a block buffer holds.
 ///
@@ -41,16 +47,38 @@ pub enum Instr {
     Monad(ScalarMonad),
     /// Replace the top two, left below right.
     Dyad(ScalarDyad),
+    /// Keep the top of the stack as let `k`, a value the rest of the
+    /// program reads more than once. It holds its block buffer until the
+    /// block is finished; nothing pops it.
+    Store(usize),
+    /// Push let `k` again.
+    Let(usize),
 }
 
-/// A fused elementwise chain, optionally ending in a reduction.
+/// What one evaluation of a kernel produces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Yield {
+    /// The mapped values, as an array of the chain's own shape.
+    Values,
+    /// The mapped values folded into one by an absorbed reduction.
+    Reduce(ScalarDyad),
+    /// How many items the mapped values would have — `#` over a chain. The
+    /// shapes answer that before any arithmetic runs, so none runs.
+    Tally,
+}
+
+/// A fused elementwise chain and what is made of its values.
 #[derive(Clone, Debug)]
 pub struct FusedKernel {
     code: Vec<Instr>,
     /// Block buffers one evaluation needs at once.
     slots: usize,
-    /// The absorbed reduction, applied to the mapped values as a whole.
-    reduce: Option<ScalarDyad>,
+    yields: Yield,
+    /// The input each leaf of the chain reads, in the order the chain
+    /// reaches them. Two leaves that are the same subtree share one input,
+    /// so this is not the identity, and the fallback needs it to give every
+    /// leaf back the value it was given.
+    leaves: Vec<usize>,
 }
 
 impl FusedKernel {
@@ -58,8 +86,15 @@ impl FusedKernel {
         &self.code
     }
 
+    pub fn yields(&self) -> Yield {
+        self.yields
+    }
+
     pub fn reduce(&self) -> Option<ScalarDyad> {
-        self.reduce
+        match self.yields {
+            Yield::Reduce(op) => Some(op),
+            _ => None,
+        }
     }
 }
 
@@ -126,9 +161,16 @@ fn absorbable_reduce(v: &Verb) -> Option<ScalarDyad> {
     matches!(op, Add | Mul | Min | Max).then_some(op)
 }
 
+/// Is this the tally, applied to the array as a whole? `#"1` and its like
+/// count the items of cells instead, which is not what the shape says.
+fn is_tally(v: &Verb) -> bool {
+    matches!(v, Verb::Prim(p) if p.monad == MonadOp::Tally && p.ranks[0] == RANK_INF)
+}
+
 // ------------------------------------------------------------- the pass
 
 /// The chain as a tree, before it becomes postfix code.
+#[derive(Clone, PartialEq)]
 enum Node {
     /// A subtree the kernel does not cover: an input, with its index.
     Leaf(usize),
@@ -136,32 +178,70 @@ enum Node {
     Dyad(ScalarDyad, Box<Node>, Box<Node>),
 }
 
-/// Build the chain rooted at `e`, collecting the subtrees that feed it.
+/// The subtrees a chain reads.
 ///
 /// Inputs are numbered in the order the evaluator would reach them — a
 /// dyad's right argument first — so that a fused node evaluates its leaves
-/// exactly when and where the unfused tree does.
-fn chain<'a>(e: &'a Expr, leaves: &mut Vec<&'a Expr>) -> Node {
-    match e {
-        Expr::Monad { verb, y, .. } => match fusable_monad(verb) {
-            Some(op) => Node::Monad(op, Box::new(chain(y, leaves))),
-            None => leaf(e, leaves),
-        },
-        Expr::Dyad { verb, x, y, .. } => match fusable_dyad(verb) {
-            Some(op) => {
-                let ry = chain(y, leaves);
-                let rx = chain(x, leaves);
-                Node::Dyad(op, Box::new(rx), Box::new(ry))
+/// exactly when and where the unfused tree does. Two leaves that are the
+/// same subtree take the same input: nothing inside a chain can assign, so
+/// the second writing of `+/ {x}` reads what the first one read, and
+/// evaluating it once is what the sentence means either way.
+#[derive(Default)]
+struct Leaves<'a> {
+    inputs: Vec<&'a Expr>,
+    /// The input each leaf position reads, in chain order.
+    order: Vec<usize>,
+}
+
+impl<'a> Leaves<'a> {
+    fn push(&mut self, e: &'a Expr) -> usize {
+        let i = match self.inputs.iter().position(|&p| same(p, e)) {
+            Some(i) => i,
+            None => {
+                self.inputs.push(e);
+                self.inputs.len() - 1
             }
-            None => leaf(e, leaves),
-        },
-        _ => leaf(e, leaves),
+        };
+        self.order.push(i);
+        i
     }
 }
 
-fn leaf<'a>(e: &'a Expr, leaves: &mut Vec<&'a Expr>) -> Node {
-    leaves.push(e);
-    Node::Leaf(leaves.len() - 1)
+/// A name the chain reads through to the value assigned to it, as inlining
+/// that assignment would; `hits` counts the uses it absorbed.
+struct Inline<'a> {
+    name: &'a str,
+    def: &'a Expr,
+    hits: usize,
+}
+
+/// Build the chain rooted at `e`, collecting the subtrees that feed it.
+fn chain<'a>(e: &'a Expr, lv: &mut Leaves<'a>, sub: &mut Option<Inline<'a>>) -> Node {
+    let read_through = match (e, sub.as_ref()) {
+        (Expr::Name(n, _), Some(s)) if n == s.name => Some(s.def),
+        _ => None,
+    };
+    if let Some(def) = read_through {
+        if let Some(s) = sub.as_mut() {
+            s.hits += 1;
+        }
+        return chain(def, lv, sub);
+    }
+    match e {
+        Expr::Monad { verb, y, .. } => match fusable_monad(verb) {
+            Some(op) => Node::Monad(op, Box::new(chain(y, lv, sub))),
+            None => Node::Leaf(lv.push(e)),
+        },
+        Expr::Dyad { verb, x, y, .. } => match fusable_dyad(verb) {
+            Some(op) => {
+                let ry = chain(y, lv, sub);
+                let rx = chain(x, lv, sub);
+                Node::Dyad(op, Box::new(rx), Box::new(ry))
+            }
+            None => Node::Leaf(lv.push(e)),
+        },
+        _ => Node::Leaf(lv.push(e)),
+    }
 }
 
 fn ops(n: &Node) -> usize {
@@ -172,17 +252,80 @@ fn ops(n: &Node) -> usize {
     }
 }
 
+/// Every subtree of the chain that computes something.
+fn subtrees<'a>(n: &'a Node, out: &mut Vec<&'a Node>) {
+    if ops(n) == 0 {
+        return;
+    }
+    out.push(n);
+    match n {
+        Node::Leaf(_) => {}
+        Node::Monad(_, y) => subtrees(y, out),
+        Node::Dyad(_, x, y) => {
+            subtrees(x, out);
+            subtrees(y, out);
+        }
+    }
+}
+
+/// The values the chain computes more than once, largest first.
+///
+/// `+/ d * d` over an inlined `d` writes the same arithmetic twice, and a
+/// block-at-a-time kernel can do what the assignment did: compute it once
+/// and read it twice. Each of these becomes a let — a block buffer of its
+/// own, held for the length of the block. Only maximal repeats are taken,
+/// so a repeat inside a let is part of that let rather than one more.
+fn lets_of(n: &Node) -> Vec<Node> {
+    let mut all = Vec::new();
+    subtrees(n, &mut all);
+    let mut out = Vec::new();
+    fn walk(n: &Node, all: &[&Node], out: &mut Vec<Node>) {
+        if ops(n) >= 1 && all.iter().filter(|m| **m == n).count() >= 2 {
+            if !out.contains(n) {
+                out.push(n.clone());
+            }
+            return;
+        }
+        match n {
+            Node::Leaf(_) => {}
+            Node::Monad(_, y) => walk(y, all, out),
+            Node::Dyad(_, x, y) => {
+                walk(x, all, out);
+                walk(y, all, out);
+            }
+        }
+    }
+    walk(n, &all, &mut out);
+    out
+}
+
+/// Postfix code for the chain: the lets first, each into a slot of its own,
+/// then the chain that reads them.
+fn emit_all(n: &Node, lets: &[Node], code: &mut Vec<Instr>) {
+    for (k, l) in lets.iter().enumerate() {
+        // A let is emitted from the lets before it, so it cannot read
+        // itself; maximal repeats never nest, so there is nothing else.
+        emit(l, &lets[..k], code);
+        code.push(Instr::Store(k));
+    }
+    emit(n, lets, code);
+}
+
 /// Postfix code for the chain: a dyad's left operand is pushed first.
-fn emit(n: &Node, code: &mut Vec<Instr>) {
+fn emit(n: &Node, lets: &[Node], code: &mut Vec<Instr>) {
+    if let Some(k) = lets.iter().position(|l| l == n) {
+        code.push(Instr::Let(k));
+        return;
+    }
     match n {
         Node::Leaf(i) => code.push(Instr::Load(*i)),
         Node::Monad(op, y) => {
-            emit(y, code);
+            emit(y, lets, code);
             code.push(Instr::Monad(*op));
         }
         Node::Dyad(op, x, y) => {
-            emit(x, code);
-            emit(y, code);
+            emit(x, lets, code);
+            emit(y, lets, code);
             code.push(Instr::Dyad(*op));
         }
     }
@@ -201,6 +344,17 @@ fn slots(code: &[Instr]) -> usize {
         let operands = match ins {
             Instr::Load(_) => {
                 stack.push(false);
+                continue;
+            }
+            // A let holds its buffer for the whole block: it is never
+            // released, so the count it added when it was computed stands
+            // and reading it takes nothing.
+            Instr::Let(_) => {
+                stack.push(false);
+                continue;
+            }
+            Instr::Store(_) => {
+                stack.pop();
                 continue;
             }
             Instr::Monad(_) => 1,
@@ -227,17 +381,83 @@ fn slots(code: &[Instr]) -> usize {
 fn replayable(e: &Expr) -> bool {
     match e {
         Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => true,
-        Expr::Assign { .. } | Expr::PrintPass { .. } => false,
+        Expr::Assign { .. } | Expr::PrintPass { .. } | Expr::Elided { .. } => false,
         Expr::Monad { verb, y, .. } => verb.is_pure() && replayable(y),
         Expr::Dyad { verb, x, y, .. } => verb.is_pure() && replayable(x) && replayable(y),
         Expr::Fused { inputs, .. } => inputs.iter().all(replayable),
     }
 }
 
-/// Fuse every chain in a compiled program's sentences.
+/// Are these the same computation? Two writings of one subexpression differ
+/// in their spans, which are positions in the source and mean nothing to
+/// the value, so spans are not compared. Assignments, output and fused
+/// nodes are never the same as anything: only leaves of a chain reach here,
+/// and a chain holds none of those.
+fn same(a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::Const(p, _), Expr::Const(q, _)) => p == q,
+        (Expr::Param(p, _), Expr::Param(q, _)) => p == q,
+        (Expr::Name(p, _), Expr::Name(q, _)) => p == q,
+        (Expr::Monad { verb: u, y: p, .. }, Expr::Monad { verb: v, y: q, .. }) => {
+            same_verb(u, v) && same(p, q)
+        }
+        (
+            Expr::Dyad { verb: u, x: px, y: py, .. },
+            Expr::Dyad { verb: v, x: qx, y: qy, .. },
+        ) => same_verb(u, v) && same(px, qx) && same(py, qy),
+        _ => false,
+    }
+}
+
+fn same_verb(a: &Verb, b: &Verb) -> bool {
+    match (a, b) {
+        (Verb::Prim(p), Verb::Prim(q)) => p == q,
+        (Verb::Rank(u, r), Verb::Rank(v, s)) => r == s && same_verb(u, v),
+        (Verb::Reduce(u), Verb::Reduce(v)) | (Verb::Commute(u), Verb::Commute(v)) => {
+            same_verb(u, v)
+        }
+        (Verb::Windowed(u, j), Verb::Windowed(v, k)) => j == k && same_verb(u, v),
+        (Verb::PowerN(u, m), Verb::PowerN(v, n)) => m == n && same_verb(u, v),
+        (Verb::Fork(f, g, h), Verb::Fork(f2, g2, h2)) => {
+            same_verb(f, f2) && same_verb(g, g2) && same_verb(h, h2)
+        }
+        (Verb::NounFork(m, g, h), Verb::NounFork(n, g2, h2)) => {
+            m == n && same_verb(g, g2) && same_verb(h, h2)
+        }
+        (Verb::Hook(g, h), Verb::Hook(g2, h2))
+        | (Verb::Atop(g, h), Verb::Atop(g2, h2))
+        | (Verb::Compose(g, h), Verb::Compose(g2, h2)) => same_verb(g, g2) && same_verb(h, h2),
+        (Verb::BondLeft(m, u), Verb::BondLeft(n, v)) => m == n && same_verb(u, v),
+        (Verb::BondRight(u, m), Verb::BondRight(v, n)) => m == n && same_verb(u, v),
+        _ => false,
+    }
+}
+
+/// Optimise a compiled program's sentences: move the values that are only
+/// named for the reader into the sentences that read them, then fuse every
+/// chain that is left.
 pub fn pass(stmts: &mut Vec<Expr>) {
-    let taken = std::mem::take(stmts);
-    *stmts = taken.into_iter().map(fuse_expr).collect();
+    let orig = std::mem::take(stmts);
+    let mut cur = orig.clone();
+    let mut names = 0usize;
+    let mut crossed = false;
+    // A round elides one assignment, so a chain of them — `m =. ...`,
+    // `d =. {x} - m`, `+/ d * d` — takes one round per link.
+    for _ in 0..=orig.len() {
+        match inline_once(&cur, &mut names) {
+            Some(next) => {
+                cur = next;
+                crossed = true;
+            }
+            None => break,
+        }
+    }
+    let mut out: Vec<Expr> = cur.into_iter().map(fuse_expr).collect();
+    if crossed {
+        // What the sentences were, for `unfused` to hold this against.
+        out.insert(0, Expr::Elided { orig, span: Span::new(0, 0) });
+    }
+    *stmts = out;
 }
 
 fn fuse_expr(e: Expr) -> Expr {
@@ -262,31 +482,63 @@ fn fuse_expr(e: Expr) -> Expr {
     }
 }
 
-/// The fused node for the chain rooted at `e`, if there is one worth making.
-fn try_fuse(e: &Expr) -> Option<Expr> {
-    let (root, reduce) = match e {
-        Expr::Monad { verb, y, .. } => match absorbable_reduce(verb) {
-            Some(op) => (&**y, Some(op)),
-            None => (e, None),
-        },
-        _ => (e, None),
-    };
-    let mut leaves = Vec::new();
-    let node = chain(root, &mut leaves);
-    // One elementwise verb on its own already runs as one pass; fusing it
-    // would only add a layer. A reduction to absorb makes one verb enough.
-    let least = if reduce.is_some() { 1 } else { 2 };
-    if ops(&node) < least || !leaves.iter().all(|l| replayable(l)) {
+/// The kernel for the chain rooted at `root`, if it carries at least
+/// `least` operations and reads nothing that cannot be replayed.
+fn build<'a>(
+    root: &'a Expr,
+    yields: Yield,
+    least: usize,
+    sub: &mut Option<Inline<'a>>,
+) -> Option<(FusedKernel, Vec<&'a Expr>)> {
+    if let Some(s) = sub.as_mut() {
+        s.hits = 0;
+    }
+    let mut lv = Leaves::default();
+    let node = chain(root, &mut lv, sub);
+    if ops(&node) < least || !lv.inputs.iter().all(|l| replayable(l)) {
         return None;
     }
     let mut code = Vec::new();
-    emit(&node, &mut code);
-    let kernel = FusedKernel { slots: slots(&code), code, reduce };
+    emit_all(&node, &lets_of(&node), &mut code);
+    let kernel = FusedKernel { slots: slots(&code), code, yields, leaves: lv.order };
+    Some((kernel, lv.inputs))
+}
+
+/// The kernel this node becomes, with the subtree it stands for — the chain
+/// itself where a tally reads only its shape, the whole sentence where a
+/// reduction sits above it.
+///
+/// One elementwise verb on its own already runs as one pass; fusing it
+/// would only add a layer. A reduction to absorb, or a tally that makes the
+/// values unnecessary altogether, makes one verb enough.
+fn kernel_at<'a>(
+    e: &'a Expr,
+    sub: &mut Option<Inline<'a>>,
+) -> Option<(FusedKernel, Vec<&'a Expr>, &'a Expr)> {
+    if let Expr::Monad { verb, y, .. } = e {
+        if is_tally(verb) {
+            if let Some((k, l)) = build(y, Yield::Tally, 1, sub) {
+                return Some((k, l, e));
+            }
+        }
+        if let Some(op) = absorbable_reduce(verb) {
+            if let Some((k, l)) = build(y, Yield::Reduce(op), 1, sub) {
+                return Some((k, l, e));
+            }
+        }
+    }
+    let (k, l) = build(e, Yield::Values, 2, sub)?;
+    Some((k, l, e))
+}
+
+/// The fused node for the chain rooted at `e`, if there is one worth making.
+fn try_fuse(e: &Expr) -> Option<Expr> {
+    let (kernel, leaves, orig) = kernel_at(e, &mut None)?;
     let inputs = leaves.into_iter().map(|l| fuse_expr(l.clone())).collect();
     Some(Expr::Fused {
         kernel,
         inputs,
-        orig: Box::new(e.clone()),
+        orig: Box::new(orig.clone()),
         span: e.span(),
     })
 }
@@ -302,36 +554,284 @@ pub(crate) fn fallback_tree(k: &FusedKernel, orig: &Expr, values: &[Array]) -> E
     let tree = match orig {
         // An absorbed reduction sits above the chain; only the chain's own
         // leaves were evaluated.
-        Expr::Monad { verb, y, span } if k.reduce.is_some() => Expr::Monad {
+        Expr::Monad { verb, y, span } if matches!(k.yields, Yield::Reduce(_)) => Expr::Monad {
             verb: verb.clone(),
-            y: Box::new(substitute(y, values, &mut next)),
+            y: Box::new(substitute(y, values, k, &mut next)),
             span: *span,
         },
-        e => substitute(e, values, &mut next),
+        // A tally is not applied at all: the chain alone runs, and the
+        // count of what it made is what the node yields.
+        Expr::Monad { verb, y, .. } if k.yields == Yield::Tally && is_tally(verb) => {
+            substitute(y, values, k, &mut next)
+        }
+        e => substitute(e, values, k, &mut next),
     };
-    debug_assert_eq!(next, values.len(), "the fallback found different leaves");
+    debug_assert_eq!(next, k.leaves.len(), "the fallback found different leaves");
     tree
+}
+
+/// What the kernel would have made of the value its chain produced. A tally
+/// skips the chain entirely when it runs, and counts the items of it when
+/// the chain has had to run instead.
+pub(crate) fn fallback_finish(k: &FusedKernel, v: Array) -> Array {
+    match k.yields {
+        Yield::Tally => Array::scalar_i64(v.items() as i64),
+        _ => v,
+    }
 }
 
 /// Walk the chain exactly as [`chain`] walked it, so the leaves take their
 /// values in the order they were numbered in.
-fn substitute(e: &Expr, values: &[Array], next: &mut usize) -> Expr {
+fn substitute(e: &Expr, values: &[Array], k: &FusedKernel, next: &mut usize) -> Expr {
     match e {
         Expr::Monad { verb, y, span } if fusable_monad(verb).is_some() => Expr::Monad {
             verb: verb.clone(),
-            y: Box::new(substitute(y, values, next)),
+            y: Box::new(substitute(y, values, k, next)),
             span: *span,
         },
         Expr::Dyad { verb, x, y, span } if fusable_dyad(verb).is_some() => {
-            let ry = substitute(y, values, next);
-            let rx = substitute(x, values, next);
+            let ry = substitute(y, values, k, next);
+            let rx = substitute(x, values, k, next);
             Expr::Dyad { verb: verb.clone(), x: Box::new(rx), y: Box::new(ry), span: *span }
         }
         leaf => {
-            let v = values[*next].clone();
+            let v = values[k.leaves[*next]].clone();
             *next += 1;
             Expr::Const(v, leaf.span())
         }
+    }
+}
+
+// ------------------------------------------- across sentence boundaries
+//
+// `d =. {x} - m` and then `+/ d * d` is the same computation as the one
+// sentence that spells it out, but the assignment writes `d` to memory in
+// full and the next sentence reads it back — the traffic the kernel exists
+// to remove. Nothing there needs the array: the name is for the reader.
+//
+// So the pass moves the value into the sentences that read it, and hoists
+// the value's own leaves — the mean's `+/ {x}` — into sentences of their
+// own first, so that copying the chain does not copy the work. What comes
+// out is the two-phase shape a hand-written kernel has: one pass for the
+// reductions the chain reads as scalars, one for the map-reduce over them.
+
+/// Names the pass introduces for the values it hoists. `·` starts no name
+/// either frontend accepts, so these cannot collide with the program's.
+fn hoisted_name(n: &mut usize) -> String {
+    *n += 1;
+    format!("·{}", *n - 1)
+}
+
+/// Elide the first assignment whose value can move into the sentences that
+/// read it, and report the sentences that leaves; None when none can.
+///
+/// The value moves only where the name is pure dataflow:
+///
+/// - the value is replayable and is a chain, so that moving it moves
+///   arithmetic into a kernel rather than moving a whole pass;
+/// - no later sentence assigns the name again, or any name the value reads,
+///   so every copy means what the original meant;
+/// - every use lands inside a kernel, so no copy materialises the value.
+///   A tally counts as landing inside one: it reads the chain's shape.
+///
+/// The assignment's own sentence stays, as the tally of the chain: that
+/// reaches every leaf and every rule the kernel has, so whatever the
+/// assignment would have raised is raised where it was raised before, and
+/// nothing else is computed.
+fn inline_once(stmts: &[Expr], names: &mut usize) -> Option<Vec<Expr>> {
+    for (i, stmt) in stmts.iter().enumerate() {
+        let Expr::Assign { name, value, span } = stmt else { continue };
+        if !inlinable(stmts, i, name, value) {
+            continue;
+        }
+        if let Some(out) = rewrite(stmts, i, name, value, *span, names) {
+            return Some(out);
+        }
+    }
+    None
+}
+
+fn inlinable(stmts: &[Expr], i: usize, name: &str, value: &Expr) -> bool {
+    if !replayable(value) || mentions(value, name) {
+        return false;
+    }
+    let mut lv = Leaves::default();
+    if ops(&chain(value, &mut lv, &mut None)) < 1 {
+        return false;
+    }
+    let mut guarded = vec![name.to_string()];
+    free_names(value, &mut guarded);
+    let later = &stmts[i + 1..];
+    if later.iter().any(|s| assigns_any(s, &guarded)) {
+        return false;
+    }
+    let mut uses = 0;
+    for stmt in later {
+        match uses_land(stmt, name, value) {
+            Some(n) => uses += n,
+            None => return false,
+        }
+    }
+    uses > 0
+}
+
+/// How many uses of `name` this sentence would take into a kernel, or None
+/// when one of them would have to materialise the value instead.
+fn uses_land(e: &Expr, name: &str, def: &Expr) -> Option<usize> {
+    let mut sub = Some(Inline { name, def, hits: 0 });
+    if let Some((_, leaves, _)) = kernel_at(e, &mut sub) {
+        let mut n = sub.map_or(0, |s| s.hits);
+        for l in leaves {
+            n += uses_land(l, name, def)?;
+        }
+        return Some(n);
+    }
+    match e {
+        Expr::Name(n, _) if n == name => None,
+        Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => Some(0),
+        Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => uses_land(value, name, def),
+        Expr::Monad { y, .. } => uses_land(y, name, def),
+        Expr::Dyad { x, y, .. } => Some(uses_land(x, name, def)? + uses_land(y, name, def)?),
+        Expr::Fused { .. } | Expr::Elided { .. } => None,
+    }
+}
+
+/// The sentences that replace `stmts`, with the assignment at `i` elided.
+fn rewrite(
+    stmts: &[Expr],
+    i: usize,
+    name: &str,
+    value: &Expr,
+    span: Span,
+    names: &mut usize,
+) -> Option<Vec<Expr>> {
+    let mut lv = Leaves::default();
+    chain(value, &mut lv, &mut None);
+    // A leaf that is more than a name or a constant becomes a sentence of
+    // its own, evaluated once and where it was evaluated before.
+    let mut hoists = Vec::new();
+    let mut bound: Vec<Option<String>> = Vec::new();
+    for l in &lv.inputs {
+        if matches!(l, Expr::Const(..) | Expr::Param(..) | Expr::Name(..)) {
+            bound.push(None);
+            continue;
+        }
+        let n = hoisted_name(names);
+        hoists.push(Expr::Assign {
+            name: n.clone(),
+            value: Box::new((*l).clone()),
+            span: l.span(),
+        });
+        bound.push(Some(n));
+    }
+    let def = with_leaves(value, &lv, &bound);
+    let (kernel, leaves) = build(&def, Yield::Tally, 1, &mut None)?;
+    let inputs = leaves.into_iter().map(|l| fuse_expr(l.clone())).collect();
+    let guard = Expr::Assign {
+        name: hoisted_name(names),
+        value: Box::new(Expr::Fused {
+            kernel,
+            inputs,
+            orig: Box::new(def.clone()),
+            span,
+        }),
+        span,
+    };
+    let mut out = stmts[..i].to_vec();
+    out.extend(hoists);
+    out.push(guard);
+    out.extend(stmts[i + 1..].iter().map(|s| replace_name(s, name, &def)));
+    Some(out)
+}
+
+/// The chain with its hoisted leaves replaced by the names they were bound
+/// to. Walks exactly as [`chain`] walks, so the leaves are the same ones.
+fn with_leaves(e: &Expr, lv: &Leaves<'_>, bound: &[Option<String>]) -> Expr {
+    match e {
+        Expr::Monad { verb, y, span } if fusable_monad(verb).is_some() => Expr::Monad {
+            verb: verb.clone(),
+            y: Box::new(with_leaves(y, lv, bound)),
+            span: *span,
+        },
+        Expr::Dyad { verb, x, y, span } if fusable_dyad(verb).is_some() => Expr::Dyad {
+            verb: verb.clone(),
+            x: Box::new(with_leaves(x, lv, bound)),
+            y: Box::new(with_leaves(y, lv, bound)),
+            span: *span,
+        },
+        leaf => {
+            let bind = lv
+                .inputs
+                .iter()
+                .position(|&p| same(p, leaf))
+                .and_then(|i| bound[i].as_ref());
+            match bind {
+                Some(n) => Expr::Name(n.clone(), leaf.span()),
+                None => leaf.clone(),
+            }
+        }
+    }
+}
+
+fn replace_name(e: &Expr, name: &str, def: &Expr) -> Expr {
+    match e {
+        Expr::Name(n, _) if n == name => def.clone(),
+        Expr::Assign { name: a, value, span } => Expr::Assign {
+            name: a.clone(),
+            value: Box::new(replace_name(value, name, def)),
+            span: *span,
+        },
+        Expr::PrintPass { value, span } => Expr::PrintPass {
+            value: Box::new(replace_name(value, name, def)),
+            span: *span,
+        },
+        Expr::Monad { verb, y, span } => Expr::Monad {
+            verb: verb.clone(),
+            y: Box::new(replace_name(y, name, def)),
+            span: *span,
+        },
+        Expr::Dyad { verb, x, y, span } => Expr::Dyad {
+            verb: verb.clone(),
+            x: Box::new(replace_name(x, name, def)),
+            y: Box::new(replace_name(y, name, def)),
+            span: *span,
+        },
+        other => other.clone(),
+    }
+}
+
+fn mentions(e: &Expr, name: &str) -> bool {
+    let mut names = Vec::new();
+    free_names(e, &mut names);
+    names.iter().any(|n| n == name)
+}
+
+/// Every name this subtree reads.
+fn free_names(e: &Expr, out: &mut Vec<String>) {
+    match e {
+        Expr::Name(n, _) => out.push(n.clone()),
+        Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => free_names(value, out),
+        Expr::Monad { y, .. } => free_names(y, out),
+        Expr::Dyad { x, y, .. } => {
+            free_names(x, out);
+            free_names(y, out);
+        }
+        Expr::Fused { inputs, .. } => inputs.iter().for_each(|i| free_names(i, out)),
+        Expr::Const(..) | Expr::Param(..) | Expr::Elided { .. } => {}
+    }
+}
+
+/// Does this sentence assign any of these names, at any depth?
+fn assigns_any(e: &Expr, names: &[String]) -> bool {
+    match e {
+        Expr::Assign { name, value, .. } => {
+            names.iter().any(|n| n == name) || assigns_any(value, names)
+        }
+        Expr::PrintPass { value, .. } => assigns_any(value, names),
+        Expr::Monad { y, .. } => assigns_any(y, names),
+        Expr::Dyad { x, y, .. } => assigns_any(x, names) || assigns_any(y, names),
+        Expr::Fused { inputs, .. } => inputs.iter().any(|i| assigns_any(i, names)),
+        Expr::Const(..) | Expr::Param(..) | Expr::Name(..) | Expr::Elided { .. } => false,
     }
 }
 
@@ -340,7 +840,7 @@ pub fn is_fused(p: &Program) -> bool {
     fn any(e: &Expr) -> bool {
         match e {
             Expr::Fused { .. } => true,
-            Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => false,
+            Expr::Const(..) | Expr::Param(..) | Expr::Name(..) | Expr::Elided { .. } => false,
             Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => any(value),
             Expr::Monad { y, .. } => any(y),
             Expr::Dyad { x, y, .. } => any(x) || any(y),
@@ -349,7 +849,13 @@ pub fn is_fused(p: &Program) -> bool {
     p.stmts.iter().any(any)
 }
 
-/// The same program with every fused node replaced by the subtree it came
+/// Did the pass move a named value into the sentences that read it?
+pub fn is_inlined(p: &Program) -> bool {
+    matches!(p.stmts.first(), Some(Expr::Elided { .. }))
+}
+
+/// The program as the plain evaluator would run it: the sentences it was
+/// compiled from, with every fused node replaced by the subtree it came
 /// from. The two must compute the same thing; tests hold them to it.
 pub fn unfused(p: &Program) -> Program {
     fn strip(e: &Expr) -> Expr {
@@ -374,7 +880,13 @@ pub fn unfused(p: &Program) -> Program {
         }
     }
     let mut out = p.clone();
-    out.stmts = p.stmts.iter().map(strip).collect();
+    // A program the pass rewrote across sentences kept the sentences it
+    // rewrote; those, not the rewriting, are what the evaluator would run.
+    let stmts = match p.stmts.first() {
+        Some(Expr::Elided { orig, .. }) => orig,
+        _ => &p.stmts,
+    };
+    out.stmts = stmts.iter().map(strip).collect();
     out
 }
 
@@ -439,6 +951,7 @@ fn dyad_type(op: ScalarDyad, a: DType, b: DType) -> Option<DType> {
 /// kernel. Nothing measured so far needs it.
 fn working_type(k: &FusedKernel, inputs: &[Array]) -> Option<(DType, DType)> {
     let mut stack: Vec<DType> = Vec::with_capacity(k.slots);
+    let mut lets: Vec<DType> = Vec::new();
     let mut float = false;
     let mut integer_step = false;
     for ins in &k.code {
@@ -450,8 +963,26 @@ fn working_type(k: &FusedKernel, inputs: &[Array]) -> Option<(DType, DType)> {
                 let a = stack.pop()?;
                 dyad_type(*op, a, b)?
             }
+            Instr::Store(k) => {
+                let t = stack.pop()?;
+                if lets.len() != *k {
+                    return None;
+                }
+                lets.push(t);
+                continue;
+            }
+            // Reading a let is not a step: the value was accounted for
+            // where it was computed.
+            Instr::Let(k) => {
+                let t = *lets.get(*k)?;
+                float |= t == DType::F64;
+                stack.push(t);
+                continue;
+            }
         };
-        if t == DType::Char {
+        // Only numbers: everything else — characters, boxes — is a type
+        // the kernel has no arithmetic for and the chain must handle.
+        if !t.is_numeric() {
             return None;
         }
         float |= t == DType::F64;
@@ -530,6 +1061,7 @@ fn exec_block<T, M, D>(
     w: usize,
     free: &mut Vec<usize>,
     stack: &mut Vec<Slot>,
+    lets: &mut Vec<usize>,
     out: Option<&mut [T]>,
     mon: &M,
     dya: &D,
@@ -541,6 +1073,7 @@ where
 {
     stack.clear();
     free.clear();
+    lets.clear();
     let nslots = scratch.len() / w;
     free.extend((0..nslots).rev());
     let last = code.len() - 1;
@@ -559,9 +1092,7 @@ where
                 if !mon(*op, av, &mut dst[..len]) {
                     return None;
                 }
-                if let Slot::Block(i) = a {
-                    free.push(i);
-                }
+                release(free, lets, a);
                 stack.push(Slot::Block(d));
             }
             Instr::Dyad(op) => {
@@ -581,12 +1112,18 @@ where
                     return None;
                 }
                 for s in [a, b] {
-                    if let Slot::Block(i) = s {
-                        free.push(i);
-                    }
+                    release(free, lets, s);
                 }
                 stack.push(Slot::Block(d));
             }
+            Instr::Store(k) => {
+                let Slot::Block(i) = stack.pop()? else { return None };
+                if lets.len() != *k {
+                    return None;
+                }
+                lets.push(i);
+            }
+            Instr::Let(k) => stack.push(Slot::Block(*lets.get(*k)?)),
         }
     }
     let Some(dst) = out else {
@@ -612,9 +1149,20 @@ where
             let a = stack.pop()?;
             dya(op, view(a), view(b), dst)
         }
-        Instr::Load(_) => return None,
+        // A kernel ends in the operation that makes its result.
+        Instr::Load(_) | Instr::Store(_) | Instr::Let(_) => return None,
     };
     ok.then_some(usize::MAX)
+}
+
+/// Give a block buffer back, unless a let is holding it for the rest of
+/// the block.
+fn release(free: &mut Vec<usize>, lets: &[usize], s: Slot) {
+    if let Slot::Block(i) = s {
+        if !lets.contains(&i) {
+            free.push(i);
+        }
+    }
 }
 
 /// The whole mapped result, one block at a time. None on integer overflow.
@@ -635,6 +1183,7 @@ where
         let mut scratch = vec![T::default(); k.slots * w];
         let mut free = Vec::with_capacity(k.slots);
         let mut stack = Vec::with_capacity(k.slots);
+        let mut lets = Vec::new();
         for (b, chunk) in part.chunks_mut(w).enumerate() {
             let len = chunk.len();
             let ok = exec_block(
@@ -646,6 +1195,7 @@ where
                 w,
                 &mut free,
                 &mut stack,
+                &mut lets,
                 Some(chunk),
                 &mon,
                 &dya,
@@ -680,6 +1230,7 @@ where
     let mut scratch = vec![T::default(); k.slots * w];
     let mut free = Vec::with_capacity(k.slots);
     let mut stack = Vec::with_capacity(k.slots);
+    let mut lets = Vec::new();
     let mut acc: Option<T> = None;
     // Blocks run backwards and the accumulator carries across them, so the
     // fold is the insert's own right-to-left order over the whole range.
@@ -687,7 +1238,8 @@ where
         let start = lo + b * w;
         let len = (hi - start).min(w);
         let slot = exec_block(
-            &k.code, srcs, start, len, &mut scratch, w, &mut free, &mut stack, None, mon, dya,
+            &k.code, srcs, start, len, &mut scratch, w, &mut free, &mut stack, &mut lets, None,
+            mon, dya,
         )?;
         for &v in scratch[slot * w..slot * w + len].iter().rev() {
             acc = Some(match acc {
@@ -925,7 +1477,7 @@ fn to_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
             Data::Bool(d) => d[0] as f64,
             Data::I64(d) => d[0] as f64,
             Data::F64(d) => d[0],
-            Data::Char(_) => return Some(Vec::new()),
+            Data::Char(_) | Data::Box(_) => return Some(Vec::new()),
         };
         return Some(vec![v; w]);
     }
@@ -933,7 +1485,7 @@ fn to_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
         Data::F64(_) => None,
         Data::I64(d) => Some(par::map(d, |&x| x as f64)),
         Data::Bool(d) => Some(par::map(d, |&x| x as f64)),
-        Data::Char(_) => Some(Vec::new()),
+        Data::Char(_) | Data::Box(_) => Some(Vec::new()),
     }
 }
 
@@ -975,7 +1527,7 @@ fn common_shape(inputs: &[Array]) -> Option<Option<Vec<usize>>> {
 /// evaluate the original subtree, which is always allowed to be slower and
 /// never allowed to differ.
 pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
-    let reducing = k.reduce.is_some();
+    let reducing = matches!(k.yields, Yield::Reduce(_));
     // Every input a scalar: no work worth blocking, and a reduction would
     // need the leading axis a scalar has not got.
     let shape = common_shape(inputs)??;
@@ -989,6 +1541,12 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
         return None;
     }
     let (working, root) = working_type(k, inputs)?;
+    if k.yields == Yield::Tally {
+        // The shapes have already said how many items the chain produces,
+        // and the type rules have said it would reach them without an
+        // error. There is nothing else a tally wants from the values.
+        return Some(Array::scalar_i64(shape[0] as i64));
+    }
     let w = BLOCK.min(n).max(1);
 
     let data = if working == DType::F64 {
@@ -1001,7 +1559,7 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
                 None => Loaded { data: a.as_f64_slice().unwrap_or(&[]), splat: false },
             })
             .collect();
-        match k.reduce {
+        match k.reduce() {
             None => {
                 let out = map_pass(k, &srcs, n, monad_f64, dyad_f64)?;
                 float_result(out, root)
@@ -1027,7 +1585,7 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
                 None => Loaded { data: a.as_i64_slice().unwrap_or(&[]), splat: false },
             })
             .collect();
-        match k.reduce {
+        match k.reduce() {
             None => {
                 let out = map_pass(k, &srcs, n, monad_i64, dyad_i64)?;
                 int_result(out, root)
@@ -1121,5 +1679,40 @@ mod tests {
         );
         // One buffer holds the inner difference, one takes the outer one.
         assert_eq!(kernel.slots, 2);
+    }
+
+    #[test]
+    fn a_value_the_chain_reads_twice_becomes_a_let() {
+        // What `d =. {x} + 1` then `+/ d * d` comes to once the name has
+        // moved into the kernel: the sum is computed once per block.
+        let p = program("+/ ({x} + 1) * ({x} + 1)");
+        let Expr::Fused { kernel, .. } = &p.stmts[0] else { panic!("not fused") };
+        assert_eq!(
+            kernel.code(),
+            [
+                Instr::Load(1),
+                Instr::Load(0),
+                Instr::Dyad(ScalarDyad::Add),
+                Instr::Store(0),
+                Instr::Let(0),
+                Instr::Let(0),
+                Instr::Dyad(ScalarDyad::Mul),
+            ]
+        );
+        // One buffer for the let, one for the product it feeds.
+        assert_eq!(kernel.slots, 2);
+    }
+
+    #[test]
+    fn a_named_value_moves_into_the_sentence_that_reads_it() {
+        let p = program("d =. {x} + 1\n+/ d * d");
+        assert!(is_inlined(&p));
+        // Three sentences: what the program was, the check that stands
+        // where the assignment stood, and the sum, which is now the chain
+        // of the test above.
+        assert_eq!(p.stmts.len(), 3);
+        let Expr::Fused { kernel, .. } = &p.stmts[2] else { panic!("the sum did not fuse") };
+        assert!(kernel.code().contains(&Instr::Store(0)));
+        assert_eq!(unfused(&p).stmts.len(), 2);
     }
 }

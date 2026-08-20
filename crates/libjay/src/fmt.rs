@@ -4,16 +4,28 @@
 use crate::array::{Array, Data};
 use crate::dtype::DType;
 
+/// How a boxed array is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoxStyle {
+    /// J: a table of cells fenced with `+`, `-` and `|`.
+    Fenced,
+    /// APL: the cells side by side, one space between them and one around
+    /// the whole. GNU APL spaces a nested display more widely than this;
+    /// see docs/coverage.md.
+    Spaced,
+}
+
 /// Display conventions that differ between languages.
 #[derive(Clone, Copy, Debug)]
 pub struct FmtOpts {
     /// Negative-number prefix: `_` for J, `¯` for APL.
     pub neg: char,
+    pub boxes: BoxStyle,
 }
 
 impl FmtOpts {
-    pub const J: FmtOpts = FmtOpts { neg: '_' };
-    pub const APL: FmtOpts = FmtOpts { neg: '¯' };
+    pub const J: FmtOpts = FmtOpts { neg: '_', boxes: BoxStyle::Fenced };
+    pub const APL: FmtOpts = FmtOpts { neg: '¯', boxes: BoxStyle::Spaced };
 }
 
 /// Significant digits kept when displaying a float.
@@ -24,6 +36,9 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
     // An array with an empty axis has nothing to show.
     if a.shape.contains(&0) {
         return String::new();
+    }
+    if a.dtype() == DType::Box {
+        return format_boxed(a, opts);
     }
     let rank = a.rank();
     let texts: Vec<String> = (0..a.count()).map(|i| format_atom(&a.data, i, opts)).collect();
@@ -59,6 +74,111 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
             out
         }
     }
+}
+
+/// A boxed array as its language draws it: the last two axes form a table
+/// of cells, each holding its own contents' display, and the axes above
+/// them separate planes exactly as they do for numbers.
+fn format_boxed(a: &Array, opts: &FmtOpts) -> String {
+    let boxes = a.as_boxes().expect("boxed data");
+    let blocks: Vec<Vec<String>> = boxes.iter().map(|b| block(b, opts)).collect();
+    let rank = a.rank();
+    let (nrows, ncols) = match rank {
+        0 => (1, 1),
+        1 => (1, a.shape[0]),
+        _ => (a.shape[rank - 2], a.shape[rank - 1]),
+    };
+    // Column widths span the whole array, as they do for numeric columns.
+    let mut widths = vec![0usize; ncols];
+    for (i, b) in blocks.iter().enumerate() {
+        let w = b.iter().map(|l| width(l)).max().unwrap_or(0);
+        widths[i % ncols] = widths[i % ncols].max(w);
+    }
+    let frame: &[usize] = if rank > 2 { &a.shape[..rank - 2] } else { &[] };
+    let planes: usize = frame.iter().product();
+    let plane_size = nrows * ncols;
+    let mut out = String::new();
+    for p in 0..planes.max(1) {
+        if p > 0 {
+            out.push_str(&"\n".repeat(plane_gap(frame, p) + 1));
+        }
+        push_boxed_plane(
+            &mut out,
+            &blocks[p * plane_size..(p + 1) * plane_size],
+            nrows,
+            ncols,
+            &widths,
+            opts,
+        );
+    }
+    out
+}
+
+/// One box's contents as display lines. An empty array shows as a single
+/// empty line, which is what gives `<''` a cell of width zero rather than
+/// no cell at all.
+fn block(a: &Array, opts: &FmtOpts) -> Vec<String> {
+    let text = format_array(a, opts);
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    text.lines().map(str::to_string).collect()
+}
+
+fn push_boxed_plane(
+    out: &mut String,
+    blocks: &[Vec<String>],
+    nrows: usize,
+    ncols: usize,
+    widths: &[usize],
+    opts: &FmtOpts,
+) {
+    let fence = opts.boxes == BoxStyle::Fenced;
+    let border: String = if fence {
+        let mut s = String::from("+");
+        for &w in widths {
+            s.push_str(&"-".repeat(w));
+            s.push('+');
+        }
+        s
+    } else {
+        String::new()
+    };
+    let mut lines: Vec<String> = Vec::new();
+    for r in 0..nrows {
+        if fence {
+            lines.push(border.clone());
+        }
+        let row = &blocks[r * ncols..(r + 1) * ncols];
+        // A row is as tall as its tallest cell; the others are padded
+        // underneath, which is where J puts the blanks.
+        let height = row.iter().map(Vec::len).max().unwrap_or(1);
+        for k in 0..height {
+            let mut line = String::new();
+            line.push(if fence { '|' } else { ' ' });
+            for (c, cell) in row.iter().enumerate() {
+                if !fence && c > 0 {
+                    line.push(' ');
+                }
+                let text = cell.get(k).map(String::as_str).unwrap_or("");
+                line.push_str(text);
+                for _ in 0..widths[c].saturating_sub(width(text)) {
+                    line.push(' ');
+                }
+                if fence {
+                    line.push('|');
+                }
+            }
+            if !fence {
+                line.push(' ');
+            }
+            lines.push(line);
+        }
+    }
+    if fence {
+        lines.push(border);
+    }
+    out.push_str(&lines.join("\n"));
 }
 
 /// Blank lines before plane `p`: one for a step along axis -3, two along
@@ -115,6 +235,8 @@ fn format_atom(data: &Data, i: usize, opts: &FmtOpts) -> String {
         Data::I64(v) => format_i64(v[i], opts),
         Data::F64(v) => format_f64(v[i], opts),
         Data::Char(v) => v[i].to_string(),
+        // Boxed data takes the drawing path before reaching here.
+        Data::Box(_) => String::new(),
     }
 }
 
@@ -199,6 +321,7 @@ fn with_sign(body: &str, opts: &FmtOpts) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::array::Buf;
     use rstest::rstest;
 
     fn j(a: &Array) -> String {
@@ -411,6 +534,67 @@ mod tests {
     fn char_rank_3_separates_planes() {
         let a = Array::new(vec![2, 2, 2], Data::Char("abcdefgh".chars().collect()));
         assert_eq!(j(&a), "ab\ncd\n\nef\ngh");
+    }
+
+    // Boxes.
+
+    fn boxed(shape: &[usize], items: Vec<Array>) -> Array {
+        Array::new(shape.to_vec(), Data::Box(items.into()))
+    }
+
+    #[test]
+    fn a_box_is_drawn_as_a_fenced_cell() {
+        let a = boxed(&[], vec![Array::from_i64(vec![1, 2])]);
+        assert_eq!(j(&a), "+---+\n|1 2|\n+---+");
+        // APL spaces the contents instead of fencing them.
+        assert_eq!(apl(&a), " 1 2 ");
+    }
+
+    #[test]
+    fn a_boxed_vector_is_a_row_of_cells() {
+        let a = boxed(
+            &[3],
+            vec![
+                Array::scalar_i64(1),
+                Array::from_i64(vec![2, 3]),
+                Array::from_chars("abc".chars().collect()),
+            ],
+        );
+        assert_eq!(j(&a), "+-+---+---+\n|1|2 3|abc|\n+-+---+---+");
+        assert_eq!(apl(&a), " 1 2 3 abc ");
+    }
+
+    #[test]
+    fn a_tall_cell_pads_the_others_below_it() {
+        let a = boxed(
+            &[2],
+            vec![
+                Array::scalar_i64(1),
+                Array::new(vec![2, 2], Data::I64(vec![1, 2, 3, 4].into())),
+            ],
+        );
+        assert_eq!(j(&a), "+-+---+\n|1|1 2|\n| |3 4|\n+-+---+");
+    }
+
+    #[test]
+    fn a_nested_box_draws_inside_its_cell() {
+        let inner = boxed(&[], vec![Array::scalar_i64(5)]);
+        assert_eq!(j(&boxed(&[], vec![inner])), "+---+\n|+-+|\n||5||\n|+-+|\n+---+");
+    }
+
+    #[test]
+    fn a_box_matrix_fences_every_row() {
+        let a = boxed(&[2, 2], (1..=4).map(Array::scalar_i64).collect());
+        assert_eq!(j(&a), "+-+-+\n|1|2|\n+-+-+\n|3|4|\n+-+-+");
+        assert_eq!(apl(&a), " 1 2 \n 3 4 ");
+    }
+
+    #[test]
+    fn a_boxed_empty_is_a_cell_of_width_zero() {
+        let a = boxed(&[], vec![Array::empty(DType::I64)]);
+        assert_eq!(j(&a), "++\n||\n++");
+        // A boxed array with an empty axis shows nothing at all.
+        assert_eq!(j(&Array::new(vec![0], Data::Box(Buf::new()))), "");
     }
 
     // Empties.

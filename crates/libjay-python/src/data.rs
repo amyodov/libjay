@@ -236,7 +236,9 @@ fn interleave(columns: &[Data], rows: usize) -> Data {
             let s: Vec<&[f64]> = columns.iter().map(as_f64).collect();
             Data::F64(weave(&s, rows).into())
         }
-        DType::Char => unreachable!("character columns are refused on import"),
+        DType::Char | DType::Box => {
+            unreachable!("character and boxed columns are refused on import")
+        }
     }
 }
 
@@ -272,6 +274,7 @@ fn check_agreement(columns: &[Data], fields: &arrow_schema::Fields) -> PyResult<
             DType::I64 => 1,
             DType::F64 => 2,
             DType::Char => 3,
+            DType::Box => 4,
         })
         .expect("at least one column");
     let Some(odd) = columns.iter().position(|c| c.dtype() != widest) else {
@@ -298,6 +301,7 @@ fn arrow_name_for(dtype: DType) -> &'static str {
         DType::I64 => "Int64",
         DType::F64 => "Float64",
         DType::Char => "Utf8",
+        DType::Box => "a nested column",
     }
 }
 
@@ -651,7 +655,7 @@ pub fn export_capsules<'py>(
     py: Python<'py>,
     array: &Array,
 ) -> PyResult<(Bound<'py, PyCapsule>, Bound<'py, PyCapsule>)> {
-    if array.rank() != 1 || array.dtype() == DType::Char {
+    if array.rank() != 1 || matches!(array.dtype(), DType::Char | DType::Box) {
         return Err(JayError::new_err(format!(
             "cannot export a rank-{} {} result through Arrow yet; use \
              .tolist(), or ravel the result first",
@@ -667,7 +671,7 @@ pub fn export_capsules<'py>(
         }
         // Arrow booleans are bit-packed; ours are one byte each.
         Data::Bool(b) => Arc::new(BooleanArray::from(b.iter().map(|&v| v != 0).collect::<Vec<_>>())),
-        Data::Char(_) => unreachable!("refused above"),
+        Data::Char(_) | Data::Box(_) => unreachable!("refused above"),
     };
     let (ffi_array, ffi_schema) = to_ffi(&arrow.to_data()).map_err(arrow_err)?;
     let schema_capsule =

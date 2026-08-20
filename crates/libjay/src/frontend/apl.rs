@@ -11,7 +11,7 @@ use crate::error::{Error, Result, Span};
 use crate::frontend::{Segment, SourceParts};
 use crate::ir::Expr;
 use crate::verb::{
-    DyadOp, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
+    DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
 };
 
 /// Parse an APL program (sentences separated by newlines or `⋄`) into IR
@@ -54,6 +54,8 @@ enum OpGlyph {
     JotDot,
     /// `∘` on its own — Dyalog's `f∘g`, which libjay does not have yet.
     Jot,
+    /// `¨` — each.
+    Each,
 }
 
 impl OpGlyph {
@@ -67,14 +69,19 @@ impl OpGlyph {
             OpGlyph::Commute => '⍨',
             OpGlyph::Power => '⍣',
             OpGlyph::JotDot | OpGlyph::Jot => '∘',
+            OpGlyph::Each => '¨',
         }
     }
 }
 
 #[derive(Clone, Debug)]
 enum Tok {
-    /// A literal array: number vector or character array.
+    /// A literal array: a character array, or a value built by the lexer.
     Value(Array),
+    /// A run of adjacent numeric literals. Apart from `Value` because
+    /// vector notation spreads its numbers into separate items while a
+    /// string contributes one.
+    Nums(Array),
     /// An interpolation hole, by parameter index.
     Param(usize),
     Name(String),
@@ -97,7 +104,15 @@ struct Token {
 /// True for tokens that can end an operand (and so make the function on
 /// their right dyadic).
 fn is_operand_end(k: &Tok) -> bool {
-    matches!(k, Tok::Value(_) | Tok::Param(_) | Tok::Name(_) | Tok::RParen)
+    matches!(k, Tok::Value(_) | Tok::Nums(_) | Tok::Param(_) | Tok::Name(_) | Tok::RParen)
+}
+
+/// The array a literal token holds.
+fn literal(k: &Tok) -> Option<&Array> {
+    match k {
+        Tok::Value(a) | Tok::Nums(a) => Some(a),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +193,7 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         },
         '∊' => Prim {
             name: "∊",
-            monad: M::NotYet("enlist (monadic ∊)"),
+            monad: M::Enlist,
             dyad: D::MemberApl,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
@@ -222,7 +237,7 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         },
         '≡' => Prim {
             name: "≡",
-            monad: M::NotYet("depth (monadic ≡)"),
+            monad: M::Depth,
             dyad: D::Match,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
@@ -285,11 +300,25 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
             dyad: D::NotYet("dyadic transpose"),
             ranks: [RANK_INF, 1, RANK_INF],
         },
+        // GNU APL is APL2-flavoured here: `↑` is first and `⊃` is
+        // disclose, the opposite of the Dyalog reading.
         '↑' => Prim {
             name: "↑",
-            monad: M::NotYet("mix (monadic ↑) — nested arrays"),
+            monad: M::First,
             dyad: D::Take,
             ranks: [RANK_INF, 1, RANK_INF],
+        },
+        '⊂' => Prim {
+            name: "⊂",
+            monad: M::Enclose(Enclose::ExceptSimpleScalar),
+            dyad: D::NotYet("partitioned enclose (dyadic ⊂)"),
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '⊃' => Prim {
+            name: "⊃",
+            monad: M::Open,
+            dyad: D::NotYet("pick (dyadic ⊃)"),
+            ranks: [0, RANK_INF, RANK_INF],
         },
         '↓' => Prim {
             name: "↓",
@@ -353,6 +382,7 @@ fn op_for(ch: char) -> Option<OpGlyph> {
         '⍨' => Some(OpGlyph::Commute),
         '⍣' => Some(OpGlyph::Power),
         '∘' => Some(OpGlyph::Jot),
+        '¨' => Some(OpGlyph::Each),
         _ => None,
     }
 }
@@ -691,7 +721,7 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
     };
     let shape = if data.len() == 1 { vec![] } else { vec![data.len()] };
     let tok = Token {
-        kind: Tok::Value(Array::new(shape, data)),
+        kind: Tok::Nums(Array::new(shape, data)),
         span: Span::new(offset + start, offset + end),
     };
     Ok((tok, end))
@@ -750,7 +780,8 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
                     | OpGlyph::Commute
                     | OpGlyph::Power
                     | OpGlyph::JotDot
-                    | OpGlyph::Jot => {
+                    | OpGlyph::Jot
+                    | OpGlyph::Each => {
                         return Err(Error::parse(
                             format!("{} needs a function to its left", op.glyph()),
                             t.span,
@@ -787,6 +818,10 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
                 Verb::Windowed(Box::new(Verb::Reduce(Box::new(f))), WindowKind::Scan)
             }
             OpGlyph::Commute => Verb::Commute(Box::new(f)),
+            // Each: the function runs on the contents of every item and
+            // its result goes back into an item. A simple scalar result
+            // stays simple, which is APL's enclosure rule.
+            OpGlyph::Each => Verb::Each(Box::new(f), Enclose::ExceptSimpleScalar),
             OpGlyph::Power => {
                 let spec = match it.peek() {
                     Some(tok) if matches!(tok.kind, Tok::Func(_)) => {
@@ -795,15 +830,12 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
                             Span::merge(span, tok.span),
                         ));
                     }
-                    Some(tok) if matches!(tok.kind, Tok::Value(_)) => it.next().unwrap(),
+                    Some(tok) if literal(&tok.kind).is_some() => it.next().unwrap(),
                     _ => {
                         return Err(Error::not_yet("computed power (f⍣n)", t.span));
                     }
                 };
-                let arr = match &spec.kind {
-                    Tok::Value(a) => a,
-                    _ => unreachable!("checked above"),
-                };
+                let arr = literal(&spec.kind).expect("checked above");
                 let p = power_spec(arr, spec.span)?;
                 let f = Verb::PowerN(Box::new(f), p);
                 out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
@@ -817,7 +849,7 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
                             Span::merge(span, tok.span),
                         ));
                     }
-                    Some(tok) if matches!(tok.kind, Tok::Value(_)) => it.next().unwrap(),
+                    Some(tok) if literal(&tok.kind).is_some() => it.next().unwrap(),
                     _ => {
                         return Err(Error::parse(
                             "⍤ needs a rank specification on its right",
@@ -825,10 +857,7 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
                         ));
                     }
                 };
-                let arr = match &spec.kind {
-                    Tok::Value(a) => a,
-                    _ => unreachable!("checked above"),
-                };
+                let arr = literal(&spec.kind).expect("checked above");
                 let ranks = rank_spec(arr, spec.span)?;
                 let f = Verb::Rank(Box::new(f), ranks);
                 out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
@@ -928,27 +957,88 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<Expr>
                 }
                 start -= 2;
             }
-            k if is_operand_end(k) => {
-                return Err(Error::not_yet(
-                    "stranding (vector notation by juxtaposition)",
-                    Span::new(left.span.start, end),
-                ));
-            }
+            // Adjacent operands are vector notation, which `parse_operand`
+            // has already taken as one operand by the time we get here.
             _ => break,
         }
     }
     Err(Error::parse("syntax error", Span::new(toks[lo].span.start, toks[start - 1].span.end)))
 }
 
+/// Parse the operand ending at `hi - 1`, vector notation included.
+///
+/// Juxtaposed operands are the items of one vector: every primary
+/// contributes one item, except a run of numeric literals, whose numbers
+/// are items of their own — which is why `1 2 (3 4)` has three items and
+/// `'ab' 'cd'` has two.
+fn parse_operand(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Expr, usize)> {
+    let (first, mut start) = parse_primary(toks, lo, hi, hint)?;
+    if start == lo || !is_operand_end(&toks[start - 1].kind) {
+        return Ok((first, start));
+    }
+    let mut items: Vec<Expr> = Vec::new();
+    let mut cur = first;
+    loop {
+        push_items(&mut items, cur, &toks[start]);
+        if start == lo || !is_operand_end(&toks[start - 1].kind) {
+            break;
+        }
+        let (e, s) = parse_primary(toks, lo, start, toks[start - 1].span)?;
+        cur = e;
+        start = s;
+    }
+    let span = Span::new(toks[start].span.start, toks[hi - 1].span.end);
+    let mut it = items.into_iter();
+    let last = it.next().expect("a strand has at least one item");
+    let mut acc = Expr::Monad { verb: strand_seed(), y: Box::new(last), span };
+    for item in it {
+        acc = Expr::Dyad { verb: strand_verb(), x: Box::new(item), y: Box::new(acc), span };
+    }
+    Ok((acc, start))
+}
+
+/// The items one primary contributes to a strand, appended right to left.
+fn push_items(items: &mut Vec<Expr>, e: Expr, tok: &Token) {
+    if let Tok::Nums(a) = &tok.kind {
+        if a.rank() > 0 {
+            for i in (0..a.count()).rev() {
+                let atom = Array { shape: Vec::new(), data: a.data.slice(i, i + 1) };
+                items.push(Expr::Const(atom, tok.span));
+            }
+            return;
+        }
+    }
+    items.push(e);
+}
+
+/// `,⊂y`: the one-item vector a single operand makes — flat when the
+/// operand is a simple scalar, nested when it is anything else.
+fn strand_seed() -> Verb {
+    Verb::Atop(
+        Box::new(Verb::Prim(prim_for(',', 0).expect("`,` is a primitive"))),
+        Box::new(Verb::Prim(prim_for('⊂', 0).expect("`⊂` is a primitive"))),
+    )
+}
+
+/// `x` prepended to the strand `y` as one more item.
+fn strand_verb() -> Verb {
+    Verb::Prim(Prim {
+        name: "(vector notation)",
+        monad: MonadOp::None,
+        dyad: DyadOp::Strand,
+        ranks: [RANK_INF; 3],
+    })
+}
+
 /// Parse the single operand ending at `hi - 1`. Returns the expression and
 /// the index of its first token.
-fn parse_operand(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Expr, usize)> {
+fn parse_primary(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Expr, usize)> {
     if hi == lo {
         return Err(Error::parse("empty parentheses", hint));
     }
     let t = &toks[hi - 1];
     match &t.kind {
-        Tok::Value(a) => Ok((Expr::Const(a.clone(), t.span), hi - 1)),
+        Tok::Value(a) | Tok::Nums(a) => Ok((Expr::Const(a.clone(), t.span), hi - 1)),
         Tok::Param(i) => Ok((Expr::Param(*i, t.span), hi - 1)),
         Tok::Name(n) => Ok((Expr::Name(n.clone(), t.span), hi - 1)),
         Tok::RParen => {
@@ -1212,8 +1302,8 @@ mod tests {
     #[case('⊥', MonadOp::None, DyadOp::Decode)]
     #[case('⊤', MonadOp::None, DyadOp::Encode)]
     #[case('≢', MonadOp::Tally, DyadOp::NotMatch)]
-    #[case('≡', MonadOp::NotYet("depth (monadic ≡)"), DyadOp::Match)]
-    #[case('∊', MonadOp::NotYet("enlist (monadic ∊)"), DyadOp::MemberApl)]
+    #[case('≡', MonadOp::Depth, DyadOp::Match)]
+    #[case('∊', MonadOp::Enlist, DyadOp::MemberApl)]
     #[case('∪', MonadOp::Nub, DyadOp::NotYet("union (dyadic ∪)"))]
     #[case('∧', MonadOp::None, DyadOp::Scalar(ScalarDyad::Lcm))]
     #[case('∨', MonadOp::None, DyadOp::Scalar(ScalarDyad::Gcd))]
@@ -1224,7 +1314,9 @@ mod tests {
     #[case('⍒', MonadOp::GradeDown { origin: 1 }, DyadOp::NotYet("dyadic grade (collation)"))]
     #[case('⊢', MonadOp::Same, DyadOp::Right)]
     #[case('⊣', MonadOp::Same, DyadOp::Left)]
-    #[case('↑', MonadOp::NotYet("mix (monadic ↑) — nested arrays"), DyadOp::Take)]
+    #[case('↑', MonadOp::First, DyadOp::Take)]
+    #[case('⊂', MonadOp::Enclose(Enclose::ExceptSimpleScalar), DyadOp::NotYet("partitioned enclose (dyadic ⊂)"))]
+    #[case('⊃', MonadOp::Open, DyadOp::NotYet("pick (dyadic ⊃)"))]
     #[case('↓', MonadOp::NotYet("split (monadic ↓) — nested arrays"), DyadOp::Drop)]
     fn primitive_meanings(#[case] glyph: char, #[case] monad: MonadOp, #[case] dyad: DyadOp) {
         let src = format!("{glyph}1");
@@ -1604,22 +1696,29 @@ mod tests {
 
     // --- syntax errors --------------------------------------------------
 
-    #[test]
-    fn stranding_is_not_yet() {
-        let e = err("(2 3)(4 5)");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("stranding"), "{}", e.msg);
-        assert_eq!(e.span, Some(Span::new(4, 10)));
-    }
-
+    /// Juxtaposition is vector notation: the operands become the items of
+    /// one vector, and the whole strand is a single operand.
     #[rstest]
-    #[case("2 x")]
-    #[case("x y")]
-    #[case("2(3)")]
-    fn other_juxtapositions_are_stranding_too(#[case] src: &str) {
-        let e = err(src);
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("stranding"), "{}", e.msg);
+    #[case("(2 3)(4 5)", 2)]
+    #[case("2 x", 2)]
+    #[case("x y", 2)]
+    #[case("2(3)", 2)]
+    #[case("1 2 (3 4)", 3)]
+    #[case("'ab' 'cd' 'ef'", 3)]
+    fn juxtaposition_is_vector_notation(#[case] src: &str, #[case] items: usize) {
+        // The strand is built right to left: one seeding monad and one
+        // dyad per item after the first.
+        let mut e = &one(src);
+        for _ in 0..items - 1 {
+            match e {
+                Expr::Dyad { verb, y, .. } => {
+                    assert_eq!(verb.name(), "(vector notation)", "{src}");
+                    e = y.as_ref();
+                }
+                other => panic!("{src}: expected a strand, got {other:?}"),
+            }
+        }
+        assert!(matches!(e, Expr::Monad { .. }), "{src}: {e:?}");
     }
 
     #[rstest]

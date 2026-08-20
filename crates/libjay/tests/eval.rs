@@ -206,9 +206,9 @@ fn j_undefined_name() {
 
 #[test]
 fn j_not_yet_is_a_promise_not_a_wall() {
-    let e = err(Lang::J, "< 5");
+    let e = err(Lang::J, "L. 1;2");
     assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("boxed"));
+    assert!(e.msg.contains("level of"));
 }
 
 #[test]

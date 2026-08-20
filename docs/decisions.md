@@ -122,3 +122,22 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   crates/libjay/README.md (crates.io page); the "not a DataFrame library"
   expectation-setting lives in the Python-facing page, not the root opening
   (owner, superseding the original §1.2 placement).
+- 2026-08-20 — Boxes (phase 8 core): `DType::Box`, `Data::Box(Buf<Array>)`;
+  structural verbs work on boxes through the generic engine; J `< > ;` with
+  the oracle-verified link rule (`x;y` = `(<x),y` iff y boxed), raze with
+  fill, box fill `a:`, each as `u&.>`; APL2 semantics per GNU APL (`⊃`
+  disclose, `↑` first — opposite of Dyalog), `⊂ ¨ ∊ ≡` and stranding
+  (numeric-literal runs stay flat). One `Enclose` enum carries the J/APL
+  split. J box drawing reproduced exactly (differentially tested against
+  jconsole, +78 display expressions). Python: ragged/mixed lists box, boxes
+  convert to nested Python values; C ABI declines boxed results for now.
+  Named gaps (deep grade ordering, general `&.`, APL dyadic `⊂⊃`, monadic
+  `↓`, mixed simple arrays) in docs/coverage.md.
+- 2026-08-20 — Fusion across assignments: the pass moves a named chain into
+  its consumers when every use lands inside one kernel (decided by re-running
+  the real chain analysis), hoisting the value's reduced leaves into
+  sentences of their own — the two-phase kernel std needs. The elided
+  assignment leaves a `Yield::Tally` guard that raises exactly the errors the
+  original would, in order. Per-block let slots dedupe repeated subtrees;
+  structurally equal leaves share one input. Result: both std spellings
+  compile to numba's two passes (18.1/21.0 ms vs numba 17.6 at 20M×8thr).

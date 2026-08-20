@@ -125,6 +125,15 @@ pub enum ScalarDyad {
     Binomial,
 }
 
+/// How a value is put into a box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Enclose {
+    /// J `<`: every value becomes a box.
+    Always,
+    /// APL `⊂`: a simple scalar is its own enclosure, so `⊂5` is `5`.
+    ExceptSimpleScalar,
+}
+
 /// Monadic meaning of a primitive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MonadOp {
@@ -176,6 +185,22 @@ pub enum MonadOp {
     /// APL `⍪`: the argument as a matrix — one row per item, that item's
     /// elements ravelled. A scalar becomes 1×1, a vector n×1.
     TableOf,
+    /// J `<` / APL `⊂`: the argument as one box.
+    Enclose(Enclose),
+    /// J `>` / APL `⊃`: open a box (rank 0, so the frame reassembles the
+    /// contents, filling where their shapes differ). A non-box opens to
+    /// itself.
+    Open,
+    /// J `;`: raze — the items of the opened boxes, catenated.
+    Raze,
+    /// APL `↑`: the first element, disclosed; the type's fill when there
+    /// is none.
+    First,
+    /// APL `∊`: enlist — every leaf element, in ravel order, as a vector.
+    Enlist,
+    /// APL `≡`: depth — 0 for a simple scalar, 1 for a simple array, one
+    /// more than the deepest content for a box.
+    Depth,
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -230,6 +255,11 @@ pub enum DyadOp {
     Encode,
     /// `x ,: y`: the two arguments as the items of a new leading axis.
     Laminate,
+    /// J `;`: link — `(<x)` before y, which is taken as it is when it is
+    /// already boxed and boxed when it is not.
+    Link,
+    /// APL vector notation: x is one more item in front of the strand y.
+    Strand,
     NotYet(&'static str),
     None,
 }
@@ -306,6 +336,9 @@ pub enum Verb {
     BondLeft(Array, Box<Verb>),
     /// `u&n`: the noun bonded as the right argument — monad `y u n`.
     BondRight(Box<Verb>, Array),
+    /// J `u&.>` and APL `u¨`: open each box, apply u, put the result back
+    /// in a box. Cell rank 0 on every side, so the frames pair as usual.
+    Each(Box<Verb>, Enclose),
 }
 
 impl Verb {
@@ -317,6 +350,7 @@ impl Verb {
             // `x u\ y` takes one window size per application, so the left
             // cell is an atom: a list of sizes frames the result, as in J.
             Verb::Windowed(_, WindowKind::Prefix) => [RANK_INF, 0, RANK_INF],
+            Verb::Each(..) => [0, 0, 0],
             _ => [RANK_INF, RANK_INF, RANK_INF],
         }
     }
@@ -339,6 +373,8 @@ impl Verb {
             Verb::Compose(f, g) => format!("({}&:{})", f.name(), g.name()),
             Verb::BondLeft(_, v) => format!("(n&{})", v.name()),
             Verb::BondRight(v, _) => format!("({}&n)", v.name()),
+            Verb::Each(v, Enclose::Always) => format!("({}&.>)", v.name()),
+            Verb::Each(v, _) => format!("({}¨)", v.name()),
         }
     }
 
@@ -359,7 +395,7 @@ impl Verb {
             | Verb::Hook(g, h)
             | Verb::Atop(g, h)
             | Verb::Compose(g, h) => g.is_pure() && h.is_pure(),
-            Verb::BondLeft(_, v) | Verb::BondRight(v, _) => v.is_pure(),
+            Verb::BondLeft(_, v) | Verb::BondRight(v, _) | Verb::Each(v, _) => v.is_pure(),
         }
     }
 
@@ -422,13 +458,23 @@ impl Verb {
             }
             Verb::BondLeft(m, v) => v.dyad(m, y, ctx, span),
             Verb::BondRight(v, n) => v.dyad(y, n, ctx, span),
+            Verb::Each(u, rule) => {
+                let n = y.count();
+                let cells = each_cell(n, n, self.is_pure(), ctx, |i, c| {
+                    let opened = open_cell(&atom(y, i));
+                    Ok(enclose(&u.monad(&opened, c, span)?, *rule))
+                })?;
+                assemble(&y.shape, cells, span)
+            }
         }
     }
 
     /// Full dyadic application including rank/frame/agreement machinery.
     pub fn dyad(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         match self {
-            Verb::Prim(_) | Verb::Rank(_, _) => self.dyad_ranked(x, y, ctx, span),
+            Verb::Prim(_) | Verb::Rank(_, _) | Verb::Each(..) => {
+                self.dyad_ranked(x, y, ctx, span)
+            }
             // `x u\ y` needs the frame machinery: its left cell is an atom.
             Verb::Windowed(_, WindowKind::Prefix) => self.dyad_ranked(x, y, ctx, span),
             Verb::Windowed(_, WindowKind::Suffix) => {
@@ -503,6 +549,10 @@ impl Verb {
             Verb::Prim(p) => dyad_op(p, x, y, ctx.cfg.agreement, span),
             Verb::Rank(v, _) => v.dyad(x, y, ctx, span),
             Verb::Windowed(v, _) => infix(v, x, y, ctx, span),
+            Verb::Each(u, rule) => {
+                let r = u.dyad(&open_cell(x), &open_cell(y), ctx, span)?;
+                Ok(enclose(&r, *rule))
+            }
             _ => Err(Error::internal("dyad_cell on a verb without cell ranks")),
         }
     }
@@ -609,6 +659,7 @@ fn push_elem(dst: &mut Data, src: &Data, i: usize) {
         (Data::I64(a), Data::I64(b)) => a.push(b[i]),
         (Data::F64(a), Data::F64(b)) => a.push(b[i]),
         (Data::Char(a), Data::Char(b)) => a.push(b[i]),
+        (Data::Box(a), Data::Box(b)) => a.push(b[i].clone()),
         _ => debug_assert!(false, "push_elem across dtypes"),
     }
 }
@@ -721,11 +772,13 @@ fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
     let mut dt = cells[0].dtype();
     for c in &cells[1..] {
         dt = DType::promote(dt, c.dtype()).ok_or_else(|| {
-            Error::new(
-                ErrorKind::Type,
-                "cannot frame character and numeric results into one array",
-                Some(span),
-            )
+            let boxed = dt == DType::Box || c.dtype() == DType::Box;
+            let what = if boxed {
+                "cannot frame boxed and unboxed results into one array"
+            } else {
+                "cannot frame character and numeric results into one array"
+            };
+            Error::new(ErrorKind::Type, what, Some(span))
         })?;
     }
     let widen = |c: &Array| -> Result<Data> {
@@ -792,10 +845,202 @@ fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
     Ok(Array::new(shape, data))
 }
 
+// ------------------------------------------------------------------ boxes
+
+/// Element `i` of `a` as a rank-0 array — the cell an operation of rank 0
+/// sees.
+fn atom(a: &Array, i: usize) -> Array {
+    Array { shape: Vec::new(), data: a.data.slice(i, i + 1) }
+}
+
+/// `< y` / `⊂ y`.
+fn enclose(y: &Array, rule: Enclose) -> Array {
+    if rule == Enclose::ExceptSimpleScalar && y.rank() == 0 && y.dtype() != DType::Box {
+        return y.clone();
+    }
+    Array::boxed(y.clone())
+}
+
+/// One rank-0 cell opened: a box gives up its contents, anything else is
+/// its own contents already.
+fn open_cell(y: &Array) -> Array {
+    match &y.data {
+        Data::Box(v) if !v.is_empty() => v[0].clone(),
+        _ => y.clone(),
+    }
+}
+
+/// `↑ y` (APL): the first element, disclosed. An empty argument has none,
+/// so its fill stands in.
+fn first(y: &Array) -> Array {
+    if y.count() == 0 {
+        let mut d = Data::empty(y.dtype());
+        d.push_fill();
+        return open_cell(&Array { shape: Vec::new(), data: d });
+    }
+    open_cell(&atom(y, 0))
+}
+
+/// `≡ y` (APL).
+fn depth(y: &Array) -> i64 {
+    match &y.data {
+        Data::Box(v) => 1 + v.iter().map(depth).max().unwrap_or(0),
+        _ => i64::from(y.rank() > 0),
+    }
+}
+
+/// Every leaf array inside `a`, in ravel order.
+fn leaves(a: &Array, out: &mut Vec<Array>) {
+    match &a.data {
+        Data::Box(v) => {
+            for b in v.iter() {
+                leaves(b, out);
+            }
+        }
+        _ => out.push(a.clone()),
+    }
+}
+
+/// `∊ y` (APL): every leaf element as one vector.
+fn enlist(y: &Array, span: Span) -> Result<Array> {
+    let mut parts = Vec::new();
+    leaves(y, &mut parts);
+    // An empty leaf contributes no elements, so it does not decide the
+    // type either.
+    let mut dt = None;
+    for p in parts.iter().filter(|p| p.count() > 0) {
+        dt = Some(match dt {
+            None => p.dtype(),
+            Some(t) => DType::promote(t, p.dtype()).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Type,
+                    "cannot enlist character and numeric data into one vector",
+                    Some(span),
+                )
+            })?,
+        });
+    }
+    let dt = dt.unwrap_or(DType::I64);
+    let mut data = Data::empty(dt);
+    for p in &parts {
+        let cast = p.data.cast(dt).ok_or_else(|| Error::internal("unsupported widening in enlist"))?;
+        data.extend_from(&cast);
+    }
+    Ok(Array::new(vec![data.len()], data))
+}
+
+/// A scalar repeated over `shape` — how a catenation spreads an atom.
+fn spread(a: &Array, shape: &[usize]) -> Array {
+    let n: usize = shape.iter().product();
+    let mut data = Data::empty(a.dtype());
+    for _ in 0..n {
+        push_elem(&mut data, &a.data, 0);
+    }
+    Array::new(shape.to_vec(), data)
+}
+
+/// Per-axis maximum of two cell shapes, aligned at their trailing axes —
+/// the same alignment framing uses.
+fn wider_shape(a: &[usize], b: &[usize]) -> Vec<usize> {
+    let r = a.len().max(b.len());
+    let pad = |s: &[usize]| {
+        let mut v = vec![1usize; r - s.len()];
+        v.extend_from_slice(s);
+        v
+    };
+    let (pa, pb) = (pad(a), pad(b));
+    (0..r).map(|k| pa[k].max(pb[k])).collect()
+}
+
+/// `; y` (J): the items of the opened boxes, one after another. A scalar
+/// among them spreads over the common item shape, as catenation does; the
+/// rest are padded with fill, which is what makes raze accept items that
+/// plain catenation would refuse.
+fn raze(y: &Array, span: Span) -> Result<Array> {
+    let opened: Vec<Array> = (0..y.count()).map(|i| open_cell(&atom(y, i))).collect();
+    let mut common: Option<Vec<usize>> = None;
+    for a in opened.iter().filter(|a| a.rank() > 0) {
+        common = Some(match common {
+            None => a.shape[1..].to_vec(),
+            Some(c) => wider_shape(&c, &a.shape[1..]),
+        });
+    }
+    let common = common.unwrap_or_default();
+    let mut cells: Vec<Array> = Vec::new();
+    for a in &opened {
+        if a.rank() == 0 {
+            cells.push(spread(a, &common));
+            continue;
+        }
+        for i in 0..a.items() {
+            cells.push(a.item(i));
+        }
+    }
+    if cells.is_empty() {
+        return Ok(Array::new(vec![0], Data::empty(DType::I64)));
+    }
+    let n = cells.len();
+    assemble(&[n], cells, span)
+}
+
+/// `x ; y` (J): x boxed, then y — which joins as it is when it is already
+/// boxed and boxed when it is not.
+fn link(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let head = Array::boxed(x.clone());
+    let tail = if y.dtype() == DType::Box { y.clone() } else { Array::boxed(y.clone()) };
+    catenate(&head, &tail, true, span)
+}
+
+/// Every item of `y` boxed; an already boxed array is left alone.
+fn box_items(y: &Array) -> Array {
+    if y.dtype() == DType::Box {
+        return y.clone();
+    }
+    let n = y.items();
+    let boxes: Vec<Array> = (0..n).map(|i| item_or_self(y, i)).collect();
+    Array::new(vec![n], Data::Box(boxes.into()))
+}
+
+/// APL vector notation: `x` becomes one more item in front of the strand
+/// `y`. Simple scalars stay simple, so `1 2 3` is a plain integer vector
+/// and only a strand holding something else becomes nested.
+fn strand(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let item = enclose(x, Enclose::ExceptSimpleScalar);
+    let one = |a: &Array| Array::new(vec![1], a.data.clone());
+    if item.dtype() != DType::Box && y.dtype() != DType::Box {
+        if DType::promote(item.dtype(), y.dtype()).is_none() {
+            return Err(Error::not_yet(
+                "a vector mixing characters and numbers (simple mixed arrays)",
+                span,
+            ));
+        }
+        return catenate(&one(&item), y, true, span);
+    }
+    let head = if item.dtype() == DType::Box { item } else { Array::boxed(item) };
+    catenate(&one(&head), &box_items(y), true, span)
+}
+
 // -------------------------------------------------- elementwise operations
 
 fn char_arith(span: Span) -> Error {
     Error::new(ErrorKind::Type, "cannot do arithmetic on characters", Some(span))
+}
+
+fn box_arith(span: Span) -> Error {
+    Error::new(
+        ErrorKind::Type,
+        "cannot do arithmetic on boxed values; open them first (J `>`, APL `⊃`)",
+        Some(span),
+    )
+}
+
+/// The complaint an operation makes about an element type it cannot work
+/// on at all.
+fn wrong_type(d: DType, span: Span) -> Error {
+    match d {
+        DType::Box => box_arith(span),
+        _ => char_arith(span),
+    }
 }
 
 /// Borrow numeric data as i64, widening a boolean buffer into `tmp`.
@@ -829,14 +1074,17 @@ fn borrow_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>) -> &'a [f64] {
 
 /// Numeric data as f64, borrowed when it already is that.
 fn as_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>, span: Span) -> Result<&'a [f64]> {
-    if d.dtype() == DType::Char {
-        return Err(char_arith(span));
+    if !d.dtype().is_numeric() {
+        return Err(wrong_type(d.dtype(), span));
     }
     Ok(borrow_f64(d, tmp))
 }
 
 /// The type an arithmetic pair computes in. Booleans count as integers.
 fn arith_type(a: DType, b: DType, span: Span) -> Result<DType> {
+    if a == DType::Box || b == DType::Box {
+        return Err(box_arith(span));
+    }
     match DType::promote(a, b) {
         Some(DType::Char) => Err(char_arith(span)),
         None => Err(Error::new(
@@ -1368,6 +1616,29 @@ fn compare_data(
     use ScalarDyad::*;
     let (dx, dy) = (x.dtype(), y.dtype());
     let equality = matches!(op, Eq | Ne);
+    if dx == DType::Box || dy == DType::Box {
+        // Boxes have no order — J refuses `<` on them — but they do have
+        // equality, which compares their contents.
+        if !equality {
+            return Err(box_arith(span));
+        }
+        let (Data::Box(a), Data::Box(b)) = (x, y) else {
+            return Err(Error::new(
+                ErrorKind::Type,
+                "cannot compare boxed and unboxed values",
+                Some(span),
+            ));
+        };
+        let (out, _) = par::fill(n, |start, part: &mut [u8]| {
+            for (k, slot) in part.iter_mut().enumerate() {
+                let i = start + k;
+                let e = arrays_match(&a[xoff + i / xdiv], &b[yoff + i / ydiv]);
+                *slot = u8::from(if op == Eq { e } else { !e });
+            }
+            true
+        });
+        return Ok(Data::Bool(out.into()));
+    }
     if dx == DType::Char || dy == DType::Char {
         if dx != dy {
             // J compares mixed types as unequal rather than failing; libjay
@@ -1585,7 +1856,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
     let data = match op {
         Conj => match d {
             // Identity on reals; conjugation matters once complex arrives.
-            Data::Char(_) => return Err(char_arith(span)),
+            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
             _ => d.clone(),
         },
         Neg => match d {
@@ -1595,7 +1866,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                 None => Data::F64(par::map(v, |&x| -(x as f64)).into()),
             },
             Data::F64(v) => Data::F64(par::map(v, |&x| -x).into()),
-            Data::Char(_) => return Err(char_arith(span)),
+            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
         },
         Signum => match d {
             Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
@@ -1604,7 +1875,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
             Data::F64(v) => Data::F64(
                 par::map(v, |&x| if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }).into(),
             ),
-            Data::Char(_) => return Err(char_arith(span)),
+            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
         },
         Recip => {
             // 1 % 0 is infinity, the J rule. APL's ÷0 is a domain error; a
@@ -1631,7 +1902,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                 None => Data::F64(par::map(v, |&x| (x as f64).abs()).into()),
             },
             Data::F64(v) => Data::F64(par::map(v, |&x| x.abs()).into()),
-            Data::Char(_) => return Err(char_arith(span)),
+            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
         },
         Floor | Ceil => match d {
             Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
@@ -1647,7 +1918,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                     None => Data::F64(par::map(v, |&x| round(x)).into()),
                 }
             }
-            Data::Char(_) => return Err(char_arith(span)),
+            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
         },
         Inc | Dec => {
             let step = if op == Inc { 1i64 } else { -1 };
@@ -1658,7 +1929,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                     None => Data::F64(par::map(v, |&x| x as f64 + step as f64).into()),
                 },
                 Data::F64(v) => Data::F64(par::map(v, |&x| x + step as f64).into()),
-                Data::Char(_) => return Err(char_arith(span)),
+                Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
             }
         }
         Double | Square => match d {
@@ -1681,7 +1952,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
             Data::F64(v) => {
                 Data::F64(par::map(v, |&x| if op == Double { x + x } else { x * x }).into())
             }
-            Data::Char(_) => return Err(char_arith(span)),
+            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
         },
         Halve => {
             let v = as_f64(d, &mut tmp, span)?;
@@ -1710,7 +1981,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                 None => Data::F64(par::map(v, |&x| 1.0 - x as f64).into()),
             },
             Data::F64(v) => Data::F64(par::map(v, |&x| 1.0 - x).into()),
-            Data::Char(_) => return Err(char_arith(span)),
+            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
         },
         Not => {
             let bad = || Error::domain("logical negation needs values of 0 or 1", span);
@@ -1738,7 +2009,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                     .ok_or_else(bad)?;
                     Data::Bool(out.into())
                 }
-                Data::Char(_) => return Err(bad()),
+                Data::Char(_) | Data::Box(_) => return Err(bad()),
             }
         }
     };
@@ -1916,6 +2187,8 @@ fn elem_key(d: &Data, i: usize) -> u64 {
             if x == 0.0 { 0 } else { x.to_bits() }
         }
         Data::Char(v) => v[i] as u64,
+        // Boxes have no cheap key; their callers compare them by content.
+        Data::Box(_) => 0,
     }
 }
 
@@ -1930,6 +2203,8 @@ fn num_key(d: &Data, i: usize) -> u64 {
             if x == 0.0 { 0.0f64.to_bits() } else { x.to_bits() }
         }
         Data::Char(v) => v[i] as u64,
+        // As in `elem_key`: never reached for boxed data.
+        Data::Box(_) => 0,
     }
 }
 
@@ -1940,12 +2215,22 @@ fn nub(y: &Array) -> Array {
     }
     let n = y.items();
     let m = y.item_size();
-    let mut seen: HashSet<Vec<u64>> = HashSet::with_capacity(n);
     let mut keep = Vec::new();
-    for i in 0..n {
-        let key: Vec<u64> = (0..m).map(|k| elem_key(&y.data, i * m + k)).collect();
-        if seen.insert(key) {
-            keep.push(i);
+    if y.dtype() == DType::Box {
+        // Boxed items are compared by content, one against the ones kept
+        // so far: there is no key to hash.
+        for i in 0..n {
+            if !keep.iter().any(|&j| arrays_match(&y.item(i), &y.item(j))) {
+                keep.push(i);
+            }
+        }
+    } else {
+        let mut seen: HashSet<Vec<u64>> = HashSet::with_capacity(n);
+        for i in 0..n {
+            let key: Vec<u64> = (0..m).map(|k| elem_key(&y.data, i * m + k)).collect();
+            if seen.insert(key) {
+                keep.push(i);
+            }
         }
     }
     let mut data = Data::empty(y.dtype());
@@ -1970,6 +2255,8 @@ fn cmp_items(d: &Data, i: usize, j: usize, m: usize) -> std::cmp::Ordering {
         Data::I64(v) => v[a + k].cmp(&v[b + k]),
         Data::F64(v) => v[a + k].partial_cmp(&v[b + k]).unwrap_or(Equal),
         Data::Char(v) => v[a + k].cmp(&v[b + k]),
+        // Grading a boxed array is refused before it gets here.
+        Data::Box(_) => Equal,
     };
     (0..m).map(ord).find(|o| *o != Equal).unwrap_or(Equal)
 }
@@ -2007,7 +2294,17 @@ fn select_items(y: &Array, order: &[usize]) -> Array {
 }
 
 /// `x /: y` / `x \: y`: x's items reordered by the grade of y's items.
+/// Ordering boxes needs J's total array ordering, which libjay does not
+/// implement yet; sorting boxed items BY something else works.
+fn no_grading_boxes(y: &Array, span: Span) -> Result<()> {
+    if y.dtype() == DType::Box {
+        return Err(Error::not_yet("grading boxed arrays (the total array ordering)", span));
+    }
+    Ok(())
+}
+
 fn grade_select(x: &Array, y: &Array, down: bool, span: Span) -> Result<Array> {
+    no_grading_boxes(y, span)?;
     let order = grade_order(y, down);
     if x.items() != order.len() {
         return Err(Error::new(
@@ -2031,6 +2328,14 @@ fn grade_select(x: &Array, y: &Array, down: bool, span: Span) -> Result<Array> {
 fn arrays_match(x: &Array, y: &Array) -> bool {
     if x.shape != y.shape {
         return false;
+    }
+    // Two empty arrays of the same shape match whatever their types are,
+    // which is what both references answer for `'' -: i. 0`.
+    if x.count() == 0 {
+        return true;
+    }
+    if let (Data::Box(a), Data::Box(b)) = (&x.data, &y.data) {
+        return a.iter().zip(b.iter()).all(|(p, q)| arrays_match(p, q));
     }
     let (dx, dy) = (x.dtype(), y.dtype());
     match DType::promote(dx, dy) {
@@ -2078,6 +2383,17 @@ fn member_j(x: &Array, y: &Array) -> Array {
 /// `x ∊ y`: for every element of x, does that value occur anywhere in y?
 fn member_apl(x: &Array, y: &Array) -> Array {
     let n = x.count();
+    if x.dtype() == DType::Box || y.dtype() == DType::Box {
+        // The elements are whole arrays, so they are compared by content;
+        // a box never equals a plain number or character.
+        let out: Vec<u8> = (0..n)
+            .map(|i| {
+                let e = atom(x, i);
+                u8::from((0..y.count()).any(|j| arrays_match(&e, &atom(y, j))))
+            })
+            .collect();
+        return Array::new(x.shape.clone(), Data::Bool(out.into()));
+    }
     if (x.dtype() == DType::Char) != (y.dtype() == DType::Char) {
         return Array::new(x.shape.clone(), Data::Bool(vec![0u8; n].into()));
     }
@@ -2166,11 +2482,13 @@ fn catenate(x: &Array, y: &Array, leading: bool, span: Span) -> Result<Array> {
         }
     }
     let dt = DType::promote(xa.dtype(), ya.dtype()).ok_or_else(|| {
-        Error::new(
-            ErrorKind::Type,
-            "cannot catenate character and numeric data",
-            Some(span),
-        )
+        let boxed = xa.dtype() == DType::Box || ya.dtype() == DType::Box;
+        let what = if boxed {
+            "cannot catenate boxed and unboxed data; box the other side first"
+        } else {
+            "cannot catenate character and numeric data"
+        };
+        Error::new(ErrorKind::Type, what, Some(span))
     })?;
     let widen = |a: &Array| -> Result<Data> {
         if a.dtype() == dt {
@@ -2249,6 +2567,18 @@ fn format_chars(y: &Array, opts: &FmtOpts) -> Array {
         return Array::new(y.shape.clone(), Data::empty(DType::Char));
     }
     let text = crate::fmt::format_array(y, opts);
+    if y.dtype() == DType::Box {
+        // A fenced box (J) takes several lines per row of cells, so the
+        // display's own rows and columns become the last two axes of the
+        // result. A spaced one (APL) still prints one line per row, and
+        // keeps the plain rule below.
+        let lines = text.lines().filter(|l| !l.is_empty()).count();
+        let rows: usize =
+            if y.rank() == 0 { 1 } else { y.shape[..y.rank() - 1].iter().product() };
+        if lines != rows {
+            return text_planes(&text, &y.shape[..y.rank().saturating_sub(2)]);
+        }
+    }
     if y.rank() < 2 {
         let chars: Vec<char> = text.chars().collect();
         return Array::new(vec![chars.len()], Data::Char(chars.into()));
@@ -2267,6 +2597,24 @@ fn format_chars(y: &Array, opts: &FmtOpts) -> Array {
     let mut shape = y.shape[..y.rank() - 1].to_vec();
     shape.push(width);
     debug_assert_eq!(lines.len(), shape[..shape.len() - 1].iter().product::<usize>());
+    Array::new(shape, Data::Char(chars.into()))
+}
+
+/// A multi-line display as a character array: the frame, then the lines of
+/// one plane, then their common width.
+fn text_planes(text: &str, frame: &[usize]) -> Array {
+    let lines: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
+    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let planes: usize = frame.iter().product::<usize>().max(1);
+    let per = lines.len() / planes;
+    let mut chars: Vec<char> = Vec::with_capacity(lines.len() * width);
+    for line in &lines {
+        chars.extend(line.chars());
+        chars.resize(chars.len() + width - line.chars().count(), ' ');
+    }
+    let mut shape = frame.to_vec();
+    shape.push(per);
+    shape.push(width);
     Array::new(shape, Data::Char(chars.into()))
 }
 
@@ -2472,6 +2820,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Reverse => Ok(reverse(y)),
         MonadOp::Nub => Ok(nub(y)),
         MonadOp::GradeUp { origin } | MonadOp::GradeDown { origin } => {
+            no_grading_boxes(y, span)?;
             let down = matches!(p.monad, MonadOp::GradeDown { .. });
             let order = grade_order(y, down);
             Ok(Array::from_i64(order.iter().map(|&i| origin + i as i64).collect()))
@@ -2504,6 +2853,12 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             Ok(Array::new(shape, y.data.clone()))
         }
         MonadOp::TableOf => Ok(table_of(y)),
+        MonadOp::Enclose(rule) => Ok(enclose(y, rule)),
+        MonadOp::Open => Ok(open_cell(y)),
+        MonadOp::Raze => raze(y, span),
+        MonadOp::First => Ok(first(y)),
+        MonadOp::Enlist => enlist(y, span),
+        MonadOp::Depth => Ok(Array::scalar_i64(depth(y))),
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         MonadOp::None => {
             Err(Error::domain(format!("{} has no monadic meaning", p.name), span))
@@ -2683,6 +3038,8 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, mode: Agreement, span: Span) -> Resul
         DyadOp::Decode => decode(Some(x), y, span),
         DyadOp::Encode => encode(x, y, span),
         DyadOp::Laminate => laminate(x, y, span),
+        DyadOp::Link => link(x, y, span),
+        DyadOp::Strand => strand(x, y, span),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -2881,7 +3238,7 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
             let widened = par::map(v, |&b| b as i64);
             Some(Data::I64(fold_i64(op, &widened, n, m)?.into()))
         }
-        Data::Char(_) => None,
+        Data::Char(_) | Data::Box(_) => None,
     }
 }
 
@@ -3070,7 +3427,7 @@ fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Optio
         Data::F64(v) => Some(Data::F64(scan_f64(op, v, n, m, back)?.into())),
         Data::I64(v) => Some(ints(v)),
         Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
-        Data::Char(_) => None,
+        Data::Char(_) | Data::Box(_) => None,
     }
 }
 
@@ -3265,7 +3622,7 @@ fn window_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, w: usize) -> Optio
         Data::F64(v) => Some(Data::F64(window_f64(op, v, n, m, w)?.into())),
         Data::I64(v) => Some(ints(v)),
         Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
-        Data::Char(_) => None,
+        Data::Char(_) | Data::Box(_) => None,
     }
 }
 
