@@ -43,6 +43,16 @@ test = [
     "polars>=1.0",
     "pandas>=2.2",
 ]
+# The benchmark rivals (bench/): never runtime dependencies.
+bench = [
+    "numpy>=1.23",
+    "polars>=1.0",
+    # Intel-mac numba wheels end at 0.61 (llvmlite 0.44 was the last with
+    # x86_64 macOS wheels); everywhere else the latest is fine. numba also
+    # trails new Python releases, hence the interpreter ceiling.
+    "numba<0.62; platform_system == 'Darwin' and platform_machine == 'x86_64' and python_version < '3.13'",
+    "numba>=0.60; (platform_system != 'Darwin' or platform_machine != 'x86_64') and python_version < '3.14'",
+]
 
 [project.urls]
 Homepage = "https://github.com/amyodov/libjay"

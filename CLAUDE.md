@@ -165,9 +165,10 @@ Choices made during implementation, with reasoning. No entry = still open.
   no runtime deps, and dev/test deps deliberately float so CI tests against
   the polars/pyarrow users actually install; revisit if upstream churn makes
   CI flaky (then: locked default + scheduled latest job).
-- 2026-08-20 — Benchmarks run in .venv-bench (Python 3.12): numba wheels for
-  Intel macs stop at numba 0.61/llvmlite 0.44, so the bench venv pins
-  numba<0.62 (the dev venv stays 3.14). Both venvs share
+- 2026-08-20 — Benchmarks run in .venv-bench (Python 3.12, numba lags new
+  Pythons; the dev venv stays 3.14), set up via the `bench` extra:
+  `uv pip install --python .venv-bench '.[bench]'` — the Intel-mac numba
+  pin lives there as an environment marker. Both venvs share
   python/jay/_jay.abi3.so — a dev `maturin develop` silently replaces the
   release build; rebuild --release before benchmarking.
 - 2026-08-20 — Phase 5: one `Verb::Windowed(u, kind)` covers J `u\`/`u\.`
