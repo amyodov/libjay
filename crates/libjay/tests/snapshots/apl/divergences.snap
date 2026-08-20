@@ -1,9 +1,9 @@
-# libjay recorded divergences from GNU APL.
-# Generated file: `LIBJAY_REFRESH_ORACLE=write cargo test -p libjay` rewrites
-# it from the live reference interpreter. Do not edit by hand; the workflow is
-# in docs/testing.md.
+# libjay reference snapshot: APL (GNU APL) — corpus/apl/divergences.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreter. Do not edit by hand; the workflow is in
+# docs/testing.md.
 #
-# One record per expression, in generator order:
+# One record per expression, in corpus order:
 #   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
 #   `> TEXT`  one line of the reference's answer.
 #   `< TEXT`  one line of libjay's answer (divergence records only).
@@ -14,7 +14,6 @@
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
-# --- known divergences ---
 = ÷0
 ? monadic ÷0 is ∞ here, DOMAIN ERROR there
 < ∞
@@ -125,3 +124,12 @@
 < <error>
 >  1 1  1 2  1 3
 >  2 1  2 2  2 3
+= F←{⍺←10 ⋄ ⍺+⍵} ⋄ 3 F 5
+? ⍺← is a default here, an unconditional assignment there
+< 8
+> 15
+= F←{⍵+1 ⋄ ⍵+2} ⋄ F 5
+? only the last statement is displayed here, every one of them there
+< 7
+> 6
+> 7

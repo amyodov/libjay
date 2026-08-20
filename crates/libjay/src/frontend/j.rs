@@ -7,11 +7,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::sync::Arc;
 
 use crate::array::{Array, Data};
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::frontend::{Segment, SourceParts};
-use crate::ir::Expr;
+use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
     DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
 };
@@ -26,19 +27,48 @@ use crate::verb::{
 /// compiles: there is no control flow for a definition to reach backwards
 /// through, and reassigning the name simply rebinds it from there on.
 pub fn parse(src: &SourceParts) -> Result<Vec<Expr>> {
-    let mut verbs: HashMap<String, Verb> = HashMap::new();
-    // Names that hold a value by the time a sentence is read. Only the
-    // diagnostics need this: a name that is neither a verb nor a value is
-    // an undefined name, not a sentence the parser has yet to learn.
-    let mut nouns: HashSet<String> = HashSet::new();
+    let mut scope = Names::default();
+    let lines = lex(src)?;
     let mut out = Vec::new();
-    for mut sentence in lex(src)? {
-        substitute_verbs(&mut sentence, &verbs);
-        let stmt = parse_sentence(sentence, &nouns)?;
-        match &stmt {
+    let mut i = 0usize;
+    while i < lines.len() {
+        // A definition whose body is written on the lines below swallows
+        // them, so the sentence that comes out may span several of them.
+        let sentence = collect_definitions(&lines, &mut i, &mut scope, true)?;
+        if sentence.is_empty() {
+            continue;
+        }
+        let stmt = scope.parse_sentence(sentence)?;
+        scope.record(&stmt);
+        out.push(stmt);
+    }
+    Ok(out)
+}
+
+/// The parts of speech a sentence is read against. A name's part of speech
+/// decides how the sentence around it parses, so the table is carried from
+/// sentence to sentence and into every definition body.
+#[derive(Clone, Default)]
+struct Names {
+    verbs: HashMap<String, Verb>,
+    /// Names that hold a value by the time a sentence is read. Only the
+    /// diagnostics need this: a name that is neither a verb nor a value is
+    /// an undefined name, not a sentence the parser has yet to learn.
+    nouns: HashSet<String>,
+}
+
+impl Names {
+    fn parse_sentence(&self, mut sentence: Vec<Frag>) -> Result<Expr> {
+        substitute_verbs(&mut sentence, &self.verbs);
+        parse_sentence(sentence, &self.nouns)
+    }
+
+    /// Note what a parsed sentence did to the names it mentions.
+    fn record(&mut self, stmt: &Expr) {
+        match stmt {
             Expr::VerbDef { name, verb, .. } => {
-                verbs.insert(name.clone(), verb.clone());
-                nouns.remove(name);
+                self.verbs.insert(name.clone(), verb.clone());
+                self.nouns.remove(name);
             }
             // A name given a noun stops being a verb, at any depth: J lets
             // a name change part of speech, and the oracle agrees.
@@ -46,14 +76,574 @@ pub fn parse(src: &SourceParts) -> Result<Vec<Expr>> {
                 let mut assigned = Vec::new();
                 assigned_names(other, &mut assigned);
                 for name in assigned {
-                    verbs.remove(&name);
-                    nouns.insert(name);
+                    self.verbs.remove(&name);
+                    self.nouns.insert(name);
                 }
             }
         }
-        out.push(stmt);
     }
-    Ok(out)
+}
+
+// ------------------------------------------------------- explicit definitions
+
+/// J's control words. `for_i.` and its relatives carry the name they bind,
+/// which is why the suffix is kept apart from the word.
+const CONTROL_WORDS: [&str; 18] = [
+    "if.", "do.", "else.", "elseif.", "end.", "while.", "whilst.", "for.", "select.", "case.",
+    "fcase.", "return.", "break.", "continue.", "try.", "catch.", "catcht.", "throw.",
+];
+
+/// A control word and, for `for_i.`, the name it binds.
+fn control_word(word: &str) -> Option<(&'static str, Option<String>)> {
+    if let Some(w) = CONTROL_WORDS.iter().copied().find(|&w| w == word) {
+        return Some((w, None));
+    }
+    for (stem, w) in [("for_", "for."), ("goto_", "goto."), ("label_", "label.")] {
+        if let Some(rest) = word.strip_prefix(stem) {
+            let name = rest.strip_suffix('.')?;
+            if !name.is_empty() && is_j_name(name) {
+                return Some((w, Some(name.to_string())));
+            }
+        }
+    }
+    None
+}
+
+fn is_j_name(s: &str) -> bool {
+    let mut cs = s.chars();
+    cs.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// One piece of a definition body: a run of ordinary words, or a control
+/// word. A line break ends a sentence, and so does every control word.
+#[derive(Clone, Debug)]
+enum Item {
+    Sentence(Vec<Frag>),
+    Word { word: &'static str, suffix: Option<String>, span: Span },
+}
+
+impl Item {
+    fn word(&self) -> Option<&'static str> {
+        match self {
+            Item::Word { word, .. } => Some(word),
+            Item::Sentence(_) => None,
+        }
+    }
+
+    fn span(&self) -> Span {
+        match self {
+            Item::Word { span, .. } => *span,
+            Item::Sentence(f) => sentence_span(f),
+        }
+    }
+}
+
+/// Collapse every explicit definition in one line into a verb fragment.
+///
+/// `lines[*i]` is the line to read; `*i` advances past it and past any lines
+/// a definition took for its body. At the top level a control word is a
+/// spelling error, which is what the reference calls it.
+fn collect_definitions(
+    lines: &[Vec<Frag>],
+    i: &mut usize,
+    scope: &mut Names,
+    top_level: bool,
+) -> Result<Vec<Frag>> {
+    let mut sentence = lines[*i].clone();
+    *i += 1;
+    // `f =. 3 : '… f …'` calls itself by name, so the body has to be parsed
+    // with `f` already a verb. The name is resolved when it is applied.
+    let self_name = match (sentence.first(), sentence.get(1)) {
+        (Some(Frag::Name(n, _)), Some(a)) if a.is_assign() => Some(n.clone()),
+        _ => None,
+    };
+    loop {
+        let Some(open) = sentence.iter().position(|f| matches!(f, Frag::DdOpen(_))) else {
+            match find_colon_definition(&sentence) {
+                Some(at) => {
+                    take_colon_definition(&mut sentence, at, lines, i, scope, self_name.as_deref())?;
+                    continue;
+                }
+                // Every definition on the line is now one verb fragment, so
+                // a control word still standing is one nothing encloses.
+                None => {
+                    if top_level {
+                        if let Some(Frag::Control(_, _, span)) =
+                            sentence.iter().find(|f| matches!(f, Frag::Control(..)))
+                        {
+                            return Err(Error::parse(
+                                "control words are only meaningful inside an explicit definition",
+                                *span,
+                            ));
+                        }
+                    }
+                    return Ok(sentence);
+                }
+            }
+        };
+        take_direct_definition(&mut sentence, open, lines, i, scope, self_name.as_deref())?;
+    }
+}
+
+/// The index of the `:` of a `m : n` definition, if the line has one.
+fn find_colon_definition(sentence: &[Frag]) -> Option<usize> {
+    (1..sentence.len().saturating_sub(1)).find(|&k| {
+        matches!(&sentence[k], Frag::Conj(":", _))
+            && as_const(&sentence[k - 1]).is_some_and(|a| a.rank() == 0)
+            && matches!(&sentence[k + 1], Frag::Noun(Expr::Const(..)))
+    })
+}
+
+/// `m : n` — the definition whose body is a string, or the lines below when
+/// the right operand is `0`.
+fn take_colon_definition(
+    sentence: &mut Vec<Frag>,
+    at: usize,
+    lines: &[Vec<Frag>],
+    i: &mut usize,
+    scope: &mut Names,
+    self_name: Option<&str>,
+) -> Result<()> {
+    let span = Span::merge(sentence[at - 1].span(), sentence[at + 1].span());
+    let valence = as_const(&sentence[at - 1])
+        .and_then(Array::to_f64_vec)
+        .and_then(|v| v.first().copied())
+        .ok_or_else(|| Error::parse("an explicit definition starts with a number", span))?;
+    let body_arr = as_const(&sentence[at + 1]).cloned().expect("checked by the finder");
+    let body_span = sentence[at + 1].span();
+    let dyadic = match valence {
+        3.0 => false,
+        4.0 => true,
+        1.0 | 2.0 => {
+            return Err(Error::not_yet("explicit adverbs and conjunctions (1 : and 2 :)", span));
+        }
+        13.0 => return Err(Error::not_yet("tacit definitions (13 : '...')", span)),
+        v => return Err(Error::domain(format!("{v} is not an explicit definition"), span)),
+    };
+    let body = match &body_arr.data {
+        // `3 : 0`: the body is written on the lines below, ending with `)`.
+        Data::I64(_) | Data::F64(_) | Data::Bool(_) => {
+            if body_arr.to_f64_vec().as_deref() != Some(&[0.0]) {
+                return Err(Error::parse("an explicit definition takes 0 or a string", body_span));
+            }
+            take_lines_until_paren(lines, i, body_span)?
+        }
+        Data::Char(chars) => {
+            let text: String = chars.as_slice().iter().collect();
+            let mut frags = Vec::new();
+            // The body sits one character past the opening quote; a doubled
+            // quote inside it shifts what follows by one column.
+            lex_line(&text, body_span.start + 1, &mut frags)?;
+            vec![frags]
+        }
+        Data::Box(_) => {
+            return Err(Error::parse("an explicit definition takes 0 or a string", body_span))
+        }
+    };
+    let name = if dyadic { "4 : '...'" } else { "3 : '...'" };
+    let verb = build_definition(body, dyadic, name, scope, self_name)?;
+    sentence.splice(at - 1..at + 2, [Frag::Verb(VerbFrag::V(verb), span)]);
+    Ok(())
+}
+
+/// The lines of a `3 : 0` body: everything up to a line that is a lone `)`.
+fn take_lines_until_paren(
+    lines: &[Vec<Frag>],
+    i: &mut usize,
+    span: Span,
+) -> Result<Vec<Vec<Frag>>> {
+    let mut body = Vec::new();
+    loop {
+        let Some(line) = lines.get(*i) else {
+            return Err(Error::parse("this definition's body has no closing `)`", span));
+        };
+        *i += 1;
+        if line.len() == 1 && matches!(line[0], Frag::RParen(_)) {
+            return Ok(body);
+        }
+        body.push(line.clone());
+    }
+}
+
+/// `{{ … }}` — the body is the words between the braces, on this line or on
+/// the lines below.
+fn take_direct_definition(
+    sentence: &mut Vec<Frag>,
+    open: usize,
+    lines: &[Vec<Frag>],
+    i: &mut usize,
+    scope: &mut Names,
+    self_name: Option<&str>,
+) -> Result<()> {
+    let open_span = sentence[open].span();
+    let mut depth = 1usize;
+    let mut body: Vec<Vec<Frag>> = Vec::new();
+    let mut tail: Vec<Frag> = Vec::new();
+    let mut close_span = open_span;
+    let mut line: Vec<Frag> = sentence[open + 1..].to_vec();
+    let mut cur: Vec<Frag> = Vec::new();
+    loop {
+        let mut closed = false;
+        for (k, f) in line.iter().enumerate() {
+            match f {
+                Frag::DdOpen(_) => {
+                    depth += 1;
+                    cur.push(f.clone());
+                }
+                Frag::DdClose(s) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close_span = *s;
+                        tail = line[k + 1..].to_vec();
+                        closed = true;
+                        break;
+                    }
+                    cur.push(f.clone());
+                }
+                _ => cur.push(f.clone()),
+            }
+        }
+        if !cur.is_empty() {
+            body.push(std::mem::take(&mut cur));
+        }
+        if closed {
+            break;
+        }
+        let Some(next) = lines.get(*i) else {
+            return Err(Error::parse("this definition has no closing `}}`", open_span));
+        };
+        *i += 1;
+        line = next.clone();
+    }
+    let span = Span::merge(open_span, close_span);
+    // The body's own words decide the valence, as they do in the reference.
+    for l in &body {
+        for f in l {
+            if let Frag::Name(n, s) = f {
+                if matches!(n.as_str(), "u" | "v" | "m" | "n") {
+                    return Err(Error::not_yet(
+                        "direct definitions of adverbs and conjunctions ({{ with u v m n }})",
+                        *s,
+                    ));
+                }
+            }
+        }
+    }
+    let dyadic = body
+        .iter()
+        .any(|l| l.iter().any(|f| matches!(f, Frag::Name(n, _) if n == "x")));
+    let verb = build_definition(body, dyadic, "{{ ... }}", scope, self_name)?;
+    let mut head: Vec<Frag> = sentence[..open].to_vec();
+    head.push(Frag::Verb(VerbFrag::V(verb), span));
+    head.extend(tail);
+    *sentence = head;
+    Ok(())
+}
+
+/// Parse a definition's body and wrap it in a verb.
+fn build_definition(
+    body: Vec<Vec<Frag>>,
+    dyadic: bool,
+    name: &str,
+    scope: &Names,
+    self_name: Option<&str>,
+) -> Result<Verb> {
+    // The body reads the names the program has already given, and binds its
+    // own arguments over them.
+    let mut inner = scope.clone();
+    inner.nouns.insert("y".to_string());
+    inner.verbs.remove("y");
+    if dyadic {
+        inner.nouns.insert("x".to_string());
+        inner.verbs.remove("x");
+    }
+    if let Some(n) = self_name {
+        inner.nouns.remove(n);
+        inner.verbs.insert(n.to_string(), Verb::Named(n.to_string()));
+    }
+    // A body may hold definitions of its own, and one of them may run past
+    // the end of its line, so the lines are collected before they are split
+    // into sentences.
+    let mut lines: Vec<Vec<Frag>> = Vec::new();
+    let mut k = 0usize;
+    while k < body.len() {
+        let line = collect_definitions(&body, &mut k, &mut inner, false)?;
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    let items = split_items(&lines);
+    let mut cursor = Cursor { items: &items, at: 0 };
+    let stmts = parse_block(&mut cursor, &mut inner, &[])?;
+    if let Some(item) = cursor.peek() {
+        return Err(Error::parse(
+            format!("`{}` has no matching opening word", item.word().unwrap_or("word")),
+            item.span(),
+        ));
+    }
+    let pure = stmts.iter().all(block_is_pure);
+    Ok(Verb::Explicit(Arc::new(ExplicitDef {
+        name: name.to_string(),
+        left: dyadic.then(|| "x".to_string()),
+        right: "y".to_string(),
+        result: None,
+        locals: Vec::new(),
+        body: stmts,
+        // A branch that runs nothing yields J's empty result, `i. 0 0`.
+        empty: Some(crate::ir::empty_result()),
+        pure,
+    })))
+}
+
+/// True when nothing in this sentence can have an effect beyond its value.
+fn block_is_pure(e: &Expr) -> bool {
+    match e {
+        Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => true,
+        Expr::Monad { verb, y, .. } => verb.is_pure() && block_is_pure(y),
+        Expr::Dyad { verb, x, y, .. } => {
+            verb.is_pure() && block_is_pure(x) && block_is_pure(y)
+        }
+        Expr::Assign { value, .. } => block_is_pure(value),
+        Expr::Control(c, _) => control_is_pure(c),
+        _ => false,
+    }
+}
+
+fn control_is_pure(c: &Control) -> bool {
+    let all = |b: &Vec<Expr>| b.iter().all(block_is_pure);
+    match c {
+        Control::Return | Control::Break | Control::Continue => true,
+        Control::If { arms, otherwise } => {
+            arms.iter().all(|a| {
+                a.test.as_ref().is_none_or(all) && all(&a.body)
+            }) && otherwise.as_ref().is_none_or(all)
+        }
+        Control::While { test, body, .. } => all(test) && all(body),
+        Control::For { source, body, .. } => block_is_pure(source) && all(body),
+        Control::Select { subject, cases } => {
+            block_is_pure(subject)
+                && cases.iter().all(|c| c.test.as_ref().is_none_or(all) && all(&c.body))
+        }
+        Control::Try { body, catch } => all(body) && all(catch),
+    }
+}
+
+/// Split a definition's lines into sentences and control words.
+fn split_items(lines: &[Vec<Frag>]) -> Vec<Item> {
+    let mut items = Vec::new();
+    for line in lines {
+        let mut run: Vec<Frag> = Vec::new();
+        for f in line {
+            match f {
+                Frag::Control(word, suffix, span) => {
+                    if !run.is_empty() {
+                        items.push(Item::Sentence(std::mem::take(&mut run)));
+                    }
+                    items.push(Item::Word {
+                        word,
+                        suffix: suffix.clone(),
+                        span: *span,
+                    });
+                }
+                _ => run.push(f.clone()),
+            }
+        }
+        if !run.is_empty() {
+            items.push(Item::Sentence(run));
+        }
+    }
+    items
+}
+
+struct Cursor<'a> {
+    items: &'a [Item],
+    at: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn peek(&self) -> Option<&'a Item> {
+        self.items.get(self.at)
+    }
+
+    fn peek_word(&self) -> Option<&'static str> {
+        self.peek().and_then(Item::word)
+    }
+
+    fn next(&mut self) -> Option<&'a Item> {
+        let it = self.items.get(self.at);
+        if it.is_some() {
+            self.at += 1;
+        }
+        it
+    }
+
+    fn last_span(&self) -> Span {
+        self.items
+            .get(self.at.saturating_sub(1))
+            .map_or_else(|| Span::new(0, 0), Item::span)
+    }
+
+    /// Consume the word that must come next.
+    fn expect(&mut self, want: &str) -> Result<Span> {
+        match self.peek() {
+            Some(Item::Word { word, span, .. }) if *word == want => {
+                self.at += 1;
+                Ok(*span)
+            }
+            Some(other) => {
+                Err(Error::parse(format!("expected `{want}` here"), other.span()))
+            }
+            None => Err(Error::parse(format!("this block needs a `{want}`"), self.last_span())),
+        }
+    }
+}
+
+/// Parse sentences and control structures until one of `stop` is next.
+fn parse_block(cur: &mut Cursor<'_>, scope: &mut Names, stop: &[&str]) -> Result<Vec<Expr>> {
+    let mut out = Vec::new();
+    loop {
+        match cur.peek() {
+            None => return Ok(out),
+            Some(Item::Word { word, .. }) if stop.contains(word) => return Ok(out),
+            Some(Item::Sentence(frags)) => {
+                cur.at += 1;
+                let stmt = scope.parse_sentence(frags.clone())?;
+                scope.record(&stmt);
+                out.push(stmt);
+            }
+            Some(Item::Word { .. }) => out.push(parse_control(cur, scope)?),
+        }
+    }
+}
+
+fn parse_control(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Expr> {
+    let Some(Item::Word { word, suffix, span }) = cur.next() else {
+        return Err(Error::internal("expected a control word"));
+    };
+    let start = *span;
+    let control = match *word {
+        "if." => parse_if(cur, scope)?,
+        "while." | "whilst." => {
+            let body_first = *word == "whilst.";
+            let test = parse_block(cur, scope, &["do."])?;
+            cur.expect("do.")?;
+            let body = parse_block(cur, scope, &["end."])?;
+            cur.expect("end.")?;
+            Control::While { test, body, body_first, until: false }
+        }
+        "for." => {
+            if let Some(name) = suffix {
+                scope.nouns.insert(name.clone());
+                scope.nouns.insert(format!("{name}_index"));
+                scope.verbs.remove(name);
+            }
+            let source = parse_block(cur, scope, &["do."])?;
+            cur.expect("do.")?;
+            let body = parse_block(cur, scope, &["end."])?;
+            let end = cur.expect("end.")?;
+            let source = one_expr(source, Span::merge(start, end))?;
+            Control::For { name: suffix.clone(), source: Box::new(source), body }
+        }
+        "select." => parse_select(cur, scope, start)?,
+        "try." => {
+            let body = parse_block(cur, scope, &["catch.", "catcht.", "end."])?;
+            if cur.peek_word() == Some("catcht.") {
+                return Err(Error::not_yet("throw. and catcht.", cur.last_span()));
+            }
+            let catch = if cur.peek_word() == Some("catch.") {
+                cur.expect("catch.")?;
+                parse_block(cur, scope, &["end."])?
+            } else {
+                Vec::new()
+            };
+            cur.expect("end.")?;
+            Control::Try { body, catch }
+        }
+        "return." => Control::Return,
+        "break." => Control::Break,
+        "continue." => Control::Continue,
+        "throw." | "catcht." => return Err(Error::not_yet("throw. and catcht.", start)),
+        "goto." | "label." => {
+            return Err(Error::not_yet("goto_name. and label_name.", start))
+        }
+        other => {
+            return Err(Error::parse(
+                format!("`{other}` has no matching opening word"),
+                start,
+            ))
+        }
+    };
+    let span = Span::merge(start, cur.last_span());
+    Ok(Expr::Control(Box::new(control), span))
+}
+
+fn parse_if(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Control> {
+    let mut arms = Vec::new();
+    let mut otherwise = None;
+    loop {
+        let test = parse_block(cur, scope, &["do."])?;
+        cur.expect("do.")?;
+        let body = parse_block(cur, scope, &["elseif.", "else.", "end."])?;
+        arms.push(Branch { test: Some(test), body, fall_through: false });
+        match cur.peek_word() {
+            Some("elseif.") => {
+                cur.at += 1;
+            }
+            Some("else.") => {
+                cur.at += 1;
+                otherwise = Some(parse_block(cur, scope, &["end."])?);
+                cur.expect("end.")?;
+                break;
+            }
+            _ => {
+                cur.expect("end.")?;
+                break;
+            }
+        }
+    }
+    // `elseif. do.` with no test is the reference's other spelling of
+    // `else.`: a final arm that always runs.
+    if let Some(last) = arms.last_mut() {
+        if last.test.as_ref().is_some_and(Vec::is_empty) {
+            last.test = None;
+        }
+    }
+    Ok(Control::If { arms, otherwise })
+}
+
+fn parse_select(cur: &mut Cursor<'_>, scope: &mut Names, start: Span) -> Result<Control> {
+    let subject = parse_block(cur, scope, &["case.", "fcase.", "end."])?;
+    let subject = one_expr(subject, start)?;
+    let mut cases = Vec::new();
+    loop {
+        let fall_through = match cur.peek_word() {
+            Some("case.") => false,
+            Some("fcase.") => true,
+            _ => {
+                cur.expect("end.")?;
+                break;
+            }
+        };
+        cur.at += 1;
+        let test = parse_block(cur, scope, &["do."])?;
+        cur.expect("do.")?;
+        let body = parse_block(cur, scope, &["case.", "fcase.", "end."])?;
+        // `case. do.` with no test is the default arm.
+        let test = (!test.is_empty()).then_some(test);
+        cases.push(Branch { test, body, fall_through });
+    }
+    Ok(Control::Select { subject: Box::new(subject), cases })
+}
+
+/// A block that has to be one sentence — a `for.` source, a `select.`
+/// subject. The value is the last sentence's, so the rest run for effect.
+fn one_expr(mut stmts: Vec<Expr>, span: Span) -> Result<Expr> {
+    match stmts.pop() {
+        Some(e) if stmts.is_empty() => Ok(e),
+        Some(_) => Err(Error::not_yet("several sentences where one value is needed", span)),
+        None => Err(Error::parse("this control word needs a value", span)),
+    }
 }
 
 /// Replace every name known to be a verb by that verb, except where the
@@ -110,6 +700,12 @@ enum Frag {
     /// A finished verb definition: `mean =. +/ % #`. It belongs to no part
     /// of speech, so no rule reaches it and it can only end a sentence.
     VerbDef(String, Verb, Span),
+    /// A control word, with the name `for_i.` binds when it has one. Only a
+    /// definition's body may hold one.
+    Control(&'static str, Option<String>, Span),
+    /// `{{` and `}}`, the direct definition's brackets.
+    DdOpen(Span),
+    DdClose(Span),
 }
 
 /// `[:` has the verb category but no verb of its own: it is only meaningful
@@ -133,7 +729,10 @@ impl Frag {
             | Frag::RParen(s)
             | Frag::AssignLocal(s)
             | Frag::AssignGlobal(s)
+            | Frag::DdOpen(s)
+            | Frag::DdClose(s)
             | Frag::VerbDef(_, _, s) => *s,
+            Frag::Control(_, _, s) => *s,
         }
     }
 
@@ -446,11 +1045,18 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
             while at(i).is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
                 i += 1;
             }
-            // An alphabetic word may be inflected into a primitive (`i.`).
+            // An alphabetic word may be inflected into a primitive (`i.`)
+            // or into a control word (`if.`, `for_i.`).
             if matches!(at(i), Some('.') | Some(':')) {
-                if let Some(v) = verb_for(&text[off(start)..off(i + 1)]) {
+                let inflected = &text[off(start)..off(i + 1)];
+                if let Some(v) = verb_for(inflected) {
                     i += 1;
                     out.push(Frag::Verb(VerbFrag::V(v), span(start, i)));
+                    continue;
+                }
+                if let Some((word, suffix)) = control_word(inflected) {
+                    i += 1;
+                    out.push(Frag::Control(word, suffix, span(start, i)));
                     continue;
                 }
             }
@@ -461,9 +1067,16 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
             }
             continue;
         }
-        // `{{` opens J's other explicit definition; it is never two words.
+        // `{{` and `}}` bracket J's direct definition; neither is two words.
         if c == '{' && at(i + 1) == Some('{') {
-            return Err(Error::not_yet("explicit definitions ({{ ... }})", span(i, i + 2)));
+            out.push(Frag::DdOpen(span(i, i + 2)));
+            i += 2;
+            continue;
+        }
+        if c == '}' && at(i + 1) == Some('}') {
+            out.push(Frag::DdClose(span(i, i + 2)));
+            i += 2;
+            continue;
         }
         // A symbol word is one character plus a trailing inflection, which
         // always binds: `~:` is one word, never `~` followed by `:`. The
@@ -500,6 +1113,8 @@ fn symbol_frag(word: &str, span: Span) -> Option<Frag> {
         "=." => Frag::AssignLocal(span),
         "=:" => Frag::AssignGlobal(span),
         "[:" => Frag::Verb(VerbFrag::Cap, span),
+        // `$:` stands for the explicit definition it is written in.
+        "$:" => Frag::Verb(VerbFrag::V(Verb::SelfRef), span),
         // An inflected verb wins over the adverb its stem spells: `~.` is
         // the nub, never `~` followed by an inflection.
         _ => {
@@ -534,12 +1149,77 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
     if word.contains('j') {
         return Err(Error::not_yet("complex literals", span));
     }
-    if word.contains('x') {
-        return Err(Error::not_yet("extended-precision integers", span));
-    }
     if word.contains('r') {
         return Err(Error::not_yet("rationals", span));
     }
+    // `1x` is an extended-precision integer; `1x1` is a multiple of e, and
+    // `1p1` a multiple of π. The letter is the separator in both.
+    if let Some(k) = word.find(['p', 'x']) {
+        if word[k + 1..].is_empty() {
+            return Err(Error::not_yet("extended-precision integers", span));
+        }
+        let base =
+            if word.as_bytes()[k] == b'p' { std::f64::consts::PI } else { std::f64::consts::E };
+        let mantissa = plain_number(&word[..k], word, span)?;
+        let exponent = plain_number(&word[k + 1..], word, span)?;
+        return Ok(Num::F(as_f64(mantissa) * as_f64(base_pow(base, as_f64(exponent)))));
+    }
+    if let Some(k) = word.find('b') {
+        return base_literal(&word[..k], &word[k + 1..], word, span);
+    }
+    plain_number(word, word, span)
+}
+
+fn as_f64(n: Num) -> f64 {
+    match n {
+        Num::I(v) => v as f64,
+        Num::F(v) => v,
+    }
+}
+
+fn base_pow(base: f64, exponent: f64) -> Num {
+    Num::F(base.powf(exponent))
+}
+
+/// `mBd…`: the digits `d…` read in base `m`. Digits run `0`–`9` then `a`–`z`,
+/// and a `_` in front of them negates the value, as the reference does.
+fn base_literal(base: &str, digits: &str, word: &str, span: Span) -> Result<Num> {
+    let invalid = || Error::parse(format!("invalid number: {word}"), span);
+    let base = as_f64(plain_number(base, word, span)?);
+    let (digits, negative) = match digits.strip_prefix('_') {
+        Some(rest) => (rest, true),
+        None => (digits, false),
+    };
+    if digits.is_empty() {
+        return Err(invalid());
+    }
+    let mut value = 0.0f64;
+    for ch in digits.chars() {
+        let d = match ch {
+            '0'..='9' => ch as u32 - '0' as u32,
+            'a'..='z' => ch as u32 - 'a' as u32 + 10,
+            _ => return Err(invalid()),
+        };
+        value = value * base + f64::from(d);
+    }
+    if negative {
+        value = -value;
+    }
+    // An exact whole number stays an integer, as the reference prints it.
+    if value.fract() == 0.0 && value.abs() < 9.007_199_254_740_992e15 {
+        return Ok(Num::I(value as i64));
+    }
+    Ok(Num::F(value))
+}
+
+fn plain_number(word: &str, whole: &str, span: Span) -> Result<Num> {
+    if word.is_empty() {
+        return Err(Error::parse(format!("invalid number: {whole}"), span));
+    }
+    parse_plain(word, span)
+}
+
+fn parse_plain(word: &str, span: Span) -> Result<Num> {
     if word == "_" {
         return Ok(Num::F(f64::INFINITY));
     }
@@ -752,9 +1432,13 @@ fn apply(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<bool> {
         Rule::Assign8 => {
             let mut t = take(stack, 0..3);
             let value = t.pop().expect("three slots");
-            let _assign = t.pop().expect("three slots");
+            let assign = t.pop().expect("three slots");
             let target = t.pop().expect("three slots");
-            let frag = apply_assign(target, value)?;
+            let scope = match assign {
+                Frag::AssignGlobal(_) => Scope::Global,
+                _ => Scope::Local,
+            };
+            let frag = apply_assign(target, value, scope)?;
             stack.insert(0, frag);
         }
         Rule::Paren9 => {
@@ -1100,11 +1784,12 @@ fn apply_bident(a: Frag, b: Frag, nouns: &HashSet<String>) -> Result<Frag> {
     Err(Error::not_yet("that bident", span))
 }
 
-fn apply_assign(target: Frag, value: Frag) -> Result<Frag> {
+fn apply_assign(target: Frag, value: Frag, scope: Scope) -> Result<Frag> {
     let span = Span::merge(target.span(), value.span());
     match target {
-        // `=.` and `=:` both lower to Expr::Assign: the IR has a single
-        // environment for now, so local and global do not yet differ.
+        // `=.` names a local and `=:` a global; the two differ only inside
+        // an explicit definition, which is the only thing with a local
+        // frame to name.
         Frag::Name(name, _) => match value {
             // Naming a verb is settled here, at parse time: `parse` records
             // the name and substitutes the verb into later sentences.
@@ -1112,7 +1797,7 @@ fn apply_assign(target: Frag, value: Frag) -> Result<Frag> {
             Frag::Verb(VerbFrag::Cap, _) => Err(Error::not_yet("assigning [: on its own", span)),
             v if v.is_noun() => {
                 let value = as_noun(v)?;
-                Ok(Frag::Noun(Expr::Assign { name, value: Box::new(value), span }))
+                Ok(Frag::Noun(Expr::Assign { name, value: Box::new(value), scope, span }))
             }
             _ => Err(Error::not_yet("adverb and conjunction assignment", span)),
         },
@@ -1752,13 +2437,14 @@ mod tests {
     // ----------------------------------------------------------- assignment
 
     #[rstest]
-    #[case("x =. 5")]
-    #[case("x =: 5")]
-    fn assignment_yields_an_assign_node(#[case] src: &str) {
+    #[case("x =. 5", Scope::Local)]
+    #[case("x =: 5", Scope::Global)]
+    fn assignment_yields_an_assign_node(#[case] src: &str, #[case] want: Scope) {
         match one(src) {
-            Expr::Assign { name, value, span } => {
+            Expr::Assign { name, value, scope, span } => {
                 assert_eq!(name, "x");
                 assert_eq!(ints(&value), vec![5]);
+                assert_eq!(scope, want);
                 assert_eq!(span, Span::new(0, 6));
             }
             other => panic!("expected an assignment, got {other:?}"),
@@ -1879,16 +2565,37 @@ mod tests {
     }
 
     #[rstest]
-    #[case("f =. 3 : 'y + 1'", "explicit definitions")]
-    #[case("f =. 4 : 'x + y'", "explicit definitions")]
-    #[case("f =. {{ y + 1 }}", "explicit definitions")]
-    fn explicit_definitions_are_named_in_the_diagnostic(
-        #[case] src: &str,
-        #[case] msg: &str,
-    ) {
+    #[case("f =. 3 : 'y + 1'", None)]
+    #[case("f =. 4 : 'x + y'", Some("x"))]
+    #[case("f =. {{ y + 1 }}", None)]
+    #[case("f =. {{ x + y }}", Some("x"))]
+    fn an_explicit_definition_names_a_verb(#[case] src: &str, #[case] left: Option<&str>) {
+        match one(src) {
+            Expr::VerbDef { name, verb: Verb::Explicit(d), .. } => {
+                assert_eq!(name, "f");
+                assert_eq!(d.left.as_deref(), left);
+                assert_eq!(d.right, "y");
+                assert_eq!(d.body.len(), 1);
+            }
+            other => panic!("expected an explicit verb definition, got {other:?}"),
+        }
+    }
+
+    #[rstest]
+    #[case("f =. 1 : 'y + 1'", "explicit adverbs and conjunctions")]
+    #[case("f =. 13 : 'y + 1'", "tacit definitions")]
+    #[case("f =. {{ u y }}", "direct definitions of adverbs and conjunctions")]
+    fn definition_forms_libjay_has_not_are_named(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);
         assert!(e.msg.contains(msg), "{}", e.msg);
+    }
+
+    #[test]
+    fn a_control_word_outside_a_definition_is_a_parse_error() {
+        let e = err("if. 1 do. 2 end.");
+        assert_eq!(e.kind, ErrorKind::Parse);
+        assert!(e.msg.contains("only meaningful inside an explicit definition"), "{}", e.msg);
     }
 
     #[test]
@@ -1967,16 +2674,16 @@ mod tests {
 
     #[test]
     fn unknown_word_reports_its_span() {
-        let e = err("1 $: 2");
+        let e = err("1 $. 2");
         assert_eq!(e.kind, ErrorKind::Parse);
-        assert_eq!(e.msg, "unknown word: $:");
+        assert_eq!(e.msg, "unknown word: $.");
         assert_eq!(e.span, Some(Span::new(2, 4)));
     }
 
     #[test]
     fn an_inflected_unknown_word_is_reported_whole() {
-        let e = err("1 $. 2");
-        assert_eq!(e.msg, "unknown word: $.");
+        let e = err("1 ]: 2");
+        assert_eq!(e.msg, "unknown word: ]:");
         assert_eq!(e.span, Some(Span::new(2, 4)));
     }
 
@@ -2021,7 +2728,7 @@ mod tests {
 
     #[test]
     fn the_error_of_a_later_sentence_points_at_that_sentence() {
-        let e = err("1 + 2\n3 $: 4");
+        let e = err("1 + 2\n3 $. 4");
         assert_eq!(e.span, Some(Span::new(8, 10)));
     }
 }

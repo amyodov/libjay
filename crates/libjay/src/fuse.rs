@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::array::{Array, Data};
 use crate::dtype::DType;
 use crate::error::Span;
-use crate::ir::{Expr, Program};
+use crate::ir::{Expr, Program, Scope};
 use crate::par;
 use crate::simd::multiversioned;
 use crate::verb::{tol_cmp, DyadOp, MonadOp, ScalarDyad, ScalarMonad, Tol, Verb, RANK_INF};
@@ -388,6 +388,8 @@ fn replayable(e: &Expr) -> bool {
         Expr::Assign { .. }
         | Expr::PrintPass { .. }
         | Expr::Elided { .. }
+        | Expr::Control(..)
+        | Expr::AmendIndex { .. }
         | Expr::VerbDef { .. } => false,
         Expr::Monad { verb, y, .. } => verb.is_pure() && replayable(y),
         Expr::Dyad { verb, x, y, .. } => verb.is_pure() && replayable(x) && replayable(y),
@@ -472,8 +474,8 @@ fn fuse_expr(e: Expr, tol: Tol) -> Expr {
         return f;
     }
     match e {
-        Expr::Assign { name, value, span } => {
-            Expr::Assign { name, value: Box::new(fuse_expr(*value, tol)), span }
+        Expr::Assign { name, value, scope, span } => {
+            Expr::Assign { name, value: Box::new(fuse_expr(*value, tol)), scope, span }
         }
         Expr::Monad { verb, y, span } => {
             Expr::Monad { verb, y: Box::new(fuse_expr(*y, tol)), span }
@@ -651,7 +653,7 @@ fn hoisted_name(n: &mut usize) -> String {
 /// nothing else is computed.
 fn inline_once(stmts: &[Expr], names: &mut usize, tol: Tol) -> Option<Vec<Expr>> {
     for (i, stmt) in stmts.iter().enumerate() {
-        let Expr::Assign { name, value, span } = stmt else { continue };
+        let Expr::Assign { name, value, span, .. } = stmt else { continue };
         if !inlinable(stmts, i, name, value, tol) {
             continue;
         }
@@ -703,7 +705,11 @@ fn uses_land(e: &Expr, name: &str, def: &Expr, tol: Tol) -> Option<usize> {
         Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => uses_land(value, name, def, tol),
         Expr::Monad { y, .. } => uses_land(y, name, def, tol),
         Expr::Dyad { x, y, .. } => Some(uses_land(x, name, def, tol)? + uses_land(y, name, def, tol)?),
-        Expr::Fused { .. } | Expr::Elided { .. } | Expr::VerbDef { .. } => None,
+        Expr::Fused { .. }
+        | Expr::Elided { .. }
+        | Expr::Control(..)
+        | Expr::AmendIndex { .. }
+        | Expr::VerbDef { .. } => None,
     }
 }
 
@@ -732,6 +738,7 @@ fn rewrite(
         hoists.push(Expr::Assign {
             name: n.clone(),
             value: Box::new((*l).clone()),
+            scope: Scope::Local,
             span: l.span(),
         });
         bound.push(Some(n));
@@ -747,6 +754,7 @@ fn rewrite(
             orig: Box::new(def.clone()),
             span,
         }),
+        scope: Scope::Local,
         span,
     };
     let mut out = stmts[..i].to_vec();
@@ -788,7 +796,8 @@ fn with_leaves(e: &Expr, lv: &Leaves<'_>, bound: &[Option<String>]) -> Expr {
 fn replace_name(e: &Expr, name: &str, def: &Expr) -> Expr {
     match e {
         Expr::Name(n, _) if n == name => def.clone(),
-        Expr::Assign { name: a, value, span } => Expr::Assign {
+        Expr::Assign { name: a, value, scope, span } => Expr::Assign {
+            scope: *scope,
             name: a.clone(),
             value: Box::new(replace_name(value, name, def)),
             span: *span,
@@ -829,7 +838,12 @@ fn free_names(e: &Expr, out: &mut Vec<String>) {
             free_names(y, out);
         }
         Expr::Fused { inputs, .. } => inputs.iter().for_each(|i| free_names(i, out)),
-        Expr::Const(..) | Expr::Param(..) | Expr::Elided { .. } | Expr::VerbDef { .. } => {}
+        Expr::Const(..)
+        | Expr::Param(..)
+        | Expr::Elided { .. }
+        | Expr::Control(..)
+        | Expr::AmendIndex { .. }
+        | Expr::VerbDef { .. } => {}
     }
 }
 
@@ -847,6 +861,8 @@ fn assigns_any(e: &Expr, names: &[String]) -> bool {
         | Expr::Param(..)
         | Expr::Name(..)
         | Expr::Elided { .. }
+        | Expr::Control(..)
+        | Expr::AmendIndex { .. }
         | Expr::VerbDef { .. } => false,
     }
 }
@@ -860,6 +876,8 @@ pub fn is_fused(p: &Program) -> bool {
             | Expr::Param(..)
             | Expr::Name(..)
             | Expr::Elided { .. }
+            | Expr::Control(..)
+            | Expr::AmendIndex { .. }
             | Expr::VerbDef { .. } => false,
             Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => any(value),
             Expr::Monad { y, .. } => any(y),
@@ -881,8 +899,13 @@ pub fn unfused(p: &Program) -> Program {
     fn strip(e: &Expr) -> Expr {
         match e {
             Expr::Fused { orig, .. } => strip(orig),
-            Expr::Assign { name, value, span } => {
-                Expr::Assign { name: name.clone(), value: Box::new(strip(value)), span: *span }
+            Expr::Assign { name, value, scope, span } => {
+                Expr::Assign {
+                    name: name.clone(),
+                    value: Box::new(strip(value)),
+                    scope: *scope,
+                    span: *span,
+                }
             }
             Expr::PrintPass { value, span } => {
                 Expr::PrintPass { value: Box::new(strip(value)), span: *span }

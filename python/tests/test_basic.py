@@ -35,6 +35,44 @@ class TestOneShot:
         assert j("x =. 5") is None
 
 
+class TestDefinitions:
+    def test_j_explicit_definition(self):
+        assert j("f =. 3 : 'y*2'\nf 21") == 42
+
+    def test_j_dyadic_definition(self):
+        assert j("f =. 4 : 'x + y'\n2 f 3") == 5
+
+    def test_j_direct_definition(self):
+        assert j("f =. {{ y * 3 }}\nf 7") == 21
+
+    def test_j_multi_line_definition(self):
+        assert j("f =. 3 : 0\nt =. y * 2\nt + 1\n)\nf 5") == 11
+
+    def test_j_control_words(self):
+        src = (
+            "fac =. 3 : 'if. y <: 1 do. 1 else. y * fac y - 1 end.'\n"
+            "fac 5"
+        )
+        assert j(src) == 120
+
+    def test_j_definition_over_bound_data(self):
+        assert j("f =. 3 : '+/ y'\nf {x}", {"x": [1, 2, 3, 4]}) == 10
+
+    def test_apl_dfn(self):
+        assert apl("F←{⍵×2} ⋄ F 21") == 42
+
+    def test_apl_tradfn_with_control_structure(self):
+        src = "∇Z←H R\n:If R>3\nZ←99\n:Else\nZ←7\n:EndIf\n∇\nH 5"
+        assert apl(src) == 99
+
+    def test_apl_indexed_assignment(self):
+        assert apl("A←1 2 3 4 ⋄ A[2]←99 ⋄ A").tolist() == [1, 99, 3, 4]
+
+    def test_runaway_recursion_is_an_error_not_a_crash(self):
+        with pytest.raises(JayError, match="deep"):
+            j("f =. 3 : '$: y'\nf 1")
+
+
 class TestData:
     def test_dict_binding(self):
         assert j("+/ {x}", {"x": [1, 2, 3]}) == 6
@@ -162,7 +200,7 @@ class TestErrors:
 
     def test_parse_error(self):
         with pytest.raises(JayError):
-            j.compile("2 $: 3")
+            j.compile("2 ]: 3")
 
 
 class TestModuleShape:

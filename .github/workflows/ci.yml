@@ -16,7 +16,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p libjay
       - run: cargo build -p libjay-capi && cargo test -p libjay-capi
-      - run: cargo clippy -p libjay -p libjay-capi --all-targets -- -D warnings
+      - run: cargo clippy -p libjay -p libjay-capi -p libjay-testkit -p libjay-devtools --all-targets -- -D warnings
 
   python:
     runs-on: ubuntu-latest

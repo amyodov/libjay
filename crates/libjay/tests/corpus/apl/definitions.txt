@@ -1,0 +1,49 @@
+// Dfns, ∇-definitions and indexed assignment.
+//
+// GNU APL has no control structures (`:If` and its family are a SYNTAX
+// ERROR there), no dfn guards and no `∇` self-reference, so none of those
+// appear here: what libjay does with them is held in tests/definitions.rs
+// against the published specification instead, and named in
+// docs/coverage.md. What IS here is what the reference answers.
+
+// --- dfns ----------------------------------------------------------------
+{⍵×2} 21
+2 {⍺+⍵} 3
+{⍵+1} 5
+F←{⍵×2} ⋄ F 21
+F←{⍵×2} ⋄ F¨1 2 3
+F←{⍺+⍵} ⋄ 3 F 5
+F←{⍺×⍵} ⋄ 3 F 5
+{a←⍵ ⋄ a+1} 5
+F←{a←⍵×2 ⋄ a+1} ⋄ F 5
+F←{⍵×2} ⋄ G←{F ⍵} ⋄ G 5
+F←{{⍵+1} ⍵×2} ⋄ F 5
+F←{+/⍵} ⋄ F 1 2 3 4
+F←{(+/⍵)÷≢⍵} ⋄ F 1 2 3 4
+F←{⍵×2} ⋄ F 2 3⍴⍳6
+a←99 ⋄ F←{a+⍵} ⋄ F 1
+a←99 ⋄ F←{a←1 ⋄ a+⍵} ⋄ (F 1),a
+F←{⌽⍵} ⋄ F 1 2 3
+
+// --- ∇-definitions -------------------------------------------------------
+∇Z←F R\nZ←R×2\n∇\nF 21
+∇Z←L G R\nZ←L+R\n∇\n2 G 3
+∇Z←F R;T\nT←R×2\nZ←T+1\n∇\nF 5
+∇Z←F R\nZ←+/R\n∇\nF 1 2 3 4
+∇Z←F R\nZ←R\nZ←Z×3\n∇\nF 7
+X←1\n∇Z←F R\nX←5\nZ←R\n∇\nQ←F 9\nX
+Y←1\n∇Z←G R;Y\nY←5\nZ←R\n∇\nQ←G 9\nY
+∇Z←F R\nZ←R×2\n∇\n∇Z←G R\nZ←F R\n∇\nG 5
+
+// --- indexed assignment --------------------------------------------------
+A←1 2 3 4 ⋄ A[2]←99 ⋄ A
+A←1 2 3 4 ⋄ A[1 3]←0 ⋄ A
+A←1 2 3 4 ⋄ A[1 3]←7 8 ⋄ A
+A←1 2 3 4 ⋄ A[2]←1.5 ⋄ A
+A←3 3⍴⍳9 ⋄ A[2;3]←0 ⋄ A
+A←3 3⍴⍳9 ⋄ A[1;]←0 0 0 ⋄ A
+A←2 3⍴⍳6 ⋄ A[1;]←9 ⋄ A
+A←3 3⍴⍳9 ⋄ A[;2]←0 ⋄ A
+A←3 3⍴⍳9 ⋄ A[1 2;1 2]←0 ⋄ A
+A←1 2 3 ⋄ A[3]←4 ⋄ +/A
+A←'abcd' ⋄ A[2]←'x' ⋄ A

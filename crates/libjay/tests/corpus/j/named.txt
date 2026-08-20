@@ -1,0 +1,14 @@
+// Naming a verb changes how the sentences after it parse, so the reference
+// has the last word on what each of these programs means. One displayed
+// value per program: the comparison sees the last.
+mean =. +/ % #\nmean 1 2 3 4
+mean =. +/ % #\n(mean - {.) 1 2 3 4
+mean =. +/ % #\nmean"1 i. 3 3
+mean =. +/ % #\n2 * mean 1 2 3 4
+n =. #\n2 n 1 2 3
+f =. +/\nf =. #\nf 1 2 3
+a =. 1 2 3\na =. +/\na 1 2 3
+f =. +/\nf =. 10 20\nf
+g =. +/ % #\nh =. g @: ,\nh i. 2 3
+sq =. *:\nsq 1 2 3
+d =. }.\nd 1 2 3

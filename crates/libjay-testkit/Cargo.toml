@@ -1,0 +1,15 @@
+[package]
+name = "libjay-testkit"
+description = "Corpus and snapshot plumbing shared by libjay's differential tests and the corpus recorder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "libjay_testkit"
+
+[dependencies]
+libjay = { path = "../libjay" }

@@ -1,23 +1,21 @@
-//! The snapshot file format shared by the two differential suites.
+//! Snapshot files: the recordings, one per corpus file.
 //!
-//! A snapshot is a plain-text list of records: an expression and the answer
-//! a reference interpreter gave for it. `cargo test` reads these files and
-//! never runs an interpreter; the refresh step (docs/testing.md) is the only
-//! thing that writes them.
-//!
-//! Each test binary uses part of this module, so unused items here are
-//! expected.
-#![allow(dead_code)]
+//! `crates/libjay/tests/snapshots/<lang>/<theme>.snap` holds what the
+//! reference interpreter answered to every expression in
+//! `corpus/<lang>/<theme>.txt`. Only `jay-corpus record` writes these;
+//! `cargo test` reads them and runs no interpreter.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::path::Path;
 
 /// The format documentation written at the top of every snapshot file.
 pub const HEADER: &str = "\
-# Generated file: `LIBJAY_REFRESH_ORACLE=write cargo test -p libjay` rewrites
-# it from the live reference interpreter. Do not edit by hand; the workflow is
-# in docs/testing.md.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreter. Do not edit by hand; the workflow is in
+# docs/testing.md.
 #
-# One record per expression, in generator order:
+# One record per expression, in corpus order:
 #   `= EXPR`  the sentence. `\\n` is a newline in it and `\\\\` a backslash.
 #   `> TEXT`  one line of the reference's answer.
 #   `< TEXT`  one line of libjay's answer (divergence records only).
@@ -36,7 +34,7 @@ pub enum Side {
 }
 
 impl Side {
-    /// The convention both suites use in memory: `None` is a refusal.
+    /// The convention the evaluators use: `None` is a refusal.
     pub fn of(answer: Option<String>) -> Side {
         match answer {
             Some(s) => Side::Out(s),
@@ -64,7 +62,7 @@ impl Side {
 pub struct Record {
     /// The sentence, handed to both implementations unchanged.
     pub expr: String,
-    /// `⎕IO` for this record. Always 1 in the J snapshot.
+    /// `⎕IO` for this record. Always 1 in a J snapshot.
     pub io: u8,
     /// Why the implementations differ; divergence records only.
     pub note: Option<String>,
@@ -84,48 +82,15 @@ impl Record {
     pub fn reference(&self) -> &Side {
         self.theirs.as_ref().unwrap_or_else(|| panic!("{:?}: no reference answer", self.expr))
     }
-}
 
-/// A run of records under one heading, kept only so the file reads well.
-pub struct Section {
-    pub title: String,
-    pub records: Vec<Record>,
-}
-
-pub fn section(title: &str, records: Vec<Record>) -> Section {
-    Section { title: title.to_string(), records }
+    /// What identifies a record: the sentence and the origin it was read
+    /// under. The same sentence under `⎕IO←0` is a different case.
+    pub fn key(&self) -> (String, u8) {
+        (self.expr.clone(), self.io)
+    }
 }
 
 const ERROR_MARK: &str = "<error>";
-
-fn escape(expr: &str) -> String {
-    let mut out = String::with_capacity(expr.len());
-    for c in expr.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
-fn unescape(text: &str, line_no: usize) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('\\') => out.push('\\'),
-            Some('n') => out.push('\n'),
-            other => panic!("line {line_no}: bad escape \\{}", other.unwrap_or(' ')),
-        }
-    }
-    out
-}
 
 fn write_side(out: &mut String, tag: char, side: &Side) {
     let text = match side {
@@ -142,84 +107,41 @@ fn write_side(out: &mut String, tag: char, side: &Side) {
     }
 }
 
-/// Rewrite a snapshot file from records. `title` names the reference.
-pub fn write(path: &str, title: &str, sections: &[Section]) {
+/// Rewrite a snapshot file from records. `title` names what was recorded.
+pub fn write(path: &Path, title: &str, records: &[Record]) {
     let mut out = String::new();
-    let _ = writeln!(out, "# {title}\n{HEADER}");
+    let _ = writeln!(out, "# {title}\n{HEADER}\n");
     let mut io = 1u8;
-    for section in sections {
-        let _ = writeln!(out, "\n# --- {} ---", section.title);
-        for record in &section.records {
-            if record.io != io {
-                io = record.io;
-                let _ = writeln!(out, "@ io={io}");
-            }
-            let _ = writeln!(out, "= {}", escape(&record.expr));
-            if let Some(note) = &record.note {
-                let _ = writeln!(out, "? {note}");
-            }
-            if let Some(ours) = &record.ours {
-                write_side(&mut out, '<', ours);
-            }
-            if let Some(theirs) = &record.theirs {
-                write_side(&mut out, '>', theirs);
-            }
+    for record in records {
+        if record.io != io {
+            io = record.io;
+            let _ = writeln!(out, "@ io={io}");
+        }
+        let _ = writeln!(out, "= {}", crate::corpus::escape(&record.expr));
+        if let Some(note) = &record.note {
+            let _ = writeln!(out, "? {note}");
+        }
+        if let Some(ours) = &record.ours {
+            write_side(&mut out, '<', ours);
+        }
+        if let Some(theirs) = &record.theirs {
+            write_side(&mut out, '>', theirs);
         }
     }
-    std::fs::write(path, out).unwrap_or_else(|e| panic!("writing {path}: {e}"));
-}
-
-/// Every way a freshly measured list differs from a recorded one, as lines
-/// for a failure message. `same` is the caller's tolerance-aware comparison.
-pub fn drift(
-    recorded: &[Record],
-    fresh: &[Record],
-    same: &dyn Fn(&Side, &Side) -> bool,
-) -> Vec<String> {
-    let mut out = Vec::new();
-    for (i, new) in fresh.iter().enumerate() {
-        let Some(old) = recorded.get(i) else {
-            out.push(format!("record {i}: {:?} is missing from the snapshot", new.expr));
-            continue;
-        };
-        if old.expr != new.expr {
-            out.push(format!(
-                "record {i}: expected {:?}, the snapshot has {:?}",
-                new.expr, old.expr
-            ));
-            continue;
-        }
-        for (label, new_side, old_side) in [
-            ("libjay", &new.ours, &old.ours),
-            ("reference", &new.theirs, &old.theirs),
-        ] {
-            match (new_side, old_side) {
-                (Some(n), Some(o)) if !same(n, o) => out.push(format!(
-                    "{}\n  {label} now: {}\n  snapshot:  {}",
-                    new.expr,
-                    n.describe(),
-                    o.describe()
-                )),
-                (Some(_), None) | (None, Some(_)) => {
-                    out.push(format!("{}: the record no longer holds {label}'s answer", new.expr))
-                }
-                _ => {}
-            }
-        }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("creating {}: {e}", dir.display()));
     }
-    if recorded.len() > fresh.len() {
-        out.push(format!(
-            "the snapshot has {} records the expression list no longer has",
-            recorded.len() - fresh.len()
-        ));
-    }
-    out
+    std::fs::write(path, out).unwrap_or_else(|e| panic!("writing {}: {e}", path.display()));
 }
 
 /// Read a snapshot file. Panics with the line number on a malformed one.
-pub fn read(path: &str) -> Vec<Record> {
+/// A snapshot that is not there yet reads as no records.
+pub fn read(path: &Path) -> Vec<Record> {
+    if !path.exists() {
+        return Vec::new();
+    }
     let text = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("reading {path}: {e} (regenerate it: see docs/testing.md)"));
+        .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
     let mut records: Vec<Record> = Vec::new();
     let mut io = 1u8;
     for (i, line) in text.lines().enumerate() {
@@ -238,7 +160,7 @@ pub fn read(path: &str) -> Vec<Record> {
                     .unwrap_or_else(|| panic!("line {line_no}: unknown setting {rest:?}"));
             }
             "=" => records.push(Record {
-                expr: unescape(rest, line_no),
+                expr: crate::corpus::unescape(rest, line_no),
                 io,
                 note: None,
                 ours: None,
@@ -267,4 +189,10 @@ pub fn read(path: &str) -> Vec<Record> {
         }
     }
     records
+}
+
+/// A snapshot indexed by sentence, which is how a replay looks a record up:
+/// adding a line in the middle of a corpus file must not shift the rest.
+pub fn index(records: Vec<Record>) -> HashMap<(String, u8), Record> {
+    records.into_iter().map(|r| (r.key(), r)).collect()
 }

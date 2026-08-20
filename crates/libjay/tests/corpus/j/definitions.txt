@@ -1,0 +1,105 @@
+// Explicit definitions and control words. Each program names a verb and then
+// displays one value, so the comparison sees the last sentence.
+//
+// `$:` is absent from this file on purpose: the reference raises a stack
+// error for a self-reference inside an explicit definition, and libjay
+// follows the published dictionary instead. docs/coverage.md records it.
+
+// --- the three spellings, and the two valences -------------------------
+f =. 3 : 'y + 1'\nf 5
+f =. 3 : 'y * 2'\nf 21
+f =. 4 : 'x + y'\n2 f 3
+f =. 4 : 'x - y'\n10 f 4
+f =. {{ y * 3 }}\nf 7
+f =. {{ x + y }}\n2 f 3
+f =. 3 : 0\nt =. y * 2\nt + 1\n)\nf 5
+f =. 4 : 0\nt =. x * y\nt + 1\n)\n3 f 4
+f =. 3 : 0\nt =. y * 2\n)\nf 5
+f =. {{\nt =. y * 2\nt + 1\n}}\nf 5
+
+// A definition is a verb: it takes a rank, joins a train, and is an operand.
+f =. 3 : '# y'\n(f " 1) i. 3 4
+f =. 3 : 'y + 1'\n(f , f) 5
+f =. 3 : '# y'\n(+/ % f) 1 2 3 4
+f =. 3 : 'y * 2'\nf @: >: 5
+f =. 3 : 'y * 2'\nf " 0 i. 2 3
+
+// The last sentence is the result, an assignment included.
+f =. 3 : 'z =. y + 1'\nf 5
+f =. 3 : 'a =. y + 1 [ b =. 2'\nf 5
+
+// --- if. -----------------------------------------------------------------
+t =. 3 : 'if. y do. 1 else. 0 end.'\nt 0
+t =. 3 : 'if. y do. 1 else. 0 end.'\nt 1
+t =. 3 : 'if. y do. 1 else. 0 end.'\nt 0 1
+t =. 3 : 'if. y do. 1 else. 0 end.'\nt 1 0
+t =. 3 : 'if. y do. 1 else. 0 end.'\nt ''
+t =. 3 : 'if. y do. 1 else. 0 end.'\nt 2
+t =. 3 : 'if. y do. 1 else. 0 end.'\nt 0.0
+t =. 3 : 'if. y do. 1 else. 0 end.'\nt i. 0
+g =. 3 : 'if. y > 5 do. 1 elseif. y > 2 do. 2 elseif. do. 3 end.'\n(g 9), (g 4), (g 1)
+b =. 3 : 'if. 0 do. 5 end. 7'\nb 0
+a =. 3 : 'if. 0 do. 5 end.'\n$ a 0
+
+// --- while., whilst., for. ----------------------------------------------
+w =. 3 : 0\nn =. 0\ns =. 0\nwhile. n < y do.\ns =. s + n\nn =. n + 1\nend.\ns\n)\nw 5
+ws =. 3 : 0\nn =. 0\nwhilst. n < 0 do.\nn =. n + 1\nend.\nn\n)\nws 0
+c =. 3 : 0\nwhile. 0 do.\n5\nend.\n)\n$ c 0
+fr =. 3 : 0\ns =. 0\nfor. y do.\ns =. s + 1\nend.\ns\n)\nfr i. 4
+fi =. 3 : 0\ns =. 0\nfor_i. y do.\ns =. s + i * 10 + i_index\nend.\ns\n)\nfi 3 4 5
+d =. 3 : 0\ns =. 0\nfor_i. i. 0 do.\ns =. s + 1\nend.\ns\n)\nd 0
+bc =. 3 : 0\ns =. 0\nfor_i. i. 10 do.\nif. i = 3 do. continue. end.\nif. i = 6 do. break. end.\ns =. s + i\nend.\ns\n)\nbc 0
+
+// --- select. -------------------------------------------------------------
+se =. 3 : 0\nselect. y\ncase. 1 do. 'one'\ncase. 2 do. 'two'\nfcase. 3 do. 'three'\ncase. 4 do. 'four'\ncase. do. 'other'\nend.\n)\nse 1
+se =. 3 : 0\nselect. y\ncase. 1 do. 'one'\ncase. 2 do. 'two'\nfcase. 3 do. 'three'\ncase. 4 do. 'four'\ncase. do. 'other'\nend.\n)\nse 3
+se =. 3 : 0\nselect. y\ncase. 1 do. 'one'\ncase. 2 do. 'two'\nfcase. 3 do. 'three'\ncase. 4 do. 'four'\ncase. do. 'other'\nend.\n)\nse 9
+sm =. 3 : 0\nselect. y\ncase. 1 2 do. 'a'\ncase. 3 do. 'b'\ncase. do. 'z'\nend.\n)\nsm 1
+sm =. 3 : 0\nselect. y\ncase. 1 2 do. 'a'\ncase. 3 do. 'b'\ncase. do. 'z'\nend.\n)\nsm 1 2
+
+// --- return., try. -------------------------------------------------------
+r =. 3 : 'if. y > 3 do. return. end. 7'\nr 1
+r =. 3 : 'if. y > 3 do. return. end. 7'\n$ r 5
+r2 =. 3 : 'z =. 42 return. 7'\nr2 5
+r4 =. 3 : 0\nif. y > 3 do.\n99\nreturn.\nend.\n7\n)\nr4 5
+tc =. 3 : 0\ntry.\nz =. 1 + 'a'\n'no'\ncatch.\n'caught'\nend.\n)\ntc 0
+tc =. 3 : 0\ntry.\ny + 1\ncatch.\n99\nend.\n)\ntc 5
+t3 =. 3 : 0\ns =. 0\nfor_i. i.3 do.\ntry.\nif. i = 1 do. z =. 1 + 'a' end.\ns =. s + 1\ncatch.\ns =. s + 100\nend.\nend.\ns\n)\nt3 0
+
+// --- recursion by name ---------------------------------------------------
+fac =. 3 : 'if. y <: 1 do. 1 else. y * fac y - 1 end.'\nfac 5
+fac =. 3 : 'if. y <: 1 do. 1 else. y * fac y - 1 end.'\nfac 10
+fib =. 3 : 'if. y < 2 do. y else. (fib y - 1) + fib y - 2 end.'\nfib 10
+
+// --- scope ---------------------------------------------------------------
+gl =: 100\ng =. 3 : 'gl + y'\ng 1
+gl2 =: 7\nh =. 3 : 0\ngl2 =. 1\ngl2\n)\n(h 0), gl2
+k =. 3 : 0\ngl3 =: 5\ngl3 + 1\n)\nk 0
+k =. 3 : 0\ngl3 =: 5\ngl3 + 1\n)\nz =. k 0\ngl3
+tl =. 55\nq =: 3 : 'tl + y'\nq 1
+
+// --- nesting -------------------------------------------------------------
+f =. {{ ({{ y + 1 }}) y * 2 }}\nf 5
+outer =. 3 : 0\ninner =. 3 : 'y * 3'\ninner y + 1\n)\nouter 4
+
+// --- numeric literal forms ----------------------------------------------
+16b1f
+16bff
+2b101
+3b12
+1b1
+0b1
+_16b11
+2.5b10
+16b_1
+1p1
+1p2
+2p1
+1p0.5
+1p_1
+_1p1
+1x1
+2x1
+1p1 2p1
+1e3
+1e_3

@@ -6,10 +6,13 @@
 //! that: `f/` and `f⍤r` are folded into derived functions before the
 //! sentence is parsed.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use crate::array::{Array, Data};
 use crate::error::{Error, Result, Span};
 use crate::frontend::{Segment, SourceParts};
-use crate::ir::Expr;
+use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
     DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
 };
@@ -18,16 +21,77 @@ use crate::verb::{
 /// statements. `origin` is the dialect's `⎕IO`.
 pub fn parse(src: &SourceParts, origin: i64) -> Result<Vec<Expr>> {
     let sentences = lex(src, origin)?;
+    let mut verbs: HashMap<String, Verb> = HashMap::new();
     let mut stmts = Vec::with_capacity(sentences.len());
-    for sentence in sentences {
-        let toks = fold_paren_funcs(fold_axes(fold_operators(sentence, origin)?, origin)?);
-        if toks.is_empty() {
+    let mut i = 0usize;
+    while i < sentences.len() {
+        if matches!(sentences[i].first().map(|t| &t.kind), Some(Tok::Del)) {
+            let stmt = parse_tradfn(&sentences, &mut i, origin, &mut verbs)?;
+            stmts.push(stmt);
             continue;
         }
-        let hint = Span::merge(toks[0].span, toks[toks.len() - 1].span);
-        stmts.push(parse_range(&toks, 0, toks.len(), hint, origin)?);
+        let sentence = sentences[i].clone();
+        i += 1;
+        if let Some(stmt) = parse_statement(sentence, origin, &mut verbs, false)? {
+            stmts.push(stmt);
+        }
     }
     Ok(stmts)
+}
+
+/// One sentence, with every name known to be a function already a function.
+/// None where the sentence held nothing but blanks and a comment.
+fn parse_statement(
+    sentence: Vec<Token>,
+    origin: i64,
+    verbs: &mut HashMap<String, Verb>,
+    in_def: bool,
+) -> Result<Option<Expr>> {
+    let sentence = substitute_verbs(sentence, verbs);
+    let sentence = fold_dfns(sentence, origin, verbs)?;
+    // `F←{⍵×2}` names a function: the sentence does no work at run time, and
+    // later sentences read `F` as the function itself.
+    if let [name, assign, func] = &sentence[..] {
+        if let (Tok::Name(n), Tok::Assign, Tok::Func(v)) = (&name.kind, &assign.kind, &func.kind) {
+            let span = Span::merge(name.span, func.span);
+            if !in_def {
+                verbs.insert(n.clone(), v.clone());
+            }
+            return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v.clone(), span }));
+        }
+    }
+    let toks = fold_paren_funcs(fold_axes(fold_operators(sentence, origin)?, origin)?);
+    if toks.is_empty() {
+        return Ok(None);
+    }
+    if let Some(t) = toks.iter().find(|t| matches!(t.kind, Tok::Control(_))) {
+        return Err(Error::parse(
+            "control structures are only meaningful inside a ∇ definition",
+            t.span,
+        ));
+    }
+    let hint = Span::merge(toks[0].span, toks[toks.len() - 1].span);
+    // `A[i]←v` replaces part of a named value; nothing else assigns through
+    // a bracket.
+    if let Some(e) = indexed_assignment(&toks, origin, hint)? {
+        return Ok(Some(e));
+    }
+    parse_range(&toks, 0, toks.len(), hint, origin).map(Some)
+}
+
+/// Replace every name the program has given a function by that function,
+/// except where the name is the target of an assignment.
+fn substitute_verbs(mut toks: Vec<Token>, verbs: &HashMap<String, Verb>) -> Vec<Token> {
+    for i in 0..toks.len() {
+        let Tok::Name(n) = &toks[i].kind else { continue };
+        if matches!(toks.get(i + 1).map(|t| &t.kind), Some(Tok::Assign)) {
+            continue;
+        }
+        if let Some(v) = verbs.get(n) {
+            toks[i].kind = Tok::Func(v.clone());
+        }
+    }
+    toks
 }
 
 // ---------------------------------------------------------------------------
@@ -95,8 +159,21 @@ enum Tok {
     RParen,
     LBracket,
     RBracket,
-    /// The separator between index slots inside `[ ]`.
+    /// The separator between index slots inside `[ ]`, and the one between
+    /// a `∇`-definition header's name and its locals.
     Semi,
+    /// `{` and `}`, a dfn's brackets; gone after `fold_dfns`.
+    LBrace,
+    RBrace,
+    /// A statement break inside a dfn's braces, where `⋄` and a line break
+    /// do not end the sentence the dfn belongs to.
+    Separator,
+    /// The `:` of a dfn's guard, `cond:expr`.
+    Colon,
+    /// `∇`: a definition's bracket outside a dfn, a self-reference inside.
+    Del,
+    /// A control word, `:If` and its family, without the colon.
+    Control(&'static str),
 }
 
 #[derive(Clone, Debug)]
@@ -448,10 +525,11 @@ fn lex(src: &SourceParts, origin: i64) -> Result<Vec<Vec<Token>>> {
     let mut cur: Vec<Token> = Vec::new();
     // A comment runs to the end of a line, which may be a later segment.
     let mut in_comment = false;
+    let mut braces = 0usize;
     for seg in &src.segments {
         match seg {
             Segment::Text { text, offset } => {
-                lex_text(text, *offset, origin, &mut out, &mut cur, &mut in_comment)?;
+                lex_text(text, *offset, origin, &mut out, &mut cur, &mut in_comment, &mut braces)?;
             }
             Segment::Param { index, offset, len } => {
                 if !in_comment {
@@ -469,6 +547,7 @@ fn lex(src: &SourceParts, origin: i64) -> Result<Vec<Vec<Token>>> {
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lex_text(
     text: &str,
     offset: usize,
@@ -476,6 +555,7 @@ fn lex_text(
     out: &mut Vec<Vec<Token>>,
     cur: &mut Vec<Token>,
     in_comment: &mut bool,
+    braces: &mut usize,
 ) -> Result<()> {
     let mut i = 0usize;
     while i < text.len() {
@@ -490,8 +570,17 @@ fn lex_text(
             continue;
         }
         match ch {
+            // Inside a dfn's braces neither a line break nor `⋄` ends the
+            // sentence the dfn belongs to; both separate its statements.
             '\n' | '⋄' => {
-                end_sentence(out, cur);
+                if *braces > 0 {
+                    cur.push(Token {
+                        kind: Tok::Separator,
+                        span: Span::new(offset + i, offset + i + clen),
+                    });
+                } else {
+                    end_sentence(out, cur);
+                }
                 i += clen;
             }
             ' ' | '\t' | '\r' => i += clen,
@@ -506,6 +595,64 @@ fn lex_text(
                     span: Span::new(offset + i, offset + next),
                 });
                 i = next;
+            }
+            '{' => {
+                *braces += 1;
+                cur.push(Token { kind: Tok::LBrace, span: Span::new(offset + i, offset + i + 1) });
+                i += 1;
+            }
+            '}' => {
+                *braces = braces.saturating_sub(1);
+                cur.push(Token { kind: Tok::RBrace, span: Span::new(offset + i, offset + i + 1) });
+                i += 1;
+            }
+            '∇' => {
+                cur.push(Token { kind: Tok::Del, span: Span::new(offset + i, offset + i + clen) });
+                i += clen;
+            }
+            // `⍺⍺` and `⍵⍵` are one name each: a dfn operator's operands.
+            '⍺' | '⍵' => {
+                let mut end = i + clen;
+                if text[end..].starts_with(ch) {
+                    end += clen;
+                }
+                cur.push(Token {
+                    kind: Tok::Name(text[i..end].to_string()),
+                    span: Span::new(offset + i, offset + end),
+                });
+                i = end;
+            }
+            // `:If` and its family are one word; a bare `:` is a dfn guard.
+            ':' => {
+                let mut j = i + 1;
+                while let Some(c) = text[j..].chars().next() {
+                    if c.is_ascii_alphabetic() {
+                        j += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                let span = Span::new(offset + i, offset + j);
+                match control_word(&text[i + 1..j]) {
+                    Some(word) => cur.push(Token { kind: Tok::Control(word), span }),
+                    None if j > i + 1 => {
+                        return Err(Error::parse(
+                            format!("unknown control word: {}", &text[i..j]),
+                            span,
+                        ));
+                    }
+                    None => cur.push(Token {
+                        kind: Tok::Colon,
+                        span: Span::new(offset + i, offset + i + 1),
+                    }),
+                }
+                i = j;
+            }
+            '→' => {
+                return Err(Error::not_yet(
+                    "branching (→ with a label)",
+                    Span::new(offset + i, offset + i + clen),
+                ));
             }
             '(' => {
                 cur.push(Token { kind: Tok::LParen, span: Span::new(offset + i, offset + i + 1) });
@@ -1132,7 +1279,12 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, origin: i64) ->
                 let span = Span::new(target.span.start, end);
                 match &target.kind {
                     Tok::Name(n) => {
-                        acc = Expr::Assign { name: n.clone(), value: Box::new(acc), span };
+                        acc = Expr::Assign {
+                            name: n.clone(),
+                            value: Box::new(acc),
+                            scope: Scope::Local,
+                            span,
+                        };
                     }
                     Tok::Quad => {
                         acc = Expr::PrintPass { value: Box::new(acc), span };
@@ -1263,6 +1415,14 @@ fn parse_primary(
         Tok::LParen => Err(Error::parse("unmatched (", t.span)),
         Tok::LBracket => Err(Error::parse("unmatched [", t.span)),
         Tok::Semi => Err(Error::parse("; is only meaningful inside index brackets", t.span)),
+        Tok::Colon => Err(Error::parse(": is only meaningful in a dfn guard", t.span)),
+        Tok::Del => Err(Error::parse("∇ opens a definition; it is not a value", t.span)),
+        Tok::Control(w) => Err(Error::parse(
+            format!(":{w} is only meaningful inside a ∇ definition"),
+            t.span,
+        )),
+        Tok::LBrace | Tok::RBrace => Err(Error::parse("unmatched {", t.span)),
+        Tok::Separator => Err(Error::internal("a statement break survived folding")),
         Tok::Op(_) => Err(Error::internal("operator survived folding")),
     }
 }
@@ -1375,6 +1535,684 @@ fn match_lparen(toks: &[Token], lo: usize, rparen: usize) -> Result<usize> {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Explicit definitions
+// ---------------------------------------------------------------------------
+
+/// APL's control words, without their colon. `:End` closes any of the
+/// structures, which is the spelling GNU APL's manual gives as an
+/// alternative to the named closers.
+const CONTROL_WORDS: [&str; 18] = [
+    "If", "ElseIf", "Else", "EndIf", "While", "EndWhile", "Repeat", "Until", "For", "In",
+    "EndFor", "Select", "Case", "EndSelect", "Return", "Leave", "Continue", "End",
+];
+
+/// The control word a `:name` spells, case-insensitively as the references
+/// accept it.
+fn control_word(word: &str) -> Option<&'static str> {
+    CONTROL_WORDS.iter().copied().find(|w| w.eq_ignore_ascii_case(word))
+}
+
+/// The index of the token matching the bracket that opens at `open`.
+fn match_close(toks: &[Token], open: usize, opener: &Tok, closer: &Tok) -> Option<usize> {
+    let same = |a: &Tok, b: &Tok| std::mem::discriminant(a) == std::mem::discriminant(b);
+    let mut depth = 0usize;
+    for (i, t) in toks.iter().enumerate().skip(open) {
+        if same(&t.kind, opener) {
+            depth += 1;
+        } else if same(&t.kind, closer) {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// Replace every `{ … }` in a sentence by the function it defines.
+fn fold_dfns(
+    toks: Vec<Token>,
+    origin: i64,
+    verbs: &HashMap<String, Verb>,
+) -> Result<Vec<Token>> {
+    let Some(open) = toks.iter().position(|t| matches!(t.kind, Tok::LBrace)) else {
+        return Ok(toks);
+    };
+    let close = match_close(&toks, open, &Tok::LBrace, &Tok::RBrace)
+        .ok_or_else(|| Error::parse("unmatched {", toks[open].span))?;
+    let span = Span::merge(toks[open].span, toks[close].span);
+    let verb = build_dfn(&toks[open + 1..close], origin, verbs)?;
+    let mut out: Vec<Token> = toks[..open].to_vec();
+    out.push(Token { kind: Tok::Func(verb), span });
+    out.extend_from_slice(&toks[close + 1..]);
+    // A sentence may hold several dfns side by side.
+    fold_dfns(out, origin, verbs)
+}
+
+/// The statements of a dfn body: the runs between the `⋄` and line breaks
+/// that belong to this dfn rather than to one nested inside it.
+fn split_statements(toks: &[Token]) -> Vec<&[Token]> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, t) in toks.iter().enumerate() {
+        match t.kind {
+            Tok::LBrace => depth += 1,
+            Tok::RBrace => depth = depth.saturating_sub(1),
+            Tok::Separator if depth == 0 => {
+                out.push(&toks[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&toks[start..]);
+    out.into_iter().filter(|s| !s.is_empty()).collect()
+}
+
+/// `{ … }`: the body's own words decide the valence, and `∇` in it names
+/// the dfn itself.
+fn build_dfn(body: &[Token], origin: i64, verbs: &HashMap<String, Verb>) -> Result<Verb> {
+    let mut depth = 0usize;
+    let mut dyadic = false;
+    let mut operator = None;
+    for t in body {
+        match &t.kind {
+            Tok::LBrace => depth += 1,
+            Tok::RBrace => depth = depth.saturating_sub(1),
+            Tok::Name(n) if depth == 0 && n == "⍺" => dyadic = true,
+            Tok::Name(n) if depth == 0 && (n == "⍺⍺" || n == "⍵⍵") => operator = Some(t.span),
+            _ => {}
+        }
+    }
+    if let Some(s) = operator {
+        return Err(Error::not_yet("dfn operators (⍺⍺ and ⍵⍵)", s));
+    }
+    let mut inner = verbs.clone();
+    let stmts = parse_dfn_body(body, origin, &mut inner)?;
+    let pure = stmts.iter().all(is_pure_stmt);
+    Ok(Verb::Explicit(Arc::new(ExplicitDef {
+        name: "{…}".to_string(),
+        left: dyadic.then(|| "⍺".to_string()),
+        right: "⍵".to_string(),
+        result: None,
+        locals: Vec::new(),
+        body: stmts,
+        // A dfn that reaches its end without a value has no result to give.
+        empty: None,
+        pure,
+    })))
+}
+
+fn parse_dfn_body(
+    body: &[Token],
+    origin: i64,
+    verbs: &mut HashMap<String, Verb>,
+) -> Result<Vec<Expr>> {
+    let mut stmts = Vec::new();
+    for stmt in split_statements(body) {
+        // `∇` inside a dfn is the dfn itself.
+        let stmt: Vec<Token> = stmt
+            .iter()
+            .map(|t| match t.kind {
+                Tok::Del => Token { kind: Tok::Func(Verb::SelfRef), span: t.span },
+                _ => t.clone(),
+            })
+            .collect();
+        stmts.push(parse_guarded(stmt, origin, verbs)?);
+    }
+    Ok(stmts)
+}
+
+/// One dfn statement: a guard `cond:expr`, an `⍺←default`, or a sentence.
+fn parse_guarded(
+    stmt: Vec<Token>,
+    origin: i64,
+    verbs: &mut HashMap<String, Verb>,
+) -> Result<Expr> {
+    let mut depth = 0usize;
+    let mut colon = None;
+    for (i, t) in stmt.iter().enumerate() {
+        match t.kind {
+            Tok::LBrace | Tok::LParen | Tok::LBracket => depth += 1,
+            Tok::RBrace | Tok::RParen | Tok::RBracket => depth = depth.saturating_sub(1),
+            Tok::Colon if depth == 0 => {
+                colon = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    if let Some(k) = colon {
+        let span = Span::merge(stmt[0].span, stmt[stmt.len() - 1].span);
+        let test = one_statement(stmt[..k].to_vec(), origin, verbs, stmt[k].span)?;
+        let body = one_statement(stmt[k + 1..].to_vec(), origin, verbs, stmt[k].span)?;
+        // A guard that holds is the dfn's answer: the value, then out.
+        let arm = Branch {
+            test: Some(vec![test]),
+            body: vec![body, Expr::Control(Box::new(Control::Return), span)],
+            fall_through: false,
+        };
+        return Ok(Expr::Control(
+            Box::new(Control::If { arms: vec![arm], otherwise: None }),
+            span,
+        ));
+    }
+    // `⍺←v` gives the left argument a value only where none arrived.
+    let default = matches!(
+        (stmt.first().map(|t| &t.kind), stmt.get(1).map(|t| &t.kind)),
+        (Some(Tok::Name(n)), Some(Tok::Assign)) if n == "⍺"
+    );
+    let span = stmt.first().map_or(Span::new(0, 0), |t| t.span);
+    let e = one_statement(stmt, origin, verbs, span)?;
+    if default {
+        if let Expr::Assign { name, value, span, .. } = e {
+            return Ok(Expr::Assign { name, value, scope: Scope::LocalDefault, span });
+        }
+    }
+    Ok(e)
+}
+
+fn one_statement(
+    stmt: Vec<Token>,
+    origin: i64,
+    verbs: &mut HashMap<String, Verb>,
+    hint: Span,
+) -> Result<Expr> {
+    parse_statement(stmt, origin, verbs, true)?
+        .ok_or_else(|| Error::parse("this needs an expression", hint))
+}
+
+/// True when nothing in this sentence can have an effect beyond its value.
+fn is_pure_stmt(e: &Expr) -> bool {
+    match e {
+        Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => true,
+        Expr::Monad { verb, y, .. } => verb.is_pure() && is_pure_stmt(y),
+        Expr::Dyad { verb, x, y, .. } => verb.is_pure() && is_pure_stmt(x) && is_pure_stmt(y),
+        Expr::Assign { value, .. } => is_pure_stmt(value),
+        Expr::Control(c, _) => is_pure_control(c),
+        _ => false,
+    }
+}
+
+fn is_pure_control(c: &Control) -> bool {
+    let all = |b: &Vec<Expr>| b.iter().all(is_pure_stmt);
+    match c {
+        Control::Return | Control::Break | Control::Continue => true,
+        Control::If { arms, otherwise } => {
+            arms.iter().all(|a| a.test.as_ref().is_none_or(all) && all(&a.body))
+                && otherwise.as_ref().is_none_or(all)
+        }
+        Control::While { test, body, .. } => all(test) && all(body),
+        Control::For { source, body, .. } => is_pure_stmt(source) && all(body),
+        Control::Select { subject, cases } => {
+            is_pure_stmt(subject)
+                && cases.iter().all(|c| c.test.as_ref().is_none_or(all) && all(&c.body))
+        }
+        Control::Try { body, catch } => all(body) && all(catch),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ∇-definitions and control structures
+// ---------------------------------------------------------------------------
+
+/// `∇ Z←L F R;a;b` … `∇`: the multi-line definition form, which is where
+/// APL puts its control structures.
+fn parse_tradfn(
+    sentences: &[Vec<Token>],
+    i: &mut usize,
+    origin: i64,
+    verbs: &mut HashMap<String, Verb>,
+) -> Result<Expr> {
+    let header = &sentences[*i];
+    let open = header[0].span;
+    *i += 1;
+    let (name, def_left, def_right, result, locals) = parse_header(&header[1..], open)?;
+    let mut body_lines: Vec<Vec<Token>> = Vec::new();
+    loop {
+        let Some(line) = sentences.get(*i) else {
+            return Err(Error::parse("this definition has no closing ∇", open));
+        };
+        *i += 1;
+        if line.len() == 1 && matches!(line[0].kind, Tok::Del) {
+            break;
+        }
+        body_lines.push(line.clone());
+    }
+    let close = sentences
+        .get(i.saturating_sub(1))
+        .and_then(|l| l.first())
+        .map_or(open, |t| t.span);
+    let span = Span::merge(open, close);
+    // The body can call the function by its own name.
+    let mut inner = verbs.clone();
+    inner.insert(name.clone(), Verb::Named(name.clone()));
+    let mut items = Vec::new();
+    for line in &body_lines {
+        items.push(to_item(line.clone(), origin, &mut inner)?);
+    }
+    let mut cursor = AplCursor { items: &items, at: 0 };
+    let mut body = parse_apl_block(&mut cursor, &[])?;
+    if let Some(item) = cursor.peek() {
+        return Err(Error::parse(
+            format!(":{} has no matching opening word", item.word().unwrap_or("?")),
+            item.span(),
+        ));
+    }
+    // A `∇` definition's names are global unless the header declares them:
+    // that is APL's rule, and the reference holds to it.
+    let mut own: Vec<String> = locals.clone();
+    own.extend(result.clone());
+    own.extend(def_left.clone());
+    own.push(def_right.clone());
+    for stmt in &mut body {
+        set_scopes(stmt, &own);
+    }
+    let pure = body.iter().all(is_pure_stmt);
+    let verb = Verb::Explicit(Arc::new(ExplicitDef {
+        name: format!("∇{name}"),
+        left: def_left,
+        right: def_right,
+        result,
+        locals,
+        body,
+        empty: None,
+        pure,
+    }));
+    verbs.insert(name.clone(), verb.clone());
+    Ok(Expr::VerbDef { name, verb, span })
+}
+
+type Header = (String, Option<String>, String, Option<String>, Vec<String>);
+
+/// `Z←L F R;a;b` and its shorter forms.
+fn parse_header(toks: &[Token], span: Span) -> Result<Header> {
+    let mut names: Vec<String> = Vec::new();
+    let mut locals: Vec<String> = Vec::new();
+    let mut result = None;
+    let mut in_locals = false;
+    let mut k = 0usize;
+    // `Z←` in front names the result.
+    if let (Some(Tok::Name(z)), Some(Tok::Assign)) =
+        (toks.first().map(|t| &t.kind), toks.get(1).map(|t| &t.kind))
+    {
+        result = Some(z.clone());
+        k = 2;
+    }
+    while k < toks.len() {
+        match &toks[k].kind {
+            Tok::Semi => in_locals = true,
+            Tok::Name(n) if in_locals => locals.push(n.clone()),
+            Tok::Name(n) => names.push(n.clone()),
+            _ => {
+                return Err(Error::parse("this is not a ∇ definition header", toks[k].span));
+            }
+        }
+        k += 1;
+    }
+    match names.len() {
+        3 => Ok((names[1].clone(), Some(names[0].clone()), names[2].clone(), result, locals)),
+        2 => Ok((names[0].clone(), None, names[1].clone(), result, locals)),
+        1 => Err(Error::not_yet("niladic ∇ definitions", span)),
+        _ => Err(Error::parse("a ∇ definition header names a function and its arguments", span)),
+    }
+}
+
+/// One line of a `∇` definition: a control word with what follows it, or a
+/// sentence already lowered.
+enum AplItem {
+    Sentence(Expr),
+    Word { word: &'static str, rest: Vec<Token>, span: Span },
+}
+
+impl AplItem {
+    fn word(&self) -> Option<&'static str> {
+        match self {
+            AplItem::Word { word, .. } => Some(word),
+            AplItem::Sentence(_) => None,
+        }
+    }
+
+    fn span(&self) -> Span {
+        match self {
+            AplItem::Word { span, .. } => *span,
+            AplItem::Sentence(e) => e.span(),
+        }
+    }
+}
+
+fn to_item(
+    line: Vec<Token>,
+    origin: i64,
+    verbs: &mut HashMap<String, Verb>,
+) -> Result<AplItem> {
+    if let Some(Tok::Control(word)) = line.first().map(|t| &t.kind) {
+        let word = *word;
+        let span = line[0].span;
+        return Ok(AplItem::Word { word, rest: line[1..].to_vec(), span });
+    }
+    let span = line.first().map_or(Span::new(0, 0), |t| t.span);
+    let e = parse_statement(line, origin, verbs, true)?
+        .ok_or_else(|| Error::parse("this line has no sentence", span))?;
+    Ok(AplItem::Sentence(e))
+}
+
+struct AplCursor<'a> {
+    items: &'a [AplItem],
+    at: usize,
+}
+
+impl<'a> AplCursor<'a> {
+    fn peek(&self) -> Option<&'a AplItem> {
+        self.items.get(self.at)
+    }
+
+    fn peek_word(&self) -> Option<&'static str> {
+        self.peek().and_then(AplItem::word)
+    }
+
+    fn last_span(&self) -> Span {
+        self.items
+            .get(self.at.saturating_sub(1))
+            .map_or_else(|| Span::new(0, 0), AplItem::span)
+    }
+
+    /// Consume the closing word, which may also be spelled `:End`.
+    fn close(&mut self, want: &str) -> Result<()> {
+        match self.peek_word() {
+            Some(w) if w == want || w == "End" => {
+                self.at += 1;
+                Ok(())
+            }
+            Some(w) => Err(Error::parse(
+                format!("expected :{want} here, not :{w}"),
+                self.peek().expect("a word").span(),
+            )),
+            None => Err(Error::parse(format!("this block needs a :{want}"), self.last_span())),
+        }
+    }
+}
+
+fn parse_apl_block(cur: &mut AplCursor<'_>, stop: &[&str]) -> Result<Vec<Expr>> {
+    let mut out = Vec::new();
+    loop {
+        match cur.peek() {
+            None => return Ok(out),
+            Some(AplItem::Word { word, .. }) if stop.contains(word) || *word == "End" => {
+                return Ok(out);
+            }
+            Some(AplItem::Sentence(e)) => {
+                cur.at += 1;
+                out.push(e.clone());
+            }
+            Some(AplItem::Word { .. }) => out.push(parse_apl_control(cur)?),
+        }
+    }
+}
+
+fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
+    let Some(AplItem::Word { word, rest, span }) = cur.peek() else {
+        return Err(Error::internal("expected a control word"));
+    };
+    let (word, rest, start) = (*word, rest.clone(), *span);
+    cur.at += 1;
+    let control = match word {
+        "If" => {
+            let mut arms = Vec::new();
+            let mut otherwise = None;
+            let mut test = rest;
+            loop {
+                let test_expr = condition(test, start)?;
+                let body = parse_apl_block(cur, &["ElseIf", "Else", "EndIf"])?;
+                arms.push(Branch { test: Some(vec![test_expr]), body, fall_through: false });
+                match cur.peek_word() {
+                    Some("ElseIf") => {
+                        let Some(AplItem::Word { rest, .. }) = cur.peek() else { unreachable!() };
+                        test = rest.clone();
+                        cur.at += 1;
+                    }
+                    Some("Else") => {
+                        cur.at += 1;
+                        otherwise = Some(parse_apl_block(cur, &["EndIf"])?);
+                        cur.close("EndIf")?;
+                        break;
+                    }
+                    _ => {
+                        cur.close("EndIf")?;
+                        break;
+                    }
+                }
+            }
+            Control::If { arms, otherwise }
+        }
+        "While" => {
+            let test = condition(rest, start)?;
+            let body = parse_apl_block(cur, &["EndWhile"])?;
+            cur.close("EndWhile")?;
+            Control::While { test: vec![test], body, body_first: false, until: false }
+        }
+        "Repeat" => {
+            if !rest.is_empty() {
+                return Err(Error::parse(":Repeat takes no condition", start));
+            }
+            let body = parse_apl_block(cur, &["Until"])?;
+            let Some(AplItem::Word { rest, span, .. }) = cur.peek() else {
+                return Err(Error::parse("this :Repeat needs an :Until", cur.last_span()));
+            };
+            let test = condition(rest.clone(), *span)?;
+            cur.at += 1;
+            Control::While { test: vec![test], body, body_first: true, until: true }
+        }
+        "For" => {
+            // `:For name :In source`.
+            let (name, source) = for_header(&rest, start)?;
+            let body = parse_apl_block(cur, &["EndFor"])?;
+            cur.close("EndFor")?;
+            Control::For { name: Some(name), source: Box::new(source), body }
+        }
+        "Select" => {
+            let subject = condition(rest, start)?;
+            let mut cases = Vec::new();
+            loop {
+                match cur.peek() {
+                    Some(AplItem::Word { word: "Case", rest, span }) => {
+                        let test = condition(rest.clone(), *span)?;
+                        cur.at += 1;
+                        let body = parse_apl_block(cur, &["Case", "Else", "EndSelect"])?;
+                        cases.push(Branch {
+                            test: Some(vec![test]),
+                            body,
+                            fall_through: false,
+                        });
+                    }
+                    Some(AplItem::Word { word: "Else", .. }) => {
+                        cur.at += 1;
+                        let body = parse_apl_block(cur, &["EndSelect"])?;
+                        cases.push(Branch { test: None, body, fall_through: false });
+                        cur.close("EndSelect")?;
+                        break;
+                    }
+                    _ => {
+                        cur.close("EndSelect")?;
+                        break;
+                    }
+                }
+            }
+            Control::Select { subject: Box::new(subject), cases }
+        }
+        "Return" => Control::Return,
+        "Leave" => Control::Break,
+        "Continue" => Control::Continue,
+        other => {
+            return Err(Error::parse(format!(":{other} has no matching opening word"), start));
+        }
+    };
+    Ok(Expr::Control(Box::new(control), Span::merge(start, cur.last_span())))
+}
+
+/// The tokens after a control word, as one expression.
+fn condition(rest: Vec<Token>, span: Span) -> Result<Expr> {
+    match rest.first() {
+        None => Err(Error::parse("this control word needs a condition", span)),
+        Some(first) => {
+            let hint = Span::merge(first.span, rest[rest.len() - 1].span);
+            match &rest[0].kind {
+                Tok::Control(w) => Err(Error::parse(format!("unexpected :{w}"), rest[0].span)),
+                _ => Ok(AplItem::Sentence(parse_prepared(&rest, hint)?)).map(|it| match it {
+                    AplItem::Sentence(e) => e,
+                    AplItem::Word { .. } => unreachable!(),
+                }),
+            }
+        }
+    }
+}
+
+/// `:For name :In source`.
+fn for_header(rest: &[Token], span: Span) -> Result<(String, Expr)> {
+    let Some(Tok::Name(name)) = rest.first().map(|t| &t.kind) else {
+        return Err(Error::parse(":For needs a name to bind", span));
+    };
+    let Some(k) = rest.iter().position(|t| matches!(t.kind, Tok::Control("In"))) else {
+        return Err(Error::parse(":For needs an :In", span));
+    };
+    if k != 1 {
+        return Err(Error::not_yet("several :For names", span));
+    }
+    let source = &rest[k + 1..];
+    let Some(first) = source.first() else {
+        return Err(Error::parse(":In needs a value", span));
+    };
+    let hint = Span::merge(first.span, source[source.len() - 1].span);
+    Ok((name.clone(), parse_prepared(source, hint)?))
+}
+
+/// Parse a token run that has already had its names and dfns folded.
+fn parse_prepared(toks: &[Token], hint: Span) -> Result<Expr> {
+    let toks = fold_paren_funcs(fold_axes(fold_operators(toks.to_vec(), 1)?, 1)?);
+    if toks.is_empty() {
+        return Err(Error::parse("this needs an expression", hint));
+    }
+    parse_range(&toks, 0, toks.len(), hint, 1)
+}
+
+/// `A[i;j]←v`: the one assignment that writes through a bracket. None when
+/// the sentence is not one.
+fn indexed_assignment(toks: &[Token], origin: i64, hint: Span) -> Result<Option<Expr>> {
+    let Some(assign) = toks.iter().position(|t| matches!(t.kind, Tok::Assign)) else {
+        return Ok(None);
+    };
+    if assign < 3 || !matches!(toks[assign - 1].kind, Tok::RBracket) {
+        return Ok(None);
+    }
+    let close = assign - 1;
+    let open = match_lbracket(toks, 0, close)?;
+    if open == 0 {
+        return Err(Error::parse("[ needs a value on its left", toks[open].span));
+    }
+    let Tok::Name(name) = &toks[open - 1].kind else {
+        return Err(Error::not_yet("indexed assignment through an expression", hint));
+    };
+    if open != 1 {
+        return Err(Error::not_yet("indexed assignment inside a larger sentence", hint));
+    }
+    let ranges = index_slots(toks, open + 1, close, toks[open].span)?;
+    let mut slots = Vec::with_capacity(ranges.len());
+    for slot in &ranges {
+        slots.push(match *slot {
+            None => None,
+            Some((lo, hi)) => Some(parse_range(toks, lo, hi, toks[open].span, origin)?),
+        });
+    }
+    let value = parse_range(toks, assign + 1, toks.len(), toks[assign].span, origin)?;
+    let span = Span::merge(toks[0].span, toks[toks.len() - 1].span);
+    Ok(Some(Expr::AmendIndex {
+        name: name.clone(),
+        slots,
+        value: Box::new(value),
+        origin,
+        scope: Scope::Local,
+        span,
+    }))
+}
+
+/// Give every assignment in a `∇` definition's body its scope: local for
+/// the names the header owns, global for the rest. Definitions nested
+/// inside keep their own rules, so the walk stops at them.
+fn set_scopes(e: &mut Expr, own: &[String]) {
+    let pick = |name: &str| {
+        if own.iter().any(|n| n == name) {
+            Scope::Local
+        } else {
+            Scope::Global
+        }
+    };
+    match e {
+        Expr::Assign { name, value, scope, .. } => {
+            *scope = pick(name);
+            set_scopes(value, own);
+        }
+        Expr::AmendIndex { name, slots, value, scope, .. } => {
+            *scope = pick(name);
+            for slot in slots.iter_mut().flatten() {
+                set_scopes(slot, own);
+            }
+            set_scopes(value, own);
+        }
+        Expr::Monad { y, .. } => set_scopes(y, own),
+        Expr::Dyad { x, y, .. } => {
+            set_scopes(x, own);
+            set_scopes(y, own);
+        }
+        Expr::PrintPass { value, .. } => set_scopes(value, own),
+        Expr::Control(c, _) => {
+            let walk = |b: &mut Vec<Expr>| b.iter_mut().for_each(|s| set_scopes(s, own));
+            match &mut **c {
+                Control::If { arms, otherwise } => {
+                    for arm in arms {
+                        if let Some(t) = &mut arm.test {
+                            walk(t);
+                        }
+                        walk(&mut arm.body);
+                    }
+                    if let Some(b) = otherwise {
+                        walk(b);
+                    }
+                }
+                Control::While { test, body, .. } => {
+                    walk(test);
+                    walk(body);
+                }
+                Control::For { source, body, .. } => {
+                    set_scopes(source, own);
+                    walk(body);
+                }
+                Control::Select { subject, cases } => {
+                    set_scopes(subject, own);
+                    for case in cases {
+                        if let Some(t) = &mut case.test {
+                            walk(t);
+                        }
+                        walk(&mut case.body);
+                    }
+                }
+                Control::Try { body, catch } => {
+                    walk(body);
+                    walk(catch);
+                }
+                Control::Return | Control::Break | Control::Continue => {}
+            }
+        }
+        Expr::Const(..)
+        | Expr::Param(..)
+        | Expr::Name(..)
+        | Expr::Fused { .. }
+        | Expr::Elided { .. }
+        | Expr::VerbDef { .. } => {}
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -372,6 +372,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 name = "libjay"
 version = "0.1.0"
 dependencies = [
+ "libjay-testkit",
  "multiversion",
  "rayon",
  "rstest",
@@ -385,6 +386,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "libjay-devtools"
+version = "0.1.0"
+dependencies = [
+ "libjay-testkit",
+ "rayon",
+]
+
+[[package]]
 name = "libjay-python"
 version = "0.1.0"
 dependencies = [
@@ -394,6 +403,13 @@ dependencies = [
  "arrow-schema",
  "libjay",
  "pyo3",
+]
+
+[[package]]
+name = "libjay-testkit"
+version = "0.1.0"
+dependencies = [
+ "libjay",
 ]
 
 [[package]]

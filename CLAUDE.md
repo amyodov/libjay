@@ -78,17 +78,19 @@ commits. Decisions with reasoning go to docs/decisions.md, not here.
   `~/projects/libjay-oracles/j/j64/jconsole -jprofile /dev/null`
   (LIBJAY_ORACLE_J), GNU APL at
   `~/projects/libjay-oracles/gnu-apl/install/bin/apl` (LIBJAY_ORACLE_APL).
-  Differential suites (tests/oracle.rs, tests/oracle_apl.rs) are snapshot
-  batteries: `cargo test` compares against tests/snapshots/*.snap and runs no
-  interpreter; the oracles run only under LIBJAY_REFRESH_ORACLE=1 (or =write
-  to rewrite the snapshots). Workflow in docs/testing.md.
+  Collecting and testing are separate: `cargo run -p libjay-devtools --
+  record <j|apl>` runs an oracle over tests/corpus/<lang>/*.txt and records
+  the answers into tests/snapshots/<lang>/*.snap; `cargo test`
+  (tests/oracle.rs, tests/oracle_apl.rs) only replays them, one case per
+  corpus file, and runs no interpreter. Workflow in docs/testing.md.
 - Venvs: `.venv` (3.14, dev), `.venv-bench` (3.12, `'.[bench]'`). Both share
   python/jay/_jay.abi3.so — rebuild `maturin develop --release` before
   benchmarking. LIBJAY_THREADS caps the pool; LIBJAY_CPU_LEVEL pins the CPU
   feature level (`baseline`, `v2`, `v3`, `native`), read once per process.
 - Phases (original roadmap): 1–6 done (frontends, IR, Arrow, parallelism,
-  time series, SIMD dispatch) + C ABI, fusion, dual oracles, boxes; next:
-  7 GPU/device, 8 bigints/rationals/control structures.
+  time series, SIMD dispatch) + C ABI, fusion, dual oracles, boxes,
+  explicit definitions and control structures; next: 7 GPU/device,
+  8 bigints/rationals.
 
 ## Open
 

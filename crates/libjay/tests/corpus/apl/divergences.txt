@@ -1,0 +1,113 @@
+// Where libjay answers differently from GNU APL on purpose: each of these
+// follows a documented choice of its own (Dyalog-style, or the rule its J
+// frontend already uses) where GNU APL follows the ISO/APL2 one, or names a
+// gap where GNU APL has an answer. The `? ` line says which.
+//
+// The snapshot records BOTH answers: the test holds libjay to its side, and
+// `jay-corpus record` re-measures both and fails if a pair has quietly
+// converged, which is the signal that the note (and the entry in
+// docs/coverage.md) should go. The same list appears in docs/coverage.md.
+// libjay's monadic `÷` takes J's rule for division by zero (an
+// infinity); GNU APL raises DOMAIN ERROR, as libjay's DYADIC `÷` does.
+// Recorded as a deliberate gap in docs/coverage.md.
+÷0
+? monadic ÷0 is ∞ here, DOMAIN ERROR there
+÷0 2 4
+? monadic ÷0 is ∞ here, DOMAIN ERROR there
+// `⍟0` is the same disagreement one function along.
+⍟0
+? log 0 is ¯∞ here, DOMAIN ERROR there
+// Dyadic `⊖` with a vector left argument: libjay reads it as one amount
+// per AXIS (J's `|.` rule), APL as one amount per column of the leading
+// axis. `⌽` follows APL in both valences, so only `⊖` diverges.
+1 2⊖3 4⍴⍳12
+? left argument is per-axis here, per-column there
+1 ¯1 2 0⊖3 4⍴⍳12
+? left argument is per-axis here, per-column there
+// `∪` is nub over ITEMS here, so a matrix is legal; GNU APL restricts
+// the monad to vectors.
+∪2 3⍴1 2 3 1 2 3
+? nub takes items of any rank here, vectors only there
+// Reshaping from an empty argument: APL2 fills with the prototype (0 or
+// blank), libjay refuses rather than invent data.
+2 2⍴⍳0
+? empty reshape is a fill of zeros there, an error here
+// A circle function that leaves the reals: GNU APL has complex numbers
+// and libjay does not yet, so it names the gap instead of answering.
+0○2
+? complex result there, `complex numbers` gap here
+¯2○2
+? complex result there, `complex numbers` gap here
+// `⊥` on an argument of rank 2 or more: APL folds the LEADING axis (it
+// is an inner product), libjay folds the last one, which is J's `#.`
+// rank-1 framing. Vectors — the common case — agree. Fixing it needs an
+// axis-moving transpose the IR does not have yet, the same one dyadic
+// `⍉` is waiting for, so it is a named gap in docs/coverage.md.
+2⊥2 3⍴1 0 1 1 1 0
+? decode folds the last axis here, the leading one there
+2⊥2 2 3⍴⍳12
+? decode folds the last axis here, the leading one there
+// A sequence yields its last sentence and prints nothing on the way
+// (CLAUDE.md); GNU APL prints the value of every statement.
+1 2 3⋄4 5
+? only the last sentence has a value here, every one prints there
+// GNU APL's own bug, kept here so we notice if a later release fixes
+// it: a scan whose axis has length 1 loses that axis, so a 2-by-1
+// matrix scans to a 2-vector and a 1-element vector to a scalar. Every
+// other axis length, and `⌽`/`⌿` on the same shapes, are fine there.
++\\2 1⍴⍳12
+? scan keeps the shape here, drops a length-1 axis there
+// The neutral cell of `⌈` and `⌊` over no items: J's infinities against
+// GNU APL's largest representable magnitudes. Every other entry of the
+// identity table matches.
+⌈/⍳0
+? the neutral cell of ⌈ is ¯∞ here, ¯1.7976E308 there
+⌊/⍳0
+? the neutral cell of ⌊ is ∞ here, 1.7976E308 there
+// Both continue their functions past the reals the way J does — the
+// gamma pole and artanh 1 are signed infinities — where GNU APL stops
+// at DOMAIN ERROR.
+!¯1
+? the factorial of a negative integer is ∞ here, DOMAIN ERROR there
+¯7○1
+? artanh 1 is ∞ here, DOMAIN ERROR there
+⍴+\\,5
+? scan keeps the shape here, drops a length-1 axis there
+// Nested arrays. A vector of simple scalars of different types is a
+// simple MIXED array in APL2 and has no representation here yet.
+1 'a'
+? a mixed simple vector there, a named gap here
+// Catenating a simple array to a nested one encloses the simple
+// items there; libjay refuses the pair rather than guess the depth.
+1 2,⊂3 4
+? the simple items are enclosed there, a type error here
+// Overtaking a nested array fills with the first item's prototype
+// there and with the empty box (J's `a:`) here.
+4↑(1 2)(3 4)
+? the fill is the item prototype there, an empty box here
+// GNU APL spaces a nested display more widely than libjay does, which
+// the whitespace-insensitive comparison above only sees through the
+// length of `⍕`.
+⍴⍕(1 2)(3 4)
+? one space between items here, two there
+// Named gaps: ordering boxes needs J's total array ordering, and
+// these two glyphs have their nested valence still to come.
+⍋(1 2)(3 4)
+? graded there, a `grading boxed arrays` gap here
+1 2⊃(1 2)(3 4)
+? pick there, a named gap here
+// The index generator on a vector of lengths: an array of index vectors
+// there, a named gap here. Refusing it is the point — the monad has rank
+// ∞ so the rank machinery cannot quietly frame it into a plain 2 by 3.
+⍳2 3
+? a nested index array there, a named gap here
+// `⍺←v` inside a dfn is a DEFAULT here, as the published dfn model has it:
+// a left argument that arrived keeps its value. GNU APL assigns
+// unconditionally, so the default overwrites the argument.
+F←{⍺←10 ⋄ ⍺+⍵} ⋄ 3 F 5
+? ⍺← is a default here, an unconditional assignment there
+// A block's value is its last sentence and nothing else is displayed —
+// libjay's sequence rule, in a dfn as everywhere else. GNU APL prints the
+// value of every statement that is not an assignment on its way through.
+F←{⍵+1 ⋄ ⍵+2} ⋄ F 5
+? only the last statement is displayed here, every one of them there

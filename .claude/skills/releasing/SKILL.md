@@ -27,10 +27,13 @@ loudly at the first failure rather than improvising past it.
   `https://pypi.org/pypi/libjay/json`, and from
   `https://crates.io/api/v1/crates/libjay` (send a User-Agent or it 403s).
 - `cargo publish -p libjay --dry-run` packages cleanly.
-- The full local suite passes, including the differential corpus against the
-  reference J (the oracle must be present — see CLAUDE.md):
+- The full local suite passes, including the recorded differential corpus
+  (a replay: no interpreter is run):
   `cargo test -p libjay -p libjay-capi` and
   `cargo clippy --all-targets -- -D warnings`.
+- The corpus still matches the live references — the oracles must be present
+  (see CLAUDE.md): `cargo run -p libjay-devtools -- record j --check` and
+  `... record apl --check`.
 - The Python suite passes against a fresh build:
   `.venv/bin/maturin develop -q && .venv/bin/pytest python/tests -q`.
 - CI is green on HEAD: `gh run list --branch main --limit 1`. Local tests

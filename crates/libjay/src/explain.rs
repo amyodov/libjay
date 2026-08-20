@@ -20,7 +20,7 @@ use crate::array::Array;
 use crate::dtype::DType;
 use crate::fmt::format_array;
 use crate::fuse;
-use crate::ir::{key, Expr, Program, Trace};
+use crate::ir::{key, Control, Expr, ExplicitDef, Program, Trace};
 use crate::verb::{Enclose, Power, Verb, WindowKind, RANK_INF};
 
 /// Width of one level of the outline.
@@ -117,13 +117,13 @@ fn expr_lines(e: &Expr, depth: usize, p: &Program, tr: &Trace, out: &mut String)
         }
         Expr::Monad { verb, y, .. } => {
             let _ = writeln!(out, "{pad}monad {}{}", verb.name(), note(e, tr));
-            verb_lines(verb, depth + 1, out);
+            verb_lines(verb, depth + 1, p, tr, out);
             let _ = writeln!(out, "{pad}  y:");
             expr_lines(y, depth + 2, p, tr, out);
         }
         Expr::Dyad { verb, x, y, .. } => {
             let _ = writeln!(out, "{pad}dyad {}{}", verb.name(), note(e, tr));
-            verb_lines(verb, depth + 1, out);
+            verb_lines(verb, depth + 1, p, tr, out);
             let _ = writeln!(out, "{pad}  x:");
             expr_lines(x, depth + 2, p, tr, out);
             let _ = writeln!(out, "{pad}  y:");
@@ -163,7 +163,99 @@ fn expr_lines(e: &Expr, depth: usize, p: &Program, tr: &Trace, out: &mut String)
                 "{pad}verb definition {name} = {}  [named at parse time; no runtime work]",
                 verb.name()
             );
-            verb_lines(verb, depth + 1, out);
+            verb_lines(verb, depth + 1, p, tr, out);
+        }
+        Expr::AmendIndex { name, slots, value, .. } => {
+            let shown: Vec<String> = slots
+                .iter()
+                .map(|s| if s.is_some() { "i".to_string() } else { String::new() })
+                .collect();
+            let _ =
+                writeln!(out, "{pad}amend {name}[{}]{}", shown.join(";"), note(e, tr));
+            for slot in slots.iter().flatten() {
+                let _ = writeln!(out, "{pad}  index:");
+                expr_lines(slot, depth + 2, p, tr, out);
+            }
+            let _ = writeln!(out, "{pad}  value:");
+            expr_lines(value, depth + 2, p, tr, out);
+        }
+        Expr::Control(c, _) => control_lines(c, depth, p, tr, out),
+    }
+}
+
+/// A control sentence: one line naming it, then its tests and bodies, each
+/// body a block of sentences one level further in.
+fn control_lines(c: &Control, depth: usize, p: &Program, tr: &Trace, out: &mut String) {
+    let pad = " ".repeat(depth * STEP);
+    let block = |label: &str, stmts: &[Expr], out: &mut String| {
+        let _ = writeln!(out, "{pad}  {label}:");
+        for s in stmts {
+            expr_lines(s, depth + 2, p, tr, out);
+        }
+    };
+    match c {
+        Control::If { arms, otherwise } => {
+            let _ = writeln!(out, "{pad}if — {} arm(s)", arms.len());
+            for (i, arm) in arms.iter().enumerate() {
+                if let Some(test) = &arm.test {
+                    block(&format!("test {}", i + 1), test, out);
+                }
+                block(&format!("body {}", i + 1), &arm.body, out);
+            }
+            if let Some(body) = otherwise {
+                block("else", body, out);
+            }
+        }
+        Control::While { test, body, body_first, until } => {
+            let kind = match (body_first, until) {
+                (false, false) => "while",
+                (true, false) => "while, body first",
+                (false, true) => "until",
+                (true, true) => "repeat until",
+            };
+            let _ = writeln!(out, "{pad}{kind}");
+            block("test", test, out);
+            block("body", body, out);
+        }
+        Control::For { name, source, body } => {
+            let _ = writeln!(
+                out,
+                "{pad}for over items{}",
+                name.as_ref().map_or(String::new(), |n| format!(", item in {n}, index in {n}_index"))
+            );
+            block("source", std::slice::from_ref(source), out);
+            block("body", body, out);
+        }
+        Control::Select { subject, cases } => {
+            let _ = writeln!(out, "{pad}select — {} case(s), matched with -:", cases.len());
+            block("subject", std::slice::from_ref(subject), out);
+            for (i, case) in cases.iter().enumerate() {
+                match &case.test {
+                    Some(test) => block(&format!("case {}", i + 1), test, out),
+                    None => {
+                        let _ = writeln!(out, "{pad}  case {} (default):", i + 1);
+                    }
+                }
+                block(
+                    &format!("body {}{}", i + 1, if case.fall_through { " (falls through)" } else { "" }),
+                    &case.body,
+                    out,
+                );
+            }
+        }
+        Control::Try { body, catch } => {
+            let _ = writeln!(out, "{pad}try");
+            block("body", body, out);
+            block("catch", catch, out);
+        }
+        Control::Return => {
+            let _ = writeln!(out, "{pad}return");
+        }
+        Control::Break => {
+            let _ = writeln!(out, "{pad}break");
+        }
+        Control::Continue => {
+            let _ = writeln!(out, "{pad}continue");
         }
     }
 }
@@ -233,7 +325,7 @@ fn source_of(p: &Program, e: &Expr) -> String {
 
 // ------------------------------------------------------------------- verbs
 
-fn verb_lines(v: &Verb, depth: usize, out: &mut String) {
+fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String) {
     let pad = " ".repeat(depth * STEP);
     let head = |out: &mut String, what: &str| {
         let _ = writeln!(out, "{pad}{what}  ranks {}", ranks(v.ranks()));
@@ -242,38 +334,38 @@ fn verb_lines(v: &Verb, depth: usize, out: &mut String) {
         Verb::Prim(p) => head(out, &format!("{} primitive", p.name)),
         Verb::Rank(u, r) => {
             head(out, &format!("rank \"{}", ranks(*r)));
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Reduce(u) => {
             head(out, "reduce (insert between items)");
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Fit(u, n) => {
             head(out, &format!("fit !.{n} (comparison tolerance)"));
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Amend(m) => head(out, &format!("amend at {} index(es)", m.count())),
         Verb::Key(u) => {
             head(out, "key / oblique");
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Cut(u, n) => {
             head(out, &format!("cut ;.{n}"));
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::PowerV(u, v) => {
             head(out, "power, count from a verb");
-            verb_lines(u, depth + 1, out);
-            verb_lines(v, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
+            verb_lines(v, depth + 1, p, tr, out);
         }
         Verb::PowerUntil(u, v) => {
             head(out, "power, until a test holds");
-            verb_lines(u, depth + 1, out);
-            verb_lines(v, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
+            verb_lines(v, depth + 1, p, tr, out);
         }
         Verb::AlongAxis(u, k) => {
             head(out, &format!("along axis {k}"));
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Windowed(u, kind) => {
             head(
@@ -284,11 +376,11 @@ fn verb_lines(v: &Verb, depth: usize, out: &mut String) {
                     WindowKind::Scan => "scan",
                 },
             );
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Commute(u) => {
             head(out, "commute (swap the arguments)");
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::PowerN(u, n) => {
             head(
@@ -298,42 +390,48 @@ fn verb_lines(v: &Verb, depth: usize, out: &mut String) {
                     Power::Times(k) => format!("power ({k} times)"),
                 },
             );
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Fork(f, g, h) => {
             head(out, "fork (f y) g (h y)");
-            verb_lines(f, depth + 1, out);
-            verb_lines(g, depth + 1, out);
-            verb_lines(h, depth + 1, out);
+            verb_lines(f, depth + 1, p, tr, out);
+            verb_lines(g, depth + 1, p, tr, out);
+            verb_lines(h, depth + 1, p, tr, out);
         }
         Verb::NounFork(a, g, h) => {
             head(out, &format!("fork with the noun {}", brief(a)));
-            verb_lines(g, depth + 1, out);
-            verb_lines(h, depth + 1, out);
+            verb_lines(g, depth + 1, p, tr, out);
+            verb_lines(h, depth + 1, p, tr, out);
         }
         Verb::Hook(f, g) => {
             head(out, "hook y f (g y)");
-            verb_lines(f, depth + 1, out);
-            verb_lines(g, depth + 1, out);
+            verb_lines(f, depth + 1, p, tr, out);
+            verb_lines(g, depth + 1, p, tr, out);
         }
         Verb::Atop(f, g) => {
             head(out, "atop f (g y)");
-            verb_lines(f, depth + 1, out);
-            verb_lines(g, depth + 1, out);
+            verb_lines(f, depth + 1, p, tr, out);
+            verb_lines(g, depth + 1, p, tr, out);
         }
         Verb::Compose(f, g) => {
             head(out, "compose (g x) f (g y)");
-            verb_lines(f, depth + 1, out);
-            verb_lines(g, depth + 1, out);
+            verb_lines(f, depth + 1, p, tr, out);
+            verb_lines(g, depth + 1, p, tr, out);
         }
         Verb::BondLeft(a, u) => {
             head(out, &format!("bond, left argument {}", brief(a)));
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::BondRight(u, a) => {
             head(out, &format!("bond, right argument {}", brief(a)));
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
+        Verb::Explicit(d) => {
+            head(out, &format!("explicit definition {}", d.name));
+            explicit_lines(d, depth + 1, p, tr, out);
+        }
+        Verb::SelfRef => head(out, "self-reference (the definition it stands in)"),
+        Verb::Named(n) => head(out, &format!("verb named {n}, resolved when it is applied")),
         Verb::Each(u, kind) => {
             head(
                 out,
@@ -342,8 +440,33 @@ fn verb_lines(v: &Verb, depth: usize, out: &mut String) {
                     Enclose::ExceptSimpleScalar => "each (open, apply, enclose again)",
                 },
             );
-            verb_lines(u, depth + 1, out);
+            verb_lines(u, depth + 1, p, tr, out);
         }
+    }
+}
+
+/// An explicit definition's shape: how it takes its arguments and how many
+/// sentences its body holds. The body itself is a program of its own, so it
+/// is summarised rather than unfolded.
+fn explicit_lines(d: &ExplicitDef, depth: usize, p: &Program, tr: &Trace, out: &mut String) {
+    let pad = " ".repeat(depth * STEP);
+    let args = match &d.left {
+        Some(x) => format!("{x} and {}", d.right),
+        None => d.right.clone(),
+    };
+    let _ = writeln!(out, "{pad}arguments {args}; body of {} sentence(s)", d.body.len());
+    if let Some(z) = &d.result {
+        let _ = writeln!(out, "{pad}result read from {z}");
+    }
+    if !d.locals.is_empty() {
+        let _ = writeln!(out, "{pad}declared local: {}", d.locals.join(", "));
+    }
+    // The body is a program of its own; it is shown the same way, one
+    // level further in. A run's notes belong to the sentences the program
+    // itself holds, so the body's nodes carry none.
+    for (i, stmt) in d.body.iter().enumerate() {
+        let _ = writeln!(out, "{pad}sentence {}:", i + 1);
+        expr_lines(stmt, depth + 1, p, tr, out);
     }
 }
 

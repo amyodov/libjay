@@ -1,0 +1,90 @@
+# libjay reference snapshot: J (jconsole) — corpus/j/tolerance.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreter. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> TEXT`  one line of the reference's answer.
+#   `< TEXT`  one line of libjay's answer (divergence records only).
+#   `? TEXT`  why the two are expected to differ (divergence records only).
+#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`  a comment.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= 1 = 1 + 2^_50
+> 1
+= 1 = 1 + 2^_44
+> 0
+= 1 = 1 + 2^_45
+> 1
+= 1 = 1 - 2^_44
+> 0
+= 1 = 1 - 2^_45
+> 1
+= 2 = 2 + 2^_43
+> 0
+= 2 = 2 + 2^_44
+> 1
+= 4 = 4 + 2^_42
+> 0
+= 1e10 = 1e10 + 1e_5
+> 1
+= 1e10 = 1e10 + 1e_3
+> 0
+= 1e_20 = 0
+> 0
+= 0 = 1e_300
+> 0
+= _ = _
+> 1
+= __ = _
+> 0
+= _ = 1e300
+> 0
+= 1 < 1 + 2^_50
+> 0
+= 1 <: 1 - 2^_50
+> 1
+= 1 > 1 - 2^_50
+> 0
+= 1 >: 1 + 2^_50
+> 1
+= 1 -: 1 + 2^_50
+> 1
+= (1 + 2^_50) e. 1 2 3
+> 1
+= (1 2 3) i. 1 + 2^_50
+> 0
+= <. 2.9999999999999
+> 3
+= <. 2.99999999999
+> 2
+= >. 3.0000000000001
+> 3
+= (<1) = (<1 + 2^_50)
+> 1
+= (2 2 $ 1 2 3 4) -: 2 2 $ 1 2 3 4.0000000000000004
+> 1
+= 1 =!.0 (1 + 2^_50)
+> 0
+= 1 <!.0 (1 + 2^_50)
+> 1
+= 1 ~:!.0 (1 + 2^_50)
+> 1
+= 1 >:!.0 (1 + 2^_50)
+> 0
+= 1 <:!.0 (1 + 2^_50)
+> 1
+= 1 >!.0 (1 + 2^_50)
+> 0
+= 1 -:!.0 (1 + 2^_50)
+> 0
+= 1 e.!.0 (1 , 1 + 2^_50)
+> 1
+= (1 2 3) i.!.0 (1 + 2^_50)
+> 3
+= (<.!.0) 2.9999999999999
+> 2

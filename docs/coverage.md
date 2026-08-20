@@ -341,6 +341,104 @@ find out. Both spellings are therefore kept out of the differential corpora;
 what is tested is the contract: the range, the shape, the distinctness of a
 deal, and that `?.` repeats.
 
+## Explicit definitions
+
+A definition is a verb (a function) like any other: it takes a rank, joins a
+train, is an operand to a modifier, and can be named.
+
+J writes it four ways. `3 : '…'` is a monad whose argument arrives as `y`;
+`4 : '…'` is a dyad with `x` and `y` as well. Either with `0` in place of
+the string takes its body from the lines below, ending at a line that is a
+lone `)`. `{{ … }}` is the direct form, on one line or over several, and its
+own words decide its valence: a body that mentions `x` is a dyad. A body
+that mentions `u`, `v`, `m` or `n` is a modifier in J, and libjay says so by
+name rather than guessing — as it does for `1 :`, `2 :` and `13 :`.
+
+APL writes it two ways. `{…}` is a dfn: `⍵` is the right argument, `⍺` the
+left, `⋄` and a line break separate its statements, and it nests. `∇ Z←L F R;a`
+… `∇` is the multi-line form, where APL's control structures live.
+
+The body is a block, and a block's value is its last sentence's — the same
+rule the top level follows, except that an assignment inside a definition
+does yield the value it assigned. `return.` (`:Return`) leaves with the
+value in hand. A branch that ran nothing yields J's empty `i. 0 0`; in APL
+a definition that produced no value is an error, and a `∇`-definition reads
+its result from the name its header gave.
+
+Recursion works by name (`fac =. 3 : '… fac …'`, `∇Z←FC R … FC R-1 … ∇`) and
+through J's `$:` and APL's `∇`, which name the innermost definition then
+running. It is bounded: 64 nested calls raise a domain error naming the
+limit rather than letting the machine stack give out. The number is set by
+the evaluator's stack frames, not by either language, and can rise.
+
+An explicit definition is never fused and never runs its cells on several
+threads: it reads and writes the program's names, so the order it runs in is
+part of its meaning.
+
+## Control structures
+
+J's control words are legal only inside an explicit definition — the
+reference calls one at the top level a spelling error, and so does libjay.
+Implemented: `if. do. elseif. else. end.`, `while. do. end.`,
+`whilst. do. end.` (body first), `for. do. end.` and `for_i. do. end.`
+(`i` is the item, `i_index` its position), `select. case. fcase. do. end.`
+(a `case.` with no test is the default; `fcase.` runs the next body too),
+`return.`, `break.`, `continue.`, and `try. catch. end.`. `throw.`,
+`catcht.`, `goto_name.` and `label_name.` are named gaps.
+
+A test is true when the argument is empty, or when its first atom is not
+zero — J's rule, checked against the reference. `select.` matches with `-:`
+(match), not membership, so `case. 1 2` takes the list `1 2` and not the
+atom `1`.
+
+`try.` answers for the languages' own errors. A gap in libjay itself — "not
+supported yet" — goes straight through it: swallowing a promise would turn
+it into a wrong answer.
+
+APL's `:If :ElseIf :Else :EndIf`, `:While :EndWhile`, `:Repeat :Until`,
+`:For … :In … :EndFor`, `:Select :Case :Else :EndSelect`, `:Return`,
+`:Leave` and `:Continue` work inside a `∇`-definition; `:End` closes any of
+them. There is no oracle for any of this — GNU APL raises a SYNTAX ERROR for
+every one of these words — so they follow the published specification and
+are tested in `crates/libjay/tests/definitions.rs` rather than in the
+corpus.
+
+## Scope
+
+J: `=.` names a local and `=:` a global. Inside an explicit definition the
+two differ — a local lives in that call's own frame and is gone when the
+call returns, a global outlives it — and at the top level, which has no
+frame, both name the same thing. A name is looked for in the running call's
+frame and then among the globals; frames do not nest, so a definition called
+from another sees its own locals and the globals, never the caller's. Every
+call gets a fresh frame, which is what makes recursion work.
+
+APL's dfns follow the same rule with `←`: a name assigned inside one is
+local to the call. A `∇`-definition follows APL's own rule instead — a name
+the header does not declare is GLOBAL, and `;a;b` after the header is what
+makes names local, along with the result name and the two argument names.
+Both rules are the reference's; the corpus records them.
+
+## Indexed assignment
+
+APL's `A[i]←v` and `A[i;j]←v` read the named value, copy it, write the
+selected part, and give the copy the name. Another name that was taken from
+the array before the write keeps what it had. An elided slot selects its
+whole axis; a scalar slot drops its axis from the shape the value has to
+match, and a scalar value spreads over the whole selection. A value of a
+wider type widens the array rather than being truncated into it. An index
+outside its axis is a domain error naming the axis and its length.
+
+## Numeric literals
+
+J's base and constant forms: `16b1f` is 31, `2b101` is 5, a fractional or
+negative base works (`2.5b10`, `_16b11`), a `_` in front of the digits
+negates the value (`16b_1`), and digits run `0`–`9` then `a`–`z`. `1p1` is
+π and `1p2` is π², `1x1` is e and `2x1` is 2e — `apb` is a×π^b and `axb` is
+a×e^b, with either part allowed a sign, a fraction or an exponent. `1x` with
+nothing after it is still an extended-precision integer, which is a named
+gap, as `1j2` (complex) and `1r2` (rational) are.
+
 ## Interpolation
 
 `{name}` in program text binds host data; braces never splice program text.
@@ -416,10 +514,10 @@ stdin or the command line, compared on their printed output, never linked
 and never read:
 
 - J: the official prebuilt jconsole, `LIBJAY_ORACLE_J`, corpus in
-  `crates/libjay/tests/oracle.rs`.
+  `crates/libjay/tests/corpus/j/`.
 - APL: GNU APL 2.0, built from the FSF tarball into
   `~/projects/libjay-oracles/gnu-apl/`, `LIBJAY_ORACLE_APL`, corpus in
-  `crates/libjay/tests/oracle_apl.rs`. It is run with
+  `crates/libjay/tests/corpus/apl/`. It is run with
   `--script --safe --noSV --PW 10000 --eval`, which silences the banner,
   keeps it from opening sockets or loading a workspace, and stops long
   vectors wrapping onto continuation lines. GNU APL always exits 0 and
@@ -463,11 +561,15 @@ the decimal point, and that is typography, not semantics.
   Sorting boxed items BY an unboxed key works.
 - Catenating a boxed array to an unboxed one is a type error in both
   languages. J agrees; APL2 encloses the simple items instead.
-- No dyadic transpose, `⎕`-variables, control words, adverb/conjunction
-  definitions or explicit definitions (`3 : '...'`, `4 : '...'`, `{{ }}`)
-  yet — all "not yet", category 2. J's tacit verb assignment
-  (`mean =. +/ % #`) is the one form of the group that now works. Named on
-  their own: J's key adverb `u/.`, outfix `x u\. y`, `u^:v` and negative
+- J's `$:` inside an explicit definition names that definition, which is
+  what the dictionary says it does. The jconsole this repository tests
+  against reads it as the largest verb in the SENTENCE — which is `$:`
+  itself — and raises a stack error for every recursion written with it, so
+  the J corpus leaves `$:` out and tests/definitions.rs holds libjay to the
+  published rule instead. Recursion by NAME (`fac =. 3 : '… fac …'`) agrees
+  with the reference and is in the corpus.
+- No dyadic transpose, `⎕`-variables or adverb/conjunction definitions yet —
+  all "not yet", category 2. Named on their own: J's key adverb `u/.`, outfix `x u\. y`, `u^:v` and negative
   powers (the obverse), under `u&.v` other than `u&.>` (it needs verb
   inverses), `L.`, APL expand `x\y`, `f⍣≡`, compose `f∘g`, dyadic `⊂` and
   `⊃`, monadic `↓`, the complex circle functions, APL's `⌷`. Bigints,
@@ -478,9 +580,9 @@ the decimal point, and that is typography, not semantics.
 
 GNU APL is ISO/APL2-flavoured and libjay's APL takes a Dyalog-style choice
 in a few places, so the two part company on purpose. Each line below is one
-entry of `KNOWN_DIVERGENCES` in `crates/libjay/tests/oracle_apl.rs`, which
+entry of `crates/libjay/tests/corpus/apl/divergences.txt`, which
 asserts that they keep disagreeing — a silent convergence is a test failure,
-not a quiet win. Everything else in a 741-expression corpus agrees.
+not a quiet win. Everything else in the corpus agrees.
 
 libjay follows J where APL2 stops at DOMAIN ERROR:
 
@@ -498,6 +600,12 @@ libjay is more permissive:
   only.
 - dyadic `⊖` reads a vector left argument per axis, GNU APL per column
   (already listed above).
+- `⍺←v` inside a dfn is a DEFAULT — it gives the left argument a value only
+  where none arrived — which is what the published dfn model says. GNU APL
+  assigns unconditionally, so there the default overwrites the argument.
+- a dfn's value is its LAST statement and nothing else is displayed, which
+  is libjay's sequence rule everywhere. GNU APL prints the value of every
+  statement of the body that is not an assignment on its way through.
 
 libjay is stricter, or simply elsewhere:
 

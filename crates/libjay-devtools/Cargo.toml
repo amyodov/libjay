@@ -1,0 +1,17 @@
+[package]
+name = "libjay-devtools"
+description = "Developer tools for libjay: the corpus recorder that runs the reference interpreters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "jay-corpus"
+path = "src/main.rs"
+
+[dependencies]
+libjay-testkit = { path = "../libjay-testkit" }
+rayon = "1.12.0"

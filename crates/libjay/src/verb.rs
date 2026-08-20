@@ -4,7 +4,8 @@
 //! applied monadically or dyadically to arrays. Frontends lower J/APL syntax
 //! to `Verb` trees; nothing in here knows any surface syntax.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::array::{Array, Data};
 use crate::dtype::DType;
@@ -117,11 +118,119 @@ pub struct EvalCfg {
 }
 
 impl EvalCfg {
-    /// Run `f` with a context whose sink is never reached. Only a verb that
-    /// [`Verb::is_pure`] accepted is given one of these.
+    /// Run `f` with a context whose sink is never reached, and whose names
+    /// are empty. Only a verb that [`Verb::is_pure`] accepted is given one
+    /// of these, and an explicit definition — the only thing that reads
+    /// names — is never pure.
     fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let mut sink = |_: &str| debug_assert!(false, "a pure verb wrote to the output sink");
-        f(&mut Ctx { cfg: self, out: &mut sink })
+        let mut env = Env::new(Vec::new());
+        f(&mut Ctx { cfg: self, out: &mut sink, env: &mut env })
+    }
+}
+
+/// How deep explicit definitions may call each other before libjay stops
+/// them. Recursion that runs away is a program bug; the diagnostic says so
+/// rather than letting the process die on a stack overflow.
+///
+/// The number is set by the machine stack, not by the languages: one level
+/// of a definition costs about 24 kB of stack in an unoptimised build, so
+/// the guard has to fire well inside the 2 MiB a small thread gets. It can
+/// rise when the evaluator's frames shrink.
+pub const RECURSION_LIMIT: usize = 64;
+
+/// The names a running program can reach: the values it has assigned, the
+/// verbs it has named, and the arguments bound to its parameters.
+///
+/// An explicit definition runs with a frame of its own on top: J's `=.`
+/// writes there and `=:` writes to the globals, and a name is looked for in
+/// the frame before the globals. Frames do not nest — a definition called
+/// from another sees only its own locals, which is what both references do.
+pub struct Env {
+    globals: HashMap<String, Array>,
+    frames: Vec<HashMap<String, Array>>,
+    /// The definitions currently running, innermost last; J's `$:` and
+    /// APL's `∇` name the last of them.
+    running: Vec<std::sync::Arc<crate::ir::ExplicitDef>>,
+    verbs: HashMap<String, Verb>,
+    args: Vec<Array>,
+}
+
+impl Env {
+    pub fn new(args: Vec<Array>) -> Env {
+        Env {
+            globals: HashMap::new(),
+            frames: Vec::new(),
+            running: Vec::new(),
+            verbs: HashMap::new(),
+            args,
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<Array> {
+        if let Some(frame) = self.frames.last() {
+            if let Some(v) = frame.get(name) {
+                return Some(v.clone());
+            }
+        }
+        self.globals.get(name).cloned()
+    }
+
+    pub fn assign(&mut self, name: String, value: Array, scope: crate::ir::Scope) {
+        if scope == crate::ir::Scope::LocalDefault && self.get(&name).is_some() {
+            return;
+        }
+        let target = match (scope, self.frames.last_mut()) {
+            (crate::ir::Scope::Local | crate::ir::Scope::LocalDefault, Some(frame)) => frame,
+            _ => &mut self.globals,
+        };
+        target.insert(name, value);
+    }
+
+    pub fn define(&mut self, name: String, verb: Verb) {
+        self.verbs.insert(name, verb);
+    }
+
+    pub fn verb(&self, name: &str) -> Option<&Verb> {
+        self.verbs.get(name)
+    }
+
+    pub fn arg(&self, i: usize) -> Result<Array> {
+        self.args
+            .get(i)
+            .cloned()
+            .ok_or_else(|| Error::internal("a parameter was read where none is bound"))
+    }
+
+    /// Start a definition's frame. Fails rather than overflowing the stack.
+    pub fn enter(
+        &mut self,
+        frame: HashMap<String, Array>,
+        def: std::sync::Arc<crate::ir::ExplicitDef>,
+        span: Span,
+    ) -> Result<()> {
+        if self.frames.len() >= RECURSION_LIMIT {
+            return Err(Error::new(
+                ErrorKind::Domain,
+                format!("explicit definitions called each other more than {RECURSION_LIMIT} deep"),
+                Some(span),
+            )
+            .note("a definition that recurses needs a case that stops"));
+        }
+        self.frames.push(frame);
+        self.running.push(def);
+        Ok(())
+    }
+
+    /// End a definition's frame and hand back the names it assigned.
+    pub fn leave(&mut self) -> HashMap<String, Array> {
+        self.running.pop();
+        self.frames.pop().unwrap_or_default()
+    }
+
+    /// The innermost definition now running; `$:` and `∇` name it.
+    pub fn current_def(&self) -> Option<std::sync::Arc<crate::ir::ExplicitDef>> {
+        self.running.last().cloned()
     }
 }
 
@@ -131,13 +240,15 @@ pub struct Ctx<'a> {
     /// Sink for explicit output (`echo`, `⎕←`). stdout by default per the
     /// sandbox contract; the host may redirect.
     pub out: &'a mut dyn FnMut(&str),
+    /// The names the program has bound so far.
+    pub env: &'a mut Env,
 }
 
 impl Ctx<'_> {
     /// Run `f` in this context with the comparison tolerance replaced.
     fn with_tol<R>(&mut self, tol: Tol, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let cfg = EvalCfg { tol, ..self.cfg };
-        f(&mut Ctx { cfg, out: &mut *self.out })
+        f(&mut Ctx { cfg, out: &mut *self.out, env: &mut *self.env })
     }
 }
 
@@ -485,6 +596,16 @@ pub enum Verb {
     /// applies to the leading axis, and a result of the argument's own rank
     /// has the axis put back where it was.
     AlongAxis(Box<Verb>, usize),
+    /// An explicit definition: a body of sentences run with the arguments
+    /// bound to names. J's `3 : '…'`, `4 : '…'` and `{{ … }}`, APL's `{…}`
+    /// and `∇`-defined functions.
+    Explicit(Arc<crate::ir::ExplicitDef>),
+    /// J `$:`, APL `∇`: the definition lexically containing the reference,
+    /// found at run time as the innermost one then running.
+    SelfRef,
+    /// A verb named earlier in the program, looked up when it is applied so
+    /// that a definition can call itself by its own name.
+    Named(String),
 }
 
 impl Verb {
@@ -537,6 +658,9 @@ impl Verb {
             Verb::PowerV(v, w) => format!("{}^:{}", v.name(), w.name()),
             Verb::PowerUntil(v, w) => format!("{}⍣{}", v.name(), w.name()),
             Verb::AlongAxis(v, k) => format!("{}[{k}]", v.name()),
+            Verb::Explicit(d) => d.name.clone(),
+            Verb::SelfRef => "$:".to_string(),
+            Verb::Named(n) => n.clone(),
         }
     }
 
@@ -584,7 +708,9 @@ impl Verb {
             Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => {
                 v.uses_tolerance() || w.uses_tolerance()
             }
-            Verb::Amend(_) => false,
+            // An explicit definition's body is a program of its own; `!.`
+            // has no reach into it.
+            Verb::Amend(_) | Verb::Explicit(_) | Verb::SelfRef | Verb::Named(_) => false,
             Verb::Fork(f, g, h) => {
                 f.uses_tolerance() || g.uses_tolerance() || h.uses_tolerance()
             }
@@ -623,6 +749,11 @@ impl Verb {
             Verb::Key(v) | Verb::Cut(v, _) | Verb::AlongAxis(v, _) => v.is_pure(),
             Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => v.is_pure() && w.is_pure(),
             Verb::Amend(_) => true,
+            // An explicit definition reads and writes the program's names,
+            // so its cells can never be run out of order on other threads —
+            // whatever its body does. `ExplicitDef::pure` records whether
+            // the body itself has an effect; this is the stronger question.
+            Verb::Explicit(_) | Verb::SelfRef | Verb::Named(_) => false,
         }
     }
 
@@ -713,6 +844,12 @@ impl Verb {
             Verb::PowerV(u, v) => power_v(u, v, None, y, ctx, span),
             Verb::PowerUntil(u, v) => power_until(u, v, y, ctx, span),
             Verb::AlongAxis(u, k) => along_axis(u, None, y, *k, ctx, span),
+            Verb::Explicit(d) => crate::ir::call_explicit(d, None, y, ctx, span),
+            Verb::SelfRef => {
+                let d = self_ref(ctx, span)?;
+                crate::ir::call_explicit(&d, None, y, ctx, span)
+            }
+            Verb::Named(n) => named_verb(ctx, n, span)?.monad(y, ctx, span),
         }
     }
 
@@ -768,6 +905,12 @@ impl Verb {
                 Err(Error::not_yet("dyadic power with a function operand (x f⍣g y)", span))
             }
             Verb::AlongAxis(u, k) => along_axis(u, Some(x), y, *k, ctx, span),
+            Verb::Explicit(d) => crate::ir::call_explicit(d, Some(x), y, ctx, span),
+            Verb::SelfRef => {
+                let d = self_ref(ctx, span)?;
+                crate::ir::call_explicit(&d, Some(x), y, ctx, span)
+            }
+            Verb::Named(n) => named_verb(ctx, n, span)?.dyad(x, y, ctx, span),
             // J gives a bond one valence only.
             Verb::BondLeft(..) | Verb::BondRight(..) => {
                 Err(Error::domain(format!("{} has no dyadic meaning", self.name()), span))
@@ -848,6 +991,24 @@ pub fn effective_rank(r: i64, arg_rank: usize) -> usize {
 /// number of elements the whole application touches, which decides whether
 /// splitting is worth it. Either way the first failing cell in index order
 /// supplies the error.
+/// The definition `$:` or `∇` names: the innermost one now running.
+fn self_ref(ctx: &Ctx<'_>, span: Span) -> Result<Arc<crate::ir::ExplicitDef>> {
+    ctx.env.current_def().ok_or_else(|| {
+        Error::new(
+            ErrorKind::Value,
+            "self-reference outside an explicit definition",
+            Some(span),
+        )
+    })
+}
+
+/// A verb the program named earlier, resolved when it is applied.
+fn named_verb(ctx: &Ctx<'_>, name: &str, span: Span) -> Result<Verb> {
+    ctx.env.verb(name).cloned().ok_or_else(|| {
+        Error::new(ErrorKind::Value, format!("undefined verb: {name}"), Some(span))
+    })
+}
+
 fn each_cell<F>(
     n: usize,
     work: usize,
@@ -2650,7 +2811,7 @@ fn grade_select(x: &Array, y: &Array, down: bool, span: Span) -> Result<Array> {
 
 /// Whole-array equality: same shape and same values. Characters never equal
 /// numbers; `1` equals `1.0`; NaN equals nothing.
-fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
+pub(crate) fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
     if x.shape != y.shape {
         return false;
     }
@@ -5208,6 +5369,127 @@ fn permute_axes(y: &Array, src: &[usize]) -> Array {
     Array::new(out_shape, data)
 }
 
+/// APL `A[i;j]←v`: `base` with the elements the slots select replaced by
+/// `value`. An elided slot takes its whole axis; a scalar slot drops its
+/// axis from the shape the value has to match. The base is copied, so the
+/// array the name held before is untouched.
+pub fn amend_at(
+    base: &Array,
+    slots: &[Option<Array>],
+    value: &Array,
+    origin: i64,
+    span: Span,
+) -> Result<Array> {
+    if slots.len() != base.rank() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!(
+                "indexed assignment needs one index per axis: {} slot(s) for a rank-{} value",
+                slots.len(),
+                base.rank()
+            ),
+            Some(span),
+        ));
+    }
+    // One list of positions per axis, and the shape the value must match.
+    let mut axes: Vec<Vec<usize>> = Vec::with_capacity(slots.len());
+    let mut selected: Vec<usize> = Vec::new();
+    for (k, slot) in slots.iter().enumerate() {
+        let len = base.shape[k];
+        let Some(idx) = slot else {
+            axes.push((0..len).collect());
+            selected.push(len);
+            continue;
+        };
+        let Some(values) = idx.to_i64_vec() else {
+            return Err(Error::new(
+                ErrorKind::Type,
+                "an index must be numeric",
+                Some(span),
+            ));
+        };
+        let mut positions = Vec::with_capacity(values.len());
+        for v in values {
+            let p = v - origin;
+            if p < 0 || p as usize >= len {
+                return Err(Error::new(
+                    ErrorKind::Domain,
+                    format!("index {v} is outside axis {k}, which has {len} element(s)"),
+                    Some(span),
+                ));
+            }
+            positions.push(p as usize);
+        }
+        // A scalar index drops its axis, as it does when reading.
+        if idx.rank() > 0 {
+            selected.push(positions.len());
+        }
+        axes.push(positions);
+    }
+    let count: usize = axes.iter().map(Vec::len).product();
+    if value.rank() != 0 && (value.shape != selected || value.count() != count) {
+        return Err(Error::new(
+            ErrorKind::Shape,
+            format!(
+                "indexed assignment needs a scalar or a {} value, not a {} one",
+                show_shape(&selected),
+                show_shape(&value.shape)
+            ),
+            Some(span),
+        ));
+    }
+    // The two sides meet at the wider type, so assigning a float into an
+    // integer array widens the array rather than truncating the value.
+    let dtype = DType::promote(base.dtype(), value.dtype()).ok_or_else(|| {
+        Error::new(
+            ErrorKind::Type,
+            format!(
+                "cannot put a {} value into a {} array",
+                value.dtype().name(),
+                base.dtype().name()
+            ),
+            Some(span),
+        )
+    })?;
+    let mut out = base.cast(dtype).ok_or_else(|| Error::internal("promotion failed"))?;
+    let src = value.cast(dtype).ok_or_else(|| Error::internal("promotion failed"))?;
+    let strides = row_major_strides(&base.shape);
+    let mut coords = vec![0usize; axes.len()];
+    for n in 0..count {
+        let mut rest = n;
+        for k in (0..axes.len()).rev() {
+            let len = axes[k].len();
+            coords[k] = axes[k][rest % len];
+            rest /= len;
+        }
+        let at: usize = coords.iter().zip(&strides).map(|(c, s)| c * s).sum();
+        let from = if src.rank() == 0 { 0 } else { n };
+        put_element(&mut out.data, at, &src.data, from);
+    }
+    Ok(out)
+}
+
+fn row_major_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = vec![1usize; shape.len()];
+    for k in (0..shape.len().saturating_sub(1)).rev() {
+        strides[k] = strides[k + 1] * shape[k + 1];
+    }
+    strides
+}
+
+/// Copy one element between two buffers of the same type.
+fn put_element(dst: &mut Data, at: usize, src: &Data, from: usize) {
+    match (dst, src) {
+        (Data::Bool(d), Data::Bool(s)) => d.to_mut()[at] = s.as_slice()[from],
+        (Data::I64(d), Data::I64(s)) => d.to_mut()[at] = s.as_slice()[from],
+        (Data::F64(d), Data::F64(s)) => d.to_mut()[at] = s.as_slice()[from],
+        (Data::Char(d), Data::Char(s)) => d.to_mut()[at] = s.as_slice()[from],
+        (Data::Box(d), Data::Box(s)) => d.to_mut()[at] = s.as_slice()[from].clone(),
+        // Both sides were cast to one type above.
+        _ => debug_assert!(false, "amend across types"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5216,10 +5498,12 @@ mod tests {
     macro_rules! ctx {
         ($name:ident, $agreement:expr) => {
             let mut sink = |_: &str| {};
+            let mut env = Env::new(Vec::new());
             #[allow(unused_mut)]
             let mut $name = Ctx {
                 cfg: EvalCfg { agreement: $agreement, fmt: FmtOpts::J, tol: Tol::J },
                 out: &mut sink,
+                env: &mut env,
             };
         };
         ($name:ident) => {
@@ -6269,9 +6553,11 @@ mod tests {
                 }
             }
         };
+        let mut env = Env::new(Vec::new());
         let mut c = Ctx {
             cfg: EvalCfg { agreement: Agreement::LeadingPrefix, fmt: FmtOpts::J, tol: Tol::J },
             out: &mut sink,
+            env: &mut env,
         };
         v.monad(&y, &mut c, sp()).unwrap();
         assert_eq!(seen, (0..16).map(|i| i * 8192).collect::<Vec<i64>>());

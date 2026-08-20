@@ -255,3 +255,102 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   respectively, with the singularity detected from the QR diagonal relative
   to the largest magnitude in the argument. A vector argument is a column,
   as in both references, and keeps its own shape on the way out.
+
+- 2026-08-20 — Collecting and testing split into two activities (owner).
+  Collecting: `cargo run -p libjay-devtools -- record <j|apl>` runs the
+  reference over `crates/libjay/tests/corpus/<lang>/*.txt` and writes
+  `tests/snapshots/<lang>/*.snap`, one snapshot per corpus file, with
+  `--check` (re-measure, write nothing, nonzero exit on drift), `--missing`
+  (record only what is not recorded yet), `gen` (append generated
+  expressions) and `stats`. Testing: `cargo test` replays, one rstest
+  `#[files]` case per corpus file, so a failure names the theme; an
+  expression with no record fails with `unrecorded: run jay-corpus record`.
+  `LIBJAY_REFRESH_ORACLE` is gone — the recorder replaces it, and nothing in
+  `cargo test` can reach an interpreter any more. The expressions moved out
+  of the Rust arrays in `tests/oracle*.rs` into plain data files split by
+  theme (at the move, J 3073 in 10 files and APL 766 in 10, with every
+  recorded answer unchanged to the byte); the generator moved into the
+  recorder and its output is now
+  ordinary corpus lines. Corpus comments are `//`, not `#`, because `#` is
+  J's tally and `# i. 5 2` is one of the expressions. Two new unpublished
+  workspace members hold the shared code once: `libjay-testkit` (corpus and
+  snapshot formats, comparison, replay — a dev-dependency of libjay and a
+  dependency of the recorder) and `libjay-devtools` (the `jay-corpus`
+  binary, the only thing in the repository that spawns an interpreter;
+  recording a language takes ~4 s, one process per expression in parallel).
+  CI is unchanged in what it runs — replay only, no oracle — and now also
+  clippies the two new crates. Workflow: docs/testing.md.
+
+- 2026-08-20 — Explicit definitions and control structures (phase 8, the
+  language half). The oracles decided most of it; where they were probed the
+  answer is in the corpus.
+
+  **Scope.** The IR gained a `Scope` on every assignment and an `Env` with a
+  stack of frames: J's `=.` writes the running definition's frame, `=:` the
+  globals, and a lookup tries the frame then the globals. Frames do not
+  nest — a definition called from another sees its own locals only — which
+  is what jconsole does and what makes each recursive call independent. At
+  the top level, which has no frame, both spellings name the same thing;
+  the oracle agrees (`tl =. 55` is visible inside a verb defined after it).
+  APL's dfns follow the same rule with `←`. APL's `∇`-definitions do NOT:
+  there a name the header does not declare is global, and `;a;b` is what
+  makes one local. Both were probed; both are in the corpus. A third scope,
+  `LocalDefault`, carries APL's `⍺←v`, which assigns only where the name has
+  no value yet.
+
+  **Control-flow IR.** `Expr::Control(Box<Control>, Span)` rather than a
+  separate statement type: the fusion pass, `explain`, the C ABI and the
+  Python binding all walk `Vec<Expr>`, and a second node type would have
+  rippled through every one of them for no gain. Control nodes only ever
+  appear inside a definition's body — neither language allows a control word
+  outside one, and jconsole calls `if.` at the top level a spelling error —
+  so nothing above sees them. A block runs to a `Flow` (normal, return,
+  break, continue) carrying the value in hand; `return.` produces no value of
+  its own, which is why `3 : 'z =. 42 return. 7'` answers 42. One `Control`
+  enum serves both languages: J's `whilst.` and APL's `:Repeat` are the same
+  node with `body_first`, `:Until` adds `until`, and `fcase.` is a flag on a
+  `select.` arm.
+
+  **Recursion.** Two mechanisms: `Verb::Named(n)`, resolved when it is
+  applied, so a definition can call itself by its own name (the frontend
+  seeds the body's name table with it); and `Verb::SelfRef` for J's `$:` and
+  APL's `∇`, resolved to the innermost definition then running. The guard is
+  a depth limit — 64 — checked when a frame is pushed, raising a domain error
+  that names the limit. 64 is not a language number: one level of a
+  definition costs about 24 kB of machine stack in an unoptimised build, and
+  the guard has to fire well inside the 2 MiB a test thread gets, or the
+  process dies instead of reporting. It rises when the evaluator's frames do.
+
+  **`$:` diverges from the oracle on purpose.** jconsole 9.6.3 reads `$:`
+  inside an explicit definition as the largest verb in the SENTENCE, which is
+  `$:` itself, so every recursion written that way is a stack error there —
+  including the classic `fib =: 3 : 'if. y<2 do. y else. ($:y-1) + $:y-2 end.'`.
+  libjay follows the published dictionary and names the definition. The J
+  corpus leaves `$:` out (there is nothing to record) and
+  tests/definitions.rs holds libjay to the documented rule. Recursion by name
+  agrees with the reference and is in the corpus.
+
+  **APL control structures have no oracle.** GNU APL raises SYNTAX ERROR for
+  `:If` and every one of its relatives, at every indentation, through `⎕FX`
+  as well; it branches with `→` and labels instead. Rather than leave the
+  biggest red block in the language unimplemented, the `:If` family follows
+  the published specification and is tested in tests/definitions.rs, with
+  the absence of an oracle stated in docs/status.md and docs/coverage.md.
+  `→` itself is a named gap. Dfn guards (`cond:expr`) and `∇` self-reference
+  are in the same position and got the same treatment.
+
+  **Indexed assignment** is `Expr::AmendIndex`: the name, one slot per axis,
+  the value. It reads the name, copies, writes and reassigns, so a value
+  taken from the array beforehand is untouched. It is its own node rather
+  than a verb because the existing `Verb::Amend` takes a literal index and
+  a verb cannot hold the slot expressions.
+
+  **Recording multi-line APL.** `jay-corpus` fed GNU APL through `--eval`,
+  which takes one line; a `∇` definition left the interpreter sitting in its
+  definition editor. A program with a line break now goes in on stdin,
+  closed with `)OFF`. Single-line programs still use `--eval`, so no existing
+  recording moved.
+
+  Deferred with a name: J's `1 :`, `2 :`, `13 :`, `{{ }}` modifier forms,
+  `throw.`/`catcht.`/`goto_name.`/`label_name.`; APL's dfn operators
+  (`⍺⍺`/`⍵⍵`), `→` branching, niladic `∇`-definitions.

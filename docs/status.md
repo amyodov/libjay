@@ -18,7 +18,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 92 green / 23 partial / 68 red of 183 valences in the inventory.**
+**J: 92 green / 24 partial / 67 red of 183 valences in the inventory.**
 
 **APL: 63 green / 20 partial / 33 red of 116 valences in the inventory.**
 
@@ -155,7 +155,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `&.:` under | 🔴 |
 | `^:` power | 🟡 literal count, `_`, or a verb count; negatives (the obverse) not yet |
 | `.` dot product | 🔴 |
-| `:` explicit definition | 🔴 |
+| `:` explicit definition | 🟡 `3 :` and `4 :`; `1 :`, `2 :`, `13 :` not yet |
 | `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`) and `;.0`; `;.3` not yet |
 | `!.` fit (tolerance) | 🟡 the tolerance meaning; `!.` as a fill not yet |
 | `!:` foreign | 🔴 sandboxed design needed |
@@ -183,12 +183,15 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `explain` facility | 🟢 |
 | Adverb and conjunction assignment | 🔴 |
 | Multiple assignment `'a b' =. …` | 🔴 |
-| `=.` vs `=:` scoping | 🟡 one environment; the two do not yet differ |
-| Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🔴 |
-| Control words `if. while. for. select. try.` | 🔴 |
+| `=.` vs `=:` scoping | 🟢 a definition has its own frame; `=:` names a global |
+| Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🟢 verbs; `{{ }}` modifier forms named |
+| Multi-line definition body `3 : 0` … `)` | 🟢 |
+| Control words `if. while. for. select. try.` | 🟢 `whilst.`, `for_i.`, `fcase.`, `elseif.` included |
+| Control words `throw. catcht. goto_x. label_x.` | 🔴 named |
 | Locales and `18!:` | 🔴 |
-| `$:` self-reference | 🔴 |
-| `x` / `y` arguments | 🔴 with explicit definitions |
+| `$:` self-reference | 🟡 names the definition it stands in; the oracle self-applies |
+| Recursion by name inside a definition | 🟢 bounded, with a diagnostic |
+| `x` / `y` arguments | 🟢 |
 | Verb rank machinery, frames, framing fill | 🟢 |
 | Leading-prefix agreement | 🟢 |
 | Overtake fill | 🟢 |
@@ -198,7 +201,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Complex literal `1j2` | 🔴 |
 | Extended literal `1x` | 🔴 |
 | Rational literal `1r2` | 🔴 |
-| Base and constant literals `16b1f`, `1p1` | 🔴 |
+| Base and constant literals `16b1f`, `1p1`, `1x1` | 🟢 |
 | `'strings'`, `NB.` comments, multi-sentence programs | 🟢 |
 | `{name}` host-data interpolation | 🟢 |
 
@@ -282,7 +285,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `⊣` | 🟢 same | 🟢 left |
 | `⎕←` output | 🟢 | — |
 | `⍞` character I/O | 🔴 | 🔴 |
-| `→` branch | 🔴 | — |
+| `→` branch | 🔴 named (label-based goto) | — |
 | `⍬` zilde | 🔴 | — |
 | `⌶` I-beam | 🔴 | 🔴 |
 
@@ -317,14 +320,19 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Nested arrays | 🟡 structural verbs only; no mixed simple arrays |
 | `←` assignment, including inline | 🟢 |
 | Function assignment `F←+/` | 🔴 GNU APL rejects it; J's spelling has landed |
-| Dfns `{⍵+1}`, `⍺`/`⍵` | 🔴 |
-| Tradfns `∇` | 🔴 |
+| Dfns `{⍵+1}`, `⍺`/`⍵`, `⋄` bodies, nesting | 🟢 |
+| Dfn assignment `F←{⍵×2}` | 🟢 |
+| Dfn guards `cond:expr`, `⍺←default`, `∇` self-reference | 🟡 no oracle: GNU APL has none of the three |
+| Dfn operators `⍺⍺` / `⍵⍵` | 🔴 named |
+| Tradfns `∇ Z←L F R;locals` … `∇` | 🟢 including APL's global-by-default scope rule |
 | Trains (forks and atops) | 🔴 |
-| Bracket indexing `A[1]` | 🟡 reading, elided slots included; `A[1]←v` not yet |
+| Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included |
+| Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
 | Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`; the rest named |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
 | `⎕`-system names as runtime variables | 🔴 |
-| Control structures `:If` … `:EndIf` | 🔴 |
+| Control structures `:If :While :Repeat :For :Select` | 🟡 no oracle: GNU APL rejects them |
+| `:Return` `:Leave` `:Continue` | 🟡 no oracle, as above |
 | Exact-or-scalar conformability | 🟢 |
 | `¯` negatives, `1E3` exponents | 🟢 |
 | Complex literal `2J3` | 🔴 |
