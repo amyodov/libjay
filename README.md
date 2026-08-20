@@ -92,18 +92,40 @@ length error: left shape 2, right shape 3
       ^
 ```
 
+## Real data, zero-copy
+
+Polars, pandas 2, PyArrow and numpy work natively — no dependency on any of
+them, via the Arrow C data interface and the buffer protocols:
+
+```python
+import polars as pl
+df = pl.DataFrame({"open": [...], "close": [...]})   # M rows × N columns
+libjay.j("+/ {df}", {"df": df})       # each column summed over all rows
+libjay.j('+/"1 {df}', {"df": df})     # each row summed
+
+v = libjay.j("2 * {x}", {"x": np.arange(10**8)})     # zero-copy in
+pl.Series(v)                                         # zero-copy out
+```
+
+int64/float64 data (and timestamps/durations, which are physically int64)
+crosses the boundary without copying, and the kernel keeps the source
+alive. Columns with nulls, or tables mixing int64 with float64, are refused
+with an error that names the column and suggests the cast — where
+information is missing, libjay reports and stops rather than guessing.
+
 ## Status
 
 Early. What exists today: both frontends over one IR; arithmetic, reduction
 (with the leading/trailing axis semantics of each language), the rank
 operator (J `"`, APL `⍤`), iota/index origin, reshape/transpose/take/drop,
-assignment and multi-sentence programs, `echo`/`⎕←`, the CLI. Dense numeric
-arrays only; things the languages have but libjay doesn't yet (boxes, nested
-arrays, scan, windows, …) fail with an explicit "not supported yet".
+assignment and multi-sentence programs, `echo`/`⎕←`, the CLI, and the Arrow
+data boundary above. Dense numeric arrays only; things the languages have
+but libjay doesn't yet (boxes, nested arrays, scan, windows, …) fail with an
+explicit "not supported yet".
 
-The roadmap is Arrow/Polars zero-copy interop, multithreaded execution
-benchmarked against Polars and numba, time-series primitives, SIMD, GPU.
-Deeper documentation lives in `docs/`.
+Next on the roadmap: multithreaded execution benchmarked against Polars and
+numba, time-series primitives, SIMD, GPU. Deeper documentation lives in
+`docs/`.
 
 ## License
 

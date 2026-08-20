@@ -12,7 +12,7 @@ pub mod frontend;
 pub mod ir;
 pub mod verb;
 
-pub use array::{Array, Data};
+pub use array::{Array, Buf, Data, Owner};
 pub use dtype::DType;
 pub use error::{Error, ErrorKind, Result, Span};
 pub use frontend::{compile, compile_parts, Dialect, Lang};

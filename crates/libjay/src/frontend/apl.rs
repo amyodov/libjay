@@ -403,7 +403,7 @@ fn lex_string(text: &str, start: usize, offset: usize) -> Result<(Array, usize)>
         i += c.len_utf8();
     }
     let shape = if chars.len() == 1 { vec![] } else { vec![chars.len()] };
-    Ok((Array::new(shape, Data::Char(chars)), i))
+    Ok((Array::new(shape, Data::Char(chars.into())), i))
 }
 
 /// True if a numeric literal starts at byte `i`.
@@ -521,7 +521,7 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
         break;
     }
     let data = if any_float {
-        Data::F64(vals)
+        Data::F64(vals.into())
     } else {
         Data::I64(vals.iter().map(|&v| v as i64).collect())
     };
@@ -811,30 +811,30 @@ mod tests {
         let e = one("5");
         let a = as_const(&e);
         assert_eq!(a.shape, Vec::<usize>::new());
-        assert_eq!(a.data, Data::I64(vec![5]));
+        assert_eq!(a.data, Data::I64(vec![5].into()));
     }
 
     #[test]
     fn adjacent_numbers_merge_into_one_vector() {
         let a = as_const(&one("2 3 4")).clone();
         assert_eq!(a.shape, vec![3]);
-        assert_eq!(a.data, Data::I64(vec![2, 3, 4]));
+        assert_eq!(a.data, Data::I64(vec![2, 3, 4].into()));
     }
 
     #[test]
     fn one_float_makes_the_whole_vector_float() {
         let a = as_const(&one("1 2.5 3")).clone();
         assert_eq!(a.shape, vec![3]);
-        assert_eq!(a.data, Data::F64(vec![1.0, 2.5, 3.0]));
+        assert_eq!(a.data, Data::F64(vec![1.0, 2.5, 3.0].into()));
     }
 
     #[rstest]
-    #[case("¯3", Data::I64(vec![-3]))]
-    #[case("¯3.5", Data::F64(vec![-3.5]))]
-    #[case("1e3", Data::I64(vec![1000]))]
-    #[case("1e¯3", Data::F64(vec![0.001]))]
-    #[case("2.5e2", Data::F64(vec![250.0]))]
-    #[case("¯1 ¯2", Data::I64(vec![-1, -2]))]
+    #[case("¯3", Data::I64(vec![-3].into()))]
+    #[case("¯3.5", Data::F64(vec![-3.5].into()))]
+    #[case("1e3", Data::I64(vec![1000].into()))]
+    #[case("1e¯3", Data::F64(vec![0.001].into()))]
+    #[case("2.5e2", Data::F64(vec![250.0].into()))]
+    #[case("¯1 ¯2", Data::I64(vec![-1, -2].into()))]
     fn numeric_literals(#[case] src: &str, #[case] want: Data) {
         assert_eq!(as_const(&one(src)).data, want);
     }
@@ -843,7 +843,7 @@ mod tests {
     fn single_char_string_is_rank_zero() {
         let a = as_const(&one("'a'")).clone();
         assert_eq!(a.shape, Vec::<usize>::new());
-        assert_eq!(a.data, Data::Char(vec!['a']));
+        assert_eq!(a.data, Data::Char(vec!['a'].into()));
     }
 
     #[test]
@@ -857,7 +857,7 @@ mod tests {
     fn empty_string_is_an_empty_char_vector() {
         let a = as_const(&one("''")).clone();
         assert_eq!(a.shape, vec![0]);
-        assert_eq!(a.data, Data::Char(vec![]));
+        assert_eq!(a.data, Data::Char(vec![].into()));
     }
 
     #[test]
@@ -884,7 +884,7 @@ mod tests {
         let stmts = p("2+2 ⍝ a note ⋄ still a note\n3").unwrap();
         assert_eq!(stmts.len(), 2);
         dyad_of(&stmts[0], "+");
-        assert_eq!(as_const(&stmts[1]).data, Data::I64(vec![3]));
+        assert_eq!(as_const(&stmts[1]).data, Data::I64(vec![3].into()));
     }
 
     #[test]
@@ -900,13 +900,13 @@ mod tests {
         match &stmts[0] {
             Expr::Assign { name, value, .. } => {
                 assert_eq!(name, "x");
-                assert_eq!(as_const(value).data, Data::I64(vec![3]));
+                assert_eq!(as_const(value).data, Data::I64(vec![3].into()));
             }
             other => panic!("expected an assignment, got {other:?}"),
         }
         let (x, y) = dyad_of(&stmts[1], "+");
         assert!(matches!(x, Expr::Name(n, _) if n == "x"));
-        assert_eq!(as_const(y).data, Data::I64(vec![1]));
+        assert_eq!(as_const(y).data, Data::I64(vec![1].into()));
     }
 
     #[rstest]
@@ -1021,9 +1021,9 @@ mod tests {
     fn reshape_of_iota() {
         let e = one("2 3⍴⍳6");
         let (x, y) = dyad_of(&e, "⍴");
-        assert_eq!(as_const(x).data, Data::I64(vec![2, 3]));
+        assert_eq!(as_const(x).data, Data::I64(vec![2, 3].into()));
         let iy = monad_of(y, "⍳");
-        assert_eq!(as_const(iy).data, Data::I64(vec![6]));
+        assert_eq!(as_const(iy).data, Data::I64(vec![6].into()));
     }
 
     #[test]
@@ -1032,15 +1032,15 @@ mod tests {
         let e = one("-3+4");
         let inner = monad_of(&e, "-");
         let (x, y) = dyad_of(inner, "+");
-        assert_eq!(as_const(x).data, Data::I64(vec![3]));
-        assert_eq!(as_const(y).data, Data::I64(vec![4]));
+        assert_eq!(as_const(x).data, Data::I64(vec![3].into()));
+        assert_eq!(as_const(y).data, Data::I64(vec![4].into()));
     }
 
     #[test]
     fn a_chain_of_dyads_associates_to_the_right() {
         let e = one("2×3+4");
         let (x, y) = dyad_of(&e, "×");
-        assert_eq!(as_const(x).data, Data::I64(vec![2]));
+        assert_eq!(as_const(x).data, Data::I64(vec![2].into()));
         dyad_of(y, "+");
     }
 
@@ -1049,7 +1049,7 @@ mod tests {
         let e = one("(2+3)×4");
         let (x, y) = dyad_of(&e, "×");
         dyad_of(x, "+");
-        assert_eq!(as_const(y).data, Data::I64(vec![4]));
+        assert_eq!(as_const(y).data, Data::I64(vec![4].into()));
     }
 
     #[test]
@@ -1181,7 +1181,7 @@ mod tests {
                 match value.as_ref() {
                     Expr::Assign { name, value, .. } => {
                         assert_eq!(name, "b");
-                        assert_eq!(as_const(value).data, Data::I64(vec![5]));
+                        assert_eq!(as_const(value).data, Data::I64(vec![5].into()));
                     }
                     other => panic!("expected a nested assignment, got {other:?}"),
                 }
@@ -1194,11 +1194,11 @@ mod tests {
     fn assignment_inside_an_expression() {
         let e = one("2+a←3");
         let (x, y) = dyad_of(&e, "+");
-        assert_eq!(as_const(x).data, Data::I64(vec![2]));
+        assert_eq!(as_const(x).data, Data::I64(vec![2].into()));
         match y {
             Expr::Assign { name, value, .. } => {
                 assert_eq!(name, "a");
-                assert_eq!(as_const(value).data, Data::I64(vec![3]));
+                assert_eq!(as_const(value).data, Data::I64(vec![3].into()));
             }
             other => panic!("expected an assignment, got {other:?}"),
         }
@@ -1221,7 +1221,7 @@ mod tests {
         let stmts = parse(&sp, 1).unwrap();
         let (x, y) = dyad_of(&stmts[0], "+");
         assert!(matches!(x, Expr::Param(0, _)));
-        assert_eq!(as_const(y).data, Data::I64(vec![1]));
+        assert_eq!(as_const(y).data, Data::I64(vec![1].into()));
         // `{x}` occupies the first three characters of the display source.
         assert_eq!(x.span(), Span::new(0, 3));
         assert_eq!(sp.display, "{x}+1");
@@ -1244,8 +1244,8 @@ mod tests {
         let sp = SourceParts::from_parts(&["1 ⍝ ", "\n2"], &["x"]);
         let stmts = parse(&sp, 1).unwrap();
         assert_eq!(stmts.len(), 2);
-        assert_eq!(as_const(&stmts[0]).data, Data::I64(vec![1]));
-        assert_eq!(as_const(&stmts[1]).data, Data::I64(vec![2]));
+        assert_eq!(as_const(&stmts[0]).data, Data::I64(vec![1].into()));
+        assert_eq!(as_const(&stmts[1]).data, Data::I64(vec![2].into()));
     }
 
     // --- spans ----------------------------------------------------------

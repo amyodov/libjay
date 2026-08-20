@@ -1,12 +1,14 @@
 //! Python binding. Exposes compile/run over the core crate; the friendly
 //! layer (kernels with defaults, t-strings, the CLI) lives in Python.
 
+mod data;
+
 use std::sync::Arc;
 
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyFloat, PyInt, PyList, PyString, PyTuple};
+use pyo3::types::{PyBool, PyCapsule, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 use jay::fmt::{format_array, FmtOpts};
 use jay::{Array, Data, DType, Dialect, Lang};
@@ -111,6 +113,19 @@ impl Value {
             Err(_) => false,
         }
     }
+
+    /// The Arrow C data interface: a rank-1 numeric result leaves as
+    /// ("arrow_schema", "arrow_array") PyCapsules, without copying its
+    /// integer or float payload. `requested_schema` is accepted and ignored.
+    #[pyo3(signature = (requested_schema=None))]
+    fn __arrow_c_array__<'py>(
+        &self,
+        py: Python<'py>,
+        requested_schema: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<(Bound<'py, PyCapsule>, Bound<'py, PyCapsule>)> {
+        let _ = requested_schema;
+        data::export_capsules(py, &self.array)
+    }
 }
 
 /// Elements [start, end) at nesting depth `axis`, as nested Python lists.
@@ -173,7 +188,7 @@ fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     if let Ok(s) = obj.downcast::<PyString>() {
         let chars: Vec<char> = s.to_str()?.chars().collect();
         return Ok(if chars.len() == 1 {
-            Array::new(vec![], Data::Char(chars))
+            Array::new(vec![], Data::Char(chars.into()))
         } else {
             Array::from_chars(chars)
         });
@@ -181,12 +196,16 @@ fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     if let Ok(v) = obj.downcast::<Value>() {
         return Ok(v.get().array.clone());
     }
+    if let Some(imported) = data::try_import(obj) {
+        return imported;
+    }
     if obj.downcast::<PyList>().is_ok() || obj.downcast::<PyTuple>().is_ok() {
         return sequence_to_array(obj);
     }
     Err(PyTypeError::new_err(format!(
-        "cannot pass a {} to J/APL; supported: bool, int, float, str, \
-         nested lists (Arrow and numpy arrive with the Arrow boundary)",
+        "cannot pass a {} to J/APL; supported: bool, int, float, str, nested \
+         lists, and anything carrying Arrow data (Polars, pandas, PyArrow) or \
+         a buffer (numpy)",
         obj.get_type().name()?
     )))
 }

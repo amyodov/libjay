@@ -748,7 +748,7 @@ fn compare_data(
             let e = a[xoff + i / xdiv] == b[yoff + i / ydiv];
             out.push(if op == Eq { e as u8 } else { !e as u8 });
         }
-        return Ok(Data::Bool(out));
+        return Ok(Data::Bool(out.into()));
     }
     let mut out = Vec::with_capacity(n);
     // Floats compare exactly. J's comparison tolerance (!:) is a known
@@ -772,7 +772,7 @@ fn compare_data(
             out.push(cmp_result(op, Some(a.cmp(&b))) as u8);
         }
     }
-    Ok(Data::Bool(out))
+    Ok(Data::Bool(out.into()))
 }
 
 /// Turn an ordering (None for NaN) into a comparison result.
@@ -818,14 +818,14 @@ fn scalar_dyad_data(
         let xs = borrow_i64(x, &mut tx);
         let ys = borrow_i64(y, &mut ty);
         if let Some(v) = dyad_i64(op, xs, xoff, xdiv, ys, yoff, ydiv, n) {
-            return Ok(Data::I64(v));
+            return Ok(Data::I64(v.into()));
         }
         // Integer overflow (or a fractional result): J widens to float.
     }
     let (mut tx, mut ty) = (Vec::new(), Vec::new());
     let xs = borrow_f64(x, &mut tx);
     let ys = borrow_f64(y, &mut ty);
-    Ok(Data::F64(dyad_f64(op, xs, xoff, xdiv, ys, yoff, ydiv, n, span)?))
+    Ok(Data::F64(dyad_f64(op, xs, xoff, xdiv, ys, yoff, ydiv, n, span)?.into()))
 }
 
 /// Elementwise dyadic application of a scalar operation to whole arrays.
@@ -859,7 +859,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
         Neg => match d {
             Data::Bool(v) => Data::I64(v.iter().map(|&b| -(b as i64)).collect()),
             Data::I64(v) => match v.iter().map(|&x| x.checked_neg()).collect::<Option<Vec<_>>>() {
-                Some(out) => Data::I64(out),
+                Some(out) => Data::I64(out.into()),
                 None => Data::F64(v.iter().map(|&x| -(x as f64)).collect()),
             },
             Data::F64(v) => Data::F64(v.iter().map(|&x| -x).collect()),
@@ -897,7 +897,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
         Abs => match d {
             Data::Bool(_) => d.clone(),
             Data::I64(v) => match v.iter().map(|&x| x.checked_abs()).collect::<Option<Vec<_>>>() {
-                Some(out) => Data::I64(out),
+                Some(out) => Data::I64(out.into()),
                 None => Data::F64(v.iter().map(|&x| (x as f64).abs()).collect()),
             },
             Data::F64(v) => Data::F64(v.iter().map(|&x| x.abs()).collect()),
@@ -912,7 +912,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                 if out.iter().all(|&x| fits_i64(x)) {
                     Data::I64(out.iter().map(|&x| x as i64).collect())
                 } else {
-                    Data::F64(out)
+                    Data::F64(out.into())
                 }
             }
             Data::Char(_) => return Err(char_arith(span)),
@@ -932,7 +932,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                             _ => return Err(bad()),
                         }
                     }
-                    Data::Bool(out)
+                    Data::Bool(out.into())
                 }
                 Data::F64(v) => {
                     let mut out = Vec::with_capacity(v.len());
@@ -945,7 +945,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                             return Err(bad());
                         }
                     }
-                    Data::Bool(out)
+                    Data::Bool(out.into())
                 }
                 Data::Char(_) => return Err(bad()),
             }
@@ -1003,7 +1003,7 @@ fn iota_j(y: &Array, span: Span) -> Result<Array> {
         out.push(v as i64);
         odometer(&mut coord, &shape);
     }
-    Ok(Array::new(shape, Data::I64(out)))
+    Ok(Array::new(shape, Data::I64(out.into())))
 }
 
 /// The first item, or a cell of fills when there are no items.
@@ -1209,10 +1209,10 @@ fn reduce_identity(v: &Verb, n: usize) -> Option<Data> {
     let Verb::Prim(p) = v else { return None };
     let DyadOp::Scalar(op) = p.dyad else { return None };
     Some(match op {
-        ScalarDyad::Add => Data::I64(vec![0; n]),
-        ScalarDyad::Mul => Data::I64(vec![1; n]),
-        ScalarDyad::Min => Data::F64(vec![f64::INFINITY; n]),
-        ScalarDyad::Max => Data::F64(vec![f64::NEG_INFINITY; n]),
+        ScalarDyad::Add => Data::I64(vec![0; n].into()),
+        ScalarDyad::Mul => Data::I64(vec![1; n].into()),
+        ScalarDyad::Min => Data::F64(vec![f64::INFINITY; n].into()),
+        ScalarDyad::Max => Data::F64(vec![f64::NEG_INFINITY; n].into()),
         _ => return None,
     })
 }
@@ -1356,7 +1356,7 @@ mod tests {
     }
 
     fn mat(rows: usize, cols: usize, v: Vec<i64>) -> Array {
-        Array::new(vec![rows, cols], Data::I64(v))
+        Array::new(vec![rows, cols], Data::I64(v.into()))
     }
 
     fn ints(a: &Array) -> Vec<i64> {
@@ -1369,7 +1369,7 @@ mod tests {
 
     fn bools(a: &Array) -> Vec<u8> {
         match &a.data {
-            Data::Bool(v) => v.clone(),
+            Data::Bool(v) => v.to_vec(),
             other => panic!("expected boolean result, got {other:?}"),
         }
     }
@@ -1573,7 +1573,7 @@ mod tests {
     #[test]
     fn empty_reduction_uses_the_identity_cell() {
         ctx!(c);
-        let empty = Array::new(vec![0, 2], Data::I64(vec![]));
+        let empty = Array::new(vec![0, 2], Data::I64(vec![].into()));
         let r = Verb::Reduce(b(plus())).monad(&empty, &mut c, sp()).unwrap();
         assert_eq!(r.shape, vec![2]);
         assert_eq!(ints(&r), vec![0, 0]);
@@ -1653,7 +1653,7 @@ mod tests {
     #[test]
     fn booleans_widen_to_integers_in_arithmetic() {
         ctx!(c);
-        let bits = Array { shape: vec![3], data: Data::Bool(vec![1, 0, 1]) };
+        let bits = Array { shape: vec![3], data: Data::Bool(vec![1, 0, 1].into()) };
         let r = plus().dyad(&bits, &bits, &mut c, sp()).unwrap();
         assert_eq!(r.dtype(), DType::I64);
         assert_eq!(ints(&r), vec![2, 0, 2]);
@@ -1800,7 +1800,7 @@ mod tests {
         assert_eq!(floats(&r), vec![-1.0, 0.0, 1.0]);
         let r = residue_v().monad(&Array::from_i64(vec![-3, 3]), &mut c, sp()).unwrap();
         assert_eq!(ints(&r), vec![3, 3]);
-        let bits = Array { shape: vec![2], data: Data::Bool(vec![0, 1]) };
+        let bits = Array { shape: vec![2], data: Data::Bool(vec![0, 1].into()) };
         let r = minus().monad(&bits, &mut c, sp()).unwrap();
         assert_eq!(r.dtype(), DType::I64);
         assert_eq!(ints(&r), vec![0, -1]);
@@ -1843,7 +1843,7 @@ mod tests {
         assert_eq!(r.shape, vec![3, 2]);
         assert_eq!(ints(&r), vec![1, 4, 2, 5, 3, 6]);
         // Rank 3: 2 by 1 by 3 becomes 3 by 1 by 2.
-        let a = Array::new(vec![2, 1, 3], Data::I64(vec![1, 2, 3, 4, 5, 6]));
+        let a = Array::new(vec![2, 1, 3], Data::I64(vec![1, 2, 3, 4, 5, 6].into()));
         let r = transpose_v().monad(&a, &mut c, sp()).unwrap();
         assert_eq!(r.shape, vec![3, 1, 2]);
         assert_eq!(ints(&r), vec![1, 4, 2, 5, 3, 6]);
@@ -1863,7 +1863,7 @@ mod tests {
         assert_eq!(r.shape, vec![1, 3]);
         assert_eq!(ints(&r), vec![4, 5, 6]);
         // The head of an empty array is a cell of fills.
-        let e = Array::new(vec![0, 2], Data::I64(vec![]));
+        let e = Array::new(vec![0, 2], Data::I64(vec![].into()));
         let r = head_v().monad(&e, &mut c, sp()).unwrap();
         assert_eq!(r.shape, vec![2]);
         assert_eq!(ints(&r), vec![0, 0]);
@@ -1984,7 +1984,7 @@ mod tests {
         let r = head_v()
             .dyad(&Array::scalar_i64(3), &Array::from_chars(vec!['a']), &mut c, sp())
             .unwrap();
-        assert_eq!(r.data, Data::Char(vec!['a', ' ', ' ']));
+        assert_eq!(r.data, Data::Char(vec!['a', ' ', ' '].into()));
         let e = head_v()
             .dyad(&Array::from_i64(vec![1, 1]), &Array::from_i64(vec![1, 2]), &mut c, sp())
             .unwrap_err();

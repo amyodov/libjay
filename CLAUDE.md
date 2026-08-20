@@ -117,8 +117,18 @@ Choices made during implementation, with reasoning. No entry = still open.
   representation error is ≤ ~5e-6 per side).
 - 2026-08-20 — Every README example also lives runnable in `examples/`
   (owner: APL is hard to type; files are copy-paste-free).
+- 2026-08-20 — Phase 3 boundary (details in docs/coverage.md): zero-copy for
+  Arrow Int64/Float64 and the physically-i64 temporal types, and for numpy
+  C-contiguous i64/f64 (via `__array_interface__` — pyo3's buffer module
+  needs Py_3_11 and we build abi3-py310); narrower types widen with one
+  copy; N≥2-column tables interleave column-major → rows-leading with one
+  copy until the layout-aware runtime. Non-contiguous numpy input is
+  REFUSED (resolves §7 item 1: visible, suggests .copy()). Arrow deps live
+  in the binding crate only; the core stays dependency-free.
+- 2026-08-20 — CI Rust toolchain pinned to the local 1.85 so clippy findings
+  are reproducible; revisit at publishing.
 
-Open: non-contiguous inputs; APL oracle;
+Open: APL oracle;
 pure-expression assertion flag; primitive ordering; complex column naming;
 sandbox surfacing; FFT-class operations.
 Delegated (owner has no opinion, decide and log): codegen backend, IR design,

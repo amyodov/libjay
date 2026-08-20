@@ -13,5 +13,9 @@ name = "_jay"
 crate-type = ["cdylib"]
 
 [dependencies]
+arrow-array = { version = "59.2.0", default-features = false, features = ["ffi"] }
+arrow-buffer = "59.2.0"
+arrow-data = "59.2.0"
+arrow-schema = "59.2.0"
 libjay = { path = "../libjay" }
 pyo3 = { version = "0.25", features = ["abi3-py310"] }

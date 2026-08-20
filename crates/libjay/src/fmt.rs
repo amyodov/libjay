@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(j(&Array::scalar_f64(0.5)), "0.5");
         assert_eq!(j(&Array::scalar_bool(true)), "1");
         assert_eq!(j(&Array::scalar_bool(false)), "0");
-        assert_eq!(j(&Array::new(vec![], Data::Char(vec!['q']))), "q");
+        assert_eq!(j(&Array::new(vec![], Data::Char(vec!['q'].into()))), "q");
     }
 
     // Vectors.
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn bool_vector() {
-        let a = Array::new(vec![4], Data::Bool(vec![1, 0, 0, 1]));
+        let a = Array::new(vec![4], Data::Bool(vec![1, 0, 0, 1].into()));
         assert_eq!(j(&a), "1 0 0 1");
     }
 
@@ -324,13 +324,13 @@ mod tests {
 
     #[test]
     fn matrix_columns_align_right() {
-        let a = Array::new(vec![2, 3], Data::I64(vec![1, 22, 333, 4444, 5, 66]));
+        let a = Array::new(vec![2, 3], Data::I64(vec![1, 22, 333, 4444, 5, 66].into()));
         assert_eq!(j(&a), "   1 22 333\n4444  5  66");
     }
 
     #[test]
     fn matrix_negatives_widen_their_column() {
-        let a = Array::new(vec![2, 2], Data::I64(vec![-1, 10, 100, -2]));
+        let a = Array::new(vec![2, 2], Data::I64(vec![-1, 10, 100, -2].into()));
         assert_eq!(j(&a), " _1 10\n100 _2");
         // `¯` is one column wide even though it is two bytes.
         assert_eq!(apl(&a), " ¯1 10\n100 ¯2");
@@ -338,19 +338,19 @@ mod tests {
 
     #[test]
     fn matrix_of_floats() {
-        let a = Array::new(vec![2, 2], Data::F64(vec![0.5, 2.0, -1.0 / 3.0, 10.0]));
+        let a = Array::new(vec![2, 2], Data::F64(vec![0.5, 2.0, -1.0 / 3.0, 10.0].into()));
         assert_eq!(j(&a), "      0.5  2\n_0.333333 10");
     }
 
     #[test]
     fn matrix_of_bools() {
-        let a = Array::new(vec![2, 3], Data::Bool(vec![1, 0, 1, 0, 1, 0]));
+        let a = Array::new(vec![2, 3], Data::Bool(vec![1, 0, 1, 0, 1, 0].into()));
         assert_eq!(j(&a), "1 0 1\n0 1 0");
     }
 
     #[test]
     fn single_column_matrix() {
-        let a = Array::new(vec![3, 1], Data::I64(vec![1, -20, 300]));
+        let a = Array::new(vec![3, 1], Data::I64(vec![1, -20, 300].into()));
         assert_eq!(j(&a), "  1\n_20\n300");
     }
 
@@ -358,25 +358,25 @@ mod tests {
 
     #[test]
     fn rank_3_separates_planes_with_one_blank_line() {
-        let a = Array::new(vec![2, 2, 2], Data::I64(vec![1, 2, 3, 4, 5, 6, 7, 8]));
+        let a = Array::new(vec![2, 2, 2], Data::I64(vec![1, 2, 3, 4, 5, 6, 7, 8].into()));
         assert_eq!(j(&a), "1 2\n3 4\n\n5 6\n7 8");
     }
 
     #[test]
     fn rank_3_column_widths_are_global() {
-        let a = Array::new(vec![2, 1, 2], Data::I64(vec![1, 2, 300, 4]));
+        let a = Array::new(vec![2, 1, 2], Data::I64(vec![1, 2, 300, 4].into()));
         assert_eq!(j(&a), "  1 2\n\n300 4");
     }
 
     #[test]
     fn rank_4_separates_groups_with_two_blank_lines() {
-        let a = Array::new(vec![2, 2, 1, 2], Data::I64(vec![1, 2, 3, 4, 5, 6, 7, 8]));
+        let a = Array::new(vec![2, 2, 1, 2], Data::I64(vec![1, 2, 3, 4, 5, 6, 7, 8].into()));
         assert_eq!(j(&a), "1 2\n\n3 4\n\n\n5 6\n\n7 8");
     }
 
     #[test]
     fn rank_5_gap_grows_with_the_axis() {
-        let a = Array::new(vec![2, 1, 1, 1, 1], Data::I64(vec![1, 2]));
+        let a = Array::new(vec![2, 1, 1, 1, 1], Data::I64(vec![1, 2].into()));
         // The step is along axis -5: three blank lines.
         assert_eq!(j(&a), "1\n\n\n\n2");
     }
@@ -429,13 +429,13 @@ mod tests {
     #[case(&[3, 0])]
     #[case(&[2, 0, 4])]
     fn any_empty_axis_prints_nothing(#[case] shape: &[usize]) {
-        let a = Array::new(shape.to_vec(), Data::I64(vec![]));
+        let a = Array::new(shape.to_vec(), Data::I64(vec![].into()));
         assert_eq!(j(&a), "");
     }
 
     #[test]
     fn no_trailing_newline_or_spaces() {
-        let a = Array::new(vec![2, 2, 2], Data::I64(vec![1, 22, 3, 4, 5, 6, 7, 8]));
+        let a = Array::new(vec![2, 2, 2], Data::I64(vec![1, 22, 3, 4, 5, 6, 7, 8].into()));
         let s = j(&a);
         assert!(!s.ends_with('\n'));
         for line in s.lines() {

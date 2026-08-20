@@ -33,11 +33,11 @@ fn err(lang: Lang, src: &str) -> jay::Error {
 }
 
 fn i64s(shape: &[usize], values: &[i64]) -> Array {
-    Array::new(shape.to_vec(), Data::I64(values.to_vec()))
+    Array::new(shape.to_vec(), Data::I64(values.to_vec().into()))
 }
 
 fn f64s(shape: &[usize], values: &[f64]) -> Array {
-    Array::new(shape.to_vec(), Data::F64(values.to_vec()))
+    Array::new(shape.to_vec(), Data::F64(values.to_vec().into()))
 }
 
 // --- J basics -----------------------------------------------------------
@@ -138,7 +138,7 @@ fn j_sequence_and_assignment() {
 fn j_strings_and_echo() {
     assert_eq!(
         run(Lang::J, "'hi'"),
-        Some(Array::new(vec![2], Data::Char(vec!['h', 'i'])))
+        Some(Array::new(vec![2], Data::Char(vec!['h', 'i'].into())))
     );
     let (result, out) = run_capture(Lang::J, "echo 'Hello, world!'");
     assert_eq!(out, "Hello, world!\n");

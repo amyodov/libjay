@@ -1,0 +1,229 @@
+"""The data boundary: Arrow and numpy in, Arrow out, and the refusals."""
+
+import datetime
+import gc
+
+import pytest
+
+import libjay
+from libjay import JayError, j
+
+
+class TestNumpy:
+    @pytest.fixture(autouse=True)
+    def _np(self):
+        self.np = pytest.importorskip("numpy")
+
+    def test_i64_vector(self):
+        a = self.np.arange(100_000, dtype=self.np.int64)
+        assert j("+/ {x}", {"x": a}) == 4999950000
+
+    def test_f64_vector(self):
+        a = self.np.arange(100_000, dtype=self.np.float64)
+        assert j("+/ {x}", {"x": a}) == pytest.approx(4999950000.0)
+
+    def test_shape_survives(self):
+        a = self.np.arange(6, dtype=self.np.int64).reshape(2, 3)
+        v = j("] {x}", {"x": a})
+        assert v.shape == (2, 3)
+        assert v.tolist() == [[0, 1, 2], [3, 4, 5]]
+
+    def test_matrix_reduces_along_the_leading_axis(self):
+        a = self.np.arange(6, dtype=self.np.int64).reshape(2, 3)
+        assert j("+/ {x}", {"x": a}).tolist() == [3, 5, 7]
+        assert j('+/"1 {x}', {"x": a}).tolist() == [3, 12]
+
+    def test_borrowed_memory_is_not_copied(self):
+        # The result of `]` is the input array; writing through numpy is
+        # visible to it, which is what zero-copy means.
+        a = self.np.arange(4, dtype=self.np.int64)
+        v = j("] {x}", {"x": a})
+        a[0] = 99
+        assert v.tolist()[0] == 99
+
+    def test_transposed_view_is_refused(self):
+        a = self.np.arange(6, dtype=self.np.int64).reshape(2, 3)
+        with pytest.raises(JayError) as e:
+            j("+/ {x}", {"x": a.T})
+        assert "not contiguous" in str(e.value)
+        assert ".copy()" in str(e.value)
+
+    def test_sliced_view_is_refused(self):
+        a = self.np.arange(10, dtype=self.np.int64)
+        with pytest.raises(JayError, match="not contiguous"):
+            j("+/ {x}", {"x": a[::2]})
+
+    def test_a_copy_of_the_view_works(self):
+        a = self.np.arange(6, dtype=self.np.int64).reshape(2, 3)
+        assert j("+/ {x}", {"x": a.T.copy()}).tolist() == [3, 12]
+
+    @pytest.mark.parametrize(
+        "dtype,total", [("int8", 6), ("int16", 6), ("int32", 6), ("uint8", 6), ("uint32", 6)]
+    )
+    def test_narrow_integers_widen(self, dtype, total):
+        a = self.np.array([1, 2, 3], dtype=dtype)
+        assert j("+/ {x}", {"x": a}) == total
+
+    def test_float32_widens(self):
+        a = self.np.array([1.5, 2.5], dtype=self.np.float32)
+        assert j("+/ {x}", {"x": a}) == pytest.approx(4.0)
+
+    def test_bool_arrives_as_boolean(self):
+        a = self.np.array([True, False, True])
+        assert j("+/ {x}", {"x": a}) == 2
+
+    def test_uint64_that_does_not_fit_is_refused(self):
+        a = self.np.array([2**63], dtype=self.np.uint64)
+        with pytest.raises(JayError) as e:
+            j("+/ {x}", {"x": a})
+        assert "9223372036854775808" in str(e.value)
+
+    def test_unsupported_dtype_is_refused(self):
+        a = self.np.array([1.0, 2.0], dtype=self.np.float16)
+        with pytest.raises(JayError, match="not supported yet"):
+            j("+/ {x}", {"x": a})
+
+    def test_keepalive_across_deletion(self):
+        a = self.np.arange(1000, dtype=self.np.int64)
+        kernel = libjay.j.compile("+/ {x}", {"x": a})
+        borrowed = j("] {x}", {"x": a})
+        del a
+        gc.collect()
+        assert kernel() == 499500
+        assert borrowed.tolist()[-1] == 999
+
+
+class TestPyArrow:
+    @pytest.fixture(autouse=True)
+    def _pa(self):
+        self.pa = pytest.importorskip("pyarrow")
+
+    def test_int64_array_in(self):
+        assert j("+/ {x}", {"x": self.pa.array([1, 2, 3])}) == 6
+
+    def test_float64_array_in(self):
+        assert j("+/ {x}", {"x": self.pa.array([1.5, 2.5])}) == pytest.approx(4.0)
+
+    def test_chunked_array_in(self):
+        chunked = self.pa.chunked_array([[1, 2], [3, 4]])
+        assert j("+/ {x}", {"x": chunked}) == 10
+
+    def test_result_goes_back_out(self):
+        out = self.pa.array(j("i. 5"))
+        assert out.type == self.pa.int64()
+        assert out.to_pylist() == [0, 1, 2, 3, 4]
+
+    def test_float_result_goes_back_out(self):
+        out = self.pa.array(j("1 2 3 % 2"))
+        assert out.to_pylist() == [0.5, 1.0, 1.5]
+
+    def test_boolean_result_goes_back_out(self):
+        out = self.pa.array(j("1 2 3 > 2"))
+        assert out.to_pylist() == [False, False, True]
+
+    def test_matrix_result_cannot_be_exported_yet(self):
+        with pytest.raises(JayError) as e:
+            self.pa.array(j("i. 2 3"))
+        assert "tolist()" in str(e.value)
+
+    def test_null_is_refused(self):
+        with pytest.raises(JayError) as e:
+            j("+/ {x}", {"x": self.pa.array([1, None, 3])})
+        assert "null(s)" in str(e.value)
+
+    def test_decimal_is_not_supported_yet(self):
+        column = self.pa.array(
+            [1, 2], type=self.pa.decimal128(10, 2)
+        )
+        with pytest.raises(JayError, match="not supported yet"):
+            j("+/ {x}", {"x": column})
+
+
+class TestPolars:
+    @pytest.fixture(autouse=True)
+    def _pl(self):
+        self.pl = pytest.importorskip("polars")
+
+    def test_series_in(self):
+        assert j("+/ {x}", {"x": self.pl.Series("close", [1.0, 2.0, 3.5])}) == 6.5
+
+    def test_series_out(self):
+        out = self.pl.Series(j("i. 5"))
+        assert out.to_list() == [0, 1, 2, 3, 4]
+
+    def test_null_names_the_column(self):
+        with pytest.raises(JayError) as e:
+            j("+/ {x}", {"x": self.pl.Series("close", [1.0, None, 3.5])})
+        message = str(e.value)
+        assert "column 'close'" in message
+        assert "1 null(s)" in message
+        assert "fill_null" in message
+
+    def test_dataframe_is_a_matrix_with_rows_leading(self):
+        df = self.pl.DataFrame({"a": [1, 2, 3], "b": [10, 20, 30]})
+        assert j("$ {df}", {"df": df}).tolist() == [3, 2]
+        assert j("+/ {df}", {"df": df}).tolist() == [6, 60]
+        assert j('+/"1 {df}', {"df": df}).tolist() == [11, 22, 33]
+
+    def test_dataframe_in_one_call(self):
+        df = self.pl.DataFrame({"a": [1.0, 2.0], "b": [10.0, 20.0]})
+        assert libjay.j("+/ {df}", {"df": df}).tolist() == [3.0, 30.0]
+
+    def test_single_column_frame_is_a_vector(self):
+        df = self.pl.DataFrame({"a": [1, 2, 3]})
+        assert j("$ {df}", {"df": df}).tolist() == [3]
+
+    def test_mixed_dtypes_are_refused_with_a_cast_suggestion(self):
+        df = self.pl.DataFrame({"volume": [1, 2], "close": [1.0, 2.0]})
+        with pytest.raises(JayError) as e:
+            j("+/ {df}", {"df": df})
+        message = str(e.value)
+        assert "columns disagree" in message
+        assert "'volume' is int64" in message
+        assert "'close' is float64" in message
+        assert "volume.cast(Float64)" in message
+
+    def test_string_column_is_not_supported_yet(self):
+        df = self.pl.DataFrame({"sym": ["a", "b"], "n": [1, 2]})
+        with pytest.raises(JayError) as e:
+            j("+/ {df}", {"df": df})
+        message = str(e.value)
+        assert "column 'sym'" in message
+        assert "yet" in message
+
+    def test_timestamps_are_plain_integers(self):
+        day = datetime.datetime(2020, 1, 2) - datetime.datetime(2020, 1, 1)
+        column = self.pl.Series(
+            "t", [datetime.datetime(2020, 1, 1), datetime.datetime(2020, 1, 2)]
+        )
+        # Polars stores microseconds; the difference is integer arithmetic.
+        assert j("-/ {x}", {"x": column}) == -int(day.total_seconds() * 1_000_000)
+
+    def test_column_sums_match_polars(self):
+        df = self.pl.DataFrame(
+            {"open": [1.0, 2.0, 3.0], "close": [1.5, 2.5, 3.5]}
+        )
+        expected = [df["open"].sum(), df["close"].sum()]
+        assert j("+/ {df}", {"df": df}).tolist() == pytest.approx(expected)
+
+
+class TestPandas:
+    @pytest.fixture(autouse=True)
+    def _pd(self):
+        self.pd = pytest.importorskip("pandas")
+        if not hasattr(self.pd.DataFrame, "__arrow_c_stream__"):
+            pytest.skip("pandas without the Arrow stream interface")
+
+    def test_dataframe_in(self):
+        df = self.pd.DataFrame({"a": [1, 2, 3], "b": [10, 20, 30]})
+        assert j("+/ {df}", {"df": df}).tolist() == [6, 60]
+        assert j('+/"1 {df}', {"df": df}).tolist() == [11, 22, 33]
+
+    def test_mixed_dtypes_are_refused(self):
+        df = self.pd.DataFrame({"volume": [1, 2], "close": [1.0, 2.0]})
+        with pytest.raises(JayError, match="columns disagree"):
+            j("+/ {df}", {"df": df})
+
+    def test_numeric_dataframe_column_sums(self):
+        df = self.pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+        assert j("+/ {df}", {"df": df}).tolist() == pytest.approx([3.0, 7.0])
