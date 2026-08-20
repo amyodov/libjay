@@ -160,8 +160,84 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '⍳' => Prim {
             name: "⍳",
             monad: M::IotaApl { origin },
-            dyad: D::NotYet("index-of (dyadic ⍳)"),
+            dyad: D::IndexOf { origin },
             ranks: [0, RANK_INF, RANK_INF],
+        },
+        '∊' => Prim {
+            name: "∊",
+            monad: M::NotYet("enlist (monadic ∊)"),
+            dyad: D::MemberApl,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '∪' => Prim {
+            name: "∪",
+            monad: M::Nub,
+            dyad: D::NotYet("union (dyadic ∪)"),
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '∩' => Prim {
+            name: "∩",
+            monad: M::NotYet("intersection (∩)"),
+            dyad: D::NotYet("intersection (∩)"),
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '∧' => Prim { name: "∧", monad: M::None, dyad: D::Scalar(SD::Lcm), ranks: [0, 0, 0] },
+        '∨' => Prim { name: "∨", monad: M::None, dyad: D::Scalar(SD::Gcd), ranks: [0, 0, 0] },
+        '⍱' => Prim {
+            name: "⍱",
+            monad: M::None,
+            dyad: D::NotYet("nor (⍱)"),
+            ranks: [0, 0, 0],
+        },
+        '⍲' => Prim {
+            name: "⍲",
+            monad: M::None,
+            dyad: D::NotYet("nand (⍲)"),
+            ranks: [0, 0, 0],
+        },
+        '⍟' => Prim {
+            name: "⍟",
+            monad: M::Scalar(SM::Ln),
+            dyad: D::Scalar(SD::Log),
+            ranks: [0, 0, 0],
+        },
+        '~' => Prim {
+            name: "~",
+            monad: M::Scalar(SM::Not),
+            dyad: D::NotYet("without (dyadic ~)"),
+            ranks: [0, 0, 0],
+        },
+        '≡' => Prim {
+            name: "≡",
+            monad: M::NotYet("depth (monadic ≡)"),
+            dyad: D::Match,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '⍋' => Prim {
+            name: "⍋",
+            monad: M::GradeUp { origin },
+            dyad: D::NotYet("dyadic grade (collation)"),
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '⍒' => Prim {
+            name: "⍒",
+            monad: M::GradeDown { origin },
+            dyad: D::NotYet("dyadic grade (collation)"),
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        // `⊖` works on the leading axis; `⌽` is the same primitive applied to
+        // rows, which `verb_for` wraps in the rank that does it.
+        '⊖' | '⌽' => Prim {
+            name: if ch == '⊖' { "⊖" } else { "⌽" },
+            monad: M::Reverse,
+            dyad: D::Rotate,
+            ranks: [RANK_INF, 1, RANK_INF],
+        },
+        '⍪' => Prim {
+            name: "⍪",
+            monad: M::NotYet("table (monadic ⍪)"),
+            dyad: D::AppendLeading,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '⍉' => Prim {
             name: "⍉",
@@ -184,13 +260,13 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         ',' => Prim {
             name: ",",
             monad: M::Ravel,
-            dyad: D::NotYet("catenate (dyadic ,)"),
+            dyad: D::AppendLast,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '≢' => Prim {
             name: "≢",
             monad: M::Tally,
-            dyad: D::NotYet("not-match (dyadic ≢)"),
+            dyad: D::NotMatch,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '⊢' => Prim {
@@ -208,6 +284,17 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         _ => return None,
     };
     Some(p)
+}
+
+/// The function a glyph denotes. Every glyph but `⌽` is a bare primitive;
+/// `⌽` is `⊖` applied to rows, so it carries the rank that does that: cells
+/// of rank 1 on the right, atoms on the left.
+fn verb_for(ch: char, origin: i64) -> Option<Verb> {
+    let p = prim_for(ch, origin)?;
+    if ch == '⌽' {
+        return Some(Verb::Rank(Box::new(Verb::Prim(p)), [1, 0, 1]));
+    }
+    Some(Verb::Prim(p))
 }
 
 fn op_for(ch: char) -> Option<OpGlyph> {
@@ -347,8 +434,8 @@ fn lex_text(
             }
             _ => {
                 let span = Span::new(offset + i, offset + i + clen);
-                if let Some(p) = prim_for(ch, origin) {
-                    cur.push(Token { kind: Tok::Func(Verb::Prim(p)), span });
+                if let Some(v) = verb_for(ch, origin) {
+                    cur.push(Token { kind: Tok::Func(v), span });
                 } else if let Some(op) = op_for(ch) {
                     cur.push(Token { kind: Tok::Op(op), span });
                 } else {
@@ -955,8 +1042,19 @@ mod tests {
     #[case('≥', MonadOp::None, DyadOp::Scalar(ScalarDyad::Ge))]
     #[case('⍴', MonadOp::ShapeOf, DyadOp::Reshape)]
     #[case('⍉', MonadOp::TransposeAxes, DyadOp::NotYet("dyadic transpose"))]
-    #[case(',', MonadOp::Ravel, DyadOp::NotYet("catenate (dyadic ,)"))]
-    #[case('≢', MonadOp::Tally, DyadOp::NotYet("not-match (dyadic ≢)"))]
+    #[case(',', MonadOp::Ravel, DyadOp::AppendLast)]
+    #[case('⍪', MonadOp::NotYet("table (monadic ⍪)"), DyadOp::AppendLeading)]
+    #[case('≢', MonadOp::Tally, DyadOp::NotMatch)]
+    #[case('≡', MonadOp::NotYet("depth (monadic ≡)"), DyadOp::Match)]
+    #[case('∊', MonadOp::NotYet("enlist (monadic ∊)"), DyadOp::MemberApl)]
+    #[case('∪', MonadOp::Nub, DyadOp::NotYet("union (dyadic ∪)"))]
+    #[case('∧', MonadOp::None, DyadOp::Scalar(ScalarDyad::Lcm))]
+    #[case('∨', MonadOp::None, DyadOp::Scalar(ScalarDyad::Gcd))]
+    #[case('⍟', MonadOp::Scalar(ScalarMonad::Ln), DyadOp::Scalar(ScalarDyad::Log))]
+    #[case('~', MonadOp::Scalar(ScalarMonad::Not), DyadOp::NotYet("without (dyadic ~)"))]
+    #[case('⊖', MonadOp::Reverse, DyadOp::Rotate)]
+    #[case('⍋', MonadOp::GradeUp { origin: 1 }, DyadOp::NotYet("dyadic grade (collation)"))]
+    #[case('⍒', MonadOp::GradeDown { origin: 1 }, DyadOp::NotYet("dyadic grade (collation)"))]
     #[case('⊢', MonadOp::Same, DyadOp::Right)]
     #[case('⊣', MonadOp::Same, DyadOp::Left)]
     #[case('↑', MonadOp::NotYet("mix (monadic ↑) — nested arrays"), DyadOp::Take)]
@@ -1002,11 +1100,27 @@ mod tests {
         match &stmts[0] {
             Expr::Monad { verb, .. } => {
                 assert_eq!(as_prim(verb).monad, MonadOp::IotaApl { origin });
-                assert_eq!(as_prim(verb).dyad, DyadOp::NotYet("index-of (dyadic ⍳)"));
+                assert_eq!(as_prim(verb).dyad, DyadOp::IndexOf { origin });
                 assert_eq!(as_prim(verb).ranks, [0, RANK_INF, RANK_INF]);
             }
             other => panic!("expected a monad, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reverse_and_rotate_pick_their_axis() {
+        // `⌽` is `⊖` on rows: the rank operator supplies the axis.
+        let e = one("⌽2 3⍴⍳6");
+        match verb_of(&e) {
+            Verb::Rank(f, ranks) => {
+                assert_eq!(*ranks, [1, 0, 1]);
+                assert_eq!(as_prim(f).monad, MonadOp::Reverse);
+                assert_eq!(as_prim(f).dyad, DyadOp::Rotate);
+            }
+            other => panic!("expected a ranked verb, got {other:?}"),
+        }
+        // `⊖` is the primitive itself, on the leading axis.
+        assert!(matches!(verb_of(&one("⊖2 3⍴⍳6")), Verb::Prim(_)));
     }
 
     #[test]

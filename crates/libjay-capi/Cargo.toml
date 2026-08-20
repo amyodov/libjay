@@ -1,0 +1,19 @@
+[package]
+name = "libjay-capi"
+description = "Stable C ABI for libjay: libjay.so/.dylib/jay.dll plus jay.h"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "jay"
+# cdylib + staticlib only, deliberately no rlib: the core crate's lib is also
+# named `jay`, so an rlib here would collide with its libjay.rlib in the
+# shared target directory. Integration tests include src/lib.rs by path.
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+libjay = { path = "../libjay" }

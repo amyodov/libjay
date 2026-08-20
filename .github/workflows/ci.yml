@@ -15,7 +15,8 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p libjay
-      - run: cargo clippy -p libjay -- -D warnings
+      - run: cargo build -p libjay-capi && cargo test -p libjay-capi
+      - run: cargo clippy -p libjay -p libjay-capi --all-targets -- -D warnings
 
   python:
     runs-on: ubuntu-latest

@@ -27,20 +27,45 @@ feature — that is a promise, not a refusal.
 | `*` | signum | times |
 | `%` | reciprocal | divide (float; `0%0` is `0`, `n%0` is `_`) |
 | `^` | exponential | power |
-| `%:` | square root | — |
+| `^.` | natural logarithm (`^. 0` is `__`) | logarithm to base x |
+| `%:` | square root | x-th root (`x %: y` is `y^(1%x)`) |
 | `\|` | magnitude | residue |
 | `<.` | floor | min |
 | `>.` | ceiling | max |
-| `=` `<` `>` `<:` `>:` | — | comparisons (0/1) |
+| `=` `<` `>` | — | comparisons (0/1) |
+| `<:` | decrement | ≤ |
+| `>:` | increment | ≥ |
+| `+:` | double | — |
+| `*:` | square | — |
+| `-:` | halve (always float) | match: same shape and values, else 0 |
+| `-.` | `1 - y` (any number, not only 0/1) | — |
+| `*.` | — | LCM (logical and on booleans) |
+| `+.` | — | GCD (logical or on booleans; `gcd 0 0` is 0) |
+| `~:` | — | ≠ |
+| `~.` | nub: distinct items, first-occurrence order | — |
 | `$` | shape of | reshape (cyclic) |
-| `,` | ravel | — |
+| `,` | ravel | catenate along the LEADING axis |
+| `,.` | — | stitch, exactly `,"_1` |
 | `#` | tally | — |
+| `{` | — | from: each atom of x selects an item (negative from the end) |
 | `{.` | head | take (negative = from end; overtake fills) |
 | `}.` | behead | drop |
+| `{:` | tail (fill cell when there are no items) | — |
+| `}:` | curtail | — |
+| `\|.` | reverse the items | rotate axis k by `x[k]`, cyclically |
 | `\|:` | transpose (reverse axes) | — |
-| `i.` | integers (negative axis = reversed) | — |
+| `i.` | integers (negative axis = reversed) | index of (absent gives the item count) |
+| `e.` | — | member: cells of x shaped like items of y |
+| `/:` | grade up (stable permutation) | x's items in the ascending order of y's |
+| `\:` | grade down (stable permutation) | x's items in the descending order of y's |
 | `]` `[` | same | right / left |
 | `echo` | print (formatted) | — |
+
+Words present with only one valence implemented say so by name: `,:`
+(laminate), monadic `,.` (itemize), monadic `{` (catalogue), monadic `e.`
+(raze-in), monadic `*.` (length/angle), monadic `+.` (real/imaginary),
+monadic `~:` (nub sieve), dyadic `+:` (nor), dyadic `*:` (nand), dyadic `-.`
+(less).
 
 Adverb `/` (insert/reduce, leading axis, right-to-left fold), conjunction
 `"` (rank, 1–3 atoms, `_` = infinite), `@:` (atop), `[:` (cap). Trains:
@@ -57,18 +82,33 @@ forks `(f g h)`, noun forks `(n g h)`, hooks `(f g)`. Assignment `=.`/`=:`
 | `×` | signum | times |
 | `÷` | reciprocal | divide (float; `0÷0` is `1`, `n÷0` is a domain error) |
 | `*` | exponential | power |
+| `⍟` | natural logarithm | logarithm to base x |
 | `⌈` | ceiling | max |
 | `⌊` | floor | min |
 | `\|` | magnitude | residue |
 | `=` `≠` `<` `≤` `>` `≥` | — | comparisons (0/1) |
+| `∧` | — | LCM (logical and on booleans) |
+| `∨` | — | GCD (logical or on booleans) |
+| `~` | not (the argument must be 0 or 1) | — |
 | `⍴` | shape of | reshape (cyclic) |
-| `⍳` | index generator (scalar; respects `⎕IO`) | — |
+| `⍳` | index generator (scalar; respects `⎕IO`) | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`) |
 | `⍉` | transpose | — |
 | `↑` | — | take |
 | `↓` | — | drop |
-| `,` | ravel | — |
-| `≢` | tally | — |
+| `,` | ravel | catenate along the LAST axis |
+| `⍪` | — | catenate along the LEADING axis |
+| `⌽` | reverse each row (last axis) | rotate each row (last axis) |
+| `⊖` | reverse the items (leading axis) | rotate the leading axis |
+| `≡` | — | match: same shape and values, else 0 |
+| `≢` | tally | not match |
+| `∊` | — | membership, element by element |
+| `∪` | nub: distinct items, first-occurrence order | — |
+| `⍋` `⍒` | grade up / down (stable; respects `⎕IO`) | — |
 | `⊢` `⊣` | same | right / left |
+
+Glyphs recognised with the missing valence named: monadic `∊` (enlist),
+dyadic `∪` (union), `∩` (intersection), monadic `≡` (depth), dyadic `⍋`/`⍒`
+(collation), `⍱`/`⍲` (nor/nand), dyadic `~` (without), monadic `⍪` (table).
 
 Operators `/` (reduce, LAST axis), `⌿` (reduce, leading axis), `⍤` (rank).
 `←` assignment (incl. inline), `⎕←` output, `⋄` and newline sentence
@@ -133,6 +173,13 @@ results of rank ≥ 2.
 - Comparing characters with numbers is a type error here; J answers 0.
 - Monadic `÷` (APL reciprocal) of 0 currently follows J's rule (infinity)
   instead of raising a domain error like dyadic `÷`.
-- No boxes / nested arrays, scan, windows, catenate, index-of, dyadic
-  transpose, `⎕`-variables, control words, verb/adverb definitions yet —
-  all "not yet", category 2.
+- Catenating items whose shapes differ needs fill; J pads them, libjay says
+  "catenate with fill is not supported yet" instead of guessing.
+- LCM/GCD accept floats only when every value is integral. J computes a real
+  GCD (`2.5 +. 5` is `2.5`); libjay reports "not supported yet".
+- APL dyadic `⊖` with a vector left argument reads it as one amount per axis
+  (J's rule) rather than one amount per column. Scalar amounts, and `⌽` in
+  both valences, follow APL.
+- Grade puts NaN wherever the comparison lands rather than at a defined end.
+- No boxes / nested arrays, scan, windows, dyadic transpose, `⎕`-variables,
+  control words, verb/adverb definitions yet — all "not yet", category 2.

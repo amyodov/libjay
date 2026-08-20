@@ -208,6 +208,125 @@ fn fixed_corpus_matches_reference() {
         "3 ] 5",
         "3 [ 5",
         "+/ , i. 3 3",
+        // reverse and rotate
+        "|. 1 2 3 4",
+        "|. i. 3 4",
+        "|. 'abc'",
+        "1 |. 1 2 3 4 5",
+        "_1 |. 1 2 3 4 5",
+        "2 |. i. 3 4",
+        "1 1 |. i. 3 4",
+        "1 _1 |. i. 3 4",
+        "7 |. 1 2 3",
+        "1 |. 5",
+        "1 0 2 |. i. 2 3 4",
+        "|. i. 2 3 4",
+        // catenate, leading axis and stitched
+        "1 2 , 3 4",
+        "(i. 2 3) , i. 2 3",
+        "(i. 2 3) , 10 20 30",
+        "(10 20 30) , i. 2 3",
+        "(i. 2 3) , 5",
+        "5 , i. 2 3",
+        "'ab' , 'cd'",
+        "'ab' , 'c'",
+        "(2 2 $ 'abcd') , 'ef'",
+        "1 2 ,. 3 4",
+        "(i. 2 3) ,. i. 2 2",
+        "(i. 2 3) ,. 9",
+        "1 2 ,. i. 2 3",
+        "(i. 2 3 4) , i. 1 3 4",
+        "(i. 2 3 4) , i. 3 4",
+        "(i. 2 3 4) ,. i. 2 2 4",
+        "~. 2 2 2 $ 0 1 2 3 0 1 2 3",
+        "(i. 2 3 4) i. i. 3 4",
+        "(i. 2 3) e. i. 2 2 3",
+        "/: 2 2 2 $ 1 0 1 1 0 1 0 0",
+        "(i. 2 2) { i. 4 2",
+        // match
+        "1 2 3 -: 1 2 3",
+        "1 2 3 -: 1 2",
+        "(i. 2 3) -: i. 2 3",
+        "1 -: 1.0",
+        "'a' -: 97",
+        "-: 8",
+        "-: 1 2 3",
+        // nub and nub sieve
+        "~. 3 1 4 1 5 9 2 6 5 3",
+        "~. 'mississippi'",
+        "~. 2 3 $ 1 2 3 1 2 3",
+        "1 2 1 3 2 ~: 1 1 1 1 1",
+        // LCM and GCD
+        "4 *. 6",
+        "12 +. 18",
+        "_4 *. 6",
+        "_4 +. 6",
+        "0 +. 0",
+        "0 *. 5",
+        "*./ 4 6 8",
+        "+./ 12 18 24",
+        "*./ i. 0",
+        "+./ i. 0",
+        // logarithm and root
+        "3 %: 27",
+        "2 %: 9",
+        "2 ^. 8",
+        "^. 1 2",
+        "^. 0",
+        "10 ^. 100",
+        // increment, decrement, double, square, one-minus
+        "<: 5",
+        ">: 5",
+        "+: 5",
+        "*: 5",
+        "-. 0 1",
+        "-. 0.25",
+        "<: 2.5",
+        "+: 1 2 3",
+        "*: _3",
+        // tail and curtail
+        "{: 1 2 3",
+        "}: 1 2 3",
+        "{: i. 3 2",
+        "}: i. 3 2",
+        "{: i. 0 2",
+        "}: i. 0 2",
+        "{: 5",
+        // from
+        "2 0 { i. 3 3",
+        "_1 { 5 6 7",
+        "0 { i. 3 3",
+        "(i. 2 2) { 10 20 30 40",
+        "1 2 { 'abcdef'",
+        "0 { 5",
+        // membership
+        "1 2 e. 1 3 5",
+        "(i. 2 3) e. i. 3 3",
+        "1 2 3 e. i. 2 3",
+        "'ab' e. 'abc'",
+        "5 e. 1 2 3",
+        "(i. 2 3) e. 1 2 3",
+        // index of
+        "1 2 3 i. 2",
+        "1 2 3 i. 4",
+        "1 2 3 i. 2 3 9",
+        "(i. 3 3) i. 3 4 5",
+        "(i. 3 3) i. 1 1 1",
+        "'abc' i. 'cab'",
+        "5 i. 6",
+        // grade
+        "/: 3 1 4 1 5",
+        "\\: 3 1 4 1 5",
+        "/: 'hello'",
+        "/: 1.5 0.5 2.5",
+        "/: 2 3 $ 1 2 1 1 1 3",
+        "\\: 2 3 $ 1 2 1 1 1 3",
+        "3 1 4 1 5 /: 3 1 4 1 5",
+        "'abc' /: 3 1 2",
+        "'abc' \\: 3 1 2",
+        "/: 1 1 1",
+        "\\: 1 1 1",
+        "1 2 3 4 5 /: \\: 1 2 3 4 5",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -230,10 +349,18 @@ fn generated_corpus_matches_reference() {
         state ^= state << 17;
         state
     };
-    let dyads = ["+", "-", "*", "<.", ">.", "|", "=", "<", ">"];
-    let monads = ["-", "*", "|", "<.", ">.", "+/", ">./", "<./", "#", "$", ",", "|:"];
+    // Verbs safe to fold over a vector of small integers.
+    let dyads = ["+", "-", "*", "<.", ">.", "|", "=", "<", ">", "*.", "+."];
+    // Verbs additionally safe with a scalar left argument. `{` is excluded:
+    // its left argument has to index the right one, so it is generated on
+    // its own below.
+    let struct_dyads = ["|.", ",", "-:", "e."];
+    let monads = [
+        "-", "*", "|", "<.", ">.", "+/", ">./", "<./", "#", "$", ",", "|:", "|.", "~.", "{:",
+        "}:", "<:", ">:", "+:", "*:", "-.", "-:", "/:", "\\:",
+    ];
     let mut exprs = Vec::new();
-    for _ in 0..150 {
+    for _ in 0..300 {
         let n = 1 + (rng() % 5) as usize;
         let vec: Vec<String> = (0..n)
             .map(|_| {
@@ -246,13 +373,19 @@ fn generated_corpus_matches_reference() {
             1 => format!("i. {} {}", 1 + rng() % 3, 1 + rng() % 4),
             _ => format!("{} 4 $ {}", 1 + rng() % 3, vec.join(" ")),
         };
-        let expr = match rng() % 3 {
+        let expr = match rng() % 4 {
             0 => format!("{} {}", monads[(rng() % monads.len() as u64) as usize], noun),
             1 => {
                 let atom = (rng() % 7) as i64 - 3;
                 let atom = if atom < 0 { format!("_{}", -atom) } else { atom.to_string() };
-                format!("{} {} {}", atom, dyads[(rng() % dyads.len() as u64) as usize], noun)
+                let all = dyads.len() + struct_dyads.len();
+                let k = (rng() % all as u64) as usize;
+                let verb = if k < dyads.len() { dyads[k] } else { struct_dyads[k - dyads.len()] };
+                format!("{atom} {verb} {noun}")
             }
+            // Every generated noun has at least one item, so index 0 is
+            // always in range.
+            2 => format!("0 {{ {noun}"),
             _ => format!(
                 "{}/ {}",
                 dyads[(rng() % dyads.len() as u64) as usize],

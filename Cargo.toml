@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/libjay", "crates/libjay-python"]
+members = ["crates/libjay", "crates/libjay-capi", "crates/libjay-python"]
 
 [workspace.package]
 version = "0.1.0"

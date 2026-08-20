@@ -124,27 +124,70 @@ fn primitive(word: &str) -> Option<Prim> {
         "*" => prim("*", M::Scalar(SM::Signum), D::Scalar(SD::Mul), [0, 0, 0]),
         "%" => prim("%", M::Scalar(SM::Recip), D::Scalar(SD::DivJ), [0, 0, 0]),
         "^" => prim("^", M::Scalar(SM::Exp), D::Scalar(SD::Pow), [0, 0, 0]),
-        "%:" => prim("%:", M::Scalar(SM::Sqrt), D::NotYet("root (dyadic %:)"), [0, 0, 0]),
+        "%:" => prim("%:", M::Scalar(SM::Sqrt), D::Scalar(SD::Root), [0, 0, 0]),
+        "^." => prim("^.", M::Scalar(SM::Ln), D::Scalar(SD::Log), [0, 0, 0]),
         "|" => prim("|", M::Scalar(SM::Abs), D::Scalar(SD::Residue), [0, 0, 0]),
         "<." => prim("<.", M::Scalar(SM::Floor), D::Scalar(SD::Min), [0, 0, 0]),
         ">." => prim(">.", M::Scalar(SM::Ceil), D::Scalar(SD::Max), [0, 0, 0]),
         "=" => prim("=", M::NotYet("self-classify (monadic =)"), D::Scalar(SD::Eq), [INF, 0, 0]),
         "<" => prim("<", M::NotYet("boxed arrays"), D::Scalar(SD::Lt), [INF, 0, 0]),
         ">" => prim(">", M::NotYet("boxed arrays (open)"), D::Scalar(SD::Gt), [0, 0, 0]),
-        "<:" => prim("<:", M::NotYet("decrement"), D::Scalar(SD::Le), [0, 0, 0]),
-        ">:" => prim(">:", M::NotYet("increment"), D::Scalar(SD::Ge), [0, 0, 0]),
+        "<:" => prim("<:", M::Scalar(SM::Dec), D::Scalar(SD::Le), [0, 0, 0]),
+        ">:" => prim(">:", M::Scalar(SM::Inc), D::Scalar(SD::Ge), [0, 0, 0]),
+        "+:" => prim("+:", M::Scalar(SM::Double), D::NotYet("nor (dyadic +:)"), [0, 0, 0]),
+        "*:" => prim("*:", M::Scalar(SM::Square), D::NotYet("nand (dyadic *:)"), [0, 0, 0]),
+        "-:" => prim("-:", M::Scalar(SM::Halve), D::Match, [0, INF, INF]),
+        "-." => prim("-.", M::Scalar(SM::OneMinus), D::NotYet("less (dyadic -.)"), [0, 0, 0]),
+        "*." => {
+            prim("*.", M::NotYet("length/angle (monadic *.)"), D::Scalar(SD::Lcm), [INF, 0, 0])
+        }
+        "+." => {
+            prim("+.", M::NotYet("real/imaginary (monadic +.)"), D::Scalar(SD::Gcd), [INF, 0, 0])
+        }
+        "~:" => prim("~:", M::NotYet("nub sieve (monadic ~:)"), D::Scalar(SD::Ne), [INF, 0, 0]),
+        "~." => prim("~.", M::Nub, D::None, [INF, INF, INF]),
         "$" => prim("$", M::ShapeOf, D::Reshape, [INF, 1, INF]),
-        "," => prim(",", M::Ravel, D::NotYet("append (dyadic ,)"), [INF, INF, INF]),
+        "," => prim(",", M::Ravel, D::AppendLeading, [INF, INF, INF]),
+        // `,.` is J's `,"_1`; `verb_for` wraps it in that rank.
+        ",." => prim(",.", M::NotYet("itemize (monadic ,.)"), D::AppendLeading, [INF, INF, INF]),
+        ",:" => prim(",:", M::NotYet("laminate (,:)"), D::NotYet("laminate (,:)"), [INF, INF, INF]),
         "#" => prim("#", M::Tally, D::NotYet("copy (dyadic #)"), [INF, 1, INF]),
+        "{" => prim("{", M::NotYet("catalogue (monadic {)"), D::From, [INF, 0, INF]),
         "{." => prim("{.", M::Head, D::Take, [INF, 1, INF]),
         "}." => prim("}.", M::Behead, D::Drop, [INF, 1, INF]),
+        "{:" => prim("{:", M::Tail, D::None, [INF, INF, INF]),
+        "}:" => prim("}:", M::Curtail, D::None, [INF, INF, INF]),
+        "|." => prim("|.", M::Reverse, D::Rotate, [INF, 1, INF]),
         "|:" => prim("|:", M::TransposeAxes, D::NotYet("dyadic transpose"), [INF, 1, INF]),
-        "i." => prim("i.", M::IotaJ, D::NotYet("index-of (dyadic i.)"), [1, INF, INF]),
+        "i." => prim("i.", M::IotaJ, D::IndexOf { origin: 0 }, [1, INF, INF]),
+        "e." => prim("e.", M::NotYet("raze-in (monadic e.)"), D::MemberJ, [INF, INF, INF]),
+        "/:" => prim(
+            "/:",
+            M::GradeUp { origin: 0 },
+            D::GradeSelect { down: false },
+            [INF, INF, INF],
+        ),
+        "\\:" => prim(
+            "\\:",
+            M::GradeDown { origin: 0 },
+            D::GradeSelect { down: true },
+            [INF, INF, INF],
+        ),
         "]" => prim("]", M::Same, D::Right, [INF, INF, INF]),
         "[" => prim("[", M::Same, D::Left, [INF, INF, INF]),
         "echo" => prim("echo", M::Echo, D::None, [INF, INF, INF]),
         _ => return None,
     })
+}
+
+/// The verb a word denotes. Every word but `,.` is a bare primitive; J's
+/// `,.` is `,"_1`, so it carries that rank.
+fn verb_for(word: &str) -> Option<Verb> {
+    let p = primitive(word)?;
+    if word == ",." {
+        return Some(Verb::Rank(Box::new(Verb::Prim(p)), [-1, -1, -1]));
+    }
+    Some(Verb::Prim(p))
 }
 
 const ADVERBS: [&str; 5] = ["/", "\\", "/.", "\\.", "~"];
@@ -283,15 +326,15 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
             }
             // An alphabetic word may be inflected into a primitive (`i.`).
             if matches!(at(i), Some('.') | Some(':')) {
-                if let Some(p) = primitive(&text[off(start)..off(i + 1)]) {
+                if let Some(v) = verb_for(&text[off(start)..off(i + 1)]) {
                     i += 1;
-                    out.push(Frag::Verb(VerbFrag::V(Verb::Prim(p)), span(start, i)));
+                    out.push(Frag::Verb(VerbFrag::V(v), span(start, i)));
                     continue;
                 }
             }
             let word = &text[off(start)..off(i)];
-            match primitive(word) {
-                Some(p) => out.push(Frag::Verb(VerbFrag::V(Verb::Prim(p)), span(start, i))),
+            match verb_for(word) {
+                Some(v) => out.push(Frag::Verb(VerbFrag::V(v), span(start, i))),
                 None => out.push(Frag::Name(word.to_string(), span(start, i))),
             }
             continue;
@@ -322,9 +365,11 @@ fn symbol_frag(word: &str, span: Span) -> Option<Frag> {
         "=." => Frag::AssignLocal(span),
         "=:" => Frag::AssignGlobal(span),
         "[:" => Frag::Verb(VerbFrag::Cap, span),
+        // An inflected verb wins over the adverb its stem spells: `~.` is
+        // the nub, never `~` followed by an inflection.
         _ => {
-            if let Some(p) = primitive(word) {
-                Frag::Verb(VerbFrag::V(Verb::Prim(p)), span)
+            if let Some(v) = verb_for(word) {
+                Frag::Verb(VerbFrag::V(v), span)
             } else if let Some(g) = adverb(word) {
                 Frag::Adverb(g, span)
             } else {
@@ -1088,8 +1133,8 @@ mod tests {
 
     #[test]
     fn unimplemented_meanings_reach_the_verb_not_the_parser() {
-        let (v, _, _) = dyad_of(&one("2 %: 8"));
-        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("root (dyadic %:)"));
+        let (v, _, _) = dyad_of(&one("2 *: 8"));
+        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("nand (dyadic *:)"));
         let (v, _) = monad_of(&one("= 1 2"));
         assert_eq!(prim_of(&v).monad, MonadOp::NotYet("self-classify (monadic =)"));
     }
@@ -1446,8 +1491,8 @@ mod tests {
 
     #[test]
     fn an_inflected_unknown_word_is_reported_whole() {
-        let e = err("1 ~: 2");
-        assert_eq!(e.msg, "unknown word: ~:");
+        let e = err("1 ?. 2");
+        assert_eq!(e.msg, "unknown word: ?.");
         assert_eq!(e.span, Some(Span::new(2, 4)));
     }
 

@@ -345,6 +345,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "libjay-capi"
+version = "0.1.0"
+dependencies = [
+ "libjay",
+]
+
+[[package]]
 name = "libjay-python"
 version = "0.1.0"
 dependencies = [

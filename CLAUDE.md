@@ -127,6 +127,19 @@ Choices made during implementation, with reasoning. No entry = still open.
   in the binding crate only; the core stays dependency-free.
 - 2026-08-20 — CI Rust toolchain pinned to the local 1.85 so clippy findings
   are reproducible; revisit at publishing.
+- 2026-08-20 — Coverage wave 1 (reverse/rotate, catenate, grade, index-of,
+  membership, from, match, lcm/gcd, log/root, nub, tail/curtail, inc/dec…)
+  in both languages; 479-expression differential corpus, 100% oracle
+  agreement. Standing rule: where a spec and the reference J disagree, the
+  ORACLE WINS for J (it corrected `,.` = `,"_1`, `-.` = 1-y, LCM sign).
+  Known scoped gaps are in docs/coverage.md.
+- 2026-08-20 — C ABI: crates/libjay-capi, [lib] name "jay", cdylib+staticlib
+  only (rlib would collide with the core's libjay.rlib) → libjay.dylib/.so +
+  libjay.a, -ljay, hand-written include/jay.h. Inputs copied at the C
+  boundary for now (no lifetime contract in the ABI yet); docs/embedding.md.
+- 2026-08-20 — Benchmarks run in .venv-bench (Python 3.12): numba wheels for
+  Intel macs stop at numba 0.61/llvmlite 0.44, so the bench venv pins
+  numba<0.62 (the dev venv stays 3.14).
 
 Open: APL oracle;
 pure-expression assertion flag; primitive ordering; complex column naming;

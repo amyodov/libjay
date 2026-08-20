@@ -4,6 +4,8 @@
 //! applied monadically or dyadically to arrays. Frontends lower J/APL syntax
 //! to `Verb` trees; nothing in here knows any surface syntax.
 
+use std::collections::HashSet;
+
 use crate::array::{Array, Data};
 use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
@@ -44,7 +46,22 @@ pub enum ScalarMonad {
     Abs,
     Floor,
     Ceil,
+    /// APL `~`: logical negation; the argument must be 0 or 1.
     Not,
+    /// J `-.`: `1 - y` on any number (a superset of logical negation).
+    OneMinus,
+    /// `y + 1` (J `>:`).
+    Inc,
+    /// `y - 1` (J `<:`).
+    Dec,
+    /// `y + y` (J `+:`).
+    Double,
+    /// `y % 2` (J `-:`); always float.
+    Halve,
+    /// `y * y` (J `*:`).
+    Square,
+    /// Natural logarithm (J `^.`, APL `⍟`); always float.
+    Ln,
 }
 
 /// Elementwise dyadic operations (cell ranks 0 0).
@@ -68,6 +85,14 @@ pub enum ScalarDyad {
     Le,
     Gt,
     Ge,
+    /// Least common multiple (J `*.`, APL `∧`); logical and on booleans.
+    Lcm,
+    /// Greatest common divisor (J `+.`, APL `∨`); logical or on booleans.
+    Gcd,
+    /// `x ^. y` / `x ⍟ y`: logarithm of y to base x; always float.
+    Log,
+    /// `x %: y`: the x-th root of y; always float.
+    Root,
 }
 
 /// Monadic meaning of a primitive.
@@ -86,6 +111,18 @@ pub enum MonadOp {
     Head,
     /// All but the first item (J `}.`).
     Behead,
+    /// Last item (J `{:`); a cell of fills when there are no items.
+    Tail,
+    /// All but the last item (J `}:`).
+    Curtail,
+    /// Reverse the items, i.e. along the leading axis (J `|.`, APL `⊖`).
+    Reverse,
+    /// Distinct items in first-occurrence order (J `~.`, APL `∪`).
+    Nub,
+    /// The stable permutation that sorts the items ascending (J `/:`, APL `⍋`).
+    GradeUp { origin: i64 },
+    /// The stable permutation that sorts the items descending (J `\:`, APL `⍒`).
+    GradeDown { origin: i64 },
     /// J `i.`: integers 0.. filling shape |y|, reversed along negative axes.
     IotaJ,
     /// APL `⍳` on a scalar: origin .. origin+y-1.
@@ -114,6 +151,28 @@ pub enum DyadOp {
     Right,
     /// x (APL `⊣`).
     Left,
+    /// x |. y: rotate axis k of y left by x[k] (negative rotates right).
+    Rotate,
+    /// Catenate along the LEADING axis (J `,`, APL `⍪`).
+    AppendLeading,
+    /// Catenate along the LAST axis (APL `,`).
+    AppendLast,
+    /// x i. y / x ⍳ y: the index in x's items of each cell of y, or
+    /// `origin + #items(x)` when absent.
+    IndexOf { origin: i64 },
+    /// x e. y: is each cell of x, shaped like y's items, an item of y?
+    MemberJ,
+    /// x ∊ y: does each ELEMENT of x occur anywhere in y?
+    MemberApl,
+    /// x { y: each integer atom of x selects an item of y (negative from
+    /// the end).
+    From,
+    /// x -: y / x ≡ y: same shape and same values; never a shape error.
+    Match,
+    /// The negation of `Match` (APL `≢`).
+    NotMatch,
+    /// x /: y and x \: y: x's items reordered by the grade of y's items.
+    GradeSelect { down: bool },
     NotYet(&'static str),
     None,
 }
@@ -701,6 +760,18 @@ fn dyad_f64(
                     b - a * (b / a).floor()
                 }
             }
+            Log => {
+                if a < 0.0 || b < 0.0 {
+                    return Err(Error::not_yet("complex numbers", span));
+                }
+                b.ln() / a.ln()
+            }
+            Root => {
+                if b < 0.0 {
+                    return Err(Error::not_yet("complex numbers", span));
+                }
+                b.powf(1.0 / a)
+            }
             _ => return Err(Error::internal("non-arithmetic op in the float path")),
         };
         out.push(v);
@@ -793,6 +864,76 @@ fn cmp_result(op: ScalarDyad, ord: Option<std::cmp::Ordering>) -> bool {
     }
 }
 
+/// Greatest common divisor, always nonnegative; `gcd(0, 0)` is 0.
+fn gcd_i128(a: i128, b: i128) -> i128 {
+    let (mut a, mut b) = (a.abs(), b.abs());
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    a
+}
+
+/// LCM/GCD over two buffers. Two booleans stay boolean, where the pair is
+/// exactly logical and (LCM) / or (GCD); integers give integers; floats are
+/// accepted only when every value is integral.
+#[allow(clippy::too_many_arguments)]
+fn lcm_gcd_data(
+    op: ScalarDyad,
+    x: &Data,
+    xoff: usize,
+    xdiv: usize,
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+    span: Span,
+) -> Result<Data> {
+    let t = arith_type(x.dtype(), y.dtype(), span)?;
+    let both_bool = x.dtype() == DType::Bool && y.dtype() == DType::Bool;
+    let float = t == DType::F64;
+    let (xs, ys) = if float {
+        let (mut tx, mut ty) = (Vec::new(), Vec::new());
+        let xf = borrow_f64(x, &mut tx);
+        let yf = borrow_f64(y, &mut ty);
+        let integral = |v: &[f64]| v.iter().all(|&a| a.fract() == 0.0 && fits_i64(a));
+        if !integral(xf) || !integral(yf) {
+            return Err(Error::not_yet("LCM/GCD on floats", span));
+        }
+        (
+            xf.iter().map(|&a| a as i64).collect::<Vec<_>>(),
+            yf.iter().map(|&a| a as i64).collect::<Vec<_>>(),
+        )
+    } else {
+        let (mut tx, mut ty) = (Vec::new(), Vec::new());
+        (borrow_i64(x, &mut tx).to_vec(), borrow_i64(y, &mut ty).to_vec())
+    };
+    let mut out = Vec::with_capacity(n);
+    let mut fits = true;
+    for i in 0..n {
+        let a = xs[xoff + i / xdiv] as i128;
+        let b = ys[yoff + i / ydiv] as i128;
+        let g = gcd_i128(a, b);
+        let v = if op == ScalarDyad::Gcd {
+            g
+        } else if g == 0 {
+            0
+        } else {
+            a / g * b
+        };
+        fits &= i64::try_from(v).is_ok();
+        out.push(v);
+    }
+    if !fits || float {
+        return Ok(Data::F64(out.iter().map(|&v| v as f64).collect()));
+    }
+    if both_bool {
+        return Ok(Data::Bool(out.iter().map(|&v| v as u8).collect()));
+    }
+    Ok(Data::I64(out.iter().map(|&v| v as i64).collect()))
+}
+
 /// One elementwise dyadic pass over two buffers. Element `i` of the result
 /// pairs `x[xoff + i / xdiv]` with `y[yoff + i / ydiv]`, so broadcasting and
 /// folding both run without materialising cells.
@@ -812,8 +953,11 @@ fn scalar_dyad_data(
     if matches!(op, Eq | Ne | Lt | Le | Gt | Ge) {
         return compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
     }
+    if matches!(op, Lcm | Gcd) {
+        return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
+    }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
-    if t == DType::I64 && !matches!(op, DivJ | DivApl) {
+    if t == DType::I64 && !matches!(op, DivJ | DivApl | Log | Root) {
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
         let xs = borrow_i64(x, &mut tx);
         let ys = borrow_i64(y, &mut ty);
@@ -915,6 +1059,66 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                     Data::F64(out.into())
                 }
             }
+            Data::Char(_) => return Err(char_arith(span)),
+        },
+        Inc | Dec => {
+            let step = if op == Inc { 1i64 } else { -1 };
+            match d {
+                Data::Bool(v) => Data::I64(v.iter().map(|&b| b as i64 + step).collect()),
+                Data::I64(v) => {
+                    match v.iter().map(|&x| x.checked_add(step)).collect::<Option<Vec<_>>>() {
+                        Some(out) => Data::I64(out.into()),
+                        None => Data::F64(v.iter().map(|&x| x as f64 + step as f64).collect()),
+                    }
+                }
+                Data::F64(v) => Data::F64(v.iter().map(|&x| x + step as f64).collect()),
+                Data::Char(_) => return Err(char_arith(span)),
+            }
+        }
+        Double | Square => match d {
+            Data::Bool(v) => Data::I64(
+                v.iter().map(|&b| if op == Double { 2 * b as i64 } else { b as i64 }).collect(),
+            ),
+            Data::I64(v) => {
+                let f = |x: i64| if op == Double { x.checked_mul(2) } else { x.checked_mul(x) };
+                match v.iter().map(|&x| f(x)).collect::<Option<Vec<_>>>() {
+                    Some(out) => Data::I64(out.into()),
+                    None => Data::F64(
+                        v.iter()
+                            .map(|&x| {
+                                let x = x as f64;
+                                if op == Double { x + x } else { x * x }
+                            })
+                            .collect(),
+                    ),
+                }
+            }
+            Data::F64(v) => Data::F64(
+                v.iter().map(|&x| if op == Double { x + x } else { x * x }).collect(),
+            ),
+            Data::Char(_) => return Err(char_arith(span)),
+        },
+        Halve => {
+            let v = y.to_f64_vec().ok_or_else(|| char_arith(span))?;
+            Data::F64(v.iter().map(|&x| x / 2.0).collect())
+        }
+        Ln => {
+            let v = y.to_f64_vec().ok_or_else(|| char_arith(span))?;
+            if v.iter().any(|&x| x < 0.0) {
+                return Err(Error::not_yet("complex numbers", span));
+            }
+            // ln(0) is negative infinity, which is what J prints as __.
+            Data::F64(v.iter().map(|&x| x.ln()).collect())
+        }
+        OneMinus => match d {
+            Data::Bool(v) => Data::Bool(v.iter().map(|&b| 1 - b).collect()),
+            Data::I64(v) => {
+                match v.iter().map(|&x| 1i64.checked_sub(x)).collect::<Option<Vec<_>>>() {
+                    Some(out) => Data::I64(out.into()),
+                    None => Data::F64(v.iter().map(|&x| 1.0 - x as f64).collect()),
+                }
+            }
+            Data::F64(v) => Data::F64(v.iter().map(|&x| 1.0 - x).collect()),
             Data::Char(_) => return Err(char_arith(span)),
         },
         Not => {
@@ -1032,6 +1236,381 @@ fn behead(y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(shape, y.data.slice(m, y.count())))
 }
 
+/// The last item, or a cell of fills when there are no items.
+fn tail(y: &Array) -> Array {
+    if y.rank() == 0 {
+        return y.clone();
+    }
+    let n = y.items();
+    if n == 0 {
+        let cell_shape = y.shape[1..].to_vec();
+        let m: usize = cell_shape.iter().product();
+        return Array::new(cell_shape, fill_data(y.dtype(), m));
+    }
+    y.item(n - 1)
+}
+
+/// All items but the last. A scalar has one item, so it curtails to empty.
+fn curtail(y: &Array) -> Array {
+    if y.rank() == 0 {
+        return Array::empty(y.dtype());
+    }
+    let n = y.items();
+    if n == 0 {
+        return y.clone();
+    }
+    let m = y.item_size();
+    let mut shape = y.shape.clone();
+    shape[0] = n - 1;
+    Array::new(shape, y.data.slice(0, (n - 1) * m))
+}
+
+/// Reverse the items (the leading axis).
+fn reverse(y: &Array) -> Array {
+    if y.rank() == 0 {
+        return y.clone();
+    }
+    let n = y.items();
+    let m = y.item_size();
+    let mut data = Data::empty(y.dtype());
+    for i in (0..n).rev() {
+        for k in 0..m {
+            push_elem(&mut data, &y.data, i * m + k);
+        }
+    }
+    Array::new(y.shape.clone(), data)
+}
+
+/// `x |. y`: rotate axis k of y left by `x[k]`, cyclically; a negative
+/// amount rotates right. A scalar argument has nothing to rotate.
+fn rotate(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let counts = axis_counts(x, "rotate", span)?;
+    if y.rank() == 0 {
+        return Ok(y.clone());
+    }
+    if counts.len() > y.rank() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "rotate has {} amounts for an argument of rank {}",
+                counts.len(),
+                y.rank()
+            ),
+            Some(span),
+        ));
+    }
+    let st = strides(&y.shape);
+    let n = y.count();
+    let r = y.rank();
+    let mut data = Data::empty(y.dtype());
+    let mut coord = vec![0usize; r];
+    for _ in 0..n {
+        let mut idx = 0usize;
+        for k in 0..r {
+            // No axis is empty here: an empty axis makes n zero.
+            let len = y.shape[k] as i64;
+            let s = counts.get(k).copied().unwrap_or(0);
+            idx += (coord[k] as i64 + s).rem_euclid(len) as usize * st[k];
+        }
+        push_elem(&mut data, &y.data, idx);
+        odometer(&mut coord, &y.shape);
+    }
+    Ok(Array::new(y.shape.clone(), data))
+}
+
+/// A key identifying one element exactly, for equality by hashing. Only
+/// comparable within one dtype; the two zeros share a key.
+fn elem_key(d: &Data, i: usize) -> u64 {
+    match d {
+        Data::Bool(v) => v[i] as u64,
+        Data::I64(v) => v[i] as u64,
+        Data::F64(v) => {
+            let x = v[i];
+            if x == 0.0 { 0 } else { x.to_bits() }
+        }
+        Data::Char(v) => v[i] as u64,
+    }
+}
+
+/// A key comparable across the numeric dtypes: numbers by their float value,
+/// characters by codepoint. Callers keep the two kinds apart.
+fn num_key(d: &Data, i: usize) -> u64 {
+    match d {
+        Data::Bool(v) => (v[i] as f64).to_bits(),
+        Data::I64(v) => (v[i] as f64).to_bits(),
+        Data::F64(v) => {
+            let x = v[i];
+            if x == 0.0 { 0.0f64.to_bits() } else { x.to_bits() }
+        }
+        Data::Char(v) => v[i] as u64,
+    }
+}
+
+/// Distinct items, in the order of their first occurrence.
+fn nub(y: &Array) -> Array {
+    if y.rank() == 0 {
+        return Array::new(vec![1], y.data.clone());
+    }
+    let n = y.items();
+    let m = y.item_size();
+    let mut seen: HashSet<Vec<u64>> = HashSet::with_capacity(n);
+    let mut keep = Vec::new();
+    for i in 0..n {
+        let key: Vec<u64> = (0..m).map(|k| elem_key(&y.data, i * m + k)).collect();
+        if seen.insert(key) {
+            keep.push(i);
+        }
+    }
+    let mut data = Data::empty(y.dtype());
+    for &i in &keep {
+        for k in 0..m {
+            push_elem(&mut data, &y.data, i * m + k);
+        }
+    }
+    let mut shape = y.shape.clone();
+    shape[0] = keep.len();
+    Array::new(shape, data)
+}
+
+/// Compare items `i` and `j` (of `m` elements each) elementwise, left to
+/// right. Characters order by codepoint; a NaN compares equal to anything,
+/// which keeps the sort total.
+fn cmp_items(d: &Data, i: usize, j: usize, m: usize) -> std::cmp::Ordering {
+    use std::cmp::Ordering::Equal;
+    let (a, b) = (i * m, j * m);
+    let ord = |k: usize| match d {
+        Data::Bool(v) => v[a + k].cmp(&v[b + k]),
+        Data::I64(v) => v[a + k].cmp(&v[b + k]),
+        Data::F64(v) => v[a + k].partial_cmp(&v[b + k]).unwrap_or(Equal),
+        Data::Char(v) => v[a + k].cmp(&v[b + k]),
+    };
+    (0..m).map(ord).find(|o| *o != Equal).unwrap_or(Equal)
+}
+
+/// The stable permutation that sorts the items of `y`.
+fn grade_order(y: &Array, down: bool) -> Vec<usize> {
+    if y.rank() == 0 {
+        return vec![0];
+    }
+    let n = y.items();
+    let m = y.item_size();
+    let mut idx: Vec<usize> = (0..n).collect();
+    // A stable sort leaves equal items in their original order, which is
+    // what both languages promise, ascending and descending alike.
+    if down {
+        idx.sort_by(|&a, &b| cmp_items(&y.data, b, a, m));
+    } else {
+        idx.sort_by(|&a, &b| cmp_items(&y.data, a, b, m));
+    }
+    idx
+}
+
+/// Select items of `y` in the given order.
+fn select_items(y: &Array, order: &[usize]) -> Array {
+    let m = y.item_size();
+    let mut data = Data::empty(y.dtype());
+    for &i in order {
+        for k in 0..m {
+            push_elem(&mut data, &y.data, i * m + k);
+        }
+    }
+    let mut shape = y.shape.clone();
+    shape[0] = order.len();
+    Array::new(shape, data)
+}
+
+/// `x /: y` / `x \: y`: x's items reordered by the grade of y's items.
+fn grade_select(x: &Array, y: &Array, down: bool, span: Span) -> Result<Array> {
+    let order = grade_order(y, down);
+    if x.items() != order.len() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "sorting {} items by a key of {} items",
+                x.items(),
+                order.len()
+            ),
+            Some(span),
+        ));
+    }
+    if x.rank() == 0 {
+        return Ok(x.clone());
+    }
+    Ok(select_items(x, &order))
+}
+
+/// Whole-array equality: same shape and same values. Characters never equal
+/// numbers; `1` equals `1.0`; NaN equals nothing.
+fn arrays_match(x: &Array, y: &Array) -> bool {
+    if x.shape != y.shape {
+        return false;
+    }
+    let (dx, dy) = (x.dtype(), y.dtype());
+    match DType::promote(dx, dy) {
+        None => false,
+        Some(DType::Char) => match (&x.data, &y.data) {
+            (Data::Char(a), Data::Char(b)) => a.as_slice() == b.as_slice(),
+            _ => false,
+        },
+        Some(DType::F64) => {
+            let (mut ta, mut tb) = (Vec::new(), Vec::new());
+            let a = borrow_f64(&x.data, &mut ta);
+            let b = borrow_f64(&y.data, &mut tb);
+            a.iter().zip(b).all(|(p, q)| p == q)
+        }
+        Some(_) => {
+            let (mut ta, mut tb) = (Vec::new(), Vec::new());
+            let a = borrow_i64(&x.data, &mut ta);
+            let b = borrow_i64(&y.data, &mut tb);
+            a.iter().zip(b).all(|(p, q)| p == q)
+        }
+    }
+}
+
+/// Item `i` of `a`, treating a scalar as an array of one item.
+fn item_or_self(a: &Array, i: usize) -> Array {
+    if a.rank() == 0 { a.clone() } else { a.item(i) }
+}
+
+/// `x e. y`: for every cell of x shaped like an item of y, is it an item
+/// of y? A cell of the wrong shape simply is not one, as in J.
+fn member_j(x: &Array, y: &Array) -> Array {
+    let cell_rank = y.rank().saturating_sub(1).min(x.rank());
+    let frame_rank = x.rank() - cell_rank;
+    let frame: Vec<usize> = x.shape[..frame_rank].to_vec();
+    let nf: usize = frame.iter().product();
+    let items = y.items();
+    let mut out = Vec::with_capacity(nf);
+    for i in 0..nf {
+        let cell = x.cell_at(frame_rank, i);
+        out.push((0..items).any(|j| arrays_match(&cell, &item_or_self(y, j))) as u8);
+    }
+    Array::new(frame, Data::Bool(out.into()))
+}
+
+/// `x ∊ y`: for every element of x, does that value occur anywhere in y?
+fn member_apl(x: &Array, y: &Array) -> Array {
+    let n = x.count();
+    if (x.dtype() == DType::Char) != (y.dtype() == DType::Char) {
+        return Array::new(x.shape.clone(), Data::Bool(vec![0u8; n].into()));
+    }
+    let seen: HashSet<u64> = (0..y.count()).map(|i| num_key(&y.data, i)).collect();
+    let out: Vec<u8> =
+        (0..n).map(|i| seen.contains(&num_key(&x.data, i)) as u8).collect();
+    Array::new(x.shape.clone(), Data::Bool(out.into()))
+}
+
+/// `x i. y` / `x ⍳ y`: where each cell of y sits among the items of x.
+fn index_of(x: &Array, y: &Array, origin: i64) -> Array {
+    let cell_rank = x.rank().saturating_sub(1).min(y.rank());
+    let frame_rank = y.rank() - cell_rank;
+    let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
+    let nf: usize = frame.iter().product();
+    let items = x.items();
+    let mut out = Vec::with_capacity(nf);
+    for i in 0..nf {
+        let cell = y.cell_at(frame_rank, i);
+        let at = (0..items)
+            .find(|&j| arrays_match(&cell, &item_or_self(x, j)))
+            .unwrap_or(items);
+        out.push(origin + at as i64);
+    }
+    Array::new(frame, Data::I64(out.into()))
+}
+
+/// `x { y` for one index atom: the rank machinery supplies the framing.
+fn from_index(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let idx = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("index must be an integer", span))?;
+    let Some(&i) = idx.first() else {
+        return Err(Error::internal("from_index with no index"));
+    };
+    let n = y.items() as i64;
+    let k = if i < 0 { i + n } else { i };
+    if k < 0 || k >= n {
+        return Err(Error::domain(
+            format!("index {i} is out of range: the argument has {n} items"),
+            span,
+        ));
+    }
+    Ok(item_or_self(y, k as usize))
+}
+
+/// Bring `a` up to `rank` axes for catenation along `axis`. A scalar spreads
+/// over one cross section of the other argument; one missing axis becomes a
+/// length-1 axis at `axis`.
+fn cat_promote(a: &Array, other: &Array, rank: usize, axis: usize, span: Span) -> Result<Array> {
+    if a.rank() == rank {
+        return Ok(a.clone());
+    }
+    if a.rank() == 0 {
+        let mut shape =
+            if other.rank() == rank { other.shape.clone() } else { vec![1usize; rank] };
+        shape[axis] = 1;
+        let n: usize = shape.iter().product();
+        let mut data = Data::empty(a.dtype());
+        for _ in 0..n {
+            push_elem(&mut data, &a.data, 0);
+        }
+        return Ok(Array::new(shape, data));
+    }
+    if a.rank() + 1 == rank {
+        let mut shape = a.shape.clone();
+        shape.insert(axis, 1);
+        return Ok(Array::new(shape, a.data.clone()));
+    }
+    Err(Error::new(
+        ErrorKind::Rank,
+        format!("cannot catenate rank {} with rank {}", a.rank(), other.rank()),
+        Some(span),
+    ))
+}
+
+/// Catenate along the leading or the last axis.
+fn catenate(x: &Array, y: &Array, leading: bool, span: Span) -> Result<Array> {
+    let rank = x.rank().max(y.rank()).max(1);
+    let axis = if leading { 0 } else { rank - 1 };
+    let xa = cat_promote(x, y, rank, axis, span)?;
+    let ya = cat_promote(y, x, rank, axis, span)?;
+    for k in 0..rank {
+        if k != axis && xa.shape[k] != ya.shape[k] {
+            return Err(Error::not_yet("catenate with fill", span));
+        }
+    }
+    let dt = DType::promote(xa.dtype(), ya.dtype()).ok_or_else(|| {
+        Error::new(
+            ErrorKind::Type,
+            "cannot catenate character and numeric data",
+            Some(span),
+        )
+    })?;
+    let widen = |a: &Array| -> Result<Data> {
+        if a.dtype() == dt {
+            Ok(a.data.clone())
+        } else {
+            a.data.cast(dt).ok_or_else(|| Error::internal("unsupported widening in catenate"))
+        }
+    };
+    let xd = widen(&xa)?;
+    let yd = widen(&ya)?;
+    let outer: usize = xa.shape[..axis].iter().product();
+    let ix: usize = xa.shape[axis..].iter().product();
+    let iy: usize = ya.shape[axis..].iter().product();
+    let mut data = Data::empty(dt);
+    for o in 0..outer {
+        for k in 0..ix {
+            push_elem(&mut data, &xd, o * ix + k);
+        }
+        for k in 0..iy {
+            push_elem(&mut data, &yd, o * iy + k);
+        }
+    }
+    let mut shape = xa.shape.clone();
+    shape[axis] = xa.shape[axis] + ya.shape[axis];
+    Ok(Array::new(shape, data))
+}
+
 /// Monadic meaning of a primitive, applied to one cell.
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     match p.monad {
@@ -1042,6 +1621,15 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::TransposeAxes => Ok(transpose_axes(y)),
         MonadOp::Head => Ok(head(y)),
         MonadOp::Behead => behead(y, span),
+        MonadOp::Tail => Ok(tail(y)),
+        MonadOp::Curtail => Ok(curtail(y)),
+        MonadOp::Reverse => Ok(reverse(y)),
+        MonadOp::Nub => Ok(nub(y)),
+        MonadOp::GradeUp { origin } | MonadOp::GradeDown { origin } => {
+            let down = matches!(p.monad, MonadOp::GradeDown { .. });
+            let order = grade_order(y, down);
+            Ok(Array::from_i64(order.iter().map(|&i| origin + i as i64).collect()))
+        }
         MonadOp::IotaJ => iota_j(y, span),
         MonadOp::IotaApl { origin } => {
             if y.rank() != 0 {
@@ -1197,6 +1785,16 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, mode: Agreement, span: Span) -> Resul
         DyadOp::Drop => drop_(x, y, span),
         DyadOp::Right => Ok(y.clone()),
         DyadOp::Left => Ok(x.clone()),
+        DyadOp::Rotate => rotate(x, y, span),
+        DyadOp::AppendLeading => catenate(x, y, true, span),
+        DyadOp::AppendLast => catenate(x, y, false, span),
+        DyadOp::IndexOf { origin } => Ok(index_of(x, y, origin)),
+        DyadOp::MemberJ => Ok(member_j(x, y)),
+        DyadOp::MemberApl => Ok(member_apl(x, y)),
+        DyadOp::From => from_index(x, y, span),
+        DyadOp::Match => Ok(Array::scalar_bool(arrays_match(x, y))),
+        DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y))),
+        DyadOp::GradeSelect { down } => grade_select(x, y, down, span),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -1213,6 +1811,8 @@ fn reduce_identity(v: &Verb, n: usize) -> Option<Data> {
         ScalarDyad::Mul => Data::I64(vec![1; n].into()),
         ScalarDyad::Min => Data::F64(vec![f64::INFINITY; n].into()),
         ScalarDyad::Max => Data::F64(vec![f64::NEG_INFINITY; n].into()),
+        ScalarDyad::Lcm => Data::I64(vec![1; n].into()),
+        ScalarDyad::Gcd => Data::I64(vec![0; n].into()),
         _ => return None,
     })
 }
