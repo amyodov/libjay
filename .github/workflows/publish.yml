@@ -59,6 +59,47 @@ jobs:
           name: wheel-${{ matrix.os }}-${{ matrix.target }}
           path: dist
 
+  # The C ABI has no registry; its bundles ship as GitHub release assets.
+  # Native targets only (plus the mac Intel cross, which Apple toolchains
+  # handle natively); linux-aarch64 C users build from source.
+  capi:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            libs: libjay.so libjay.a
+          - os: macos-14
+            triple: aarch64-apple-darwin
+            libs: libjay.dylib libjay.a
+          - os: macos-14
+            triple: x86_64-apple-darwin
+            libs: libjay.dylib libjay.a
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            libs: jay.dll jay.lib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+        with:
+          targets: ${{ matrix.triple }}
+      - run: cargo build --release -p libjay-capi --target ${{ matrix.triple }}
+      - name: Bundle
+        shell: bash
+        run: |
+          mkdir -p bundle
+          cp crates/libjay-capi/include/jay.h bundle/
+          for f in ${{ matrix.libs }}; do
+            cp "target/${{ matrix.triple }}/release/$f" bundle/
+          done
+          cd bundle && tar czf "../libjay-capi-${{ matrix.triple }}.tar.gz" *
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capi-${{ matrix.triple }}
+          path: libjay-capi-*.tar.gz
+
   sdist:
     runs-on: ubuntu-latest
     steps:
@@ -74,17 +115,26 @@ jobs:
 
   publish:
     if: github.event_name == 'release'
-    needs: [wheels, sdist]
+    needs: [wheels, capi, sdist]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
+      contents: write # attach assets to the release
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
       - run: ls -l dist
+      # Everything also lands on the release page: wheels and sdist for the
+      # record, the C bundles as their only distribution channel.
+      - name: Attach assets to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Keep only Python artifacts for PyPI
+        run: rm -f dist/libjay-capi-*.tar.gz
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
