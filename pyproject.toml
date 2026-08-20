@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "libjay"
-description = "Embedded J and APL: compile array-language expressions and run them in parallel"
+description = "Independent, modern implementations of the J and APL array languages: parallel and vectorized, embeddable from Rust, Python, and C"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Alex Myodov", email = "amyodov@gmail.com" }]

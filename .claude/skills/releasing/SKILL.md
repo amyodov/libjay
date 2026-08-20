@@ -110,5 +110,5 @@ someone asks for `cargo add libjay-capi`.
 
 ## 6. Not part of this pipeline
 
-No MCP registry, no Context7 — libjay is a library, not an MCP server;
-revisit Context7 once docs/ is worth indexing.
+Context7 indexing: revisit once docs/ is worth indexing, so AI assistants
+answer from the current release rather than a stale crawl.
