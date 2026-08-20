@@ -428,14 +428,246 @@ fn tail_and_curtail() {
     assert_eq!(err(Lang::J, "1 }: 1 2 3").kind, ErrorKind::Domain);
 }
 
+// --- composition --------------------------------------------------------
+
+/// `u@v` and `u@:v` compute the same thing on different cells: `@` runs at
+/// v's ranks, `@:` on the argument whole. That is the whole difference.
+#[test]
+fn atop_differs_from_atop_infinite_only_in_rank() {
+    // `,` takes its argument whole either way, so the two agree.
+    assert_eq!(val(Lang::J, "(+/ @ ,) i. 2 3"), Array::scalar_i64(15));
+    assert_eq!(val(Lang::J, "(+/ @: ,) i. 2 3"), Array::scalar_i64(15));
+    // `,"1` has rank 1: `@` sums each row, `@:` sums the columns of the
+    // whole (unchanged) matrix.
+    assert_eq!(val(Lang::J, "(+/ @ (,\"1)) i. 2 3"), i64s(&[2], &[3, 12]));
+    assert_eq!(val(Lang::J, "(+/ @: (,\"1)) i. 2 3"), i64s(&[3], &[3, 5, 7]));
+    assert_eq!(val(Lang::J, "($ @ (]\"1)) i. 2 3"), i64s(&[2, 1], &[3, 3]));
+    assert_eq!(val(Lang::J, "($ @: (]\"1)) i. 2 3"), i64s(&[2], &[2, 3]));
+    // Dyadically the ranks come from v as well.
+    assert_eq!(
+        val(Lang::J, "1 2 3 (+/ @ (,\"0)) 10 20 30"),
+        i64s(&[3], &[11, 22, 33])
+    );
+    assert_eq!(
+        val(Lang::J, "1 2 3 (+/ @: (,\"0)) 10 20 30"),
+        i64s(&[2], &[6, 60])
+    );
+}
+
+#[test]
+fn compose_applies_the_right_verb_to_both_arguments() {
+    // Monadically a composition is an atop.
+    assert_eq!(val(Lang::J, "(+ & *:) 1 2 3"), i64s(&[3], &[1, 4, 9]));
+    // Dyadically `x (u&v) y` is `(v x) u (v y)`.
+    assert_eq!(val(Lang::J, "2 (+ & *:) 3"), Array::scalar_i64(13));
+    assert_eq!(val(Lang::J, "1 2 3 (+&*:) 1 2 3"), i64s(&[3], &[2, 8, 18]));
+    // `&` runs at v's monadic rank, `&:` on the arguments whole: here v
+    // sums each row, and only `&` pairs the two arguments row by row.
+    assert_eq!(
+        val(Lang::J, "(i.2 3) (,&(+/\"1)) i. 2 3"),
+        i64s(&[2, 2], &[3, 3, 12, 12])
+    );
+    assert_eq!(
+        val(Lang::J, "(i.2 3) (,&:(+/\"1)) i. 2 3"),
+        i64s(&[4], &[3, 12, 3, 12])
+    );
+}
+
+#[test]
+fn a_noun_operand_bonds_it_into_the_dyad() {
+    assert_eq!(val(Lang::J, "(1 & +) 5"), Array::scalar_i64(6));
+    assert_eq!(val(Lang::J, "(1 & +) i. 2 3"), i64s(&[2, 3], &[1, 2, 3, 4, 5, 6]));
+    assert_eq!(val(Lang::J, "(^ & 2) 1 2 3"), i64s(&[3], &[1, 4, 9]));
+    assert_eq!(val(Lang::J, "(2 & ^) 1 2 3"), i64s(&[3], &[2, 4, 8]));
+    assert_eq!(val(Lang::J, "(10 & *) 1 2 3"), i64s(&[3], &[10, 20, 30]));
+    // Which side the noun sits on is the difference between the two.
+    assert_eq!(val(Lang::J, "(- & 1) 5"), Array::scalar_i64(4));
+    assert_eq!(val(Lang::J, "(1 & -) 5"), Array::scalar_i64(-4));
+    // Bonds inside larger trains.
+    assert_eq!(val(Lang::J, "(1&+ @ *:) 1 2 3"), i64s(&[3], &[2, 5, 10]));
+    assert_eq!(val(Lang::J, "(^&2 @ (1&+)) 1 2 3"), i64s(&[3], &[4, 9, 16]));
+    assert_eq!(val(Lang::J, "(10&* + 1&+) 1 2 3"), i64s(&[3], &[12, 23, 34]));
+    // The bond takes the rank of the side its argument arrives on: `,` is
+    // infinite both ways, `,"1` reads rows.
+    assert_eq!(val(Lang::J, "(1 & (,\"1)) i. 2 3"), i64s(&[2, 4], &[1, 0, 1, 2, 1, 3, 4, 5]));
+    assert_eq!(val(Lang::J, "((,\"1) & 1) i. 2 3"), i64s(&[2, 4], &[0, 1, 2, 1, 3, 4, 5, 1]));
+    // A bond has one valence only, as in J.
+    assert_eq!(err(Lang::J, "3 (1 & +) 5").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::J, "3 (^ & 2) 5").kind, ErrorKind::Domain);
+}
+
+// --- table (outer product) ----------------------------------------------
+
+#[test]
+fn table_pairs_every_cell_with_every_cell() {
+    // The times table, spelled `u/` in J and `∘.u` in APL.
+    let times = i64s(&[3, 3], &[1, 2, 3, 2, 4, 6, 3, 6, 9]);
+    assert_eq!(val(Lang::J, "1 2 3 */ 1 2 3"), times);
+    assert_eq!(val(Lang::Apl, "1 2 3∘.×1 2 3"), times);
+    assert_eq!(val(Lang::J, "1 2 3 +/ 10 20"), i64s(&[3, 2], &[11, 21, 12, 22, 13, 23]));
+    assert_eq!(val(Lang::Apl, "1 2 3∘.+10 20"), i64s(&[3, 2], &[11, 21, 12, 22, 13, 23]));
+    assert_eq!(val(Lang::J, "1 2 3 </ 2 3"), bits(&[3, 2], &[1, 1, 0, 1, 0, 0]));
+    // The frame is x's cells then y's cells, so it grows with both.
+    assert_eq!(val(Lang::J, "(i.2 2) +/ i.2").shape, vec![2, 2, 2]);
+    assert_eq!(val(Lang::J, "(i.2 3) +/ 10 20").shape, vec![2, 3, 2]);
+    // The cells are the ones the verb's own ranks ask for: `,` takes both
+    // arguments whole, so its table is a single catenation.
+    assert_eq!(val(Lang::J, "'ab' ,/ 'cd'"), text(&[4], "abcd"));
+    assert_eq!(val(Lang::J, "(i.2 3) (,\"1)/ 1 2"), i64s(&[2, 5], &[0, 1, 2, 1, 2, 3, 4, 5, 1, 2]));
+    // Two scalars leave no frame at all.
+    assert_eq!(val(Lang::J, "2 +/ 3"), Array::scalar_i64(5));
+    // `∘` on its own is Dyalog's compose, which is a separate gap.
+    assert_eq!(err(Lang::Apl, "1∘×2").kind, ErrorKind::NotYet);
+}
+
+// --- factorial and binomial ---------------------------------------------
+
+#[test]
+fn factorial_and_binomial() {
+    // The factorial is J's gamma, so it is always float.
+    assert_eq!(val(Lang::J, "! 0 1 2 3 4 5"), f64s(&[6], &[1.0, 1.0, 2.0, 6.0, 24.0, 120.0]));
+    assert_eq!(val(Lang::J, "! 5").dtype(), DType::F64);
+    let half = val(Lang::J, "! 0.5").to_f64_vec().expect("numeric")[0];
+    assert!((half - 0.886_226_925_452_758).abs() < 1e-12, "{half}");
+    let two_half = val(Lang::J, "! 2.5").to_f64_vec().expect("numeric")[0];
+    assert!((two_half - 3.323_350_970_447_843).abs() < 1e-12, "{two_half}");
+    // A negative integer is a pole; the limit alternates sign.
+    assert_eq!(val(Lang::J, "! _1"), f64s(&[], &[f64::INFINITY]));
+    assert_eq!(val(Lang::J, "! _2"), f64s(&[], &[f64::NEG_INFINITY]));
+    // The binomial keeps whole answers whole.
+    assert_eq!(val(Lang::J, "2 ! 5"), Array::scalar_i64(10));
+    assert_eq!(val(Lang::J, "0 ! 5"), Array::scalar_i64(1));
+    assert_eq!(val(Lang::J, "6 ! 5"), Array::scalar_i64(0));
+    assert_eq!(val(Lang::J, "_1 ! 5"), Array::scalar_i64(0));
+    assert_eq!(val(Lang::J, "10 ! 100"), Array::scalar_i64(17_310_309_456_440));
+    // A negative pair follows the upper-negation identity, sign and all.
+    assert_eq!(val(Lang::J, "2 ! _5"), Array::scalar_i64(15));
+    assert_eq!(val(Lang::J, "_3 ! _2"), Array::scalar_i64(-2));
+    assert_eq!(val(Lang::J, "_5 ! _3"), Array::scalar_i64(6));
+    assert_eq!(val(Lang::J, "_2 ! _5"), Array::scalar_i64(0));
+    // Fractional arguments go through the gamma quotient.
+    assert_eq!(val(Lang::J, "2 ! 5.5"), f64s(&[], &[12.375]));
+    let g = val(Lang::J, "0.5 ! 2").to_f64_vec().expect("numeric")[0];
+    assert!((g - 1.697_652_726_36).abs() < 1e-9, "{g}");
+    // APL spells both the same way and in the same argument order.
+    assert_eq!(val(Lang::Apl, "!0 1 2 3 4 5"), f64s(&[6], &[1.0, 1.0, 2.0, 6.0, 24.0, 120.0]));
+    assert_eq!(val(Lang::Apl, "2!5"), Array::scalar_i64(10));
+    assert_eq!(val(Lang::Apl, "3!10"), Array::scalar_i64(120));
+}
+
+// --- format -------------------------------------------------------------
+
+#[test]
+fn format_yields_the_characters_of_the_display() {
+    assert_eq!(val(Lang::J, "\": 2.5"), text(&[3], "2.5"));
+    assert_eq!(val(Lang::J, "\": 5"), text(&[1], "5"));
+    assert_eq!(val(Lang::J, "\": 1 2 3"), text(&[5], "1 2 3"));
+    assert_eq!(val(Lang::J, "\": _1 22 333"), text(&[9], "_1 22 333"));
+    // A matrix becomes a character matrix, one row per line.
+    assert_eq!(val(Lang::J, "$ \": i. 2 3"), i64s(&[2], &[2, 5]));
+    assert_eq!(val(Lang::J, "\": i. 2 3"), text(&[2, 5], "0 1 23 4 5"));
+    // The column widths span the whole argument, so every line is one width
+    // and the planes of a rank-3 array stay aligned.
+    assert_eq!(val(Lang::J, "$ \": i. 2 3 4"), i64s(&[3], &[2, 3, 11]));
+    assert_eq!(val(Lang::J, "\": 2 2 $ 1 22 333 4"), text(&[2, 6], "  1 22333  4"));
+    // Characters are already their own display.
+    assert_eq!(val(Lang::J, "\": 'abc'"), text(&[3], "abc"));
+    assert_eq!(val(Lang::J, "\": 'a'"), text(&[], "a"));
+    // APL prints its own negative sign.
+    assert_eq!(val(Lang::Apl, "⍕¯1 22 333"), text(&[9], "¯1 22 333"));
+    assert_eq!(val(Lang::Apl, "⍕2.5"), text(&[3], "2.5"));
+}
+
+// --- base conversion ----------------------------------------------------
+
+#[test]
+fn decode_reads_digits_in_a_radix() {
+    assert_eq!(val(Lang::J, "#. 1 0 1"), Array::scalar_i64(5));
+    assert_eq!(val(Lang::J, "2 #. 1 0 1"), Array::scalar_i64(5));
+    // Mixed radix: hours, minutes, seconds.
+    assert_eq!(val(Lang::J, "24 60 60 #. 1 2 3"), Array::scalar_i64(3723));
+    // A scalar radix extends over the digits; a leading 0 contributes none.
+    assert_eq!(val(Lang::J, "2 #. 1 2 3"), Array::scalar_i64(11));
+    assert_eq!(val(Lang::J, "0 #. 1 2 3"), Array::scalar_i64(3));
+    // Rank 1: one number per row.
+    assert_eq!(val(Lang::J, "#. i. 2 3"), i64s(&[2], &[4, 25]));
+    // A radix list of the wrong length is a length error.
+    assert_eq!(err(Lang::J, "2 3 #. 1 2 3").kind, ErrorKind::Length);
+    // APL spells it `⊥`, with no monadic meaning.
+    assert_eq!(val(Lang::Apl, "2⊥1 0 1"), Array::scalar_i64(5));
+    assert_eq!(val(Lang::Apl, "24 60 60⊥1 2 3"), Array::scalar_i64(3723));
+    assert_eq!(err(Lang::Apl, "⊥1 0 1").kind, ErrorKind::Domain);
+}
+
+#[test]
+fn encode_writes_a_number_in_a_radix() {
+    // The monad picks a width wide enough for the largest value anywhere in
+    // the argument, which is why it is not a rank-0 verb.
+    assert_eq!(val(Lang::J, "#: 5"), i64s(&[3], &[1, 0, 1]));
+    assert_eq!(val(Lang::J, "#: 0"), i64s(&[1], &[0]));
+    assert_eq!(val(Lang::J, "#: 2 5"), i64s(&[2, 3], &[0, 1, 0, 1, 0, 1]));
+    assert_eq!(val(Lang::J, "#: 8"), i64s(&[4], &[1, 0, 0, 0]));
+    // A negative value wraps within that width.
+    assert_eq!(val(Lang::J, "#: _5"), i64s(&[3], &[0, 1, 1]));
+    // Dyadically the digit axis is the radix's own shape: a scalar radix
+    // adds no axis, so `2 #: 5` is a scalar.
+    assert_eq!(val(Lang::J, "2 2 2 #: 5"), i64s(&[3], &[1, 0, 1]));
+    assert_eq!(val(Lang::J, "2 #: 5"), Array::scalar_i64(1));
+    assert_eq!(val(Lang::J, "24 60 60 #: 3723"), i64s(&[3], &[1, 2, 3]));
+    // A radix of 0 takes whatever is left over.
+    assert_eq!(val(Lang::J, "0 0 #: 5"), i64s(&[2], &[0, 5]));
+    // A fractional remainder lands in the last digit.
+    assert_eq!(val(Lang::J, "2 2 #: 2.5"), f64s(&[2], &[1.0, 0.5]));
+    // J frames the digits per atom; APL's `⊤` takes the whole right
+    // argument, so the digits become the LEADING axis instead.
+    assert_eq!(val(Lang::J, "2 2 2 #: 5 6"), i64s(&[2, 3], &[1, 0, 1, 1, 1, 0]));
+    assert_eq!(val(Lang::Apl, "2 2 2⊤5 6"), i64s(&[3, 2], &[1, 1, 0, 1, 1, 0]));
+    assert_eq!(val(Lang::Apl, "2 2 2⊤5"), i64s(&[3], &[1, 0, 1]));
+    assert_eq!(val(Lang::Apl, "24 60 60⊤3723"), i64s(&[3], &[1, 2, 3]));
+    assert_eq!(err(Lang::Apl, "⊤5").kind, ErrorKind::Domain);
+}
+
+// --- itemize, laminate, table -------------------------------------------
+
+#[test]
+fn itemize_and_laminate() {
+    // The monad adds a leading axis of one.
+    assert_eq!(val(Lang::J, ",: 1 2 3"), i64s(&[1, 3], &[1, 2, 3]));
+    assert_eq!(val(Lang::J, ",: i. 2 3").shape, vec![1, 2, 3]);
+    assert_eq!(val(Lang::J, ",: 5"), i64s(&[1], &[5]));
+    // The dyad makes the two arguments the items of a new leading axis.
+    assert_eq!(val(Lang::J, "1 2 ,: 3 4"), i64s(&[2, 2], &[1, 2, 3, 4]));
+    assert_eq!(val(Lang::J, "(i.2 3) ,: i. 2 3").shape, vec![2, 2, 3]);
+    // Two atoms become one-element items, so the result has rank 2.
+    assert_eq!(val(Lang::J, "1 ,: 2"), i64s(&[2, 1], &[1, 2]));
+    // A scalar spreads over the other argument; unequal lists take fill.
+    assert_eq!(val(Lang::J, "1 2 3 ,: 4"), i64s(&[2, 3], &[1, 2, 3, 4, 4, 4]));
+    assert_eq!(val(Lang::J, "1 2 ,: 3 4 5"), i64s(&[2, 3], &[1, 2, 0, 3, 4, 5]));
+    assert_eq!(
+        val(Lang::J, "(i.2 3) ,: 1 2 3"),
+        i64s(&[2, 2, 3], &[0, 1, 2, 3, 4, 5, 1, 2, 3, 0, 0, 0])
+    );
+    assert_eq!(val(Lang::J, "'ab' ,: 'cd'"), text(&[2, 2], "abcd"));
+    assert_eq!(err(Lang::J, "'ab' ,: 1 2").kind, ErrorKind::Type);
+}
+
+/// APL's `⍪` monad: one row per item, holding that item's elements.
+#[test]
+fn apl_table_makes_a_matrix() {
+    assert_eq!(val(Lang::Apl, "⍪1 2 3"), i64s(&[3, 1], &[1, 2, 3]));
+    assert_eq!(val(Lang::Apl, "⍪5"), i64s(&[1, 1], &[5]));
+    assert_eq!(val(Lang::Apl, "⍪2 3⍴⍳6"), i64s(&[2, 3], &[1, 2, 3, 4, 5, 6]));
+    assert_eq!(val(Lang::Apl, "⍴⍪2 3 4⍴⍳24"), i64s(&[2], &[2, 12]));
+    assert_eq!(val(Lang::Apl, "⍪'abc'"), text(&[3, 1], "abc"));
+    assert_eq!(val(Lang::Apl, "⍴⍪⍳0"), i64s(&[2], &[0, 1]));
+}
+
 // --- the diagnostics of what is still missing ---------------------------
 
 #[test]
 fn newly_spelled_words_name_what_they_still_lack() {
     let cases = [
-        (Lang::J, ",: 1 2", "laminate"),
-        (Lang::J, "1 ,: 2", "laminate"),
-        (Lang::J, ",. 1 2", "itemize"),
+        (Lang::J, ",. 1 2", "ravel items"),
         (Lang::J, "{ 1 2", "catalogue"),
         (Lang::J, "e. 1 2", "raze-in"),
         (Lang::J, "*. 1 2", "length/angle"),
@@ -451,7 +683,11 @@ fn newly_spelled_words_name_what_they_still_lack() {
         (Lang::Apl, "1 2⍱0 1", "nor"),
         (Lang::Apl, "1 2⍲0 1", "nand"),
         (Lang::Apl, "1 2~3", "without"),
-        (Lang::Apl, "⍪1 2", "table"),
+        (Lang::J, "2 \": 1.5", "format with a specification"),
+        (Lang::Apl, "2⍕1.5", "format with a specification"),
+        (Lang::J, "+ &. - 1", "under (&.)"),
+        (Lang::J, "+ &.: - 1", "under (&.)"),
+        (Lang::Apl, "1 2 3+∘×1 2 3", "beside (∘)"),
     ];
     for (lang, src, what) in cases {
         let e = err(lang, src);

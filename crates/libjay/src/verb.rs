@@ -82,6 +82,9 @@ pub enum ScalarMonad {
     Ln,
     /// `pi * y` (J/APL monadic `o.` / `○`); always float.
     Pi,
+    /// `! y`: factorial, i.e. the gamma function at y+1. Always float, as in
+    /// J; a negative integer is a pole and yields a signed infinity.
+    Factorial,
 }
 
 /// Elementwise dyadic operations (cell ranks 0 0).
@@ -117,6 +120,9 @@ pub enum ScalarDyad {
     /// the trigonometric, hyperbolic and inverse families, plus the two
     /// Pythagorean forms at 0 and 4. Always float.
     Circle,
+    /// `x ! y`: the number of ways to choose x things from y — J's argument
+    /// order. Defined for every real pair through the gamma function.
+    Binomial,
 }
 
 /// Monadic meaning of a primitive.
@@ -155,6 +161,21 @@ pub enum MonadOp {
     Echo,
     /// The argument itself (APL `⊢`).
     Same,
+    /// J `":` / APL `⍕`: the argument as the characters that display it.
+    /// A rank-0 argument gives a character vector, a rank-r one a character
+    /// array of rank r (the display's lines, padded to one width).
+    Format,
+    /// J `#.` / APL monadic base-2 decode: a vector of digits as one number.
+    DecodeBits,
+    /// J `#:`: base-2 encode. The width comes from the largest magnitude in
+    /// the whole argument, so the verb has infinite rank; the digits become
+    /// a new trailing axis.
+    EncodeBits,
+    /// J `,:`: a leading axis of one (shape `2 3` becomes `1 2 3`).
+    Itemize,
+    /// APL `⍪`: the argument as a matrix — one row per item, that item's
+    /// elements ravelled. A scalar becomes 1×1, a vector n×1.
+    TableOf,
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -200,6 +221,15 @@ pub enum DyadOp {
     /// `x # y` (J), `x/y` and `x⌿y` (APL): item i of y repeated x[i] times.
     /// A one-element x applies to every item.
     Copy,
+    /// `x #. y` / `x ⊥ y`: mixed-radix decode. A scalar x is the base for
+    /// every digit; otherwise x and y have the same length.
+    Decode,
+    /// `x #: y` / `x ⊤ y`: mixed-radix encode. The digits become the LEADING
+    /// axis of the result, which is what makes one operation serve J's
+    /// per-atom `#:` (right rank 0) and APL's `⊤` (right rank infinite).
+    Encode,
+    /// `x ,: y`: the two arguments as the items of a new leading axis.
+    Laminate,
     NotYet(&'static str),
     None,
 }
@@ -268,6 +298,14 @@ pub enum Verb {
     Hook(Box<Verb>, Box<Verb>),
     /// f@:g / [: f g:  monad f (g y);  dyad f (x g y).
     Atop(Box<Verb>, Box<Verb>),
+    /// f&:g:  monad f (g y);  dyad (g x) f (g y). J's `&` is this wrapped in
+    /// [`Verb::Rank`] at g's monadic rank; `&:` is this on its own.
+    Compose(Box<Verb>, Box<Verb>),
+    /// `m&v`: the noun bonded as the left argument — monad `m v y`. J gives
+    /// a bond no dyadic valence at all.
+    BondLeft(Array, Box<Verb>),
+    /// `u&n`: the noun bonded as the right argument — monad `y u n`.
+    BondRight(Box<Verb>, Array),
 }
 
 impl Verb {
@@ -298,6 +336,9 @@ impl Verb {
             Verb::NounFork(_, g, h) => format!("(n {} {})", g.name(), h.name()),
             Verb::Hook(f, g) => format!("({} {})", f.name(), g.name()),
             Verb::Atop(f, g) => format!("({}@:{})", f.name(), g.name()),
+            Verb::Compose(f, g) => format!("({}&:{})", f.name(), g.name()),
+            Verb::BondLeft(_, v) => format!("(n&{})", v.name()),
+            Verb::BondRight(v, _) => format!("({}&n)", v.name()),
         }
     }
 
@@ -314,9 +355,11 @@ impl Verb {
             | Verb::Commute(v)
             | Verb::PowerN(v, _) => v.is_pure(),
             Verb::Fork(f, g, h) => f.is_pure() && g.is_pure() && h.is_pure(),
-            Verb::NounFork(_, g, h) | Verb::Hook(g, h) | Verb::Atop(g, h) => {
-                g.is_pure() && h.is_pure()
-            }
+            Verb::NounFork(_, g, h)
+            | Verb::Hook(g, h)
+            | Verb::Atop(g, h)
+            | Verb::Compose(g, h) => g.is_pure() && h.is_pure(),
+            Verb::BondLeft(_, v) | Verb::BondRight(v, _) => v.is_pure(),
         }
     }
 
@@ -373,10 +416,12 @@ impl Verb {
                 let r = g.monad(y, ctx, span)?;
                 f.dyad(y, &r, ctx, span)
             }
-            Verb::Atop(f, g) => {
+            Verb::Atop(f, g) | Verb::Compose(f, g) => {
                 let r = g.monad(y, ctx, span)?;
                 f.monad(&r, ctx, span)
             }
+            Verb::BondLeft(m, v) => v.dyad(m, y, ctx, span),
+            Verb::BondRight(v, n) => v.dyad(y, n, ctx, span),
         }
     }
 
@@ -394,7 +439,8 @@ impl Verb {
             }
             Verb::Commute(v) => v.dyad(y, x, ctx, span),
             Verb::PowerN(v, p) => power(v, *p, Some(x), y, ctx, span),
-            Verb::Reduce(_) => Err(Error::not_yet("table (x u/ y)", span)),
+            // `x u/ y` is the table: every cell of x against every cell of y.
+            Verb::Reduce(v) => table(v, x, y, ctx, span),
             Verb::Fork(f, g, h) => {
                 let l = f.dyad(x, y, ctx, span)?;
                 let r = h.dyad(x, y, ctx, span)?;
@@ -411,6 +457,15 @@ impl Verb {
             Verb::Atop(f, g) => {
                 let r = g.dyad(x, y, ctx, span)?;
                 f.monad(&r, ctx, span)
+            }
+            Verb::Compose(f, g) => {
+                let l = g.monad(x, ctx, span)?;
+                let r = g.monad(y, ctx, span)?;
+                f.dyad(&l, &r, ctx, span)
+            }
+            // J gives a bond one valence only.
+            Verb::BondLeft(..) | Verb::BondRight(..) => {
+                Err(Error::domain(format!("{} has no dyadic meaning", self.name()), span))
             }
         }
     }
@@ -862,6 +917,128 @@ where
     true
 }
 
+// ------------------------------------------------- factorial and binomial
+
+/// Lanczos coefficients for g = 7, the published nine-term series.
+const LANCZOS: [f64; 9] = [
+    0.999_999_999_999_809_9,
+    676.520_368_121_885_1,
+    -1_259.139_216_722_402_8,
+    771.323_428_777_653_1,
+    -176.615_029_162_140_6,
+    12.507_343_278_686_905,
+    -0.138_571_095_265_720_12,
+    9.984_369_578_019_572e-6,
+    1.505_632_735_149_311_6e-7,
+];
+
+/// The gamma function on the reals, by the Lanczos approximation (relative
+/// error below 1e-13 over the range that stays finite). Poles are left to
+/// the callers, which know the sign the limit approaches from.
+fn gamma(x: f64) -> f64 {
+    use std::f64::consts::PI;
+    if x < 0.5 {
+        // Reflection carries the negative half onto the positive one.
+        return PI / ((PI * x).sin() * gamma(1.0 - x));
+    }
+    let z = x - 1.0;
+    let mut a = LANCZOS[0];
+    for (i, &c) in LANCZOS.iter().enumerate().skip(1) {
+        a += c / (z + i as f64);
+    }
+    let t = z + 7.5;
+    (2.0 * PI).sqrt() * t.powf(z + 0.5) * (-t).exp() * a
+}
+
+/// `! y`: gamma(y+1). Integers up to 20! are exact in f64 and every
+/// factorial is one in J, which is why this never returns an integer.
+fn factorial(y: f64) -> f64 {
+    if y.fract() == 0.0 && y.abs() < 1e17 {
+        let n = y as i64;
+        if n < 0 {
+            // A pole: the limit alternates sign as the argument walks left.
+            return if n % 2 == -1 { f64::INFINITY } else { f64::NEG_INFINITY };
+        }
+        if n > 170 {
+            return f64::INFINITY;
+        }
+        let mut c = 1.0f64;
+        for i in 2..=n {
+            c *= i as f64;
+        }
+        return c;
+    }
+    gamma(y + 1.0)
+}
+
+/// The largest left argument the product form of the binomial is taken for;
+/// beyond it the gamma quotient is both faster and accurate enough.
+const BINOMIAL_PRODUCT_LIMIT: i64 = 4096;
+
+/// `x ! y` for a nonnegative whole x: the falling factorial over `x!`, one
+/// factor at a time so that no partial product overflows more than the
+/// result does.
+fn binomial_product(x: i64, y: f64) -> f64 {
+    let mut c = 1.0f64;
+    for i in 1..=x {
+        c = c * (y - i as f64 + 1.0) / i as f64;
+        if c == 0.0 {
+            break;
+        }
+    }
+    c
+}
+
+/// The two whole-number cases J answers with an exact integer: a
+/// nonnegative x, and a negative x against a y at least as negative (the
+/// upper-negation identity). None when the value leaves i64.
+fn binomial_i64(x: i64, y: i64) -> Option<i64> {
+    if x < 0 {
+        // C(y, x) is zero for a negative x unless y is negative too and no
+        // greater, where C(y,x) = (-1)^(y-x) C(-x-1, -y-1).
+        if y >= 0 || y < x {
+            return Some(0);
+        }
+        let v = binomial_exact(-y - 1, -x - 1)?;
+        return if (y - x) % 2 == 0 { Some(v) } else { v.checked_neg() };
+    }
+    binomial_exact(x, y)
+}
+
+/// `x ! y` in exact integers for a nonnegative whole x. Every partial value
+/// is itself a binomial coefficient, so the division is always exact.
+fn binomial_exact(x: i64, y: i64) -> Option<i64> {
+    if x > BINOMIAL_PRODUCT_LIMIT {
+        return None;
+    }
+    let mut c: i128 = 1;
+    for i in 1..=x as i128 {
+        c = c.checked_mul(y as i128 - i + 1)? / i;
+        if c == 0 {
+            break;
+        }
+    }
+    i64::try_from(c).ok()
+}
+
+/// `x ! y` on the reals.
+fn binomial(x: f64, y: f64) -> f64 {
+    if x.fract() == 0.0 && x.abs() < 1e17 {
+        let xi = x as i64;
+        if xi < 0 {
+            if y.fract() == 0.0 && y < 0.0 && y >= x {
+                let sign = if (y as i64 - xi) % 2 == 0 { 1.0 } else { -1.0 };
+                return sign * binomial_product(-y as i64 - 1, -x - 1.0);
+            }
+            return 0.0;
+        }
+        if xi <= BINOMIAL_PRODUCT_LIMIT {
+            return binomial_product(xi, y);
+        }
+    }
+    gamma(y + 1.0) / (gamma(x + 1.0) * gamma(y - x + 1.0))
+}
+
 /// One integer step. None means the result left i64 — an overflow, or a
 /// value that is not an integer — and the whole pass is redone in f64.
 #[inline]
@@ -891,6 +1068,7 @@ fn i64_op(op: ScalarDyad, a: i64, b: i64) -> Option<i64> {
             }
             a.checked_pow(u32::try_from(b).ok()?)?
         }
+        Binomial => binomial_i64(a, b)?,
         _ => return None,
     })
 }
@@ -950,6 +1128,7 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, span: Span) -> Result<f64> {
             b.powf(1.0 / a)
         }
         Circle => return circle(a, b, span),
+        Binomial => binomial(a, b),
         _ => return Err(Error::internal("non-arithmetic op in the float path")),
     })
 }
@@ -1362,6 +1541,8 @@ fn scalar_dyad_data(
     }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
     if t == DType::I64 && !matches!(op, DivJ | DivApl | Log | Root | Circle) {
+        // Binomial reaches this path: a whole pair has a whole answer, and
+        // the i64 step declines (None) exactly where J widens to float.
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
         let xs = borrow_i64(x, &mut tx);
         let ys = borrow_i64(y, &mut ty);
@@ -1509,6 +1690,10 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
         Pi => {
             let v = as_f64(d, &mut tmp, span)?;
             Data::F64(par::map(v, |&x| std::f64::consts::PI * x).into())
+        }
+        Factorial => {
+            let v = as_f64(d, &mut tmp, span)?;
+            Data::F64(par::map(v, |&x| factorial(x)).into())
         }
         Ln => {
             let v = as_f64(d, &mut tmp, span)?;
@@ -2047,6 +2232,231 @@ fn copy_items(x: &Array, y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(shape, data))
 }
 
+/// `": y` / `⍕ y`: the argument as the characters that display it.
+///
+/// Characters are already their own display, so they pass through unchanged.
+/// Anything else is laid out exactly as the session would print it: a rank-0
+/// or rank-1 argument gives one character vector, and a higher-rank one gives
+/// the display's lines as the rows of a character array of the same rank —
+/// column widths span the whole argument, so every line has one width and the
+/// planes stay aligned with each other.
+fn format_chars(y: &Array, opts: &FmtOpts) -> Array {
+    if y.dtype() == DType::Char {
+        return y.clone();
+    }
+    // An empty argument has nothing to lay out; J keeps its shape.
+    if y.count() == 0 {
+        return Array::new(y.shape.clone(), Data::empty(DType::Char));
+    }
+    let text = crate::fmt::format_array(y, opts);
+    if y.rank() < 2 {
+        let chars: Vec<char> = text.chars().collect();
+        return Array::new(vec![chars.len()], Data::Char(chars.into()));
+    }
+    // The blank lines are the plane separators, which the array does not
+    // carry: its own shape already says where the planes are.
+    let lines: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
+    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let mut chars: Vec<char> = Vec::with_capacity(lines.len() * width);
+    for line in &lines {
+        chars.extend(line.chars());
+        chars.resize(chars.len() + width - line.chars().count(), ' ');
+    }
+    // One line per row of the display: the argument's shape with its last
+    // axis replaced by the line width.
+    let mut shape = y.shape[..y.rank() - 1].to_vec();
+    shape.push(width);
+    debug_assert_eq!(lines.len(), shape[..shape.len() - 1].iter().product::<usize>());
+    Array::new(shape, Data::Char(chars.into()))
+}
+
+/// Numeric data as f64, refusing characters.
+fn digits_of(a: &Array, what: &str, span: Span) -> Result<Vec<f64>> {
+    a.to_f64_vec().ok_or_else(|| Error::domain(format!("{what} needs numeric data"), span))
+}
+
+/// Narrow a finished digit or value buffer back to integers when the inputs
+/// were whole and nothing left the exact range, which is what both languages
+/// do with integer arguments.
+fn narrow(values: Vec<f64>, integral: bool) -> Data {
+    if integral && values.iter().all(|&v| v.fract() == 0.0 && fits_i64(v)) {
+        return Data::I64(values.iter().map(|&v| v as i64).collect::<Vec<_>>().into());
+    }
+    Data::F64(values.into())
+}
+
+/// True when the array holds whole numbers only.
+fn is_integral(a: &Array) -> bool {
+    !matches!(a.dtype(), DType::F64 | DType::Char)
+}
+
+/// `x #. y` / `x ⊥ y`: the digits y read in the radices x. A scalar x is the
+/// radix of every position; otherwise the two have the same length.
+fn decode(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
+    let digits = digits_of(y, "decode", span)?;
+    let radix: Vec<f64> = match x {
+        None => vec![2.0; digits.len()],
+        Some(x) => {
+            let r = digits_of(x, "decode", span)?;
+            match r.len() {
+                1 => vec![r[0]; digits.len()],
+                n if n == digits.len() => r,
+                n => {
+                    return Err(Error::new(
+                        ErrorKind::Length,
+                        format!("{n} radices for {} digits", digits.len()),
+                        Some(span),
+                    ));
+                }
+            }
+        }
+    };
+    let mut acc = 0.0f64;
+    for (d, b) in digits.iter().zip(&radix) {
+        acc = acc * b + d;
+    }
+    let integral = is_integral(y) && x.is_none_or(is_integral);
+    Ok(Array::new(vec![], narrow(vec![acc], integral)))
+}
+
+/// The number of binary digits `#: y` uses: enough for the largest magnitude
+/// in the whole argument, and never fewer than one.
+fn bit_width(values: &[f64], span: Span) -> Result<usize> {
+    // Nothing to encode needs no digits at all: `$ #: i. 0` is `0 0`.
+    if values.is_empty() {
+        return Ok(0);
+    }
+    let mut m = 0.0f64;
+    for &v in values {
+        if !v.is_finite() {
+            return Err(Error::domain("cannot encode an infinite value", span));
+        }
+        m = m.max(v.abs());
+    }
+    let whole = m.floor();
+    if whole >= 1e15 {
+        return Err(Error::domain("the value is too large to encode in binary", span));
+    }
+    let mut w = 1usize;
+    let mut n = whole as i64;
+    while n > 1 {
+        n /= 2;
+        w += 1;
+    }
+    Ok(w)
+}
+
+/// One value written in the radices `radix`, most significant first. A radix
+/// of 0 takes whatever is left, which is how both languages spell "and the
+/// rest".
+fn encode_one(radix: &[f64], v: f64, out: &mut [f64]) {
+    let mut rem = v;
+    for i in (0..radix.len()).rev() {
+        let b = radix[i];
+        if b == 0.0 {
+            out[i] = rem;
+            rem = 0.0;
+        } else {
+            let r = rem - b * (rem / b).floor();
+            out[i] = r;
+            rem = (rem - r) / b;
+        }
+    }
+}
+
+/// `x #: y` / `x ⊤ y`: the digits become the LEADING axis, so the result has
+/// shape `(#x), $y`. J applies this per atom of y (right rank 0) and APL to
+/// the whole of it (right rank infinite); the operation itself is the same.
+fn encode(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let radix = digits_of(x, "encode", span)?;
+    let values = digits_of(y, "encode", span)?;
+    let k = radix.len();
+    let n = values.len();
+    let mut out = vec![0.0f64; k * n];
+    let mut cell = vec![0.0f64; k];
+    for (j, &v) in values.iter().enumerate() {
+        encode_one(&radix, v, &mut cell);
+        for i in 0..k {
+            out[i * n + j] = cell[i];
+        }
+    }
+    // The digit axis is x's own shape: a scalar radix adds no axis at all,
+    // which is why `2 #: 5` is a scalar and `2 2 #: 5` is a two-element list.
+    let mut shape = if x.rank() == 0 { Vec::new() } else { vec![k] };
+    shape.extend_from_slice(&y.shape);
+    Ok(Array::new(shape, narrow(out, is_integral(x) && is_integral(y))))
+}
+
+/// `#: y`: base-2 encode of the whole argument, the digits trailing.
+fn encode_bits(y: &Array, span: Span) -> Result<Array> {
+    let values = digits_of(y, "encode", span)?;
+    let k = bit_width(&values, span)?;
+    let radix = vec![2.0; k];
+    let mut out = vec![0.0f64; values.len() * k];
+    for (j, &v) in values.iter().enumerate() {
+        encode_one(&radix, v, &mut out[j * k..(j + 1) * k]);
+    }
+    let mut shape = y.shape.clone();
+    shape.push(k);
+    Ok(Array::new(shape, narrow(out, is_integral(y))))
+}
+
+/// `x ,: y`: the two arguments as the items of a new leading axis. A scalar
+/// spreads over the other argument's shape, and two scalars become
+/// one-element lists (`1 ,: 2` has shape 2 1); otherwise the framing
+/// machinery's own fill brings the two cells to a common shape.
+fn laminate(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let spread = |a: &Array, other: &Array| -> Array {
+        if a.rank() != 0 {
+            return a.clone();
+        }
+        let shape = if other.rank() == 0 { vec![1] } else { other.shape.clone() };
+        let n: usize = shape.iter().product();
+        let mut data = Data::empty(a.dtype());
+        for _ in 0..n {
+            push_elem(&mut data, &a.data, 0);
+        }
+        Array::new(shape, data)
+    };
+    assemble(&[2], vec![spread(x, y), spread(y, x)], span)
+}
+
+/// `⍪ y`: one row per item, holding that item's elements.
+fn table_of(y: &Array) -> Array {
+    let shape = match y.rank() {
+        0 => vec![1, 1],
+        _ => vec![y.items(), y.item_size()],
+    };
+    Array::new(shape, y.data.clone())
+}
+
+/// `x u/ y`: u applied to every pair of cells, x's frame before y's.
+///
+/// The cells are the ones u's own ranks ask for, which is why `1 2 3 +/ 10 20`
+/// is a 3-by-2 table (atoms both sides) while `x ,/ y` is a single catenation
+/// (`,` takes its arguments whole).
+fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let ranks = u.ranks();
+    let fxl = x.rank() - effective_rank(ranks[1], x.rank());
+    let fyl = y.rank() - effective_rank(ranks[2], y.rank());
+    let mut frame = x.shape[..fxl].to_vec();
+    frame.extend_from_slice(&y.shape[..fyl]);
+    let nx: usize = x.shape[..fxl].iter().product();
+    let ny: usize = y.shape[..fyl].iter().product();
+    let n = nx * ny;
+    if n == 0 {
+        return assemble(&frame, Vec::new(), span);
+    }
+    if frame.is_empty() {
+        return u.dyad(x, y, ctx, span);
+    }
+    let work = x.count().max(y.count()).max(n);
+    let cells = each_cell(n, work, u.is_pure(), ctx, |i, c| {
+        u.dyad(&x.cell_at(fxl, i / ny), &y.cell_at(fyl, i % ny), c, span)
+    })?;
+    assemble(&frame, cells, span)
+}
+
 /// Monadic meaning of a primitive, applied to one cell.
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     match p.monad {
@@ -2085,6 +2495,15 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             Ok(Array::empty(DType::I64))
         }
         MonadOp::Same => Ok(y.clone()),
+        MonadOp::Format => Ok(format_chars(y, &ctx.cfg.fmt)),
+        MonadOp::DecodeBits => decode(None, y, span),
+        MonadOp::EncodeBits => encode_bits(y, span),
+        MonadOp::Itemize => {
+            let mut shape = vec![1usize];
+            shape.extend_from_slice(&y.shape);
+            Ok(Array::new(shape, y.data.clone()))
+        }
+        MonadOp::TableOf => Ok(table_of(y)),
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         MonadOp::None => {
             Err(Error::domain(format!("{} has no monadic meaning", p.name), span))
@@ -2261,6 +2680,9 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, mode: Agreement, span: Span) -> Resul
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y))),
         DyadOp::GradeSelect { down } => grade_select(x, y, down, span),
         DyadOp::Copy => copy_items(x, y, span),
+        DyadOp::Decode => decode(Some(x), y, span),
+        DyadOp::Encode => encode(x, y, span),
+        DyadOp::Laminate => laminate(x, y, span),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -3112,6 +3534,33 @@ mod tests {
         );
         assert_eq!(Verb::Hook(b(plus()), b(minus())).name(), "(+ -)");
         assert_eq!(Verb::Atop(b(plus()), b(minus())).name(), "(+@:-)");
+        assert_eq!(Verb::Compose(b(plus()), b(minus())).name(), "(+&:-)");
+        assert_eq!(Verb::BondLeft(Array::scalar_i64(1), b(plus())).name(), "(n&+)");
+        assert_eq!(Verb::BondRight(b(plus()), Array::scalar_i64(1)).name(), "(+&n)");
+    }
+
+    #[test]
+    fn composition_applies_the_right_verb_to_both_arguments() {
+        ctx!(c);
+        let v = Verb::Compose(b(plus()), b(times()));
+        // Monadically an atop; dyadically the right verb runs on each side.
+        let r = v.monad(&Array::from_i64(vec![-2, 0, 3]), &mut c, sp()).unwrap();
+        assert_eq!(ints(&r), vec![-1, 0, 1]);
+        let r = v
+            .dyad(&Array::scalar_i64(-5), &Array::scalar_i64(7), &mut c, sp())
+            .unwrap();
+        assert_eq!(ints(&r), vec![0]);
+        // A bond has a monadic valence only.
+        let bond = Verb::BondLeft(Array::scalar_i64(10), b(minus()));
+        let r = bond.monad(&Array::from_i64(vec![1, 2]), &mut c, sp()).unwrap();
+        assert_eq!(ints(&r), vec![9, 8]);
+        let e = bond
+            .dyad(&Array::scalar_i64(1), &Array::scalar_i64(2), &mut c, sp())
+            .unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Domain);
+        let bond = Verb::BondRight(b(minus()), Array::scalar_i64(10));
+        let r = bond.monad(&Array::from_i64(vec![1, 2]), &mut c, sp()).unwrap();
+        assert_eq!(ints(&r), vec![-9, -8]);
     }
 
     // ------------------------------------------------- rank and agreement
@@ -3325,15 +3774,30 @@ mod tests {
     }
 
     #[test]
-    fn dyadic_reduction_is_not_supported_yet() {
+    fn dyadic_reduction_is_the_table() {
         ctx!(c);
-        // `x u/ y` is J's table (outer product), not a windowed reduction —
+        // `x u/ y` is the table (outer product), not a windowed reduction —
         // the windows are `x u\ y`.
-        let e = Verb::Reduce(b(plus()))
+        let v = Verb::Reduce(b(plus()));
+        let r = v
             .dyad(&Array::scalar_i64(2), &Array::from_i64(vec![1, 2, 3]), &mut c, sp())
-            .unwrap_err();
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("table"), "{}", e.msg);
+            .unwrap();
+        assert_eq!(r.shape, vec![3]);
+        assert_eq!(ints(&r), vec![3, 4, 5]);
+        // The cells are the ones the inner verb's ranks ask for, so a scalar
+        // verb pairs every atom of x with every atom of y.
+        let r = v
+            .dyad(&Array::from_i64(vec![1, 2, 3]), &Array::from_i64(vec![10, 20]), &mut c, sp())
+            .unwrap();
+        assert_eq!(r.shape, vec![3, 2]);
+        assert_eq!(ints(&r), vec![11, 21, 12, 22, 13, 23]);
+        // An infinite-rank verb takes both arguments whole: one application.
+        let cat = Verb::Reduce(b(inf_prim(",", MonadOp::Ravel, DyadOp::AppendLeading)));
+        let r = cat
+            .dyad(&Array::from_i64(vec![1, 2]), &Array::from_i64(vec![3, 4]), &mut c, sp())
+            .unwrap();
+        assert_eq!(r.shape, vec![4]);
+        assert_eq!(ints(&r), vec![1, 2, 3, 4]);
     }
 
     // --------------------------------------------------------- arithmetic

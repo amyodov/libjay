@@ -50,6 +50,10 @@ enum OpGlyph {
     Commute,
     /// `⍣` — power.
     Power,
+    /// `∘.` — outer product; unlike the rest, its operand is on its right.
+    JotDot,
+    /// `∘` on its own — Dyalog's `f∘g`, which libjay does not have yet.
+    Jot,
 }
 
 impl OpGlyph {
@@ -62,6 +66,7 @@ impl OpGlyph {
             OpGlyph::Rank => '⍤',
             OpGlyph::Commute => '⍨',
             OpGlyph::Power => '⍣',
+            OpGlyph::JotDot | OpGlyph::Jot => '∘',
         }
     }
 }
@@ -243,9 +248,36 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         },
         '⍪' => Prim {
             name: "⍪",
-            monad: M::NotYet("table (monadic ⍪)"),
+            monad: M::TableOf,
             dyad: D::AppendLeading,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '!' => Prim {
+            name: "!",
+            monad: M::Scalar(SM::Factorial),
+            dyad: D::Scalar(SD::Binomial),
+            ranks: [0, 0, 0],
+        },
+        '⍕' => Prim {
+            name: "⍕",
+            monad: M::Format,
+            dyad: D::NotYet("format with a specification (dyadic ⍕)"),
+            ranks: [RANK_INF, 1, RANK_INF],
+        },
+        // `⊥` and `⊤` have no monadic meaning in APL; J spells those `#.`
+        // and `#:`. `⊤` takes its right argument whole, so the digit axis
+        // leads and the result has shape (⍴x),(⍴y).
+        '⊥' => Prim {
+            name: "⊥",
+            monad: M::None,
+            dyad: D::Decode,
+            ranks: [RANK_INF, 1, 1],
+        },
+        '⊤' => Prim {
+            name: "⊤",
+            monad: M::None,
+            dyad: D::Encode,
+            ranks: [RANK_INF, 1, RANK_INF],
         },
         '⍉' => Prim {
             name: "⍉",
@@ -320,6 +352,7 @@ fn op_for(ch: char) -> Option<OpGlyph> {
         '⍤' => Some(OpGlyph::Rank),
         '⍨' => Some(OpGlyph::Commute),
         '⍣' => Some(OpGlyph::Power),
+        '∘' => Some(OpGlyph::Jot),
         _ => None,
     }
 }
@@ -462,15 +495,30 @@ fn lex_text(
                 });
             }
             _ => {
-                let span = Span::new(offset + i, offset + i + clen);
+                let mut end = i + clen;
                 if let Some(v) = verb_for(ch, origin) {
-                    cur.push(Token { kind: Tok::Func(v), span });
-                } else if let Some(op) = op_for(ch) {
-                    cur.push(Token { kind: Tok::Op(op), span });
+                    cur.push(Token {
+                        kind: Tok::Func(v),
+                        span: Span::new(offset + i, offset + end),
+                    });
+                } else if let Some(mut op) = op_for(ch) {
+                    // `∘.` is one operator (the outer product); a bare `∘`
+                    // is Dyalog's compose, a different thing.
+                    if op == OpGlyph::Jot && text[end..].starts_with('.') {
+                        op = OpGlyph::JotDot;
+                        end += 1;
+                    }
+                    cur.push(Token {
+                        kind: Tok::Op(op),
+                        span: Span::new(offset + i, offset + end),
+                    });
                 } else {
-                    return Err(Error::parse(format!("unknown symbol: {ch}"), span));
+                    return Err(Error::parse(
+                        format!("unknown symbol: {ch}"),
+                        Span::new(offset + i, offset + end),
+                    ));
                 }
-                i += clen;
+                i = end;
             }
         }
     }
@@ -667,6 +715,23 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
                 continue;
             }
         };
+        // The outer product is the one operator whose operand is on its
+        // right; it derives the same table J spells `u/`.
+        if op == OpGlyph::JotDot {
+            let ftok = match it.peek() {
+                Some(tok) if matches!(tok.kind, Tok::Func(_)) => it.next().unwrap(),
+                _ => {
+                    return Err(Error::parse("∘. needs a function on its right", t.span));
+                }
+            };
+            let span = Span::merge(t.span, ftok.span);
+            let Tok::Func(f) = ftok.kind else { unreachable!("checked above") };
+            out.push(Token { kind: Tok::Func(Verb::Reduce(Box::new(f))), span });
+            continue;
+        }
+        if op == OpGlyph::Jot {
+            return Err(Error::not_yet("beside (∘) composition: Dyalog's f∘g", t.span));
+        }
         // Left operand: a function, derived or not.
         let left_is_func = matches!(out.last().map(|x| &x.kind), Some(Tok::Func(_)));
         if !left_is_func {
@@ -681,7 +746,11 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
                     OpGlyph::BackslashBar => {
                         return Err(Error::not_yet("expand along the leading axis (x⍀y)", t.span));
                     }
-                    OpGlyph::Rank | OpGlyph::Commute | OpGlyph::Power => {
+                    OpGlyph::Rank
+                    | OpGlyph::Commute
+                    | OpGlyph::Power
+                    | OpGlyph::JotDot
+                    | OpGlyph::Jot => {
                         return Err(Error::parse(
                             format!("{} needs a function to its left", op.glyph()),
                             t.span,
@@ -765,6 +834,8 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
                 out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
                 continue;
             }
+            // Both are answered before the left operand is taken.
+            OpGlyph::JotDot | OpGlyph::Jot => unreachable!("handled above"),
         };
         out.push(Token { kind: Tok::Func(derived), span });
     }
@@ -1135,7 +1206,11 @@ mod tests {
     #[case('⍴', MonadOp::ShapeOf, DyadOp::Reshape)]
     #[case('⍉', MonadOp::TransposeAxes, DyadOp::NotYet("dyadic transpose"))]
     #[case(',', MonadOp::Ravel, DyadOp::AppendLast)]
-    #[case('⍪', MonadOp::NotYet("table (monadic ⍪)"), DyadOp::AppendLeading)]
+    #[case('⍪', MonadOp::TableOf, DyadOp::AppendLeading)]
+    #[case('!', MonadOp::Scalar(ScalarMonad::Factorial), DyadOp::Scalar(ScalarDyad::Binomial))]
+    #[case('⍕', MonadOp::Format, DyadOp::NotYet("format with a specification (dyadic ⍕)"))]
+    #[case('⊥', MonadOp::None, DyadOp::Decode)]
+    #[case('⊤', MonadOp::None, DyadOp::Encode)]
     #[case('≢', MonadOp::Tally, DyadOp::NotMatch)]
     #[case('≡', MonadOp::NotYet("depth (monadic ≡)"), DyadOp::Match)]
     #[case('∊', MonadOp::NotYet("enlist (monadic ∊)"), DyadOp::MemberApl)]

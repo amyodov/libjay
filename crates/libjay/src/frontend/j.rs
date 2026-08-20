@@ -151,9 +151,17 @@ fn primitive(word: &str) -> Option<Prim> {
         "$" => prim("$", M::ShapeOf, D::Reshape, [INF, 1, INF]),
         "," => prim(",", M::Ravel, D::AppendLeading, [INF, INF, INF]),
         // `,.` is J's `,"_1`; `verb_for` wraps it in that rank.
-        ",." => prim(",.", M::NotYet("itemize (monadic ,.)"), D::AppendLeading, [INF, INF, INF]),
-        ",:" => prim(",:", M::NotYet("laminate (,:)"), D::NotYet("laminate (,:)"), [INF, INF, INF]),
+        ",." => prim(",.", M::NotYet("ravel items (monadic ,.)"), D::AppendLeading, [INF, INF, INF]),
+        ",:" => prim(",:", M::Itemize, D::Laminate, [INF, INF, INF]),
         "#" => prim("#", M::Tally, D::Copy, [INF, 1, INF]),
+        "#." => prim("#.", M::DecodeBits, D::Decode, [1, 1, 1]),
+        // The width of `#: y` comes from the largest value in the whole
+        // argument, which is why the monad has infinite rank.
+        "#:" => prim("#:", M::EncodeBits, D::Encode, [INF, 1, 0]),
+        "!" => prim("!", M::Scalar(SM::Factorial), D::Scalar(SD::Binomial), [0, 0, 0]),
+        "\":" => {
+            prim("\":", M::Format, D::NotYet("format with a specification"), [INF, 1, INF])
+        }
         "o." => prim("o.", M::Scalar(SM::Pi), D::Scalar(SD::Circle), [0, 0, 0]),
         "{" => prim("{", M::NotYet("catalogue (monadic {)"), D::From, [INF, 0, INF]),
         "{." => prim("{.", M::Head, D::Take, [INF, 1, INF]),
@@ -195,10 +203,12 @@ fn verb_for(word: &str) -> Option<Verb> {
 
 const ADVERBS: [&str; 5] = ["/", "\\", "/.", "\\.", "~"];
 
-/// Conjunction spellings. Only `"` and `@:` have meanings here; the rest are
-/// recognised so their diagnostic names the conjunction rather than the word.
-const CONJUNCTIONS: [&str; 16] =
-    ["\"", "@", "@.", "@:", "&", "&.", "&:", "^:", ";.", "!.", "!:", "`", "`:", "}", ".", ":"];
+/// Conjunction spellings. The ones without a meaning here are recognised so
+/// that their diagnostic names the conjunction rather than the word.
+const CONJUNCTIONS: [&str; 17] = [
+    "\"", "@", "@.", "@:", "&", "&.", "&.:", "&:", "^:", ";.", "!.", "!:", "`", "`:", "}", ".",
+    ":",
+];
 
 fn adverb(word: &str) -> Option<&'static str> {
     ADVERBS.iter().copied().find(|&g| g == word)
@@ -346,7 +356,16 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
         // always binds: `~:` is one word, never `~` followed by `:`. The
         // parentheses are the exception; they are never inflected.
         let inflectable = c != '(' && c != ')';
-        let len = if inflectable && matches!(at(i + 1), Some('.') | Some(':')) { 2 } else { 1 };
+        let mut len =
+            if inflectable && matches!(at(i + 1), Some('.') | Some(':')) { 2 } else { 1 };
+        // A doubly inflected word (`&.:`) exists only where the table says
+        // it does; everything else stops at one inflection.
+        if len == 2
+            && at(i + 2) == Some(':')
+            && conjunction(&text[off(i)..off(i + 3)]).is_some()
+        {
+            len = 3;
+        }
         let word = &text[off(i)..off(i + len)];
         match symbol_frag(word, span(i, i + len)) {
             Some(frag) => {
@@ -713,6 +732,19 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
             let g = verb_operand(v, span)?;
             Ok(Frag::Verb(VerbFrag::V(Verb::Atop(Box::new(f), Box::new(g))), span))
         }
+        // `u@v` is `u@:v` applied at v's own ranks: one v-cell at a time,
+        // with u run on each result. That difference in rank is all that
+        // separates the two spellings.
+        "@" => {
+            let f = verb_operand(u, span)?;
+            let g = verb_operand(v, span)?;
+            let ranks = g.ranks();
+            let atop = Verb::Atop(Box::new(f), Box::new(g));
+            Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(atop), ranks)), span))
+        }
+        "&" => compose(u, v, false, span),
+        "&:" => compose(u, v, true, span),
+        "&." | "&.:" => Err(Error::not_yet("under (&.) — needs verb inverses", span)),
         "^:" => {
             let f = verb_operand(u, span)?;
             if v.is_verb() {
@@ -723,6 +755,49 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
         }
         _ => Err(Error::not_yet(format!("composition ({glyph})"), span)),
     }
+}
+
+/// `u&v` and `u&:v`, in all three shapes the conjunction takes.
+///
+/// With two verbs it composes: monadically `u v y`, dyadically
+/// `(v x) u (v y)` — and `&` runs that at v's monadic rank on both sides
+/// while `&:` runs it on the arguments whole. With a noun on either side it
+/// bonds that noun into the dyad, giving a verb with a monadic valence only;
+/// `&:` takes no noun at all.
+fn compose(u: Frag, v: Frag, infinite: bool, span: Span) -> Result<Frag> {
+    let verb = |v: Verb| Ok(Frag::Verb(VerbFrag::V(v), span));
+    if infinite || (!u.is_noun() && !v.is_noun()) {
+        let f = verb_operand(u, span)?;
+        let g = verb_operand(v, span)?;
+        let monadic_rank = g.ranks()[0];
+        let composed = Verb::Compose(Box::new(f), Box::new(g));
+        if infinite {
+            return verb(composed);
+        }
+        return verb(Verb::Rank(Box::new(composed), [monadic_rank; 3]));
+    }
+    if u.is_noun() && v.is_noun() {
+        return Err(Error::not_yet("noun-operand conjunctions", span));
+    }
+    // A bond applies its verb dyadically, so it takes the rank of the side
+    // the argument arrives on.
+    if u.is_noun() {
+        let m = bond_noun(&u, span)?;
+        let g = as_verb(v)?.0;
+        let rank = g.ranks()[2];
+        return verb(Verb::Rank(Box::new(Verb::BondLeft(m, Box::new(g))), [rank; 3]));
+    }
+    let f = as_verb(u)?.0;
+    let n = bond_noun(&v, span)?;
+    let rank = f.ranks()[1];
+    verb(Verb::Rank(Box::new(Verb::BondRight(Box::new(f), n)), [rank; 3]))
+}
+
+/// The array a bonded noun operand holds; it has to be known now.
+fn bond_noun(f: &Frag, span: Span) -> Result<Array> {
+    as_const(f)
+        .cloned()
+        .ok_or_else(|| Error::not_yet("bonds over a non-literal noun", span))
 }
 
 fn verb_operand(f: Frag, span: Span) -> Result<Verb> {
@@ -1263,17 +1338,68 @@ mod tests {
     }
 
     #[rstest]
-    #[case("+ @ - y", "composition (@)")]
-    #[case("+ & - y", "composition (&)")]
-    #[case("+ &: - y", "composition (&:)")]
-    #[case("+ &. - y", "composition (&.)")]
+    #[case("+ &. - y", "under (&.)")]
+    #[case("+ &.: - y", "under (&.)")]
     #[case("+ ^: - y", "power with a verb right operand")]
     #[case("+ ^: {n} y", "computed power")]
     #[case("+ ^: _1 y", "obverse")]
+    #[case("(1 + 2) & , y", "bonds over a non-literal noun")]
     fn other_conjunctions_are_not_supported_yet(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);
         assert!(e.msg.contains(msg), "{}", e.msg);
+    }
+
+    #[test]
+    fn atop_at_rank_and_compose() {
+        // `u@v` is `u@:v` at v's ranks; `u&v` is the composition at v's
+        // monadic rank; `u&:v` is that composition on the arguments whole.
+        let (v, _) = monad_of(&one("+/ @ (,\"1) y"));
+        match &v {
+            Verb::Rank(inner, ranks) => {
+                assert_eq!(*ranks, [1, 1, 1]);
+                assert!(matches!(**inner, Verb::Atop(..)), "got {inner:?}");
+            }
+            other => panic!("expected a ranked atop, got {other:?}"),
+        }
+        let (v, _) = monad_of(&one("+ & (*:\"0) y"));
+        match &v {
+            Verb::Rank(inner, ranks) => {
+                assert_eq!(*ranks, [0, 0, 0]);
+                assert!(matches!(**inner, Verb::Compose(..)), "got {inner:?}");
+            }
+            other => panic!("expected a ranked composition, got {other:?}"),
+        }
+        let (v, _) = monad_of(&one("+ &: *: y"));
+        assert!(matches!(v, Verb::Compose(..)), "got {v:?}");
+    }
+
+    #[test]
+    fn a_noun_operand_bonds_the_conjunction() {
+        // The bond takes the rank of the side its argument arrives on.
+        let (v, _) = monad_of(&one("1 & + y"));
+        match &v {
+            Verb::Rank(inner, ranks) => {
+                assert_eq!(*ranks, [0, 0, 0]);
+                match &**inner {
+                    Verb::BondLeft(a, g) => {
+                        assert_eq!(a.as_i64_slice(), Some(&[1i64][..]));
+                        assert_eq!(prim_of(g).name, "+");
+                    }
+                    other => panic!("expected a left bond, got {other:?}"),
+                }
+            }
+            other => panic!("expected a ranked bond, got {other:?}"),
+        }
+        let (v, _) = monad_of(&one("{. & 2 y"));
+        match &v {
+            // `{.` has left rank 1, so `{.&2` reads its argument by rows.
+            Verb::Rank(inner, ranks) => {
+                assert_eq!(*ranks, [1, 1, 1]);
+                assert!(matches!(**inner, Verb::BondRight(..)), "got {inner:?}");
+            }
+            other => panic!("expected a ranked bond, got {other:?}"),
+        }
     }
 
     #[test]

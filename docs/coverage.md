@@ -46,7 +46,12 @@ feature — that is a promise, not a refusal.
 | `$` | shape of | reshape (cyclic) |
 | `,` | ravel | catenate along the LEADING axis |
 | `,.` | — | stitch, exactly `,"_1` |
+| `,:` | itemize: a leading axis of 1 (`2 3` becomes `1 2 3`) | laminate: the two arguments as the items of a new leading axis (two atoms give shape `2 1`) |
 | `#` | tally | replicate: item i repeated x[i] times (a scalar x applies to every item) |
+| `#.` | base-2 decode (rank 1) | mixed-radix decode; a scalar x is the radix of every digit, a radix of 0 contributes none |
+| `#:` | base-2 encode; the width fits the largest magnitude in the WHOLE argument, so the verb has infinite rank | mixed-radix encode; the digit axis is x's own shape, so `2 #: 5` is a scalar and `2 2 2 #: 5` a 3-list |
+| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity | binomial: x things chosen from y, defined on the reals through gamma |
+| `":` | format: the characters that display the argument | — |
 | `o.` | pi times y | circle function k (see below) |
 | `{` | — | from: each atom of x selects an item (negative from the end) |
 | `{.` | head | take (negative = from end; overtake fills) |
@@ -62,23 +67,39 @@ feature — that is a promise, not a refusal.
 | `]` `[` | same | right / left |
 | `echo` | print (formatted) | — |
 
-Words present with only one valence implemented say so by name: `,:`
-(laminate), monadic `,.` (itemize), monadic `{` (catalogue), monadic `e.`
-(raze-in), monadic `*.` (length/angle), monadic `+.` (real/imaginary),
-monadic `~:` (nub sieve), dyadic `+:` (nor), dyadic `*:` (nand), dyadic `-.`
-(less).
+The format of a rank-0 argument is a character VECTOR (`$ ": 5` is 1); of a
+rank-r one, a character array of rank r whose lines all have one width
+(`$ ": i. 2 3 4` is `2 3 11`), because the column widths span the whole
+argument.
 
-Adverbs: `/` (insert/reduce, leading axis, right-to-left fold), `\` (monad:
-`u` applied to every prefix; dyad `x u\ y`: to every window of x items — a
-negative x takes non-overlapping chunks with a short last one, zero takes
-the n+1 empty runs, and a window longer than the argument yields none),
-`\.` (monad: every suffix), `~` (commute: `u~ y` is `y u y`, `x u~ y` is
-`y u x`). Conjunctions: `"` (rank, 1–3 atoms, `_` = infinite), `@:` (atop),
-`^:` (power: `u^:n` applies u n times, `u^:_` iterates until the result
-stops changing), `[:` (cap). Trains: forks `(f g h)`, noun forks
-`(n g h)`, hooks `(f g)`. Assignment `=.`/`=:` (one environment for now),
-multi-sentence programs, `NB.` comments, `'strings'`, `_`/`__` infinities,
-`1e_3` exponents.
+Words present with only one valence implemented say so by name: monadic `,.`
+(ravel items), monadic `{` (catalogue), monadic `e.` (raze-in), monadic `*.`
+(length/angle), monadic `+.` (real/imaginary), monadic `~:` (nub sieve),
+dyadic `+:` (nor), dyadic `*:` (nand), dyadic `-.` (less), dyadic `":`
+(format with a specification).
+
+Adverbs: `/` (monad: insert/reduce, leading axis, right-to-left fold; dyad
+`x u/ y`: the table, u applied to every pair of cells — the cells u's own
+ranks ask for, so `1 2 3 +/ 10 20` is a 3-by-2 table of sums while
+`'ab' ,/ 'cd'` is one catenation), `\` (monad: `u` applied to every prefix;
+dyad `x u\ y`: to every window of x items — a negative x takes
+non-overlapping chunks with a short last one, zero takes the n+1 empty runs,
+and a window longer than the argument yields none), `\.` (monad: every
+suffix), `~` (commute: `u~ y` is `y u y`, `x u~ y` is `y u x`).
+
+Conjunctions: `"` (rank, 1–3 atoms, `_` = infinite); `@:` (atop: monad
+`u v y`, dyad `u (x v y)`, at infinite rank) and `@` (the same thing at v's
+own ranks — one v-cell at a time, u run on each result, which is the entire
+difference between the two); `&:` (compose: monad `u v y`, dyad
+`(v x) u (v y)`, at infinite rank) and `&` (that composition at v's monadic
+rank on both sides); `&` with a noun operand instead bonds it into the dyad
+— `1&+` increments, `^&2` squares — and J gives a bond no dyadic valence at
+all, so `x (1&+) y` is an error; `^:` (power: `u^:n` applies u n times,
+`u^:_` iterates until the result stops changing); `[:` (cap).
+
+Trains: forks `(f g h)`, noun forks `(n g h)`, hooks `(f g)`. Assignment
+`=.`/`=:` (one environment for now), multi-sentence programs, `NB.`
+comments, `'strings'`, `_`/`__` infinities, `1e_3` exponents.
 
 ## APL
 
@@ -103,7 +124,11 @@ multi-sentence programs, `NB.` comments, `'strings'`, `_`/`__` infinities,
 | `↑` | — | take |
 | `↓` | — | drop |
 | `,` | ravel | catenate along the LAST axis |
-| `⍪` | — | catenate along the LEADING axis |
+| `⍪` | table: one row per item, holding that item's elements (a scalar gives 1×1, a vector n×1) | catenate along the LEADING axis |
+| `!` | factorial (always float) | binomial, J's argument order |
+| `⍕` | format: the characters that display the argument | — |
+| `⊥` | — | mixed-radix decode |
+| `⊤` | — | mixed-radix encode |
 | `⌽` | reverse each row (last axis) | rotate each row (last axis) |
 | `⊖` | reverse the items (leading axis) | rotate the leading axis |
 | `≡` | — | match: same shape and values, else 0 |
@@ -115,15 +140,23 @@ multi-sentence programs, `NB.` comments, `'strings'`, `_`/`__` infinities,
 | `○` | pi times y | circle function k (see below) |
 | `/` `⌿` | — | replicate, after an operand: `/` counts the LAST axis, `⌿` the leading one |
 
+`⊥` and `⊤` have no monadic meaning in APL at all; J spells those `#.` and
+`#:`. `x ⊤ y` takes its right argument whole, so the digits become the
+LEADING axis and the result has shape `(⍴x),(⍴y)` — the transpose of what
+J's `x #: y` produces, which frames the digits per atom of y.
+
 Glyphs recognised with the missing valence named: monadic `∊` (enlist),
 dyadic `∪` (union), `∩` (intersection), monadic `≡` (depth), dyadic `⍋`/`⍒`
-(collation), `⍱`/`⍲` (nor/nand), dyadic `~` (without), monadic `⍪` (table).
+(collation), `⍱`/`⍲` (nor/nand), dyadic `~` (without), dyadic `⍕` (format
+with a specification).
 
 Operators: `/` (reduce, LAST axis), `⌿` (reduce, leading axis), `\` (scan,
 last axis), `⍀` (scan, leading axis), `⍤` (rank), `⍨` (commute), `⍣`
-(power, a nonnegative count). A scan's k-th element is the reduce of the
+(power, a nonnegative count), `∘.f` (outer product — the same table J spells
+`x u/ y`, e.g. `1 2 3∘.×1 2 3`). A scan's k-th element is the reduce of the
 first k, so it folds right to left like the reduce and not like a left
-fold: `-\1 2 3` is `1 ¯1 2`.
+fold: `-\1 2 3` is `1 ¯1 2`. A bare `∘` is Dyalog's compose `f∘g`, which is
+named as its own gap.
 
 `/` and `⌿` are operators after a function and replicate after an operand;
 names are always values in this subset, so which one is meant is decided by
@@ -222,9 +255,15 @@ results of rank ≥ 2.
   rounding — the same regrouping reduction already takes (§5.9). Every other
   verb, and every prefix scan of a verb that does not associate, is folded
   exactly as the insert would.
-- `x u/ y` (J's table, the outer product) is not implemented; the windows
-  are `x u\ y`.
+- The binomial `x ! y` returns an exact integer wherever the whole-number
+  answer fits i64; J switches to float earlier (`28 ! 56` prints
+  `7.64869e15` there and exactly here). The values agree to well within the
+  differential tolerance; only the printed form differs.
+- A bonded noun (`n&v`, `u&n`) has to be a literal, as a noun fork's left
+  tine does; a computed one says "bonds over a non-literal noun is not
+  supported yet".
 - No boxes / nested arrays, dyadic transpose, `⎕`-variables, control words,
   verb/adverb definitions yet — all "not yet", category 2. Named on their
   own: J's key adverb `u/.`, outfix `x u\. y`, `u^:v` and negative powers
-  (the obverse), APL expand `x\y` and `f⍣≡`, the complex circle functions.
+  (the obverse), under `u&.v` (it needs verb inverses), APL expand `x\y`,
+  `f⍣≡`, compose `f∘g`, the complex circle functions.
