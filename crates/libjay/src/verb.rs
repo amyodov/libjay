@@ -2691,17 +2691,35 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, mode: Agreement, span: Span) -> Resul
 // ------------------------------------------------------------- reduction
 
 /// The neutral cell of a reduction over no items, if the verb has one.
+///
+/// The values are the ones the references produce — both of them, for every
+/// verb both spell (`x %: y` is J's alone). Where a table entry is
+/// conventional rather than algebraic (a comparison has no true identity)
+/// J and GNU APL still agree on it, so libjay follows. The two exceptions
+/// are `⌊` and `⌈`: J's neutral cells are the infinities and GNU APL's are
+/// the largest representable magnitudes — libjay takes J's, and the
+/// difference is recorded in docs/coverage.md.
 fn reduce_identity(v: &Verb, n: usize) -> Option<Data> {
     let Verb::Prim(p) = v else { return None };
     let DyadOp::Scalar(op) = p.dyad else { return None };
+    let ints = |k: i64| Data::I64(vec![k; n].into());
+    let bits = |k: u8| Data::Bool(vec![k; n].into());
     Some(match op {
-        ScalarDyad::Add => Data::I64(vec![0; n].into()),
-        ScalarDyad::Mul => Data::I64(vec![1; n].into()),
+        ScalarDyad::Add | ScalarDyad::Sub | ScalarDyad::Gcd | ScalarDyad::Residue => ints(0),
+        ScalarDyad::Mul
+        | ScalarDyad::DivJ
+        | ScalarDyad::DivApl
+        | ScalarDyad::Pow
+        | ScalarDyad::Lcm
+        | ScalarDyad::Root
+        | ScalarDyad::Binomial => ints(1),
         ScalarDyad::Min => Data::F64(vec![f64::INFINITY; n].into()),
         ScalarDyad::Max => Data::F64(vec![f64::NEG_INFINITY; n].into()),
-        ScalarDyad::Lcm => Data::I64(vec![1; n].into()),
-        ScalarDyad::Gcd => Data::I64(vec![0; n].into()),
-        _ => return None,
+        ScalarDyad::Eq | ScalarDyad::Le | ScalarDyad::Ge => bits(1),
+        ScalarDyad::Ne | ScalarDyad::Lt | ScalarDyad::Gt => bits(0),
+        // Logarithm and the circle functions have none: both references
+        // refuse an empty reduction of them.
+        ScalarDyad::Log | ScalarDyad::Circle => return None,
     })
 }
 
@@ -3745,6 +3763,14 @@ mod tests {
         assert!(floats(&r).iter().all(|&x| x == f64::INFINITY));
         let r = Verb::Reduce(b(ceil_v())).monad(&empty, &mut c, sp()).unwrap();
         assert!(floats(&r).iter().all(|&x| x == f64::NEG_INFINITY));
+        // Subtraction and division have identities too, and a comparison
+        // has the conventional one both references print.
+        let r = Verb::Reduce(b(minus())).monad(&empty, &mut c, sp()).unwrap();
+        assert_eq!(ints(&r), vec![0, 0]);
+        let r = Verb::Reduce(b(pct())).monad(&empty, &mut c, sp()).unwrap();
+        assert_eq!(ints(&r), vec![1, 1]);
+        let r = Verb::Reduce(b(eq_v())).monad(&empty, &mut c, sp()).unwrap();
+        assert_eq!(bools(&r), vec![1, 1]);
         // An empty vector reduces to a scalar identity.
         let r = Verb::Reduce(b(plus()))
             .monad(&Array::empty(DType::I64), &mut c, sp())
@@ -3756,12 +3782,13 @@ mod tests {
     #[test]
     fn empty_reduction_without_an_identity_is_a_domain_error() {
         ctx!(c);
-        let e = Verb::Reduce(b(minus()))
-            .monad(&Array::empty(DType::I64), &mut c, sp())
-            .unwrap_err();
+        // A derived verb has no identity cell at all; among the primitives
+        // only the logarithm and the circle functions are left without one,
+        // which is what both references do.
+        let v = Verb::Hook(b(plus()), b(minus()));
+        let e = Verb::Reduce(b(v)).monad(&Array::empty(DType::I64), &mut c, sp()).unwrap_err();
         assert_eq!(e.kind, ErrorKind::Domain);
         assert!(e.msg.contains("identity"), "{}", e.msg);
-        assert!(e.msg.contains('-'), "{}", e.msg);
     }
 
     #[test]

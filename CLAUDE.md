@@ -181,9 +181,17 @@ Choices made during implementation, with reasoning. No entry = still open.
   `_4 o.` sign. Gate met: Bollinger z-score one-kernel beats the Polars
   pipeline at 20M rows (687 vs 759 ms, 8.7e-10 agreement); remaining gap to
   numba is fusion, the known next perf lever.
+- 2026-08-20 — Reference APL oracle: GNU APL 2.0, built from the FSF tarball
+  under `~/projects/libjay-oracles/gnu-apl/` (run-only, never linked, never
+  read), overridable via LIBJAY_ORACLE_APL; 592-expression differential
+  corpus in tests/oracle_apl.rs, 100% agreement. It corrected the empty
+  reduction: every verb both references give a neutral cell now has one
+  (`-/⍳0` is 0, `÷/⍳0` is 1, the comparisons follow their table), where
+  before only `+ × ⌈ ⌊ ∧ ∨` did. The deliberate dialect differences are a
+  KNOWN_DIVERGENCES list in that file, asserted to STAY divergent, and a
+  "Differences from GNU APL" subsection in docs/coverage.md.
 
-Open: APL oracle;
-pure-expression assertion flag; primitive ordering; complex column naming;
+Open: pure-expression assertion flag; primitive ordering; complex column naming;
 sandbox surfacing; FFT-class operations.
 Delegated (owner has no opinion, decide and log): codegen backend, IR design,
 crate structure, CLI implementation language, caching/dispatch internals.

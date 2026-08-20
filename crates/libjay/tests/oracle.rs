@@ -30,7 +30,9 @@ fn oracle_eval(jconsole: &str, expr: &str) -> Option<String> {
         .args(["-jprofile", "/dev/null"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // jconsole reports a failed sentence on stderr, so discarding it
+        // would turn an error into an empty result.
+        .stderr(Stdio::piped())
         .spawn()
         .expect("spawn jconsole");
     child
@@ -41,7 +43,8 @@ fn oracle_eval(jconsole: &str, expr: &str) -> Option<String> {
         .expect("write to jconsole");
     let out = child.wait_with_output().expect("wait for jconsole");
     let text = String::from_utf8_lossy(&out.stdout);
-    if text.contains("error") && text.contains('|') {
+    let complaint = String::from_utf8_lossy(&out.stderr);
+    if (text.contains("error") && text.contains('|')) || !complaint.trim().is_empty() {
         return None;
     }
     Some(text.trim_end().to_string())
@@ -172,6 +175,21 @@ fn fixed_corpus_matches_reference() {
         ">./ 3 1 4",
         "+/ i. 0",
         "*/ i. 0",
+        // The rest of the identity table: every verb J gives a neutral cell.
+        "-/ i. 0",
+        "%/ i. 0",
+        "^/ i. 0",
+        "%:/ i. 0",
+        "|/ i. 0",
+        "!/ i. 0",
+        "=/ i. 0",
+        "~:/ i. 0",
+        "</ i. 0",
+        "<:/ i. 0",
+        ">/ i. 0",
+        ">:/ i. 0",
+        "^./ i. 0",
+        "o./ i. 0",
         "i. 4",
         "i. 2 3",
         "i. _3",

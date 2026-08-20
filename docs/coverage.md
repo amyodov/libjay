@@ -143,7 +143,12 @@ comments, `'strings'`, `_`/`__` infinities, `1e_3` exponents.
 `⊥` and `⊤` have no monadic meaning in APL at all; J spells those `#.` and
 `#:`. `x ⊤ y` takes its right argument whole, so the digits become the
 LEADING axis and the result has shape `(⍴x),(⍴y)` — the transpose of what
-J's `x #: y` produces, which frames the digits per atom of y.
+J's `x #: y` produces, which frames the digits per atom of y. `⊥` has not
+had the matching treatment yet: an APL decode is an inner product and folds
+the LEADING axis of its right argument, while libjay folds the last one,
+which is J's `#.` at rank 1. Vectors — the whole of the common case — agree;
+rank 2 and above do not, and the fix waits on the axis-moving transpose that
+dyadic `⍉` needs anyway.
 
 Glyphs recognised with the missing valence named: monadic `∊` (enlist),
 dyadic `∪` (union), `∩` (intersection), monadic `≡` (depth), dyadic `⍋`/`⍒`
@@ -235,6 +240,29 @@ Not supported yet (a promise, not a refusal): decimals, strings, binary,
 lists, structs, dictionaries, float16, byte-swapped data, and exporting
 results of rank ≥ 2.
 
+## The reference oracles
+
+Two interpreters are run as black-box subprocesses — fed an expression on
+stdin or the command line, compared on their printed output, never linked
+and never read:
+
+- J: the official prebuilt jconsole, `LIBJAY_ORACLE_J`, corpus in
+  `crates/libjay/tests/oracle.rs`.
+- APL: GNU APL 2.0, built from the FSF tarball into
+  `~/projects/libjay-oracles/gnu-apl/`, `LIBJAY_ORACLE_APL`, corpus in
+  `crates/libjay/tests/oracle_apl.rs`. It is run with
+  `--script --safe --noSV --PW 10000 --eval`, which silences the banner,
+  keeps it from opening sockets or loading a workspace, and stops long
+  vectors wrapping onto continuation lines. GNU APL always exits 0 and
+  reports a failed sentence on stderr, so a non-empty stderr is what "the
+  reference refused this" means.
+
+Both sides are compared line by line (the line structure carries the shape)
+and token by token within a line, each token parsed back to `f64` and
+accepted within 1e-5 relative / 1e-9 absolute. Column padding is not
+compared: libjay right-aligns a mixed numeric column where GNU APL aligns on
+the decimal point, and that is typography, not semantics.
+
 ## Known divergences from the references (deliberate, revisit later)
 
 - Float comparisons are exact; J's default comparison tolerance (2⁻⁴⁴) is
@@ -266,4 +294,43 @@ results of rank ≥ 2.
   verb/adverb definitions yet — all "not yet", category 2. Named on their
   own: J's key adverb `u/.`, outfix `x u\. y`, `u^:v` and negative powers
   (the obverse), under `u&.v` (it needs verb inverses), APL expand `x\y`,
-  `f⍣≡`, compose `f∘g`, the complex circle functions.
+  `f⍣≡`, compose `f∘g`, the complex circle functions, APL's `⌷`.
+
+### Differences from GNU APL
+
+GNU APL is ISO/APL2-flavoured and libjay's APL takes a Dyalog-style choice
+in a few places, so the two part company on purpose. Each line below is one
+entry of `KNOWN_DIVERGENCES` in `crates/libjay/tests/oracle_apl.rs`, which
+asserts that they keep disagreeing — a silent convergence is a test failure,
+not a quiet win. Everything else in a 592-expression corpus agrees.
+
+libjay follows J where APL2 stops at DOMAIN ERROR:
+
+- monadic `÷0` is `∞` and `⍟0` is `¯∞` (the first is already listed above).
+- `!¯1` is `∞` (the gamma pole) and `¯7○1` — artanh 1 — is `∞`.
+- the neutral cell of `⌈` and `⌊` over no items is `¯∞`/`∞`, where GNU APL
+  uses the largest representable magnitudes. Every other entry of the
+  identity table now matches both references exactly.
+
+libjay is more permissive:
+
+- `∪` is nub over ITEMS, so a matrix is legal; GNU APL's monad takes vectors
+  only.
+- dyadic `⊖` reads a vector left argument per axis, GNU APL per column
+  (already listed above).
+
+libjay is stricter, or simply elsewhere:
+
+- `2 2⍴⍳0` fills with the prototype in APL2 and is an error here — reshape
+  does not invent data.
+- a circle function that leaves the reals (`0○2`) is a complex number there
+  and the named "complex numbers" gap here.
+- `⊥` folds the last axis of a rank ≥ 2 argument, APL the leading one (see
+  the `⊥`/`⊤` note above).
+- a sequence yields its last sentence and prints nothing on the way, so
+  `1 2 3⋄4 5` is `4 5`; GNU APL prints the value of every statement.
+
+One entry is GNU APL's bug rather than a dialect difference, pinned so that a
+later release fixing it is noticed: a scan whose axis has length 1 loses that
+axis there, so `+\2 1⍴⍳12` comes back as a 2-vector and `+\,5` as a scalar.
+`⌽`, `⌿` and every other axis length are fine.
