@@ -38,9 +38,14 @@ method    best of 5 after one warmup, wall time in ms
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | weighted sum | `+/ {w} * {x}` | 119.1 | 74.1 | 1.61x | 109.4 | 25.4 | 12.4 | 106.4 |
 | column sums | `+/ {m}` | 9.2 | 5.1 | 1.82x | 5.7 | 13.3 | 13.6 | 35.3 |
-| std, named value | `d =. {x} - (+/ {x}) % # {x}` … `%: (+/ d * d) % # d` | 703.1 | 532.1 | 1.32x | 22.2 | 49.6 | 12.5 | 132.3 |
+| std, named value | `d =. {x} - (+/ {x}) % # {x}` … `%: (+/ d * d) % # d` | 235.1 | 130.2 | 1.81x | 22.2 | 49.6 | 12.5 | 132.3 |
 | std, one sentence | `%: (+/ ({x} - (+/ {x}) % # {x}) * {x} - (+/ {x}) % # {x}) % # {x}` | 375.1 | 195.3 | 1.92x | 20.9 | 49.6 | 12.5 | 120.5 |
 | sum of exponentials | `+/ ^ {x}` | 217.7 | 65.5 | 3.32x | 205.5 | 116.7 | 26.5 | 207.6 |
+
+The named-value row was re-measured after owned buffers became refcounted
+(see below); it read 703.1 / 532.1 / 1.32x before that change, and the rest
+of the table is unchanged by it (`+/ ^ {x}`, re-measured as a control on the
+same machine, repeated within 2%).
 
 Scaling, weighted sum, 20M rows:
 
@@ -66,9 +71,10 @@ every other suite pass unchanged.
 **Where libjay stands.** On eight threads it is the fastest of the five on
 column sums (5.1 ms against Polars' 5.7 and numpy's 35.3), it beats Polars
 and numpy on three scenarios of five, and it beats a serial numba loop on
-two. It loses to numba's parallel loop on four of five, and it loses to
-everything on the two standard-deviation spellings. Two structural reasons,
-neither of them a threading problem, and neither addressed by this phase:
+two. It loses to numba's parallel loop on four of five, and both
+standard-deviation spellings still trail Polars and numba by a wide margin
+(the named one now edges past numpy). Two structural reasons, neither of them
+a threading problem, and neither addressed by this phase:
 
 * *No fusion.* `+/ {w} * {x}` materialises the 160 MB product before
   reducing it; numba's loop keeps each product in a register. Three streams
@@ -80,13 +86,19 @@ neither of them a threading problem, and neither addressed by this phase:
   on its own. libjay may (§5.9) and does so across chunks, but inside a
   chunk it still runs a single accumulator.
 
-**Naming a value costs a copy.** `d =. …` and every later mention of `d`
-each deep-copy the array: the two spellings of the standard deviation differ
-only in that, and the named one is 330 ms slower on 20M rows. Measured on
-its own, naming a 16 MB value costs about 16 ms and each further use another
-19 ms. Refcounted buffers (`Buf::Owned` behind an `Arc`) would remove it
-entirely. This is the most expensive thing in the codebase right now and it
-has nothing to do with parallelism.
+**Naming a value used to cost a copy; now it is free.** `d =. …` and every
+later mention of `d` each deep-copied the array — one 16 MB copy on the
+assignment and another on each of the two uses, about 16 ms and 19 ms apiece
+on 20M rows — which made the named spelling of the standard deviation 330 ms
+slower than the one-sentence spelling that computes the same thing twice.
+`Buf::Owned` now holds an `Arc<Vec<T>>`: cloning is a refcount bump, and
+`to_mut` goes through `Arc::make_mut`, so a copy happens only when someone
+writes to a buffer that is still shared. Copy-on-write semantics are exactly
+as before — no caller could tell, and no call site changed — but the scenario
+went from 703.1 / 532.1 ms (1 / 8 threads) to 235.1 / 130.2, a 3.0x and 4.1x
+win with no new parallelism. Naming a value is now cheaper than repeating the
+expression, which is the right way round: at 130.2 ms the named spelling beats
+the one-sentence spelling's 195.3, because the mean is computed once.
 
 **Streaming elementwise passes do not benefit from threads on this
 machine.** One core already saturates the memory bus for a two-in/one-out
@@ -139,7 +151,8 @@ chunking gives the machine independent chains to interleave.
 
 In the order the measurements rank them:
 
-1. Refcounted buffers, so naming a value is free.
+1. ~~Refcounted buffers, so naming a value is free.~~ Done: `Buf::Owned` is
+   an `Arc<Vec<T>>` with copy-on-write through `Arc::make_mut`.
 2. Fusion of elementwise chains into one pass, so `+/ w * x` never
    materialises `w * x`.
 3. SIMD and multiple accumulators inside a chunk (phase 6), which is where

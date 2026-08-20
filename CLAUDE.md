@@ -147,9 +147,14 @@ Choices made during implementation, with reasoning. No entry = still open.
   verb; narrow items split into chunks of items, associative verbs only —
   the float reassociation is the §5.9 contract). Nothing splits below 65,536
   element operations. `Ctx` splits into a Copy `EvalCfg` plus the output
-  sink, so a parallel path cannot capture the sink. Numbers, and the two
-  things that now cost more than threading buys (deep copies on naming a
-  value; no fusion), are in bench/README.md.
+  sink, so a parallel path cannot capture the sink. Numbers, and the one
+  thing that now costs more than threading buys (no fusion), are in
+  bench/README.md.
+- 2026-08-20 — Owned buffers are refcounted (`Buf` Owned = Arc<Vec<T>>,
+  copy-on-write via make_mut): naming a value and re-mentioning it is now
+  free (std_named 703→235 ms / 532→130 ms). Buf's Send/Sync bounds
+  tightened to T: Send + Sync. Known remaining copy: `Buf::slice` on owned
+  data (cells/items) — deliberate, revisit with the layout-aware runtime.
 - 2026-08-20 — Benchmarks run in .venv-bench (Python 3.12): numba wheels for
   Intel macs stop at numba 0.61/llvmlite 0.44, so the bench venv pins
   numba<0.62 (the dev venv stays 3.14).

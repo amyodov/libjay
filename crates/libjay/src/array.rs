@@ -19,31 +19,36 @@ pub type Owner = Arc<dyn Any + Send + Sync>;
 /// A borrowed (foreign) buffer points into memory owned by someone else — an
 /// Arrow C data interface import, a Python buffer — and holds an `Owner`
 /// handle that keeps that memory alive for at least as long as the buffer.
-/// Foreign buffers are immutable and read-only: mutation copies first
-/// ([`Buf::to_mut`]), cloning is a refcount bump.
+/// An owned buffer is refcounted. Either way cloning is a refcount bump and
+/// mutation copies first if the memory is shared or foreign ([`Buf::to_mut`]),
+/// so a `Buf` behaves as a private value however cheaply it was cloned.
 pub struct Buf<T> {
     repr: Repr<T>,
 }
 
 enum Repr<T> {
-    Owned(Vec<T>),
+    Owned(Arc<Vec<T>>),
     Foreign { ptr: *const T, len: usize, owner: Owner },
 }
 
-// SAFETY: a foreign buffer is read-only for its whole life (mutation goes
-// through `to_mut`, which copies to `Owned` first) and its `owner` keeps the
-// memory alive, so `Buf` is exactly as shareable as the `&[T]` it derefs to.
-unsafe impl<T: Send> Send for Buf<T> {}
+// SAFETY: neither variant hands out aliased mutable access. A foreign buffer
+// is read-only for its whole life and its `owner` keeps the memory alive; an
+// owned buffer shares its `Vec` through an `Arc` and only ever mutates it
+// through `Arc::make_mut`, which copies unless this buffer is the sole
+// holder. So `Buf` is exactly as shareable as the `&[T]` it derefs to —
+// which, because an owned buffer is an `Arc<Vec<T>>` that may be dropped or
+// read from any thread holding a clone, needs `T: Send + Sync` on both.
+unsafe impl<T: Send + Sync> Send for Buf<T> {}
 // SAFETY: as above; `&Buf<T>` only ever hands out `&[T]`.
-unsafe impl<T: Sync> Sync for Buf<T> {}
+unsafe impl<T: Send + Sync> Sync for Buf<T> {}
 
 impl<T> Buf<T> {
     pub fn new() -> Buf<T> {
-        Buf { repr: Repr::Owned(Vec::new()) }
+        Buf { repr: Repr::Owned(Arc::new(Vec::new())) }
     }
 
     pub fn from_vec(v: Vec<T>) -> Buf<T> {
-        Buf { repr: Repr::Owned(v) }
+        Buf { repr: Repr::Owned(Arc::new(v)) }
     }
 
     /// Borrow `len` elements at `ptr`, keeping `owner` alive alongside them.
@@ -80,21 +85,24 @@ impl<T> Buf<T> {
 }
 
 impl<T: Clone> Buf<T> {
-    /// The buffer as an owned `Vec`, copying a foreign buffer once.
-    /// Subsequent calls on the same buffer are free.
+    /// The buffer as a uniquely owned `Vec`, copying once if it is foreign or
+    /// shared with another holder. Subsequent calls on the same buffer are
+    /// free until it is cloned again.
     pub fn to_mut(&mut self) -> &mut Vec<T> {
         if self.is_foreign() {
-            self.repr = Repr::Owned(self.as_slice().to_vec());
+            self.repr = Repr::Owned(Arc::new(self.as_slice().to_vec()));
         }
         match &mut self.repr {
-            Repr::Owned(v) => v,
+            Repr::Owned(v) => Arc::make_mut(v),
             Repr::Foreign { .. } => unreachable!("just converted to owned"),
         }
     }
 
+    /// The contents as a `Vec`, moving it out when this buffer is the sole
+    /// holder and copying otherwise.
     pub fn into_vec(self) -> Vec<T> {
         match self.repr {
-            Repr::Owned(v) => v,
+            Repr::Owned(v) => Arc::try_unwrap(v).unwrap_or_else(|v| v.as_slice().to_vec()),
             Repr::Foreign { .. } => self.as_slice().to_vec(),
         }
     }
@@ -130,10 +138,13 @@ impl<T> Deref for Buf<T> {
     }
 }
 
+/// Cloning never copies elements: both variants are a refcount bump, and the
+/// copy happens later, in [`Buf::to_mut`], only if someone writes while the
+/// memory is still shared.
 impl<T: Clone> Clone for Buf<T> {
     fn clone(&self) -> Buf<T> {
         match &self.repr {
-            Repr::Owned(v) => Buf::from_vec(v.clone()),
+            Repr::Owned(v) => Buf { repr: Repr::Owned(Arc::clone(v)) },
             Repr::Foreign { ptr, len, owner } => {
                 // SAFETY: same pointer, same owner, same guarantees.
                 unsafe { Buf::foreign(*ptr, *len, owner.clone()) }
@@ -460,6 +471,42 @@ mod tests {
         // SAFETY: zero length, so the dangling pointer is never dereferenced.
         let f = unsafe { Buf::<f64>::foreign(std::ptr::null(), 0, Arc::new(())) };
         assert_eq!(&f[..], &[] as &[f64]);
+    }
+
+    #[test]
+    fn cloning_an_owned_buf_shares_the_same_memory() {
+        let b: Buf<i64> = vec![1, 2, 3].into();
+        let c = b.clone();
+        assert_eq!(b.as_ptr(), c.as_ptr(), "owned clone copied the elements");
+        assert_eq!(&c[..], &[1, 2, 3]);
+    }
+
+    #[test]
+    fn writing_to_a_shared_owned_buf_copies_first() {
+        let b: Buf<i64> = vec![1, 2, 3].into();
+        let mut c = b.clone();
+        c.to_mut()[0] = 99;
+        assert_eq!(&b[..], &[1, 2, 3], "the other holder saw the write");
+        assert_eq!(&c[..], &[99, 2, 3]);
+        assert_ne!(b.as_ptr(), c.as_ptr());
+        // Sole holder again: further writes are in place.
+        let ptr = c.as_ptr();
+        c.to_mut()[1] = 98;
+        assert_eq!(c.as_ptr(), ptr, "unshared write copied");
+    }
+
+    #[test]
+    fn into_vec_moves_when_sole_holder_and_copies_when_shared() {
+        let b: Buf<i64> = vec![1, 2, 3].into();
+        let ptr = b.as_ptr();
+        let v = b.into_vec();
+        assert_eq!(v.as_ptr(), ptr, "sole holder copied instead of moving");
+
+        let b: Buf<i64> = vec![1, 2, 3].into();
+        let c = b.clone();
+        let v = b.into_vec();
+        assert_eq!(v, vec![1, 2, 3]);
+        assert_eq!(&c[..], &[1, 2, 3]);
     }
 
     #[test]
