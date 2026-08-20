@@ -1,8 +1,8 @@
 """Embedded J and APL.
 
-The surface follows the `re` module's shape: ``libjay.j(...)`` compiles,
-binds and executes in one call; ``libjay.j.compile(...)`` returns a reusable
-kernel. ``libjay.apl`` is the same thing for APL.
+The surface follows the `re` module's shape: ``jay.j(...)`` compiles,
+binds and executes in one call; ``jay.j.compile(...)`` returns a reusable
+kernel. ``jay.apl`` is the same thing for APL.
 """
 
 from __future__ import annotations

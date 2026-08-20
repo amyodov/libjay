@@ -31,7 +31,9 @@ differential test suite.
 ## Fixed points
 
 - Names: Cargo package `libjay`, Rust lib `jay` (avoids `liblibjay.so`),
-  PyPI/import `libjay`, CLI `libjay`. License: MIT.
+  PyPI package `libjay`, Python import `jay` (owner decision 2026-08-20,
+  superseding the original record: the import matches Rust `use jay::` and
+  C `-ljay`, pillow/PIL-style), CLI `libjay`. License: MIT.
 - Two frontends (J + APL) over one language-agnostic IR from day one; the IR
   carries no J-specific assumptions. Early coverage = the divergence set:
   reduction axis, rank, indexing/index origin, transpose/reshape/take/drop.

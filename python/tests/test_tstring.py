@@ -2,7 +2,7 @@
 
 import pytest
 
-from libjay import JayError, j
+from jay import JayError, j
 
 
 def test_tstring_samples_are_defaults():

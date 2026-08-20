@@ -1,7 +1,7 @@
 import pytest
 
-import libjay
-from libjay import JayError, apl, j
+import jay
+from jay import JayError, apl, j
 
 
 class TestOneShot:
@@ -101,7 +101,7 @@ class TestDialect:
         assert apl.compile("⍳3", index_origin=0)().tolist() == [0, 1, 2]
 
     def test_create_compiler(self):
-        from libjay.lang import APL
+        from jay.lang import APL
 
         c = APL.create_compiler(APL.Dialect(index_base=0))
         assert c("⍳3").tolist() == [0, 1, 2]
@@ -127,4 +127,4 @@ class TestModuleShape:
         # Callable singletons with .compile, like re.match/re.compile.
         assert callable(j) and callable(j.compile)
         assert callable(apl)
-        assert libjay.compile("2+2", lang="j")() == 4
+        assert jay.compile("2+2", lang="j")() == 4

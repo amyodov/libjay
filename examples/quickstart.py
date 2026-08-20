@@ -1,7 +1,7 @@
 """The Python API end to end. Run: python quickstart.py"""
 
-import libjay
-from libjay import apl, j
+import jay
+from jay import apl, j
 
 # One-shot: compile + bind + execute.
 print(j("+/ 1 2 3 4"))                     # 10
@@ -13,7 +13,7 @@ print(apl("+/2 3⍴⍳6").tolist())            # [6, 15]    — trailing axis
 print(apl("+⌿2 3⍴⍳6").tolist())            # [5, 7, 9]  — leading again
 
 # Compile once, bind data, run many times.
-k = libjay.j.compile("+/ {weights} * {data}")
+k = jay.j.compile("+/ {weights} * {data}")
 k1 = k.bind({"weights": [0.5, 0.25, 0.25]})
 print(k1({"data": [10.0, 20.0, 30.0]}))    # 17.5
 print(k1({"data": [4.0, 8.0, 8.0]}))       # 6.0
@@ -24,5 +24,5 @@ print(j("x =. 1 2 3 4\n(>./ x) - <./ x"))  # 3 — the range
 # Errors point into the expression.
 try:
     j("1 2 + 1 2 3")
-except libjay.JayError as e:
+except jay.JayError as e:
     print(e)

@@ -32,11 +32,11 @@ test = [
 Repository = "https://github.com/amyodov/libjay"
 
 [project.scripts]
-libjay = "libjay._cli:main"
+libjay = "jay._cli:main"
 
 [tool.maturin]
 manifest-path = "crates/libjay-python/Cargo.toml"
-module-name = "libjay._jay"
+module-name = "jay._jay"
 python-source = "python"
 features = ["pyo3/extension-module"]
 

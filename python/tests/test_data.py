@@ -5,8 +5,8 @@ import gc
 
 import pytest
 
-import libjay
-from libjay import JayError, j
+import jay
+from jay import JayError, j
 
 
 class TestNumpy:
@@ -85,7 +85,7 @@ class TestNumpy:
 
     def test_keepalive_across_deletion(self):
         a = self.np.arange(1000, dtype=self.np.int64)
-        kernel = libjay.j.compile("+/ {x}", {"x": a})
+        kernel = jay.j.compile("+/ {x}", {"x": a})
         borrowed = j("] {x}", {"x": a})
         del a
         gc.collect()
@@ -167,7 +167,7 @@ class TestPolars:
 
     def test_dataframe_in_one_call(self):
         df = self.pl.DataFrame({"a": [1.0, 2.0], "b": [10.0, 20.0]})
-        assert libjay.j("+/ {df}", {"df": df}).tolist() == [3.0, 30.0]
+        assert jay.j("+/ {df}", {"df": df}).tolist() == [3.0, 30.0]
 
     def test_single_column_frame_is_a_vector(self):
         df = self.pl.DataFrame({"a": [1, 2, 3]})
