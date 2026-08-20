@@ -1,7 +1,7 @@
 [package]
 name = "libjay"
 description = "Independent, modern implementations of the J and APL array languages: parallel and vectorized, embeddable from Rust, Python, and C"
-readme = "../../README.md"
+readme = "README.md"
 keywords = ["j", "apl", "array", "vectorization", "language"]
 categories = ["compilers", "mathematics", "science"]
 version.workspace = true

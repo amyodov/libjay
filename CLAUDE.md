@@ -7,6 +7,9 @@ parallel. The interface model is PCRE: compile/execute split, heavy
 optimisation inside, a thin boring surface outside. Not a DataFrame library,
 not a framework; the string is the interface. Performance is measured against
 Polars and numba; language coverage is a goal in itself, not a by-product.
+(The "not a DataFrame library" expectation-setting lives in the
+Python-facing docs, not the root README's opening — owner decision
+2026-08-20, superseding the original §1.2 placement.)
 
 This file is the project's decision record. It stays short because it is
 loaded into every session; prune sections once code, tests, or docs carry
@@ -190,6 +193,24 @@ Choices made during implementation, with reasoning. No entry = still open.
   before only `+ × ⌈ ⌊ ∧ ∨` did. The deliberate dialect differences are a
   KNOWN_DIVERGENCES list in that file, asserted to STAY divergent, and a
   "Differences from GNU APL" subsection in docs/coverage.md.
+
+- 2026-08-20 — Expression fusion (delegated, IR design): a compile-time pass
+  (`fuse.rs`, run where Program is assembled) replaces a maximal subtree of
+  elementwise primitives with `Expr::Fused` — a postfix kernel over
+  cache-sized block buffers (8,192 elements; measured flat from 2K to 32K),
+  parallel across blocks, absorbing a full-rank `+/ * / <./ >./` over a
+  vector into the same pass. NumExpr-shaped, not codegen. Only verbs that
+  cannot fail elementwise join a kernel (no `%:`, `^.`, `^`, APL `÷`, APL
+  `~`), the arguments must have identical shapes with rank-0 broadcast, and
+  one working type (i64 or f64, chosen by replaying the promotion rules over
+  the program) must hold every value; anything else — a frame needing
+  agreement, a narrowing dtype, an integer overflow — falls back to the
+  original subtree, which the node keeps, so results and error messages
+  cannot change and leaves must be replayable (no echo/assignment inside).
+  Fused maps are bit-identical to unfused ones; a fused reduce regroups as
+  §5.9 allows. 20M rows: `+/ w * x` 67.5→14.6 ms, one-sentence std
+  221.6→38.3, `+/ ^ x` 72.2→33.0, Bollinger z-score 675→437 (numbers and
+  what remains in bench/README.md).
 
 Open: pure-expression assertion flag; primitive ordering; complex column naming;
 sandbox surfacing; FFT-class operations.

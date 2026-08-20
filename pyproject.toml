@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "libjay"
 description = "Independent, modern implementations of the J and APL array languages: parallel and vectorized, embeddable from Rust, Python, and C"
-readme = "README.md"
+readme = "python/README.md"
 license = "MIT"
 authors = [{ name = "Alex Myodov", email = "amyodov@gmail.com" }]
 requires-python = ">=3.10"
