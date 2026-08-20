@@ -123,14 +123,17 @@ Early. What exists today: both frontends over one IR; arithmetic, reduction
 (with the leading/trailing axis semantics of each language), the rank
 operator (J `"`, APL `⍤`), iota/index origin, reshape/transpose/take/drop,
 assignment and multi-sentence programs, `echo`/`⎕←`, the CLI, the Arrow
-data boundary above, a C ABI (`docs/embedding.md`), and multithreaded
-execution with honest benchmarks against Polars and numba (`bench/`). A
-growing primitive set is differential-tested against the reference J
-implementation, run as a black-box subprocess. Dense numeric arrays only;
-things the languages have but libjay doesn't yet (boxes, nested arrays, …)
-fail with an explicit "not supported yet".
+data boundary above, a C ABI (`docs/embedding.md`), multithreaded execution,
+and time series: scans (`+/\`, APL `f\`), moving windows (`20 +/\ y`),
+replicate/compress, circle (trig) functions, power/converge (`^:`/`⍣`). A
+20-period Bollinger z-score written as one J kernel beats the equivalent
+Polars pipeline on 20M rows while agreeing with it to 1e-9 (`bench/`). The
+primitive set is differential-tested against the reference J implementation
+run as a black-box subprocess — currently 2375 expressions, 100% agreement.
+Dense numeric arrays only; things the languages have but libjay doesn't yet
+(boxes, nested arrays, …) fail with an explicit "not supported yet".
 
-Next on the roadmap: time-series primitives (windows, scan), SIMD, GPU.
+Next on the roadmap: more of both languages, expression fusion, SIMD, GPU.
 Deeper documentation lives in `docs/`.
 
 ## License

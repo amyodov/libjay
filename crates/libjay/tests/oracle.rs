@@ -327,6 +327,109 @@ fn fixed_corpus_matches_reference() {
         "/: 1 1 1",
         "\\: 1 1 1",
         "1 2 3 4 5 /: \\: 1 2 3 4 5",
+        // scans (prefixes)
+        "+/\\ 1 2 3",
+        "*/\\ 1 2 3 4",
+        "-/\\ 1 2 3 4",
+        "<./\\ 3 1 4 1 5",
+        ">./\\ 3 1 4 1 5",
+        "%/\\ 1 2 3 4",
+        "+/\\ i. 2 3",
+        "+/\\ i. 0",
+        "+/\\ 5",
+        "$ +/\\ 5",
+        "#\\ 1 2 3",
+        "(+/ % #)\\ 1 2 3",
+        "+/\\ 1 0 1",
+        // suffixes
+        "+/\\. 1 2 3",
+        "-/\\. 1 2 3 4",
+        "+/\\. i. 2 3",
+        "$ +/\\. i. 0",
+        // moving windows
+        "3 +/\\ 1 2 3 4 5",
+        "2 +/\\ 1 2 3 4 5",
+        "1 +/\\ 1 2 3",
+        "0 +/\\ 1 2 3 4 5",
+        "0 <./\\ 1 2 3",
+        "$ 0 +/\\ i. 0",
+        "5 +/\\ 1 2 3 4",
+        "$ 9 +/\\ 1 2 3",
+        "$ 3 +/\\ i. 2 3",
+        "$ 3 -/\\ 1 2",
+        "_2 +/\\ 1 2 3 4 5",
+        "_3 +/\\ 1 2 3 4 5 6 7",
+        "_9 +/\\ 1 2 3",
+        "_1 +/\\ 1 2 3",
+        "3 +/\\ i. 4 3",
+        "_2 +/\\ i. 4 3",
+        "2 <./\\ 3 1 4 1 5",
+        "3 >./\\ 3 1 4 1 5",
+        "3 */\\ 1 2 3 4 5",
+        "_2 */\\ 1 2 3 4 5",
+        "2 %/\\ 1 2 3 4",
+        "2 3 4 -/\\ 1 2 3",
+        "3 (+/ % #)\\ 1 2 3 4 5",
+        "3 #\\ 1 2 3 4 5",
+        "2 +/\\ 5",
+        // commute
+        "+~ 3",
+        "2 -~ 5",
+        "%~ 4",
+        "3 %~ 12",
+        "-~ 1 2 3",
+        "2 3 +~ 4 5",
+        "<~ 1 2 3",
+        "2 %~ 8",
+        // power
+        "+:^:3 (1)",
+        "+:^:0 (5)",
+        "2 +^:3 (5)",
+        "2 *^:4 (1)",
+        "%:^:_ (100)",
+        "%:^:_ (0.5)",
+        "%:^:_ (1)",
+        "%:^:_ (0)",
+        "%:^:3 (100)",
+        "$ +:^:2 (1 2 3)",
+        "+:^:2 (1 2 3)",
+        // circle functions
+        "o. 1",
+        "o. 0 1 2",
+        "0 o. 0.5",
+        "1 o. 0.5",
+        "2 o. 0.5",
+        "3 o. 0.5",
+        "4 o. 0.5",
+        "5 o. 0.5",
+        "6 o. 0.5",
+        "7 o. 0.5",
+        "_1 o. 0.5",
+        "_2 o. 0.5",
+        "_3 o. 0.5",
+        "_4 o. 2",
+        "_4 o. _2",
+        "_5 o. 0.5",
+        "_6 o. 2",
+        "_7 o. 0.5",
+        "_7 o. 1",
+        "1 o. 0",
+        "1 2 3 o. 1",
+        "2 o. o. 1",
+        // replicate
+        "1 0 1 # 1 2 3",
+        "2 0 1 # 1 2 3",
+        "1 # 1 2 3",
+        "2 # 1 2 3",
+        "0 # 1 2 3",
+        "$ 0 # 1 2 3",
+        "1 0 # i. 2 3",
+        "2 # i. 2 3",
+        "2 3 # 1 2",
+        "2 # 5",
+        "$ 2 # 5",
+        "1 0 1 # 'abc'",
+        "0 0 0 # 1 2 3",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -359,6 +462,9 @@ fn generated_corpus_matches_reference() {
         "-", "*", "|", "<.", ">.", "+/", ">./", "<./", "#", "$", ",", "|:", "|.", "~.", "{:",
         "}:", "<:", ">:", "+:", "*:", "-.", "-:", "/:", "\\:",
     ];
+    // Verbs whose reduction folds a window or a prefix without leaving the
+    // reals, whatever small integers it is given.
+    let folds = ["+", "*", "<.", ">."];
     let mut exprs = Vec::new();
     for _ in 0..300 {
         let n = 1 + (rng() % 5) as usize;
@@ -373,6 +479,20 @@ fn generated_corpus_matches_reference() {
             1 => format!("i. {} {}", 1 + rng() % 3, 1 + rng() % 4),
             _ => format!("{} 4 $ {}", 1 + rng() % 3, vec.join(" ")),
         };
+        // A noun with at least five items, so a window of 1 to 4 always has
+        // both the full and the short cases available.
+        let long = match rng() % 3 {
+            0 => format!("i. {}", 5 + rng() % 4),
+            1 => format!("{} 3 $ i. 12", 5 + rng() % 3),
+            _ => format!("{} 4 $ {}", 5 + rng() % 4, vec.join(" ")),
+        };
+        let fold = |r: u64| folds[(r % folds.len() as u64) as usize];
+        exprs.push(format!("{} +/\\ {long}", 1 + rng() % 4));
+        exprs.push(format!("{}/\\ {long}", fold(rng())));
+        exprs.push(format!("{}/\\. {long}", fold(rng())));
+        exprs.push(format!("{} {}/\\ {long}", 1 + rng() % 4, fold(rng())));
+        exprs.push(format!("_{} {}/\\ {long}", 1 + rng() % 4, fold(rng())));
+        exprs.push(format!("{}~ {noun}", dyads[(rng() % dyads.len() as u64) as usize]));
         let expr = match rng() % 4 {
             0 => format!("{} {}", monads[(rng() % monads.len() as u64) as usize], noun),
             1 => {

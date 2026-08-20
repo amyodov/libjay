@@ -80,6 +80,8 @@ pub enum ScalarMonad {
     Square,
     /// Natural logarithm (J `^.`, APL `⍟`); always float.
     Ln,
+    /// `pi * y` (J/APL monadic `o.` / `○`); always float.
+    Pi,
 }
 
 /// Elementwise dyadic operations (cell ranks 0 0).
@@ -111,6 +113,10 @@ pub enum ScalarDyad {
     Log,
     /// `x %: y`: the x-th root of y; always float.
     Root,
+    /// `k o. y` / `k ○ y`: the circle function selected by the integer k —
+    /// the trigonometric, hyperbolic and inverse families, plus the two
+    /// Pythagorean forms at 0 and 4. Always float.
+    Circle,
 }
 
 /// Monadic meaning of a primitive.
@@ -191,6 +197,9 @@ pub enum DyadOp {
     NotMatch,
     /// x /: y and x \: y: x's items reordered by the grade of y's items.
     GradeSelect { down: bool },
+    /// `x # y` (J), `x/y` and `x⌿y` (APL): item i of y repeated x[i] times.
+    /// A one-element x applies to every item.
+    Copy,
     NotYet(&'static str),
     None,
 }
@@ -205,6 +214,35 @@ pub struct Prim {
     pub ranks: [i64; 3],
 }
 
+/// Which windowed application a [`Verb::Windowed`] performs. One variant
+/// covers all three because the work is the same: the verb is applied to a
+/// run of consecutive items, and only the choice of runs differs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowKind {
+    /// J `u\`: the monad applies u to every prefix, the dyad `x u\ y` to
+    /// every window of x items.
+    Prefix,
+    /// J `u\.`: the monad applies u to every suffix; the dyad (outfix) is
+    /// not implemented.
+    Suffix,
+    /// APL `f\` and `f⍀`: the monad is the scan, which is the prefix
+    /// application. APL has no dyadic scan — `x\y` is expand, a function of
+    /// its own — so the dyad reports that instead.
+    Scan,
+}
+
+/// How many times a [`Verb::PowerN`] applies its verb.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Power {
+    /// Exactly `n` applications; 0 is the identity.
+    Times(u64),
+    /// Iterate until a result matches the one before it (J `u^:_`).
+    Converge,
+}
+
+/// Iterations `Power::Converge` allows before giving up.
+const CONVERGE_LIMIT: usize = 1 << 20;
+
 /// A verb: primitive or derived. Language-agnostic; frontends decide which
 /// combinations their syntax produces (e.g. APL `+/` becomes
 /// `Rank(Reduce(+), [1,1,1])` — reduce the last axis).
@@ -215,6 +253,13 @@ pub enum Verb {
     Rank(Box<Verb>, [i64; 3]),
     /// Insert the verb between items, folding right to left (J `/`, APL `⌿`).
     Reduce(Box<Verb>),
+    /// Apply the verb to runs of consecutive items (J `\` and `\.`, APL
+    /// `\` and `⍀`). The valence chooses the runs; see [`WindowKind`].
+    Windowed(Box<Verb>, WindowKind),
+    /// J `u~`, APL `u⍨`: monad `u~ y` = `y u y`; dyad `x u~ y` = `y u x`.
+    Commute(Box<Verb>),
+    /// J `u^:n`, APL `u⍣n`: apply the verb n times, or to convergence.
+    PowerN(Box<Verb>, Power),
     /// (f g h) y = (f y) g (h y);  x (f g h) y = (x f y) g (x h y).
     Fork(Box<Verb>, Box<Verb>, Box<Verb>),
     /// (n g h) y = n g (h y);  x (n g h) y = n g (x h y).
@@ -231,6 +276,9 @@ impl Verb {
         match self {
             Verb::Prim(p) => p.ranks,
             Verb::Rank(_, r) => *r,
+            // `x u\ y` takes one window size per application, so the left
+            // cell is an atom: a list of sizes frames the result, as in J.
+            Verb::Windowed(_, WindowKind::Prefix) => [RANK_INF, 0, RANK_INF],
             _ => [RANK_INF, RANK_INF, RANK_INF],
         }
     }
@@ -241,6 +289,11 @@ impl Verb {
             Verb::Prim(p) => p.name.to_string(),
             Verb::Rank(v, r) => format!("{}\"{}", v.name(), rank_str(*r)),
             Verb::Reduce(v) => format!("{}/", v.name()),
+            Verb::Windowed(v, WindowKind::Suffix) => format!("{}\\.", v.name()),
+            Verb::Windowed(v, _) => format!("{}\\", v.name()),
+            Verb::Commute(v) => format!("{}~", v.name()),
+            Verb::PowerN(v, Power::Converge) => format!("{}^:_", v.name()),
+            Verb::PowerN(v, Power::Times(n)) => format!("{}^:{n}", v.name()),
             Verb::Fork(f, g, h) => format!("({} {} {})", f.name(), g.name(), h.name()),
             Verb::NounFork(_, g, h) => format!("(n {} {})", g.name(), h.name()),
             Verb::Hook(f, g) => format!("({} {})", f.name(), g.name()),
@@ -255,7 +308,11 @@ impl Verb {
     pub fn is_pure(&self) -> bool {
         match self {
             Verb::Prim(p) => !matches!(p.monad, MonadOp::Echo),
-            Verb::Rank(v, _) | Verb::Reduce(v) => v.is_pure(),
+            Verb::Rank(v, _)
+            | Verb::Reduce(v)
+            | Verb::Windowed(v, _)
+            | Verb::Commute(v)
+            | Verb::PowerN(v, _) => v.is_pure(),
             Verb::Fork(f, g, h) => f.is_pure() && g.is_pure() && h.is_pure(),
             Verb::NounFork(_, g, h) | Verb::Hook(g, h) | Verb::Atop(g, h) => {
                 g.is_pure() && h.is_pure()
@@ -298,6 +355,11 @@ impl Verb {
                 assemble(&frame, cells, span)
             }
             Verb::Reduce(v) => reduce(v, y, ctx, span),
+            Verb::Windowed(v, kind) => {
+                runs(v, y, *kind == WindowKind::Suffix, ctx, span)
+            }
+            Verb::Commute(v) => v.dyad(y, y, ctx, span),
+            Verb::PowerN(v, p) => power(v, *p, None, y, ctx, span),
             Verb::Fork(f, g, h) => {
                 let l = f.monad(y, ctx, span)?;
                 let r = h.monad(y, ctx, span)?;
@@ -322,7 +384,17 @@ impl Verb {
     pub fn dyad(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         match self {
             Verb::Prim(_) | Verb::Rank(_, _) => self.dyad_ranked(x, y, ctx, span),
-            Verb::Reduce(_) => Err(Error::not_yet("windowed reduction (x f/ y)", span)),
+            // `x u\ y` needs the frame machinery: its left cell is an atom.
+            Verb::Windowed(_, WindowKind::Prefix) => self.dyad_ranked(x, y, ctx, span),
+            Verb::Windowed(_, WindowKind::Suffix) => {
+                Err(Error::not_yet("outfix (x u\\. y)", span))
+            }
+            Verb::Windowed(_, WindowKind::Scan) => {
+                Err(Error::not_yet("dyadic scan (x f\\ y)", span))
+            }
+            Verb::Commute(v) => v.dyad(y, x, ctx, span),
+            Verb::PowerN(v, p) => power(v, *p, Some(x), y, ctx, span),
+            Verb::Reduce(_) => Err(Error::not_yet("table (x u/ y)", span)),
             Verb::Fork(f, g, h) => {
                 let l = f.dyad(x, y, ctx, span)?;
                 let r = h.dyad(x, y, ctx, span)?;
@@ -375,6 +447,7 @@ impl Verb {
         match self {
             Verb::Prim(p) => dyad_op(p, x, y, ctx.cfg.agreement, span),
             Verb::Rank(v, _) => v.dyad(x, y, ctx, span),
+            Verb::Windowed(v, _) => infix(v, x, y, ctx, span),
             _ => Err(Error::internal("dyad_cell on a verb without cell ranks")),
         }
     }
@@ -876,7 +949,85 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, span: Span) -> Result<f64> {
             }
             b.powf(1.0 / a)
         }
+        Circle => return circle(a, b, span),
         _ => return Err(Error::internal("non-arithmetic op in the float path")),
+    })
+}
+
+/// `k o. y`: the circle function k applied to y.
+///
+/// The table is J's and APL's alike (they share it): 1 2 3 are sine, cosine
+/// and tangent, 5 6 7 their hyperbolic counterparts, a negative k inverts the
+/// function at |k|, and 0 and 4 are the two Pythagorean forms. The functions
+/// that would leave the reals report the same "complex numbers" gap as `%:`
+/// of a negative number; the k values that only mean something for a complex
+/// argument (8..12 and their negatives) are named as their own gap.
+#[inline]
+fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
+    if k.fract() != 0.0 {
+        return Err(Error::domain("the circle function needs an integer left argument", span));
+    }
+    let complex = || Error::not_yet("complex numbers", span);
+    Ok(match k as i64 {
+        0 => {
+            if y.abs() > 1.0 {
+                return Err(complex());
+            }
+            (1.0 - y * y).max(0.0).sqrt()
+        }
+        1 => y.sin(),
+        2 => y.cos(),
+        3 => y.tan(),
+        4 => (1.0 + y * y).sqrt(),
+        5 => y.sinh(),
+        6 => y.cosh(),
+        7 => y.tanh(),
+        -1 => {
+            if y.abs() > 1.0 {
+                return Err(complex());
+            }
+            y.asin()
+        }
+        -2 => {
+            if y.abs() > 1.0 {
+                return Err(complex());
+            }
+            y.acos()
+        }
+        -3 => y.atan(),
+        -4 => {
+            if y.abs() < 1.0 {
+                return Err(complex());
+            }
+            // The sign follows y: `_4 o. _2` is `_1.73205`, not `1.73205`.
+            y.signum() * (y * y - 1.0).max(0.0).sqrt()
+        }
+        -5 => y.asinh(),
+        -6 => {
+            if y < 1.0 {
+                return Err(complex());
+            }
+            y.acosh()
+        }
+        -7 => {
+            if y.abs() > 1.0 {
+                return Err(complex());
+            }
+            y.atanh()
+        }
+        other => {
+            return Err(Error::not_yet(
+                match other {
+                    8 | -8 => "circle function 8 (complex)",
+                    9 | -9 => "circle function 9 (complex)",
+                    10 | -10 => "circle function 10 (complex)",
+                    11 | -11 => "circle function 11 (complex)",
+                    12 | -12 => "circle function 12 (complex)",
+                    _ => "that circle function",
+                },
+                span,
+            ));
+        }
     })
 }
 
@@ -1210,7 +1361,7 @@ fn scalar_dyad_data(
         return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
     }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
-    if t == DType::I64 && !matches!(op, DivJ | DivApl | Log | Root) {
+    if t == DType::I64 && !matches!(op, DivJ | DivApl | Log | Root | Circle) {
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
         let xs = borrow_i64(x, &mut tx);
         let ys = borrow_i64(y, &mut ty);
@@ -1354,6 +1505,10 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
         Halve => {
             let v = as_f64(d, &mut tmp, span)?;
             Data::F64(par::map(v, |&x| x / 2.0).into())
+        }
+        Pi => {
+            let v = as_f64(d, &mut tmp, span)?;
+            Data::F64(par::map(v, |&x| std::f64::consts::PI * x).into())
         }
         Ln => {
             let v = as_f64(d, &mut tmp, span)?;
@@ -1858,6 +2013,40 @@ fn catenate(x: &Array, y: &Array, leading: bool, span: Span) -> Result<Array> {
     Ok(Array::new(shape, data))
 }
 
+/// `x # y`: item i of y appears x[i] times. Only a scalar x is extended to
+/// every item — a one-element vector is a length error, as in J.
+fn copy_items(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let counts = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("replication counts must be integers", span))?;
+    if counts.iter().any(|&c| c < 0) {
+        return Err(Error::domain("replication counts must be nonnegative", span));
+    }
+    let n = y.items();
+    let m = y.item_size();
+    let per = if x.rank() == 0 { vec![counts[0]; n] } else { counts };
+    if per.len() != n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{} replication count(s) for {n} item(s)", per.len()),
+            Some(span),
+        ));
+    }
+    let total: usize = per.iter().map(|&c| c as usize).sum();
+    let mut data = Data::empty(y.dtype());
+    for (i, &c) in per.iter().enumerate() {
+        for _ in 0..c {
+            for k in 0..m {
+                push_elem(&mut data, &y.data, i * m + k);
+            }
+        }
+    }
+    // A scalar argument has one item, so replicating it yields a vector.
+    let mut shape = if y.rank() == 0 { vec![1] } else { y.shape.clone() };
+    shape[0] = total;
+    Ok(Array::new(shape, data))
+}
+
 /// Monadic meaning of a primitive, applied to one cell.
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     match p.monad {
@@ -1938,6 +2127,29 @@ fn reshape(x: &Array, y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(shape, data))
 }
 
+/// A take or drop that only touches the leading axis moves a run of whole
+/// items, which is a slice of the buffer rather than an element-by-element
+/// walk. `keep` is the items to end up with, `from` the first of them.
+fn leading_run(y: &Array, counts: &[i64], drop: bool) -> Option<Array> {
+    if y.rank() == 0 || counts.is_empty() || counts[1..].iter().any(|&c| c != 0) {
+        return None;
+    }
+    let n = y.items();
+    let k = counts[0];
+    let a = k.unsigned_abs() as usize;
+    let (lo, keep) = if drop {
+        let a = a.min(n);
+        if k >= 0 { (a, n - a) } else { (0, n - a) }
+    } else {
+        // An overtake has to produce fills, which is not a slice.
+        if a > n {
+            return None;
+        }
+        if k >= 0 { (0, a) } else { (n - a, a) }
+    };
+    Some(section(y, lo, lo + keep))
+}
+
 fn take(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let counts = axis_counts(x, "take", span)?;
     let promoted;
@@ -1950,6 +2162,9 @@ fn take(x: &Array, y: &Array, span: Span) -> Result<Array> {
     };
     if counts.len() > base.rank() {
         return Err(Error::not_yet("take with more axes than the rank", span));
+    }
+    if let Some(run) = leading_run(base, &counts, false) {
+        return Ok(run);
     }
     let mut out_shape = base.shape.clone();
     for (a, &k) in counts.iter().enumerate() {
@@ -1999,6 +2214,9 @@ fn drop_(x: &Array, y: &Array, span: Span) -> Result<Array> {
     if counts.len() > base.rank() {
         return Err(Error::not_yet("drop with more axes than the rank", span));
     }
+    if let Some(run) = leading_run(base, &counts, true) {
+        return Ok(run);
+    }
     let mut out_shape = base.shape.clone();
     let mut offset = vec![0usize; base.rank()];
     for (a, &k) in counts.iter().enumerate() {
@@ -2042,6 +2260,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, mode: Agreement, span: Span) -> Resul
         DyadOp::Match => Ok(Array::scalar_bool(arrays_match(x, y))),
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y))),
         DyadOp::GradeSelect { down } => grade_select(x, y, down, span),
+        DyadOp::Copy => copy_items(x, y, span),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -2271,6 +2490,481 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         acc = v.dyad(&y.item(i), &acc, ctx, span)?;
     }
     Ok(acc)
+}
+
+// ------------------------------------------------- windows, scans, power
+
+/// The elementwise operation a windowed verb folds with, when the verb is
+/// exactly a reduction by a scalar primitive. The fast paths below apply
+/// only then: they fold whole items at full rank, which is what `u/` does
+/// and what any other spelling (a rank wrapper, a train) does not.
+fn folded_op(u: &Verb) -> Option<ScalarDyad> {
+    let Verb::Reduce(inner) = u else { return None };
+    let Verb::Prim(p) = &**inner else { return None };
+    match p.dyad {
+        DyadOp::Scalar(op) => Some(op),
+        _ => None,
+    }
+}
+
+/// Items `lo .. hi` of `y`, sharing its buffer where the buffer allows.
+fn section(y: &Array, lo: usize, hi: usize) -> Array {
+    let m = y.item_size();
+    let mut shape = y.shape.clone();
+    shape[0] = hi - lo;
+    Array::new(shape, y.data.slice(lo * m, hi * m))
+}
+
+/// `y` with a leading axis: a scalar is one item, which is how both
+/// languages count the items of a rank-0 argument.
+fn as_items(y: &Array) -> Option<Array> {
+    (y.rank() == 0).then(|| Array::new(vec![1], y.data.clone()))
+}
+
+/// Running fold over `n` items of `m` elements each, one output item per
+/// step. Backward is exactly the insert's right-to-left order, so it holds
+/// for any step; forward is the left-to-right order, which agrees with the
+/// insert only when the step is associative. None when a step left the
+/// element type.
+fn scan_flat<T, F>(v: &[T], n: usize, m: usize, back: bool, step: F) -> Option<Vec<T>>
+where
+    T: Copy + Default,
+    F: Fn(T, T) -> (T, bool),
+{
+    if m == 1 {
+        // One element per item is the shape a time series has, and it is
+        // the one worth keeping the accumulator in a register for.
+        let mut out = vec![T::default(); n];
+        let mut over = false;
+        if back {
+            let mut acc = v[n - 1];
+            out[n - 1] = acc;
+            for (slot, &x) in out[..n - 1].iter_mut().zip(&v[..n - 1]).rev() {
+                let (r, o) = step(x, acc);
+                acc = r;
+                over |= o;
+                *slot = acc;
+            }
+        } else {
+            let mut acc = v[0];
+            out[0] = acc;
+            for (slot, &x) in out[1..n].iter_mut().zip(&v[1..n]) {
+                let (r, o) = step(acc, x);
+                acc = r;
+                over |= o;
+                *slot = acc;
+            }
+        }
+        return (!over).then_some(out);
+    }
+    let mut out = vec![T::default(); n * m];
+    let mut acc = vec![T::default(); m];
+    let mut over = false;
+    if back {
+        acc.copy_from_slice(&v[(n - 1) * m..n * m]);
+        out[(n - 1) * m..n * m].copy_from_slice(&acc);
+        for i in (0..n - 1).rev() {
+            for (j, slot) in acc.iter_mut().enumerate() {
+                let (r, o) = step(v[i * m + j], *slot);
+                *slot = r;
+                over |= o;
+            }
+            out[i * m..i * m + m].copy_from_slice(&acc);
+        }
+    } else {
+        acc.copy_from_slice(&v[..m]);
+        out[..m].copy_from_slice(&acc);
+        for i in 1..n {
+            for (j, slot) in acc.iter_mut().enumerate() {
+                let (r, o) = step(*slot, v[i * m + j]);
+                *slot = r;
+                over |= o;
+            }
+            out[i * m..i * m + m].copy_from_slice(&acc);
+        }
+    }
+    (!over).then_some(out)
+}
+
+fn scan_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, back: bool) -> Option<Vec<i64>> {
+    use ScalarDyad::*;
+    match op {
+        Add => scan_flat(v, n, m, back, i64::overflowing_add),
+        Sub => scan_flat(v, n, m, back, i64::overflowing_sub),
+        Mul => scan_flat(v, n, m, back, i64::overflowing_mul),
+        Min => scan_flat(v, n, m, back, |a: i64, b: i64| (a.min(b), false)),
+        Max => scan_flat(v, n, m, back, |a: i64, b: i64| (a.max(b), false)),
+        _ => None,
+    }
+}
+
+fn scan_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize, back: bool) -> Option<Vec<f64>> {
+    use ScalarDyad::*;
+    match op {
+        Add => scan_flat(v, n, m, back, |a: f64, b: f64| (a + b, false)),
+        Sub => scan_flat(v, n, m, back, |a: f64, b: f64| (a - b, false)),
+        Mul => scan_flat(v, n, m, back, |a: f64, b: f64| (a * b, false)),
+        Min => scan_flat(v, n, m, back, |a: f64, b: f64| (a.min(b), false)),
+        Max => scan_flat(v, n, m, back, |a: f64, b: f64| (a.max(b), false)),
+        _ => None,
+    }
+}
+
+/// The scan of a numeric buffer in one pass. None means this path does not
+/// apply. Integer overflow anywhere widens the whole result to float, which
+/// is what the per-prefix reduction would also produce.
+fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Option<Data> {
+    use ScalarDyad::*;
+    if !matches!(op, Add | Sub | Mul | Min | Max) {
+        return None;
+    }
+    let widened = |v: &[i64]| {
+        let f: Vec<f64> = v.iter().map(|&x| x as f64).collect();
+        Data::F64(scan_f64(op, &f, n, m, back).expect("the float scan cannot overflow").into())
+    };
+    let ints = |v: &[i64]| match scan_i64(op, v, n, m, back) {
+        Some(out) => Data::I64(out.into()),
+        None => widened(v),
+    };
+    match d {
+        Data::F64(v) => Some(Data::F64(scan_f64(op, v, n, m, back)?.into())),
+        Data::I64(v) => Some(ints(v)),
+        Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
+        Data::Char(_) => None,
+    }
+}
+
+/// Fold every window of `w` consecutive items into one item.
+///
+/// The items are cut into blocks of `w`. Within a block the running folds
+/// from its start and from its end are computed once each, and then every
+/// window is either one whole block or one block's suffix combined with the
+/// next block's prefix. That is two steps per element with no accumulator
+/// running longer than `w` of them, so the float error of a window is the
+/// error of computing that window on its own — a cumulative sum over the
+/// whole argument, differenced, would instead carry the drift of the entire
+/// series into every window.
+///
+/// `step` has to be associative: the grouping is not the insert's own. The
+/// float reassociation is the §5.9 contract, the same one reduction takes.
+/// None when a step left the element type.
+fn window_fold<T, F>(v: &[T], n: usize, m: usize, w: usize, step: F) -> Option<Vec<T>>
+where
+    T: Copy + Default + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    debug_assert!(w >= 1 && n >= w);
+    if m == 1 {
+        return window_fold_flat(v, n, w, step);
+    }
+    let count = n - w + 1;
+    let mut out = vec![T::default(); count * m];
+    // Prefix folds of the current block, suffix folds of it and of the one
+    // before: `w` items each, whatever the length of the argument.
+    let mut pre = vec![T::default(); w * m];
+    let mut suf = vec![T::default(); w * m];
+    let mut prev = vec![T::default(); w * m];
+    let mut over = false;
+    for b in 0..n.div_ceil(w) {
+        let bs = b * w;
+        let be = ((b + 1) * w).min(n);
+        pre[..m].copy_from_slice(&v[bs * m..bs * m + m]);
+        for i in 1..be - bs {
+            let (o, p) = (i * m, (i - 1) * m);
+            for j in 0..m {
+                let (r, f) = step(pre[p + j], v[(bs + i) * m + j]);
+                pre[o + j] = r;
+                over |= f;
+            }
+        }
+        // Every window whose last item is in this block; its first item is
+        // either this block's start or somewhere in the block before.
+        for e in bs.max(w - 1)..be {
+            let i = e + 1 - w;
+            let (oo, po) = (i * m, (e - bs) * m);
+            if i == bs {
+                out[oo..oo + m].copy_from_slice(&pre[po..po + m]);
+            } else {
+                let so = (i + w - bs) * m;
+                for j in 0..m {
+                    let (r, f) = step(prev[so + j], pre[po + j]);
+                    out[oo + j] = r;
+                    over |= f;
+                }
+            }
+        }
+        let last = be - 1 - bs;
+        suf[last * m..last * m + m].copy_from_slice(&v[(be - 1) * m..be * m]);
+        for i in (0..last).rev() {
+            let (o, p) = (i * m, (i + 1) * m);
+            for j in 0..m {
+                let (r, f) = step(v[(bs + i) * m + j], suf[p + j]);
+                suf[o + j] = r;
+                over |= f;
+            }
+        }
+        std::mem::swap(&mut prev, &mut suf);
+    }
+    (!over).then_some(out)
+}
+
+/// [`window_fold`] for one element per item — a plain time series, and the
+/// shape worth writing the loops out for: each of the three runs over a
+/// block is a walk over one slice, so the accumulator stays in a register
+/// and nothing is bounds-checked per element.
+///
+/// A range of the output depends only on the blocks its own windows lie in,
+/// so the output splits across threads with nothing shared: a chunk starting
+/// at `lo` starts at the block holding item `lo`, and the first window it
+/// writes begins in that same block.
+fn window_fold_flat<T, F>(v: &[T], n: usize, w: usize, step: F) -> Option<Vec<T>>
+where
+    T: Copy + Default + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    let (out, ok) = par::fill(n - w + 1, |lo, part: &mut [T]| {
+        window_fold_range(v, n, w, lo, part, &step)
+    });
+    ok.then_some(out)
+}
+
+/// The windows `lo .. lo + out.len()`. False when a step left the type.
+fn window_fold_range<T, F>(v: &[T], n: usize, w: usize, lo: usize, out: &mut [T], step: &F) -> bool
+where
+    T: Copy + Default,
+    F: Fn(T, T) -> (T, bool),
+{
+    if out.is_empty() {
+        return true;
+    }
+    let hi = lo + out.len();
+    let mut pre = vec![T::default(); w];
+    let mut suf = vec![T::default(); w];
+    let mut prev = vec![T::default(); w];
+    let mut over = false;
+    let mut bs = lo / w * w;
+    // The last item any window of this chunk needs is `hi + w - 2`.
+    while bs < n && bs <= hi + w - 2 {
+        let block = &v[bs..(bs + w).min(n)];
+        let lb = block.len();
+        let mut acc = block[0];
+        pre[0] = acc;
+        for (slot, &x) in pre[1..lb].iter_mut().zip(&block[1..]) {
+            let (r, o) = step(acc, x);
+            acc = r;
+            over |= o;
+            *slot = acc;
+        }
+        // Every window of this chunk whose last item is in this block. Its
+        // first item is this block's start, or is in the block before —
+        // which is never the case in the first block a chunk touches, since
+        // that block holds item `lo` and no window here starts earlier.
+        for e in bs.max(lo + w - 1)..(bs + lb).min(hi + w - 1) {
+            let i = e + 1 - w;
+            out[i - lo] = if i == bs {
+                pre[e - bs]
+            } else {
+                let (r, o) = step(prev[i + w - bs], pre[e - bs]);
+                over |= o;
+                r
+            };
+        }
+        let mut acc = block[lb - 1];
+        suf[lb - 1] = acc;
+        for (slot, &x) in suf[..lb - 1].iter_mut().zip(&block[..lb - 1]).rev() {
+            let (r, o) = step(x, acc);
+            acc = r;
+            over |= o;
+            *slot = acc;
+        }
+        std::mem::swap(&mut prev, &mut suf);
+        bs += w;
+    }
+    !over
+}
+
+fn window_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, w: usize) -> Option<Vec<i64>> {
+    use ScalarDyad::*;
+    match op {
+        Add => window_fold(v, n, m, w, i64::overflowing_add),
+        Mul => window_fold(v, n, m, w, i64::overflowing_mul),
+        Min => window_fold(v, n, m, w, |a: i64, b: i64| (a.min(b), false)),
+        Max => window_fold(v, n, m, w, |a: i64, b: i64| (a.max(b), false)),
+        _ => None,
+    }
+}
+
+fn window_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize, w: usize) -> Option<Vec<f64>> {
+    use ScalarDyad::*;
+    match op {
+        Add => window_fold(v, n, m, w, |a: f64, b: f64| (a + b, false)),
+        Mul => window_fold(v, n, m, w, |a: f64, b: f64| (a * b, false)),
+        Min => window_fold(v, n, m, w, |a: f64, b: f64| (a.min(b), false)),
+        Max => window_fold(v, n, m, w, |a: f64, b: f64| (a.max(b), false)),
+        _ => None,
+    }
+}
+
+/// Moving windows over a numeric buffer in two passes. None means this path
+/// does not apply: only the associative arithmetic can be regrouped into
+/// blocks, so subtraction and every non-scalar verb go the general way.
+fn window_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, w: usize) -> Option<Data> {
+    use ScalarDyad::*;
+    if !matches!(op, Add | Mul | Min | Max) {
+        return None;
+    }
+    let widened = |v: &[i64]| {
+        let f: Vec<f64> = v.iter().map(|&x| x as f64).collect();
+        Data::F64(window_f64(op, &f, n, m, w).expect("the float fold cannot overflow").into())
+    };
+    let ints = |v: &[i64]| match window_i64(op, v, n, m, w) {
+        Some(out) => Data::I64(out.into()),
+        None => widened(v),
+    };
+    match d {
+        Data::F64(v) => Some(Data::F64(window_f64(op, v, n, m, w)?.into())),
+        Data::I64(v) => Some(ints(v)),
+        Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
+        Data::Char(_) => None,
+    }
+}
+
+/// `u\ y` and `u\. y`: the verb applied to every prefix, or to every suffix.
+fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let promoted = as_items(y);
+    let base = promoted.as_ref().unwrap_or(y);
+    let n = base.items();
+    let m = base.item_size();
+    if n > 0 && base.dtype().is_numeric() {
+        if let Some(op) = folded_op(u) {
+            // Folding from the right is the insert's own order, so it holds
+            // for any step; folding from the left needs associativity.
+            if back || is_associative(op) {
+                if let Some(d) = scan_typed(op, &base.data, n, m, back) {
+                    return Ok(Array::new(base.shape.clone(), d));
+                }
+            }
+        }
+    }
+    let cells = each_cell(n, n * m, u.is_pure(), ctx, |i, c| {
+        let part = if back { section(base, i, n) } else { section(base, 0, i + 1) };
+        u.monad(&part, c, span)
+    })?;
+    assemble(&[n], cells, span)
+}
+
+/// The result of a window longer than the argument holds no items, but it
+/// still has the shape of one: J learns that shape by running the verb on a
+/// window of fills, and so does this. A verb that fails on fills, or a
+/// window too large to build, leaves the result a plain empty vector.
+fn empty_windows(u: &Verb, y: &Array, w: usize, ctx: &mut Ctx<'_>, span: Span) -> Array {
+    let m = y.item_size();
+    if u.is_pure() {
+        if let Some(cells) = w.checked_mul(m).filter(|&s| s <= 1 << 20) {
+            let mut shape = y.shape.clone();
+            shape[0] = w;
+            let probe = Array::new(shape, fill_data(y.dtype(), cells));
+            if let Ok(cell) = u.monad(&probe, ctx, span) {
+                let mut shape = vec![0usize];
+                shape.extend_from_slice(&cell.shape);
+                return Array::new(shape, Data::empty(cell.dtype()));
+            }
+        }
+    }
+    Array::new(vec![0], Data::empty(DType::I64))
+}
+
+/// The window size: one integer atom.
+fn window_size(x: &Array, span: Span) -> Result<i64> {
+    let v = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("the window size must be an integer", span))?;
+    match v.as_slice() {
+        [k] => Ok(*k),
+        _ => Err(Error::new(
+            ErrorKind::Length,
+            "the window size must be a single number",
+            Some(span),
+        )),
+    }
+}
+
+/// `x u\ y`: the verb applied to runs of x items.
+///
+/// A positive x takes the overlapping windows of that length, of which there
+/// are none when the argument is shorter; a negative one takes the
+/// non-overlapping chunks of |x| items, the last of them short; and zero
+/// takes the n+1 empty runs between and around the items, which is what J
+/// does with it.
+fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let k = window_size(x, span)?;
+    let promoted = as_items(y);
+    let base = promoted.as_ref().unwrap_or(y);
+    let n = base.items();
+    let m = base.item_size();
+    if k < 0 {
+        let w = k.unsigned_abs() as usize;
+        let count = n.div_ceil(w);
+        let cells = each_cell(count, n * m, u.is_pure(), ctx, |i, c| {
+            u.monad(&section(base, i * w, ((i + 1) * w).min(n)), c, span)
+        })?;
+        return assemble(&[count], cells, span);
+    }
+    let w = k as usize;
+    if n < w {
+        return Ok(empty_windows(u, base, w, ctx, span));
+    }
+    let count = n - w + 1;
+    if w > 0 && base.dtype().is_numeric() {
+        if let Some(op) = folded_op(u) {
+            if let Some(d) = window_typed(op, &base.data, n, m, w) {
+                let mut shape = base.shape.clone();
+                shape[0] = count;
+                return Ok(Array::new(shape, d));
+            }
+        }
+    }
+    let work = count.saturating_mul(w).saturating_mul(m);
+    let cells = each_cell(count, work, u.is_pure(), ctx, |i, c| {
+        u.monad(&section(base, i, i + w), c, span)
+    })?;
+    assemble(&[count], cells, span)
+}
+
+/// `u^:n y` and `x u^:n y`: n applications of the verb, or iteration until
+/// the result stops changing.
+fn power(
+    u: &Verb,
+    p: Power,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let step = |acc: &Array, c: &mut Ctx<'_>| match x {
+        Some(x) => u.dyad(x, acc, c, span),
+        None => u.monad(acc, c, span),
+    };
+    match p {
+        Power::Times(n) => {
+            let mut acc = y.clone();
+            for _ in 0..n {
+                acc = step(&acc, ctx)?;
+            }
+            Ok(acc)
+        }
+        Power::Converge => {
+            let mut acc = y.clone();
+            for _ in 0..CONVERGE_LIMIT {
+                let next = step(&acc, ctx)?;
+                if arrays_match(&next, &acc) {
+                    return Ok(next);
+                }
+                acc = next;
+            }
+            Err(Error::domain("the iteration did not converge", span))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2633,11 +3327,13 @@ mod tests {
     #[test]
     fn dyadic_reduction_is_not_supported_yet() {
         ctx!(c);
+        // `x u/ y` is J's table (outer product), not a windowed reduction —
+        // the windows are `x u\ y`.
         let e = Verb::Reduce(b(plus()))
             .dyad(&Array::scalar_i64(2), &Array::from_i64(vec![1, 2, 3]), &mut c, sp())
             .unwrap_err();
         assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("windowed"), "{}", e.msg);
+        assert!(e.msg.contains("table"), "{}", e.msg);
     }
 
     // --------------------------------------------------------- arithmetic

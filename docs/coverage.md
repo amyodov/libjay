@@ -46,7 +46,8 @@ feature — that is a promise, not a refusal.
 | `$` | shape of | reshape (cyclic) |
 | `,` | ravel | catenate along the LEADING axis |
 | `,.` | — | stitch, exactly `,"_1` |
-| `#` | tally | — |
+| `#` | tally | replicate: item i repeated x[i] times (a scalar x applies to every item) |
+| `o.` | pi times y | circle function k (see below) |
 | `{` | — | from: each atom of x selects an item (negative from the end) |
 | `{.` | head | take (negative = from end; overtake fills) |
 | `}.` | behead | drop |
@@ -67,11 +68,17 @@ Words present with only one valence implemented say so by name: `,:`
 monadic `~:` (nub sieve), dyadic `+:` (nor), dyadic `*:` (nand), dyadic `-.`
 (less).
 
-Adverb `/` (insert/reduce, leading axis, right-to-left fold), conjunction
-`"` (rank, 1–3 atoms, `_` = infinite), `@:` (atop), `[:` (cap). Trains:
-forks `(f g h)`, noun forks `(n g h)`, hooks `(f g)`. Assignment `=.`/`=:`
-(one environment for now), multi-sentence programs, `NB.` comments,
-`'strings'`, `_`/`__` infinities, `1e_3` exponents.
+Adverbs: `/` (insert/reduce, leading axis, right-to-left fold), `\` (monad:
+`u` applied to every prefix; dyad `x u\ y`: to every window of x items — a
+negative x takes non-overlapping chunks with a short last one, zero takes
+the n+1 empty runs, and a window longer than the argument yields none),
+`\.` (monad: every suffix), `~` (commute: `u~ y` is `y u y`, `x u~ y` is
+`y u x`). Conjunctions: `"` (rank, 1–3 atoms, `_` = infinite), `@:` (atop),
+`^:` (power: `u^:n` applies u n times, `u^:_` iterates until the result
+stops changing), `[:` (cap). Trains: forks `(f g h)`, noun forks
+`(n g h)`, hooks `(f g)`. Assignment `=.`/`=:` (one environment for now),
+multi-sentence programs, `NB.` comments, `'strings'`, `_`/`__` infinities,
+`1e_3` exponents.
 
 ## APL
 
@@ -105,16 +112,45 @@ forks `(f g h)`, noun forks `(n g h)`, hooks `(f g)`. Assignment `=.`/`=:`
 | `∪` | nub: distinct items, first-occurrence order | — |
 | `⍋` `⍒` | grade up / down (stable; respects `⎕IO`) | — |
 | `⊢` `⊣` | same | right / left |
+| `○` | pi times y | circle function k (see below) |
+| `/` `⌿` | — | replicate, after an operand: `/` counts the LAST axis, `⌿` the leading one |
 
 Glyphs recognised with the missing valence named: monadic `∊` (enlist),
 dyadic `∪` (union), `∩` (intersection), monadic `≡` (depth), dyadic `⍋`/`⍒`
 (collation), `⍱`/`⍲` (nor/nand), dyadic `~` (without), monadic `⍪` (table).
 
-Operators `/` (reduce, LAST axis), `⌿` (reduce, leading axis), `⍤` (rank).
+Operators: `/` (reduce, LAST axis), `⌿` (reduce, leading axis), `\` (scan,
+last axis), `⍀` (scan, leading axis), `⍤` (rank), `⍨` (commute), `⍣`
+(power, a nonnegative count). A scan's k-th element is the reduce of the
+first k, so it folds right to left like the reduce and not like a left
+fold: `-\1 2 3` is `1 ¯1 2`.
+
+`/` and `⌿` are operators after a function and replicate after an operand;
+names are always values in this subset, so which one is meant is decided by
+the token to the left and nothing else.
+
 `←` assignment (incl. inline), `⎕←` output, `⋄` and newline sentence
 separators, `⍝` comments, `¯` negatives, `''` strings. Index origin is a
 dialect setting of the compiler instance (`⎕IO` as a variable is
 deliberately not runtime state).
+
+## The circle functions (`o.` / `○`)
+
+Both languages share one table, indexed by the left argument:
+
+| k | `k o. y` | k | `k o. y` |
+|---:|---|---:|---|
+| 0 | sqrt(1 - y²) | 4 | sqrt(1 + y²) |
+| 1 2 3 | sine, cosine, tangent | 5 6 7 | sinh, cosh, tanh |
+| ¯1 ¯2 ¯3 | arcsine, arccosine, arctangent | ¯5 ¯6 ¯7 | arsinh, arcosh, artanh |
+| ¯4 | sqrt(y² - 1), signed like y | | |
+
+Monadically the verb is `pi * y`. A k that would leave the reals (arcsine of
+2, say) reports the same "complex numbers" gap `%:` of a negative number
+does. The k values that only mean something for a complex argument (8 to 12
+and their negatives) are named individually; J gives real answers for some
+of them (`10 o. y` is the magnitude) and libjay does not implement those
+yet.
 
 ## Interpolation
 
@@ -181,5 +217,14 @@ results of rank ≥ 2.
   (J's rule) rather than one amount per column. Scalar amounts, and `⌽` in
   both valences, follow APL.
 - Grade puts NaN wherever the comparison lands rather than at a defined end.
-- No boxes / nested arrays, scan, windows, dyadic transpose, `⎕`-variables,
-  control words, verb/adverb definitions yet — all "not yet", category 2.
+- A moving window of an associative verb (`+`, `*`, `<.`, `>.`) is folded in
+  blocks rather than strictly right to left, which reorders the float
+  rounding — the same regrouping reduction already takes (§5.9). Every other
+  verb, and every prefix scan of a verb that does not associate, is folded
+  exactly as the insert would.
+- `x u/ y` (J's table, the outer product) is not implemented; the windows
+  are `x u\ y`.
+- No boxes / nested arrays, dyadic transpose, `⎕`-variables, control words,
+  verb/adverb definitions yet — all "not yet", category 2. Named on their
+  own: J's key adverb `u/.`, outfix `x u\. y`, `u^:v` and negative powers
+  (the obverse), APL expand `x\y` and `f⍣≡`, the complex circle functions.

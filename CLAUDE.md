@@ -159,7 +159,19 @@ Choices made during implementation, with reasoning. No entry = still open.
   data (cells/items) — deliberate, revisit with the layout-aware runtime.
 - 2026-08-20 — Benchmarks run in .venv-bench (Python 3.12): numba wheels for
   Intel macs stop at numba 0.61/llvmlite 0.44, so the bench venv pins
-  numba<0.62 (the dev venv stays 3.14).
+  numba<0.62 (the dev venv stays 3.14). Both venvs share
+  python/jay/_jay.abi3.so — a dev `maturin develop` silently replaces the
+  release build; rebuild --release before benchmarking.
+- 2026-08-20 — Phase 5: one `Verb::Windowed(u, kind)` covers J `u\`/`u\.`
+  (prefix/suffix monads, infix/outfix dyads) and APL scan (its third valence
+  pairing is why it isn't three variants). Window fast path is the two-pass
+  block algorithm (suffix+prefix folds per block) — O(n), uniform across
+  Add/Mul/Min/Max, and more accurate than sliding accumulators (window error
+  = error of that window alone). Oracle corrected several window edge cases
+  (x>n keeps the cell shape; x=0 gives n+1 identities; left rank 0) and the
+  `_4 o.` sign. Gate met: Bollinger z-score one-kernel beats the Polars
+  pipeline at 20M rows (687 vs 759 ms, 8.7e-10 agreement); remaining gap to
+  numba is fusion, the known next perf lever.
 
 Open: APL oracle;
 pure-expression assertion flag; primitive ordering; complex column naming;

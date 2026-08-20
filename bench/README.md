@@ -1,14 +1,22 @@
 # Benchmarks
 
 Phase 4: the first honest measurement of libjay against Polars, numba and
-numpy, and the first measurement of what threading buys.
+numpy, and the first measurement of what threading buys. Phase 5 adds the
+time-series gate at the bottom: one J expression against a multi-step
+rolling pipeline.
 
 ```sh
 uv pip install --python .venv-bench maturin
 VIRTUAL_ENV=$PWD/.venv-bench .venv-bench/bin/maturin develop --release
-.venv-bench/bin/python bench/bench.py            # the table below
+.venv-bench/bin/python bench/bench.py            # the phase-4 table
 .venv-bench/bin/python bench/sweep.py            # the threshold sweep
+.venv-bench/bin/python bench/timeseries.py       # the phase-5 gate
 ```
+
+Both virtualenvs install the extension in place, at `python/jay/_jay.abi3.so`,
+so a plain `maturin develop` from the dev environment overwrites the release
+build with a debug one. Run the release build again before measuring
+anything.
 
 `bench.py` measures the rivals in its own process and every libjay number in
 a subprocess, because the thread count is fixed the first time the pool is
@@ -146,6 +154,76 @@ the bandwidth-bound multiply. That is the trade the threshold is set to
 make. A reduction over a million elements reaches 6x on eight threads —
 more than the four cores — because the sequential fold is latency-bound and
 chunking gives the machine independent chains to interleave.
+
+## Phase 5: one expression against a rolling pipeline
+
+The phase-5 gate is a Bollinger z-score over a synthetic OHLCV close series
+— a reflected random walk in log price, 20M rows of f64, window 20:
+
+    z[i] = (close[i] - mean(close[i-19 .. i])) / std(close[i-19 .. i])
+
+Polars spells it as a rolling mean, a rolling standard deviation and the
+arithmetic between them. libjay spells it as one compiled kernel, in which
+everything is a moving sum:
+
+```j
+s =. 20 +/\ {close}
+((20 * 19 }. {close}) - s) % %: (20 * 20 +/\ *: {close}) - s * s
+```
+
+`s` is the moving sum of the closes and the second `+/\` is the moving sum
+of their squares, so the standard deviation comes out of `20Q - s²` without
+a second pass over the windows; `19 }. {close}` drops the 19 leading closes
+the windows do not cover, which is what aligns the two sides of the
+subtraction. Both moving sums take the O(n) window path.
+
+`bench/timeseries.py`, same machine, 20M rows, best of 5 after a warmup:
+
+| kernel | libjay 1 thread | libjay 8 threads | speedup | polars | numba | numba prange | numpy |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Bollinger z-score, window 20 | 1307.3 | 687.2 | 1.90x | 758.7 | 193.6 | 141.4 | 1494.5 |
+
+| LIBJAY_THREADS | time (ms) | speedup over 1 |
+|---:|---:|---:|
+| 1 | 1303.0 | 1.00x |
+| 2 | 898.5 | 1.45x |
+| 4 | 646.1 | 2.02x |
+| 8 | 661.2 | 1.97x |
+
+**The gate is met**: 687 ms against Polars' 759 ms, and the two agree to
+8.7e-10 relative over all 20M rows (the harness fails outright if they do
+not). Four physical cores again cap the scaling at 4 threads.
+
+**Where the time goes.** The kernel is about ten passes over a 160 MB
+column: the two moving sums, the squares, and seven pieces of elementwise
+arithmetic. Each pass is memory-bound at roughly 5 ms per 2M elements, and
+the moving sums cost about one and a half passes each. Polars needs four.
+libjay wins anyway because a moving sum is cheaper than a rolling
+aggregation with a null mask, and because both of its window folds are split
+across threads. Fusing the elementwise chain — still the biggest item on the
+list below — would roughly halve what is left.
+
+**Precision is the reason the window fold costs two passes.** A moving sum
+is usually written as one accumulator slid along the series, or as a
+cumulative sum differenced; both carry the drift of the whole series into
+every window. libjay instead cuts the series into blocks of the window
+length, folds each block from both ends once, and combines one block's
+suffix with the next block's prefix — so no accumulator ever runs for more
+than 20 steps and each window's error is the error of computing that window
+on its own. The harness prints what that buys, against libjay:
+
+```
+  polars        max abs 1.52e-09, max rel 8.74e-10 over |z| >= 1e-3
+  numba         max abs 3.13e-06, max rel 2.39e-06 over |z| >= 1e-3
+  numba prange  max abs 1.85e-09, max rel 1.52e-09 over |z| >= 1e-3
+  numpy         max abs 2.68e-03, max rel 1.40e-03 over |z| >= 1e-3
+```
+
+`numba` is the natural hand-rolled loop with a sliding accumulator and
+`numpy` is the cumulative-sum-and-difference spelling; both lose three to
+twelve digits by 20M rows. `numba prange` recomputes every window from
+scratch — 20x the arithmetic, and it is still the fastest thing in the
+table, which is what an unfused interpreter costs against a fused loop.
 
 ## Next
 

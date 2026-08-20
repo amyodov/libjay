@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import libjay  # noqa: E402
+import jay  # noqa: E402
 from data import best_of, checksum, make_matrix, make_vectors  # noqa: E402
 
 # The J of each scenario. Sentences are separated by newlines; the value of
@@ -29,7 +29,7 @@ SOURCE = {
 
 
 def bind(scenario: str, rows: int, mrows: int, cols: int):
-    kernel = libjay.j.compile(SOURCE[scenario])
+    kernel = jay.j.compile(SOURCE[scenario])
     if scenario == "column_sums":
         return kernel.bind({"m": make_matrix(mrows, cols)})
     w, x = make_vectors(rows)

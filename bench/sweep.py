@@ -35,7 +35,7 @@ KERNELS = {
 
 
 def measure(repeat: int) -> dict:
-    import libjay
+    import jay
 
     rng = np.random.default_rng(1)
     out = {}
@@ -43,7 +43,7 @@ def measure(repeat: int) -> dict:
         w, x = rng.random(n), rng.random(n)
         for src, params in KERNELS.items():
             data = {"w": w, "x": x}
-            kernel = libjay.j.compile(src).bind({p: data[p] for p in params})
+            kernel = jay.j.compile(src).bind({p: data[p] for p in params})
             best, _ = best_of(kernel, repeat)
             out[f"{n}|{src}"] = best
     return out

@@ -10,7 +10,9 @@ use crate::array::{Array, Data};
 use crate::error::{Error, Result, Span};
 use crate::frontend::{Segment, SourceParts};
 use crate::ir::Expr;
-use crate::verb::{DyadOp, MonadOp, Prim, ScalarDyad, ScalarMonad, Verb, RANK_INF};
+use crate::verb::{
+    DyadOp, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
+};
 
 /// Parse an APL program (sentences separated by newlines or `⋄`) into IR
 /// statements. `origin` is the dialect's `⎕IO`.
@@ -44,6 +46,10 @@ enum OpGlyph {
     BackslashBar,
     /// `⍤` — rank.
     Rank,
+    /// `⍨` — commute.
+    Commute,
+    /// `⍣` — power.
+    Power,
 }
 
 impl OpGlyph {
@@ -54,6 +60,8 @@ impl OpGlyph {
             OpGlyph::Backslash => '\\',
             OpGlyph::BackslashBar => '⍀',
             OpGlyph::Rank => '⍤',
+            OpGlyph::Commute => '⍨',
+            OpGlyph::Power => '⍣',
         }
     }
 }
@@ -281,6 +289,12 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
             dyad: D::Left,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
+        '○' => Prim {
+            name: "○",
+            monad: M::Scalar(SM::Pi),
+            dyad: D::Scalar(SD::Circle),
+            ranks: [0, 0, 0],
+        },
         _ => return None,
     };
     Some(p)
@@ -304,8 +318,23 @@ fn op_for(ch: char) -> Option<OpGlyph> {
         '\\' => Some(OpGlyph::Backslash),
         '⍀' => Some(OpGlyph::BackslashBar),
         '⍤' => Some(OpGlyph::Rank),
+        '⍨' => Some(OpGlyph::Commute),
+        '⍣' => Some(OpGlyph::Power),
         _ => None,
     }
+}
+
+/// Replicate as a function: `x/y` along the last axis, `x⌿y` along the
+/// leading one. One primitive, applied at the rank that picks the axis —
+/// exactly the J/APL divergence the shared IR is built to carry.
+fn copy_verb(leading: bool) -> Verb {
+    let p = Prim {
+        name: if leading { "⌿" } else { "/" },
+        monad: MonadOp::None,
+        dyad: DyadOp::Copy,
+        ranks: if leading { [RANK_INF, 1, RANK_INF] } else { [RANK_INF, 1, 1] },
+    };
+    Verb::Prim(p)
 }
 
 // ---------------------------------------------------------------------------
@@ -641,8 +670,26 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
         // Left operand: a function, derived or not.
         let left_is_func = matches!(out.last().map(|x| &x.kind), Some(Tok::Func(_)));
         if !left_is_func {
+            // After an operand these glyphs are functions, not operators.
+            // Names are always values in this subset, so the reading is
+            // decided by the token to the left and nothing else.
             if out.last().is_some_and(|x| is_operand_end(&x.kind)) {
-                return Err(Error::not_yet("compress/replicate (x/y)", t.span));
+                let f = match op {
+                    OpGlyph::Slash => copy_verb(false),
+                    OpGlyph::SlashBar => copy_verb(true),
+                    OpGlyph::Backslash => return Err(Error::not_yet("expand (x\\y)", t.span)),
+                    OpGlyph::BackslashBar => {
+                        return Err(Error::not_yet("expand along the leading axis (x⍀y)", t.span));
+                    }
+                    OpGlyph::Rank | OpGlyph::Commute | OpGlyph::Power => {
+                        return Err(Error::parse(
+                            format!("{} needs a function to its left", op.glyph()),
+                            t.span,
+                        ));
+                    }
+                };
+                out.push(Token { kind: Tok::Func(f), span: t.span });
+                continue;
             }
             return Err(Error::parse(
                 format!("{} needs a function to its left", op.glyph()),
@@ -660,8 +707,38 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
             // leading one. `+/` sums rows, `+⌿` sums columns.
             OpGlyph::Slash => Verb::Rank(Box::new(Verb::Reduce(Box::new(f))), [1, 1, 1]),
             OpGlyph::SlashBar => Verb::Reduce(Box::new(f)),
-            OpGlyph::Backslash | OpGlyph::BackslashBar => {
-                return Err(Error::not_yet("scan (\\ ⍀)", span));
+            // The scan follows the reduce: `\` along the last axis, `⍀`
+            // along the leading one. The k-th element is the reduce of the
+            // first k, which is the verb applied to the k-th prefix.
+            OpGlyph::Backslash => Verb::Rank(
+                Box::new(Verb::Windowed(Box::new(Verb::Reduce(Box::new(f))), WindowKind::Scan)),
+                [1, 1, 1],
+            ),
+            OpGlyph::BackslashBar => {
+                Verb::Windowed(Box::new(Verb::Reduce(Box::new(f))), WindowKind::Scan)
+            }
+            OpGlyph::Commute => Verb::Commute(Box::new(f)),
+            OpGlyph::Power => {
+                let spec = match it.peek() {
+                    Some(tok) if matches!(tok.kind, Tok::Func(_)) => {
+                        return Err(Error::not_yet(
+                            "power with a function right operand (f⍣g)",
+                            Span::merge(span, tok.span),
+                        ));
+                    }
+                    Some(tok) if matches!(tok.kind, Tok::Value(_)) => it.next().unwrap(),
+                    _ => {
+                        return Err(Error::not_yet("computed power (f⍣n)", t.span));
+                    }
+                };
+                let arr = match &spec.kind {
+                    Tok::Value(a) => a,
+                    _ => unreachable!("checked above"),
+                };
+                let p = power_spec(arr, spec.span)?;
+                let f = Verb::PowerN(Box::new(f), p);
+                out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
+                continue;
             }
             OpGlyph::Rank => {
                 let spec = match it.peek() {
@@ -692,6 +769,21 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
         out.push(Token { kind: Tok::Func(derived), span });
     }
     Ok(out)
+}
+
+/// `f⍣n`: one nonnegative integer atom. APL spells convergence `f⍣≡`, a
+/// function right operand, which is a separate gap.
+fn power_spec(a: &Array, span: Span) -> Result<Power> {
+    let ints = a
+        .to_i64_vec()
+        .ok_or_else(|| Error::parse("⍣ needs a whole number on its right", span))?;
+    let [n] = ints[..] else {
+        return Err(Error::not_yet("power over a list of counts (f⍣n)", span));
+    };
+    if n < 0 {
+        return Err(Error::not_yet("inverse power (f⍣¯1 and other negative powers)", span));
+    }
+    Ok(Power::Times(n as u64))
 }
 
 /// `⍤` rank specification: `n` → [n,n,n]; `a b` → [b,a,b]; `a b c` → [a,b,c].
@@ -1207,24 +1299,68 @@ mod tests {
         }
     }
 
+    #[test]
+    fn backslash_scans_the_last_axis_and_backslashbar_the_leading_one() {
+        // The k-th element of a scan is the REDUCE of the first k, so the
+        // derived verb applies `f/` to every prefix, not `f`.
+        let inner = |v: &Verb| match v {
+            Verb::Windowed(g, WindowKind::Scan) => match &**g {
+                Verb::Reduce(h) => as_prim(h).name,
+                other => panic!("expected a reduction under the scan, got {other:?}"),
+            },
+            other => panic!("expected a scan, got {other:?}"),
+        };
+        match &one("+\\1 2 3") {
+            Expr::Monad { verb: Verb::Rank(f, ranks), .. } => {
+                assert_eq!(*ranks, [1, 1, 1]);
+                assert_eq!(inner(f), "+");
+            }
+            other => panic!("expected a ranked scan, got {other:?}"),
+        }
+        match &one("+⍀1 2 3") {
+            Expr::Monad { verb, .. } => assert_eq!(inner(verb), "+"),
+            other => panic!("expected a leading-axis scan, got {other:?}"),
+        }
+    }
+
+    /// After an operand `/` and `⌿` are replicate, the function — the two
+    /// readings are told apart by the token on the left and nothing else.
     #[rstest]
-    #[case("+\\1 2 3")]
-    #[case("+⍀1 2 3")]
-    fn scan_is_not_yet(#[case] src: &str) {
-        let e = err(src);
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("scan"), "{}", e.msg);
+    #[case("1 0 1/1 2 3", "/")]
+    #[case("1 0 1⌿1 2 3", "⌿")]
+    #[case("x/1 2 3", "/")]
+    #[case("(1 0)/1 2 3", "/")]
+    fn slash_after_an_operand_is_replicate(#[case] src: &str, #[case] name: &str) {
+        let e = one(src);
+        let (_, _) = dyad_of(&e, name);
+        assert_eq!(as_prim(verb_of(&e)).dyad, DyadOp::Copy);
     }
 
     #[rstest]
-    #[case("1 0 1/1 2 3")]
-    #[case("1 0 1⌿1 2 3")]
-    #[case("x/1 2 3")]
-    #[case("(1 0)/1 2 3")]
-    fn compress_is_not_yet(#[case] src: &str) {
+    #[case("1 0 1\\1 2 3", "expand")]
+    #[case("1 0 1⍀1 2 3", "expand")]
+    fn expand_is_not_yet(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("compress"), "{}", e.msg);
+        assert!(e.msg.contains(msg), "{}", e.msg);
+    }
+
+    #[test]
+    fn commute_and_power_are_operators() {
+        match one("2-⍨5") {
+            Expr::Dyad { verb: Verb::Commute(f), .. } => assert_eq!(as_prim(&f).name, "-"),
+            other => panic!("expected a commute, got {other:?}"),
+        }
+        match one("+⍣3⊢5") {
+            Expr::Monad { verb: Verb::PowerN(_, p), .. } => assert_eq!(p, Power::Times(3)),
+            other => panic!("expected a power, got {other:?}"),
+        }
+        let e = err("+⍣≡⊢5");
+        assert_eq!(e.kind, ErrorKind::NotYet);
+        assert!(e.msg.contains("function right operand"), "{}", e.msg);
+        let e = err("+⍣¯1⊢5");
+        assert_eq!(e.kind, ErrorKind::NotYet);
+        assert!(e.msg.contains("inverse power"), "{}", e.msg);
     }
 
     #[rstest]

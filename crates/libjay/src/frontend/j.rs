@@ -11,7 +11,9 @@ use crate::array::{Array, Data};
 use crate::error::{Error, Result, Span};
 use crate::frontend::{Segment, SourceParts};
 use crate::ir::Expr;
-use crate::verb::{DyadOp, MonadOp, Prim, ScalarDyad, ScalarMonad, Verb, RANK_INF};
+use crate::verb::{
+    DyadOp, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
+};
 
 /// Parse a J program (one sentence per line) into IR statements.
 pub fn parse(src: &SourceParts) -> Result<Vec<Expr>> {
@@ -151,7 +153,8 @@ fn primitive(word: &str) -> Option<Prim> {
         // `,.` is J's `,"_1`; `verb_for` wraps it in that rank.
         ",." => prim(",.", M::NotYet("itemize (monadic ,.)"), D::AppendLeading, [INF, INF, INF]),
         ",:" => prim(",:", M::NotYet("laminate (,:)"), D::NotYet("laminate (,:)"), [INF, INF, INF]),
-        "#" => prim("#", M::Tally, D::NotYet("copy (dyadic #)"), [INF, 1, INF]),
+        "#" => prim("#", M::Tally, D::Copy, [INF, 1, INF]),
+        "o." => prim("o.", M::Scalar(SM::Pi), D::Scalar(SD::Circle), [0, 0, 0]),
         "{" => prim("{", M::NotYet("catalogue (monadic {)"), D::From, [INF, 0, INF]),
         "{." => prim("{.", M::Head, D::Take, [INF, 1, INF]),
         "}." => prim("}.", M::Behead, D::Drop, [INF, 1, INF]),
@@ -681,11 +684,14 @@ fn apply_adverb(u: Frag, a: Frag) -> Result<Frag> {
         return Err(Error::not_yet("noun-operand adverbs", span));
     }
     let (v, _) = as_verb(u)?;
-    match glyph {
-        "/" => Ok(Frag::Verb(VerbFrag::V(Verb::Reduce(Box::new(v))), span)),
-        "~" => Err(Error::not_yet("reflexive (~)", span)),
-        _ => Err(Error::not_yet("infix/scan adverbs", span)),
-    }
+    let derived = match glyph {
+        "/" => Verb::Reduce(Box::new(v)),
+        "\\" => Verb::Windowed(Box::new(v), WindowKind::Prefix),
+        "\\." => Verb::Windowed(Box::new(v), WindowKind::Suffix),
+        "~" => Verb::Commute(Box::new(v)),
+        _ => return Err(Error::not_yet("key (u/.)", span)),
+    };
+    Ok(Frag::Verb(VerbFrag::V(derived), span))
 }
 
 fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
@@ -706,6 +712,14 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
             let f = verb_operand(u, span)?;
             let g = verb_operand(v, span)?;
             Ok(Frag::Verb(VerbFrag::V(Verb::Atop(Box::new(f), Box::new(g))), span))
+        }
+        "^:" => {
+            let f = verb_operand(u, span)?;
+            if v.is_verb() {
+                return Err(Error::not_yet("power with a verb right operand (u^:v)", span));
+            }
+            let p = power_spec(&v, span)?;
+            Ok(Frag::Verb(VerbFrag::V(Verb::PowerN(Box::new(f), p)), span))
         }
         _ => Err(Error::not_yet(format!("composition ({glyph})"), span)),
     }
@@ -747,6 +761,30 @@ fn rank_spec(f: &Frag, span: Span) -> Result<[i64; 3]> {
         2 => [r[1], r[0], r[1]],
         _ => [r[0], r[1], r[2]],
     })
+}
+
+/// `u^:n`: one nonnegative integer atom, or `_` for "iterate until the
+/// result stops changing".
+fn power_spec(f: &Frag, span: Span) -> Result<Power> {
+    let Some(arr) = as_const(f) else {
+        return Err(Error::not_yet("computed power (u^:n)", span));
+    };
+    let Some(vals) = arr.to_f64_vec() else {
+        return Err(Error::parse("power must be numeric", span));
+    };
+    let [n] = vals[..] else {
+        return Err(Error::not_yet("power over a list of counts (u^:n)", span));
+    };
+    if n == f64::INFINITY {
+        return Ok(Power::Converge);
+    }
+    if n < 0.0 {
+        return Err(Error::not_yet("obverse (u^:_1 and other negative powers)", span));
+    }
+    if n.fract() != 0.0 {
+        return Err(Error::parse("power must be a whole number", span));
+    }
+    Ok(Power::Times(n as u64))
 }
 
 fn apply_fork(f: Frag, g: Frag, h: Frag) -> Result<Frag> {
@@ -1229,22 +1267,45 @@ mod tests {
     #[case("+ & - y", "composition (&)")]
     #[case("+ &: - y", "composition (&:)")]
     #[case("+ &. - y", "composition (&.)")]
-    #[case("+ ^: - y", "composition (^:)")]
+    #[case("+ ^: - y", "power with a verb right operand")]
+    #[case("+ ^: {n} y", "computed power")]
+    #[case("+ ^: _1 y", "obverse")]
     fn other_conjunctions_are_not_supported_yet(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);
         assert!(e.msg.contains(msg), "{}", e.msg);
     }
 
-    #[rstest]
-    #[case("+\\ 1 2 3", "infix/scan")]
-    #[case("+/. 1 2 3", "infix/scan")]
-    #[case("+\\. 1 2 3", "infix/scan")]
-    #[case("+~ 1 2 3", "reflexive")]
-    fn other_adverbs_are_not_supported_yet(#[case] src: &str, #[case] msg: &str) {
-        let e = err(src);
+    #[test]
+    fn window_scan_and_commute_adverbs() {
+        let (v, _) = monad_of(&one("+/\\ 1 2 3"));
+        match &v {
+            Verb::Windowed(u, WindowKind::Prefix) => assert!(matches!(**u, Verb::Reduce(_))),
+            other => panic!("expected a prefix application, got {other:?}"),
+        }
+        // The window size is the left argument, so the derived verb has both
+        // valences and its left cell is an atom.
+        assert_eq!(v.ranks(), [RANK_INF, 0, RANK_INF]);
+        let (v, _, _) = dyad_of(&one("2 +/\\ 1 2 3"));
+        assert!(matches!(v, Verb::Windowed(_, WindowKind::Prefix)));
+        let (v, _) = monad_of(&one("+/\\. 1 2 3"));
+        assert!(matches!(v, Verb::Windowed(_, WindowKind::Suffix)));
+        let (v, _) = monad_of(&one("+~ 1 2 3"));
+        match &v {
+            Verb::Commute(u) => assert_eq!(prim_of(u).name, "+"),
+            other => panic!("expected a commute, got {other:?}"),
+        }
+        let (v, _) = monad_of(&one("+:^:3 (1)"));
+        assert!(matches!(v, Verb::PowerN(_, Power::Times(3))));
+        let (v, _) = monad_of(&one("%:^:_ (100)"));
+        assert!(matches!(v, Verb::PowerN(_, Power::Converge)));
+    }
+
+    #[test]
+    fn the_key_adverb_is_not_supported_yet() {
+        let e = err("+/. 1 2 3");
         assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains(msg), "{}", e.msg);
+        assert!(e.msg.contains("key"), "{}", e.msg);
     }
 
     #[test]
