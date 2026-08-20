@@ -124,6 +124,18 @@ Trains: forks `(f g h)`, noun forks `(n g h)`, hooks `(f g)`. Assignment
 `=.`/`=:` (one environment for now), multi-sentence programs, `NB.`
 comments, `'strings'`, `_`/`__` infinities, `1e_3` exponents.
 
+Naming a verb — `mean =. +/ % #` — is settled while the program is parsed:
+the name is recorded and substituted into the sentences after it, which is
+what lets `mean"1`, `(mean - {.)` and `2 n 1 2 3` parse as the trains and
+applications they are. The sentence itself yields no value, as an
+assignment does. A name may change part of speech in either direction, and
+the last assignment before a sentence decides how that sentence reads; that
+is enough for the straight-line programs this frontend compiles, since
+there is no control flow for a definition to reach backwards through.
+Adverb and conjunction assignment, and the explicit definitions
+(`3 : '...'`, `4 : '...'`, `{{ }}`), are recognised and reported as not
+supported yet.
+
 ## APL
 
 | Glyph | Monadic | Dyadic |
@@ -208,6 +220,11 @@ the token to the left and nothing else.
 separators, `⍝` comments, `¯` negatives, `''` strings. Index origin is a
 dialect setting of the compiler instance (`⎕IO` as a variable is
 deliberately not runtime state).
+
+Function assignment (`F←+/`) is not supported yet: GNU APL, the reference
+this frontend follows, rejects it as a syntax error, so there is nothing to
+be differential against. J's `mean =. +/ % #` is the spelling libjay has for
+the idea today.
 
 ## The circle functions (`o.` / `○`)
 

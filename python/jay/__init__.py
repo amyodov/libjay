@@ -59,6 +59,21 @@ class Kernel:
         result, _ = self._inner.run(ordered, _write_stdout, False)
         return result
 
+    def explain(self, data: dict | None = None) -> str:
+        """Describe what the expression became: one section per sentence,
+        with the verb structure the frontend produced and the fused kernels
+        the optimiser made of it.
+
+        Values follow the same cascade as :meth:`__call__` — interpolated,
+        bound, then call-time. When every parameter has one, the program is
+        run and each node is annotated with the shape and dtype it
+        produced; when one is missing, the structure is described alone.
+        """
+        values = self._defaults if not data else {**self._defaults, **self._check_names(data)}
+        if any(p not in values for p in self._inner.params):
+            return self._inner.explain(None)
+        return self._inner.explain([values[p] for p in self._inner.params])
+
     def run_display(self, data: dict | None = None) -> str | None:
         """Execute like __call__, but return the last value formatted for
         display (None when there is no value). Used by the CLI."""

@@ -81,10 +81,11 @@ commits. Decisions with reasoning go to docs/decisions.md, not here.
   Differential suites: tests/oracle.rs, tests/oracle_apl.rs.
 - Venvs: `.venv` (3.14, dev), `.venv-bench` (3.12, `'.[bench]'`). Both share
   python/jay/_jay.abi3.so — rebuild `maturin develop --release` before
-  benchmarking. LIBJAY_THREADS caps the pool.
-- Phases (original roadmap): 1–5 done (frontends, IR, Arrow, parallelism,
-  time series) + C ABI, fusion, dual oracles; next: 6 SIMD dispatch,
-  7 GPU/device, 8 boxes/bigints/rationals/control structures.
+  benchmarking. LIBJAY_THREADS caps the pool; LIBJAY_CPU_LEVEL pins the CPU
+  feature level (`baseline`, `v2`, `v3`, `native`), read once per process.
+- Phases (original roadmap): 1–6 done (frontends, IR, Arrow, parallelism,
+  time series, SIMD dispatch) + C ABI, fusion, dual oracles, boxes; next:
+  7 GPU/device, 8 bigints/rationals/control structures.
 
 ## Open
 

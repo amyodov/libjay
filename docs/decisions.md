@@ -141,3 +141,23 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   original would, in order. Per-block let slots dedupe repeated subtrees;
   structurally equal leaves share one input. Result: both std spellings
   compile to numba's two passes (18.1/21.0 ms vs numba 17.6 at 20M×8thr).
+- 2026-08-20 — SIMD dispatch (phase 6) is function multiversioning, not
+  intrinsics: the `multiversion` crate compiles each hot leaf loop once per
+  CPU feature level and a cached runtime check picks the clone, so libjay
+  writes no `core::arch` code and no `unsafe` and the owner invariant holds
+  — the autovectoriser is still the only thing making vectors. Levels:
+  baseline, x86-64-v2, x86-64-v3 (AVX2+FMA), and aarch64 NEON as the top
+  rung there; no AVX-512 rung, because `avx512*` has no stable
+  `target_feature` name on the pinned 1.85 toolchain. Nine loops carry the
+  annotation — the four fused block kernels, the two unfused elementwise
+  chunk passes, the typed reduce across an item's columns, the scan and the
+  moving window — which is the whole arithmetic of the fast paths in about
+  as many lines of attribute. `LIBJAY_CPU_LEVEL` pins the level, clamped to
+  what the CPU can run, and `simd::set_level` turns the same knob in
+  process so tests/simd.rs can compare every level on one data set (maps
+  bit-identical, reduces to 1e-12). A vector clone is declined where the
+  loop that would widen is shorter than 16 elements
+  (`verb::VECTOR_COLUMNS`): measured on `+/ m` at 20M f64, 4 and 8 columns
+  are ~1.5x slower under AVX2 and 16 columns and up are 1.2x to 1.6x
+  faster, so narrow items take the baseline compilation. What it buys is
+  modest and honest — the numbers are in bench/README.md.

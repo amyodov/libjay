@@ -171,3 +171,62 @@ class TestModuleShape:
         assert callable(j) and callable(j.compile)
         assert callable(apl)
         assert jay.compile("2+2", lang="j")() == 4
+
+
+class TestNamedVerbs:
+    def test_a_named_verb_applies_later(self):
+        assert j("mean =. +/ % #\nmean 1 2 3 4") == 2.5
+
+    def test_a_named_verb_is_a_verb_in_a_train(self):
+        assert j("mean =. +/ % #\n(mean - {.) 1 2 3 4") == 1.5
+
+    def test_naming_a_verb_yields_nothing(self):
+        assert j("1 + 1\nmean =. +/ % #") is None
+
+    def test_apl_function_assignment_is_not_yet(self):
+        with pytest.raises(JayError, match="function assignment"):
+            apl.compile("F←+/")
+
+
+class TestExplain:
+    def test_fork_structure_and_shapes(self):
+        text = j.compile("(+/ % #) {x}", {"x": [3.0, 1.0, 4.0, 1.0, 5.0]}).explain()
+        assert "+/" in text
+        assert "%" in text
+        assert "#" in text
+        assert "fork" in text
+        assert "→ 5 $ float" in text
+        assert "→ scalar float" in text
+
+    def test_without_values_the_structure_alone(self):
+        text = j.compile("+/ {w} * {x}").explain()
+        assert "structure only" in text
+        assert "fused kernel" in text
+        assert "parameters: w, x" in text
+
+    def test_call_time_data_is_used(self):
+        k = j.compile("+/ {w} * {x}", {"w": [1.0, 2.0, 3.0]})
+        text = k.explain({"x": [4.0, 5.0, 6.0]})
+        assert "structure only" not in text
+        assert "[kernel ran]" in text
+
+    def test_named_verb_section(self):
+        text = j.compile("mean =. +/ % #\nmean 1 2 3 4").explain()
+        assert "verb definition mean" in text
+        assert "no runtime work" in text
+
+
+class TestCli:
+    def test_explain_flag(self, capsys):
+        from jay._cli import main
+
+        assert main(["--explain", "-e", "(+/ % #) 1 2 3 4"]) == 0
+        out = capsys.readouterr().out
+        assert "fork" in out
+        assert "→ scalar float" in out
+
+    def test_run_without_explain(self, capsys):
+        from jay._cli import main
+
+        assert main(["-e", "(+/ % #) 1 2 3 4"]) == 0
+        assert capsys.readouterr().out.strip() == "2.5"

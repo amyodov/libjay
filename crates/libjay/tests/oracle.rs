@@ -707,6 +707,34 @@ fn fixed_corpus_matches_reference() {
     check(&jconsole, &exprs);
 }
 
+/// Naming a verb changes how the sentences after it parse, so the reference
+/// has the last word on what each of these programs means.
+#[test]
+fn named_verbs_match_reference() {
+    let Some(jconsole) = oracle_path() else {
+        eprintln!("J oracle not found; skipping (set LIBJAY_ORACLE_J)");
+        return;
+    };
+    let exprs: Vec<String> = [
+        "mean =. +/ % #\nmean 1 2 3 4",
+        "mean =. +/ % #\n(mean - {.) 1 2 3 4",
+        "mean =. +/ % #\nmean\"1 i. 3 3",
+        "mean =. +/ % #\n2 * mean 1 2 3 4",
+        "n =. #\n2 n 1 2 3",
+        // One displayed value per program: the harness compares the last.
+        "f =. +/\nf =. #\nf 1 2 3",
+        "a =. 1 2 3\na =. +/\na 1 2 3",
+        "f =. +/\nf =. 10 20\nf",
+        "g =. +/ % #\nh =. g @: ,\nh i. 2 3",
+        "sq =. *:\nsq 1 2 3",
+        "d =. }.\nd 1 2 3",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    check(&jconsole, &exprs);
+}
+
 /// Deterministic pseudo-random expressions over the implemented surface.
 #[test]
 fn generated_corpus_matches_reference() {

@@ -21,6 +21,12 @@ print(k1({"data": [4.0, 8.0, 8.0]}))       # 6.0
 # Sequences read like a session: intermediate names, last value returned.
 print(j("x =. 1 2 3 4\n(>./ x) - <./ x"))  # 3 — the range
 
+# Naming a verb: the name is a verb everywhere after it.
+print(j("mean =. +/ % #\nmean 3 1 4 1 5"))  # 2.8
+
+# See what the expression became: the fork, the fused kernel, the shapes.
+print(k1.explain({"data": [10.0, 20.0, 30.0]}))
+
 # Errors point into the expression.
 try:
     j("1 2 + 1 2 3")

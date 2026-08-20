@@ -1047,6 +1047,14 @@ fn parse_primary(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Ex
             let inner = parse_range(toks, l + 1, hi - 1, hint)?;
             Ok((inner, l))
         }
+        // `F←+/` names a function in some dialects. The reference this
+        // frontend follows, GNU APL, rejects it as a syntax error, so it is
+        // not implemented here; J's `mean =. +/ % #` is the spelling libjay
+        // has for the same idea.
+        Tok::Func(_) if hi >= lo + 2 && matches!(toks[hi - 2].kind, Tok::Assign) => {
+            let from = if hi >= lo + 3 { toks[hi - 3].span } else { toks[hi - 2].span };
+            Err(Error::not_yet("function assignment (F←+/)", Span::merge(from, t.span)))
+        }
         Tok::Func(_) => Err(Error::parse("missing right argument", t.span)),
         Tok::Assign => Err(Error::parse("← needs a value on its right", t.span)),
         Tok::Quad => Err(Error::parse("⎕ is only supported as ⎕← (print)", t.span)),

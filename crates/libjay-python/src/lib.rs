@@ -74,6 +74,18 @@ impl Kernel {
         };
         Ok((value, display))
     }
+
+    /// Describe what the expression became. With `values` (one per
+    /// parameter) the program is also run and every node is annotated with
+    /// the shape and dtype it produced; without them, structure only.
+    #[pyo3(signature = (values=None))]
+    fn explain(&self, values: Option<Vec<Bound<'_, PyAny>>>) -> PyResult<String> {
+        let args: Option<Vec<Array>> = match values {
+            None => None,
+            Some(v) => Some(v.iter().map(py_to_array).collect::<PyResult<_>>()?),
+        };
+        Ok(self.program.explain(args.as_deref()))
+    }
 }
 
 /// A non-scalar result: shape, dtype, list conversion, J/APL-style repr.

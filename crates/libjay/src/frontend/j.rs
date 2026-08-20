@@ -5,10 +5,11 @@
 //! right to left by pushing words onto a stack and matching the leftmost four
 //! stack slots against the parse table after every push.
 
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use crate::array::{Array, Data};
-use crate::error::{Error, Result, Span};
+use crate::error::{Error, ErrorKind, Result, Span};
 use crate::frontend::{Segment, SourceParts};
 use crate::ir::Expr;
 use crate::verb::{
@@ -16,8 +17,75 @@ use crate::verb::{
 };
 
 /// Parse a J program (one sentence per line) into IR statements.
+///
+/// Sentences are parsed in order over a table of the names that have been
+/// given verbs, because a name's part of speech decides how the sentence
+/// around it parses. A sentence that names a verb records it and produces
+/// no work; a later sentence that reads the name gets the verb substituted
+/// into it. That is enough for the straight-line programs this frontend
+/// compiles: there is no control flow for a definition to reach backwards
+/// through, and reassigning the name simply rebinds it from there on.
 pub fn parse(src: &SourceParts) -> Result<Vec<Expr>> {
-    lex(src)?.into_iter().map(parse_sentence).collect()
+    let mut verbs: HashMap<String, Verb> = HashMap::new();
+    // Names that hold a value by the time a sentence is read. Only the
+    // diagnostics need this: a name that is neither a verb nor a value is
+    // an undefined name, not a sentence the parser has yet to learn.
+    let mut nouns: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for mut sentence in lex(src)? {
+        substitute_verbs(&mut sentence, &verbs);
+        let stmt = parse_sentence(sentence, &nouns)?;
+        match &stmt {
+            Expr::VerbDef { name, verb, .. } => {
+                verbs.insert(name.clone(), verb.clone());
+                nouns.remove(name);
+            }
+            // A name given a noun stops being a verb, at any depth: J lets
+            // a name change part of speech, and the oracle agrees.
+            other => {
+                let mut assigned = Vec::new();
+                assigned_names(other, &mut assigned);
+                for name in assigned {
+                    verbs.remove(&name);
+                    nouns.insert(name);
+                }
+            }
+        }
+        out.push(stmt);
+    }
+    Ok(out)
+}
+
+/// Replace every name known to be a verb by that verb, except where the
+/// name is the target of an assignment, which is a definition of the name
+/// rather than a use of it.
+fn substitute_verbs(sentence: &mut [Frag], verbs: &HashMap<String, Verb>) {
+    for i in 0..sentence.len() {
+        let Frag::Name(name, span) = &sentence[i] else { continue };
+        if sentence.get(i + 1).is_some_and(Frag::is_assign) {
+            continue;
+        }
+        if let Some(v) = verbs.get(name) {
+            sentence[i] = Frag::Verb(VerbFrag::V(v.clone()), *span);
+        }
+    }
+}
+
+/// Every name this sentence assigns a value to, inline assignments included.
+fn assigned_names(e: &Expr, out: &mut Vec<String>) {
+    match e {
+        Expr::Assign { name, value, .. } => {
+            out.push(name.clone());
+            assigned_names(value, out);
+        }
+        Expr::Monad { y, .. } => assigned_names(y, out),
+        Expr::Dyad { x, y, .. } => {
+            assigned_names(x, out);
+            assigned_names(y, out);
+        }
+        Expr::PrintPass { value, .. } => assigned_names(value, out),
+        _ => {}
+    }
 }
 
 // ---------------------------------------------------------------- fragments
@@ -39,6 +107,9 @@ enum Frag {
     RParen(Span),
     AssignLocal(Span),
     AssignGlobal(Span),
+    /// A finished verb definition: `mean =. +/ % #`. It belongs to no part
+    /// of speech, so no rule reaches it and it can only end a sentence.
+    VerbDef(String, Verb, Span),
 }
 
 /// `[:` has the verb category but no verb of its own: it is only meaningful
@@ -61,7 +132,8 @@ impl Frag {
             | Frag::LParen(s)
             | Frag::RParen(s)
             | Frag::AssignLocal(s)
-            | Frag::AssignGlobal(s) => *s,
+            | Frag::AssignGlobal(s)
+            | Frag::VerbDef(_, _, s) => *s,
         }
     }
 
@@ -359,6 +431,10 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
             }
             continue;
         }
+        // `{{` opens J's other explicit definition; it is never two words.
+        if c == '{' && at(i + 1) == Some('{') {
+            return Err(Error::not_yet("explicit definitions ({{ ... }})", span(i, i + 2)));
+        }
         // A symbol word is one character plus a trailing inflection, which
         // always binds: `~:` is one word, never `~` followed by `:`. The
         // parentheses are the exception; they are never inflected.
@@ -499,18 +575,19 @@ enum Rule {
     Paren9,
 }
 
-fn parse_sentence(tokens: Vec<Frag>) -> Result<Expr> {
+fn parse_sentence(tokens: Vec<Frag>, nouns: &HashSet<String>) -> Result<Expr> {
     let sentence = sentence_span(&tokens);
     let mut stack: Vec<Frag> = Vec::new();
     for frag in tokens.into_iter().rev() {
         stack.insert(0, frag);
-        reduce(&mut stack)?;
+        reduce(&mut stack, nouns)?;
     }
     stack.insert(0, Frag::Mark);
-    reduce(&mut stack)?;
+    reduce(&mut stack, nouns)?;
     if stack.len() == 2 {
         match stack.pop().expect("checked length") {
             f @ (Frag::Noun(_) | Frag::Name(..)) => return as_noun(f),
+            Frag::VerbDef(name, verb, span) => return Ok(Expr::VerbDef { name, verb, span }),
             Frag::Verb(VerbFrag::V(_), span) => {
                 return Err(Error::not_yet(
                     "tacit verb definitions (a sentence that is a verb)",
@@ -531,8 +608,8 @@ fn sentence_span(tokens: &[Frag]) -> Span {
         .unwrap_or_else(|| Span::new(0, 0))
 }
 
-fn reduce(stack: &mut Vec<Frag>) -> Result<()> {
-    while apply(stack)? {}
+fn reduce(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<()> {
+    while apply(stack, nouns)? {}
     Ok(())
 }
 
@@ -585,7 +662,7 @@ fn take(stack: &mut Vec<Frag>, range: Range<usize>) -> Vec<Frag> {
     stack.drain(range).collect()
 }
 
-fn apply(stack: &mut Vec<Frag>) -> Result<bool> {
+fn apply(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<bool> {
     let Some(rule) = match_rule(stack) else {
         return Ok(false);
     };
@@ -639,7 +716,7 @@ fn apply(stack: &mut Vec<Frag>) -> Result<bool> {
             let mut t = take(stack, 1..3);
             let b = t.pop().expect("two slots");
             let a = t.pop().expect("two slots");
-            let frag = apply_bident(a, b)?;
+            let frag = apply_bident(a, b, nouns)?;
             stack.insert(1, frag);
         }
         Rule::Assign8 => {
@@ -766,6 +843,9 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
             let p = power_spec(&v, span)?;
             Ok(Frag::Verb(VerbFrag::V(Verb::PowerN(Box::new(f), p)), span))
         }
+        // `3 : '...'` and its relatives are J's explicit definitions, not a
+        // composition; the diagnostic should say so.
+        ":" => Err(Error::not_yet("explicit definitions (3 : '...' and 4 : '...')", span)),
         _ => Err(Error::not_yet(format!("composition ({glyph})"), span)),
     }
 }
@@ -906,8 +986,20 @@ fn apply_fork(f: Frag, g: Frag, h: Frag) -> Result<Frag> {
     }
 }
 
-fn apply_bident(a: Frag, b: Frag) -> Result<Frag> {
+fn apply_bident(a: Frag, b: Frag, nouns: &HashSet<String>) -> Result<Frag> {
     let span = Span::merge(a.span(), b.span());
+    // A name here is not a verb, or it would have been substituted; if it
+    // is not a value either, that is what is wrong with the sentence, and
+    // it is what the reference reports.
+    if let Frag::Name(n, nspan) = &a {
+        if !nouns.contains(n) {
+            return Err(Error::new(
+                ErrorKind::Value,
+                format!("undefined name: {n}"),
+                Some(*nspan),
+            ));
+        }
+    }
     if a.is_real_verb() && b.is_real_verb() {
         let (f, _) = as_verb(a)?;
         let (g, _) = as_verb(b)?;
@@ -921,16 +1013,17 @@ fn apply_assign(target: Frag, value: Frag) -> Result<Frag> {
     match target {
         // `=.` and `=:` both lower to Expr::Assign: the IR has a single
         // environment for now, so local and global do not yet differ.
-        Frag::Name(name, _) => {
-            if value.is_verb() {
-                return Err(Error::not_yet("verb assignment", span));
+        Frag::Name(name, _) => match value {
+            // Naming a verb is settled here, at parse time: `parse` records
+            // the name and substitutes the verb into later sentences.
+            Frag::Verb(VerbFrag::V(verb), _) => Ok(Frag::VerbDef(name, verb, span)),
+            Frag::Verb(VerbFrag::Cap, _) => Err(Error::not_yet("assigning [: on its own", span)),
+            v if v.is_noun() => {
+                let value = as_noun(v)?;
+                Ok(Frag::Noun(Expr::Assign { name, value: Box::new(value), span }))
             }
-            if !value.is_noun() {
-                return Err(Error::not_yet("adverb and conjunction assignment", span));
-            }
-            let value = as_noun(value)?;
-            Ok(Frag::Noun(Expr::Assign { name, value: Box::new(value), span }))
-        }
+            _ => Err(Error::not_yet("adverb and conjunction assignment", span)),
+        },
         Frag::Noun(_) => Err(Error::not_yet("multiple assignment", span)),
         other => Err(Error::internal(format!("expected an assignment target, got {other:?}"))),
     }
@@ -1605,12 +1698,105 @@ mod tests {
         }
     }
 
+    // ---------------------------------------------------- naming a verb
+
     #[test]
-    fn verb_assignment_is_not_supported_yet() {
-        let e = err("mean =. +/ % #");
+    fn assigning_a_verb_names_it_and_runs_nothing() {
+        let s = stmts("mean =. +/ % #");
+        assert_eq!(s.len(), 1);
+        match &s[0] {
+            Expr::VerbDef { name, verb, span } => {
+                assert_eq!(name, "mean");
+                assert!(matches!(verb, Verb::Fork(..)), "got {verb:?}");
+                assert_eq!(*span, Span::new(0, 14));
+            }
+            other => panic!("expected a verb definition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_named_verb_applies_in_a_later_sentence() {
+        let s = stmts("mean =. +/ % #\nmean 1 2 3 4");
+        assert_eq!(s.len(), 2);
+        let (v, y) = monad_of(&s[1]);
+        assert!(matches!(v, Verb::Fork(..)), "got {v:?}");
+        assert_eq!(konst(&y).shape, vec![4]);
+    }
+
+    #[test]
+    fn a_named_verb_is_a_verb_inside_a_train_and_under_a_conjunction() {
+        let (v, _) = monad_of(&stmts("mean =. +/ % #\n(mean - {.) 1 2 3 4").pop().expect("two"));
+        match &v {
+            Verb::Fork(f, g, h) => {
+                assert!(matches!(**f, Verb::Fork(..)), "got {f:?}");
+                assert_eq!(prim_of(g).name, "-");
+                assert_eq!(prim_of(h).name, "{.");
+            }
+            other => panic!("expected a fork, got {other:?}"),
+        }
+        let (v, _) = monad_of(&stmts("mean =. +/ % #\nmean\"1 m").pop().expect("two"));
+        match &v {
+            Verb::Rank(inner, r) => {
+                assert_eq!(*r, [1, 1, 1]);
+                assert!(matches!(**inner, Verb::Fork(..)), "got {inner:?}");
+            }
+            other => panic!("expected a ranked verb, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn redefinition_rebinds_from_that_sentence_on() {
+        let s = stmts("f =. +/\nf 1 2 3\nf =. #\nf 1 2 3");
+        assert_eq!(s.len(), 4);
+        assert!(matches!(monad_of(&s[1]).0, Verb::Reduce(_)));
+        assert_eq!(prim_of(&monad_of(&s[3]).0).name, "#");
+    }
+
+    #[test]
+    fn a_name_may_change_part_of_speech_in_either_direction() {
+        // The oracle accepts both; the last assignment decides.
+        let s = stmts("a =. 1 2 3\na =. +/\na 1 2 3");
+        assert!(matches!(s[0], Expr::Assign { .. }));
+        assert!(matches!(s[1], Expr::VerbDef { .. }));
+        assert!(matches!(monad_of(&s[2]).0, Verb::Reduce(_)));
+        let s = stmts("f =. +/\nf =. 10 20\nf");
+        assert!(matches!(s[0], Expr::VerbDef { .. }));
+        assert!(matches!(s[1], Expr::Assign { .. }));
+        assert!(matches!(s[2], Expr::Name(..)));
+    }
+
+    #[test]
+    fn an_undefined_name_applied_as_a_verb_is_a_value_error() {
+        // The reference says `value error: zz`, pointing at the name.
+        let e = err("zz 1 2 3");
+        assert_eq!(e.kind, ErrorKind::Value);
+        assert_eq!(e.msg, "undefined name: zz");
+        assert_eq!(e.span, Some(Span::new(0, 2)));
+        // A name that does hold a value is a different complaint: two
+        // nouns side by side, which the reference calls a syntax error.
+        let e = err("a =. 5\na 1 2 3");
         assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("verb assignment"), "{}", e.msg);
-        assert_eq!(e.span, Some(Span::new(0, 14)));
+        assert!(e.msg.contains("that bident"), "{}", e.msg);
+    }
+
+    #[test]
+    fn adverb_and_conjunction_assignment_are_not_supported_yet() {
+        let e = err("insert =. /");
+        assert_eq!(e.kind, ErrorKind::NotYet);
+        assert!(e.msg.contains("adverb and conjunction assignment"), "{}", e.msg);
+    }
+
+    #[rstest]
+    #[case("f =. 3 : 'y + 1'", "explicit definitions")]
+    #[case("f =. 4 : 'x + y'", "explicit definitions")]
+    #[case("f =. {{ y + 1 }}", "explicit definitions")]
+    fn explicit_definitions_are_named_in_the_diagnostic(
+        #[case] src: &str,
+        #[case] msg: &str,
+    ) {
+        let e = err(src);
+        assert_eq!(e.kind, ErrorKind::NotYet);
+        assert!(e.msg.contains(msg), "{}", e.msg);
     }
 
     #[test]

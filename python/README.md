@@ -100,6 +100,36 @@ reports and stops rather than guessing on your behalf. The full table of what
 is zero-copy, copied, refused and not supported yet is in
 [docs/coverage.md](https://github.com/amyodov/libjay/blob/main/docs/coverage.md#the-data-boundary).
 
+## Seeing what an expression became
+
+A compiled expression is not the string you wrote. `+/ % #` is a *fork*;
+`+/ w * x` is one blockwise kernel with the sum folded into it. `explain`
+prints that structure, one section per sentence:
+
+```python
+k = jay.j.compile("+/ {w} * {x}", {"w": [1.0, 2.0, 3.0]})
+print(k.explain({"x": [4.0, 5.0, 6.0]}))
+```
+
+```
+sentence 1  |  +/ {w} * {x}
+  fused kernel (1 op: *; +/ absorbed; block 8192)  → scalar float  [kernel ran]
+    in 0:
+      {x}  → 3 $ float
+    in 1:
+      {w}  → 3 $ float
+    falls back to:
+      monad +/
+        ...
+```
+
+Values follow the same cascade as a call — interpolated, bound, call-time.
+With every parameter filled the program is run and each node is annotated
+with the shape and dtype it produced, and each fused node with whether its
+kernel ran or handed the work back to the chain, and why. With a parameter
+missing, the structure is printed alone. `libjay --explain -e '...'` is the
+same thing from the shell.
+
 ## The CLI
 
 ```sh
@@ -107,6 +137,7 @@ libjay -e '(+/ % #) 3 1 4 1 5'                   # 2.8
 libjay -e "⎕←'Hello, world!'" --lang apl         # APL
 libjay examples/hello.apl                        # a file; the extension
                                                  # picks the language
+libjay --explain -e '+/ {w} * {x}'               # the structure, not a result
 ```
 
 `.ijs`/`.j` are J, `.apl` is APL; `--lang` overrides. `-e` defaults to J.

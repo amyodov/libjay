@@ -26,6 +26,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=["j", "apl"],
         help="language; default: by file extension, or J for -e",
     )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="print what the expression became instead of running it",
+    )
     parser.add_argument("--version", action="version", version=f"libjay {__version__}")
     args = parser.parse_args(argv)
 
@@ -55,7 +60,11 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
 
     try:
-        display = lang.compile(source).run_display()
+        kernel = lang.compile(source)
+        if args.explain:
+            print(kernel.explain().rstrip("\n"))
+            return 0
+        display = kernel.run_display()
     except JayError as e:
         print(str(e), file=sys.stderr)
         return 1

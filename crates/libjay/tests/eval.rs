@@ -109,6 +109,29 @@ fn j_fork_mean() {
 }
 
 #[test]
+fn j_named_verbs() {
+    // Naming a verb is a parse-time substitution: the name is a verb in
+    // every later sentence, wherever a verb may stand.
+    assert_eq!(run(Lang::J, "mean =. +/ % #\nmean 1 2 3 4"), Some(Array::scalar_f64(2.5)));
+    assert_eq!(
+        run(Lang::J, "mean =. +/ % #\n(mean - {.) 1 2 3 4"),
+        Some(Array::scalar_f64(1.5))
+    );
+    assert_eq!(
+        run(Lang::J, "mean =. +/ % #\nmean\"1 i. 3 3"),
+        Some(f64s(&[3], &[1.0, 4.0, 7.0]))
+    );
+    // Dyadically too, and redefinition rebinds from that sentence on.
+    assert_eq!(run(Lang::J, "n =. #\n2 n 1 2 3"), Some(i64s(&[6], &[1, 1, 2, 2, 3, 3])));
+    assert_eq!(run(Lang::J, "f =. +/\nf =. #\nf 1 2 3"), Some(Array::scalar_i64(3)));
+    // A name may change part of speech in either direction.
+    assert_eq!(run(Lang::J, "a =. 1 2 3\na =. +/\na 1 2 3"), Some(Array::scalar_i64(6)));
+    assert_eq!(run(Lang::J, "f =. +/\nf =. 10 20\nf"), Some(i64s(&[2], &[10, 20])));
+    // Naming a verb yields no value, so it displays nothing.
+    assert_eq!(run(Lang::J, "1 + 1\nmean =. +/ % #"), None);
+}
+
+#[test]
 fn j_hook_and_cap() {
     // Hook: y - (mean y) as ([-(+/%#)]) is a fork; test a simpler hook (* -): y * (-y).
     assert_eq!(run(Lang::J, "(* -) 3"), Some(Array::scalar_i64(-9)));

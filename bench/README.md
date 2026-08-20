@@ -338,6 +338,108 @@ scratch — 20x the arithmetic, and it is still the fastest thing in the
 table, which is what one fused loop over the whole expression buys against
 four passes over 160 MB.
 
+## SIMD dispatch
+
+Phase 6. One artifact per platform carries several compilations of every hot
+loop — the four fused block kernels, the two unfused elementwise chunk
+passes, the typed reduce across an item's columns, the scan and the moving
+window — and a cached runtime check picks one. The compilations differ only
+in the `target_feature` set attached to them; the loops are the same generic
+Rust and the autovectoriser is what turns each clone into vector code.
+Nothing here is hand-written SIMD.
+
+`LIBJAY_CPU_LEVEL` overrides the pick, so the levels can be measured against
+each other on one machine: `baseline`, `v2` (SSE4.2 and its neighbours),
+`v3` (AVX2 and FMA), or `native` for the highest the CPU can run, which is
+also what an unset variable means. A level the CPU cannot run is clamped
+down to one it can, so a pinned level always names code that really
+executes. It is read once per process, like `LIBJAY_THREADS`, so every
+figure below comes from a subprocess of its own.
+
+```sh
+VIRTUAL_ENV=$PWD/.venv-bench .venv-bench/bin/maturin develop --release
+.venv-bench/bin/python bench/simd.py
+```
+
+```
+machine   macOS-13.7.8-x86_64-i386-64bit
+cpu       i386, 8 logical threads          (Intel i7-7920HQ, 4 cores)
+python    3.12.9, numpy 2.0.2
+sizes     vector 20,000,000 f64, matrix 2,000,000 x 8 f64
+method    best of 5 calls after one warmup, best of 3 passes over the table
+```
+
+| scenario | threads | baseline | v2 | native (v3) | speedup |
+|---|---|---:|---:|---:|---:|
+| weighted sum | 1 | 38.8 | 38.7 | 38.2 | 1.02x |
+| weighted sum | 8 | 12.6 | 12.5 | 12.4 | 1.02x |
+| sum of exponentials | 1 | 131.3 | 132.8 | 133.2 | 0.99x |
+| sum of exponentials | 8 | 28.4 | 29.0 | 27.4 | 1.03x |
+| std, named value | 1 | 82.5 | 76.8 | 73.0 | 1.13x |
+| std, named value | 8 | 18.1 | 16.2 | 15.5 | 1.17x |
+| column sums | 1 | 14.2 | 14.2 | 14.2 | 1.00x |
+| column sums | 8 | 5.2 | 5.3 | 5.1 | 1.00x |
+| count above | 1 | 38.0 | 33.6 | 33.2 | 1.14x |
+| count above | 8 | 7.9 | 7.3 | 6.8 | 1.16x |
+| polynomial | 1 | 84.8 | 86.6 | 76.1 | 1.11x |
+| polynomial | 8 | 19.7 | 19.9 | 20.3 | 0.97x |
+| elementwise chain | 1 | 120.0 | 113.5 | 109.1 | 1.10x |
+| elementwise chain | 8 | 64.0 | 64.2 | 63.2 | 1.01x |
+| moving maximum | 1 | 173.8 | 177.7 | 161.8 | 1.07x |
+| moving maximum | 8 | 58.2 | 59.6 | 55.5 | 1.05x |
+| running sum | 1 | 105.4 | 103.0 | 100.7 | 1.05x |
+| running sum | 8 | 106.2 | 101.3 | 99.3 | 1.07x |
+| bollinger | 1 | 730.1 | 711.6 | 708.1 | 1.03x |
+| bollinger | 8 | 361.9 | 377.0 | 374.5 | 0.97x |
+
+`count above` is `+/ {x} > 0.5`, `polynomial` is `+/ {x} * 1 + {x} * 2 +
+{x} * 3 + {x} * 4 + {x}`, `elementwise chain` is `({x} * {w}) + {x} - 0.5`
+and `moving maximum` is `20 >./\ {x}`; the rest are the programs of the
+tables above.
+
+**The honest headline: a few per cent to 17%, and zero where the row is
+bandwidth-bound.** The rows that gain are the ones with arithmetic to spare
+per byte loaded — the comparison-and-count (1.14x, 1.16x), the standard
+deviation (1.13x, 1.17x), the four-term polynomial on one thread (1.11x),
+the three-operand elementwise chain (1.10x). The rows that do not gain do
+not gain at all: the weighted sum reads two streams and does one multiply
+and one add, column sums reads one and adds, and both were already waiting
+on memory before a wider register was involved — which is the same thing the
+threading table said when the eighth thread stopped helping. `+/ ^ x` is
+flat for a different reason: `exp` is a libm call per element, and no
+autovectoriser turns that into a vector one.
+
+Nothing regressed. The 0.97x and 0.99x cells are the measurement's own
+spread — repeating a row moves it by a few per cent — and the levels are not
+allowed to disagree on values: tests/simd.rs runs a battery of programs at
+every level the machine has and requires elementwise results to be identical
+bit for bit, reductions to 1e-12 (float reassociation is already contracted,
+§5.9).
+
+Two loops decline the vector clone where it cannot pay. The reduce and the
+scan widen only across an item's columns, and a loop of four or eight
+columns spends more entering a vector body than the width returns: measured
+on `+/ m` at 20M f64 on one thread, AVX2 is ~1.5x *slower* at 4 and 8
+columns and 1.2x to 1.6x faster from 16 up. So below 16 columns those two
+take the baseline compilation whatever the CPU is, which is what keeps the
+`column sums` row at 1.00x instead of 0.7x.
+
+Two platforms are built and not measured here. aarch64 gets an explicit
+NEON clone, which the arm64 wheel job exercises for correctness through the
+same suite; NEON is also in the aarch64 baseline, so the two rungs there are
+expected to be the same code. AVX-512 has no rung at all — `avx512*` has no
+stable `target_feature` name on the toolchain libjay pins — and this laptop
+has no AVX-512 to measure it with either way.
+
+The baseline column really is the baseline. There is no `.cargo/config.toml`
+and no `RUSTFLAGS` anywhere in the repository or the wheel jobs, so the build
+takes the target's default CPU: for `x86_64-apple-darwin` that is Penryn
+(SSE up to 4.1) and for `x86_64-unknown-linux-gnu` plain x86-64, which is
+why `v2` — SSE4.2 and popcount on top of that — is worth almost nothing on
+this machine and the real step is `v3`. The shipped extension carries 12
+dispatchers and 34 AVX2 clones; had `-C target-cpu` leaked in above `v3` the
+dispatchers would have been elided and there would be none.
+
 ## Next
 
 In the order the measurements rank them:
@@ -348,8 +450,12 @@ In the order the measurements rank them:
    materialises `w * x`.~~ Done: `fuse.rs` replaces a chain of two or more
    elementwise primitives with one blockwise kernel, and absorbs an
    `+/`-style reduction over it.
-3. SIMD and multiple accumulators inside a chunk (phase 6), which is where
-   the remaining gap to numba lives.
-4. Fusion across an assignment, which is what the named standard deviation
-   is still paying for: `d =. {x} - mean` is one verb, so it materialises a
-   160 MB column that the next sentence reads back twice.
+3. ~~SIMD and multiple accumulators inside a chunk (phase 6), which is where
+   the remaining gap to numba lives.~~ Half done: the vector width is there
+   (see "SIMD dispatch"), and it says the gap was never the width — the
+   rows that stayed flat are waiting on memory, not on registers. Multiple
+   accumulators inside a fold are still to try, and are the half of this
+   item that might move a bandwidth-bound row.
+4. ~~Fusion across an assignment, which is what the named standard deviation
+   is still paying for.~~ Done: the pass moves a named value into the
+   sentences that read it, which is what the head of this file measures.

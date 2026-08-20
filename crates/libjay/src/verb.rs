@@ -11,6 +11,7 @@ use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::fmt::FmtOpts;
 use crate::par;
+use crate::simd::multiversioned;
 
 /// Infinite rank (applies to the argument as a whole).
 pub const RANK_INF: i64 = i64::MAX;
@@ -1458,10 +1459,9 @@ fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
     })
 }
 
-/// One chunk of an integer pass. False means the chunk left i64 and the
-/// caller redoes the whole operation in f64.
 #[allow(clippy::too_many_arguments)]
-fn dyad_i64_chunk(
+#[inline(always)]
+fn dyad_i64_chunk_body(
     op: ScalarDyad,
     xs: &[i64],
     xoff: usize,
@@ -1514,6 +1514,27 @@ fn dyad_i64_chunk(
     }
 }
 
+multiversioned! {
+    /// One chunk of an integer pass. False means the chunk left i64 and the
+    /// caller redoes the whole operation in f64.
+    ///
+    /// This is one of the loops compiled per CPU feature level: a chunk is
+    /// thousands of elements, so choosing the compilation costs nothing
+    /// against the pass it chooses.
+    #[allow(clippy::too_many_arguments)]
+    fn dyad_i64_chunk(
+        op: ScalarDyad,
+        xs: &[i64],
+        xoff: usize,
+        xdiv: usize,
+        ys: &[i64],
+        yoff: usize,
+        ydiv: usize,
+        start: usize,
+        out: &mut [i64],
+    ) -> bool = dyad_i64_chunk_body;
+}
+
 /// One elementwise integer pass. None means it left i64 anywhere.
 #[allow(clippy::too_many_arguments)]
 fn dyad_i64(
@@ -1533,7 +1554,8 @@ fn dyad_i64(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn dyad_f64_chunk(
+#[inline(always)]
+fn dyad_f64_chunk_body(
     op: ScalarDyad,
     xs: &[f64],
     xoff: usize,
@@ -1582,6 +1604,23 @@ fn dyad_f64_chunk(
         Some(e) => Err(e),
         None => Ok(()),
     }
+}
+
+multiversioned! {
+    /// One chunk of a float pass, compiled per CPU feature level.
+    #[allow(clippy::too_many_arguments)]
+    fn dyad_f64_chunk(
+        op: ScalarDyad,
+        xs: &[f64],
+        xoff: usize,
+        xdiv: usize,
+        ys: &[f64],
+        yoff: usize,
+        ydiv: usize,
+        start: usize,
+        out: &mut [f64],
+        span: Span,
+    ) -> Result<()> = dyad_f64_chunk_body;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3090,11 +3129,16 @@ fn is_associative(op: ScalarDyad) -> bool {
     matches!(op, Add | Mul | Min | Max)
 }
 
-/// Fold items `lo .. hi` into `acc`, right to left, taking only the columns
-/// that start at `j0` — `acc.len()` of them. False when a step left the
-/// element type; the accumulator is then meaningless.
-#[inline]
-fn fold_range<T, F>(v: &[T], m: usize, lo: usize, hi: usize, j0: usize, acc: &mut [T], step: &F) -> bool
+#[inline(always)]
+fn fold_range_body<T, F>(
+    v: &[T],
+    m: usize,
+    lo: usize,
+    hi: usize,
+    j0: usize,
+    acc: &mut [T],
+    step: &F,
+) -> bool
 where
     T: Copy,
     F: Fn(T, T) -> (T, bool),
@@ -3114,6 +3158,58 @@ where
         }
     }
     !over
+}
+
+multiversioned! {
+    #[allow(clippy::too_many_arguments)]
+    fn fold_range_vectorised[T: Copy, F: Fn(T, T) -> (T, bool)](
+        v: &[T],
+        m: usize,
+        lo: usize,
+        hi: usize,
+        j0: usize,
+        acc: &mut [T],
+        step: &F,
+    ) -> bool = fold_range_body;
+}
+
+/// Columns per fold below which the baseline compilation wins.
+///
+/// The only loop a wider vector can widen here is the one across an item's
+/// columns, and a loop of a few columns spends more on entering the vector
+/// body than the width gives back. Measured on `+/ m` over 20M f64 on one
+/// thread: at 4 and 8 columns the AVX2 clone is about 1.5x slower than the
+/// baseline one, at 16 columns and above it is 1.2x to 1.6x faster.
+const VECTOR_COLUMNS: usize = 16;
+
+/// Fold items `lo .. hi` into `acc`, right to left, taking only the columns
+/// that start at `j0` — `acc.len()` of them. False when a step left the
+/// element type; the accumulator is then meaningless.
+///
+/// Wide enough, and this is the reduce that vectorises, so it runs the
+/// compilation the CPU is entitled to; narrow, and it runs the baseline one.
+/// Either way the fold order is the same: the columns are independent
+/// accumulators, not a reassociation of one.
+#[allow(clippy::too_many_arguments)]
+#[inline]
+fn fold_range<T, F>(
+    v: &[T],
+    m: usize,
+    lo: usize,
+    hi: usize,
+    j0: usize,
+    acc: &mut [T],
+    step: &F,
+) -> bool
+where
+    T: Copy,
+    F: Fn(T, T) -> (T, bool),
+{
+    if acc.len() < VECTOR_COLUMNS {
+        fold_range_body(v, m, lo, hi, j0, acc, step)
+    } else {
+        fold_range_vectorised(v, m, lo, hi, j0, acc, step)
+    }
 }
 
 /// Fold `n` single-element items, right to left. Associative steps fold in
@@ -3318,12 +3414,8 @@ fn as_items(y: &Array) -> Option<Array> {
     (y.rank() == 0).then(|| Array::new(vec![1], y.data.clone()))
 }
 
-/// Running fold over `n` items of `m` elements each, one output item per
-/// step. Backward is exactly the insert's right-to-left order, so it holds
-/// for any step; forward is the left-to-right order, which agrees with the
-/// insert only when the step is associative. None when a step left the
-/// element type.
-fn scan_flat<T, F>(v: &[T], n: usize, m: usize, back: bool, step: F) -> Option<Vec<T>>
+#[inline(always)]
+fn scan_flat_body<T, F>(v: &[T], n: usize, m: usize, back: bool, step: F) -> Option<Vec<T>>
 where
     T: Copy + Default,
     F: Fn(T, T) -> (T, bool),
@@ -3381,6 +3473,39 @@ where
         }
     }
     (!over).then_some(out)
+}
+
+multiversioned! {
+    fn scan_flat_vectorised[T: Copy + Default, F: Fn(T, T) -> (T, bool)](
+        v: &[T],
+        n: usize,
+        m: usize,
+        back: bool,
+        step: F,
+    ) -> Option<Vec<T>> = scan_flat_body;
+}
+
+/// Running fold over `n` items of `m` elements each, one output item per
+/// step. Backward is exactly the insert's right-to-left order, so it holds
+/// for any step; forward is the left-to-right order, which agrees with the
+/// insert only when the step is associative. None when a step left the
+/// element type.
+///
+/// Only the wide shape has anything to gain from a wider vector, and for
+/// the same reason the reduce has: the loop that widens is the one across
+/// an item's elements. A scan of one element per item is a chain of
+/// dependent steps, which no vector shortens, so it takes the baseline
+/// compilation.
+fn scan_flat<T, F>(v: &[T], n: usize, m: usize, back: bool, step: F) -> Option<Vec<T>>
+where
+    T: Copy + Default,
+    F: Fn(T, T) -> (T, bool),
+{
+    if m < VECTOR_COLUMNS {
+        scan_flat_body(v, n, m, back, step)
+    } else {
+        scan_flat_vectorised(v, n, m, back, step)
+    }
 }
 
 fn scan_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, back: bool) -> Option<Vec<i64>> {
@@ -3525,8 +3650,15 @@ where
     ok.then_some(out)
 }
 
-/// The windows `lo .. lo + out.len()`. False when a step left the type.
-fn window_fold_range<T, F>(v: &[T], n: usize, w: usize, lo: usize, out: &mut [T], step: &F) -> bool
+#[inline(always)]
+fn window_fold_range_body<T, F>(
+    v: &[T],
+    n: usize,
+    w: usize,
+    lo: usize,
+    out: &mut [T],
+    step: &F,
+) -> bool
 where
     T: Copy + Default,
     F: Fn(T, T) -> (T, bool),
@@ -3578,6 +3710,21 @@ where
         bs += w;
     }
     !over
+}
+
+multiversioned! {
+    /// The windows `lo .. lo + out.len()`. False when a step left the type.
+    /// Compiled per CPU feature level; the prefix and suffix passes it runs
+    /// are dependent chains, so what a wider vector reaches here is the
+    /// pairing of the two, not the passes themselves.
+    fn window_fold_range[T: Copy + Default, F: Fn(T, T) -> (T, bool)](
+        v: &[T],
+        n: usize,
+        w: usize,
+        lo: usize,
+        out: &mut [T],
+        step: &F,
+    ) -> bool = window_fold_range_body;
 }
 
 fn window_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, w: usize) -> Option<Vec<i64>> {

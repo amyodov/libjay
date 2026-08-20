@@ -26,6 +26,7 @@ use crate::dtype::DType;
 use crate::error::Span;
 use crate::ir::{Expr, Program};
 use crate::par;
+use crate::simd::multiversioned;
 use crate::verb::{DyadOp, MonadOp, ScalarDyad, ScalarMonad, Verb, RANK_INF};
 
 /// Elements a block buffer holds.
@@ -381,7 +382,10 @@ fn slots(code: &[Instr]) -> usize {
 fn replayable(e: &Expr) -> bool {
     match e {
         Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => true,
-        Expr::Assign { .. } | Expr::PrintPass { .. } | Expr::Elided { .. } => false,
+        Expr::Assign { .. }
+        | Expr::PrintPass { .. }
+        | Expr::Elided { .. }
+        | Expr::VerbDef { .. } => false,
         Expr::Monad { verb, y, .. } => verb.is_pure() && replayable(y),
         Expr::Dyad { verb, x, y, .. } => verb.is_pure() && replayable(x) && replayable(y),
         Expr::Fused { inputs, .. } => inputs.iter().all(replayable),
@@ -692,7 +696,7 @@ fn uses_land(e: &Expr, name: &str, def: &Expr) -> Option<usize> {
         Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => uses_land(value, name, def),
         Expr::Monad { y, .. } => uses_land(y, name, def),
         Expr::Dyad { x, y, .. } => Some(uses_land(x, name, def)? + uses_land(y, name, def)?),
-        Expr::Fused { .. } | Expr::Elided { .. } => None,
+        Expr::Fused { .. } | Expr::Elided { .. } | Expr::VerbDef { .. } => None,
     }
 }
 
@@ -817,7 +821,7 @@ fn free_names(e: &Expr, out: &mut Vec<String>) {
             free_names(y, out);
         }
         Expr::Fused { inputs, .. } => inputs.iter().for_each(|i| free_names(i, out)),
-        Expr::Const(..) | Expr::Param(..) | Expr::Elided { .. } => {}
+        Expr::Const(..) | Expr::Param(..) | Expr::Elided { .. } | Expr::VerbDef { .. } => {}
     }
 }
 
@@ -831,7 +835,11 @@ fn assigns_any(e: &Expr, names: &[String]) -> bool {
         Expr::Monad { y, .. } => assigns_any(y, names),
         Expr::Dyad { x, y, .. } => assigns_any(x, names) || assigns_any(y, names),
         Expr::Fused { inputs, .. } => inputs.iter().any(|i| assigns_any(i, names)),
-        Expr::Const(..) | Expr::Param(..) | Expr::Name(..) | Expr::Elided { .. } => false,
+        Expr::Const(..)
+        | Expr::Param(..)
+        | Expr::Name(..)
+        | Expr::Elided { .. }
+        | Expr::VerbDef { .. } => false,
     }
 }
 
@@ -840,7 +848,11 @@ pub fn is_fused(p: &Program) -> bool {
     fn any(e: &Expr) -> bool {
         match e {
             Expr::Fused { .. } => true,
-            Expr::Const(..) | Expr::Param(..) | Expr::Name(..) | Expr::Elided { .. } => false,
+            Expr::Const(..)
+            | Expr::Param(..)
+            | Expr::Name(..)
+            | Expr::Elided { .. }
+            | Expr::VerbDef { .. } => false,
             Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => any(value),
             Expr::Monad { y, .. } => any(y),
             Expr::Dyad { x, y, .. } => any(x) || any(y),
@@ -1290,6 +1302,12 @@ where
 // Each pass picks its operation before the loop and then runs one plain
 // loop over slices, which is the shape the compiler vectorises. Nothing in
 // here is hand-written SIMD, and nothing may become it.
+//
+// These four are the whole arithmetic of a kernel, so they are also where
+// the CPU feature levels are chosen: each is compiled once per level (see
+// `simd`) and the call dispatches on what the machine runs. One block of
+// one instruction is thousands of elements, so the dispatch costs nothing
+// measurable.
 
 macro_rules! each {
     ($a:expr, $dst:expr, $f:expr) => {{
@@ -1311,7 +1329,8 @@ macro_rules! zip {
     }};
 }
 
-fn monad_f64(op: ScalarMonad, a: &[f64], dst: &mut [f64]) -> bool {
+#[inline(always)]
+fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64]) -> bool {
     use ScalarMonad::*;
     match op {
         Conj => each!(a, dst, |x: f64| x),
@@ -1341,7 +1360,8 @@ fn monad_f64(op: ScalarMonad, a: &[f64], dst: &mut [f64]) -> bool {
     }
 }
 
-fn dyad_f64(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64]) -> bool {
+#[inline(always)]
+fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64]) -> bool {
     use ScalarDyad::*;
     match op {
         Add => zip!(a, b, dst, |x: f64, y: f64| x + y),
@@ -1399,7 +1419,8 @@ macro_rules! zip_over {
     }};
 }
 
-fn monad_i64(op: ScalarMonad, a: &[i64], dst: &mut [i64]) -> bool {
+#[inline(always)]
+fn monad_i64_body(op: ScalarMonad, a: &[i64], dst: &mut [i64]) -> bool {
     use ScalarMonad::*;
     match op {
         Conj | Floor | Ceil => each!(a, dst, |x: i64| x),
@@ -1415,7 +1436,8 @@ fn monad_i64(op: ScalarMonad, a: &[i64], dst: &mut [i64]) -> bool {
     }
 }
 
-fn dyad_i64(op: ScalarDyad, a: &[i64], b: &[i64], dst: &mut [i64]) -> bool {
+#[inline(always)]
+fn dyad_i64_body(op: ScalarDyad, a: &[i64], b: &[i64], dst: &mut [i64]) -> bool {
     use ScalarDyad::*;
     match op {
         Add => zip_over!(a, b, dst, i64::overflowing_add),
@@ -1441,6 +1463,31 @@ fn dyad_i64(op: ScalarDyad, a: &[i64], b: &[i64], dst: &mut [i64]) -> bool {
         Ge => zip!(a, b, dst, |x: i64, y: i64| (x >= y) as i64),
         _ => false,
     }
+}
+
+multiversioned! {
+    /// One instruction of a kernel over one block of floats: the monadic
+    /// operations. False is unreachable — every operation a kernel holds is
+    /// covered — and exists so the two passes have one signature.
+    fn monad_f64(op: ScalarMonad, a: &[f64], dst: &mut [f64]) -> bool = monad_f64_body;
+}
+
+multiversioned! {
+    /// One instruction of a kernel over one block of floats: the dyadic
+    /// operations.
+    fn dyad_f64(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64]) -> bool = dyad_f64_body;
+}
+
+multiversioned! {
+    /// One instruction of a kernel over one block of integers: the monadic
+    /// operations. False means the block left i64.
+    fn monad_i64(op: ScalarMonad, a: &[i64], dst: &mut [i64]) -> bool = monad_i64_body;
+}
+
+multiversioned! {
+    /// One instruction of a kernel over one block of integers: the dyadic
+    /// operations. False means the block left i64.
+    fn dyad_i64(op: ScalarDyad, a: &[i64], b: &[i64], dst: &mut [i64]) -> bool = dyad_i64_body;
 }
 
 /// One fold step of an absorbed reduction. None on integer overflow.
@@ -1614,6 +1661,197 @@ fn int_result(out: Vec<i64>, root: DType) -> Data {
     match root {
         DType::Bool => Data::Bool(par::map(&out, |&v| (v != 0) as u8).into()),
         _ => Data::I64(out.into()),
+    }
+}
+
+// -------------------------------------------------------- describing one
+//
+// Read-only descriptions of a compiled kernel, for `Program::explain`.
+// Nothing here runs a kernel or changes one; the summary is derived from
+// the code the pass emitted, and the decline reason re-checks the same
+// preconditions `run` checks before it starts.
+
+/// Why a kernel handed its work back to the chain it came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decline {
+    /// Inputs disagree on shape, or every input is a scalar: broadcasting
+    /// and agreement are the chain's business.
+    Agreement,
+    /// Nothing to compute.
+    Empty,
+    /// An absorbed reduction wants one axis with at least two items.
+    ReduceShape,
+    /// One working type cannot hold every step exactly — a chain that
+    /// computes integers along a float path, or non-numeric data.
+    WorkingType,
+    /// The preconditions held, so a step went out of range mid-block:
+    /// integer overflow, which the chain redoes in a wider type.
+    Overflow,
+}
+
+impl Decline {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Decline::Agreement => "the inputs need agreement or are all scalars",
+            Decline::Empty => "there is nothing to compute",
+            Decline::ReduceShape => "the reduction needs one axis of two or more items",
+            Decline::WorkingType => "no single working type holds every step exactly",
+            Decline::Overflow => "an integer step left 64-bit range",
+        }
+    }
+}
+
+/// Why this kernel would decline these inputs, or None if it would run.
+///
+/// A read-only mirror of the preconditions at the top of [`run`]: it looks
+/// at shapes and dtypes only, never at values, so the one thing it cannot
+/// see in advance is an overflow — which is what is left when every
+/// precondition holds.
+pub fn decline_reason(k: &FusedKernel, inputs: &[Array]) -> Option<Decline> {
+    let Some(Some(shape)) = common_shape(inputs) else {
+        return Some(Decline::Agreement);
+    };
+    let n: usize = shape.iter().product();
+    if n == 0 {
+        return Some(Decline::Empty);
+    }
+    if matches!(k.yields, Yield::Reduce(_)) && (shape.len() != 1 || n < 2) {
+        return Some(Decline::ReduceShape);
+    }
+    if working_type(k, inputs).is_none() {
+        return Some(Decline::WorkingType);
+    }
+    Some(Decline::Overflow)
+}
+
+/// What a compiled kernel is made of.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Summary {
+    /// Arithmetic steps: the monads and dyads, not the loads and stores.
+    pub ops: usize,
+    /// Those steps in the order the kernel performs them.
+    pub op_names: Vec<&'static str>,
+    /// The reduction folded into the same pass, if there is one.
+    pub reduce: Option<&'static str>,
+    /// True when the whole chain collapsed to a count of its own items.
+    pub tally: bool,
+    /// Values the kernel keeps for a second read within one block.
+    pub lets: usize,
+    /// Subtrees the chain reads.
+    pub inputs: usize,
+    /// Elements one block buffer holds.
+    pub block: usize,
+}
+
+impl std::fmt::Display for Summary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} op{}", self.ops, if self.ops == 1 { "" } else { "s" })?;
+        if !self.op_names.is_empty() {
+            write!(f, ": {}", self.op_names.join(" "))?;
+        }
+        if let Some(r) = self.reduce {
+            write!(f, "; {r}/ absorbed")?;
+        }
+        if self.tally {
+            write!(f, "; tally only")?;
+        }
+        if self.lets > 0 {
+            write!(f, "; {} let slot{}", self.lets, if self.lets == 1 { "" } else { "s" })?;
+        }
+        write!(f, "; block {}", self.block)
+    }
+}
+
+/// Describe a compiled kernel: what it computes, and with what.
+pub fn summary(k: &FusedKernel) -> Summary {
+    let mut op_names = Vec::new();
+    let mut lets = 0usize;
+    for ins in &k.code {
+        match ins {
+            Instr::Monad(op) => op_names.push(monad_name(*op)),
+            Instr::Dyad(op) => op_names.push(dyad_name(*op)),
+            Instr::Store(_) => lets += 1,
+            Instr::Load(_) | Instr::Let(_) => {}
+        }
+    }
+    Summary {
+        ops: op_names.len(),
+        op_names,
+        reduce: k.reduce().map(dyad_name),
+        tally: k.yields == Yield::Tally,
+        lets,
+        inputs: k.leaves.iter().copied().max().map_or(0, |m| m + 1),
+        block: BLOCK,
+    }
+}
+
+/// The names the pass took out of the program: values it moved into the
+/// kernels that read them, so no sentence computes them as arrays any more.
+pub fn inlined_names(p: &Program) -> Vec<String> {
+    let Some(Expr::Elided { orig, .. }) = p.stmts.first() else { return Vec::new() };
+    let assigned = |stmts: &[Expr]| -> Vec<String> {
+        stmts
+            .iter()
+            .filter_map(|s| match s {
+                Expr::Assign { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let kept = assigned(&p.stmts);
+    assigned(orig).into_iter().filter(|n| !kept.contains(n)).collect()
+}
+
+/// J spellings for the elementwise operations a kernel can hold. Only the
+/// naming lives here; the meanings are [`crate::verb`]'s.
+fn monad_name(op: ScalarMonad) -> &'static str {
+    use ScalarMonad::*;
+    match op {
+        Conj => "+",
+        Neg => "-",
+        Signum => "*",
+        Recip => "%",
+        Sqrt => "%:",
+        Exp => "^",
+        Abs => "|",
+        Floor => "<.",
+        Ceil => ">.",
+        Not => "-.",
+        OneMinus => "-.",
+        Inc => ">:",
+        Dec => "<:",
+        Double => "+:",
+        Halve => "-:",
+        Square => "*:",
+        Ln => "^.",
+        Pi => "o.",
+        Factorial => "!",
+    }
+}
+
+fn dyad_name(op: ScalarDyad) -> &'static str {
+    use ScalarDyad::*;
+    match op {
+        Add => "+",
+        Sub => "-",
+        Mul => "*",
+        DivJ | DivApl => "%",
+        Min => "<.",
+        Max => ">.",
+        Pow => "^",
+        Residue => "|",
+        Eq => "=",
+        Ne => "~:",
+        Lt => "<",
+        Le => "<:",
+        Gt => ">",
+        Ge => ">:",
+        Lcm => "*.",
+        Gcd => "+.",
+        Log => "^.",
+        Root => "%:",
+        Circle => "o.",
+        Binomial => "!",
     }
 }
 

@@ -7,11 +7,13 @@
 pub mod array;
 pub mod dtype;
 pub mod error;
+mod explain;
 pub mod fmt;
 pub mod frontend;
 pub mod fuse;
 pub mod ir;
 mod par;
+pub mod simd;
 pub mod verb;
 
 pub use array::{Array, Buf, Data, Owner};
