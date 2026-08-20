@@ -13,6 +13,7 @@ pub mod frontend;
 pub mod fuse;
 pub mod ir;
 mod par;
+mod rng;
 pub mod simd;
 pub mod verb;
 

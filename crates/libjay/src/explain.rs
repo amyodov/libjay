@@ -248,6 +248,33 @@ fn verb_lines(v: &Verb, depth: usize, out: &mut String) {
             head(out, "reduce (insert between items)");
             verb_lines(u, depth + 1, out);
         }
+        Verb::Fit(u, n) => {
+            head(out, &format!("fit !.{n} (comparison tolerance)"));
+            verb_lines(u, depth + 1, out);
+        }
+        Verb::Amend(m) => head(out, &format!("amend at {} index(es)", m.count())),
+        Verb::Key(u) => {
+            head(out, "key / oblique");
+            verb_lines(u, depth + 1, out);
+        }
+        Verb::Cut(u, n) => {
+            head(out, &format!("cut ;.{n}"));
+            verb_lines(u, depth + 1, out);
+        }
+        Verb::PowerV(u, v) => {
+            head(out, "power, count from a verb");
+            verb_lines(u, depth + 1, out);
+            verb_lines(v, depth + 1, out);
+        }
+        Verb::PowerUntil(u, v) => {
+            head(out, "power, until a test holds");
+            verb_lines(u, depth + 1, out);
+            verb_lines(v, depth + 1, out);
+        }
+        Verb::AlongAxis(u, k) => {
+            head(out, &format!("along axis {k}"));
+            verb_lines(u, depth + 1, out);
+        }
         Verb::Windowed(u, kind) => {
             head(
                 out,

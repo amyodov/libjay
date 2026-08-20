@@ -184,3 +184,74 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   is now `not_yet("nested index arrays (⍳ with an array argument)")` and a
   recorded divergence from GNU APL, which has them. J's `i.` reshapes on the
   same argument and is untouched.
+- 2026-08-20 — Comparison tolerance, measured rather than assumed. Both
+  languages compare reals with a relative tolerance, and the two rules are
+  not the same one with a different constant. Probing each reference at the
+  threshold settled it: J is `|x-y| < ct × (|x| ⌊ |y|)` with `ct` = 2⁻⁴⁴
+  (`9!:18`), APL is `|x-y| < ⎕CT × (|x| ⌈ |y|)` with `⎕CT` = 1e¯13 — the
+  SMALLER magnitude in one and the LARGER in the other, both strictly below.
+  `1 = 1 + 2^_44` is 0 in jconsole while `1=1+2*¯44` is 1 in GNU APL, which
+  is the pair that pins them apart; the ISO/Dictionary prose says "max" for
+  both, so the oracle won. Exact equality (the infinities included) is
+  equality whatever the tolerance is, and a comparison against zero is
+  therefore exact. The tolerance lives on `EvalCfg` as a dialect value, next
+  to `Agreement`, and reaches the comparisons, `-:`/`≡`, `e.`/`∊`,
+  `i.`/`i:`/`⍳`, `~.`/`∪`, `I.`/`⍸` and the two roundings. It deliberately
+  does NOT reach grade: both references leave `/:`, `\:`, `⍋` and `⍒`
+  exact. Where the old code hashed for equality (nub, APL membership) the
+  float case now compares directly — tolerant equality is not an
+  equivalence relation, so no hash can stand in for it — and the integer,
+  character and boxed cases keep the hash, which is the common path.
+  `FusedKernel` carries the tolerance too, so a comparison inside a
+  blockwise chain cannot answer differently from the same comparison
+  outside one. J's `!.` is a new `Verb::Fit` that swaps the tolerance for
+  the verb under it; it is accepted only on verbs whose meaning uses one,
+  because on anything else J's `!.` specifies a fill, which is a separate
+  feature and now says so by name. `⎕CT` as a runtime variable stays out,
+  as `⎕IO` does.
+- 2026-08-20 — Random numbers are libjay's own stream. `?` and `?.` (J) and
+  `?` (APL) draw from MT19937, the published Mersenne Twister; `?.`
+  restarts from a fixed seed on every invocation (which is the behaviour
+  jconsole shows: the same sentence answers the same way twice in one
+  process) and `?` is seeded once per process from the clock. Both
+  references are in fact reproducible — jconsole's `?.` and GNU APL's `?`
+  from `⎕RL←16807` — but neither publishes the stream, and the clean-room
+  rule forbids the one way to find out, so matching them is not on offer.
+  `?` and `?.` are therefore the two spellings kept out of the differential
+  corpora; what is tested is the contract (range, shape, distinctness of a
+  deal, and that `?.` repeats). Both are marked impure so their cells are
+  never reordered across threads.
+- 2026-08-20 — APL bracket indexing without a new IR node. `A[i;j]` lowers
+  to one `SelectAxis` dyad per non-elided slot, applied from the LAST axis
+  to the first so that a scalar slot dropping its axis leaves the axes still
+  to come where they were. The slot applied first — the highest non-elided
+  one — is the only one that sees the whole array, so it carries the check
+  that the brackets held one slot per axis. Nothing else in the IR, the
+  fusion pass or `explain` had to learn a new shape. Indexed assignment
+  (`A[2]←99`) is deliberately out: the brackets are a reader.
+- 2026-08-20 — `f[k]` (axis) is a verb wrapper, not a rank. `Verb::AlongAxis`
+  brings axis k to the front, runs the verb on the leading axis, and puts
+  the axis back when the result kept the argument's rank — which is exactly
+  what separates a reduction (rank drops, remaining axes keep their order)
+  from a scan or a reversal. Naming an axis also collapses each
+  axis-choosing pair to one function, as GNU APL does: `f/[k]` and `f⌿[k]`
+  are the same reduction and `⌽[k]` and `⊖[k]` the same reversal. Only those
+  six spellings are wired; every other glyph reports
+  `axis specification for X`.
+- 2026-08-20 — GNU APL has no compose family at all: `∘` exists only as the
+  left half of `∘.`, `⍥` and `⍛` are not in its character set, and `f⍤g`
+  (atop) is a VALUE ERROR. So `∘`, `⍥`, `⍛` and `f⍤g` are no-oracle
+  territory, not merely unimplemented, and docs/status.md says so rather
+  than promising a differential test that cannot exist. `f⍣g` IS there and
+  is implemented (`Verb::PowerUntil`: apply f until `new g old` holds).
+  J's `u^:v` is a different operator with the same spelling — v supplies the
+  COUNT, so `u^:v` alone is one conditional step and `(u^:v)^:_` is the
+  while loop — and that is what `Verb::PowerV` does.
+- 2026-08-20 — Matrix division is one Householder QR in f64, shared by J's
+  `%.`/APL's `⌹` in both valences: the monad solves against an identity to
+  get the (pseudo-)inverse, the dyad against the right-hand side. Both
+  references refuse a matrix with more columns than rows and both refuse a
+  rank-deficient one, so libjay does too — a length error and a domain error
+  respectively, with the singularity detected from the QR diagonal relative
+  to the largest magnitude in the argument. A vector argument is a column,
+  as in both references, and keeps its own shape on the way out.

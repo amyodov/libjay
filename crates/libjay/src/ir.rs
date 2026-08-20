@@ -6,7 +6,7 @@ use crate::array::Array;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::fmt::{format_array, FmtOpts};
 use crate::fuse::FusedKernel;
-use crate::verb::{Agreement, Ctx, EvalCfg, Verb};
+use crate::verb::{Agreement, Ctx, EvalCfg, Tol, Verb};
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -81,6 +81,8 @@ pub struct Program {
     pub display_src: String,
     pub agreement: Agreement,
     pub fmt: FmtOpts,
+    /// The dialect's comparison tolerance.
+    pub tol: Tol,
 }
 
 /// What an instrumented run saw at one node.
@@ -136,7 +138,7 @@ impl Program {
                 args.len()
             )));
         }
-        let cfg = EvalCfg { agreement: self.agreement, fmt: self.fmt };
+        let cfg = EvalCfg { agreement: self.agreement, fmt: self.fmt, tol: self.tol };
         let mut ctx = Ctx { cfg, out };
         let mut env: HashMap<String, Array> = HashMap::new();
         let mut last = None;

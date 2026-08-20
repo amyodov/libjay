@@ -18,9 +18,9 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 82 green / 14 partial / 87 red of 183 valences in the inventory.**
+**J: 92 green / 23 partial / 68 red of 183 valences in the inventory.**
 
-**APL: 59 green / 16 partial / 41 red of 116 valences in the inventory.**
+**APL: 63 green / 20 partial / 33 red of 116 valences in the inventory.**
 
 ## J — verbs
 
@@ -48,15 +48,15 @@ tables are listed separately and not counted.
 | `*.` | 🔴 length/angle | 🟡 LCM; integral values only |
 | `!` | 🟢 factorial | 🟢 out of |
 | `o.` | 🟢 pi times | 🟡 circle; real k only, 8–12 not yet |
-| `%.` | 🔴 matrix inverse | 🔴 matrix divide |
+| `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
 | `j.` | 🔴 imaginary | 🔴 complex |
 | `r.` | 🔴 angle | 🔴 polar |
 | `p.` | 🔴 roots | 🔴 polynomial |
 | `p..` | 🔴 poly. derivative | 🔴 poly. integral |
-| `p:` | 🔴 primes | 🔴 primality |
-| `q:` | 🔴 prime factors | 🔴 prime exponents |
-| `?` | 🔴 roll | 🔴 deal |
-| `?.` | 🔴 roll (fixed seed) | 🔴 deal (fixed seed) |
+| `p:` | 🟢 the y-th prime | 🔴 primality and the factorisation table |
+| `q:` | 🟢 prime factors | 🔴 prime exponents |
+| `?` | 🟡 roll; libjay's own stream, not J's | 🟡 deal; same |
+| `?.` | 🟡 roll, fixed seed; libjay's own stream | 🟡 deal, fixed seed; same |
 | `x:` | 🔴 extend precision | 🔴 to rational |
 
 ### Comparison and logic
@@ -69,7 +69,8 @@ tables are listed separately and not counted.
 | `~:` | 🔴 nub sieve | 🟢 not-equal |
 | `~.` | 🟢 nub | — |
 
-`-:` (halve / match) is in the arithmetic table. Comparison is exact; J's default tolerance is a feature-table row below.
+`-:` (halve / match) is in the arithmetic table. Comparison carries J's
+default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 
 ### Structural
 
@@ -94,10 +95,10 @@ tables are listed separately and not counted.
 | Spelling | Monad | Dyad |
 |---|---|---|
 | `{` | 🔴 catalogue | 🟡 from; atom indices, no boxed index specs |
-| `{::` | 🔴 map | 🔴 fetch |
+| `{::` | 🔴 map | 🟢 fetch |
 | `i.` | 🟢 integers | 🟢 index of |
-| `i:` | 🔴 steps | 🔴 index of last |
-| `I.` | 🔴 indices | 🔴 interval index |
+| `i:` | 🟢 steps | 🟢 index of last |
+| `I.` | 🟢 indices | 🟢 interval index |
 | `e.` | 🔴 raze in | 🟢 member of |
 | `E.` | — | 🔴 member of interval |
 | `/:` | 🟡 grade up; boxes need total ordering | 🟢 sort |
@@ -137,9 +138,9 @@ tables are listed separately and not counted.
 | `/` | 🟢 insert | 🟢 table |
 | `\` | 🟢 prefix | 🟢 infix |
 | `\.` | 🟢 suffix | 🔴 outfix |
-| `/.` | 🔴 oblique | 🔴 key |
+| `/.` | 🟢 oblique | 🟢 key |
 | `~` | 🟢 reflex | 🟢 passive |
-| `}` | 🔴 item amend | 🔴 amend |
+| `}` | 🟡 noun operand (`m} y` selects) | 🟡 noun operand; `u}` not yet |
 
 ## J — conjunctions
 
@@ -152,11 +153,11 @@ tables are listed separately and not counted.
 | `&:` appose | 🟢 |
 | `&.` under | 🟡 only `u&.>` (each); the general case needs inverses |
 | `&.:` under | 🔴 |
-| `^:` power | 🟡 literal count or `_`; `u^:v` and negatives not yet |
+| `^:` power | 🟡 literal count, `_`, or a verb count; negatives (the obverse) not yet |
 | `.` dot product | 🔴 |
 | `:` explicit definition | 🔴 |
-| `;.` cut | 🔴 |
-| `!.` fit (tolerance) | 🔴 |
+| `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`) and `;.0`; `;.3` not yet |
+| `!.` fit (tolerance) | 🟡 the tolerance meaning; `!.` as a fill not yet |
 | `!:` foreign | 🔴 sandboxed design needed |
 | `` ` `` tie (gerund) | 🔴 |
 | `` `: `` evoke gerund | 🔴 |
@@ -192,7 +193,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Leading-prefix agreement | 🟢 |
 | Overtake fill | 🟢 |
 | Catenate with fill | 🔴 |
-| Comparison tolerance (default `=`, `!.`) | 🟡 exact today; divergence recorded |
+| Comparison tolerance (default `=`, `!.`) | 🟢 2⁻⁴⁴, and `u!.n` |
 | Integer, float, `_` negative, `1e_3` exponent literals | 🟢 |
 | Complex literal `1j2` | 🔴 |
 | Extended literal `1x` | 🔴 |
@@ -218,8 +219,8 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `\|` | 🟢 magnitude | 🟢 residue |
 | `!` | 🟢 factorial | 🟢 binomial |
 | `○` | 🟢 pi times | 🟡 circle; real k only |
-| `?` | 🔴 roll | 🔴 deal |
-| `⌹` | 🔴 matrix inverse | 🔴 matrix divide |
+| `?` | 🟡 roll; libjay's own stream, not GNU APL's | 🟡 deal; same |
+| `⌹` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
 
 ### Comparison and logic
 
@@ -251,10 +252,10 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `⍉` | 🟢 transpose | 🔴 dyadic transpose |
 | `↑` | 🟢 first | 🟡 take; overtaking a nested array fills with the empty box |
 | `↓` | 🔴 split | 🟢 drop |
-| `⊂` | 🟢 enclose | 🔴 partitioned enclose |
+| `⊂` | 🟢 enclose | 🟡 partitioned enclose; a vector argument only |
 | `⊃` | 🟢 disclose / mix | 🔴 pick |
-| `⊆` | 🔴 nest | 🔴 partition |
-| `⌷` | 🔴 materialise | 🔴 index |
+| `⊆` | 🔴 no oracle: not in GNU APL's character set | 🔴 same |
+| `⌷` | 🔴 materialise — GNU APL has no monad either | 🟢 index (APL2: one scalar per axis) |
 | `⊥` | — | 🟡 decode; folds the last axis, not the leading one |
 | `⊤` | — | 🟢 encode |
 
@@ -263,7 +264,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Glyph | Monad | Dyad |
 |---|---|---|
 | `⍳` | 🟡 scalar only; vector argument is a named not-yet | 🟢 index of |
-| `⍸` | 🔴 where | 🔴 interval index |
+| `⍸` | 🟢 where | 🟢 interval index |
 | `∊` | 🟢 enlist | 🟢 membership |
 | `⍷` | — | 🔴 find |
 | `∪` | 🟢 unique | 🔴 union |
@@ -297,11 +298,11 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `¨` each | 🟢 |
 | `⍨` commute | 🟢 |
 | `∘.` outer product | 🟢 |
-| `⍤` rank | 🟡 rank specification only; `f⍤g` not yet |
-| `⍣` power | 🟡 literal count; `f⍣g`, including `f⍣≡`, not yet |
-| `∘` beside | 🔴 |
-| `⍥` over | 🔴 |
-| `⍛` before | 🔴 |
+| `⍤` rank | 🟡 rank specification only; `f⍤g` is not in GNU APL either |
+| `⍣` power | 🟡 literal count or a function operand (`f⍣≡`); negatives not yet |
+| `∘` beside | 🔴 no oracle: GNU APL has no `∘` operator |
+| `⍥` over | 🔴 no oracle: not in GNU APL's character set |
+| `⍛` before | 🔴 no oracle: GNU APL rejects it |
 | `⍢` under | 🔴 |
 | `⌸` key | 🔴 |
 | `⌺` stencil | 🔴 |
@@ -319,8 +320,8 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Dfns `{⍵+1}`, `⍺`/`⍵` | 🔴 |
 | Tradfns `∇` | 🔴 |
 | Trains (forks and atops) | 🔴 |
-| Bracket indexing `A[1]` | 🔴 |
-| Axis specification `f[k]` | 🔴 |
+| Bracket indexing `A[1]` | 🟡 reading, elided slots included; `A[1]←v` not yet |
+| Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`; the rest named |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
 | `⎕`-system names as runtime variables | 🔴 |
 | Control structures `:If` … `:EndIf` | 🔴 |

@@ -58,10 +58,10 @@ Once published, `uvx libjay -e '...'` will do all of that with no setup.
 ## Status
 
 Early. What's implemented, feature by feature, is the
-[status matrix](docs/status.md): 82 green / 14 partial / 87 red of 183 J
-valences, 59 green / 16 partial / 41 red of 116 APL valences. Both primitive
-sets are differential-tested against the reference implementations: 2942
-J and 676 APL expressions, recorded as snapshots from black-box runs of the
+[status matrix](docs/status.md): 92 green / 23 partial / 68 red of 183 J
+valences, 63 green / 20 partial / 33 red of 116 APL valences. Both primitive
+sets are differential-tested against the reference implementations: 3073
+J and 766 APL expressions, recorded as snapshots from black-box runs of the
 reference interpreters and replayed on every test run, 100% agreement. A
 20-period Bollinger z-score written as one J kernel runs 20M rows in 437 ms
 against the equivalent Polars pipeline's 768, agreeing to 8.7e-10. Dense numeric arrays and boxes; things the languages have but

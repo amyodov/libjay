@@ -20,12 +20,12 @@ pub fn parse(src: &SourceParts, origin: i64) -> Result<Vec<Expr>> {
     let sentences = lex(src, origin)?;
     let mut stmts = Vec::with_capacity(sentences.len());
     for sentence in sentences {
-        let toks = fold_operators(sentence)?;
+        let toks = fold_paren_funcs(fold_axes(fold_operators(sentence, origin)?, origin)?);
         if toks.is_empty() {
             continue;
         }
         let hint = Span::merge(toks[0].span, toks[toks.len() - 1].span);
-        stmts.push(parse_range(&toks, 0, toks.len(), hint)?);
+        stmts.push(parse_range(&toks, 0, toks.len(), hint, origin)?);
     }
     Ok(stmts)
 }
@@ -93,6 +93,10 @@ enum Tok {
     Quad,
     LParen,
     RParen,
+    LBracket,
+    RBracket,
+    /// The separator between index slots inside `[ ]`.
+    Semi,
 }
 
 #[derive(Clone, Debug)]
@@ -104,7 +108,10 @@ struct Token {
 /// True for tokens that can end an operand (and so make the function on
 /// their right dyadic).
 fn is_operand_end(k: &Tok) -> bool {
-    matches!(k, Tok::Value(_) | Tok::Nums(_) | Tok::Param(_) | Tok::Name(_) | Tok::RParen)
+    matches!(
+        k,
+        Tok::Value(_) | Tok::Nums(_) | Tok::Param(_) | Tok::Name(_) | Tok::RParen | Tok::RBracket
+    )
 }
 
 /// The array a literal token holds.
@@ -314,8 +321,35 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '⊂' => Prim {
             name: "⊂",
             monad: M::Enclose(Enclose::ExceptSimpleScalar),
-            dyad: D::NotYet("partitioned enclose (dyadic ⊂)"),
+            dyad: D::PartitionEnclose,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        // `⍸` counts from ⎕IO; its dyad is the interval index, which GNU
+        // APL answers with the count of bounds below the value plus ⎕IO-1.
+        '⍸' => Prim {
+            name: "⍸",
+            monad: M::Indices { origin, boxed_coords: true },
+            dyad: D::IntervalIndex { offset: origin - 1 },
+            ranks: [RANK_INF, 1, RANK_INF],
+        },
+        // GNU APL's `⌷` is APL2's: one scalar index per axis, no monad.
+        '⌷' => Prim {
+            name: "⌷",
+            monad: M::NotYet("materialise (monadic ⌷)"),
+            dyad: D::Squad { origin },
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '?' => Prim {
+            name: "?",
+            monad: M::Roll { origin, fixed: false, float_at_zero: false },
+            dyad: D::Deal { origin, fixed: false },
+            ranks: [RANK_INF, 0, 0],
+        },
+        '⌹' => Prim {
+            name: "⌹",
+            monad: M::MatrixInverse,
+            dyad: D::MatrixDivide,
+            ranks: [2, RANK_INF, 2],
         },
         '⊃' => Prim {
             name: "⊃",
@@ -479,6 +513,24 @@ fn lex_text(
             }
             ')' => {
                 cur.push(Token { kind: Tok::RParen, span: Span::new(offset + i, offset + i + 1) });
+                i += 1;
+            }
+            '[' => {
+                cur.push(Token {
+                    kind: Tok::LBracket,
+                    span: Span::new(offset + i, offset + i + 1),
+                });
+                i += 1;
+            }
+            ']' => {
+                cur.push(Token {
+                    kind: Tok::RBracket,
+                    span: Span::new(offset + i, offset + i + 1),
+                });
+                i += 1;
+            }
+            ';' => {
+                cur.push(Token { kind: Tok::Semi, span: Span::new(offset + i, offset + i + 1) });
                 i += 1;
             }
             '←' => {
@@ -737,7 +789,7 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
 /// Fold monadic and dyadic operators into derived-function tokens, left to
 /// right. After this the sentence holds only values, names, functions, `←`,
 /// `⎕` and parentheses.
-fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
+fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
     let mut out: Vec<Token> = Vec::new();
     let mut it = toks.into_iter().peekable();
     while let Some(t) = it.next() {
@@ -805,6 +857,28 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
             _ => unreachable!("checked above"),
         };
         let span = Span::merge(ftok.span, t.span);
+        // An explicit axis replaces the glyph's own choice of one: `+/[k]`
+        // and `+⌿[k]` both reduce axis k, and `f\\[k]` and `f⍀[k]` both scan
+        // it, which is what makes the two spellings the same function here.
+        if let Some((k, aspan)) = take_axis(&mut it, origin)? {
+            let inner = match op {
+                OpGlyph::Slash | OpGlyph::SlashBar => Verb::Reduce(Box::new(f)),
+                OpGlyph::Backslash | OpGlyph::BackslashBar => {
+                    Verb::Windowed(Box::new(Verb::Reduce(Box::new(f))), WindowKind::Scan)
+                }
+                _ => {
+                    return Err(Error::not_yet(
+                        format!("axis specification for {}", op.glyph()),
+                        aspan,
+                    ));
+                }
+            };
+            out.push(Token {
+                kind: Tok::Func(Verb::AlongAxis(Box::new(inner), k)),
+                span: Span::merge(span, aspan),
+            });
+            continue;
+        }
         let derived = match op {
             // APL's divergence from J: `/` reduces the last axis, `⌿` the
             // leading one. `+/` sums rows, `+⌿` sums columns.
@@ -827,11 +901,17 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
             OpGlyph::Each => Verb::Each(Box::new(f), Enclose::ExceptSimpleScalar),
             OpGlyph::Power => {
                 let spec = match it.peek() {
+                    // `f⍣g` iterates until `new g old` holds: `f⍣≡` is the
+                    // fixed point, which is the spelling the reference uses.
                     Some(tok) if matches!(tok.kind, Tok::Func(_)) => {
-                        return Err(Error::not_yet(
-                            "power with a function right operand (f⍣g)",
-                            Span::merge(span, tok.span),
-                        ));
+                        let gtok = it.next().unwrap();
+                        let Tok::Func(g) = gtok.kind else { unreachable!("checked above") };
+                        let v = Verb::PowerUntil(Box::new(f), Box::new(g));
+                        out.push(Token {
+                            kind: Tok::Func(v),
+                            span: Span::merge(span, gtok.span),
+                        });
+                        continue;
                     }
                     Some(tok) if literal(&tok.kind).is_some() => it.next().unwrap(),
                     _ => {
@@ -874,6 +954,112 @@ fn fold_operators(toks: Vec<Token>) -> Result<Vec<Token>> {
     Ok(out)
 }
 
+/// `[k]` immediately after an operator glyph, if it is there. The axis is
+/// given in `⎕IO` origin and comes back as a zero-based one.
+fn take_axis(
+    it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
+    origin: i64,
+) -> Result<Option<(usize, Span)>> {
+    if !matches!(it.peek().map(|t| &t.kind), Some(Tok::LBracket)) {
+        return Ok(None);
+    }
+    let open = it.next().expect("peeked");
+    let spec = match it.next() {
+        Some(tok) if literal(&tok.kind).is_some() => tok,
+        Some(tok) => return Err(Error::not_yet("a computed axis (f[k])", tok.span)),
+        None => return Err(Error::parse("unterminated axis specification", open.span)),
+    };
+    let close = match it.next() {
+        Some(tok) if matches!(tok.kind, Tok::RBracket) => tok,
+        _ => return Err(Error::parse("unterminated axis specification", open.span)),
+    };
+    let span = Span::merge(open.span, close.span);
+    let arr = literal(&spec.kind).expect("checked above");
+    let ints = arr
+        .to_i64_vec()
+        .ok_or_else(|| Error::parse("an axis must be a whole number", spec.span))?;
+    let [k] = ints[..] else {
+        return Err(Error::not_yet("several axes in one specification", spec.span));
+    };
+    let k = k - origin;
+    if k < 0 {
+        return Err(Error::domain(format!("axis {} does not exist", k + origin), spec.span));
+    }
+    Ok(Some((k as usize, span)))
+}
+
+/// `(f)` is `f`: a function alone in parentheses is only grouped, and the
+/// parser reads a bare function as a missing argument otherwise.
+fn fold_paren_funcs(toks: Vec<Token>) -> Vec<Token> {
+    let mut out: Vec<Token> = Vec::with_capacity(toks.len());
+    for t in toks {
+        if matches!(t.kind, Tok::RBracket) {
+            out.push(t);
+            continue;
+        }
+        let is_close = matches!(t.kind, Tok::RParen);
+        let n = out.len();
+        if is_close
+            && n >= 2
+            && matches!(out[n - 1].kind, Tok::Func(_))
+            && matches!(out[n - 2].kind, Tok::LParen)
+        {
+            let f = out.pop().expect("checked above");
+            let open = out.pop().expect("checked above");
+            out.push(Token { kind: f.kind, span: Span::merge(open.span, t.span) });
+            continue;
+        }
+        out.push(t);
+    }
+    out
+}
+
+/// `f[k]` where `f` is a plain function rather than a derived one.
+fn fold_axes(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
+    let mut out: Vec<Token> = Vec::new();
+    let mut it = toks.into_iter().peekable();
+    while let Some(t) = it.next() {
+        let Tok::Func(f) = &t.kind else {
+            out.push(t);
+            continue;
+        };
+        let Some((k, aspan)) = take_axis(&mut it, origin)? else {
+            out.push(t);
+            continue;
+        };
+        let Some(inner) = leading_axis_form(f) else {
+            return Err(Error::not_yet(format!("axis specification for {}", f.name()), aspan));
+        };
+        out.push(Token {
+            kind: Tok::Func(Verb::AlongAxis(Box::new(inner), k)),
+            span: Span::merge(t.span, aspan),
+        });
+    }
+    Ok(out)
+}
+
+/// The function a glyph means once an axis is named — the leading-axis form
+/// of the pairs that differ only in which axis they pick. None where libjay
+/// has no axis form for the function yet.
+fn leading_axis_form(v: &Verb) -> Option<Verb> {
+    match v {
+        // `⌽` is `⊖` applied to rows; with an axis given the two agree.
+        Verb::Rank(inner, [1, 0, 1]) => leading_axis_form(inner),
+        Verb::Prim(p) if matches!(p.monad, MonadOp::Reverse) => Some(v.clone()),
+        _ => None,
+    }
+}
+
+/// One bracket slot: axis `axis` of the right argument selected by the left.
+fn select_axis_verb(axis: usize, rank: usize, origin: i64) -> Verb {
+    Verb::Prim(Prim {
+        name: "[…]",
+        monad: MonadOp::None,
+        dyad: DyadOp::SelectAxis { axis, rank, origin },
+        ranks: [RANK_INF; 3],
+    })
+}
+
 /// `f⍣n`: one nonnegative integer atom. APL spells convergence `f⍣≡`, a
 /// function right operand, which is a separate gap.
 fn power_spec(a: &Array, span: Span) -> Result<Power> {
@@ -908,8 +1094,8 @@ fn rank_spec(a: &Array, span: Span) -> Result<[i64; 3]> {
 
 /// Parse the token range `[lo, hi)` as one expression, right to left.
 /// `hint` locates errors when the range is empty.
-fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<Expr> {
-    let (mut acc, mut start) = parse_operand(toks, lo, hi, hint)?;
+fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, origin: i64) -> Result<Expr> {
+    let (mut acc, mut start) = parse_operand(toks, lo, hi, hint, origin)?;
     let end = toks[hi - 1].span.end;
     loop {
         if start == lo {
@@ -921,7 +1107,7 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<Expr>
                 // Dyadic exactly when an operand ends to the left of `f`.
                 let dyadic = start >= lo + 2 && is_operand_end(&toks[start - 2].kind);
                 if dyadic {
-                    let (x, xstart) = parse_operand(toks, lo, start - 1, left.span)?;
+                    let (x, xstart) = parse_operand(toks, lo, start - 1, left.span, origin)?;
                     acc = Expr::Dyad {
                         verb: f.clone(),
                         x: Box::new(x),
@@ -974,8 +1160,14 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<Expr>
 /// contributes one item, except a run of numeric literals, whose numbers
 /// are items of their own — which is why `1 2 (3 4)` has three items and
 /// `'ab' 'cd'` has two.
-fn parse_operand(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Expr, usize)> {
-    let (first, mut start) = parse_primary(toks, lo, hi, hint)?;
+fn parse_operand(
+    toks: &[Token],
+    lo: usize,
+    hi: usize,
+    hint: Span,
+    origin: i64,
+) -> Result<(Expr, usize)> {
+    let (first, mut start) = parse_primary(toks, lo, hi, hint, origin)?;
     if start == lo || !is_operand_end(&toks[start - 1].kind) {
         return Ok((first, start));
     }
@@ -986,7 +1178,7 @@ fn parse_operand(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Ex
         if start == lo || !is_operand_end(&toks[start - 1].kind) {
             break;
         }
-        let (e, s) = parse_primary(toks, lo, start, toks[start - 1].span)?;
+        let (e, s) = parse_primary(toks, lo, start, toks[start - 1].span, origin)?;
         cur = e;
         start = s;
     }
@@ -1035,7 +1227,13 @@ fn strand_verb() -> Verb {
 
 /// Parse the single operand ending at `hi - 1`. Returns the expression and
 /// the index of its first token.
-fn parse_primary(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Expr, usize)> {
+fn parse_primary(
+    toks: &[Token],
+    lo: usize,
+    hi: usize,
+    hint: Span,
+    origin: i64,
+) -> Result<(Expr, usize)> {
     if hi == lo {
         return Err(Error::parse("empty parentheses", hint));
     }
@@ -1047,9 +1245,10 @@ fn parse_primary(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Ex
         Tok::RParen => {
             let l = match_lparen(toks, lo, hi - 1)?;
             let hint = Span::merge(toks[l].span, t.span);
-            let inner = parse_range(toks, l + 1, hi - 1, hint)?;
+            let inner = parse_range(toks, l + 1, hi - 1, hint, origin)?;
             Ok((inner, l))
         }
+        Tok::RBracket => index_brackets(toks, lo, hi, origin),
         // `F←+/` names a function in some dialects. The reference this
         // frontend follows, GNU APL, rejects it as a syntax error, so it is
         // not implemented here; J's `mean =. +/ % #` is the spelling libjay
@@ -1062,8 +1261,96 @@ fn parse_primary(toks: &[Token], lo: usize, hi: usize, hint: Span) -> Result<(Ex
         Tok::Assign => Err(Error::parse("← needs a value on its right", t.span)),
         Tok::Quad => Err(Error::parse("⎕ is only supported as ⎕← (print)", t.span)),
         Tok::LParen => Err(Error::parse("unmatched (", t.span)),
+        Tok::LBracket => Err(Error::parse("unmatched [", t.span)),
+        Tok::Semi => Err(Error::parse("; is only meaningful inside index brackets", t.span)),
         Tok::Op(_) => Err(Error::internal("operator survived folding")),
     }
+}
+
+/// `A[i;j]`: one slot per axis, an empty slot meaning the whole axis.
+///
+/// The slots are applied from the last axis to the first, so a scalar slot
+/// dropping its axis leaves the axes still to come where they were. The
+/// slot that sees the whole array — the last one applied — carries the
+/// check that there is one slot per axis.
+fn index_brackets(
+    toks: &[Token],
+    lo: usize,
+    hi: usize,
+    origin: i64,
+) -> Result<(Expr, usize)> {
+    let close = &toks[hi - 1];
+    let open = match_lbracket(toks, lo, hi - 1)?;
+    if open == lo || !is_operand_end(&toks[open - 1].kind) {
+        return Err(Error::parse("[ needs a value on its left", toks[open].span));
+    }
+    let (base, start) = parse_primary(toks, lo, open, toks[open].span, origin)?;
+    let slots = index_slots(toks, open + 1, hi - 1, toks[open].span)?;
+    let span = Span::new(toks[start].span.start, close.span.end);
+    let rank = slots.len();
+    let mut acc = base;
+    let mut first = true;
+    for (axis, slot) in slots.iter().enumerate().rev() {
+        let Some((slo, shi)) = *slot else { continue };
+        let idx = parse_range(toks, slo, shi, toks[open].span, origin)?;
+        let check = if first { rank } else { 0 };
+        first = false;
+        acc = Expr::Dyad {
+            verb: select_axis_verb(axis, check, origin),
+            x: Box::new(idx),
+            y: Box::new(acc),
+            span,
+        };
+    }
+    Ok((acc, start))
+}
+
+/// The token ranges of the slots between `[` and `]`, in axis order. None
+/// is an elided slot, which selects the whole axis.
+fn index_slots(
+    toks: &[Token],
+    lo: usize,
+    hi: usize,
+    hint: Span,
+) -> Result<Vec<Option<(usize, usize)>>> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = lo;
+    for (i, t) in toks.iter().enumerate().take(hi).skip(lo) {
+        match t.kind {
+            Tok::LParen | Tok::LBracket => depth += 1,
+            Tok::RParen | Tok::RBracket => depth -= 1,
+            Tok::Semi if depth == 0 => {
+                out.push((start < i).then_some((start, i)));
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push((start < hi).then_some((start, hi)));
+    if out.len() == 1 && out[0].is_none() {
+        return Err(Error::parse("empty index brackets", hint));
+    }
+    Ok(out)
+}
+
+fn match_lbracket(toks: &[Token], lo: usize, rbracket: usize) -> Result<usize> {
+    let mut depth = 0usize;
+    let mut i = rbracket;
+    while i > lo {
+        i -= 1;
+        match toks[i].kind {
+            Tok::RBracket => depth += 1,
+            Tok::LBracket => {
+                if depth == 0 {
+                    return Ok(i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    Err(Error::parse("unmatched ]", toks[rbracket].span))
 }
 
 fn match_lparen(toks: &[Token], lo: usize, rparen: usize) -> Result<usize> {
@@ -1326,7 +1613,7 @@ mod tests {
     #[case('⊢', MonadOp::Same, DyadOp::Right)]
     #[case('⊣', MonadOp::Same, DyadOp::Left)]
     #[case('↑', MonadOp::First, DyadOp::Take)]
-    #[case('⊂', MonadOp::Enclose(Enclose::ExceptSimpleScalar), DyadOp::NotYet("partitioned enclose (dyadic ⊂)"))]
+    #[case('⊂', MonadOp::Enclose(Enclose::ExceptSimpleScalar), DyadOp::PartitionEnclose)]
     #[case('⊃', MonadOp::Open, DyadOp::NotYet("pick (dyadic ⊃)"))]
     #[case('↓', MonadOp::NotYet("split (monadic ↓) — nested arrays"), DyadOp::Drop)]
     fn primitive_meanings(#[case] glyph: char, #[case] monad: MonadOp, #[case] dyad: DyadOp) {
@@ -1533,9 +1820,10 @@ mod tests {
             Expr::Monad { verb: Verb::PowerN(_, p), .. } => assert_eq!(p, Power::Times(3)),
             other => panic!("expected a power, got {other:?}"),
         }
-        let e = err("+⍣≡⊢5");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("function right operand"), "{}", e.msg);
+        match one("+⍣≡⊢5") {
+            Expr::Monad { verb: Verb::PowerUntil(..), .. } => {}
+            other => panic!("expected a power until, got {other:?}"),
+        }
         let e = err("+⍣¯1⊢5");
         assert_eq!(e.kind, ErrorKind::NotYet);
         assert!(e.msg.contains("inverse power"), "{}", e.msg);

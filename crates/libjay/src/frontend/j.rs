@@ -243,6 +243,31 @@ fn primitive(word: &str) -> Option<Prim> {
         "|." => prim("|.", M::Reverse, D::Rotate, [INF, 1, INF]),
         "|:" => prim("|:", M::TransposeAxes, D::NotYet("dyadic transpose"), [INF, 1, INF]),
         "i." => prim("i.", M::IotaJ, D::IndexOf { origin: 0 }, [1, INF, INF]),
+        "i:" => prim("i:", M::Steps, D::IndexOfLast { origin: 0 }, [0, INF, INF]),
+        "I." => prim(
+            "I.",
+            M::Indices { origin: 0, boxed_coords: false },
+            D::IntervalIndex { offset: 0 },
+            [1, 1, INF],
+        ),
+        "p:" => prim("p:", M::NthPrime, D::NotYet("prime metadata (dyadic p:)"), [0, 0, 0]),
+        "q:" => prim("q:", M::PrimeFactors, D::NotYet("prime exponents (dyadic q:)"), [0, 0, 0]),
+        "%." => prim("%.", M::MatrixInverse, D::MatrixDivide, [2, INF, 2]),
+        // The monad takes the whole argument: one invocation is one run of
+        // the generator, consumed in ravel order.
+        "?" => prim(
+            "?",
+            M::Roll { origin: 0, fixed: false, float_at_zero: true },
+            D::Deal { origin: 0, fixed: false },
+            [INF, 0, 0],
+        ),
+        "?." => prim(
+            "?.",
+            M::Roll { origin: 0, fixed: true, float_at_zero: true },
+            D::Deal { origin: 0, fixed: true },
+            [INF, 0, 0],
+        ),
+        "{::" => prim("{::", M::NotYet("map (monadic {::)"), D::Fetch, [INF, INF, INF]),
         "e." => prim("e.", M::NotYet("raze-in (monadic e.)"), D::MemberJ, [INF, INF, INF]),
         "/:" => prim(
             "/:",
@@ -257,6 +282,12 @@ fn primitive(word: &str) -> Option<Prim> {
             [INF, INF, INF],
         ),
         ";" => prim(";", M::Raze, D::Link, [INF, INF, INF]),
+        ";:" => prim(
+            ";:",
+            M::NotYet("words (monadic ;:)"),
+            D::NotYet("sequential machine (dyadic ;:)"),
+            [INF, INF, INF],
+        ),
         "L." => prim(
             "L.",
             M::NotYet("level of (L.)"),
@@ -280,13 +311,12 @@ fn verb_for(word: &str) -> Option<Verb> {
     Some(Verb::Prim(p))
 }
 
-const ADVERBS: [&str; 5] = ["/", "\\", "/.", "\\.", "~"];
+const ADVERBS: [&str; 6] = ["/", "\\", "/.", "\\.", "~", "}"];
 
 /// Conjunction spellings. The ones without a meaning here are recognised so
 /// that their diagnostic names the conjunction rather than the word.
-const CONJUNCTIONS: [&str; 17] = [
-    "\"", "@", "@.", "@:", "&", "&.", "&.:", "&:", "^:", ";.", "!.", "!:", "`", "`:", "}", ".",
-    ":",
+const CONJUNCTIONS: [&str; 16] = [
+    "\"", "@", "@.", "@:", "&", "&.", "&.:", "&:", "^:", ";.", "!.", "!:", "`", "`:", ".", ":",
 ];
 
 fn adverb(word: &str) -> Option<&'static str> {
@@ -443,11 +473,11 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
             if inflectable && matches!(at(i + 1), Some('.') | Some(':')) { 2 } else { 1 };
         // A doubly inflected word (`&.:`) exists only where the table says
         // it does; everything else stops at one inflection.
-        if len == 2
-            && at(i + 2) == Some(':')
-            && conjunction(&text[off(i)..off(i + 3)]).is_some()
-        {
-            len = 3;
+        if len == 2 && at(i + 2) == Some(':') {
+            let w = &text[off(i)..off(i + 3)];
+            if conjunction(w).is_some() || verb_for(w).is_some() {
+                len = 3;
+            }
         }
         let word = &text[off(i)..off(i + len)];
         match symbol_frag(word, span(i, i + len)) {
@@ -783,6 +813,17 @@ fn apply_adverb(u: Frag, a: Frag) -> Result<Frag> {
         return Err(Error::internal("expected an adverb fragment"));
     };
     let span = Span::merge(u.span(), aspan);
+    // `}` is the one adverb whose operand is a noun: `m}` amends at the
+    // indices m. A verb operand is J's other amend, which libjay has not.
+    if glyph == "}" {
+        if !u.is_real_verb() {
+            let m = as_const(&u)
+                .cloned()
+                .ok_or_else(|| Error::not_yet("amend over a computed index", span))?;
+            return Ok(Frag::Verb(VerbFrag::V(Verb::Amend(m)), span));
+        }
+        return Err(Error::not_yet("amend with a verb operand (u})", span));
+    }
     if !u.is_real_verb() {
         return Err(Error::not_yet("noun-operand adverbs", span));
     }
@@ -792,7 +833,8 @@ fn apply_adverb(u: Frag, a: Frag) -> Result<Frag> {
         "\\" => Verb::Windowed(Box::new(v), WindowKind::Prefix),
         "\\." => Verb::Windowed(Box::new(v), WindowKind::Suffix),
         "~" => Verb::Commute(Box::new(v)),
-        _ => return Err(Error::not_yet("key (u/.)", span)),
+        "/." => Verb::Key(Box::new(v)),
+        _ => return Err(Error::not_yet(format!("adverb ({glyph})"), span)),
     };
     Ok(Frag::Verb(VerbFrag::V(derived), span))
 }
@@ -838,10 +880,43 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
         "^:" => {
             let f = verb_operand(u, span)?;
             if v.is_verb() {
-                return Err(Error::not_yet("power with a verb right operand (u^:v)", span));
+                // `u^:v` asks v for the number of applications; the while
+                // loop is that verb under `^:_`.
+                let g = verb_operand(v, span)?;
+                let p = Verb::PowerV(Box::new(f), Box::new(g));
+                return Ok(Frag::Verb(VerbFrag::V(p), span));
             }
             let p = power_spec(&v, span)?;
             Ok(Frag::Verb(VerbFrag::V(Verb::PowerN(Box::new(f), p)), span))
+        }
+        ";." => {
+            let f = verb_operand(u, span)?;
+            let n = one_atom(&v, "cut", span)?;
+            if n.fract() != 0.0 || !matches!(n as i64, -2..=2) {
+                return Err(Error::not_yet(format!("cut (u;.{n})"), span));
+            }
+            Ok(Frag::Verb(VerbFrag::V(Verb::Cut(Box::new(f), n as i64)), span))
+        }
+        // `u!.n` is the tolerance for the verbs whose meaning uses one; on
+        // any other verb J's `!.` specifies a fill, which is its own
+        // feature and not this one.
+        "!." => {
+            let f = verb_operand(u, span)?;
+            let n = one_atom(&v, "fit", span)?;
+            if !f.uses_tolerance() {
+                return Err(Error::not_yet(
+                    format!("fill specification ({}!.n)", f.name()),
+                    span,
+                ));
+            }
+            // J refuses a tolerance above 2^-34, and so does libjay.
+            if !(0.0..=LARGEST_TOLERANCE).contains(&n) {
+                return Err(Error::domain(
+                    format!("a comparison tolerance must be between 0 and {LARGEST_TOLERANCE}"),
+                    span,
+                ));
+            }
+            Ok(Frag::Verb(VerbFrag::V(Verb::Fit(Box::new(f), n)), span))
         }
         // `3 : '...'` and its relatives are J's explicit definitions, not a
         // composition; the diagnostic should say so.
@@ -884,6 +959,23 @@ fn compose(u: Frag, v: Frag, infinite: bool, span: Span) -> Result<Frag> {
     let n = bond_noun(&v, span)?;
     let rank = f.ranks()[1];
     verb(Verb::Rank(Box::new(Verb::BondRight(Box::new(f), n)), [rank; 3]))
+}
+
+/// The largest comparison tolerance `!.` accepts, as J's does: 2^-34.
+const LARGEST_TOLERANCE: f64 = 5.820_766_091_346_741e-11;
+
+/// A conjunction's single numeric noun operand.
+fn one_atom(f: &Frag, what: &str, span: Span) -> Result<f64> {
+    let Some(arr) = as_const(f) else {
+        return Err(Error::not_yet(format!("a computed {what} specification"), span));
+    };
+    let Some(vals) = arr.to_f64_vec() else {
+        return Err(Error::parse(format!("{what} takes a numeric operand"), span));
+    };
+    match vals[..] {
+        [n] => Ok(n),
+        _ => Err(Error::parse(format!("{what} takes one atom"), span)),
+    }
 }
 
 /// The array a bonded noun operand holds; it has to be known now.
@@ -1452,7 +1544,6 @@ mod tests {
     #[rstest]
     #[case("+ &. - y", "under (&.)")]
     #[case("+ &.: - y", "under (&.)")]
-    #[case("+ ^: - y", "power with a verb right operand")]
     #[case("+ ^: {n} y", "computed power")]
     #[case("+ ^: _1 y", "obverse")]
     #[case("(1 + 2) & , y", "bonds over a non-literal noun")]
@@ -1540,10 +1631,11 @@ mod tests {
     }
 
     #[test]
-    fn the_key_adverb_is_not_supported_yet() {
-        let e = err("+/. 1 2 3");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("key"), "{}", e.msg);
+    fn the_key_adverb_derives_a_verb() {
+        match one("+/. 1 2 3") {
+            Expr::Monad { verb: Verb::Key(_), .. } => {}
+            other => panic!("expected a key, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1875,16 +1967,16 @@ mod tests {
 
     #[test]
     fn unknown_word_reports_its_span() {
-        let e = err("1 ? 2");
+        let e = err("1 $: 2");
         assert_eq!(e.kind, ErrorKind::Parse);
-        assert_eq!(e.msg, "unknown word: ?");
-        assert_eq!(e.span, Some(Span::new(2, 3)));
+        assert_eq!(e.msg, "unknown word: $:");
+        assert_eq!(e.span, Some(Span::new(2, 4)));
     }
 
     #[test]
     fn an_inflected_unknown_word_is_reported_whole() {
-        let e = err("1 ?. 2");
-        assert_eq!(e.msg, "unknown word: ?.");
+        let e = err("1 $. 2");
+        assert_eq!(e.msg, "unknown word: $.");
         assert_eq!(e.span, Some(Span::new(2, 4)));
     }
 
@@ -1929,7 +2021,7 @@ mod tests {
 
     #[test]
     fn the_error_of_a_later_sentence_points_at_that_sentence() {
-        let e = err("1 + 2\n3 ? 4");
-        assert_eq!(e.span, Some(Span::new(8, 9)));
+        let e = err("1 + 2\n3 $: 4");
+        assert_eq!(e.span, Some(Span::new(8, 10)));
     }
 }

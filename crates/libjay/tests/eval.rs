@@ -236,11 +236,11 @@ fn j_not_yet_is_a_promise_not_a_wall() {
 
 #[test]
 fn j_parse_error_has_span() {
-    let e = compile(Lang::J, "2 ?! 3", &Dialect::default()).unwrap_err();
+    let e = compile(Lang::J, "2 $: 3", &Dialect::default()).unwrap_err();
     assert_eq!(e.kind, ErrorKind::Parse);
     assert!(e.span.is_some());
     // The rendered form points into the source.
-    assert!(e.render("2 ?! 3").contains('^'));
+    assert!(e.render("2 $: 3").contains('^'));
 }
 
 // --- APL basics ---------------------------------------------------------

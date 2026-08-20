@@ -27,7 +27,7 @@ use crate::error::Span;
 use crate::ir::{Expr, Program};
 use crate::par;
 use crate::simd::multiversioned;
-use crate::verb::{DyadOp, MonadOp, ScalarDyad, ScalarMonad, Verb, RANK_INF};
+use crate::verb::{tol_cmp, DyadOp, MonadOp, ScalarDyad, ScalarMonad, Tol, Verb, RANK_INF};
 
 /// Elements a block buffer holds.
 ///
@@ -80,6 +80,9 @@ pub struct FusedKernel {
     /// so this is not the identity, and the fallback needs it to give every
     /// leaf back the value it was given.
     leaves: Vec<usize>,
+    /// The dialect's comparison tolerance, so that a comparison inside the
+    /// kernel answers exactly as the same comparison outside it does.
+    tol: Tol,
 }
 
 impl FusedKernel {
@@ -440,7 +443,7 @@ fn same_verb(a: &Verb, b: &Verb) -> bool {
 /// Optimise a compiled program's sentences: move the values that are only
 /// named for the reader into the sentences that read them, then fuse every
 /// chain that is left.
-pub fn pass(stmts: &mut Vec<Expr>) {
+pub fn pass(stmts: &mut Vec<Expr>, tol: Tol) {
     let orig = std::mem::take(stmts);
     let mut cur = orig.clone();
     let mut names = 0usize;
@@ -448,7 +451,7 @@ pub fn pass(stmts: &mut Vec<Expr>) {
     // A round elides one assignment, so a chain of them — `m =. ...`,
     // `d =. {x} - m`, `+/ d * d` — takes one round per link.
     for _ in 0..=orig.len() {
-        match inline_once(&cur, &mut names) {
+        match inline_once(&cur, &mut names, tol) {
             Some(next) => {
                 cur = next;
                 crossed = true;
@@ -456,7 +459,7 @@ pub fn pass(stmts: &mut Vec<Expr>) {
             None => break,
         }
     }
-    let mut out: Vec<Expr> = cur.into_iter().map(fuse_expr).collect();
+    let mut out: Vec<Expr> = cur.into_iter().map(|e| fuse_expr(e, tol)).collect();
     if crossed {
         // What the sentences were, for `unfused` to hold this against.
         out.insert(0, Expr::Elided { orig, span: Span::new(0, 0) });
@@ -464,23 +467,25 @@ pub fn pass(stmts: &mut Vec<Expr>) {
     *stmts = out;
 }
 
-fn fuse_expr(e: Expr) -> Expr {
-    if let Some(f) = try_fuse(&e) {
+fn fuse_expr(e: Expr, tol: Tol) -> Expr {
+    if let Some(f) = try_fuse(&e, tol) {
         return f;
     }
     match e {
         Expr::Assign { name, value, span } => {
-            Expr::Assign { name, value: Box::new(fuse_expr(*value)), span }
+            Expr::Assign { name, value: Box::new(fuse_expr(*value, tol)), span }
         }
-        Expr::Monad { verb, y, span } => Expr::Monad { verb, y: Box::new(fuse_expr(*y)), span },
+        Expr::Monad { verb, y, span } => {
+            Expr::Monad { verb, y: Box::new(fuse_expr(*y, tol)), span }
+        }
         Expr::Dyad { verb, x, y, span } => Expr::Dyad {
             verb,
-            x: Box::new(fuse_expr(*x)),
-            y: Box::new(fuse_expr(*y)),
+            x: Box::new(fuse_expr(*x, tol)),
+            y: Box::new(fuse_expr(*y, tol)),
             span,
         },
         Expr::PrintPass { value, span } => {
-            Expr::PrintPass { value: Box::new(fuse_expr(*value)), span }
+            Expr::PrintPass { value: Box::new(fuse_expr(*value, tol)), span }
         }
         other => other,
     }
@@ -493,6 +498,7 @@ fn build<'a>(
     yields: Yield,
     least: usize,
     sub: &mut Option<Inline<'a>>,
+    tol: Tol,
 ) -> Option<(FusedKernel, Vec<&'a Expr>)> {
     if let Some(s) = sub.as_mut() {
         s.hits = 0;
@@ -504,7 +510,7 @@ fn build<'a>(
     }
     let mut code = Vec::new();
     emit_all(&node, &lets_of(&node), &mut code);
-    let kernel = FusedKernel { slots: slots(&code), code, yields, leaves: lv.order };
+    let kernel = FusedKernel { slots: slots(&code), code, yields, leaves: lv.order, tol };
     Some((kernel, lv.inputs))
 }
 
@@ -518,27 +524,28 @@ fn build<'a>(
 fn kernel_at<'a>(
     e: &'a Expr,
     sub: &mut Option<Inline<'a>>,
+    tol: Tol,
 ) -> Option<(FusedKernel, Vec<&'a Expr>, &'a Expr)> {
     if let Expr::Monad { verb, y, .. } = e {
         if is_tally(verb) {
-            if let Some((k, l)) = build(y, Yield::Tally, 1, sub) {
+            if let Some((k, l)) = build(y, Yield::Tally, 1, sub, tol) {
                 return Some((k, l, e));
             }
         }
         if let Some(op) = absorbable_reduce(verb) {
-            if let Some((k, l)) = build(y, Yield::Reduce(op), 1, sub) {
+            if let Some((k, l)) = build(y, Yield::Reduce(op), 1, sub, tol) {
                 return Some((k, l, e));
             }
         }
     }
-    let (k, l) = build(e, Yield::Values, 2, sub)?;
+    let (k, l) = build(e, Yield::Values, 2, sub, tol)?;
     Some((k, l, e))
 }
 
 /// The fused node for the chain rooted at `e`, if there is one worth making.
-fn try_fuse(e: &Expr) -> Option<Expr> {
-    let (kernel, leaves, orig) = kernel_at(e, &mut None)?;
-    let inputs = leaves.into_iter().map(|l| fuse_expr(l.clone())).collect();
+fn try_fuse(e: &Expr, tol: Tol) -> Option<Expr> {
+    let (kernel, leaves, orig) = kernel_at(e, &mut None, tol)?;
+    let inputs = leaves.into_iter().map(|l| fuse_expr(l.clone(), tol)).collect();
     Some(Expr::Fused {
         kernel,
         inputs,
@@ -642,20 +649,20 @@ fn hoisted_name(n: &mut usize) -> String {
 /// reaches every leaf and every rule the kernel has, so whatever the
 /// assignment would have raised is raised where it was raised before, and
 /// nothing else is computed.
-fn inline_once(stmts: &[Expr], names: &mut usize) -> Option<Vec<Expr>> {
+fn inline_once(stmts: &[Expr], names: &mut usize, tol: Tol) -> Option<Vec<Expr>> {
     for (i, stmt) in stmts.iter().enumerate() {
         let Expr::Assign { name, value, span } = stmt else { continue };
-        if !inlinable(stmts, i, name, value) {
+        if !inlinable(stmts, i, name, value, tol) {
             continue;
         }
-        if let Some(out) = rewrite(stmts, i, name, value, *span, names) {
+        if let Some(out) = rewrite(stmts, i, name, value, *span, names, tol) {
             return Some(out);
         }
     }
     None
 }
 
-fn inlinable(stmts: &[Expr], i: usize, name: &str, value: &Expr) -> bool {
+fn inlinable(stmts: &[Expr], i: usize, name: &str, value: &Expr, tol: Tol) -> bool {
     if !replayable(value) || mentions(value, name) {
         return false;
     }
@@ -671,7 +678,7 @@ fn inlinable(stmts: &[Expr], i: usize, name: &str, value: &Expr) -> bool {
     }
     let mut uses = 0;
     for stmt in later {
-        match uses_land(stmt, name, value) {
+        match uses_land(stmt, name, value, tol) {
             Some(n) => uses += n,
             None => return false,
         }
@@ -681,21 +688,21 @@ fn inlinable(stmts: &[Expr], i: usize, name: &str, value: &Expr) -> bool {
 
 /// How many uses of `name` this sentence would take into a kernel, or None
 /// when one of them would have to materialise the value instead.
-fn uses_land(e: &Expr, name: &str, def: &Expr) -> Option<usize> {
+fn uses_land(e: &Expr, name: &str, def: &Expr, tol: Tol) -> Option<usize> {
     let mut sub = Some(Inline { name, def, hits: 0 });
-    if let Some((_, leaves, _)) = kernel_at(e, &mut sub) {
+    if let Some((_, leaves, _)) = kernel_at(e, &mut sub, tol) {
         let mut n = sub.map_or(0, |s| s.hits);
         for l in leaves {
-            n += uses_land(l, name, def)?;
+            n += uses_land(l, name, def, tol)?;
         }
         return Some(n);
     }
     match e {
         Expr::Name(n, _) if n == name => None,
         Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => Some(0),
-        Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => uses_land(value, name, def),
-        Expr::Monad { y, .. } => uses_land(y, name, def),
-        Expr::Dyad { x, y, .. } => Some(uses_land(x, name, def)? + uses_land(y, name, def)?),
+        Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => uses_land(value, name, def, tol),
+        Expr::Monad { y, .. } => uses_land(y, name, def, tol),
+        Expr::Dyad { x, y, .. } => Some(uses_land(x, name, def, tol)? + uses_land(y, name, def, tol)?),
         Expr::Fused { .. } | Expr::Elided { .. } | Expr::VerbDef { .. } => None,
     }
 }
@@ -708,6 +715,7 @@ fn rewrite(
     value: &Expr,
     span: Span,
     names: &mut usize,
+    tol: Tol,
 ) -> Option<Vec<Expr>> {
     let mut lv = Leaves::default();
     chain(value, &mut lv, &mut None);
@@ -729,8 +737,8 @@ fn rewrite(
         bound.push(Some(n));
     }
     let def = with_leaves(value, &lv, &bound);
-    let (kernel, leaves) = build(&def, Yield::Tally, 1, &mut None)?;
-    let inputs = leaves.into_iter().map(|l| fuse_expr(l.clone())).collect();
+    let (kernel, leaves) = build(&def, Yield::Tally, 1, &mut None, tol)?;
+    let inputs = leaves.into_iter().map(|l| fuse_expr(l.clone(), tol)).collect();
     let guard = Expr::Assign {
         name: hoisted_name(names),
         value: Box::new(Expr::Fused {
@@ -1361,7 +1369,7 @@ fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64]) -> bool {
 }
 
 #[inline(always)]
-fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64]) -> bool {
+fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64], tol: Tol) -> bool {
     use ScalarDyad::*;
     match op {
         Add => zip!(a, b, dst, |x: f64, y: f64| x + y),
@@ -1380,13 +1388,11 @@ fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64]) -> bool 
             y - x * (y / x).floor()
         }),
         // A comparison is a number here, as it is in J: the boolean only
-        // shows in the dtype of a result, which the caller narrows.
-        Eq => zip!(a, b, dst, |x: f64, y: f64| (x == y) as u8 as f64),
-        Ne => zip!(a, b, dst, |x: f64, y: f64| (x != y) as u8 as f64),
-        Lt => zip!(a, b, dst, |x: f64, y: f64| (x < y) as u8 as f64),
-        Le => zip!(a, b, dst, |x: f64, y: f64| (x <= y) as u8 as f64),
-        Gt => zip!(a, b, dst, |x: f64, y: f64| (x > y) as u8 as f64),
-        Ge => zip!(a, b, dst, |x: f64, y: f64| (x >= y) as u8 as f64),
+        // shows in the dtype of a result, which the caller narrows. Floats
+        // compare with the dialect's tolerance, as they do unfused.
+        Eq | Ne | Lt | Le | Gt | Ge => {
+            zip!(a, b, dst, |x: f64, y: f64| tol_cmp(op, x, y, tol) as u8 as f64)
+        }
         _ => false,
     }
 }
@@ -1475,7 +1481,13 @@ multiversioned! {
 multiversioned! {
     /// One instruction of a kernel over one block of floats: the dyadic
     /// operations.
-    fn dyad_f64(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64]) -> bool = dyad_f64_body;
+    fn dyad_f64(
+        op: ScalarDyad,
+        a: &[f64],
+        b: &[f64],
+        dst: &mut [f64],
+        tol: Tol,
+    ) -> bool = dyad_f64_body;
 }
 
 multiversioned! {
@@ -1595,6 +1607,10 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
         return Some(Array::scalar_i64(shape[0] as i64));
     }
     let w = BLOCK.min(n).max(1);
+    // The kernel's comparisons carry the tolerance the program was compiled
+    // with, so a fused comparison answers as the unfused one does.
+    let tol = k.tol;
+    let cmp_f64 = move |op, a: &[f64], b: &[f64], dst: &mut [f64]| dyad_f64(op, a, b, dst, tol);
 
     let data = if working == DType::F64 {
         let owned: Vec<Option<Vec<f64>>> = inputs.iter().map(|a| to_f64(a, w)).collect();
@@ -1608,12 +1624,11 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
             .collect();
         match k.reduce() {
             None => {
-                let out = map_pass(k, &srcs, n, monad_f64, dyad_f64)?;
+                let out = map_pass(k, &srcs, n, monad_f64, cmp_f64)?;
                 float_result(out, root)
             }
             Some(op) => {
-                let v =
-                    reduce_pass(k, &srcs, n, monad_f64, dyad_f64, |a, b| step_f64(op, a, b))?;
+                let v = reduce_pass(k, &srcs, n, monad_f64, cmp_f64, |a, b| step_f64(op, a, b))?;
                 // A comparison at the root maps to exact 0 and 1, which the
                 // fold keeps exact; the reduction of booleans is integer.
                 match root {

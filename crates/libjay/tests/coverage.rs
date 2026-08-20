@@ -690,7 +690,7 @@ fn newly_spelled_words_name_what_they_still_lack() {
         (Lang::J, "/: 1;2", "grading boxed arrays"),
         (Lang::J, "L. 1;2", "level of"),
         (Lang::Apl, "⍋⊂1 2", "grading boxed arrays"),
-        (Lang::Apl, "1⊂1 2 3", "partitioned enclose"),
+        (Lang::Apl, "1 0 1⊂2 2⍴⍳4", "partitioned enclose on a matrix"),
         (Lang::Apl, "1⊃(1 2)(3 4)", "pick"),
         (Lang::Apl, "↓2 3⍴⍳6", "split"),
     ];

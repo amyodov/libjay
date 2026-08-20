@@ -72,7 +72,15 @@ feature — that is a promise, not a refusal.
 | `\|.` | reverse the items | rotate axis k by `x[k]`, cyclically |
 | `\|:` | transpose (reverse axes) | — |
 | `i.` | integers (negative axis = reversed) | index of (absent gives the item count) |
+| `i:` | steps: `-y` to `y` one apart, `1 + <. 2 * \| y` of them; a negative y counts down | index of the LAST occurrence (absent gives the item count) |
+| `I.` | indices: index `i` repeated `y[i]` times (rank 1, so a table frames the rows) | interval index: how many items of the ascending x are strictly below each cell |
 | `e.` | — | member: cells of x shaped like items of y |
+| `%.` | matrix inverse — the least-squares pseudo-inverse of a taller matrix; a wider one is refused, a singular one is a domain error | matrix divide: the least-squares solution of `y a = x` |
+| `p:` | the y-th prime, counting from zero | — |
+| `q:` | prime factors, ascending, with multiplicity (`q: 1` is empty) | — |
+| `?` | roll: a random value below each element (`? 0` is a uniform double) | deal: x distinct values from `i. y` |
+| `?.` | roll from a fixed seed, restarted on every invocation | deal from that fixed seed |
+| `{::` | — | fetch: follow the path x into y, opening one level a step |
 | `/:` | grade up (stable permutation) | x's items in the ascending order of y's |
 | `\:` | grade down (stable permutation) | x's items in the descending order of y's |
 | `]` `[` | same | right / left |
@@ -99,7 +107,8 @@ Words present with only one valence implemented say so by name: monadic `,.`
 (ravel items), monadic `{` (catalogue), monadic `e.` (raze-in), monadic `*.`
 (length/angle), monadic `+.` (real/imaginary), monadic `~:` (nub sieve),
 dyadic `+:` (nor), dyadic `*:` (nand), dyadic `-.` (less), dyadic `":`
-(format with a specification), `L.` (level of).
+(format with a specification), monadic `{::` (map), dyadic `p:` (prime
+metadata), dyadic `q:` (prime exponents), `L.` (level of).
 
 Adverbs: `/` (monad: insert/reduce, leading axis, right-to-left fold; dyad
 `x u/ y`: the table, u applied to every pair of cells — the cells u's own
@@ -108,7 +117,15 @@ ranks ask for, so `1 2 3 +/ 10 20` is a 3-by-2 table of sums while
 dyad `x u\ y`: to every window of x items — a negative x takes
 non-overlapping chunks with a short last one, zero takes the n+1 empty runs,
 and a window longer than the argument yields none), `\.` (monad: every
-suffix), `~` (commute: `u~ y` is `y u y`, `x u~ y` is `y u x`).
+suffix), `~` (commute: `u~ y` is `y u y`, `x u~ y` is `y u x`), `/.` (dyad
+`x u/. y`: the key — u over each group of items of y sharing an item of x,
+the groups in the order their keys first appear, the answers framed with
+fill; monad `u/. y`: the oblique — u over each anti-diagonal of a table,
+starting at the leading corner), `}` with a noun operand (`x m} y`: y with
+the items at the indices m replaced by x, one replacement cell for all of
+them or one each; a negative index counts from the end, an out-of-range one
+is an error, and `m} y` with a single index selects instead). `u}` — amend
+with a verb operand — is named as a gap.
 
 Conjunctions: `"` (rank, 1–3 atoms, `_` = infinite); `@:` (atop: monad
 `u v y`, dyad `u (x v y)`, at infinite rank) and `@` (the same thing at v's
@@ -117,8 +134,18 @@ difference between the two); `&:` (compose: monad `u v y`, dyad
 `(v x) u (v y)`, at infinite rank) and `&` (that composition at v's monadic
 rank on both sides); `&` with a noun operand instead bonds it into the dyad
 — `1&+` increments, `^&2` squares — and J gives a bond no dyadic valence at
-all, so `x (1&+) y` is an error; `^:` (power: `u^:n` applies u n times,
-`u^:_` iterates until the result stops changing); `[:` (cap).
+all, so `x (1&+) y` is an error; `^:` (power: `u^:n` applies u n times, `u^:_` iterates until the result
+stops changing, and `u^:v` asks the verb v for the count — so `u^:v` alone
+is one conditional step and `(u^:v)^:_` is the while loop the idiom is
+written with); `;.` (cut: `x u;.1 y` and `x u;._1 y` open an interval at
+each fret, `x u;.2 y` and `x u;._2 y` close one there, and the negative
+spellings drop the fret itself; monadically the fret is the argument's own
+first item for ±1 and its last for ±2, which is the string-splitting idiom
+`<;._2 'a,b,c,'`; `u;.0 y` applies u to the argument with every axis
+reversed, and `;.3` and the rest are named gaps); `!.` (fit: on the verbs
+whose meaning uses the comparison tolerance it replaces that tolerance, so
+`=!.0` compares exactly — on any other verb J's `!.` gives a fill instead,
+which libjay names as its own gap); `[:` (cap).
 
 Trains: forks `(f g h)`, noun forks `(n g h)`, hooks `(f g)`. Assignment
 `=.`/`=:` (one environment for now), multi-sentence programs, `NB.`
@@ -167,7 +194,11 @@ supported yet.
 | `⊖` | reverse the items (leading axis) | rotate the leading axis |
 | `≢` | tally | not match |
 | `∊` | enlist: every leaf element, in ravel order, as a vector | membership, element by element (an element of a nested array is a whole array) |
-| `⊂` | enclose — except that a simple scalar is its own enclosure, so `⊂5` is `5` | — |
+| `⊂` | enclose — except that a simple scalar is its own enclosure, so `⊂5` is `5` | partitioned enclose: a partition opens where x rises (`x[i] > x[i-1]`, reading `x[¯1]` as 0) and an item flagged 0 is dropped |
+| `⍸` | where: index `i` repeated `y[i]` times, from `⎕IO`; a rank-2 or higher argument gives one boxed coordinate vector per occurrence | interval index: how many items of the ascending x are strictly below each cell, plus `⎕IO - 1` |
+| `⌷` | — | index: one scalar index per axis of y, and the count must equal the rank (APL2's rule, not Dyalog's enclosed-index form) |
+| `⌹` | matrix inverse — the pseudo-inverse of a taller matrix; wider is refused, singular is a domain error | matrix divide: the least-squares solution of `y a = x` |
+| `?` | roll: a random value in `⎕IO .. ⎕IO+y-1` (`?0` is a domain error) | deal: x distinct values from that range |
 | `⊃` | disclose: the items mixed into one array, filled where their shapes differ | — |
 | `↑` | first: the first element of the ravel, disclosed; the type's fill when there is none | take |
 | `≡` | depth: 0 for a simple scalar, 1 for a simple array, one more than the deepest box | match: same shape and values, else 0 |
@@ -198,8 +229,10 @@ gap rather than boxing behind the user's back.
 Glyphs recognised with the missing valence named: dyadic `∪` (union), `∩`
 (intersection), dyadic `⍋`/`⍒` (collation), `⍱`/`⍲` (nor/nand), dyadic `~`
 (without), dyadic `⍕` (format with a specification), monadic `↓` (split —
-GNU APL has no monadic `↓` either), dyadic `⊂` (partitioned enclose),
-dyadic `⊃` (pick).
+GNU APL has no monadic `↓` either), monadic `⌷` (materialise — GNU APL has
+no monadic `⌷` either), dyadic `⊃` (pick). Partitioned enclose on an
+argument of rank 2 or more is named separately from the vector case, which
+works.
 
 Operators: `/` (reduce, LAST axis), `⌿` (reduce, leading axis), `\` (scan,
 last axis), `⍀` (scan, leading axis), `⍤` (rank), `⍨` (commute), `⍣`
@@ -209,8 +242,28 @@ result stays simple, so `2×¨1 2 3` is flat and `⍴¨'ab' 'cde'` is nested),
 `∘.f` (outer product — the same table J spells
 `x u/ y`, e.g. `1 2 3∘.×1 2 3`). A scan's k-th element is the reduce of the
 first k, so it folds right to left like the reduce and not like a left
-fold: `-\1 2 3` is `1 ¯1 2`. A bare `∘` is Dyalog's compose `f∘g`, which is
-named as its own gap.
+fold: `-\1 2 3` is `1 ¯1 2`. `⍣` also takes a FUNCTION right operand:
+`f⍣g` applies f until `new g old` holds, so `f⍣≡` is the fixed point.
+
+A bare `∘` is Dyalog's compose `f∘g`, which is named as its own gap — and
+will stay one until there is something to be differential against: GNU APL
+has no `∘` operator at all (it is only the left half of `∘.`), no `⍥`, no
+`⍛`, and no `f⍤g` atop. The whole compose family is therefore no-oracle
+territory here, not merely unimplemented.
+
+An axis specification `f[k]` is supported for the four spellings where an
+explicit axis is the whole point: `f/[k]` and `f⌿[k]` both reduce axis k,
+`f\[k]` and `f⍀[k]` both scan it, and `⌽[k]` and `⊖[k]` both reverse it —
+naming an axis collapses each pair to one function. The axis is counted from
+`⎕IO`. Every other glyph reports `axis specification for X` as a gap.
+
+Bracket indexing `A[i;j]` is real: one slot per axis, an elided slot meaning
+the whole axis, indices counted from `⎕IO`, and the result's shape the
+slots' shapes spliced in — so a scalar slot drops its axis and a matrix slot
+adds rank. The slots are applied from the last axis to the first, which is
+what keeps the earlier axis numbers valid as scalar slots drop theirs.
+Indexed assignment (`A[2]←99`) is not implemented; the brackets are a
+reader, not a writer.
 
 `/` and `⌿` are operators after a function and replicate after an operand;
 names are always values in this subset, so which one is meant is decided by
@@ -243,6 +296,50 @@ does. The k values that only mean something for a complex argument (8 to 12
 and their negatives) are named individually; J gives real answers for some
 of them (`10 o. y` is the magnitude) and libjay does not implement those
 yet.
+
+## Comparison tolerance
+
+Both languages compare reals with a relative tolerance, and libjay carries
+the dialect's own: J's `9!:18` value, 2⁻⁴⁴ ≈ 5.68e¯14, and GNU APL's `⎕CT`,
+1e¯13. The two rules are not the same one with a different constant, and
+each was measured against its own reference rather than assumed:
+
+- J: `x` and `y` are equal when `x = y` exactly, or when
+  `|x-y| < ct × (|x| ⌊ |y|)` — the SMALLER magnitude, strictly below.
+- APL: the same, with the LARGER magnitude — `|x-y| < ⎕CT × (|x| ⌈ |y|)`.
+
+The difference shows only at the threshold itself, which is exactly where
+the references were probed: `1 = 1 + 2^_44` is 0 in J and `1=1+2*¯44` is 1
+in GNU APL, and the pair pins the two rules apart. A comparison against zero
+is therefore exact — nothing is relatively near it — and so is any
+comparison of integers, characters or boxes with anything but a float
+inside. Equal infinities are equal; unequal ones are not.
+
+The tolerance reaches `=` `~:` `<` `<:` `>` `>:` `-:` `e.` `i.` `i:` `~.`
+`I.` in J, the same family plus `≡` `∊` `⍳` `∪` `⍸` in APL, and the two
+roundings `<.`/`⌊` and `>.`/`⌈`, which snap to a neighbouring integer when
+they are tolerantly equal to it. It does NOT reach grade (`/:`, `\:`, `⍋`,
+`⍒`), which both references leave exact.
+
+J's `!.` sets it per verb: `=!.0` compares bit for bit, and any tolerance
+above 2⁻³⁴ is refused, as J refuses it. `⎕CT` as a runtime variable is not
+implemented — APL's tolerance is the dialect's, as `⎕IO` is.
+
+A fused kernel carries the tolerance the program was compiled with, so a
+comparison inside a blockwise chain answers exactly as the same comparison
+outside one does.
+
+## Random numbers
+
+`?` and `?.` (J) and `?` (APL) draw from MT19937, the published Mersenne
+Twister, seeded by libjay: `?.` restarts from a fixed seed on every
+invocation, so the same sentence always answers the same way, and `?` is
+seeded once per process from the clock. That reproduces the BEHAVIOUR the
+references define, not their numbers — neither jconsole nor GNU APL
+publishes the stream it draws from, and libjay does not read either one to
+find out. Both spellings are therefore kept out of the differential corpora;
+what is tested is the contract: the range, the shape, the distinctness of a
+deal, and that `?.` repeats.
 
 ## Interpolation
 
@@ -337,8 +434,6 @@ the decimal point, and that is typography, not semantics.
 
 ## Known divergences from the references (deliberate, revisit later)
 
-- Float comparisons are exact; J's default comparison tolerance (2⁻⁴⁴) is
-  not yet implemented.
 - Comparing characters with numbers is a type error here; J answers 0.
 - Monadic `÷` (APL reciprocal) of 0 currently follows J's rule (infinity)
   instead of raising a domain error like dyadic `÷`.
@@ -385,7 +480,7 @@ GNU APL is ISO/APL2-flavoured and libjay's APL takes a Dyalog-style choice
 in a few places, so the two part company on purpose. Each line below is one
 entry of `KNOWN_DIVERGENCES` in `crates/libjay/tests/oracle_apl.rs`, which
 asserts that they keep disagreeing — a silent convergence is a test failure,
-not a quiet win. Everything else in a 650-expression corpus agrees.
+not a quiet win. Everything else in a 741-expression corpus agrees.
 
 libjay follows J where APL2 stops at DOMAIN ERROR:
 
@@ -418,8 +513,8 @@ libjay is stricter, or simply elsewhere:
   ignores whitespace, so `⍴⍕(1 2)(3 4)` is the entry that pins it. Nested
   DISPLAYS are kept out of the corpus for that reason; what is compared
   there is structure — `⍴`, `≡`, `≢` and the leaves `∊` brings back.
-- grading a nested array, partitioned enclose (`1⊂1 2 3`) and pick
-  (`1 2⊃…`) are answered there and named as gaps here.
+- grading a nested array and pick (`1 2⊃…`) are answered there and named as
+  gaps here.
 
 - `2 2⍴⍳0` fills with the prototype in APL2 and is an error here — reshape
   does not invent data.

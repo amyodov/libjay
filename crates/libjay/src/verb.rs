@@ -26,6 +26,84 @@ pub enum Agreement {
     ExactOrScalar,
 }
 
+/// How close two floats have to be to count as equal.
+///
+/// Both languages compare reals with a relative tolerance: J's `9!:18`
+/// comparison tolerance, APL's `⎕CT`. Two values are equal when they differ
+/// by less than the tolerance scaled by one of their magnitudes — the
+/// smaller one in J, the larger one in APL. Both references answer strictly:
+/// a difference exactly at the threshold is not equal. Integers, characters
+/// and boxes are unaffected, and an exact bit-for-bit equality (the
+/// infinities included) is equality whatever the tolerance is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tol {
+    /// Relative tolerance; zero compares exactly.
+    pub ct: f64,
+    /// Scale by the smaller magnitude (J) rather than the larger (APL).
+    pub by_smaller: bool,
+}
+
+impl Tol {
+    /// No tolerance at all — J's `u!.0`.
+    pub const EXACT: Tol = Tol { ct: 0.0, by_smaller: true };
+    /// J's default comparison tolerance, 2^-44.
+    pub const J: Tol = Tol { ct: 5.684_341_886_080_802e-14, by_smaller: true };
+    /// GNU APL's default `⎕CT`.
+    pub const APL: Tol = Tol { ct: 1e-13, by_smaller: false };
+
+    /// Tolerant equality.
+    #[inline(always)]
+    pub fn eq(self, a: f64, b: f64) -> bool {
+        if a == b {
+            return true;
+        }
+        // NaN and unequal infinities fail every comparison below, which is
+        // what both references answer for them.
+        let s = if self.by_smaller {
+            a.abs().min(b.abs())
+        } else {
+            a.abs().max(b.abs())
+        };
+        (a - b).abs() < self.ct * s
+    }
+
+    /// Tolerant `<`: less, and not tolerantly equal.
+    #[inline(always)]
+    pub fn lt(self, a: f64, b: f64) -> bool {
+        a < b && !self.eq(a, b)
+    }
+
+    /// Tolerant `<=`: less, or tolerantly equal.
+    #[inline(always)]
+    pub fn le(self, a: f64, b: f64) -> bool {
+        a <= b || self.eq(a, b)
+    }
+
+    /// `<. y`: the largest integer not above y, with a value just under an
+    /// integer counting as that integer.
+    #[inline(always)]
+    pub fn floor(self, y: f64) -> f64 {
+        let c = y.ceil();
+        if self.eq(y, c) {
+            c
+        } else {
+            y.floor()
+        }
+    }
+
+    /// `>. y`: the ceiling, with a value just over an integer counting as
+    /// that integer.
+    #[inline(always)]
+    pub fn ceil(self, y: f64) -> f64 {
+        let f = y.floor();
+        if self.eq(y, f) {
+            f
+        } else {
+            y.ceil()
+        }
+    }
+}
+
 /// The effect-free half of the execution context. Copyable, so a path that
 /// runs cells on other threads can carry it there; the output sink cannot
 /// go along, which is what keeps those paths pure by construction.
@@ -33,6 +111,9 @@ pub enum Agreement {
 pub struct EvalCfg {
     pub agreement: Agreement,
     pub fmt: FmtOpts,
+    /// Comparison tolerance, from the dialect; `u!.n` overrides it inside
+    /// the verb it is attached to.
+    pub tol: Tol,
 }
 
 impl EvalCfg {
@@ -50,6 +131,14 @@ pub struct Ctx<'a> {
     /// Sink for explicit output (`echo`, `⎕←`). stdout by default per the
     /// sandbox contract; the host may redirect.
     pub out: &'a mut dyn FnMut(&str),
+}
+
+impl Ctx<'_> {
+    /// Run `f` in this context with the comparison tolerance replaced.
+    fn with_tol<R>(&mut self, tol: Tol, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
+        let cfg = EvalCfg { tol, ..self.cfg };
+        f(&mut Ctx { cfg, out: &mut *self.out })
+    }
 }
 
 /// Elementwise monadic operations (cell rank 0).
@@ -202,6 +291,23 @@ pub enum MonadOp {
     /// APL `≡`: depth — 0 for a simple scalar, 1 for a simple array, one
     /// more than the deepest content for a box.
     Depth,
+    /// J `I.` / APL `⍸`: index `i` repeated `y[i]` times. J applies at
+    /// rank 1; APL applies whole, and answers a rank-2-or-higher argument
+    /// with one boxed coordinate vector per occurrence.
+    Indices { origin: i64, boxed_coords: bool },
+    /// J `i:`: the integers from `-y` to `y`, one step apart.
+    Steps,
+    /// J `p:`: the y-th prime, counting from zero.
+    NthPrime,
+    /// J `q:`: y's prime factors, ascending, with multiplicity.
+    PrimeFactors,
+    /// J `%.` / APL `⌹`: the inverse, or the least-squares pseudo-inverse.
+    MatrixInverse,
+    /// J `?` / `?.` and APL `?`: roll. Each element of y is replaced by a
+    /// random value below it, counted from `origin`. `fixed` restarts the
+    /// generator at its fixed seed, which is J's `?.`; `float_at_zero` is
+    /// J's `? 0`, a uniform double, where APL refuses a zero.
+    Roll { origin: i64, fixed: bool, float_at_zero: bool },
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -261,6 +367,28 @@ pub enum DyadOp {
     Link,
     /// APL vector notation: x is one more item in front of the strand y.
     Strand,
+    /// J `x I. y` / APL `x ⍸ y`: which interval of the ascending x each cell
+    /// of y falls in. The field is what the language adds to the count of
+    /// items below it: nothing in J, `⎕IO - 1` in APL.
+    IntervalIndex { offset: i64 },
+    /// J `x i: y`: where each cell of y LAST sits among the items of x.
+    IndexOfLast { origin: i64 },
+    /// J `x %. y` / APL `x ⌹ y`: the least-squares solution of `y a = x`.
+    MatrixDivide,
+    /// APL `x ⊂ y`: partitioned enclose — a 1 in x opens a partition, a 0
+    /// continues it, and a leading run of 0s drops those items.
+    PartitionEnclose,
+    /// APL `x ⌷ y`: one scalar index per axis of y.
+    Squad { origin: i64 },
+    /// One bracket slot of APL indexing: axis `axis` of y selected by x.
+    /// `rank`, when it is not zero, is the number of slots the brackets
+    /// held, checked by the slot that sees the whole array.
+    SelectAxis { axis: usize, rank: usize, origin: i64 },
+    /// J `x {:: y`: follow the path x into y, opening a level a step.
+    Fetch,
+    /// J `x ? y` / `x ?. y` and APL `x ? y`: deal — x distinct values from
+    /// the y below `origin + y`.
+    Deal { origin: i64, fixed: bool },
     NotYet(&'static str),
     None,
 }
@@ -340,6 +468,23 @@ pub enum Verb {
     /// J `u&.>` and APL `u¨`: open each box, apply u, put the result back
     /// in a box. Cell rank 0 on every side, so the frames pair as usual.
     Each(Box<Verb>, Enclose),
+    /// J `u!.n`: apply u with the comparison tolerance replaced by n.
+    Fit(Box<Verb>, f64),
+    /// J `x m} y`: y with the items at the indices m replaced by x.
+    Amend(Array),
+    /// J `u/.`: the key dyadically (u over each group of items sharing a
+    /// key), the oblique monadically (u over each anti-diagonal).
+    Key(Box<Verb>),
+    /// J `u;.n`: cut — u over the intervals a fret marks out.
+    Cut(Box<Verb>, i64),
+    /// J `u^:v`: v's value at the arguments is the number of applications.
+    PowerV(Box<Verb>, Box<Verb>),
+    /// APL `f⍣g`: apply f until `new g old` holds.
+    PowerUntil(Box<Verb>, Box<Verb>),
+    /// APL `f[k]`: f along axis k. The axis is brought to the front, f
+    /// applies to the leading axis, and a result of the argument's own rank
+    /// has the axis put back where it was.
+    AlongAxis(Box<Verb>, usize),
 }
 
 impl Verb {
@@ -352,6 +497,15 @@ impl Verb {
             // cell is an atom: a list of sizes frames the result, as in J.
             Verb::Windowed(_, WindowKind::Prefix) => [RANK_INF, 0, RANK_INF],
             Verb::Each(..) => [0, 0, 0],
+            Verb::Fit(v, _) => v.ranks(),
+            // Amend reads the whole argument, and the rest run their own
+            // verb over the argument as a whole.
+            Verb::Amend(_)
+            | Verb::Key(_)
+            | Verb::Cut(..)
+            | Verb::PowerV(..)
+            | Verb::PowerUntil(..)
+            | Verb::AlongAxis(..) => [RANK_INF, RANK_INF, RANK_INF],
             _ => [RANK_INF, RANK_INF, RANK_INF],
         }
     }
@@ -376,6 +530,68 @@ impl Verb {
             Verb::BondRight(v, _) => format!("({}&n)", v.name()),
             Verb::Each(v, Enclose::Always) => format!("({}&.>)", v.name()),
             Verb::Each(v, _) => format!("({}¨)", v.name()),
+            Verb::Fit(v, n) => format!("{}!.{n}", v.name()),
+            Verb::Amend(_) => "(m})".to_string(),
+            Verb::Key(v) => format!("{}/.", v.name()),
+            Verb::Cut(v, n) => format!("{};.{n}", v.name()),
+            Verb::PowerV(v, w) => format!("{}^:{}", v.name(), w.name()),
+            Verb::PowerUntil(v, w) => format!("{}⍣{}", v.name(), w.name()),
+            Verb::AlongAxis(v, k) => format!("{}[{k}]", v.name()),
+        }
+    }
+
+    /// True when the verb's meaning depends on the comparison tolerance —
+    /// the comparisons, the searches that use them, and the two roundings.
+    /// `u!.n` is only the tolerance conjunction for these; on anything else
+    /// J's `!.` specifies a fill instead, which is a separate feature.
+    pub fn uses_tolerance(&self) -> bool {
+        match self {
+            Verb::Prim(p) => {
+                matches!(
+                    p.monad,
+                    MonadOp::Scalar(ScalarMonad::Floor)
+                        | MonadOp::Scalar(ScalarMonad::Ceil)
+                        | MonadOp::Nub
+                ) || matches!(
+                    p.dyad,
+                    DyadOp::Scalar(
+                        ScalarDyad::Eq
+                            | ScalarDyad::Ne
+                            | ScalarDyad::Lt
+                            | ScalarDyad::Le
+                            | ScalarDyad::Gt
+                            | ScalarDyad::Ge
+                    ) | DyadOp::Match
+                        | DyadOp::NotMatch
+                        | DyadOp::MemberJ
+                        | DyadOp::MemberApl
+                        | DyadOp::IndexOf { .. }
+                        | DyadOp::IndexOfLast { .. }
+                )
+            }
+            Verb::Rank(v, _)
+            | Verb::Reduce(v)
+            | Verb::Windowed(v, _)
+            | Verb::Commute(v)
+            | Verb::PowerN(v, _)
+            | Verb::BondLeft(_, v)
+            | Verb::BondRight(v, _)
+            | Verb::Each(v, _)
+            | Verb::Fit(v, _)
+            | Verb::Key(v)
+            | Verb::Cut(v, _)
+            | Verb::AlongAxis(v, _) => v.uses_tolerance(),
+            Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => {
+                v.uses_tolerance() || w.uses_tolerance()
+            }
+            Verb::Amend(_) => false,
+            Verb::Fork(f, g, h) => {
+                f.uses_tolerance() || g.uses_tolerance() || h.uses_tolerance()
+            }
+            Verb::NounFork(_, g, h)
+            | Verb::Hook(g, h)
+            | Verb::Atop(g, h)
+            | Verb::Compose(g, h) => g.uses_tolerance() || h.uses_tolerance(),
         }
     }
 
@@ -385,7 +601,12 @@ impl Verb {
     /// threads. Deliberately conservative: a new effect must be added here.
     pub fn is_pure(&self) -> bool {
         match self {
-            Verb::Prim(p) => !matches!(p.monad, MonadOp::Echo),
+            // Output and the random source are the two effects a verb can
+            // have; both fix the order its cells must run in.
+            Verb::Prim(p) => {
+                !matches!(p.monad, MonadOp::Echo | MonadOp::Roll { .. })
+                    && !matches!(p.dyad, DyadOp::Deal { .. })
+            }
             Verb::Rank(v, _)
             | Verb::Reduce(v)
             | Verb::Windowed(v, _)
@@ -396,7 +617,12 @@ impl Verb {
             | Verb::Hook(g, h)
             | Verb::Atop(g, h)
             | Verb::Compose(g, h) => g.is_pure() && h.is_pure(),
-            Verb::BondLeft(_, v) | Verb::BondRight(v, _) | Verb::Each(v, _) => v.is_pure(),
+            Verb::BondLeft(_, v) | Verb::BondRight(v, _) | Verb::Each(v, _) | Verb::Fit(v, _) => {
+                v.is_pure()
+            }
+            Verb::Key(v) | Verb::Cut(v, _) | Verb::AlongAxis(v, _) => v.is_pure(),
+            Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => v.is_pure() && w.is_pure(),
+            Verb::Amend(_) => true,
         }
     }
 
@@ -407,7 +633,7 @@ impl Verb {
                 // Scalar verbs have cell rank 0: the cells are the elements,
                 // so the whole buffer is one elementwise pass.
                 if let MonadOp::Scalar(op) = p.monad {
-                    return scalar_monad(op, y, span);
+                    return scalar_monad(op, y, ctx.cfg.tol, span);
                 }
                 let frame_rank = y.rank() - effective_rank(p.ranks[0], y.rank());
                 if frame_rank == 0 {
@@ -467,6 +693,26 @@ impl Verb {
                 })?;
                 assemble(&y.shape, cells, span)
             }
+            Verb::Fit(v, n) => {
+                let tol = Tol { ct: *n, ..ctx.cfg.tol };
+                ctx.with_tol(tol, |c| v.monad(y, c, span))
+            }
+            // `m} y` with one index is J's item selection.
+            Verb::Amend(m) => {
+                if m.rank() != 0 || y.rank() > 1 {
+                    return Err(Error::new(
+                        ErrorKind::Rank,
+                        "selecting with m} takes one index into a list",
+                        Some(span),
+                    ));
+                }
+                from_index(m, y, span)
+            }
+            Verb::Key(u) => oblique(u, y, ctx, span),
+            Verb::Cut(u, n) => cut(u, None, y, *n, ctx, span),
+            Verb::PowerV(u, v) => power_v(u, v, None, y, ctx, span),
+            Verb::PowerUntil(u, v) => power_until(u, v, y, ctx, span),
+            Verb::AlongAxis(u, k) => along_axis(u, None, y, *k, ctx, span),
         }
     }
 
@@ -510,6 +756,18 @@ impl Verb {
                 let r = g.monad(y, ctx, span)?;
                 f.dyad(&l, &r, ctx, span)
             }
+            Verb::Fit(v, n) => {
+                let tol = Tol { ct: *n, ..ctx.cfg.tol };
+                ctx.with_tol(tol, |c| v.dyad(x, y, c, span))
+            }
+            Verb::Amend(m) => amend(m, x, y, span),
+            Verb::Key(u) => key(u, x, y, ctx, span),
+            Verb::Cut(u, n) => cut(u, Some(x), y, *n, ctx, span),
+            Verb::PowerV(u, v) => power_v(u, v, Some(x), y, ctx, span),
+            Verb::PowerUntil(..) => {
+                Err(Error::not_yet("dyadic power with a function operand (x f⍣g y)", span))
+            }
+            Verb::AlongAxis(u, k) => along_axis(u, Some(x), y, *k, ctx, span),
             // J gives a bond one valence only.
             Verb::BondLeft(..) | Verb::BondRight(..) => {
                 Err(Error::domain(format!("{} has no dyadic meaning", self.name()), span))
@@ -526,7 +784,7 @@ impl Verb {
             // Both cells are elements: run the flat elementwise path instead
             // of materialising one Array per element.
             if let Some(op) = self.scalar_dyad_op() {
-                return scalar_dyad(op, x, y, ctx.cfg.agreement, span);
+                return scalar_dyad(op, x, y, ctx.cfg, span);
             }
         }
         let fxl = x.rank() - er_l;
@@ -547,7 +805,7 @@ impl Verb {
     /// The meaning applied to one pair of cells by `dyad_ranked`.
     fn dyad_cell(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         match self {
-            Verb::Prim(p) => dyad_op(p, x, y, ctx.cfg.agreement, span),
+            Verb::Prim(p) => dyad_op(p, x, y, ctx.cfg, span),
             Verb::Rank(v, _) => v.dyad(x, y, ctx, span),
             Verb::Windowed(v, _) => infix(v, x, y, ctx, span),
             Verb::Each(u, rule) => {
@@ -1650,6 +1908,7 @@ fn compare_data(
     yoff: usize,
     ydiv: usize,
     n: usize,
+    tol: Tol,
     span: Span,
 ) -> Result<Data> {
     use ScalarDyad::*;
@@ -1671,7 +1930,7 @@ fn compare_data(
         let (out, _) = par::fill(n, |start, part: &mut [u8]| {
             for (k, slot) in part.iter_mut().enumerate() {
                 let i = start + k;
-                let e = arrays_match(&a[xoff + i / xdiv], &b[yoff + i / ydiv]);
+                let e = arrays_match(&a[xoff + i / xdiv], &b[yoff + i / ydiv], tol);
                 *slot = u8::from(if op == Eq { e } else { !e });
             }
             true
@@ -1707,15 +1966,15 @@ fn compare_data(
         });
         return Ok(Data::Bool(out.into()));
     }
-    // Floats compare exactly. J's comparison tolerance (!:) is a known
-    // divergence, to revisit together with the rest of the tolerance rules.
+    // Floats compare with the dialect's tolerance; integers are exact
+    // whatever it is, so the integer pass below is untouched by it.
     let out = if DType::promote(dx, dy) == Some(DType::F64) {
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
         let xs = borrow_f64(x, &mut tx);
         let ys = borrow_f64(y, &mut ty);
         par::fill(n, |start, part: &mut [u8]| {
             zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
-                *slot = cmp_result(op, a.partial_cmp(&b)) as u8;
+                *slot = tol_cmp(op, a, b, tol) as u8;
                 true
             })
         })
@@ -1733,6 +1992,21 @@ fn compare_data(
         .0
     };
     Ok(Data::Bool(out.into()))
+}
+
+/// One tolerant float comparison.
+#[inline(always)]
+pub(crate) fn tol_cmp(op: ScalarDyad, a: f64, b: f64, tol: Tol) -> bool {
+    use ScalarDyad::*;
+    match op {
+        Eq => tol.eq(a, b),
+        Ne => !tol.eq(a, b),
+        Lt => tol.lt(a, b),
+        Le => tol.le(a, b),
+        Gt => tol.lt(b, a),
+        Ge => tol.le(b, a),
+        _ => false,
+    }
 }
 
 /// Turn an ordering (None for NaN) into a comparison result.
@@ -1840,11 +2114,12 @@ fn scalar_dyad_data(
     yoff: usize,
     ydiv: usize,
     n: usize,
+    tol: Tol,
     span: Span,
 ) -> Result<Data> {
     use ScalarDyad::*;
     if matches!(op, Eq | Ne | Lt | Le | Gt | Ge) {
-        return compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
+        return compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span);
     }
     if matches!(op, Lcm | Gcd) {
         return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
@@ -1872,11 +2147,12 @@ fn scalar_dyad(
     op: ScalarDyad,
     x: &Array,
     y: &Array,
-    mode: Agreement,
+    cfg: EvalCfg,
     span: Span,
 ) -> Result<Array> {
-    let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, mode, span)?;
-    let data = scalar_dyad_data(op, &x.data, 0, p.x_div, &y.data, 0, p.y_div, p.n, span)?;
+    let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
+    let data =
+        scalar_dyad_data(op, &x.data, 0, p.x_div, &y.data, 0, p.y_div, p.n, cfg.tol, span)?;
     Ok(Array::new(p.frame, data))
 }
 
@@ -1886,7 +2162,7 @@ fn fits_i64(v: f64) -> bool {
 }
 
 /// Elementwise monadic application to a whole array.
-fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
+fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     use ScalarMonad::*;
     let d = &y.data;
     // The float-only operations borrow float data as it lies; anything else
@@ -1947,7 +2223,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
             Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
             Data::I64(_) => d.clone(),
             Data::F64(v) => {
-                let round = |x: f64| if op == Floor { x.floor() } else { x.ceil() };
+                let round = |x: f64| if op == Floor { tol.floor(x) } else { tol.ceil(x) };
                 // Integer when every rounded value is one, as in J.
                 match par::try_map(v, |x| {
                     let r = round(x);
@@ -2248,7 +2524,7 @@ fn num_key(d: &Data, i: usize) -> u64 {
 }
 
 /// Distinct items, in the order of their first occurrence.
-fn nub(y: &Array) -> Array {
+fn nub(y: &Array, tol: Tol) -> Array {
     if y.rank() == 0 {
         return Array::new(vec![1], y.data.clone());
     }
@@ -2259,7 +2535,17 @@ fn nub(y: &Array) -> Array {
         // Boxed items are compared by content, one against the ones kept
         // so far: there is no key to hash.
         for i in 0..n {
-            if !keep.iter().any(|&j| arrays_match(&y.item(i), &y.item(j))) {
+            if !keep.iter().any(|&j| arrays_match(&y.item(i), &y.item(j), tol)) {
+                keep.push(i);
+            }
+        }
+    } else if y.dtype() == DType::F64 && tol.ct != 0.0 {
+        // Tolerant equality is not an equivalence a hash can stand in for:
+        // each float item is compared against the ones already kept.
+        let mut tv = Vec::new();
+        let v = borrow_f64(&y.data, &mut tv);
+        for i in 0..n {
+            if !keep.iter().any(|&j| (0..m).all(|k| tol.eq(v[i * m + k], v[j * m + k]))) {
                 keep.push(i);
             }
         }
@@ -2364,7 +2650,7 @@ fn grade_select(x: &Array, y: &Array, down: bool, span: Span) -> Result<Array> {
 
 /// Whole-array equality: same shape and same values. Characters never equal
 /// numbers; `1` equals `1.0`; NaN equals nothing.
-fn arrays_match(x: &Array, y: &Array) -> bool {
+fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
     if x.shape != y.shape {
         return false;
     }
@@ -2374,7 +2660,7 @@ fn arrays_match(x: &Array, y: &Array) -> bool {
         return true;
     }
     if let (Data::Box(a), Data::Box(b)) = (&x.data, &y.data) {
-        return a.iter().zip(b.iter()).all(|(p, q)| arrays_match(p, q));
+        return a.iter().zip(b.iter()).all(|(p, q)| arrays_match(p, q, tol));
     }
     let (dx, dy) = (x.dtype(), y.dtype());
     match DType::promote(dx, dy) {
@@ -2387,7 +2673,7 @@ fn arrays_match(x: &Array, y: &Array) -> bool {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
             let a = borrow_f64(&x.data, &mut ta);
             let b = borrow_f64(&y.data, &mut tb);
-            a.iter().zip(b).all(|(p, q)| p == q)
+            a.iter().zip(b).all(|(p, q)| tol.eq(*p, *q))
         }
         Some(_) => {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
@@ -2405,7 +2691,7 @@ fn item_or_self(a: &Array, i: usize) -> Array {
 
 /// `x e. y`: for every cell of x shaped like an item of y, is it an item
 /// of y? A cell of the wrong shape simply is not one, as in J.
-fn member_j(x: &Array, y: &Array) -> Array {
+fn member_j(x: &Array, y: &Array, tol: Tol) -> Array {
     let cell_rank = y.rank().saturating_sub(1).min(x.rank());
     let frame_rank = x.rank() - cell_rank;
     let frame: Vec<usize> = x.shape[..frame_rank].to_vec();
@@ -2414,13 +2700,13 @@ fn member_j(x: &Array, y: &Array) -> Array {
     let mut out = Vec::with_capacity(nf);
     for i in 0..nf {
         let cell = x.cell_at(frame_rank, i);
-        out.push((0..items).any(|j| arrays_match(&cell, &item_or_self(y, j))) as u8);
+        out.push((0..items).any(|j| arrays_match(&cell, &item_or_self(y, j), tol)) as u8);
     }
     Array::new(frame, Data::Bool(out.into()))
 }
 
 /// `x ∊ y`: for every element of x, does that value occur anywhere in y?
-fn member_apl(x: &Array, y: &Array) -> Array {
+fn member_apl(x: &Array, y: &Array, tol: Tol) -> Array {
     let n = x.count();
     if x.dtype() == DType::Box || y.dtype() == DType::Box {
         // The elements are whole arrays, so they are compared by content;
@@ -2428,13 +2714,25 @@ fn member_apl(x: &Array, y: &Array) -> Array {
         let out: Vec<u8> = (0..n)
             .map(|i| {
                 let e = atom(x, i);
-                u8::from((0..y.count()).any(|j| arrays_match(&e, &atom(y, j))))
+                u8::from((0..y.count()).any(|j| arrays_match(&e, &atom(y, j), tol)))
             })
             .collect();
         return Array::new(x.shape.clone(), Data::Bool(out.into()));
     }
     if (x.dtype() == DType::Char) != (y.dtype() == DType::Char) {
         return Array::new(x.shape.clone(), Data::Bool(vec![0u8; n].into()));
+    }
+    if tol.ct != 0.0
+        && (x.dtype() == DType::F64 || y.dtype() == DType::F64)
+        && x.dtype() != DType::Char
+    {
+        // Tolerance rules a hash out; the values are compared directly.
+        let (mut tx, mut ty) = (Vec::new(), Vec::new());
+        let xs = borrow_f64(&x.data, &mut tx);
+        let ys = borrow_f64(&y.data, &mut ty);
+        let out: Vec<u8> =
+            xs.iter().map(|a| ys.iter().any(|b| tol.eq(*a, *b)) as u8).collect();
+        return Array::new(x.shape.clone(), Data::Bool(out.into()));
     }
     let seen: HashSet<u64> = (0..y.count()).map(|i| num_key(&y.data, i)).collect();
     let out: Vec<u8> =
@@ -2443,7 +2741,7 @@ fn member_apl(x: &Array, y: &Array) -> Array {
 }
 
 /// `x i. y` / `x ⍳ y`: where each cell of y sits among the items of x.
-fn index_of(x: &Array, y: &Array, origin: i64) -> Array {
+fn index_of(x: &Array, y: &Array, origin: i64, tol: Tol) -> Array {
     let cell_rank = x.rank().saturating_sub(1).min(y.rank());
     let frame_rank = y.rank() - cell_rank;
     let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
@@ -2453,7 +2751,7 @@ fn index_of(x: &Array, y: &Array, origin: i64) -> Array {
     for i in 0..nf {
         let cell = y.cell_at(frame_rank, i);
         let at = (0..items)
-            .find(|&j| arrays_match(&cell, &item_or_self(x, j)))
+            .find(|&j| arrays_match(&cell, &item_or_self(x, j), tol))
             .unwrap_or(items);
         out.push(origin + at as i64);
     }
@@ -2847,7 +3145,7 @@ fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
 /// Monadic meaning of a primitive, applied to one cell.
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     match p.monad {
-        MonadOp::Scalar(op) => scalar_monad(op, y, span),
+        MonadOp::Scalar(op) => scalar_monad(op, y, ctx.cfg.tol, span),
         MonadOp::ShapeOf => Ok(Array::from_i64(y.shape.iter().map(|&n| n as i64).collect())),
         MonadOp::Tally => Ok(Array::scalar_i64(y.items() as i64)),
         MonadOp::Ravel => Ok(Array::new(vec![y.count()], y.data.clone())),
@@ -2857,7 +3155,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Tail => Ok(tail(y)),
         MonadOp::Curtail => Ok(curtail(y)),
         MonadOp::Reverse => Ok(reverse(y)),
-        MonadOp::Nub => Ok(nub(y)),
+        MonadOp::Nub => Ok(nub(y, ctx.cfg.tol)),
         MonadOp::GradeUp { origin } | MonadOp::GradeDown { origin } => {
             no_grading_boxes(y, span)?;
             let down = matches!(p.monad, MonadOp::GradeDown { .. });
@@ -2900,6 +3198,28 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::First => Ok(first(y)),
         MonadOp::Enlist => enlist(y, span),
         MonadOp::Depth => Ok(Array::scalar_i64(depth(y))),
+        MonadOp::Indices { origin, boxed_coords } => {
+            where_indices(y, origin, boxed_coords, span)
+        }
+        MonadOp::Steps => steps(y, span),
+        MonadOp::NthPrime => {
+            let n = y
+                .to_i64_vec()
+                .ok_or_else(|| Error::domain("the prime index must be an integer", span))?;
+            let v = n.first().copied().unwrap_or(0);
+            Ok(Array::scalar_i64(nth_prime(v, span)?))
+        }
+        MonadOp::PrimeFactors => {
+            let n = y
+                .to_i64_vec()
+                .ok_or_else(|| Error::domain("prime factors need an integer", span))?;
+            let v = n.first().copied().unwrap_or(0);
+            Ok(Array::from_i64(prime_factors(v, span)?))
+        }
+        MonadOp::MatrixInverse => matrix_inverse(y, span),
+        MonadOp::Roll { origin, fixed, float_at_zero } => {
+            roll(y, origin, fixed, float_at_zero, span)
+        }
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         MonadOp::None => {
             Err(Error::domain(format!("{} has no monadic meaning", p.name), span))
@@ -3055,11 +3375,12 @@ fn drop_(x: &Array, y: &Array, span: Span) -> Result<Array> {
 }
 
 /// Dyadic meaning of a primitive, applied to one pair of cells.
-fn dyad_op(p: &Prim, x: &Array, y: &Array, mode: Agreement, span: Span) -> Result<Array> {
+fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    let tol = cfg.tol;
     match p.dyad {
         // Reached only when a scalar verb is given non-zero cell ranks; the
         // cells then agree among themselves.
-        DyadOp::Scalar(op) => scalar_dyad(op, x, y, mode, span),
+        DyadOp::Scalar(op) => scalar_dyad(op, x, y, cfg, span),
         DyadOp::Reshape => reshape(x, y, span),
         DyadOp::Take => take(x, y, span),
         DyadOp::Drop => drop_(x, y, span),
@@ -3068,12 +3389,12 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, mode: Agreement, span: Span) -> Resul
         DyadOp::Rotate => rotate(x, y, span),
         DyadOp::AppendLeading => catenate(x, y, true, span),
         DyadOp::AppendLast => catenate(x, y, false, span),
-        DyadOp::IndexOf { origin } => Ok(index_of(x, y, origin)),
-        DyadOp::MemberJ => Ok(member_j(x, y)),
-        DyadOp::MemberApl => Ok(member_apl(x, y)),
+        DyadOp::IndexOf { origin } => Ok(index_of(x, y, origin, tol)),
+        DyadOp::MemberJ => Ok(member_j(x, y, tol)),
+        DyadOp::MemberApl => Ok(member_apl(x, y, tol)),
         DyadOp::From => from_index(x, y, span),
-        DyadOp::Match => Ok(Array::scalar_bool(arrays_match(x, y))),
-        DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y))),
+        DyadOp::Match => Ok(Array::scalar_bool(arrays_match(x, y, tol))),
+        DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
         DyadOp::GradeSelect { down } => grade_select(x, y, down, span),
         DyadOp::Copy => copy_items(x, y, span),
         DyadOp::Decode => decode(Some(x), y, span),
@@ -3081,6 +3402,16 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, mode: Agreement, span: Span) -> Resul
         DyadOp::Laminate => laminate(x, y, span),
         DyadOp::Link => link(x, y, span),
         DyadOp::Strand => strand(x, y, span),
+        DyadOp::IntervalIndex { offset } => interval_index(x, y, offset, tol, span),
+        DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
+        DyadOp::MatrixDivide => matrix_divide(x, y, span),
+        DyadOp::PartitionEnclose => partition_enclose(x, y, span),
+        DyadOp::Squad { origin } => squad(x, y, origin, span),
+        DyadOp::SelectAxis { axis, rank, origin } => {
+            select_axis(x, y, axis, rank, origin, span)
+        }
+        DyadOp::Fetch => fetch(x, y, span),
+        DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, span),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -3374,7 +3705,8 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
                 // materialising item arrays.
                 let mut acc = y.data.slice((n - 1) * m, n * m);
                 for i in (0..n - 1).rev() {
-                    acc = scalar_dyad_data(op, &y.data, i * m, 1, &acc, 0, 1, m, span)?;
+                    acc =
+                        scalar_dyad_data(op, &y.data, i * m, 1, &acc, 0, 1, m, ctx.cfg.tol, span)?;
                 }
                 return Ok(Array::new(cell_shape, acc));
             }
@@ -3903,7 +4235,7 @@ fn power(
             let mut acc = y.clone();
             for _ in 0..CONVERGE_LIMIT {
                 let next = step(&acc, ctx)?;
-                if arrays_match(&next, &acc) {
+                if arrays_match(&next, &acc, ctx.cfg.tol) {
                     return Ok(next);
                 }
                 acc = next;
@@ -3911,6 +4243,969 @@ fn power(
             Err(Error::domain("the iteration did not converge", span))
         }
     }
+}
+
+/// `u^:v y` and `x u^:v y` (J): the verb `v` says how many times to apply
+/// `u`. `(u^:v)^:_` is the while loop the idiom is written with.
+fn power_v(
+    u: &Verb,
+    v: &Verb,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let count = match x {
+        Some(x) => v.dyad(x, y, ctx, span)?,
+        None => v.monad(y, ctx, span)?,
+    };
+    let n = count
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("the power count must be an integer", span))?;
+    if n.len() != 1 {
+        return Err(Error::not_yet("a list of power counts (u^:v with several)", span));
+    }
+    let n = n[0];
+    if n < 0 {
+        return Err(Error::not_yet("a negative power (the verb's inverse)", span));
+    }
+    power(u, Power::Times(n as u64), x, y, ctx, span)
+}
+
+/// `f⍣g y` (APL): apply `f` until `new g old` holds.
+fn power_until(
+    u: &Verb,
+    test: &Verb,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let mut acc = y.clone();
+    for _ in 0..CONVERGE_LIMIT {
+        let next = u.monad(&acc, ctx, span)?;
+        let done = test.dyad(&next, &acc, ctx, span)?;
+        let stop = done
+            .to_f64_vec()
+            .ok_or_else(|| Error::domain("the ⍣ test must answer with numbers", span))?;
+        if !stop.is_empty() && stop.iter().all(|&v| v != 0.0) {
+            return Ok(next);
+        }
+        acc = next;
+    }
+    Err(Error::domain("the iteration did not converge", span))
+}
+
+/// `f[k]` (APL): `f` applied along axis `k`.
+///
+/// The axis is brought to the front, the verb runs on the leading axis, and
+/// a result that kept the argument's rank has the axis put back — which is
+/// what separates a reduction (rank drops, axes stay in order) from a scan
+/// or a reversal (rank kept).
+fn along_axis(
+    u: &Verb,
+    x: Option<&Array>,
+    y: &Array,
+    k: usize,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    if k >= y.rank().max(1) {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("axis {k} does not exist on an argument of rank {}", y.rank()),
+            Some(span),
+        ));
+    }
+    let moved = axis_to_front(y, k);
+    let r = moved.rank();
+    let out = match x {
+        Some(x) => u.dyad(x, &moved, ctx, span)?,
+        None => u.monad(&moved, ctx, span)?,
+    };
+    if out.rank() == r {
+        return Ok(front_to_axis(&out, k));
+    }
+    Ok(out)
+}
+
+// ------------------------------------------------- wave 3: search and steps
+
+/// `I. y` (J) / `⍸ y` (APL): index `i` repeated `y[i]` times.
+///
+/// J applies at rank 1, so a higher-rank argument frames the vector answers;
+/// APL applies to the whole argument and answers a rank-2-or-higher one with
+/// one boxed coordinate vector per occurrence.
+fn where_indices(y: &Array, origin: i64, boxed: bool, span: Span) -> Result<Array> {
+    let counts = y
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("indices needs non-negative integers", span))?;
+    if counts.iter().any(|&c| c < 0) {
+        return Err(Error::domain("indices needs non-negative integers", span));
+    }
+    if !boxed || y.rank() < 2 {
+        let mut out = Vec::new();
+        for (i, &c) in counts.iter().enumerate() {
+            for _ in 0..c {
+                out.push(origin + i as i64);
+            }
+        }
+        return Ok(Array::from_i64(out));
+    }
+    let r = y.rank();
+    let mut coord = vec![0usize; r];
+    let mut out: Vec<Array> = Vec::new();
+    for &c in &counts {
+        if c > 0 {
+            let point =
+                Array::from_i64(coord.iter().map(|&k| origin + k as i64).collect::<Vec<_>>());
+            for _ in 0..c {
+                out.push(point.clone());
+            }
+        }
+        odometer(&mut coord, &y.shape);
+    }
+    Ok(Array::new(vec![out.len()], Data::Box(out.into())))
+}
+
+/// `x I. y` / `x ⍸ y`: which interval of the ascending `x` each cell of `y`
+/// falls in — the number of items of `x` strictly below it.
+///
+/// `offset` is what the language adds to that count: nothing in J, and
+/// `⎕IO - 1` in APL, which is what both references answer.
+fn interval_index(x: &Array, y: &Array, offset: i64, tol: Tol, span: Span) -> Result<Array> {
+    let bounds = x
+        .to_f64_vec()
+        .ok_or_else(|| Error::domain("interval index needs numeric bounds", span))?;
+    let vals = y
+        .to_f64_vec()
+        .ok_or_else(|| Error::domain("interval index needs numeric values", span))?;
+    let out: Vec<i64> = vals
+        .iter()
+        .map(|&v| offset + bounds.iter().filter(|&&b| tol.lt(b, v)).count() as i64)
+        .collect();
+    Ok(Array::new(y.shape.clone(), Data::I64(out.into())))
+}
+
+/// `i: y` (J): the integers from `-y` to `y`, one step apart. The count is
+/// `1 + <. 2 * | y`, and a negative argument counts down.
+fn steps(y: &Array, span: Span) -> Result<Array> {
+    let vals = y.to_f64_vec().ok_or_else(|| Error::domain("steps needs a number", span))?;
+    let v = match vals.first() {
+        Some(&v) if v.is_finite() => v,
+        _ => return Err(Error::domain("steps needs a finite number", span)),
+    };
+    let n = (2.0 * v.abs()).floor();
+    if n > 1e7 {
+        return Err(Error::domain("steps would produce too many items", span));
+    }
+    let n = n as i64 + 1;
+    let step = if v < 0.0 { -1.0 } else { 1.0 };
+    let start = -v;
+    if v.fract() == 0.0 {
+        let start = start as i64;
+        let step = step as i64;
+        return Ok(Array::from_i64((0..n).map(|k| start + k * step).collect()));
+    }
+    Ok(Array::from_f64((0..n).map(|k| start + k as f64 * step).collect()))
+}
+
+/// `x i: y`: where each cell of `y` LAST sits among the items of `x`.
+fn index_of_last(x: &Array, y: &Array, origin: i64, tol: Tol) -> Array {
+    let cell_rank = x.rank().saturating_sub(1).min(y.rank());
+    let frame_rank = y.rank() - cell_rank;
+    let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
+    let nf: usize = frame.iter().product();
+    let items = x.items();
+    let mut out = Vec::with_capacity(nf);
+    for i in 0..nf {
+        let cell = y.cell_at(frame_rank, i);
+        let at = (0..items)
+            .rev()
+            .find(|&j| arrays_match(&cell, &item_or_self(x, j), tol))
+            .unwrap_or(items);
+        out.push(origin + at as i64);
+    }
+    Array::new(frame, Data::I64(out.into()))
+}
+
+// ----------------------------------------------------------- roll and deal
+
+/// `? y` / `?. y`: every element of y replaced by a random value below it.
+///
+/// The whole argument is one draw, taken in ravel order, which is what
+/// makes `?. 5 # 100` five different numbers rather than one repeated.
+fn roll(
+    y: &Array,
+    origin: i64,
+    fixed: bool,
+    float_at_zero: bool,
+    span: Span,
+) -> Result<Array> {
+    let bounds = y
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("roll needs whole numbers", span))?;
+    if bounds.iter().any(|&b| b < 0) {
+        return Err(Error::domain("roll needs non-negative numbers", span));
+    }
+    if !float_at_zero && bounds.iter().any(|&b| b == 0) {
+        return Err(Error::domain("? 0 has no value: the range is empty", span));
+    }
+    // A zero anywhere makes the whole answer float, as J's does.
+    let any_zero = bounds.contains(&0);
+    crate::rng::with(fixed, |g| {
+        if any_zero {
+            let out: Vec<f64> = bounds
+                .iter()
+                .map(|&b| {
+                    if b == 0 {
+                        g.unit()
+                    } else {
+                        (origin + g.below(b as u64) as i64) as f64
+                    }
+                })
+                .collect();
+            return Ok(Array::new(y.shape.clone(), Data::F64(out.into())));
+        }
+        let out: Vec<i64> =
+            bounds.iter().map(|&b| origin + g.below(b as u64) as i64).collect();
+        Ok(Array::new(y.shape.clone(), Data::I64(out.into())))
+    })
+}
+
+/// `x ? y` / `x ?. y`: x distinct values drawn from the y below `origin+y`.
+fn deal(x: &Array, y: &Array, origin: i64, fixed: bool, span: Span) -> Result<Array> {
+    let want = one_whole(x, "the count dealt", span)?;
+    let from = one_whole(y, "the range dealt from", span)?;
+    if want < 0 || from < 0 {
+        return Err(Error::domain("deal needs non-negative numbers", span));
+    }
+    if want > from {
+        return Err(Error::domain(
+            format!("cannot deal {want} distinct value(s) from {from}"),
+            span,
+        ));
+    }
+    if want == 0 {
+        return Ok(Array::from_i64(Vec::new()));
+    }
+    let drawn = crate::rng::with(fixed, |g| g.deal(want as usize, from as u64));
+    Ok(Array::from_i64(drawn.into_iter().map(|v| v + origin).collect()))
+}
+
+/// One whole number from a one-element argument.
+fn one_whole(a: &Array, what: &str, span: Span) -> Result<i64> {
+    let v = a
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain(format!("{what} must be a whole number"), span))?;
+    match v[..] {
+        [n] => Ok(n),
+        _ => Err(Error::new(
+            ErrorKind::Rank,
+            format!("{what} must be one number"),
+            Some(span),
+        )),
+    }
+}
+
+// ------------------------------------------------------------------ primes
+
+/// The `n`-th prime, counting from zero (`p: n`).
+fn nth_prime(n: i64, span: Span) -> Result<i64> {
+    if n < 0 {
+        return Err(Error::domain("the prime index must not be negative", span));
+    }
+    const LIMIT: i64 = 5_000_000;
+    if n >= LIMIT {
+        return Err(Error::domain(
+            format!("prime index {n} is beyond the {LIMIT}th prime"),
+            span,
+        ));
+    }
+    // An upper bound for p_n (n counted from zero): n < 6 is tabulated,
+    // above that Rosser's bound n(ln n + ln ln n) holds.
+    let k = (n + 1) as f64;
+    let bound = if n < 6 { 15.0 } else { k * (k.ln() + k.ln().ln()) };
+    let bound = bound.ceil() as usize + 1;
+    let mut sieve = vec![true; bound + 1];
+    sieve[0] = false;
+    if bound >= 1 {
+        sieve[1] = false;
+    }
+    let mut p = 2usize;
+    while p * p <= bound {
+        if sieve[p] {
+            let mut q = p * p;
+            while q <= bound {
+                sieve[q] = false;
+                q += p;
+            }
+        }
+        p += 1;
+    }
+    let mut seen = 0i64;
+    for (v, &is_p) in sieve.iter().enumerate() {
+        if is_p {
+            if seen == n {
+                return Ok(v as i64);
+            }
+            seen += 1;
+        }
+    }
+    Err(Error::internal("the prime sieve was too small"))
+}
+
+/// `q: n`: the prime factors of n, ascending, with multiplicity.
+fn prime_factors(n: i64, span: Span) -> Result<Vec<i64>> {
+    if n < 1 {
+        return Err(Error::domain("prime factors need a positive integer", span));
+    }
+    let mut out = Vec::new();
+    let mut m = n;
+    let mut d = 2i64;
+    while d.saturating_mul(d) <= m {
+        while m % d == 0 {
+            out.push(d);
+            m /= d;
+        }
+        d += if d == 2 { 1 } else { 2 };
+    }
+    if m > 1 {
+        out.push(m);
+    }
+    Ok(out)
+}
+
+// --------------------------------------------------------- matrix division
+
+/// Least-squares solution of `a x = b` by Householder QR.
+///
+/// `a` is `m` by `n` in row-major order with `m >= n`, `b` is `m` by `k`.
+/// The answer is `n` by `k`. None when `a` has not got full column rank,
+/// which both references refuse.
+fn lstsq(a: &[f64], m: usize, n: usize, b: &[f64], k: usize) -> Option<Vec<f64>> {
+    // Work on copies: the factorisation overwrites both.
+    let mut r = a.to_vec();
+    let mut c = b.to_vec();
+    let at = |i: usize, j: usize, w: usize| i * w + j;
+    let scale = a.iter().fold(0.0f64, |acc, v| acc.max(v.abs()));
+    if scale == 0.0 {
+        return None;
+    }
+    for j in 0..n {
+        // The Householder vector for column j below the diagonal.
+        let norm = (j..m).map(|i| r[at(i, j, n)] * r[at(i, j, n)]).sum::<f64>().sqrt();
+        if norm <= 1e-13 * scale {
+            return None;
+        }
+        let alpha = if r[at(j, j, n)] > 0.0 { -norm } else { norm };
+        let mut v = vec![0.0f64; m];
+        for i in j..m {
+            v[i] = r[at(i, j, n)];
+        }
+        v[j] -= alpha;
+        let vnorm2: f64 = (j..m).map(|i| v[i] * v[i]).sum();
+        if vnorm2 > 0.0 {
+            for col in j..n {
+                let dot: f64 = (j..m).map(|i| v[i] * r[at(i, col, n)]).sum();
+                let f = 2.0 * dot / vnorm2;
+                for i in j..m {
+                    r[at(i, col, n)] -= f * v[i];
+                }
+            }
+            for col in 0..k {
+                let dot: f64 = (j..m).map(|i| v[i] * c[at(i, col, k)]).sum();
+                let f = 2.0 * dot / vnorm2;
+                for i in j..m {
+                    c[at(i, col, k)] -= f * v[i];
+                }
+            }
+        }
+    }
+    // Back-substitute the upper triangle.
+    let mut x = vec![0.0f64; n * k];
+    for col in 0..k {
+        for i in (0..n).rev() {
+            let mut acc = c[at(i, col, k)];
+            for j in i + 1..n {
+                acc -= r[at(i, j, n)] * x[at(j, col, k)];
+            }
+            let d = r[at(i, i, n)];
+            if d.abs() <= 1e-13 * scale {
+                return None;
+            }
+            x[at(i, col, k)] = acc / d;
+        }
+    }
+    Some(x)
+}
+
+/// A numeric argument as an `m` by `n` row-major buffer. Rank 0 is 1 by 1
+/// and rank 1 is `m` by 1, which is how both references read them.
+fn as_matrix(a: &Array, span: Span) -> Result<(Vec<f64>, usize, usize)> {
+    let v = a
+        .to_f64_vec()
+        .ok_or_else(|| Error::domain("matrix division needs numeric data", span))?;
+    match a.rank() {
+        0 => Ok((v, 1, 1)),
+        1 => {
+            let m = a.shape[0];
+            Ok((v, m, 1))
+        }
+        2 => Ok((v, a.shape[0], a.shape[1])),
+        _ => Err(Error::new(
+            ErrorKind::Rank,
+            "matrix division needs an argument of rank 2 or less",
+            Some(span),
+        )),
+    }
+}
+
+/// `%. y` / `⌹ y`: the inverse of a square matrix, or the least-squares
+/// pseudo-inverse of a taller one. A wider one is refused, as both
+/// references refuse it.
+fn matrix_inverse(y: &Array, span: Span) -> Result<Array> {
+    let (a, m, n) = as_matrix(y, span)?;
+    if m < n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("cannot invert a {m} by {n} matrix: it has more columns than rows"),
+            Some(span),
+        ));
+    }
+    let mut eye = vec![0.0f64; m * m];
+    for i in 0..m {
+        eye[i * m + i] = 1.0;
+    }
+    let x = lstsq(&a, m, n, &eye, m)
+        .ok_or_else(|| Error::domain("the matrix is singular", span))?;
+    // A rank-2 argument gives the n by m pseudo-inverse; a vector or scalar
+    // keeps its own shape, which is what J prints for them.
+    let shape = if y.rank() == 2 { vec![n, m] } else { y.shape.clone() };
+    Ok(Array::new(shape, Data::F64(x.into())))
+}
+
+/// `x %. y` / `x ⌹ y`: the least-squares solution of `y a = x`.
+fn matrix_divide(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let (a, m, n) = as_matrix(y, span)?;
+    let (b, bm, k) = as_matrix(x, span)?;
+    if bm != m {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("the system has {m} rows but the right-hand side has {bm}"),
+            Some(span),
+        ));
+    }
+    if m < n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("the {m} by {n} system is underdetermined"),
+            Some(span),
+        ));
+    }
+    let sol = lstsq(&a, m, n, &b, k)
+        .ok_or_else(|| Error::domain("the system is singular", span))?;
+    // The right-hand side's own rank decides the answer's: a vector in gives
+    // one solution vector, a matrix in gives one column per column.
+    let shape = if x.rank() == 2 { vec![n, k] } else { vec![n] };
+    Ok(Array::new(shape, Data::F64(sol.into())))
+}
+
+// ----------------------------------------------------- indexing and amend
+
+/// `x ⌷ y` (APL2): one scalar index per axis of y.
+fn squad(x: &Array, y: &Array, origin: i64, span: Span) -> Result<Array> {
+    if x.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "the index of ⌷ must be a scalar or a vector",
+            Some(span),
+        ));
+    }
+    let idx = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("index must be an integer", span))?;
+    if idx.len() != y.rank() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("{} index(es) for an argument of rank {}", idx.len(), y.rank()),
+            Some(span),
+        ));
+    }
+    let st = strides(&y.shape);
+    let mut at = 0usize;
+    for (k, &i) in idx.iter().enumerate() {
+        let j = i - origin;
+        if j < 0 || j as usize >= y.shape[k] {
+            return Err(Error::domain(
+                format!("index {i} is out of range on axis {k}"),
+                span,
+            ));
+        }
+        at += j as usize * st[k];
+    }
+    Ok(atom(y, at))
+}
+
+/// One bracket slot of APL indexing: axis `axis` of `y` selected by `x`.
+///
+/// A scalar index drops the axis, any other shape splices in. `rank`, when
+/// it is not zero, is the number of slots the brackets held: the slot that
+/// sees the whole array checks it, and the others have already been applied
+/// to a smaller one.
+fn select_axis(
+    x: &Array,
+    y: &Array,
+    axis: usize,
+    rank: usize,
+    origin: i64,
+    span: Span,
+) -> Result<Array> {
+    if rank != 0 && y.rank() != rank {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("{rank} index slot(s) for an argument of rank {}", y.rank()),
+            Some(span),
+        ));
+    }
+    if axis >= y.rank() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("axis {axis} does not exist on an argument of rank {}", y.rank()),
+            Some(span),
+        ));
+    }
+    let idx = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("index must be an integer", span))?;
+    let len = y.shape[axis];
+    let mut picks = Vec::with_capacity(idx.len());
+    for &i in &idx {
+        let j = i - origin;
+        if j < 0 || j as usize >= len {
+            return Err(Error::domain(
+                format!("index {i} is out of range: axis {axis} has {len} items"),
+                span,
+            ));
+        }
+        picks.push(j as usize);
+    }
+    let mut shape = Vec::with_capacity(y.rank() + x.rank());
+    shape.extend_from_slice(&y.shape[..axis]);
+    shape.extend_from_slice(&x.shape);
+    shape.extend_from_slice(&y.shape[axis + 1..]);
+    let outer: usize = y.shape[..axis].iter().product();
+    let inner: usize = y.shape[axis + 1..].iter().product();
+    let mut data = Data::empty(y.dtype());
+    for o in 0..outer {
+        for &p in &picks {
+            let base = (o * len + p) * inner;
+            for e in 0..inner {
+                push_elem(&mut data, &y.data, base + e);
+            }
+        }
+    }
+    Ok(Array::new(shape, data))
+}
+
+/// `x m} y` (J): the items of `y` at the indices `m`, replaced by `x`.
+///
+/// `x` is either one item, used at every index, or one item per index.
+fn amend(m: &Array, x: &Array, y: &Array, span: Span) -> Result<Array> {
+    if y.rank() == 0 {
+        return Err(Error::new(ErrorKind::Rank, "cannot amend a scalar", Some(span)));
+    }
+    let idx = m
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("amend indices must be integers", span))?;
+    let items = y.items() as i64;
+    let mut at = Vec::with_capacity(idx.len());
+    for &i in &idx {
+        let k = if i < 0 { i + items } else { i };
+        if k < 0 || k >= items {
+            return Err(Error::domain(
+                format!("index {i} is out of range: the argument has {items} items"),
+                span,
+            ));
+        }
+        at.push(k as usize);
+    }
+    let cell = y.item_size();
+    let per_index = if x.count() == cell {
+        false
+    } else if x.count() == cell * at.len() {
+        true
+    } else {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "cannot amend {} item(s) of {} element(s) each with {} element(s)",
+                at.len(),
+                cell,
+                x.count()
+            ),
+            Some(span),
+        ));
+    };
+    // The result holds both kinds of value, so it takes the wider type:
+    // amending an integer list with 1.5 gives a float list, as J's does.
+    let Some(t) = DType::promote(x.dtype(), y.dtype()) else {
+        return Err(Error::new(
+            ErrorKind::Type,
+            "the replacement and the argument hold different kinds of value",
+            Some(span),
+        ));
+    };
+    let (Some(src), Some(base)) = (x.data.cast(t), y.data.cast(t)) else {
+        return Err(Error::new(
+            ErrorKind::Type,
+            "the replacement and the argument hold different kinds of value",
+            Some(span),
+        ));
+    };
+    // Rebuild rather than mutate: the buffer may be shared, or foreign.
+    let mut data = Data::empty(t);
+    let mut plan: Vec<Option<usize>> = vec![None; y.items()];
+    for (n, &k) in at.iter().enumerate() {
+        plan[k] = Some(if per_index { n } else { 0 });
+    }
+    for (i, slot) in plan.iter().enumerate() {
+        match slot {
+            Some(n) => {
+                for e in 0..cell {
+                    push_elem(&mut data, &src, n * cell + e);
+                }
+            }
+            None => {
+                for e in 0..cell {
+                    push_elem(&mut data, &base, i * cell + e);
+                }
+            }
+        }
+    }
+    Ok(Array::new(y.shape.clone(), data))
+}
+
+/// `x {:: y` (J): follow the path `x` into `y`, opening one level a step.
+///
+/// A boxed `x` is one step per box; a simple `x` is a single step, so
+/// `1 {:: y` is item 1 of y opened once.
+fn fetch(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let steps: Vec<Array> = match x.as_boxes() {
+        Some(bs) => bs.to_vec(),
+        None => vec![x.clone()],
+    };
+    let mut cur = y.clone();
+    for step in steps {
+        let idx = step
+            .to_i64_vec()
+            .ok_or_else(|| Error::domain("a fetch path holds integers", span))?;
+        // A scalar has one item, which is how `{` reads one too.
+        let base =
+            if cur.rank() == 0 { Array::new(vec![1], cur.data.clone()) } else { cur.clone() };
+        if idx.len() > base.rank() {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!(
+                    "a path step of {} index(es) into a value of rank {}",
+                    idx.len(),
+                    cur.rank()
+                ),
+                Some(span),
+            ));
+        }
+        let at = cell_index(&base, &idx, span)?;
+        cur = open_cell(&base.cell_at(idx.len(), at));
+    }
+    Ok(cur)
+}
+
+/// The cell number a path step names, in the order `cell_at` counts them.
+fn cell_index(y: &Array, idx: &[i64], span: Span) -> Result<usize> {
+    let mut at = 0usize;
+    for (k, &i) in idx.iter().enumerate() {
+        let len = y.shape[k] as i64;
+        let j = if i < 0 { i + len } else { i };
+        if j < 0 || j >= len {
+            return Err(Error::domain(
+                format!("index {i} is out of range: axis {k} has {len} items"),
+                span,
+            ));
+        }
+        at = at * y.shape[k] + j as usize;
+    }
+    Ok(at)
+}
+
+// ------------------------------------------------------ partition, groups
+
+/// `x ⊂ y` (APL2): partitioned enclose.
+///
+/// A partition opens wherever `x` rises — `x[i] > x[i-1]`, reading `x[-1]`
+/// as zero — and an item whose flag is zero is dropped rather than joined
+/// to anything. That is what GNU APL answers, and it is what makes
+/// `1 1 2 2 ⊂ 'abcd'` two pairs rather than one run.
+fn partition_enclose(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    if y.rank() != 1 {
+        return Err(Error::not_yet("partitioned enclose on a matrix", span));
+    }
+    let flags = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("partition flags must be integers", span))?;
+    if flags.iter().any(|&f| f < 0) {
+        return Err(Error::domain("partition flags must not be negative", span));
+    }
+    if flags.len() != y.shape[0] {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{} flag(s) for {} item(s)", flags.len(), y.shape[0]),
+            Some(span),
+        ));
+    }
+    let mut parts: Vec<Array> = Vec::new();
+    let mut cur: Option<Data> = None;
+    let mut prev = 0i64;
+    for (i, &f) in flags.iter().enumerate() {
+        if f > prev {
+            if let Some(d) = cur.take() {
+                parts.push(Array::new(vec![d.len()], d));
+            }
+            cur = Some(Data::empty(y.dtype()));
+        }
+        prev = f;
+        if f == 0 {
+            continue;
+        }
+        if let Some(d) = cur.as_mut() {
+            push_elem(d, &y.data, i);
+        }
+    }
+    if let Some(d) = cur.take() {
+        parts.push(Array::new(vec![d.len()], d));
+    }
+    Ok(Array::new(vec![parts.len()], Data::Box(parts.into())))
+}
+
+/// `x u/. y` (J): `u` over each group of items of `y` sharing a key in `x`,
+/// the groups in the order their keys first appear.
+fn key(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let keys = if x.rank() == 0 { Array::new(vec![1], x.data.clone()) } else { x.clone() };
+    let n = keys.items();
+    if n != y.items() && !(y.rank() == 0 && n == 1) {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{n} key(s) for {} item(s)", y.items()),
+            Some(span),
+        ));
+    }
+    let tol = ctx.cfg.tol;
+    let mut order: Vec<usize> = Vec::new();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for i in 0..n {
+        let k = keys.item(i);
+        match order.iter().position(|&j| arrays_match(&k, &keys.item(j), tol)) {
+            Some(g) => groups[g].push(i),
+            None => {
+                order.push(i);
+                groups.push(vec![i]);
+            }
+        }
+    }
+    let items = if y.rank() == 0 { Array::new(vec![1], y.data.clone()) } else { y.clone() };
+    let mut cells = Vec::with_capacity(groups.len());
+    for g in &groups {
+        cells.push(u.monad(&select_items(&items, g), ctx, span)?);
+    }
+    assemble(&[groups.len()], cells, span)
+}
+
+/// `u/. y` (J): `u` over each anti-diagonal of a table, starting at the
+/// leading corner.
+fn oblique(u: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    if y.rank() < 2 {
+        let items = if y.rank() == 0 { Array::new(vec![1], y.data.clone()) } else { y.clone() };
+        let n = items.items();
+        let mut cells = Vec::with_capacity(n);
+        for i in 0..n {
+            cells.push(u.monad(&select_items(&items, &[i]), ctx, span)?);
+        }
+        return assemble(&[n], cells, span);
+    }
+    if y.rank() > 2 {
+        return Err(Error::not_yet("oblique (u/.) on a rank-3 or higher argument", span));
+    }
+    let (rows, cols) = (y.shape[0], y.shape[1]);
+    let mut cells = Vec::with_capacity(rows + cols - 1);
+    for d in 0..rows + cols - 1 {
+        let mut data = Data::empty(y.dtype());
+        let mut len = 0usize;
+        for i in 0..rows {
+            if d >= i && d - i < cols {
+                push_elem(&mut data, &y.data, i * cols + (d - i));
+                len += 1;
+            }
+        }
+        cells.push(u.monad(&Array::new(vec![len], data), ctx, span)?);
+    }
+    assemble(&[rows + cols - 1], cells, span)
+}
+
+// ----------------------------------------------------------------- cutting
+
+/// Where each interval of a cut begins and ends (both inclusive of the
+/// start, exclusive of the end).
+///
+/// `mode` is J's: 1 and -1 have the fret open an interval, 2 and -2 have it
+/// close one, and the negative spellings drop the fret itself.
+fn cut_ranges(frets: &[bool], mode: i64) -> Vec<(usize, usize)> {
+    let n = frets.len();
+    let mut out = Vec::new();
+    if mode.abs() == 1 {
+        let mut start: Option<usize> = None;
+        for (i, &fret) in frets.iter().enumerate() {
+            if fret {
+                if let Some(s) = start {
+                    out.push((s, i));
+                }
+                start = Some(i);
+            }
+        }
+        if let Some(s) = start {
+            out.push((s, n));
+        }
+        if mode < 0 {
+            return out.into_iter().map(|(s, e)| (s + 1, e)).collect();
+        }
+    } else {
+        let mut start = 0usize;
+        for (i, &fret) in frets.iter().enumerate() {
+            if fret {
+                out.push((start, i + 1));
+                start = i + 1;
+            }
+        }
+        if mode < 0 {
+            return out.into_iter().map(|(s, e)| (s, e - 1)).collect();
+        }
+    }
+    out
+}
+
+/// `x u;.n y` and `u;.n y` (J).
+fn cut(
+    u: &Verb,
+    x: Option<&Array>,
+    y: &Array,
+    mode: i64,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    if mode == 0 {
+        if x.is_some() {
+            return Err(Error::not_yet("dyadic cut with a rectangle (x u;.0 y)", span));
+        }
+        return u.monad(&reverse_all_axes(y), ctx, span);
+    }
+    if !matches!(mode, 1 | -1 | 2 | -2) {
+        return Err(Error::not_yet(format!("cut (u;.{mode})"), span));
+    }
+    let items = if y.rank() == 0 { Array::new(vec![1], y.data.clone()) } else { y.clone() };
+    let n = items.items();
+    let tol = ctx.cfg.tol;
+    let frets: Vec<bool> = match x {
+        Some(x) => {
+            let flags = x
+                .to_i64_vec()
+                .ok_or_else(|| Error::domain("cut frets must be integers", span))?;
+            if flags.len() != n {
+                return Err(Error::new(
+                    ErrorKind::Length,
+                    format!("{} fret(s) for {n} item(s)", flags.len()),
+                    Some(span),
+                ));
+            }
+            flags.iter().map(|&f| f != 0).collect()
+        }
+        None => {
+            // The fret is the argument's own first or last item.
+            if n == 0 {
+                Vec::new()
+            } else {
+                let at = if mode.abs() == 1 { 0 } else { n - 1 };
+                let mark = items.item(at);
+                (0..n).map(|i| arrays_match(&items.item(i), &mark, tol)).collect()
+            }
+        }
+    };
+    let ranges = cut_ranges(&frets, mode);
+    let mut cells = Vec::with_capacity(ranges.len());
+    for (s, e) in &ranges {
+        cells.push(u.monad(&section(&items, *s, *e), ctx, span)?);
+    }
+    assemble(&[ranges.len()], cells, span)
+}
+
+/// Every axis of `y` reversed — what `u;.0 y` applies its verb to.
+fn reverse_all_axes(y: &Array) -> Array {
+    if y.rank() == 0 {
+        return y.clone();
+    }
+    let st = strides(&y.shape);
+    let n = y.count();
+    let r = y.rank();
+    let mut data = Data::empty(y.dtype());
+    let mut coord = vec![0usize; r];
+    for _ in 0..n {
+        let idx: usize = (0..r).map(|k| (y.shape[k] - 1 - coord[k]) * st[k]).sum();
+        push_elem(&mut data, &y.data, idx);
+        odometer(&mut coord, &y.shape);
+    }
+    Array::new(y.shape.clone(), data)
+}
+
+// ------------------------------------------------------------ along an axis
+
+/// `y` with axis `k` moved in front of the others, their order kept.
+fn axis_to_front(y: &Array, k: usize) -> Array {
+    if k == 0 || y.rank() < 2 {
+        return y.clone();
+    }
+    let r = y.rank();
+    let src: Vec<usize> = std::iter::once(k).chain((0..r).filter(|&a| a != k)).collect();
+    permute_axes(y, &src)
+}
+
+/// `y` with its leading axis moved to position `k`.
+fn front_to_axis(y: &Array, k: usize) -> Array {
+    if k == 0 || y.rank() < 2 {
+        return y.clone();
+    }
+    let r = y.rank();
+    // Output axis a reads source axis: the ones before k shift up by one,
+    // k itself is the source's leading axis, the rest keep their place.
+    let mut src = Vec::with_capacity(r);
+    for a in 0..r {
+        src.push(match a.cmp(&k) {
+            std::cmp::Ordering::Less => a + 1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => a,
+        });
+    }
+    permute_axes(y, &src)
+}
+
+/// `y` with output axis `a` reading source axis `src[a]`.
+fn permute_axes(y: &Array, src: &[usize]) -> Array {
+    let st = strides(&y.shape);
+    let out_shape: Vec<usize> = src.iter().map(|&a| y.shape[a]).collect();
+    let n = y.count();
+    let mut data = Data::empty(y.dtype());
+    let mut coord = vec![0usize; src.len()];
+    for _ in 0..n {
+        let idx: usize = (0..src.len()).map(|a| coord[a] * st[src[a]]).sum();
+        push_elem(&mut data, &y.data, idx);
+        odometer(&mut coord, &out_shape);
+    }
+    Array::new(out_shape, data)
 }
 
 #[cfg(test)]
@@ -3923,7 +5218,7 @@ mod tests {
             let mut sink = |_: &str| {};
             #[allow(unused_mut)]
             let mut $name = Ctx {
-                cfg: EvalCfg { agreement: $agreement, fmt: FmtOpts::J },
+                cfg: EvalCfg { agreement: $agreement, fmt: FmtOpts::J, tol: Tol::J },
                 out: &mut sink,
             };
         };
@@ -4975,7 +6270,7 @@ mod tests {
             }
         };
         let mut c = Ctx {
-            cfg: EvalCfg { agreement: Agreement::LeadingPrefix, fmt: FmtOpts::J },
+            cfg: EvalCfg { agreement: Agreement::LeadingPrefix, fmt: FmtOpts::J, tol: Tol::J },
             out: &mut sink,
         };
         v.monad(&y, &mut c, sp()).unwrap();

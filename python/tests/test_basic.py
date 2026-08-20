@@ -162,7 +162,7 @@ class TestErrors:
 
     def test_parse_error(self):
         with pytest.raises(JayError):
-            j.compile("2 ?! 3")
+            j.compile("2 $: 3")
 
 
 class TestModuleShape:

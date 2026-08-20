@@ -298,7 +298,9 @@ fn power_to_convergence_stops_when_the_result_stops_changing() {
 #[test]
 fn power_operands_that_are_not_a_count_are_named() {
     for (src, msg) in [
-        ("+ ^: - 5", "verb right operand"),
+        // A verb operand is the count, so a count that is not a whole
+        // number is what the diagnostic names.
+        ("+ ^: (% & 2) 5", "count must be an integer"),
         ("+ ^: _1 (5)", "obverse"),
         ("+ ^: 1.5 (5)", "whole number"),
     ] {

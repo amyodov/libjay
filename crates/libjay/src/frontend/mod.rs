@@ -6,7 +6,7 @@ pub mod j;
 use crate::error::Result;
 use crate::fmt::FmtOpts;
 use crate::ir::{ParamSpec, Program};
-use crate::verb::Agreement;
+use crate::verb::{Agreement, Tol};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lang {
@@ -146,14 +146,14 @@ pub fn compile_parts(
 }
 
 fn compile_source_parts(lang: Lang, sp: SourceParts, dialect: &Dialect) -> Result<Program> {
-    let (mut stmts, agreement, fmt) = match lang {
-        Lang::J => (j::parse(&sp)?, Agreement::LeadingPrefix, FmtOpts::J),
+    let (mut stmts, agreement, fmt, tol) = match lang {
+        Lang::J => (j::parse(&sp)?, Agreement::LeadingPrefix, FmtOpts::J, Tol::J),
         Lang::Apl => {
             let origin = dialect.index_origin.unwrap_or(1);
-            (apl::parse(&sp, origin)?, Agreement::ExactOrScalar, FmtOpts::APL)
+            (apl::parse(&sp, origin)?, Agreement::ExactOrScalar, FmtOpts::APL, Tol::APL)
         }
     };
-    crate::fuse::pass(&mut stmts);
+    crate::fuse::pass(&mut stmts, tol);
     let params = sp.param_names.into_iter().map(|name| ParamSpec { name }).collect();
-    Ok(Program { stmts, params, display_src: sp.display, agreement, fmt })
+    Ok(Program { stmts, params, display_src: sp.display, agreement, fmt, tol })
 }
