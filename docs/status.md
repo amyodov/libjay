@@ -177,8 +177,9 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Longer trains (5-verb and up) | 🟢 |
 | Cap forks `([: g h)` | 🟢 |
 | Noun forks `(n g h)` | 🟡 literal noun only |
-| Verb (tacit) assignment `mean =. +/ % #` | 🟡 landing |
-| `explain` facility | 🟡 landing |
+| Verb (tacit) assignment `mean =. +/ % #` | 🟢 |
+| Displaying a bare tacit-verb name (`mean` after `mean =. +/ % #`) | 🔴 named not-yet |
+| `explain` facility | 🟢 |
 | Adverb and conjunction assignment | 🔴 |
 | Multiple assignment `'a b' =. …` | 🔴 |
 | `=.` vs `=:` scoping | 🟡 one environment; the two do not yet differ |
@@ -261,7 +262,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 
 | Glyph | Monad | Dyad |
 |---|---|---|
-| `⍳` | 🟡 index generator; scalar argument only | 🟢 index of |
+| `⍳` | 🟡 scalar only; vector argument is a named not-yet | 🟢 index of |
 | `⍸` | 🔴 where | 🔴 interval index |
 | `∊` | 🟢 enlist | 🟢 membership |
 | `⍷` | — | 🔴 find |
@@ -314,7 +315,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Stranding (vector notation) | 🟢 |
 | Nested arrays | 🟡 structural verbs only; no mixed simple arrays |
 | `←` assignment, including inline | 🟢 |
-| Function assignment `F←+/` | 🔴 GNU APL rejects it; J's spelling is landing |
+| Function assignment `F←+/` | 🔴 GNU APL rejects it; J's spelling has landed |
 | Dfns `{⍵+1}`, `⍺`/`⍵` | 🔴 |
 | Tradfns `∇` | 🔴 |
 | Trains (forks and atops) | 🔴 |
@@ -350,7 +351,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Zero-copy out | 🟡 rank-1 numeric only; rank ≥ 2, chars and boxes go via `.tolist()` |
 | Parallel execution (own pool, `LIBJAY_THREADS`) | 🟢 |
 | Expression fusion (blockwise kernels) | 🟢 |
-| SIMD dispatch | 🟡 hot loops only; x86-64 v2/v3 and NEON, no AVX-512 |
+| SIMD dispatch | 🟢 hot loops (arithmetic, reductions, fused kernels); x86-64 baseline/v2/v3 and NEON, runtime-detected; no AVX-512 rung — no stable `target_feature` name on rustc 1.85 |
 | GPU / device backend | 🔴 |
 | C ABI: compile, bind, execute, errors, spans | 🟢 |
 | C ABI: boxed results | 🔴 no descriptor for a box yet |

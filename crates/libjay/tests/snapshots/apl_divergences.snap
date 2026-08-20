@@ -1,0 +1,131 @@
+# libjay recorded divergences from GNU APL.
+# Generated file: `LIBJAY_REFRESH_ORACLE=write cargo test -p libjay` rewrites
+# it from the live reference interpreter. Do not edit by hand; the workflow is
+# in docs/testing.md.
+#
+# One record per expression, in generator order:
+#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> TEXT`  one line of the reference's answer.
+#   `< TEXT`  one line of libjay's answer (divergence records only).
+#   `? TEXT`  why the two are expected to differ (divergence records only).
+#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`  a comment.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+# --- known divergences ---
+= ÷0
+? monadic ÷0 is ∞ here, DOMAIN ERROR there
+< ∞
+> <error>
+= ÷0 2 4
+? monadic ÷0 is ∞ here, DOMAIN ERROR there
+< ∞ 0.5 0.25
+> <error>
+= ⍟0
+? log 0 is ¯∞ here, DOMAIN ERROR there
+< ¯∞
+> <error>
+= 1 2⊖3 4⍴⍳12
+? left argument is per-axis here, per-column there
+<  7  8 5  6
+< 11 12 9 10
+<  3  4 1  2
+> <error>
+= 1 ¯1 2 0⊖3 4⍴⍳12
+? left argument is per-axis here, per-column there
+< <error>
+> 5 10 11  4
+> 9  2  3  8
+> 1  6  7 12
+= ∪2 3⍴1 2 3 1 2 3
+? nub takes items of any rank here, vectors only there
+< 1 2 3
+> <error>
+= 2 2⍴⍳0
+? empty reshape is a fill of zeros there, an error here
+< <error>
+> 0 0
+> 0 0
+= 0○2
+? complex result there, `complex numbers` gap here
+< <error>
+> 0J1.732050808
+= ¯2○2
+? complex result there, `complex numbers` gap here
+< <error>
+> 0J¯1.316957897
+= 2⊥2 3⍴1 0 1 1 1 0
+? decode folds the last axis here, the leading one there
+< 5 6
+> 3 1 2
+= 2⊥2 2 3⍴⍳12
+? decode folds the last axis here, the leading one there
+< 11 32
+< 53 74
+>  9 12 15
+> 18 21 24
+= 1 2 3⋄4 5
+? only the last sentence has a value here, every one prints there
+< 4 5
+> 1 2 3
+> 4 5
+= +\\2 1⍴⍳12
+? scan keeps the shape here, drops a length-1 axis there
+< 1
+< 2
+> 1 2
+= ⌈/⍳0
+? the neutral cell of ⌈ is ¯∞ here, ¯1.7976E308 there
+< ¯∞
+> ¯1.7976E308
+= ⌊/⍳0
+? the neutral cell of ⌊ is ∞ here, 1.7976E308 there
+< ∞
+> 1.7976E308
+= !¯1
+? the factorial of a negative integer is ∞ here, DOMAIN ERROR there
+< ∞
+> <error>
+= ¯7○1
+? artanh 1 is ∞ here, DOMAIN ERROR there
+< ∞
+> <error>
+= ⍴+\\,5
+? scan keeps the shape here, drops a length-1 axis there
+< 1
+>
+= 1 'a'
+? a mixed simple vector there, a named gap here
+< <error>
+> 1 a
+= 1 2,⊂3 4
+? the simple items are enclosed there, a type error here
+< <error>
+>  1 2  3 4
+= 4↑(1 2)(3 4)
+? the fill is the item prototype there, an empty box here
+<  1 2 3 4
+>  1 2  3 4  0 0  0 0
+= ⍴⍕(1 2)(3 4)
+? one space between items here, two there
+< 9
+> 10
+= ⍋(1 2)(3 4)
+? graded there, a `grading boxed arrays` gap here
+< <error>
+> 1 2
+= 1⊂1 2 3
+? partitioned enclose there, a named gap here
+< <error>
+>  1 2 3
+= 1 2⊃(1 2)(3 4)
+? pick there, a named gap here
+< <error>
+> 2
+= ⍳2 3
+? a nested index array there, a named gap here
+< <error>
+>  1 1  1 2  1 3
+>  2 1  2 2  2 3

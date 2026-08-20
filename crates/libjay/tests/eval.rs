@@ -266,6 +266,13 @@ fn apl_iota_respects_index_origin() {
     let zero = Dialect { index_origin: Some(0) };
     assert_eq!(run_dialect(Lang::Apl, "⍳4", &zero), Some(i64s(&[4], &[0, 1, 2, 3])));
     assert_eq!(run(Lang::Apl, "⍳0"), Some(Array::empty(jay::DType::I64)));
+    // A vector argument asks for an array of index vectors — a nested array,
+    // which is a named gap rather than a per-atom frame of index vectors.
+    let e = err(Lang::Apl, "⍳2 3");
+    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert!(e.msg.contains("nested index arrays"), "{}", e.msg);
+    // J's `i.` reshapes on the same argument and is unaffected.
+    assert_eq!(run(Lang::J, "i. 2 3"), Some(i64s(&[2, 3], &[0, 1, 2, 3, 4, 5])));
 }
 
 #[test]

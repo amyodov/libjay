@@ -161,3 +161,26 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   are ~1.5x slower under AVX2 and 16 columns and up are 1.2x to 1.6x
   faster, so narrow items take the baseline compilation. What it buys is
   modest and honest — the numbers are in bench/README.md.
+- 2026-08-20 — `cargo test` is a closed system (owner): no subprocesses, no
+  external binaries, predictable runtime. The differential suites became
+  snapshot batteries — `tests/snapshots/j.snap` (2942 records),
+  `apl.snap` (650) and `apl_divergences.snap` (26) hold each expression and
+  the reference interpreter's answer, the generated corpora materialised so
+  the generator runs only on a refresh. The batteries evaluate libjay against
+  the recorded answers with the same tolerance-aware comparison as before;
+  the oracles run only under `LIBJAY_REFRESH_ORACLE=1` (verify) or `=write`
+  (rewrite), where a missing interpreter is a failure rather than a skip.
+  Format: line-tagged plain text (`=` expression, `>` the reference's answer,
+  `<` libjay's, `?` the note, `@ io=N`, `#` comment, `<error>` for a
+  refusal), one line per output line so a diff reads as one line per changed
+  answer. APL divergences record BOTH answers: the battery holds libjay to
+  its side, the refresh re-checks that the pair still disagrees. Suite time
+  29.3 s → 6.0 s warm (oracle 14.9 s → 0.21 s, oracle_apl 7.2 s → 0.03 s),
+  and the differential corpus now runs on CI, which never had the oracles.
+  Workflow: docs/testing.md.
+- 2026-08-20 — APL monadic `⍳` has rank ∞, not 0 (owner-flagged bug): with
+  rank 0 the frame machinery answered `⍳2 3` with a 2×3 array of its own
+  invention. A non-scalar argument asks for an array of index vectors, so it
+  is now `not_yet("nested index arrays (⍳ with an array argument)")` and a
+  recorded divergence from GNU APL, which has them. J's `i.` reshapes on the
+  same argument and is untouched.

@@ -189,7 +189,10 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
             name: "⍳",
             monad: M::IotaApl { origin },
             dyad: D::IndexOf { origin },
-            ranks: [0, RANK_INF, RANK_INF],
+            // The monad takes the whole argument: a vector of lengths asks
+            // for a nested index array, which is a refusal, not a frame of
+            // one index generator per atom.
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '∊' => Prim {
             name: "∊",
@@ -1368,7 +1371,7 @@ mod tests {
             Expr::Monad { verb, .. } => {
                 assert_eq!(as_prim(verb).monad, MonadOp::IotaApl { origin });
                 assert_eq!(as_prim(verb).dyad, DyadOp::IndexOf { origin });
-                assert_eq!(as_prim(verb).ranks, [0, RANK_INF, RANK_INF]);
+                assert_eq!(as_prim(verb).ranks, [RANK_INF, RANK_INF, RANK_INF]);
             }
             other => panic!("expected a monad, got {other:?}"),
         }

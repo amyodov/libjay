@@ -51,25 +51,23 @@ Once published, `uvx libjay -e '...'` will do all of that with no setup.
 | Using it from **Rust** | [crates/libjay/README.md](crates/libjay/README.md) |
 | Using it from **C**, or any language with a C FFI | [docs/embedding.md](docs/embedding.md) |
 | Runnable examples — no APL keyboard needed | [examples/](examples/) |
+| What's implemented, feature by feature (🟢🟡🔴) | [docs/status.md](docs/status.md) |
 | What each language covers, and the data boundary | [docs/coverage.md](docs/coverage.md) |
 | Honest numbers against Polars, numba and numpy | [bench/README.md](bench/README.md) |
 
 ## Status
 
-Early. What exists today: both frontends over one IR; arithmetic, reduction
-(with the leading/trailing axis semantics of each language), the rank
-operator (J `"`, APL `⍤`), iota/index origin, reshape/transpose/take/drop,
-assignment and multi-sentence programs, `echo`/`⎕←`, the CLI, the Arrow and
-numpy data boundary, a C ABI, multithreaded execution, compile-time fusion of
-elementwise chains, and time series: scans, moving windows,
-replicate/compress, circle (trig) functions, power/converge (`^:`/`⍣`). Both
-primitive sets are differential-tested against reference implementations run
-as black-box subprocesses — 2375 J expressions and 592 APL ones, 100%
-agreement. A 20-period Bollinger z-score written as one J kernel runs 20M
-rows in 437 ms against the equivalent Polars pipeline's 768, agreeing to
-8.7e-10. Dense numeric arrays only; things the languages have but libjay
-doesn't yet (boxes, nested arrays, …) fail with an explicit "not supported
-yet". Next on the roadmap: more of both languages, SIMD, GPU.
+Early. What's implemented, feature by feature, is the
+[status matrix](docs/status.md): 82 green / 14 partial / 87 red of 183 J
+valences, 59 green / 16 partial / 41 red of 116 APL valences. Both primitive
+sets are differential-tested against the reference implementations: 2942
+J and 676 APL expressions, recorded as snapshots from black-box runs of the
+reference interpreters and replayed on every test run, 100% agreement. A
+20-period Bollinger z-score written as one J kernel runs 20M rows in 437 ms
+against the equivalent Polars pipeline's 768, agreeing to 8.7e-10. Dense numeric arrays and boxes; things the languages have but
+libjay doesn't yet (bigints, rationals, complex numbers, a GPU backend, …)
+fail with an explicit "not supported yet". Next on the roadmap: more of
+both languages, GPU.
 
 ## License
 

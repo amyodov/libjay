@@ -78,7 +78,10 @@ commits. Decisions with reasoning go to docs/decisions.md, not here.
   `~/projects/libjay-oracles/j/j64/jconsole -jprofile /dev/null`
   (LIBJAY_ORACLE_J), GNU APL at
   `~/projects/libjay-oracles/gnu-apl/install/bin/apl` (LIBJAY_ORACLE_APL).
-  Differential suites: tests/oracle.rs, tests/oracle_apl.rs.
+  Differential suites (tests/oracle.rs, tests/oracle_apl.rs) are snapshot
+  batteries: `cargo test` compares against tests/snapshots/*.snap and runs no
+  interpreter; the oracles run only under LIBJAY_REFRESH_ORACLE=1 (or =write
+  to rewrite the snapshots). Workflow in docs/testing.md.
 - Venvs: `.venv` (3.14, dev), `.venv-bench` (3.12, `'.[bench]'`). Both share
   python/jay/_jay.abi3.so — rebuild `maturin develop --release` before
   benchmarking. LIBJAY_THREADS caps the pool; LIBJAY_CPU_LEVEL pins the CPU

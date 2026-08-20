@@ -1,8 +1,14 @@
-//! Differential tests against GNU APL, run as a black-box subprocess (never
-//! linked, never read). Skipped when the oracle binary is absent.
+//! Differential tests against GNU APL.
 //!
-//! GNU APL is built from the FSF tarball into `~/projects/libjay-oracles/`
-//! and only ever executed; `LIBJAY_ORACLE_APL` overrides the path.
+//! `cargo test` runs the SNAPSHOT batteries: every expression in
+//! `tests/snapshots/apl.snap` and `tests/snapshots/apl_divergences.snap` is
+//! evaluated by libjay and compared with the recorded answer. No subprocess,
+//! no external binary, nothing outside the repository.
+//!
+//! GNU APL itself is run only by the refresh tests, gated on
+//! `LIBJAY_REFRESH_ORACLE` (docs/testing.md). It is built from the FSF
+//! tarball into `~/projects/libjay-oracles/` and only ever executed;
+//! `LIBJAY_ORACLE_APL` overrides the path.
 //!
 //! Comparison is textual with numeric tolerance. libjay prints 6 significant
 //! digits and GNU APL prints `⎕PP` (10) of them, so each token is parsed back
@@ -11,23 +17,52 @@
 //! values near zero.
 //!
 //! Both dialects are Iverson-family but not the same language. Where the
-//! difference is deliberate it lives in `KNOWN_DIVERGENCES`, which asserts
-//! that the two sides keep disagreeing, so a silent drift on either side is
-//! a test failure rather than a surprise.
+//! difference is deliberate it lives in `KNOWN_DIVERGENCES`, whose snapshot
+//! records BOTH answers: the battery holds libjay to its side, and the
+//! refresh re-checks that the two still disagree, so a silent drift on
+//! either side is a test failure rather than a surprise.
+
+mod common;
 
 use std::process::{Command, Stdio};
 
+use common::{Record, Side};
 use jay::fmt::{format_array, FmtOpts};
 use jay::{compile, Dialect, Lang};
 
-fn oracle_path() -> Option<String> {
+const SNAP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/snapshots/apl.snap");
+const DIVERGENCES: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/snapshots/apl_divergences.snap");
+
+/// What `LIBJAY_REFRESH_ORACLE` asks for. Absent means the refresh is off.
+enum Refresh {
+    /// Run the reference and fail on any drift from the snapshot.
+    Verify,
+    /// Run the reference and rewrite the snapshot.
+    Write,
+}
+
+fn refresh_mode() -> Option<Refresh> {
+    match std::env::var("LIBJAY_REFRESH_ORACLE").ok()?.as_str() {
+        "" | "0" => None,
+        "1" => Some(Refresh::Verify),
+        "write" => Some(Refresh::Write),
+        other => panic!("LIBJAY_REFRESH_ORACLE={other:?}: expected `1` or `write`"),
+    }
+}
+
+fn oracle_path() -> String {
     let path = std::env::var("LIBJAY_ORACLE_APL").unwrap_or_else(|_| {
         format!(
             "{}/projects/libjay-oracles/gnu-apl/install/bin/apl",
             std::env::var("HOME").unwrap_or_default()
         )
     });
-    std::path::Path::new(&path).exists().then_some(path)
+    assert!(
+        std::path::Path::new(&path).exists(),
+        "the refresh needs the GNU APL oracle; {path} is not there (set LIBJAY_ORACLE_APL)"
+    );
+    path
 }
 
 /// `--script` silences the banner and the input echo, `--safe` and `--noSV`
@@ -125,56 +160,178 @@ fn outputs_match(ours: &str, theirs: &str) -> bool {
     })
 }
 
-/// Both answers, side by side. `None` is "that side reported an error"; the
-/// error texts belong to their own implementations and are not compared.
-fn both(apl: &str, expr: &str, index_origin: u8) -> (Option<String>, Option<String>) {
-    (jay_eval(expr, index_origin), oracle_eval(apl, expr, index_origin))
-}
-
-fn describe(side: &Option<String>) -> String {
-    match side {
-        Some(s) => format!("{s:?}"),
-        None => "error".to_string(),
+/// Two answers agree when both are values that match, or both are refusals.
+/// Error texts belong to their own implementations and are not compared.
+fn sides_match(ours: &Side, theirs: &Side) -> bool {
+    match (ours.text(), theirs.text()) {
+        (Some(o), Some(t)) => outputs_match(o, t),
+        (None, None) => true,
+        _ => false,
     }
 }
 
-fn check(apl: &str, exprs: &[String], index_origin: u8) {
+/// The whole expression list, in the order the snapshot records it. The
+/// index origin travels with the expression: libjay carries `⎕IO` on the
+/// dialect, and the oracle gets `⎕IO←0⋄` glued in front of the sentence.
+fn all_exprs() -> Vec<(&'static str, Vec<(String, u8)>)> {
+    vec![
+        ("fixed corpus", FIXED.iter().map(|s| (s.to_string(), 1)).collect()),
+        ("index origin 0", IO_ZERO.iter().map(|s| (s.to_string(), 0)).collect()),
+        ("generated corpus", generated_exprs().into_iter().map(|s| (s, 1)).collect()),
+    ]
+}
+
+/// The closed test: libjay against the recorded answers, no oracle.
+#[test]
+fn snapshot_battery() {
+    let records = common::read(SNAP);
+    assert!(!records.is_empty(), "{SNAP} has no records");
     let mut failures = Vec::new();
-    // Two implementations refusing the same sentence agree, but they agree
-    // about nothing in particular, so the count is reported separately.
-    let mut refused = 0;
-    for expr in exprs {
-        let (ours, theirs) = both(apl, expr, index_origin);
-        if ours.is_none() && theirs.is_none() {
-            refused += 1;
-            continue;
-        }
-        let same = matches!((&ours, &theirs), (Some(o), Some(t)) if outputs_match(o, t));
-        if !same {
+    for record in &records {
+        let ours = Side::of(jay_eval(&record.expr, record.io));
+        let theirs = record.reference();
+        if !sides_match(&ours, theirs) {
             failures.push(format!(
-                "{expr}\n  ours:   {}\n  oracle: {}",
-                describe(&ours),
-                describe(&theirs)
+                "{}\n  ours:     {}\n  snapshot: {}",
+                record.expr,
+                ours.describe(),
+                theirs.describe()
             ));
         }
     }
     assert!(
         failures.is_empty(),
-        "{} of {} differ from the reference:\n{}",
+        "{} of {} snapshot expressions differ:\n{}",
         failures.len(),
-        exprs.len(),
+        records.len(),
         failures.join("\n")
     );
-    eprintln!(
-        "GNU APL agreement on {} expressions ({refused} of them refused by both)",
-        exprs.len()
-    );
+    eprintln!("snapshot agreement on {} expressions", records.len());
 }
+
+/// The recorded divergences, held to libjay's own side of each one. That the
+/// pair still disagrees is re-measured by the refresh; here it is asserted
+/// of the file, so a hand-edited record that has quietly converged is caught.
+#[test]
+fn divergences_battery() {
+    let records = common::read(DIVERGENCES);
+    assert!(!records.is_empty(), "{DIVERGENCES} has no records");
+    let mut failures = Vec::new();
+    for record in &records {
+        let recorded = record.ours.as_ref().expect("a divergence records libjay's answer");
+        let theirs = record.reference();
+        let ours = Side::of(jay_eval(&record.expr, record.io));
+        if !sides_match(&ours, recorded) {
+            failures.push(format!(
+                "{}\n  ours:     {}\n  snapshot: {}",
+                record.expr,
+                ours.describe(),
+                recorded.describe()
+            ));
+        } else if sides_match(recorded, theirs) {
+            failures.push(format!(
+                "{}: the recorded answers agree, so the note should go",
+                record.expr
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} recorded divergences are wrong:\n{}",
+        failures.len(),
+        records.len(),
+        failures.join("\n")
+    );
+    eprintln!("{} recorded divergences hold", records.len());
+}
+
+/// The open test: the live reference against the snapshot. Off unless asked.
+#[test]
+fn refresh_against_reference() {
+    let Some(mode) = refresh_mode() else {
+        eprintln!("refresh off; set LIBJAY_REFRESH_ORACLE=1 (or =write) to run the APL oracle");
+        return;
+    };
+    let apl = oracle_path();
+    let sections: Vec<common::Section> = all_exprs()
+        .into_iter()
+        .map(|(title, exprs)| {
+            let records = exprs
+                .iter()
+                .map(|(e, io)| Record::new(e, *io, Side::of(oracle_eval(&apl, e, *io))))
+                .collect();
+            common::section(title, records)
+        })
+        .collect();
+    let fresh: Vec<Record> = sections.iter().flat_map(|s| s.records.clone()).collect();
+    if let Refresh::Write = mode {
+        common::write(SNAP, "libjay reference snapshot: APL (GNU APL).", &sections);
+        eprintln!("wrote {} records to {SNAP}", fresh.len());
+        return;
+    }
+    let drift = common::drift(&common::read(SNAP), &fresh, &sides_match);
+    assert!(
+        drift.is_empty(),
+        "{} snapshot records no longer match the reference \
+         (rerun with LIBJAY_REFRESH_ORACLE=write):\n{}",
+        drift.len(),
+        drift.join("\n")
+    );
+    eprintln!("{} snapshot records confirmed against the reference", fresh.len());
+}
+
+/// The same, for the divergences: both sides are measured live, and each
+/// pair must still disagree.
+#[test]
+fn refresh_divergences_against_reference() {
+    let Some(mode) = refresh_mode() else {
+        eprintln!("refresh off; set LIBJAY_REFRESH_ORACLE=1 (or =write) to re-check divergences");
+        return;
+    };
+    let apl = oracle_path();
+    let mut records = Vec::new();
+    let mut converged = Vec::new();
+    for (expr, why) in KNOWN_DIVERGENCES {
+        let ours = Side::of(jay_eval(expr, 1));
+        let theirs = Side::of(oracle_eval(&apl, expr, 1));
+        if sides_match(&ours, &theirs) {
+            converged.push(format!("{expr}: {why}"));
+        }
+        records.push(Record {
+            expr: expr.to_string(),
+            io: 1,
+            note: Some(why.to_string()),
+            ours: Some(ours),
+            theirs: Some(theirs),
+        });
+    }
+    assert!(
+        converged.is_empty(),
+        "recorded divergences now agree, so the note should go:\n{}",
+        converged.join("\n")
+    );
+    let sections = [common::section("known divergences", records.clone())];
+    if let Refresh::Write = mode {
+        common::write(DIVERGENCES, "libjay recorded divergences from GNU APL.", &sections);
+        eprintln!("wrote {} divergences to {DIVERGENCES}", records.len());
+        return;
+    }
+    let drift = common::drift(&common::read(DIVERGENCES), &records, &sides_match);
+    assert!(
+        drift.is_empty(),
+        "{} recorded divergences have moved (rerun with LIBJAY_REFRESH_ORACLE=write):\n{}",
+        drift.len(),
+        drift.join("\n")
+    );
+    eprintln!("{} divergences confirmed against the reference", records.len());
+}
+
 
 /// Kept out of the corpora above: each of these is a place where libjay
 /// follows a documented choice of its own (Dyalog-style, or the rule its J
-/// frontend already uses) and GNU APL follows the ISO/APL2 one. The test
-/// asserts they still DISAGREE, so if either side moves we hear about it.
+/// frontend already uses) and GNU APL follows the ISO/APL2 one. The refresh
+/// asserts they still DISAGREE, so if either side moves we hear about it,
+/// and records both answers in `apl_divergences.snap`.
 /// The same list appears in docs/coverage.md.
 const KNOWN_DIVERGENCES: &[(&str, &str)] = &[
     // libjay's monadic `÷` takes J's rule for division by zero (an
@@ -243,57 +400,11 @@ const KNOWN_DIVERGENCES: &[(&str, &str)] = &[
     ("⍋(1 2)(3 4)", "graded there, a `grading boxed arrays` gap here"),
     ("1⊂1 2 3", "partitioned enclose there, a named gap here"),
     ("1 2⊃(1 2)(3 4)", "pick there, a named gap here"),
+    // The index generator on a vector of lengths: an array of index vectors
+    // there, a named gap here. Refusing it is the point — the monad has rank
+    // ∞ so the rank machinery cannot quietly frame it into a plain 2 by 3.
+    ("⍳2 3", "a nested index array there, a named gap here"),
 ];
-
-#[test]
-fn fixed_corpus_matches_reference() {
-    let Some(apl) = oracle_path() else {
-        eprintln!("GNU APL oracle not found; skipping (set LIBJAY_ORACLE_APL)");
-        return;
-    };
-    let exprs: Vec<String> = FIXED.iter().map(|s| s.to_string()).collect();
-    check(&apl, &exprs, 1);
-}
-
-#[test]
-fn index_origin_zero_matches_reference() {
-    let Some(apl) = oracle_path() else {
-        eprintln!("GNU APL oracle not found; skipping (set LIBJAY_ORACLE_APL)");
-        return;
-    };
-    // libjay carries `⎕IO` on the dialect; GNU APL takes it as a variable,
-    // so the oracle side gets `⎕IO←0⋄` glued in front of the sentence.
-    let exprs: Vec<String> = IO_ZERO.iter().map(|s| s.to_string()).collect();
-    check(&apl, &exprs, 0);
-}
-
-#[test]
-fn known_divergences_stay_divergent() {
-    let Some(apl) = oracle_path() else {
-        eprintln!("GNU APL oracle not found; skipping (set LIBJAY_ORACLE_APL)");
-        return;
-    };
-    let mut converged = Vec::new();
-    for (expr, why) in KNOWN_DIVERGENCES {
-        let (ours, theirs) = both(&apl, expr, 1);
-        // The pair is the documentation: printing it keeps the comments
-        // above honest without anyone having to run the oracle by hand.
-        eprintln!("{expr}\n  ours:   {}\n  oracle: {}\n  ({why})", describe(&ours), describe(&theirs));
-        let same = match (&ours, &theirs) {
-            (Some(o), Some(t)) => outputs_match(o, t),
-            (None, None) => true,
-            _ => false,
-        };
-        if same {
-            converged.push(format!("{expr}: {why}"));
-        }
-    }
-    assert!(
-        converged.is_empty(),
-        "recorded divergences now agree, so the note should go:\n{}",
-        converged.join("\n")
-    );
-}
 
 const IO_ZERO: &[&str] = &[
     "⍳5",
@@ -678,12 +789,8 @@ const FIXED: &[&str] = &[
 
 /// Deterministic pseudo-random sentences over the shared surface: no
 /// primitive whose two dialects are known to part ways appears here.
-#[test]
-fn generated_corpus_matches_reference() {
-    let Some(apl) = oracle_path() else {
-        eprintln!("GNU APL oracle not found; skipping (set LIBJAY_ORACLE_APL)");
-        return;
-    };
+/// Materialised into the snapshot; this runs only on a refresh.
+fn generated_exprs() -> Vec<String> {
     // Small xorshift so runs are reproducible without any clock access.
     let mut state: u64 = 0x9E3779B97F4A7C15;
     let mut rng = move || {
@@ -742,5 +849,5 @@ fn generated_corpus_matches_reference() {
         exprs.push(format!("{vec}⍳{atom}"));
         exprs.push(format!("⍴{noun}"));
     }
-    check(&apl, &exprs, 1);
+    exprs
 }

@@ -40,9 +40,9 @@ feature — that is a promise, not a refusal.
 | `\|` | magnitude | residue |
 | `<.` | floor | min |
 | `>.` | ceiling | max |
-| `=` `<` `>` | — | comparisons (0/1); `=` compares boxes by content, the orderings refuse them |
-| `<` | box: the whole argument in one box | — |
-| `>` | open: rank 0, so cells of different shapes are framed with fill; a non-box opens to itself | — |
+| `=` | not supported yet (self-classify) | equal (0/1); compares boxes by content |
+| `<` | box: the whole argument in one box | less than (0/1); refuses boxed operands — open them first |
+| `>` | open: rank 0, so cells of different shapes are framed with fill; a non-box opens to itself | greater than (0/1); refuses boxed operands — open them first |
 | `;` | raze: the items of the opened boxes, catenated (a scalar spreads, unequal items are padded) | link: `(<x)` before y, which joins as it is when already boxed |
 | `<:` | decrement | ≤ |
 | `>:` | increment | ≥ |
@@ -54,7 +54,7 @@ feature — that is a promise, not a refusal.
 | `+.` | — | GCD (logical or on booleans; `gcd 0 0` is 0) |
 | `~:` | — | ≠ |
 | `~.` | nub: distinct items, first-occurrence order | — |
-| `$` | shape of | reshape (cyclic) |
+| `$` | shape of | reshape (cyclic); an empty right argument is refused, not filled, when the left argument asks for a nonzero shape (`2 3 $ i. 0`) |
 | `,` | ravel | catenate along the LEADING axis |
 | `,.` | — | stitch, exactly `,"_1` |
 | `,:` | itemize: a leading axis of 1 (`2 3` becomes `1 2 3`) | laminate: the two arguments as the items of a new leading axis (two atoms give shape `2 1`) |
@@ -154,7 +154,7 @@ supported yet.
 | `∨` | — | GCD (logical or on booleans) |
 | `~` | not (the argument must be 0 or 1) | — |
 | `⍴` | shape of | reshape (cyclic) |
-| `⍳` | index generator (scalar; respects `⎕IO`) | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`) |
+| `⍳` | index generator (scalar argument only; respects `⎕IO`); a non-scalar argument is not supported yet (nested index arrays) | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`) |
 | `⍉` | transpose | — |
 | `↓` | — | drop |
 | `,` | ravel | catenate along the LAST axis |
@@ -368,14 +368,16 @@ the decimal point, and that is typography, not semantics.
   Sorting boxed items BY an unboxed key works.
 - Catenating a boxed array to an unboxed one is a type error in both
   languages. J agrees; APL2 encloses the simple items instead.
-- No dyadic transpose, `⎕`-variables, control words, verb/adverb
-  definitions yet — all "not yet", category 2. Named on their own: J's key
-  adverb `u/.`, outfix `x u\. y`, `u^:v` and negative powers (the
-  obverse), under `u&.v` other than `u&.>` (it needs verb inverses), `L.`,
-  APL expand `x\y`, `f⍣≡`, compose `f∘g`, dyadic `⊂` and `⊃`, monadic `↓`,
-  the complex circle functions, APL's `⌷`. Bigints, rationals and complex
-  numbers are still the other half of the "boxes, bigints, rationals"
-  promise.
+- No dyadic transpose, `⎕`-variables, control words, adverb/conjunction
+  definitions or explicit definitions (`3 : '...'`, `4 : '...'`, `{{ }}`)
+  yet — all "not yet", category 2. J's tacit verb assignment
+  (`mean =. +/ % #`) is the one form of the group that now works. Named on
+  their own: J's key adverb `u/.`, outfix `x u\. y`, `u^:v` and negative
+  powers (the obverse), under `u&.v` other than `u&.>` (it needs verb
+  inverses), `L.`, APL expand `x\y`, `f⍣≡`, compose `f∘g`, dyadic `⊂` and
+  `⊃`, monadic `↓`, the complex circle functions, APL's `⌷`. Bigints,
+  rationals and complex numbers are still the other half of the "boxes,
+  bigints, rationals" promise.
 
 ### Differences from GNU APL
 
@@ -388,6 +390,8 @@ not a quiet win. Everything else in a 650-expression corpus agrees.
 libjay follows J where APL2 stops at DOMAIN ERROR:
 
 - monadic `÷0` is `∞` and `⍟0` is `¯∞` (the first is already listed above).
+- monadic `⍳` on a vector is a nested index array there; here it is a
+  named gap (`⍳2 3` → not supported yet: nested index arrays).
 - `!¯1` is `∞` (the gamma pole) and `¯7○1` — artanh 1 — is `∞`.
 - the neutral cell of `⌈` and `⌊` over no items is `¯∞`/`∞`, where GNU APL
   uses the largest representable magnitudes. Every other entry of the

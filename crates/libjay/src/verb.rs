@@ -2866,8 +2866,10 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         }
         MonadOp::IotaJ => iota_j(y, span),
         MonadOp::IotaApl { origin } => {
+            // A non-scalar argument asks for an array of index vectors, one
+            // per cell of the result: a nested array, which is still to come.
             if y.rank() != 0 {
-                return Err(Error::domain("index generator needs a scalar argument", span));
+                return Err(Error::not_yet("nested index arrays (⍳ with an array argument)", span));
             }
             let n = y
                 .to_i64_vec()
@@ -4621,8 +4623,9 @@ mod tests {
         assert_eq!(ints(&r), vec![0, 1, 2]);
         let e = iota_apl(1).monad(&Array::scalar_i64(-1), &mut c, sp()).unwrap_err();
         assert_eq!(e.kind, ErrorKind::Domain);
+        // A vector of lengths asks for an array of index vectors.
         let e = iota_apl(1).monad(&Array::from_i64(vec![2, 3]), &mut c, sp()).unwrap_err();
-        assert_eq!(e.kind, ErrorKind::Domain);
+        assert_eq!(e.kind, ErrorKind::NotYet);
     }
 
     #[test]
