@@ -12,6 +12,8 @@ name: Publish
 on:
   release:
     types: [published]
+  # Dry run: builds every wheel and the sdist, publishes nothing.
+  workflow_dispatch:
 
 jobs:
   wheels:
@@ -67,6 +69,7 @@ jobs:
           path: dist
 
   publish:
+    if: github.event_name == 'release'
     needs: [wheels, sdist]
     runs-on: ubuntu-latest
     environment: pypi
