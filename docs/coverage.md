@@ -35,8 +35,8 @@ feature — that is a promise, not a refusal.
 | `*` | signum | times |
 | `%` | reciprocal | divide (float; `0%0` is `0`, `n%0` is `_`) |
 | `^` | exponential | power |
-| `^.` | natural logarithm (`^. 0` is `__`) | logarithm to base x |
-| `%:` | square root | x-th root (`x %: y` is `y^(1%x)`) |
+| `^.` | natural logarithm (`^. 0` is `__`); a negative argument gives a complex answer | logarithm to base x; the same |
+| `%:` | square root; a negative argument gives a complex answer | x-th root (`x %: y` is `y^(1%x)`); the same |
 | `\|` | magnitude | residue |
 | `<.` | floor | min |
 | `>.` | ceiling | max |
@@ -50,8 +50,8 @@ feature — that is a promise, not a refusal.
 | `*:` | square | — |
 | `-:` | halve (always float) | match: same shape and values, else 0 |
 | `-.` | `1 - y` (any number, not only 0/1) | — |
-| `*.` | — | LCM (logical and on booleans) |
-| `+.` | — | GCD (logical or on booleans; `gcd 0 0` is 0) |
+| `*.` | length/angle: the polar pair, as a new trailing axis | LCM (logical and on booleans; the Gaussian one on complex) |
+| `+.` | real/imaginary: the rectangular pair, as a new trailing axis | GCD (logical or on booleans; `gcd 0 0` is 0; the Gaussian one on complex) |
 | `~:` | — | ≠ |
 | `~.` | nub: distinct items, first-occurrence order | — |
 | `$` | shape of | reshape (cyclic); an empty right argument is refused, not filled, when the left argument asks for a nonzero shape (`2 3 $ i. 0`) |
@@ -61,7 +61,9 @@ feature — that is a promise, not a refusal.
 | `#` | tally | replicate: item i repeated x[i] times (a scalar x applies to every item) |
 | `#.` | base-2 decode (rank 1) | mixed-radix decode; a scalar x is the radix of every digit, a radix of 0 contributes none |
 | `#:` | base-2 encode; the width fits the largest magnitude in the WHOLE argument, so the verb has infinite rank | mixed-radix encode; the digit axis is x's own shape, so `2 #: 5` is a scalar and `2 2 2 #: 5` a 3-list |
-| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity | binomial: x things chosen from y, defined on the reals through gamma |
+| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity; a complex argument is a named gap | binomial: x things chosen from y, defined on the reals through gamma; complex is the same gap |
+| `j.` | `0j1 * y` | `x + 0j1 * y` |
+| `r.` | `^ 0j1 * y`: the unit complex at angle y | `x * ^ 0j1 * y`: polar coordinates |
 | `":` | format: the characters that display the argument | — |
 | `o.` | pi times y | circle function k (see below) |
 | `{` | — | from: each atom of x selects an item (negative from the end) |
@@ -104,8 +106,8 @@ u, and boxes the result again — `# &.> 'ab';'cde'` is `2;3`. Dyadically it
 pairs boxes at rank 0, so `1 ,&.> 1;2` extends the atom over both.
 
 Words present with only one valence implemented say so by name: monadic `,.`
-(ravel items), monadic `{` (catalogue), monadic `e.` (raze-in), monadic `*.`
-(length/angle), monadic `+.` (real/imaginary), monadic `~:` (nub sieve),
+(ravel items), monadic `{` (catalogue), monadic `e.` (raze-in),
+monadic `~:` (nub sieve),
 dyadic `+:` (nor), dyadic `*:` (nand), dyadic `-.` (less), dyadic `":`
 (format with a specification), monadic `{::` (map), dyadic `p:` (prime
 metadata), dyadic `q:` (prime exponents), `L.` (level of).
@@ -171,14 +173,14 @@ supported yet.
 | `-` | negate | minus |
 | `×` | signum | times |
 | `÷` | reciprocal | divide (float; `0÷0` is `1`, `n÷0` is a domain error) |
-| `*` | exponential | power |
-| `⍟` | natural logarithm | logarithm to base x |
+| `*` | exponential | power; a negative base with a fractional exponent gives a complex answer |
+| `⍟` | natural logarithm; a negative argument gives a complex answer | logarithm to base x; the same |
 | `⌈` | ceiling | max |
 | `⌊` | floor | min |
 | `\|` | magnitude | residue |
 | `=` `≠` `<` `≤` `>` `≥` | — | comparisons (0/1) |
-| `∧` | — | LCM (logical and on booleans) |
-| `∨` | — | GCD (logical or on booleans) |
+| `∧` | — | LCM (logical and on booleans; the Gaussian one on complex) |
+| `∨` | — | GCD (logical or on booleans; the Gaussian one on complex) |
 | `~` | not (the argument must be 0 or 1) | — |
 | `⍴` | shape of | reshape (cyclic) |
 | `⍳` | index generator (scalar argument only; respects `⎕IO`); a non-scalar argument is not supported yet (nested index arrays) | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`) |
@@ -186,7 +188,7 @@ supported yet.
 | `↓` | — | drop |
 | `,` | ravel | catenate along the LAST axis |
 | `⍪` | table: one row per item, holding that item's elements (a scalar gives 1×1, a vector n×1) | catenate along the LEADING axis |
-| `!` | factorial (always float) | binomial, J's argument order |
+| `!` | factorial (always float); a complex argument is a named gap | binomial, J's argument order; the same gap |
 | `⍕` | format: the characters that display the argument | — |
 | `⊥` | — | mixed-radix decode |
 | `⊤` | — | mixed-radix encode |
@@ -288,14 +290,16 @@ Both languages share one table, indexed by the left argument:
 | 0 | sqrt(1 - y²) | 4 | sqrt(1 + y²) |
 | 1 2 3 | sine, cosine, tangent | 5 6 7 | sinh, cosh, tanh |
 | ¯1 ¯2 ¯3 | arcsine, arccosine, arctangent | ¯5 ¯6 ¯7 | arsinh, arcosh, artanh |
-| ¯4 | sqrt(y² - 1), signed like y | | |
+| ¯4 | sqrt(y² - 1), signed like y | ¯8 | -sqrt(-(1 + y²)) |
+| 8 | sqrt(-(1 + y²)) | ¯9 ¯10 ¯11 ¯12 | y, conjugate, i×y, e^(iy) |
+| 9 10 11 12 | real part, magnitude, imaginary part, phase | | |
 
-Monadically the verb is `pi * y`. A k that would leave the reals (arcsine of
-2, say) reports the same "complex numbers" gap `%:` of a negative number
-does. The k values that only mean something for a complex argument (8 to 12
-and their negatives) are named individually; J gives real answers for some
-of them (`10 o. y` is the magnitude) and libjay does not implement those
-yet.
+Monadically the verb is `pi * y`. The whole table runs on complex arguments,
+and a real argument whose answer is not real (arcsine of 2, say) turns the
+pass complex, exactly as `%:` of a negative number does. 9 to 12 read a
+number's parts, so their answer is real however complex the argument was —
+J reports them as floats, and libjay does the same. A k outside ¯12..12, or
+a fractional one, is a domain error.
 
 ## Comparison tolerance
 
@@ -314,6 +318,11 @@ in GNU APL, and the pair pins the two rules apart. A comparison against zero
 is therefore exact — nothing is relatively near it — and so is any
 comparison of integers, characters or boxes with anything but a float
 inside. Equal infinities are equal; unequal ones are not.
+
+Complex values take the same rule on the MAGNITUDE of the difference:
+`|x-y| < ct × (|x| ⌊ |y|)` in J, the larger magnitude in APL. That is what
+J answers — `3j4 = 3.0000000000001j4` is 1 — and GNU APL is far looser here
+(see divergences.txt).
 
 The tolerance reaches `=` `~:` `<` `<:` `>` `>:` `-:` `e.` `i.` `i:` `~.`
 `I.` in J, the same family plus `≡` `∊` `⍳` `∪` `⍸` in APL, and the two
@@ -437,7 +446,15 @@ negates the value (`16b_1`), and digits run `0`–`9` then `a`–`z`. `1p1` is
 π and `1p2` is π², `1x1` is e and `2x1` is 2e — `apb` is a×π^b and `axb` is
 a×e^b, with either part allowed a sign, a fraction or an exponent. `1x` with
 nothing after it is still an extended-precision integer, which is a named
-gap, as `1j2` (complex) and `1r2` (rational) are.
+gap, as `1r2` (rational) is.
+
+Complex literals: `3j4` in J and `3J4` in APL are the rectangular form. J
+also has the polar ones — `1ad45` takes the angle in degrees, `1ar1` in
+radians — and both are exact on the quadrant boundaries, so `2ad90` is
+`0j2` and not a cosine's rounding of it. The exponent letters bind loosest
+of all, so `1ar1p1` is the polar value `1ar1` scaled by π and `1p1j1` is π
+raised to the power `1j1`. A `b` earlier in the word makes the `j` or the
+`a` a base-literal digit instead (`36bj` is 19).
 
 ## Interpolation
 
@@ -477,9 +494,39 @@ interface: a rank-1 numeric result has `__arrow_c_array__`, so
 `polars.Series(v)` and `pyarrow.array(v)` work. Higher-rank and character
 results go out through `.tolist()` for now.
 
+### Complex at the boundary
+
+Arrow has no complex type, so complex data crosses as a PAIR of float
+columns — real part and imaginary part — in one of two shapes:
+
+| Direction | Form |
+|---|---|
+| In (a single array) | `struct<re: f64, im: f64>` → a complex column, shape [M] |
+| In (a table) | two adjacent `f64` columns named `x_re` and `x_im` → one complex column `x` |
+| Out | a rank-1 complex result exports as `struct<re: f64, im: f64>` |
+
+The struct is the single-array form of the paired-column convention: a
+consumer that wants two table columns back gets them with `unnest`. Neither
+Arrow direction is zero-copy — libjay holds the two parts interleaved and
+Arrow holds them apart, and one of the two has to move.
+
+numpy is zero-copy in both languages' favour: `complex128` is two
+contiguous doubles per element, which is exactly libjay's own layout, so a
+`complex128` array is BORROWED like `float64` is. There is no complex
+result type on the numpy side yet; `.tolist()` yields Python `complex`
+values and a rank-0 complex result is a Python `complex`.
+
+The C ABI tag is `JAY_COMPLEX = 5`, with `double[2]` per element in and
+out — the layout of C99's `double _Complex`, so a caller passes its own
+array straight through. A real argument can produce a complex result
+(`%: _4`), so a C caller reads `jay_result_dtype` rather than assuming the
+type it passed in.
+
 Zero-copy (the source memory is borrowed, and the kernel keeps the source
 object alive for as long as it holds the data):
 
+- numpy C-contiguous `complex128`, whose two-doubles-per-element layout is
+  libjay's own.
 - Arrow `Int64` and `Float64`, and the types that are physically i64 —
   `Timestamp` (any unit), `Date64`, `Duration`, `Time64`. Reinterpretation is
   reading, not converting: a timestamp difference is plain integer
@@ -502,10 +549,10 @@ Refused, with the column named and an action suggested:
 - `UInt64` values above `2⁶³-1`.
 
 Not supported yet (a promise, not a refusal): decimals, strings, binary,
-lists, structs, dictionaries, float16, byte-swapped data, and exporting
-results of rank ≥ 2 or of boxes. An Arrow list or struct column is still
-refused rather than boxed: the mapping from Arrow nesting to box nesting
-is its own decision and has not been taken.
+lists, dictionaries, float16, byte-swapped data, and exporting results of
+rank ≥ 2 or of boxes. An Arrow list column, and any struct that is not the
+`re`/`im` pair above, is still refused rather than boxed: the mapping from
+Arrow nesting to box nesting is its own decision and has not been taken.
 
 ## The reference oracles
 
@@ -558,7 +605,10 @@ the decimal point, and that is typography, not semantics.
 - Ordering boxes needs J's total array ordering — which sorts by type,
   then by element count, then by rank, then by contents — so `/:`, `\:`,
   `⍋` and `⍒` name it as a gap when the array being graded is boxed.
-  Sorting boxed items BY an unboxed key works.
+  Sorting boxed items BY an unboxed key works. A COMPLEX array grades by
+  (real, imaginary), which is what J's `/:` answers; the ordering verbs
+  still refuse complex operands, because a permutation is not a claim about
+  size.
 - Catenating a boxed array to an unboxed one is a type error in both
   languages. J agrees; APL2 encloses the simple items instead.
 - J's `$:` inside an explicit definition names that definition, which is
@@ -572,9 +622,17 @@ the decimal point, and that is typography, not semantics.
   all "not yet", category 2. Named on their own: J's key adverb `u/.`, outfix `x u\. y`, `u^:v` and negative
   powers (the obverse), under `u&.v` other than `u&.>` (it needs verb
   inverses), `L.`, APL expand `x\y`, `f⍣≡`, compose `f∘g`, dyadic `⊂` and
-  `⊃`, monadic `↓`, the complex circle functions, APL's `⌷`. Bigints,
-  rationals and complex numbers are still the other half of the "boxes,
-  bigints, rationals" promise.
+  `⊃`, monadic `↓`, APL's `⌷`. Bigints and rationals are still the other
+  half of the "boxes, bigints, rationals" promise; complex numbers arrived
+  with this wave.
+
+- Complex numbers reach every scalar verb, the reductions, the scans and
+  the structural verbs. They do NOT reach: `!` (the gamma function of a
+  complex argument), matrix inverse and matrix divide (`%.` / `⌹`, which
+  work in f64), `#.`/`⊥` and `#:`/`⊤` (decode and encode), and the fused
+  blockwise kernel, which computes in one real type and declines a chain
+  that touches complex data — the ordinary pipeline runs it instead, with
+  the same answer.
 
 ### Differences from GNU APL
 
@@ -626,8 +684,18 @@ libjay is stricter, or simply elsewhere:
 
 - `2 2⍴⍳0` fills with the prototype in APL2 and is an error here — reshape
   does not invent data.
-- a circle function that leaves the reals (`0○2`) is a complex number there
-  and the named "complex numbers" gap here.
+- the circle functions on a REAL argument whose answer is imaginary (`8○3`,
+  `¯8○3`, `¯2○2`): GNU APL carries a negative zero into the square root and
+  lands on the lower branch, libjay takes the principal one — which is what
+  J answers.
+- ordering a complex number. GNU APL extends `< ≤ > ≥` to complex operands
+  as a lexicographic order on (real, imaginary); libjay refuses it, as the
+  standard and J both do. Grading goes the other way: libjay grades a
+  complex vector by (real, imaginary), which is what J's `/:` answers, and
+  GNU APL refuses.
+- complex equality. libjay compares the magnitude of the difference against
+  `⎕CT`, as its real comparison does; GNU APL's complex comparison is looser
+  by roughly the square root of `⎕CT`, so `1J1=1.0000000001J1` is 1 there.
 - `⊥` folds the last axis of a rank ≥ 2 argument, APL the leading one (see
   the `⊥`/`⊤` note above).
 - a sequence yields its last sentence and prints nothing on the way, so

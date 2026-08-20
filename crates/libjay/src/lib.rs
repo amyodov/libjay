@@ -5,6 +5,7 @@
 //! step owned by the caller.
 
 pub mod array;
+pub mod complex;
 pub mod dtype;
 pub mod error;
 mod explain;
@@ -18,6 +19,7 @@ pub mod simd;
 pub mod verb;
 
 pub use array::{Array, Buf, Data, Owner};
+pub use complex::Cx;
 pub use dtype::DType;
 pub use error::{Error, ErrorKind, Result, Span};
 pub use frontend::{compile, compile_parts, Dialect, Lang};

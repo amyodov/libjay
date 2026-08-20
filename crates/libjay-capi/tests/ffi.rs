@@ -85,6 +85,15 @@ fn result_i64(r: *mut jay_result) -> Vec<i64> {
     }
 }
 
+/// A complex result's elements: two doubles each, real then imaginary.
+fn result_complex(r: *mut jay_result) -> Vec<[f64; 2]> {
+    unsafe {
+        assert_eq!(jay_result_dtype(r), JAY_COMPLEX);
+        let n: usize = shape_of(r).iter().map(|&d| d as usize).product();
+        std::slice::from_raw_parts(jay_result_data(r) as *const [f64; 2], n).to_vec()
+    }
+}
+
 fn shape_of(r: *mut jay_result) -> Vec<u64> {
     unsafe {
         let rank = jay_result_rank(r);
@@ -390,4 +399,46 @@ fn version_is_a_readable_string() {
     let v = unsafe { CStr::from_ptr(jay_version()) }.to_str().unwrap();
     assert_eq!(v, env!("CARGO_PKG_VERSION"));
     assert!(v.starts_with(char::is_numeric), "{v}");
+}
+
+/// Complex data crosses in and out as interleaved doubles — the layout C's
+/// `double _Complex` and numpy's `complex128` both use, so a caller passes
+/// its own buffer straight through.
+#[test]
+fn complex_data_crosses_both_ways() {
+    let prog = compile_ok("{z} * {z}", "j");
+    let data: [[f64; 2]; 3] = [[1.0, 1.0], [3.0, 4.0], [0.0, 1.0]];
+    let shape = [data.len() as u64];
+    let arg = value(JAY_COMPLEX, &shape, data.as_ptr() as *const c_void);
+    let r = run_ok(prog, &[arg]);
+
+    assert_eq!(unsafe { jay_result_dtype(r) }, JAY_COMPLEX);
+    assert_eq!(shape_of(r), vec![3]);
+    assert_eq!(result_complex(r), vec![[0.0, 2.0], [-7.0, 24.0], [-1.0, 0.0]]);
+    // The display demotes an exactly-real element and nothing else.
+    assert_eq!(formatted(r), "0j2 _7j24 _1");
+
+    unsafe {
+        jay_result_free(r);
+        jay_program_free(prog);
+    }
+}
+
+/// A real argument whose answer is not real comes back as JAY_COMPLEX, so a
+/// C caller has to read the dtype rather than assume the one it passed in.
+#[test]
+fn a_real_argument_can_produce_a_complex_result() {
+    let prog = compile_ok("%: {x}", "j");
+    let data = [-4.0f64, 9.0];
+    let shape = [data.len() as u64];
+    let arg = value(JAY_F64, &shape, data.as_ptr() as *const c_void);
+    let r = run_ok(prog, &[arg]);
+
+    assert_eq!(unsafe { jay_result_dtype(r) }, JAY_COMPLEX);
+    assert_eq!(result_complex(r), vec![[0.0, 2.0], [3.0, 0.0]]);
+
+    unsafe {
+        jay_result_free(r);
+        jay_program_free(prog);
+    }
 }

@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::array::{Array, Data};
+use crate::complex::{self as cx, Cx};
 use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::fmt::FmtOpts;
@@ -78,6 +79,19 @@ impl Tol {
     #[inline(always)]
     pub fn le(self, a: f64, b: f64) -> bool {
         a <= b || self.eq(a, b)
+    }
+
+    /// Tolerant equality on complex values: the magnitude of the difference
+    /// against the same scale the real comparison uses. J answers
+    /// `3j4 = 3.0000000000001j4` with 1, which is this rule on magnitudes.
+    #[inline]
+    pub fn eq_cx(self, a: Cx, b: Cx) -> bool {
+        if a == b {
+            return true;
+        }
+        let (ma, mb) = (cx::abs(a), cx::abs(b));
+        let s = if self.by_smaller { ma.min(mb) } else { ma.max(mb) };
+        cx::abs(cx::sub(a, b)) < self.ct * s
     }
 
     /// `<. y`: the largest integer not above y, with a value just under an
@@ -286,6 +300,10 @@ pub enum ScalarMonad {
     /// `! y`: factorial, i.e. the gamma function at y+1. Always float, as in
     /// J; a negative integer is a pole and yields a signed infinity.
     Factorial,
+    /// J `j. y`: `0j1 * y`. Always complex.
+    Imaginary,
+    /// J `r. y`: `^ 0j1 * y`, the unit complex at angle y. Always complex.
+    Polar,
 }
 
 /// Elementwise dyadic operations (cell ranks 0 0).
@@ -324,6 +342,10 @@ pub enum ScalarDyad {
     /// `x ! y`: the number of ways to choose x things from y — J's argument
     /// order. Defined for every real pair through the gamma function.
     Binomial,
+    /// J `x j. y`: `x + 0j1 * y`. Always complex.
+    MakeComplex,
+    /// J `x r. y`: `x * ^ 0j1 * y`, i.e. polar coordinates. Always complex.
+    PolarBy,
 }
 
 /// How a value is put into a box.
@@ -419,6 +441,10 @@ pub enum MonadOp {
     /// generator at its fixed seed, which is J's `?.`; `float_at_zero` is
     /// J's `? 0`, a uniform double, where APL refuses a zero.
     Roll { origin: i64, fixed: bool, float_at_zero: bool },
+    /// J `+. y` (rectangular) and `*. y` (polar): the two parts of a
+    /// complex number as a two-element vector, which becomes a new trailing
+    /// axis. A real argument is the pair `y 0` / `|y| 0`.
+    ComplexParts { polar: bool },
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -1078,6 +1104,7 @@ fn push_elem(dst: &mut Data, src: &Data, i: usize) {
         (Data::Bool(a), Data::Bool(b)) => a.push(b[i]),
         (Data::I64(a), Data::I64(b)) => a.push(b[i]),
         (Data::F64(a), Data::F64(b)) => a.push(b[i]),
+        (Data::Complex(a), Data::Complex(b)) => a.push(b[i]),
         (Data::Char(a), Data::Char(b)) => a.push(b[i]),
         (Data::Box(a), Data::Box(b)) => a.push(b[i].clone()),
         _ => debug_assert!(false, "push_elem across dtypes"),
@@ -1492,6 +1519,26 @@ fn borrow_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>) -> &'a [f64] {
     }
 }
 
+/// Borrow numeric data as complex, widening into `tmp` when needed.
+fn borrow_cx<'a>(d: &'a Data, tmp: &'a mut Vec<Cx>) -> &'a [Cx] {
+    match d {
+        Data::Complex(v) => v,
+        Data::F64(v) => {
+            *tmp = v.iter().map(|&x| [x, 0.0]).collect();
+            &tmp[..]
+        }
+        Data::I64(v) => {
+            *tmp = v.iter().map(|&x| [x as f64, 0.0]).collect();
+            &tmp[..]
+        }
+        Data::Bool(v) => {
+            *tmp = v.iter().map(|&x| [x as f64, 0.0]).collect();
+            &tmp[..]
+        }
+        _ => &[],
+    }
+}
+
 /// Numeric data as f64, borrowed when it already is that.
 fn as_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>, span: Span) -> Result<&'a [f64]> {
     if !d.dtype().is_numeric() {
@@ -1801,20 +1848,55 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, span: Span) -> Result<f64> {
     })
 }
 
-/// `k o. y`: the circle function k applied to y.
+/// Which of a real pair's operations has no real answer, so the whole pass
+/// runs in the complex domain instead. Only the four operations that can
+/// leave the reals are asked.
+#[inline]
+fn escapes_reals(op: ScalarDyad, a: f64, b: f64) -> bool {
+    use ScalarDyad::*;
+    match op {
+        // An integer exponent keeps a negative base real (`_1 ^ 2` is 1).
+        Pow => a < 0.0 && b.fract() != 0.0,
+        Log => a < 0.0 || b < 0.0,
+        Root => b < 0.0,
+        Circle => circle_escapes(a, b),
+        _ => false,
+    }
+}
+
+/// The circle functions with no real answer at a real argument. A
+/// non-integer k is a domain error, which the real path reports.
+#[inline]
+fn circle_escapes(k: f64, y: f64) -> bool {
+    if k.fract() != 0.0 {
+        return false;
+    }
+    match k as i64 {
+        0 | -1 | -2 | -7 => y.abs() > 1.0,
+        -4 => y.abs() < 1.0,
+        -6 => y < 1.0,
+        // The functions built on the imaginary unit, which no real argument
+        // escapes.
+        8 | -8 | -11 | -12 => true,
+        _ => false,
+    }
+}
+
+/// `k o. y`: the circle function k applied to a real y.
 ///
 /// The table is J's and APL's alike (they share it): 1 2 3 are sine, cosine
 /// and tangent, 5 6 7 their hyperbolic counterparts, a negative k inverts the
-/// function at |k|, and 0 and 4 are the two Pythagorean forms. The functions
-/// that would leave the reals report the same "complex numbers" gap as `%:`
-/// of a negative number; the k values that only mean something for a complex
-/// argument (8..12 and their negatives) are named as their own gap.
+/// function at |k|, and 0 and 4 are the two Pythagorean forms. 9 to 12 read
+/// the parts of a complex number — real, magnitude, imaginary, phase — and
+/// are answered here for the reals they also accept. A pair whose answer
+/// leaves the reals never reaches this function: [`escapes_reals`] sends the
+/// whole pass to the complex path first.
 #[inline]
 fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
     if k.fract() != 0.0 {
         return Err(Error::domain("the circle function needs an integer left argument", span));
     }
-    let complex = || Error::not_yet("complex numbers", span);
+    let complex = || Error::internal("a circle function left the reals on the real path");
     Ok(match k as i64 {
         0 => {
             if y.abs() > 1.0 {
@@ -1862,20 +1944,212 @@ fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
             }
             y.atanh()
         }
-        other => {
-            return Err(Error::not_yet(
-                match other {
-                    8 | -8 => "circle function 8 (complex)",
-                    9 | -9 => "circle function 9 (complex)",
-                    10 | -10 => "circle function 10 (complex)",
-                    11 | -11 => "circle function 11 (complex)",
-                    12 | -12 => "circle function 12 (complex)",
-                    _ => "that circle function",
-                },
+        // The parts of a number that happens to be real.
+        9 | -9 | -10 => y,
+        10 => y.abs(),
+        11 => 0.0,
+        12 => {
+            if y < 0.0 {
+                std::f64::consts::PI
+            } else {
+                0.0
+            }
+        }
+        8 | -8 | -11 | -12 => return Err(complex()),
+        _ => {
+            return Err(Error::domain(
+                "the circle functions run from _12 to 12",
                 span,
             ));
         }
     })
+}
+
+/// One complex step.
+#[inline]
+fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
+    use ScalarDyad::*;
+    Ok(match op {
+        Add => cx::add(a, b),
+        Sub => cx::sub(a, b),
+        Mul => cx::mul(a, b),
+        DivJ => cx::div(a, b),
+        DivApl => {
+            if b == cx::ZERO {
+                if a == cx::ZERO {
+                    cx::ONE
+                } else {
+                    return Err(Error::domain("division by zero", span));
+                }
+            } else {
+                cx::div(a, b)
+            }
+        }
+        Pow => cx::pow(a, b),
+        Log => cx::log(a, b),
+        Root => cx::root(a, b),
+        Residue => cx::residue(a, b),
+        Lcm => cx::lcm(a, b),
+        Gcd => cx::gcd(a, b),
+        MakeComplex => cx::add(a, cx::mul(cx::I, b)),
+        PolarBy => cx::mul(a, cx::exp(cx::mul(cx::I, b))),
+        Circle => {
+            if a[1] != 0.0 || a[0].fract() != 0.0 {
+                return Err(Error::domain(
+                    "the circle function needs an integer left argument",
+                    span,
+                ));
+            }
+            cx::circle(a[0] as i64, b).ok_or_else(|| {
+                Error::domain("the circle functions run from _12 to 12", span)
+            })?
+        }
+        Min | Max => return Err(no_complex_order(span)),
+        Binomial => {
+            return Err(Error::not_yet("the binomial function on complex numbers", span));
+        }
+        Eq | Ne | Lt | Le | Gt | Ge => {
+            return Err(Error::internal("a comparison in the complex arithmetic path"));
+        }
+    })
+}
+
+/// The complaint an ordering makes about complex operands. Both references
+/// refuse it: complex numbers carry no order, only equality.
+fn no_complex_order(span: Span) -> Error {
+    Error::new(
+        ErrorKind::Domain,
+        "complex numbers have no order; only equality (=, ~:) applies to them",
+        Some(span),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn dyad_cx_chunk(
+    op: ScalarDyad,
+    xs: &[Cx],
+    xoff: usize,
+    xdiv: usize,
+    ys: &[Cx],
+    yoff: usize,
+    ydiv: usize,
+    start: usize,
+    out: &mut [Cx],
+    span: Span,
+) -> Result<()> {
+    use ScalarDyad::*;
+    // The three steps that cannot fail are picked before the loop, so the
+    // pass is one operation per element rather than a match per element.
+    macro_rules! plain {
+        ($step:expr) => {{
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut Cx| {
+                *slot = $step(a, b);
+                true
+            });
+            return Ok(());
+        }};
+    }
+    match op {
+        Add => plain!(cx::add),
+        Sub => plain!(cx::sub),
+        Mul => plain!(cx::mul),
+        DivJ => plain!(cx::div),
+        _ => {}
+    }
+    let mut err = None;
+    zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut Cx| {
+        match cx_op(op, a, b, span) {
+            Ok(v) => {
+                *slot = v;
+                true
+            }
+            Err(e) => {
+                err = Some(e);
+                false
+            }
+        }
+    });
+    match err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dyad_cx(
+    op: ScalarDyad,
+    xs: &[Cx],
+    xoff: usize,
+    xdiv: usize,
+    ys: &[Cx],
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+    span: Span,
+) -> Result<Vec<Cx>> {
+    par::try_fill(n, |start, part| {
+        dyad_cx_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, span)
+    })
+}
+
+/// One complex pass over two buffers, widening both to complex first.
+#[allow(clippy::too_many_arguments)]
+fn complex_dyad_data(
+    op: ScalarDyad,
+    x: &Data,
+    xoff: usize,
+    xdiv: usize,
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+    span: Span,
+) -> Result<Data> {
+    let (mut tx, mut ty) = (Vec::new(), Vec::new());
+    let xs = borrow_cx(x, &mut tx);
+    let ys = borrow_cx(y, &mut ty);
+    Ok(Data::Complex(dyad_cx(op, xs, xoff, xdiv, ys, yoff, ydiv, n, span)?.into()))
+}
+
+/// `9 o.` to `12 o.` read a part of a number — real, magnitude, imaginary,
+/// phase — so their answers are real however complex the argument was. J
+/// reports them as floats rather than as complex values with a zero
+/// imaginary part.
+fn circle_reads_a_part(x: &Data, xoff: usize, xdiv: usize, n: usize) -> bool {
+    if x.dtype() == DType::Complex {
+        // A complex left argument selects nothing; the pass reports it.
+        return false;
+    }
+    let mut tmp = Vec::new();
+    let xs = borrow_f64(x, &mut tmp);
+    (0..n).all(|i| {
+        let k = xs[xoff + i / xdiv];
+        k.fract() == 0.0 && (9.0..=12.0).contains(&k)
+    })
+}
+
+/// Does the real pass hold an argument pair whose answer leaves the reals?
+/// One extra scan, and only for the four operations that can.
+#[allow(clippy::too_many_arguments)]
+fn pass_leaves_reals(
+    op: ScalarDyad,
+    x: &Data,
+    xoff: usize,
+    xdiv: usize,
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+) -> bool {
+    use ScalarDyad::*;
+    if !matches!(op, Pow | Log | Root | Circle) {
+        return false;
+    }
+    let (mut tx, mut ty) = (Vec::new(), Vec::new());
+    let xs = borrow_f64(x, &mut tx);
+    let ys = borrow_f64(y, &mut ty);
+    (0..n).any(|i| escapes_reals(op, xs[xoff + i / xdiv], ys[yoff + i / ydiv]))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2127,6 +2401,22 @@ fn compare_data(
         });
         return Ok(Data::Bool(out.into()));
     }
+    if dx == DType::Complex || dy == DType::Complex {
+        if !equality {
+            return Err(no_complex_order(span));
+        }
+        let (mut tx, mut ty) = (Vec::new(), Vec::new());
+        let xs = borrow_cx(x, &mut tx);
+        let ys = borrow_cx(y, &mut ty);
+        let (out, _) = par::fill(n, |start, part: &mut [u8]| {
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
+                let e = tol.eq_cx(a, b);
+                *slot = if op == Eq { e as u8 } else { !e as u8 };
+                true
+            })
+        });
+        return Ok(Data::Bool(out.into()));
+    }
     // Floats compare with the dialect's tolerance; integers are exact
     // whatever it is, so the integer pass below is untouched by it.
     let out = if DType::promote(dx, dy) == Some(DType::F64) {
@@ -2215,6 +2505,10 @@ fn lcm_gcd_data(
     span: Span,
 ) -> Result<Data> {
     let t = arith_type(x.dtype(), y.dtype(), span)?;
+    if t == DType::Complex {
+        // The Gaussian-integer versions, which is what both references give.
+        return complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
+    }
     let both_bool = x.dtype() == DType::Bool && y.dtype() == DType::Bool;
     let float = t == DType::F64;
     let (xs, ys) = if float {
@@ -2297,6 +2591,18 @@ fn scalar_dyad_data(
         }
         // Integer overflow (or a fractional result): J widens to float.
     }
+    if t == DType::Complex
+        || matches!(op, MakeComplex | PolarBy)
+        || pass_leaves_reals(op, x, xoff, xdiv, y, yoff, ydiv, n)
+    {
+        let data = complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span)?;
+        if op == Circle && circle_reads_a_part(x, xoff, xdiv, n) {
+            if let Data::Complex(v) = &data {
+                return Ok(Data::F64(v.iter().map(|z| z[0]).collect()));
+            }
+        }
+        return Ok(data);
+    }
     let (mut tx, mut ty) = (Vec::new(), Vec::new());
     let xs = borrow_f64(x, &mut tx);
     let ys = borrow_f64(y, &mut ty);
@@ -2322,19 +2628,81 @@ fn fits_i64(v: f64) -> bool {
     v.is_finite() && v >= i64::MIN as f64 && v < i64::MAX as f64
 }
 
+/// Does a real argument have no real answer under this monad?
+fn monad_leaves_reals(op: ScalarMonad, d: &Data) -> bool {
+    use ScalarMonad::*;
+    match op {
+        // The two that make a complex number out of a real one.
+        Imaginary | Polar => d.dtype().is_numeric(),
+        Sqrt | Ln => match d {
+            Data::I64(v) => v.iter().any(|&x| x < 0),
+            Data::F64(v) => v.iter().any(|&x| x < 0.0),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Elementwise monadic application in the complex domain.
+fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
+    use ScalarMonad::*;
+    let mut tmp = Vec::new();
+    let v = borrow_cx(&y.data, &mut tmp);
+    if y.count() > 0 && v.is_empty() {
+        return Err(wrong_type(y.dtype(), span));
+    }
+    let data = match op {
+        // Magnitude is the one that leaves the complex domain again.
+        Abs => Data::F64(par::map(v, |&z| cx::abs(z)).into()),
+        Not => return Err(Error::domain("logical negation needs values of 0 or 1", span)),
+        Factorial => {
+            return Err(Error::not_yet("the factorial of a complex number", span));
+        }
+        _ => {
+            let step: fn(Cx) -> Cx = match op {
+                Conj => cx::conj,
+                Neg => cx::neg,
+                Signum => cx::signum,
+                Recip => cx::recip,
+                Sqrt => cx::sqrt,
+                Exp => cx::exp,
+                Ln => cx::ln,
+                Floor => cx::floor,
+                Ceil => cx::ceil,
+                OneMinus => |z| cx::sub(cx::ONE, z),
+                Inc => |z| cx::add(z, cx::ONE),
+                Dec => |z| cx::sub(z, cx::ONE),
+                Double => |z| cx::add(z, z),
+                Halve => |z| [z[0] / 2.0, z[1] / 2.0],
+                Square => |z| cx::mul(z, z),
+                Pi => |z| [std::f64::consts::PI * z[0], std::f64::consts::PI * z[1]],
+                Imaginary => |z| cx::mul(cx::I, z),
+                Polar => |z| cx::exp(cx::mul(cx::I, z)),
+                Abs | Not | Factorial => unreachable!("handled above"),
+            };
+            Data::Complex(par::map(v, |&z| step(z)).into())
+        }
+    };
+    Ok(Array { shape: y.shape.clone(), data })
+}
+
 /// Elementwise monadic application to a whole array.
 fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     use ScalarMonad::*;
     let d = &y.data;
+    if d.dtype() == DType::Complex || monad_leaves_reals(op, d) {
+        return complex_monad(op, y, span);
+    }
     // The float-only operations borrow float data as it lies; anything else
     // is widened once into `tmp` first.
     let mut tmp = Vec::new();
     let data = match op {
-        Conj => match d {
-            // Identity on reals; conjugation matters once complex arrives.
-            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
-            _ => d.clone(),
-        },
+        // Conjugation is the identity on reals.
+        Conj if d.dtype().is_numeric() => d.clone(),
+        Conj => return Err(wrong_type(d.dtype(), span)),
+        // Both make a complex value out of any argument, so they never
+        // reach the real path.
+        Imaginary | Polar => return Err(Error::internal("a complex monad on the real path")),
         Neg => match d {
             Data::Bool(v) => Data::I64(par::map(v, |&b| -(b as i64)).into()),
             Data::I64(v) => match par::try_map(v, i64::checked_neg) {
@@ -2342,7 +2710,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
                 None => Data::F64(par::map(v, |&x| -(x as f64)).into()),
             },
             Data::F64(v) => Data::F64(par::map(v, |&x| -x).into()),
-            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
+            _ => return Err(wrong_type(d.dtype(), span)),
         },
         Signum => match d {
             Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
@@ -2351,7 +2719,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
             Data::F64(v) => Data::F64(
                 par::map(v, |&x| if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }).into(),
             ),
-            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
+            _ => return Err(wrong_type(d.dtype(), span)),
         },
         Recip => {
             // 1 % 0 is infinity, the J rule. APL's ÷0 is a domain error; a
@@ -2361,10 +2729,8 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
             Data::F64(par::map(v, |&x| if x == 0.0 { f64::INFINITY } else { 1.0 / x }).into())
         }
         Sqrt => {
+            // A negative value went to the complex path before this point.
             let v = as_f64(d, &mut tmp, span)?;
-            if v.iter().any(|&x| x < 0.0) {
-                return Err(Error::not_yet("complex numbers", span));
-            }
             Data::F64(par::map(v, |&x| x.sqrt()).into())
         }
         Exp => {
@@ -2378,7 +2744,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
                 None => Data::F64(par::map(v, |&x| (x as f64).abs()).into()),
             },
             Data::F64(v) => Data::F64(par::map(v, |&x| x.abs()).into()),
-            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
+            _ => return Err(wrong_type(d.dtype(), span)),
         },
         Floor | Ceil => match d {
             Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
@@ -2394,7 +2760,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
                     None => Data::F64(par::map(v, |&x| round(x)).into()),
                 }
             }
-            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
+            _ => return Err(wrong_type(d.dtype(), span)),
         },
         Inc | Dec => {
             let step = if op == Inc { 1i64 } else { -1 };
@@ -2405,7 +2771,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
                     None => Data::F64(par::map(v, |&x| x as f64 + step as f64).into()),
                 },
                 Data::F64(v) => Data::F64(par::map(v, |&x| x + step as f64).into()),
-                Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
+                _ => return Err(wrong_type(d.dtype(), span)),
             }
         }
         Double | Square => match d {
@@ -2428,7 +2794,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
             Data::F64(v) => {
                 Data::F64(par::map(v, |&x| if op == Double { x + x } else { x * x }).into())
             }
-            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
+            _ => return Err(wrong_type(d.dtype(), span)),
         },
         Halve => {
             let v = as_f64(d, &mut tmp, span)?;
@@ -2443,10 +2809,8 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
             Data::F64(par::map(v, |&x| factorial(x)).into())
         }
         Ln => {
+            // As with `Sqrt`: a negative value is already on the complex path.
             let v = as_f64(d, &mut tmp, span)?;
-            if v.iter().any(|&x| x < 0.0) {
-                return Err(Error::not_yet("complex numbers", span));
-            }
             // ln(0) is negative infinity, which is what J prints as __.
             Data::F64(par::map(v, |&x| x.ln()).into())
         }
@@ -2457,7 +2821,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
                 None => Data::F64(par::map(v, |&x| 1.0 - x as f64).into()),
             },
             Data::F64(v) => Data::F64(par::map(v, |&x| 1.0 - x).into()),
-            Data::Char(_) | Data::Box(_) => return Err(wrong_type(d.dtype(), span)),
+            _ => return Err(wrong_type(d.dtype(), span)),
         },
         Not => {
             let bad = || Error::domain("logical negation needs values of 0 or 1", span);
@@ -2485,7 +2849,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
                     .ok_or_else(bad)?;
                     Data::Bool(out.into())
                 }
-                Data::Char(_) | Data::Box(_) => return Err(bad()),
+                _ => return Err(bad()),
             }
         }
     };
@@ -2662,6 +3026,7 @@ fn elem_key(d: &Data, i: usize) -> u64 {
             let x = v[i];
             if x == 0.0 { 0 } else { x.to_bits() }
         }
+        Data::Complex(v) => cx_key(v[i]),
         Data::Char(v) => v[i] as u64,
         // Boxes have no cheap key; their callers compare them by content.
         Data::Box(_) => 0,
@@ -2678,10 +3043,17 @@ fn num_key(d: &Data, i: usize) -> u64 {
             let x = v[i];
             if x == 0.0 { 0.0f64.to_bits() } else { x.to_bits() }
         }
+        Data::Complex(v) => cx_key(v[i]),
         Data::Char(v) => v[i] as u64,
         // As in `elem_key`: never reached for boxed data.
         Data::Box(_) => 0,
     }
+}
+
+/// One key for a complex value; the two parts have to disagree to disagree.
+fn cx_key(z: Cx) -> u64 {
+    let bits = |x: f64| if x == 0.0 { 0u64 } else { x.to_bits() };
+    bits(z[0]) ^ bits(z[1]).rotate_left(32)
 }
 
 /// Distinct items, in the order of their first occurrence.
@@ -2740,6 +3112,13 @@ fn cmp_items(d: &Data, i: usize, j: usize, m: usize) -> std::cmp::Ordering {
         Data::Bool(v) => v[a + k].cmp(&v[b + k]),
         Data::I64(v) => v[a + k].cmp(&v[b + k]),
         Data::F64(v) => v[a + k].partial_cmp(&v[b + k]).unwrap_or(Equal),
+        // Grading a complex array orders it by real part then imaginary,
+        // which is the order J's `/:` puts it in. The ordering VERBS still
+        // refuse it; a grade is a permutation, not a claim about size.
+        Data::Complex(v) => v[a + k][0]
+            .partial_cmp(&v[b + k][0])
+            .unwrap_or(Equal)
+            .then_with(|| v[a + k][1].partial_cmp(&v[b + k][1]).unwrap_or(Equal)),
         Data::Char(v) => v[a + k].cmp(&v[b + k]),
         // Grading a boxed array is refused before it gets here.
         Data::Box(_) => Equal,
@@ -2835,6 +3214,12 @@ pub(crate) fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
             let a = borrow_f64(&x.data, &mut ta);
             let b = borrow_f64(&y.data, &mut tb);
             a.iter().zip(b).all(|(p, q)| tol.eq(*p, *q))
+        }
+        Some(DType::Complex) => {
+            let (mut ta, mut tb) = (Vec::new(), Vec::new());
+            let a = borrow_cx(&x.data, &mut ta);
+            let b = borrow_cx(&y.data, &mut tb);
+            a.iter().zip(b).all(|(p, q)| tol.eq_cx(*p, *q))
         }
         Some(_) => {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
@@ -3381,6 +3766,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Roll { origin, fixed, float_at_zero } => {
             roll(y, origin, fixed, float_at_zero, span)
         }
+        MonadOp::ComplexParts { polar } => complex_parts(y, polar, span),
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         MonadOp::None => {
             Err(Error::domain(format!("{} has no monadic meaning", p.name), span))
@@ -3389,6 +3775,17 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
 }
 
 /// Left argument of reshape/take/drop: a scalar or vector of integers.
+/// J `+. y` and `*. y` at rank 0: one complex value as its two parts, so
+/// the rank machinery turns them into a new trailing axis of length 2.
+fn complex_parts(y: &Array, polar: bool, span: Span) -> Result<Array> {
+    let Some(v) = y.to_complex_vec() else {
+        return Err(wrong_type(y.dtype(), span));
+    };
+    let z = v.first().copied().unwrap_or(cx::ZERO);
+    let pair = if polar { vec![cx::abs(z), cx::arg(z)] } else { vec![z[0], z[1]] };
+    Ok(Array::from_f64(pair))
+}
+
 fn axis_counts(x: &Array, what: &str, span: Span) -> Result<Vec<i64>> {
     if x.rank() > 1 {
         return Err(Error::new(
@@ -3607,6 +4004,9 @@ fn reduce_identity(v: &Verb, n: usize) -> Option<Data> {
         ScalarDyad::Max => Data::F64(vec![f64::NEG_INFINITY; n].into()),
         ScalarDyad::Eq | ScalarDyad::Le | ScalarDyad::Ge => bits(1),
         ScalarDyad::Ne | ScalarDyad::Lt | ScalarDyad::Gt => bits(0),
+        // `j.` and `r.` build a complex number out of two reals; neither
+        // reference gives them an identity element.
+        ScalarDyad::MakeComplex | ScalarDyad::PolarBy => return None,
         // Logarithm and the circle functions have none: both references
         // refuse an empty reduction of them.
         ScalarDyad::Log | ScalarDyad::Circle => return None,
@@ -3796,6 +4196,18 @@ fn fold_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize) -> Option<Vec<i64>> {
     }
 }
 
+fn fold_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize) -> Option<Vec<Cx>> {
+    use ScalarDyad::*;
+    let assoc = is_associative(op);
+    match op {
+        Add => fold_items(v, n, m, assoc, |a: Cx, b: Cx| (cx::add(a, b), false)),
+        Sub => fold_items(v, n, m, assoc, |a: Cx, b: Cx| (cx::sub(a, b), false)),
+        Mul => fold_items(v, n, m, assoc, |a: Cx, b: Cx| (cx::mul(a, b), false)),
+        // Min and Max have no complex meaning; the general path reports it.
+        _ => None,
+    }
+}
+
 fn fold_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     let assoc = is_associative(op);
@@ -3821,6 +4233,7 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
     }
     match d {
         Data::F64(v) => Some(Data::F64(fold_f64(op, v, n, m)?.into())),
+        Data::Complex(v) => Some(Data::Complex(fold_cx(op, v, n, m)?.into())),
         Data::I64(v) => Some(Data::I64(fold_i64(op, v, n, m)?.into())),
         // Booleans reduce as integers, which is what promotion says the
         // general path would produce; widen once and fold.
@@ -4015,6 +4428,16 @@ fn scan_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, back: bool) -> Option
     }
 }
 
+fn scan_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize, back: bool) -> Option<Vec<Cx>> {
+    use ScalarDyad::*;
+    match op {
+        Add => scan_flat(v, n, m, back, |a: Cx, b: Cx| (cx::add(a, b), false)),
+        Sub => scan_flat(v, n, m, back, |a: Cx, b: Cx| (cx::sub(a, b), false)),
+        Mul => scan_flat(v, n, m, back, |a: Cx, b: Cx| (cx::mul(a, b), false)),
+        _ => None,
+    }
+}
+
 fn scan_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize, back: bool) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     match op {
@@ -4045,6 +4468,7 @@ fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Optio
     };
     match d {
         Data::F64(v) => Some(Data::F64(scan_f64(op, v, n, m, back)?.into())),
+        Data::Complex(v) => Some(Data::Complex(scan_cx(op, v, n, m, back)?.into())),
         Data::I64(v) => Some(ints(v)),
         Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
         Data::Char(_) | Data::Box(_) => None,
@@ -4233,6 +4657,15 @@ fn window_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, w: usize) -> Option
     }
 }
 
+fn window_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize, w: usize) -> Option<Vec<Cx>> {
+    use ScalarDyad::*;
+    match op {
+        Add => window_fold(v, n, m, w, |a: Cx, b: Cx| (cx::add(a, b), false)),
+        Mul => window_fold(v, n, m, w, |a: Cx, b: Cx| (cx::mul(a, b), false)),
+        _ => None,
+    }
+}
+
 fn window_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize, w: usize) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     match op {
@@ -4262,6 +4695,7 @@ fn window_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, w: usize) -> Optio
     };
     match d {
         Data::F64(v) => Some(Data::F64(window_f64(op, v, n, m, w)?.into())),
+        Data::Complex(v) => Some(Data::Complex(window_cx(op, v, n, m, w)?.into())),
         Data::I64(v) => Some(ints(v)),
         Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
         Data::Char(_) | Data::Box(_) => None,
@@ -6098,13 +6532,13 @@ mod tests {
     }
 
     #[test]
-    fn square_root_of_a_negative_number_awaits_complex_numbers() {
+    fn square_root_of_a_negative_number_is_complex() {
         ctx!(c);
         let r = sqrt_v().monad(&Array::from_i64(vec![9]), &mut c, sp()).unwrap();
         assert!(close(floats(&r)[0], 3.0));
-        let e = sqrt_v().monad(&Array::from_i64(vec![-1]), &mut c, sp()).unwrap_err();
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("complex"), "{}", e.msg);
+        let r = sqrt_v().monad(&Array::from_i64(vec![-4]), &mut c, sp()).unwrap();
+        assert_eq!(r.dtype(), DType::Complex);
+        assert_eq!(r.as_complex_slice().expect("complex data"), &[[0.0, 2.0]]);
     }
 
     // --------------------------------------------------------- structural

@@ -348,11 +348,9 @@ fn logarithm_and_root() {
     assert_eq!(val(Lang::J, "^. 0"), f64s(&[], &[f64::NEG_INFINITY]));
     assert_eq!(val(Lang::J, "3 %: 27"), f64s(&[], &[3.0]));
     assert_eq!(val(Lang::J, "2 %: 9"), f64s(&[], &[3.0]));
-    // Complex results wait for complex numbers.
+    // A logarithm or a root that leaves the reals is complex.
     for src in ["^. _1", "2 %: _8", "_2 ^. 8"] {
-        let e = err(Lang::J, src);
-        assert_eq!(e.kind, ErrorKind::NotYet, "{src}");
-        assert!(e.msg.contains("complex"), "{src}: {}", e.msg);
+        assert_eq!(val(Lang::J, src).dtype(), DType::Complex, "{src}");
     }
     // APL spells the logarithm `⍟`, both valences.
     assert_eq!(val(Lang::Apl, "⍟1"), f64s(&[], &[0.0]));
@@ -670,8 +668,6 @@ fn newly_spelled_words_name_what_they_still_lack() {
         (Lang::J, ",. 1 2", "ravel items"),
         (Lang::J, "{ 1 2", "catalogue"),
         (Lang::J, "e. 1 2", "raze-in"),
-        (Lang::J, "*. 1 2", "length/angle"),
-        (Lang::J, "+. 1 2", "real/imaginary"),
         (Lang::J, "~: 1 2", "nub sieve"),
         (Lang::Apl, "1 2∪3", "union"),
         (Lang::Apl, "∩1 2", "intersection"),

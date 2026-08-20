@@ -1,0 +1,187 @@
+# libjay reference snapshot: APL (GNU APL) — corpus/apl/complex.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreter. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> TEXT`  one line of the reference's answer.
+#   `< TEXT`  one line of libjay's answer (divergence records only).
+#   `? TEXT`  why the two are expected to differ (divergence records only).
+#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`  a comment.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= 3J4
+> 3J4
+= ¯1J¯2
+> ¯1J¯2
+= 1J0
+> 1
+= 0J0
+> 0
+= 0J¯1
+> 0J¯1
+= 0.5J0.25
+> 0.5J0.25
+= 1J1E¯10
+> 1J1E¯10
+= 3J4 1J1 2
+> 3J4 1J1 2
+= 1J0 2J3
+> 1 2J3
+= 2 2⍴3J4 1 2.5J¯1 100
+>   3J4    1
+> 2.5J¯1 100
+= ⍴3J4
+>
+= ≢3J4 1J1
+> 2
+= 3J4+1J1
+> 4J5
+= 3J4-1J1
+> 2J3
+= 3J4×2
+> 6J8
+= 0J1×0J1
+> ¯1
+= (1J2)×(1J¯2)
+> 5
+= 3J4÷2J1
+> 2J1
+= ÷0J1
+> 0J¯1
+= 3J4*2
+> ¯7J24
+= 0J1*2
+> ¯1
+= 2*3J4
+> ¯7.461496615J2.885492726
+= *0J1
+> 0.5403023059J0.8414709848
+= *3J4
+> ¯13.12878308J¯15.20078446
+= ⍟3J4
+> 1.609437912J0.927295218
+= 2⍟3J4
+> 2.321928095J1.337804212
+= +3J4
+> 3J¯4
+= -3J4
+> ¯3J¯4
+= |3J4
+> 5
+= |¯3J4
+> 5
+= ×3J4
+> 0.6J0.8
+= ⌊3.5J4.5
+> 4J4
+= ⌈3.5J4.5
+> 3J5
+= 5|3J4
+> 3J¯1
+= 3J4|2
+> ¯2J3
+= 3J4∨1J2
+> 1
+= 3J4∧1J2
+> ¯5J10
+= (¯4)*0.5
+> 0J2
+= (¯1)*0.5
+> 0J1
+= (¯1)*2
+> 1
+= ⍟¯1
+> 0J3.141592654
+= ⍟¯2 ¯3
+> 0.6931471806J3.141592654 1.098612289J3.141592654
+= (¯4 9)*0.5
+> 0J2 3
+= 9○3J4
+> 3
+= 10○3J4
+> 5
+= 11○3J4
+> 4
+= 12○3J4
+> 0.927295218
+= 1○3J4
+> 3.853738038J¯27.01681326
+= 2○3J4
+> ¯27.0349456J¯3.851153335
+= 3○3J4
+> ¯0.0001873462046J0.9993559874
+= 5○3J4
+> ¯6.548120041J¯7.61923172
+= 6○3J4
+> ¯6.580663041J¯7.581552743
+= 7○3J4
+> 1.000709536J0.004908258067
+= 0○3J4
+> 4.080332173J¯2.940937034
+= 4○3J4
+> 3.060933988J3.920372033
+= ¯1○3J4
+> 0.6339838656J2.305509031
+= ¯2○3J4
+> 0.9368124612J¯2.305509031
+= ¯3○3J4
+> 1.448306995J0.1589971917
+= ¯5○3J4
+> 2.299914041J0.9176168534
+= ¯6○3J4
+> 2.305509031J0.9368124612
+= ¯7○3J4
+> 0.1175009073J1.40992105
+= ○3J4
+> 9.424777961J12.56637061
+= 9○3
+> 3
+= 11○3
+> 0
+= 10○¯3
+> 3
+= 12○¯3
+> 3.141592654
+= 0○2
+> 0J1.732050808
+= ¯1○2
+> 1.570796327J¯1.316957897
+= ¯6○0
+> 0J1.570796327
+= ¯7○2
+> 0.5493061443J¯1.570796327
+= 3J4=3J4
+> 1
+= 3J4≠3J4
+> 0
+= 1J0=1
+> 1
+= 3J4≡3J4
+> 1
+= 3J4≢3J4
+> 0
+= +/3J4 1J1 2
+> 6J5
+= ×/1J1 1J1
+> 0J2
+= +\\1J1 2J2 3J3
+> 1J1 3J3 6J6
+= 1J1-1J1
+> 0
+= ∪3J4 3J4 1J1
+> 3J4 1J1
+= 3J4 1J1⍳1J1
+> 2
+= 3J4∊3J4 1
+> 1
+= ⌽3J4 1J1
+> 1J1 3J4
+= 1J1,2 3
+> 1J1 2 3
+= 2+3J4 1J1
+> 5J4 3J1

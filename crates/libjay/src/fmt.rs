@@ -20,12 +20,15 @@ pub enum BoxStyle {
 pub struct FmtOpts {
     /// Negative-number prefix: `_` for J, `¯` for APL.
     pub neg: char,
+    /// Separator between the parts of a complex number: `j` for J, `J` for
+    /// APL.
+    pub imag: char,
     pub boxes: BoxStyle,
 }
 
 impl FmtOpts {
-    pub const J: FmtOpts = FmtOpts { neg: '_', boxes: BoxStyle::Fenced };
-    pub const APL: FmtOpts = FmtOpts { neg: '¯', boxes: BoxStyle::Spaced };
+    pub const J: FmtOpts = FmtOpts { neg: '_', imag: 'j', boxes: BoxStyle::Fenced };
+    pub const APL: FmtOpts = FmtOpts { neg: '¯', imag: 'J', boxes: BoxStyle::Spaced };
 }
 
 /// Significant digits kept when displaying a float.
@@ -234,10 +237,22 @@ fn format_atom(data: &Data, i: usize, opts: &FmtOpts) -> String {
         Data::Bool(v) => (if v[i] != 0 { "1" } else { "0" }).to_string(),
         Data::I64(v) => format_i64(v[i], opts),
         Data::F64(v) => format_f64(v[i], opts),
+        Data::Complex(v) => format_complex(v[i], opts),
         Data::Char(v) => v[i].to_string(),
         // Boxed data takes the drawing path before reaching here.
         Data::Box(_) => String::new(),
     }
+}
+
+/// A complex number, as both references print one: the two parts joined by
+/// `j`/`J`, and the real part alone when the imaginary part is exactly zero.
+/// The demotion is in the display only — the value keeps its complex type,
+/// which is what `3!:0` reports of it in J.
+fn format_complex(z: crate::complex::Cx, opts: &FmtOpts) -> String {
+    if z[1] == 0.0 {
+        return format_f64(z[0], opts);
+    }
+    format!("{}{}{}", format_f64(z[0], opts), opts.imag, format_f64(z[1], opts))
 }
 
 fn format_i64(v: i64, opts: &FmtOpts) -> String {

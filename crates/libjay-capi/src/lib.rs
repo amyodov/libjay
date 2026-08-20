@@ -27,6 +27,7 @@ pub const JAY_BOOL: i32 = 1;
 pub const JAY_I64: i32 = 2;
 pub const JAY_F64: i32 = 3;
 pub const JAY_CHAR: i32 = 4;
+pub const JAY_COMPLEX: i32 = 5;
 
 /// `jay_run` return codes.
 const JAY_OK: c_int = 0;
@@ -68,7 +69,8 @@ pub struct jay_value {
     pub rank: i32,
     /// `rank` axis lengths, or NULL when `rank` is 0.
     pub shape: *const u64,
-    /// Row-major elements: `uint8_t` 0/1, `int64_t`, `double`, or `uint32_t`
+    /// Row-major elements: `uint8_t` 0/1, `int64_t`, `double`, a pair of
+    /// `double` (real then imaginary) per complex value, or `uint32_t`
     /// codepoints. May be NULL when the array is empty.
     pub data: *const c_void,
 }
@@ -177,6 +179,11 @@ fn value_to_array(v: &jay_value, index: usize) -> Result<Array, Error> {
         // `data`, aligned, per the descriptor contract.
         JAY_I64 => Data::I64(Buf::from_vec(unsafe { raw_slice::<i64>(v.data, count) }.to_vec())),
         JAY_F64 => Data::F64(Buf::from_vec(unsafe { raw_slice::<f64>(v.data, count) }.to_vec())),
+        // Two doubles per element, which is the layout `Data::Complex`
+        // already holds, so this is a copy and not a conversion.
+        JAY_COMPLEX => {
+            Data::Complex(Buf::from_vec(unsafe { raw_slice::<[f64; 2]>(v.data, count) }.to_vec()))
+        }
         JAY_CHAR => {
             let src: &[u32] = unsafe { raw_slice(v.data, count) };
             let mut chars = Vec::with_capacity(count);
@@ -212,6 +219,7 @@ fn dtype_tag(d: DType) -> i32 {
         DType::I64 => JAY_I64,
         DType::F64 => JAY_F64,
         DType::Char => JAY_CHAR,
+        DType::Complex => JAY_COMPLEX,
         // Refused by `jay_run` before a result is built.
         DType::Box => 0,
     }
@@ -506,6 +514,7 @@ pub unsafe extern "C" fn jay_result_data(result: *const jay_result) -> *const c_
             Some(Data::Bool(v)) => v.as_ptr() as *const c_void,
             Some(Data::I64(v)) => v.as_ptr() as *const c_void,
             Some(Data::F64(v)) => v.as_ptr() as *const c_void,
+            Some(Data::Complex(v)) => v.as_ptr() as *const c_void,
             Some(Data::Char(_)) => r.chars.as_ptr() as *const c_void,
             Some(Data::Box(_)) => ptr::null(),
             None => ptr::null(),

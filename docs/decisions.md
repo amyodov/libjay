@@ -354,3 +354,80 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   Deferred with a name: J's `1 :`, `2 :`, `13 :`, `{{ }}` modifier forms,
   `throw.`/`catcht.`/`goto_name.`/`label_name.`; APL's dfn operators
   (`⍺⍺`/`⍵⍵`), `→` branching, niladic `∇`-definitions.
+
+- 2026-08-20 — **Complex numbers** (original record, Group 1; the DSP/audio
+  scenario's prerequisite). `DType::Complex` with
+  `Data::Complex(Buf<[f64; 2]>)`.
+
+  **Layout: interleaved `[re, im]`.** Not two parallel buffers, and not a
+  newtype. `[f64; 2]` is bit-identical to numpy's `complex128`, to C99's
+  `double _Complex`, and to what a caller's own array already holds, so the
+  numpy import BORROWS a complex block exactly as it borrows `float64`, and
+  the C ABI takes and returns `double[2]` per element with no conversion at
+  all. The cost is at the Arrow edge, which stores the parts apart; that is
+  one boundary and it pays for zero-copy everywhere else. `Buf<[f64; 2]>`,
+  `par::fill` and `zip_chunk` are already generic over the element type, so
+  the parallel machinery took the new type without a line of change.
+
+  **Demotion is DISPLAY only.** `1j0` prints as `1` and `(1j2)*(1j_2)` as
+  `5`, per element, but the array stays complex — which is what J reports
+  (`3!:0 ] 1j0` is 16, the complex type). Demoting the TYPE would have made
+  every complex result's dtype depend on its values.
+
+  **Ordering is refused, grading is not.** J answers `3j4 < 1j2` with a
+  domain error, and so does libjay, in both languages — including dyadic
+  `<.`/`>.`/`⌊`/`⌈`. GNU APL instead extends `< ≤ > ≥` to a lexicographic
+  order on (real, imaginary); that is a GNU APL extension, not the standard,
+  and it is recorded in corpus/apl/divergences.txt rather than copied.
+  Grading is the other way round: `/:` on a complex vector works in J (a
+  permutation is not a claim about size), GNU APL refuses it, and libjay
+  follows J. Equality is tolerant on the MAGNITUDE of the difference, which
+  is J's rule; GNU APL's complex tolerance is looser by about √⎕CT and is
+  also a recorded divergence.
+
+  **Escaping the reals.** `%: _4`, `^. _1`, `_4 ^ 0.5`, `2 ^. _8`,
+  `_1 o. 2` and their relatives now answer in complex instead of reporting a
+  gap. The decision is per PASS, not per element: a scan over the argument
+  pair decides whether any element leaves the reals, and if one does the
+  whole pass runs in complex — so `%: _4 9` is `0j2 3`, one complex array,
+  as it is in J. The scan runs only for `^`, `^.`, `%:` and `o.`; nothing
+  else can escape.
+  Two rounding details came from the oracle rather than from a formula: a
+  square root uses the algebraic form (so `%: _4` is exactly `0j2`, not
+  `1.22e_16j2`), and a negative real raised to a real power turns on cos and
+  sin of a multiple of π computed exactly at the quadrant boundaries. The
+  same trick makes `2ad90` exactly `0j2`.
+
+  **Fusion declines.** The blockwise kernel computes a whole chain in one
+  type, and complex is not one of the two it has. `working_type` returns
+  None as soon as an input is complex, and the ordinary pipeline runs the
+  chain — with the same answer, which tests/complex.rs checks by running one
+  chain both ways. Widening the kernel to a third working type is a
+  separate, measurable change and nothing has asked for it.
+
+  **Arrow: paired columns** (the original record's decision). Arrow has no
+  complex type. A rank-1 complex result exports as
+  `struct<re: f64, im: f64>` — the single-array form of a paired column,
+  which a consumer splits with `unnest`. Import accepts both shapes: a
+  `struct<re, im>` array, and two adjacent `f64` columns of a table named
+  `x_re` and `x_im`, which become one complex column `x`. A `FixedSizeList`
+  of 2 would have been zero-copy, but it names nothing, and naming the parts
+  is what makes the convention readable at the far end.
+
+  **FFT (original §7 item 8, resolved).** FFT is NOT a J or APL primitive:
+  neither language spells it, so implementing it inside the primitive tables
+  would invent vocabulary, which the clean-room rule and the "language
+  coverage is the goal" rule both forbid. It belongs to the NAMED EXTENSION
+  layer — the place for a carrier or a function that adds capability without
+  changing any existing primitive's meaning — and it is not implemented in
+  this wave. Complex numbers are the only thing that blocked it: a complex
+  vector in and a complex vector out is the whole interface, and that now
+  exists end to end (numpy zero-copy in, `struct<re, im>` out, `double[2]`
+  across the C ABI). The criterion for anything else joining that layer is
+  the same: it must add a carrier or a function without changing the
+  semantics of a primitive either language defines.
+
+  Deferred with a name: the gamma function of a complex argument (`!`),
+  complex matrix inverse and matrix divide (`%.` / `⌹` stay f64), complex
+  decode and encode (`#.`/`⊥`, `#:`/`⊤`), and rationals, which is the last
+  of the Group-1 types.

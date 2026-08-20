@@ -18,9 +18,9 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 92 green / 24 partial / 67 red of 183 valences in the inventory.**
+**J: 99 green / 23 partial / 61 red of 183 valences in the inventory.**
 
-**APL: 63 green / 20 partial / 33 red of 116 valences in the inventory.**
+**APL: 62 green / 21 partial / 33 red of 116 valences in the inventory.**
 
 ## J — verbs
 
@@ -34,7 +34,7 @@ tables are listed separately and not counted.
 | `%` | 🟢 reciprocal | 🟢 divide |
 | `^` | 🟢 exponential | 🟢 power |
 | `^.` | 🟢 natural log | 🟢 logarithm |
-| `%:` | 🟡 sqrt; negative needs complex | 🟡 root; same |
+| `%:` | 🟢 sqrt; a negative gives a complex answer | 🟢 root; same |
 | `<.` | 🟢 floor | 🟢 lesser of |
 | `>.` | 🟢 ceiling | 🟢 larger of |
 | `\|` | 🟢 magnitude | 🟢 residue |
@@ -44,13 +44,13 @@ tables are listed separately and not counted.
 | `*:` | 🟢 square | 🔴 not-and |
 | `-:` | 🟢 halve | 🟢 match |
 | `-.` | 🟢 not (`1-y`) | 🔴 less |
-| `+.` | 🔴 real/imaginary | 🟡 GCD; integral values only |
-| `*.` | 🔴 length/angle | 🟡 LCM; integral values only |
-| `!` | 🟢 factorial | 🟢 out of |
-| `o.` | 🟢 pi times | 🟡 circle; real k only, 8–12 not yet |
+| `+.` | 🟢 real/imaginary | 🟡 GCD; integral reals, or Gaussian integers |
+| `*.` | 🟢 length/angle | 🟡 LCM; integral reals, or Gaussian integers |
+| `!` | 🟡 factorial; a complex argument is a named gap | 🟡 out of; same |
+| `o.` | 🟢 pi times | 🟢 circle; `_12` to `12`, real and complex |
 | `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
-| `j.` | 🔴 imaginary | 🔴 complex |
-| `r.` | 🔴 angle | 🔴 polar |
+| `j.` | 🟢 imaginary | 🟢 complex |
+| `r.` | 🟢 angle | 🟢 polar |
 | `p.` | 🔴 roots | 🔴 polynomial |
 | `p..` | 🔴 poly. derivative | 🔴 poly. integral |
 | `p:` | 🟢 the y-th prime | 🔴 primality and the factorisation table |
@@ -198,7 +198,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Catenate with fill | 🔴 |
 | Comparison tolerance (default `=`, `!.`) | 🟢 2⁻⁴⁴, and `u!.n` |
 | Integer, float, `_` negative, `1e_3` exponent literals | 🟢 |
-| Complex literal `1j2` | 🔴 |
+| Complex literals `1j2`, `1ad45`, `1ar1` | 🟢 |
 | Extended literal `1x` | 🔴 |
 | Rational literal `1r2` | 🔴 |
 | Base and constant literals `16b1f`, `1p1`, `1x1` | 🟢 |
@@ -220,8 +220,8 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `⌈` | 🟢 ceiling | 🟢 maximum |
 | `⌊` | 🟢 floor | 🟢 minimum |
 | `\|` | 🟢 magnitude | 🟢 residue |
-| `!` | 🟢 factorial | 🟢 binomial |
-| `○` | 🟢 pi times | 🟡 circle; real k only |
+| `!` | 🟡 factorial; a complex argument is a named gap | 🟡 binomial; same |
+| `○` | 🟢 pi times | 🟢 circle; `¯12` to `12`, real and complex |
 | `?` | 🟡 roll; libjay's own stream, not GNU APL's | 🟡 deal; same |
 | `⌹` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
 
@@ -335,7 +335,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `:Return` `:Leave` `:Continue` | 🟡 no oracle, as above |
 | Exact-or-scalar conformability | 🟢 |
 | `¯` negatives, `1E3` exponents | 🟢 |
-| Complex literal `2J3` | 🔴 |
+| Complex literal `2J3` | 🟢 |
 | `'strings'`, `⍝` comments, `⋄` and newline separators | 🟢 |
 | `{name}` host-data interpolation | 🟢 |
 
@@ -347,11 +347,11 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Boxes | 🟢 structural verbs, display, Python conversion |
 | i8/i16/i32, u8/u16/u32, f32, `Date32`, `Time32`, `Boolean` at the boundary | 🟡 widened or unpacked by one copy on entry |
 | u64 | 🟡 refused above 2⁶³−1 |
-| Complex | 🔴 |
+| Complex | 🟢 core type, `[re, im]` pairs; numpy `complex128` zero-copy, Arrow `struct<re, im>` |
 | Decimal128 | 🔴 |
 | Bigint, rational | 🔴 |
 | float16, byte-swapped data | 🔴 |
-| Arrow string, binary, list, struct, dictionary columns | 🔴 |
+| Arrow string, binary, list, dictionary columns | 🔴 |
 | Nulls | ⚪ neither language has a missing value; the column is named and refused |
 | Mixed-type table columns | ⚪ silent promotion would damage values above 2⁵³ |
 | Non-contiguous numpy views | ⚪ refused rather than silently copied |
@@ -363,6 +363,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | SIMD dispatch | 🟢 hot loops (arithmetic, reductions, fused kernels); x86-64 baseline/v2/v3 and NEON, runtime-detected; no AVX-512 rung — no stable `target_feature` name on rustc 1.85 |
 | GPU / device backend | 🔴 |
 | C ABI: compile, bind, execute, errors, spans | 🟢 |
+| C ABI: complex (`JAY_COMPLEX`, interleaved doubles) | 🟢 |
 | C ABI: boxed results | 🔴 no descriptor for a box yet |
 | Python: `jay.j`, t-strings, samples as live defaults | 🟢 |
 | Rust compile-time checking of an expression (macro) | 🔴 |

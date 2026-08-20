@@ -47,14 +47,38 @@
 < <error>
 > 0 0
 > 0 0
-= 0○2
-? complex result there, `complex numbers` gap here
-< <error>
-> 0J1.732050808
+= 8○3
+? principal branch here, the lower one there
+< 0J3.16228
+> 0J¯3.16227766
+= ¯8○3
+? principal branch here, the lower one there
+< 0J¯3.16228
+> 0J3.16227766
 = ¯2○2
-? complex result there, `complex numbers` gap here
-< <error>
+? principal branch here, the lower one there
+< 0J1.31696
 > 0J¯1.316957897
+= 3J4<1J2
+? no order on complex here, lexicographic there
+< <error>
+> 0
+= 0J1<1
+? no order on complex here, lexicographic there
+< <error>
+> 1
+= 3J4≤3J4
+? no order on complex here, lexicographic there
+< <error>
+> 1
+= ⍋3J4 1J1
+? complex grading here, a domain error there
+< 2 1
+> <error>
+= 1J1=1.0000000001J1
+? ⎕CT on the magnitude here, a much looser threshold there
+< 0
+> 1
 = 2⊥2 3⍴1 0 1 1 1 0
 ? decode folds the last axis here, the leading one there
 < 5 6

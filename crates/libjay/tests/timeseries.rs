@@ -359,21 +359,18 @@ fn the_circle_table_matches_the_standard_library() {
 }
 
 #[test]
-fn circle_functions_outside_the_reals_are_named_gaps() {
-    // Leaving the reals reports the same gap `%:` of a negative does.
-    for src in ["_1 o. 2", "_2 o. 2", "0 o. 2", "_4 o. 0.5", "_6 o. 0.5", "_7 o. 2"] {
-        let e = err(Lang::J, src);
-        assert_eq!(e.kind, ErrorKind::NotYet, "{src}");
-        assert!(e.msg.contains("complex"), "{src}: {}", e.msg);
+fn circle_functions_outside_the_reals_answer_in_complex() {
+    // A real argument whose answer is not real turns the whole pass complex.
+    for src in ["_1 o. 2", "_2 o. 2", "0 o. 2", "_4 o. 0.5", "_6 o. 0.5", "_7 o. 2", "8 o. 3"] {
+        assert_eq!(val(Lang::J, src).dtype(), jay::DType::Complex, "{src}");
     }
-    // The k values that only mean something for a complex argument name
-    // themselves rather than the family.
-    let e = err(Lang::J, "9 o. 1");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("circle function 9"), "{}", e.msg);
-    // A fractional k selects nothing.
-    let e = err(Lang::J, "1.5 o. 1");
-    assert_eq!(e.kind, ErrorKind::Domain);
+    // 9 to 12 read the parts of a number that may well be real.
+    assert_eq!(val(Lang::J, "9 o. 1"), f64s(&[], &[1.0]));
+    assert_eq!(val(Lang::J, "11 o. 1"), f64s(&[], &[0.0]));
+    assert_eq!(val(Lang::J, "10 o. _3"), f64s(&[], &[3.0]));
+    // A fractional k selects nothing, and neither does one off the table.
+    assert_eq!(err(Lang::J, "1.5 o. 1").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::J, "13 o. 1").kind, ErrorKind::Domain);
 }
 
 // --- replicate ----------------------------------------------------------

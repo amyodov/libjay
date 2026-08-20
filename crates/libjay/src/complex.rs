@@ -1,0 +1,442 @@
+//! Complex arithmetic on interleaved `[re, im]` pairs.
+//!
+//! The element type is `[f64; 2]`, which is the layout numpy's `complex128`,
+//! C99's `double _Complex` and a pair of Arrow `Float64` children all agree
+//! on, so a complex buffer crosses every boundary without a conversion.
+//!
+//! Functions here are the mathematics only; the languages' type rules and
+//! diagnostics live in `verb.rs`.
+
+/// One complex number: `[real, imaginary]`.
+pub type Cx = [f64; 2];
+
+pub const ZERO: Cx = [0.0, 0.0];
+pub const ONE: Cx = [1.0, 0.0];
+pub const I: Cx = [0.0, 1.0];
+
+#[inline]
+pub fn from_real(x: f64) -> Cx {
+    [x, 0.0]
+}
+
+#[inline]
+pub fn add(a: Cx, b: Cx) -> Cx {
+    [a[0] + b[0], a[1] + b[1]]
+}
+
+#[inline]
+pub fn sub(a: Cx, b: Cx) -> Cx {
+    [a[0] - b[0], a[1] - b[1]]
+}
+
+#[inline]
+pub fn neg(a: Cx) -> Cx {
+    [-a[0], -a[1]]
+}
+
+#[inline]
+pub fn conj(a: Cx) -> Cx {
+    [a[0], -a[1]]
+}
+
+#[inline]
+pub fn mul(a: Cx, b: Cx) -> Cx {
+    [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]]
+}
+
+/// Division, with J's rule for a zero divisor carried onto both parts:
+/// `0 % 0` is 0 and anything else over zero is a signed infinity.
+#[inline]
+pub fn div(a: Cx, b: Cx) -> Cx {
+    if b[0] == 0.0 && b[1] == 0.0 {
+        let step = |x: f64| if x == 0.0 { 0.0 } else { f64::INFINITY.copysign(x) };
+        return [step(a[0]), step(a[1])];
+    }
+    // Smith's scaling keeps the denominator from overflowing.
+    if b[0].abs() >= b[1].abs() {
+        let r = b[1] / b[0];
+        let d = b[0] + b[1] * r;
+        [(a[0] + a[1] * r) / d, (a[1] - a[0] * r) / d]
+    } else {
+        let r = b[0] / b[1];
+        let d = b[0] * r + b[1];
+        [(a[0] * r + a[1]) / d, (a[1] * r - a[0]) / d]
+    }
+}
+
+#[inline]
+pub fn abs(z: Cx) -> f64 {
+    z[0].hypot(z[1])
+}
+
+/// The argument, in radians; `arg(0)` is 0.
+#[inline]
+pub fn arg(z: Cx) -> f64 {
+    // A negative zero imaginary part would put a real negative value on the
+    // lower branch; every value that reaches here as a widened real has to
+    // land on the principal one.
+    z[1].atan2(z[0])
+}
+
+/// `y % | y`: the unit complex in y's direction, and 0 at the origin.
+#[inline]
+pub fn signum(z: Cx) -> Cx {
+    let m = abs(z);
+    if m == 0.0 { ZERO } else { [z[0] / m, z[1] / m] }
+}
+
+#[inline]
+pub fn recip(z: Cx) -> Cx {
+    div(ONE, z)
+}
+
+/// A real value widened for a function that leaves the reals keeps a
+/// positive zero imaginary part, so it lands on the principal branch.
+#[inline]
+fn principal(z: Cx) -> Cx {
+    if z[1] == 0.0 { [z[0], 0.0] } else { z }
+}
+
+#[inline]
+pub fn exp(z: Cx) -> Cx {
+    let m = z[0].exp();
+    [m * z[1].cos(), m * z[1].sin()]
+}
+
+/// The principal logarithm; `ln 0` is negative infinity, as on the reals.
+#[inline]
+pub fn ln(z: Cx) -> Cx {
+    let z = principal(z);
+    [abs(z).ln(), arg(z)]
+}
+
+/// The principal square root, by the algebraic form: `sqrt _4` has to be
+/// exactly `0j2`, which halving the argument and taking a cosine does not
+/// give.
+#[inline]
+pub fn sqrt(z: Cx) -> Cx {
+    let z = principal(z);
+    if z[0] == 0.0 && z[1] == 0.0 {
+        return ZERO;
+    }
+    let t = ((abs(z) + z[0].abs()) / 2.0).sqrt();
+    if z[0] >= 0.0 {
+        [t, z[1] / (2.0 * t)]
+    } else {
+        [z[1].abs() / (2.0 * t), t.copysign(z[1])]
+    }
+}
+
+/// `x ^ y`. An integer exponent is repeated multiplication, which keeps
+/// `0j1 ^ 2` exactly `_1` rather than a rounded neighbour of it.
+pub fn pow(a: Cx, b: Cx) -> Cx {
+    if b[1] == 0.0 && b[0].fract() == 0.0 && b[0].abs() <= 1024.0 {
+        let n = b[0] as i64;
+        if n == 0 {
+            return ONE;
+        }
+        let mut acc = ONE;
+        let mut base = if n < 0 { recip(a) } else { a };
+        let mut k = n.unsigned_abs();
+        while k > 0 {
+            if k & 1 == 1 {
+                acc = mul(acc, base);
+            }
+            base = mul(base, base);
+            k >>= 1;
+        }
+        return acc;
+    }
+    if a[0] == 0.0 && a[1] == 0.0 {
+        return if b[0] == 0.0 && b[1] == 0.0 { ONE } else { ZERO };
+    }
+    // A negative real raised to a real power turns on cos and sin of a
+    // multiple of pi, where the general form rounds `_4 ^ 0.5` to
+    // `1.22465e_16j2`. Both references answer `0j2`.
+    if a[1] == 0.0 && a[0] < 0.0 && b[1] == 0.0 {
+        let m = (-a[0]).powf(b[0]);
+        let (c, s) = cos_sin_pi(b[0]);
+        return [m * c, m * s];
+    }
+    exp(mul(b, ln(a)))
+}
+
+/// `(cos pi*t, sin pi*t)`, exact where the true values are 0 and ±1.
+fn cos_sin_pi(t: f64) -> (f64, f64) {
+    let r = t.rem_euclid(2.0);
+    let half_turns = r * 2.0;
+    if half_turns.fract() == 0.0 {
+        return match half_turns as i64 {
+            0 => (1.0, 0.0),
+            1 => (0.0, 1.0),
+            2 => (-1.0, 0.0),
+            _ => (0.0, -1.0),
+        };
+    }
+    let angle = std::f64::consts::PI * r;
+    (angle.cos(), angle.sin())
+}
+
+/// `x ^. y`: the logarithm of y to base x.
+#[inline]
+pub fn log(base: Cx, z: Cx) -> Cx {
+    div(ln(z), ln(base))
+}
+
+/// `x %: y`: the x-th root of y.
+#[inline]
+pub fn root(x: Cx, y: Cx) -> Cx {
+    pow(y, recip(x))
+}
+
+/// McDonnell's complex floor: the Gaussian integer at or below y, chosen so
+/// that the residue keeps a magnitude below one. Published in the J
+/// dictionary's account of `<.`; both references answer with it.
+pub fn floor(z: Cx) -> Cx {
+    let (bx, by) = (z[0].floor(), z[1].floor());
+    let (r, s) = (z[0] - bx, z[1] - by);
+    if r + s < 1.0 {
+        [bx, by]
+    } else if r >= s {
+        [bx + 1.0, by]
+    } else {
+        [bx, by + 1.0]
+    }
+}
+
+/// The ceiling is the floor reflected through the origin.
+#[inline]
+pub fn ceil(z: Cx) -> Cx {
+    neg(floor(neg(z)))
+}
+
+/// `x | y`: y reduced modulo x, with the complex floor doing the rounding.
+#[inline]
+pub fn residue(x: Cx, y: Cx) -> Cx {
+    if x[0] == 0.0 && x[1] == 0.0 {
+        return y;
+    }
+    sub(y, mul(x, floor(div(y, x))))
+}
+
+/// The Gaussian-integer greatest common divisor, by Euclid with the nearest
+/// Gaussian integer as the quotient. `gcd(0, 0)` is 0.
+pub fn gcd(a: Cx, b: Cx) -> Cx {
+    let (mut a, mut b) = (a, b);
+    // Bounded because each step strictly shrinks |b|; the cap is there so
+    // that arguments that are not Gaussian integers stop rather than spin.
+    for _ in 0..1024 {
+        if b[0] == 0.0 && b[1] == 0.0 {
+            return first_quadrant(a);
+        }
+        let q = div(a, b);
+        let rounded = [round_half_away(q[0]), round_half_away(q[1])];
+        let r = sub(a, mul(b, rounded));
+        if abs(r) >= abs(b) {
+            return first_quadrant(b);
+        }
+        a = b;
+        b = r;
+    }
+    first_quadrant(a)
+}
+
+/// A divisor is fixed only up to a unit, so the reference picks one: the
+/// associate with a positive real part and a non-negative imaginary one,
+/// which is what makes `+.` of two reals the positive divisor as well.
+fn first_quadrant(z: Cx) -> Cx {
+    let mut z = z;
+    for _ in 0..4 {
+        if z[0] > 0.0 && z[1] >= 0.0 {
+            return z;
+        }
+        if z[0] == 0.0 && z[1] == 0.0 {
+            return ZERO;
+        }
+        z = mul(I, z);
+    }
+    z
+}
+
+/// `x *. y`: the least common multiple, `(x * y) % gcd`.
+#[inline]
+pub fn lcm(a: Cx, b: Cx) -> Cx {
+    let g = gcd(a, b);
+    if g[0] == 0.0 && g[1] == 0.0 { ZERO } else { div(mul(a, b), g) }
+}
+
+fn round_half_away(x: f64) -> f64 {
+    if x < 0.0 { -(-x + 0.5).floor() } else { (x + 0.5).floor() }
+}
+
+// --------------------------------------------------------- transcendentals
+
+#[inline]
+pub fn sin(z: Cx) -> Cx {
+    [z[0].sin() * z[1].cosh(), z[0].cos() * z[1].sinh()]
+}
+
+#[inline]
+pub fn cos(z: Cx) -> Cx {
+    [z[0].cos() * z[1].cosh(), -z[0].sin() * z[1].sinh()]
+}
+
+#[inline]
+pub fn tan(z: Cx) -> Cx {
+    div(sin(z), cos(z))
+}
+
+#[inline]
+pub fn sinh(z: Cx) -> Cx {
+    [z[0].sinh() * z[1].cos(), z[0].cosh() * z[1].sin()]
+}
+
+#[inline]
+pub fn cosh(z: Cx) -> Cx {
+    [z[0].cosh() * z[1].cos(), z[0].sinh() * z[1].sin()]
+}
+
+#[inline]
+pub fn tanh(z: Cx) -> Cx {
+    div(sinh(z), cosh(z))
+}
+
+/// `_1 o. y`: `-i ln(iy + sqrt(1 - y^2))`.
+pub fn asin(z: Cx) -> Cx {
+    let w = sqrt(sub(ONE, mul(z, z)));
+    mul([0.0, -1.0], ln(add(mul(I, z), w)))
+}
+
+/// `_2 o. y`: the arcsine's complement.
+pub fn acos(z: Cx) -> Cx {
+    sub([std::f64::consts::FRAC_PI_2, 0.0], asin(z))
+}
+
+/// `_3 o. y`: `(i/2)(ln(1 - iy) - ln(1 + iy))`, the two-logarithm form,
+/// which puts the branch cuts where both references put them.
+pub fn atan(z: Cx) -> Cx {
+    let iz = mul(I, z);
+    mul([0.0, 0.5], sub(ln(sub(ONE, iz)), ln(add(ONE, iz))))
+}
+
+/// `_5 o. y`: `ln(y + sqrt(y^2 + 1))`.
+pub fn asinh(z: Cx) -> Cx {
+    ln(add(z, sqrt(add(mul(z, z), ONE))))
+}
+
+/// `_6 o. y`: `i * arccos y`.
+pub fn acosh(z: Cx) -> Cx {
+    mul(I, acos(z))
+}
+
+/// `_7 o. y`: `(ln(1 + y) - ln(1 - y)) / 2`, again as two logarithms.
+pub fn atanh(z: Cx) -> Cx {
+    mul([0.5, 0.0], sub(ln(add(ONE, z)), ln(sub(ONE, z))))
+}
+
+/// The unit complex at `degrees`, exact on the quadrant boundaries — both
+/// references answer `2ad90` with `0j2`, not with a cosine's rounding of it.
+pub fn from_degrees(magnitude: f64, degrees: f64) -> Cx {
+    let turn = degrees.rem_euclid(360.0);
+    if turn % 90.0 == 0.0 {
+        let (c, s) = match (turn / 90.0) as i64 {
+            0 => (1.0, 0.0),
+            1 => (0.0, 1.0),
+            2 => (-1.0, 0.0),
+            _ => (0.0, -1.0),
+        };
+        return [magnitude * c, magnitude * s];
+    }
+    from_radians(magnitude, degrees * std::f64::consts::PI / 180.0)
+}
+
+/// The complex of the given magnitude at the given angle in radians.
+#[inline]
+pub fn from_radians(magnitude: f64, radians: f64) -> Cx {
+    [magnitude * radians.cos(), magnitude * radians.sin()]
+}
+
+/// The circle function `k` on a complex argument. `None` for a k the table
+/// does not define.
+pub fn circle(k: i64, y: Cx) -> Option<Cx> {
+    let one_plus_sq = add(ONE, mul(y, y));
+    Some(match k {
+        0 => sqrt(sub(ONE, mul(y, y))),
+        1 => sin(y),
+        2 => cos(y),
+        3 => tan(y),
+        4 => sqrt(one_plus_sq),
+        5 => sinh(y),
+        6 => cosh(y),
+        7 => tanh(y),
+        8 => sqrt(neg(one_plus_sq)),
+        9 => from_real(y[0]),
+        10 => from_real(abs(y)),
+        11 => from_real(y[1]),
+        12 => from_real(arg(y)),
+        -1 => asin(y),
+        -2 => acos(y),
+        -3 => atan(y),
+        -4 => sqrt(sub(mul(y, y), ONE)),
+        -5 => asinh(y),
+        -6 => acosh(y),
+        -7 => atanh(y),
+        -8 => neg(sqrt(neg(one_plus_sq))),
+        -9 => y,
+        -10 => conj(y),
+        -11 => mul(I, y),
+        -12 => exp(mul(I, y)),
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: Cx, b: Cx) -> bool {
+        (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9
+    }
+
+    #[test]
+    fn multiplication_and_division_are_inverse() {
+        let a = [3.0, 4.0];
+        let b = [1.0, -2.0];
+        assert!(close(div(mul(a, b), b), a));
+        assert_eq!(mul([1.0, 2.0], [1.0, -2.0]), [5.0, 0.0]);
+    }
+
+    #[test]
+    fn dividing_by_zero_follows_the_real_rule_on_both_parts() {
+        assert_eq!(div(ZERO, ZERO), ZERO);
+        assert_eq!(div(ONE, ZERO), [f64::INFINITY, 0.0]);
+        assert_eq!(div(I, ZERO), [0.0, f64::INFINITY]);
+    }
+
+    #[test]
+    fn square_root_of_a_negative_real_takes_the_principal_branch() {
+        assert!(close(sqrt([-4.0, 0.0]), [0.0, 2.0]));
+        // A negative zero imaginary part must not flip the branch.
+        assert!(close(sqrt([-4.0, -0.0]), [0.0, 2.0]));
+    }
+
+    #[test]
+    fn an_integer_power_is_exact() {
+        assert_eq!(pow(I, [2.0, 0.0]), [-1.0, 0.0]);
+        assert_eq!(pow([3.0, 4.0], [2.0, 0.0]), [-7.0, 24.0]);
+    }
+
+    #[test]
+    fn complex_floor_keeps_the_residue_inside_the_unit_disc() {
+        assert_eq!(floor([3.0, 4.0]), [3.0, 4.0]);
+        assert_eq!(floor([0.6, 0.8]), [0.0, 1.0]);
+        assert_eq!(floor([3.5, 4.5]), [4.0, 4.0]);
+        assert!(close(residue([5.0, 0.0], [3.0, 4.0]), [3.0, -1.0]));
+    }
+
+    #[test]
+    fn gaussian_gcd_and_lcm() {
+        assert!(close(gcd([3.0, 4.0], [1.0, 2.0]), ONE));
+        assert!(close(lcm([3.0, 4.0], [1.0, 2.0]), [-5.0, 10.0]));
+    }
+}

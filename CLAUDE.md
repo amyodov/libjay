@@ -89,11 +89,11 @@ commits. Decisions with reasoning go to docs/decisions.md, not here.
   feature level (`baseline`, `v2`, `v3`, `native`), read once per process.
 - Phases (original roadmap): 1–6 done (frontends, IR, Arrow, parallelism,
   time series, SIMD dispatch) + C ABI, fusion, dual oracles, boxes,
-  explicit definitions and control structures; next: 7 GPU/device,
-  8 bigints/rationals.
+  explicit definitions and control structures, complex numbers; next:
+  7 GPU/device, 8 bigints/rationals.
 
 ## Open
 
-Pure-expression assertion flag; primitive ordering; complex column naming;
-sandbox surfacing; FFT-class operations. Delegated (decide and log):
-codegen backend, IR internals, caching/dispatch internals.
+Pure-expression assertion flag; primitive ordering; sandbox surfacing.
+Delegated (decide and log): codegen backend, IR internals, caching/dispatch
+internals.

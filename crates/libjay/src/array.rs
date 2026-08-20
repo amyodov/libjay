@@ -8,6 +8,7 @@ use std::any::Any;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use crate::complex::Cx;
 use crate::dtype::DType;
 
 /// Anything that keeps a foreign buffer's memory alive: the importing side
@@ -197,6 +198,9 @@ pub enum Data {
     Bool(Buf<u8>),
     I64(Buf<i64>),
     F64(Buf<f64>),
+    /// Complex numbers, interleaved `[re, im]` — the layout numpy, C and a
+    /// pair of Arrow float columns all share.
+    Complex(Buf<Cx>),
     Char(Buf<char>),
     /// Boxes: every element is a whole array. Foreign memory never holds
     /// these, so a boxed buffer is always owned and cloning it is a
@@ -210,6 +214,7 @@ impl Data {
             Data::Bool(_) => DType::Bool,
             Data::I64(_) => DType::I64,
             Data::F64(_) => DType::F64,
+            Data::Complex(_) => DType::Complex,
             Data::Char(_) => DType::Char,
             Data::Box(_) => DType::Box,
         }
@@ -220,6 +225,7 @@ impl Data {
             Data::Bool(v) => v.len(),
             Data::I64(v) => v.len(),
             Data::F64(v) => v.len(),
+            Data::Complex(v) => v.len(),
             Data::Char(v) => v.len(),
             Data::Box(v) => v.len(),
         }
@@ -235,6 +241,7 @@ impl Data {
             Data::Bool(v) => v.is_foreign(),
             Data::I64(v) => v.is_foreign(),
             Data::F64(v) => v.is_foreign(),
+            Data::Complex(v) => v.is_foreign(),
             Data::Char(v) => v.is_foreign(),
             Data::Box(v) => v.is_foreign(),
         }
@@ -245,6 +252,7 @@ impl Data {
             Data::Bool(v) => Data::Bool(v.slice(start, end)),
             Data::I64(v) => Data::I64(v.slice(start, end)),
             Data::F64(v) => Data::F64(v.slice(start, end)),
+            Data::Complex(v) => Data::Complex(v.slice(start, end)),
             Data::Char(v) => Data::Char(v.slice(start, end)),
             Data::Box(v) => Data::Box(v.slice(start, end)),
         }
@@ -255,6 +263,7 @@ impl Data {
             DType::Bool => Data::Bool(Buf::new()),
             DType::I64 => Data::I64(Buf::new()),
             DType::F64 => Data::F64(Buf::new()),
+            DType::Complex => Data::Complex(Buf::new()),
             DType::Char => Data::Char(Buf::new()),
             DType::Box => Data::Box(Buf::new()),
         }
@@ -267,6 +276,7 @@ impl Data {
             Data::Bool(v) => v.push(0),
             Data::I64(v) => v.push(0),
             Data::F64(v) => v.push(0.0),
+            Data::Complex(v) => v.push(crate::complex::ZERO),
             Data::Char(v) => v.push(' '),
             Data::Box(v) => v.push(Array::box_fill()),
         }
@@ -277,6 +287,7 @@ impl Data {
             (Data::Bool(a), Data::Bool(b)) => a.extend_from_slice(b),
             (Data::I64(a), Data::I64(b)) => a.extend_from_slice(b),
             (Data::F64(a), Data::F64(b)) => a.extend_from_slice(b),
+            (Data::Complex(a), Data::Complex(b)) => a.extend_from_slice(b),
             (Data::Char(a), Data::Char(b)) => a.extend_from_slice(b),
             (Data::Box(a), Data::Box(b)) => a.extend_from_slice(b),
             _ => return false,
@@ -293,6 +304,15 @@ impl Data {
             (Data::Bool(v), DType::I64) => Some(Data::I64(v.iter().map(|&x| x as i64).collect())),
             (Data::Bool(v), DType::F64) => Some(Data::F64(v.iter().map(|&x| x as f64).collect())),
             (Data::I64(v), DType::F64) => Some(Data::F64(v.iter().map(|&x| x as f64).collect())),
+            (Data::Bool(v), DType::Complex) => {
+                Some(Data::Complex(v.iter().map(|&x| [x as f64, 0.0]).collect()))
+            }
+            (Data::I64(v), DType::Complex) => {
+                Some(Data::Complex(v.iter().map(|&x| [x as f64, 0.0]).collect()))
+            }
+            (Data::F64(v), DType::Complex) => {
+                Some(Data::Complex(v.iter().map(|&x| [x, 0.0]).collect()))
+            }
             _ => None,
         }
     }
@@ -429,13 +449,33 @@ impl Array {
         }
     }
 
+    pub fn as_complex_slice(&self) -> Option<&[Cx]> {
+        match &self.data {
+            Data::Complex(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Numeric contents widened to complex. None for character or boxed data.
+    pub fn to_complex_vec(&self) -> Option<Vec<Cx>> {
+        match &self.data {
+            Data::Bool(v) => Some(v.iter().map(|&x| [x as f64, 0.0]).collect()),
+            Data::I64(v) => Some(v.iter().map(|&x| [x as f64, 0.0]).collect()),
+            Data::F64(v) => Some(v.iter().map(|&x| [x, 0.0]).collect()),
+            Data::Complex(v) => Some(v.to_vec()),
+            Data::Char(_) | Data::Box(_) => None,
+        }
+    }
+
     /// Numeric contents widened to f64. None for character data.
     pub fn to_f64_vec(&self) -> Option<Vec<f64>> {
         match &self.data {
             Data::Bool(v) => Some(v.iter().map(|&x| x as f64).collect()),
             Data::I64(v) => Some(v.iter().map(|&x| x as f64).collect()),
             Data::F64(v) => Some(v.to_vec()),
-            Data::Char(_) | Data::Box(_) => None,
+            // A complex value is not a real one, even when its imaginary
+            // part is zero: the caller wants a real and must ask for it.
+            Data::Complex(_) | Data::Char(_) | Data::Box(_) => None,
         }
     }
 
@@ -454,7 +494,7 @@ impl Array {
                 }
                 Some(out)
             }
-            Data::Char(_) | Data::Box(_) => None,
+            Data::Complex(_) | Data::Char(_) | Data::Box(_) => None,
         }
     }
 }

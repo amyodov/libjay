@@ -31,20 +31,37 @@ fn parse_num(lang: Lang, tok: &str) -> Option<f64> {
     }
 }
 
+/// A complex token is two numbers joined by `j` (J) or `J` (APL). The
+/// separator cannot start a token, so the first one after the first
+/// character is the one that splits it.
+fn parse_complex(lang: Lang, tok: &str) -> Option<(f64, f64)> {
+    let sep = match lang {
+        Lang::J => 'j',
+        Lang::Apl => 'J',
+    };
+    let k = tok.char_indices().skip(1).find(|&(_, c)| c == sep)?.0;
+    Some((parse_num(lang, &tok[..k])?, parse_num(lang, &tok[k + sep.len_utf8()..])?))
+}
+
 fn tokens_match(lang: Lang, a: &str, b: &str) -> bool {
+    if let (Some(x), Some(y)) = (parse_complex(lang, a), parse_complex(lang, b)) {
+        return numbers_match(x.0, y.0) && numbers_match(x.1, y.1);
+    }
     match (parse_num(lang, a), parse_num(lang, b)) {
-        (Some(x), Some(y)) => {
-            if x.is_nan() || y.is_nan() {
-                return x.is_nan() && y.is_nan();
-            }
-            if x.is_infinite() || y.is_infinite() {
-                return x == y;
-            }
-            let scale = x.abs().max(y.abs());
-            (x - y).abs() <= 1e-9 + 1e-5 * scale
-        }
+        (Some(x), Some(y)) => numbers_match(x, y),
         _ => a == b,
     }
+}
+
+fn numbers_match(x: f64, y: f64) -> bool {
+    if x.is_nan() || y.is_nan() {
+        return x.is_nan() && y.is_nan();
+    }
+    if x.is_infinite() || y.is_infinite() {
+        return x == y;
+    }
+    let scale = x.abs().max(y.abs());
+    (x - y).abs() <= 1e-9 + 1e-5 * scale
 }
 
 pub fn outputs_match(lang: Lang, ours: &str, theirs: &str) -> bool {

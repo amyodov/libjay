@@ -223,7 +223,7 @@ fn take_colon_definition(
     };
     let body = match &body_arr.data {
         // `3 : 0`: the body is written on the lines below, ending with `)`.
-        Data::I64(_) | Data::F64(_) | Data::Bool(_) => {
+        Data::I64(_) | Data::F64(_) | Data::Bool(_) | Data::Complex(_) => {
             if body_arr.to_f64_vec().as_deref() != Some(&[0.0]) {
                 return Err(Error::parse("an explicit definition takes 0 or a string", body_span));
             }
@@ -811,12 +811,8 @@ fn primitive(word: &str) -> Option<Prim> {
         "*:" => prim("*:", M::Scalar(SM::Square), D::NotYet("nand (dyadic *:)"), [0, 0, 0]),
         "-:" => prim("-:", M::Scalar(SM::Halve), D::Match, [0, INF, INF]),
         "-." => prim("-.", M::Scalar(SM::OneMinus), D::NotYet("less (dyadic -.)"), [0, 0, 0]),
-        "*." => {
-            prim("*.", M::NotYet("length/angle (monadic *.)"), D::Scalar(SD::Lcm), [INF, 0, 0])
-        }
-        "+." => {
-            prim("+.", M::NotYet("real/imaginary (monadic +.)"), D::Scalar(SD::Gcd), [INF, 0, 0])
-        }
+        "*." => prim("*.", M::ComplexParts { polar: true }, D::Scalar(SD::Lcm), [0, 0, 0]),
+        "+." => prim("+.", M::ComplexParts { polar: false }, D::Scalar(SD::Gcd), [0, 0, 0]),
         "~:" => prim("~:", M::NotYet("nub sieve (monadic ~:)"), D::Scalar(SD::Ne), [INF, 0, 0]),
         "~." => prim("~.", M::Nub, D::None, [INF, INF, INF]),
         "$" => prim("$", M::ShapeOf, D::Reshape, [INF, 1, INF]),
@@ -834,6 +830,8 @@ fn primitive(word: &str) -> Option<Prim> {
             prim("\":", M::Format, D::NotYet("format with a specification"), [INF, 1, INF])
         }
         "o." => prim("o.", M::Scalar(SM::Pi), D::Scalar(SD::Circle), [0, 0, 0]),
+        "j." => prim("j.", M::Scalar(SM::Imaginary), D::Scalar(SD::MakeComplex), [0, 0, 0]),
+        "r." => prim("r.", M::Scalar(SM::Polar), D::Scalar(SD::PolarBy), [0, 0, 0]),
         "{" => prim("{", M::NotYet("catalogue (monadic {)"), D::From, [INF, 0, INF]),
         "{." => prim("{.", M::Head, D::Take, [INF, 1, INF]),
         "}." => prim("}.", M::Behead, D::Drop, [INF, 1, INF]),
@@ -963,6 +961,7 @@ fn lex(src: &SourceParts) -> Result<Vec<Vec<Frag>>> {
 enum Num {
     I(i64),
     F(f64),
+    C(crate::complex::Cx),
 }
 
 fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
@@ -1146,14 +1145,9 @@ fn starts_number(cs: &[(usize, char)], i: usize) -> bool {
 }
 
 fn parse_number(word: &str, span: Span) -> Result<Num> {
-    if word.contains('j') {
-        return Err(Error::not_yet("complex literals", span));
-    }
-    if word.contains('r') {
-        return Err(Error::not_yet("rationals", span));
-    }
     // `1x` is an extended-precision integer; `1x1` is a multiple of e, and
-    // `1p1` a multiple of π. The letter is the separator in both.
+    // `1p1` a multiple of π. The letter is the separator in both, and it
+    // binds LOOSEST: `1ar1p1` is the polar value `1ar1` scaled by π.
     if let Some(k) = word.find(['p', 'x']) {
         if word[k + 1..].is_empty() {
             return Err(Error::not_yet("extended-precision integers", span));
@@ -1162,7 +1156,32 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
             if word.as_bytes()[k] == b'p' { std::f64::consts::PI } else { std::f64::consts::E };
         let mantissa = plain_number(&word[..k], word, span)?;
         let exponent = plain_number(&word[k + 1..], word, span)?;
-        return Ok(Num::F(as_f64(mantissa) * as_f64(base_pow(base, as_f64(exponent)))));
+        return Ok(scale(mantissa, base, exponent));
+    }
+    // `3j4` is the rectangular form. A `b` earlier in the word makes the
+    // `j` a base-literal digit instead (`36bj` is 19).
+    if let Some(k) = word.find('j') {
+        if !word[..k].contains('b') {
+            let re = as_f64(plain_number(&word[..k], word, span)?);
+            let im = as_f64(plain_number(&word[k + 1..], word, span)?);
+            return Ok(Num::C([re, im]));
+        }
+    }
+    // `1ad45` and `1ar1` are the polar forms: a magnitude, then the angle
+    // in degrees or in radians.
+    if let Some(k) = word.find("ad").or_else(|| word.find("ar")) {
+        if !word[..k].contains('b') {
+            let magnitude = as_f64(plain_number(&word[..k], word, span)?);
+            let angle = as_f64(plain_number(&word[k + 2..], word, span)?);
+            return Ok(Num::C(if word.as_bytes()[k + 1] == b'd' {
+                crate::complex::from_degrees(magnitude, angle)
+            } else {
+                crate::complex::from_radians(magnitude, angle)
+            }));
+        }
+    }
+    if word.contains('r') {
+        return Err(Error::not_yet("rationals", span));
     }
     if let Some(k) = word.find('b') {
         return base_literal(&word[..k], &word[k + 1..], word, span);
@@ -1170,15 +1189,32 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
     plain_number(word, word, span)
 }
 
+/// A mantissa scaled by a power of π or e. Either half may be complex —
+/// `1p1j1` is π to the power `1j1`.
+fn scale(mantissa: Num, base: f64, exponent: Num) -> Num {
+    if matches!(mantissa, Num::C(_)) || matches!(exponent, Num::C(_)) {
+        let m = as_cx(mantissa);
+        let f = crate::complex::pow([base, 0.0], as_cx(exponent));
+        return Num::C(crate::complex::mul(m, f));
+    }
+    Num::F(as_f64(mantissa) * base.powf(as_f64(exponent)))
+}
+
+fn as_cx(n: Num) -> crate::complex::Cx {
+    match n {
+        Num::C(z) => z,
+        other => [as_f64(other), 0.0],
+    }
+}
+
 fn as_f64(n: Num) -> f64 {
     match n {
         Num::I(v) => v as f64,
         Num::F(v) => v,
+        // A complex part is itself written as a plain number, so this is
+        // never reached from a well-formed literal.
+        Num::C(z) => z[0],
     }
-}
-
-fn base_pow(base: f64, exponent: f64) -> Num {
-    Num::F(base.powf(exponent))
 }
 
 /// `mBd…`: the digits `d…` read in base `m`. Digits run `0`–`9` then `a`–`z`,
@@ -1212,9 +1248,15 @@ fn base_literal(base: &str, digits: &str, word: &str, span: Span) -> Result<Num>
     Ok(Num::F(value))
 }
 
+/// One constituent of a literal — a whole one, a mantissa, an exponent, or
+/// half of a complex or polar form. Every part is itself a number in the
+/// same grammar, which is what makes `1ar1p1` and `1p1j1` read.
 fn plain_number(word: &str, whole: &str, span: Span) -> Result<Num> {
     if word.is_empty() {
         return Err(Error::parse(format!("invalid number: {whole}"), span));
+    }
+    if word.contains(['j', 'p', 'x', 'b']) || word.contains("ad") || word.contains("ar") {
+        return parse_number(word, span);
     }
     parse_plain(word, span)
 }
@@ -1249,12 +1291,24 @@ fn parse_plain(word: &str, span: Span) -> Result<Num> {
 
 fn num_array(nums: &[Num]) -> Array {
     let shape = if nums.len() == 1 { vec![] } else { vec![nums.len()] };
+    if nums.iter().any(|n| matches!(n, Num::C(_))) {
+        let data = nums
+            .iter()
+            .map(|n| match n {
+                Num::I(v) => [*v as f64, 0.0],
+                Num::F(v) => [*v, 0.0],
+                Num::C(z) => *z,
+            })
+            .collect();
+        return Array::new(shape, Data::Complex(data));
+    }
     if nums.iter().any(|n| matches!(n, Num::F(_))) {
         let data = nums
             .iter()
             .map(|n| match n {
                 Num::I(v) => *v as f64,
                 Num::F(v) => *v,
+                Num::C(z) => z[0],
             })
             .collect();
         Array::new(shape, Data::F64(data))
@@ -1263,7 +1317,7 @@ fn num_array(nums: &[Num]) -> Array {
             .iter()
             .map(|n| match n {
                 Num::I(v) => *v,
-                Num::F(_) => 0,
+                Num::F(_) | Num::C(_) => 0,
             })
             .collect();
         Array::new(shape, Data::I64(data))
@@ -2634,6 +2688,19 @@ mod tests {
         assert!(matches!(y2, Expr::Param(0, _)));
     }
 
+    #[rstest]
+    #[case("3j4", 3.0, 4.0)]
+    #[case("_1j_2", -1.0, -2.0)]
+    #[case("1e1j2", 10.0, 2.0)]
+    #[case("2ad90", 0.0, 2.0)]
+    #[case("1ad180", -1.0, 0.0)]
+    fn complex_literals(#[case] src: &str, #[case] re: f64, #[case] im: f64) {
+        let a = konst(&one(src));
+        assert_eq!(a.dtype(), DType::Complex);
+        let z = a.as_complex_slice().expect("complex data")[0];
+        assert!((z[0] - re).abs() < 1e-12 && (z[1] - im).abs() < 1e-12, "{z:?}");
+    }
+
     #[test]
     fn a_hole_takes_a_verb_like_any_noun() {
         let (v, y) = monad_of(&one("+/ {data}"));
@@ -2688,8 +2755,6 @@ mod tests {
     }
 
     #[rstest]
-    #[case("3j4", "complex literals", 0, 3)]
-    #[case("1 + 3j4", "complex literals", 4, 7)]
     #[case("12x", "extended-precision integers", 0, 3)]
     #[case("3r4", "rationals", 0, 3)]
     fn unsupported_number_forms(

@@ -1,0 +1,94 @@
+// Complex numbers in APL: `3J4` literals, the arithmetic, and the circle
+// functions that read a complex number's parts. Where GNU APL answers
+// differently on purpose — the ordering comparisons, the branch it takes
+// for a real argument of `8○` and `¯2○` — the entry is in divergences.txt.
+
+3J4
+¯1J¯2
+1J0
+0J0
+0J¯1
+0.5J0.25
+1J1E¯10
+3J4 1J1 2
+1J0 2J3
+2 2⍴3J4 1 2.5J¯1 100
+⍴3J4
+≢3J4 1J1
+
+3J4+1J1
+3J4-1J1
+3J4×2
+0J1×0J1
+(1J2)×(1J¯2)
+3J4÷2J1
+÷0J1
+3J4*2
+0J1*2
+2*3J4
+*0J1
+*3J4
+⍟3J4
+2⍟3J4
++3J4
+-3J4
+|3J4
+|¯3J4
+×3J4
+⌊3.5J4.5
+⌈3.5J4.5
+5|3J4
+3J4|2
+3J4∨1J2
+3J4∧1J2
+
+(¯4)*0.5
+(¯1)*0.5
+(¯1)*2
+⍟¯1
+⍟¯2 ¯3
+(¯4 9)*0.5
+
+9○3J4
+10○3J4
+11○3J4
+12○3J4
+1○3J4
+2○3J4
+3○3J4
+5○3J4
+6○3J4
+7○3J4
+0○3J4
+4○3J4
+¯1○3J4
+¯2○3J4
+¯3○3J4
+¯5○3J4
+¯6○3J4
+¯7○3J4
+○3J4
+9○3
+11○3
+10○¯3
+12○¯3
+0○2
+¯1○2
+¯6○0
+¯7○2
+
+3J4=3J4
+3J4≠3J4
+1J0=1
+3J4≡3J4
+3J4≢3J4
++/3J4 1J1 2
+×/1J1 1J1
++\\1J1 2J2 3J3
+1J1-1J1
+∪3J4 3J4 1J1
+3J4 1J1⍳1J1
+3J4∊3J4 1
+⌽3J4 1J1
+1J1,2 3
+2+3J4 1J1

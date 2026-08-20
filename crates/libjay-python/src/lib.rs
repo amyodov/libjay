@@ -8,7 +8,9 @@ use std::sync::Arc;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyCapsule, PyFloat, PyInt, PyList, PyString, PyTuple};
+use pyo3::types::{
+    PyBool, PyCapsule, PyComplex, PyComplexMethods, PyFloat, PyInt, PyList, PyString, PyTuple,
+};
 
 use jay::fmt::{format_array, FmtOpts};
 use jay::{Array, Data, DType, Dialect, Lang};
@@ -171,6 +173,11 @@ fn element_to_py(py: Python<'_>, data: &Data, i: usize) -> PyResult<PyObject> {
         Data::Bool(v) => (v[i] != 0).into_pyobject(py)?.to_owned().unbind().into(),
         Data::I64(v) => v[i].into_pyobject(py)?.unbind().into(),
         Data::F64(v) => v[i].into_pyobject(py)?.unbind().into(),
+        // Python's own complex; a value whose imaginary part is zero is
+        // still complex, as it is in J.
+        Data::Complex(v) => {
+            PyComplex::from_doubles(py, v[i][0], v[i][1]).unbind().into()
+        }
         Data::Char(v) => v[i].to_string().into_pyobject(py)?.unbind().into(),
         // A box converts to whatever its contents convert to: Python
         // holds nested data as nested lists and strings, not as wrappers.
@@ -232,6 +239,12 @@ fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     }
     if obj.downcast::<PyFloat>().is_ok() {
         return Ok(Array::scalar_f64(obj.extract::<f64>()?));
+    }
+    if let Ok(z) = obj.downcast::<PyComplex>() {
+        return Ok(Array {
+            shape: vec![],
+            data: Data::Complex(vec![[z.real(), z.imag()]].into()),
+        });
     }
     if let Ok(s) = obj.downcast::<PyString>() {
         let chars: Vec<char> = s.to_str()?.chars().collect();

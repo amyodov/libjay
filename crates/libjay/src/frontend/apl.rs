@@ -887,22 +887,25 @@ fn take_digits(text: &str, mut i: usize, buf: &mut String) -> usize {
 /// A run of blank-separated numeric literals: one value token. Integers
 /// unless some literal needs floating point; a single literal is a scalar.
 fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, usize)> {
-    let mut vals: Vec<f64> = Vec::new();
+    let mut vals: Vec<crate::complex::Cx> = Vec::new();
     let mut any_float = false;
+    let mut any_complex = false;
     let mut i = start;
     let mut end;
     loop {
-        let (v, float, next) = lex_number(text, i, offset)?;
+        let (v, float, mut next) = lex_number(text, i, offset)?;
+        let mut imag = 0.0;
         if let Some(c) = text[next..].chars().next() {
+            // `3J4` is the rectangular form; `J` is not otherwise a
+            // character a numeric literal can continue with.
             if (c == 'j' || c == 'J') && num_start(text, next + 1) {
-                let (_, _, imag_end) = lex_number(text, next + 1, offset)?;
-                return Err(Error::not_yet(
-                    "complex literals",
-                    Span::new(offset + start, offset + imag_end),
-                ));
+                let (b, _, imag_end) = lex_number(text, next + 1, offset)?;
+                imag = b;
+                next = imag_end;
+                any_complex = true;
             }
         }
-        vals.push(v);
+        vals.push([v, imag]);
         any_float |= float;
         end = next;
         i = next;
@@ -916,10 +919,12 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
         }
         break;
     }
-    let data = if any_float {
-        Data::F64(vals.into())
+    let data = if any_complex {
+        Data::Complex(vals.into())
+    } else if any_float {
+        Data::F64(vals.iter().map(|&v| v[0]).collect())
     } else {
-        Data::I64(vals.iter().map(|&v| v as i64).collect())
+        Data::I64(vals.iter().map(|&v| v[0] as i64).collect())
     };
     let shape = if data.len() == 1 { vec![] } else { vec![data.len()] };
     let tok = Token {
@@ -2344,13 +2349,11 @@ mod tests {
     }
 
     #[rstest]
-    #[case("2j3")]
-    #[case("1J¯1")]
-    #[case("2 1j2")]
-    fn complex_literals_are_not_yet(#[case] src: &str) {
-        let e = err(src);
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("complex"), "{}", e.msg);
+    #[case("2j3", vec![[2.0, 3.0]])]
+    #[case("1J¯1", vec![[1.0, -1.0]])]
+    #[case("2 1j2", vec![[2.0, 0.0], [1.0, 2.0]])]
+    fn complex_literals(#[case] src: &str, #[case] want: Vec<[f64; 2]>) {
+        assert_eq!(as_const(&one(src)).data, Data::Complex(want.into()));
     }
 
     // --- comments, sentences, names ------------------------------------

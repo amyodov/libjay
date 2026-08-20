@@ -227,3 +227,89 @@ class TestPandas:
     def test_numeric_dataframe_column_sums(self):
         df = self.pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
         assert j("+/ {df}", {"df": df}).tolist() == pytest.approx([3.0, 7.0])
+
+
+class TestComplex:
+    """Complex values at the boundary: numpy's complex128 in, Python's
+    ``complex`` out, and Arrow's ``struct<re, im>`` both ways — which is the
+    single-array form of the paired-column convention, since Arrow has no
+    complex type of its own."""
+
+    @pytest.fixture(autouse=True)
+    def _np(self):
+        self.np = pytest.importorskip("numpy")
+
+    def test_complex128_vector_in(self):
+        a = self.np.array([1 + 2j, 3 - 4j], dtype=self.np.complex128)
+        assert j("+/ {z}", {"z": a}) == 4 - 2j
+
+    def test_complex128_is_borrowed_not_copied(self):
+        a = self.np.array([1 + 1j, 2 + 2j], dtype=self.np.complex128)
+        v = j("] {z}", {"z": a})
+        a[0] = 9 + 9j
+        assert v.tolist()[0] == 9 + 9j
+
+    def test_a_rank_zero_complex_result_is_a_python_complex(self):
+        v = j("3j4")
+        assert isinstance(v, complex)
+        assert v == 3 + 4j
+        assert j("%: _4") == 2j
+
+    def test_tolist_yields_python_complex(self):
+        v = j("3j4 1j1")
+        assert v.dtype == "complex"
+        assert v.tolist() == [3 + 4j, 1 + 1j]
+        assert repr(v) == "3j4 1j1"
+
+    def test_a_python_complex_binds_as_data(self):
+        assert j("{z} * {z}", {"z": 3 + 4j}) == -7 + 24j
+
+    def test_round_trip_through_numpy(self):
+        a = self.np.array([1 + 2j, 3 - 4j], dtype=self.np.complex128)
+        assert j("+ {z}", {"z": a}).tolist() == list(self.np.conj(a))
+        assert j("{z} * {z}", {"z": a}).tolist() == list(a * a)
+
+    def test_shape_survives_a_complex_matrix(self):
+        a = self.np.array([[1 + 1j, 2 + 2j], [3 + 3j, 4 + 4j]], dtype=self.np.complex128)
+        v = j("] {z}", {"z": a})
+        assert v.shape == (2, 2)
+        assert v.tolist() == [[1 + 1j, 2 + 2j], [3 + 3j, 4 + 4j]]
+
+
+class TestComplexArrow:
+    @pytest.fixture(autouse=True)
+    def _pa(self):
+        self.pa = pytest.importorskip("pyarrow")
+        self.np = pytest.importorskip("numpy")
+
+    def test_result_exports_as_a_struct_of_re_and_im(self):
+        out = self.pa.array(j("3j4 1j_1"))
+        assert out.type == self.pa.struct(
+            [
+                self.pa.field("re", self.pa.float64(), nullable=False),
+                self.pa.field("im", self.pa.float64(), nullable=False),
+            ]
+        )
+        assert out.to_pylist() == [
+            {"re": 3.0, "im": 4.0},
+            {"re": 1.0, "im": -1.0},
+        ]
+
+    def test_a_struct_of_re_and_im_arrives_as_complex(self):
+        arr = self.pa.array(j("3j4 1j_1"))
+        assert j("+/ {z}", {"z": arr}) == 4 + 3j
+
+    def test_round_trip_through_arrow(self):
+        a = self.np.array([1 + 2j, 3 - 4j], dtype=self.np.complex128)
+        arr = self.pa.array(j("] {z}", {"z": a}))
+        assert j("] {z}", {"z": arr}).tolist() == list(a)
+
+    def test_a_re_im_column_pair_in_a_table_is_one_complex_column(self):
+        table = self.pa.table(
+            {"x_re": [1.0, 3.0], "x_im": [2.0, -4.0]}
+        )
+        assert j("+/ {t}", {"t": table}) == 4 - 2j
+
+    def test_an_unpaired_re_column_stays_a_float_column(self):
+        table = self.pa.table({"x_re": [1.0, 3.0], "y": [2.0, 4.0]})
+        assert j("+/ {t}", {"t": table}).tolist() == [4.0, 6.0]

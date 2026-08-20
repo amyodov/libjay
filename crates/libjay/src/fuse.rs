@@ -941,6 +941,11 @@ pub fn unfused(p: &Program) -> Program {
 fn monad_type(op: ScalarMonad, a: DType) -> Option<DType> {
     use DType::*;
     use ScalarMonad::*;
+    // The kernel computes in one real type; complex values are not one of
+    // them, so a chain that touches one declines and runs unfused.
+    if a == Complex {
+        return None;
+    }
     Some(match op {
         Recip | Halve | Exp => F64,
         // Identity and magnitude keep a boolean boolean.
@@ -961,6 +966,9 @@ fn monad_type(op: ScalarMonad, a: DType) -> Option<DType> {
 /// where no integer step overflows (one that does falls back).
 fn dyad_type(op: ScalarDyad, a: DType, b: DType) -> Option<DType> {
     use ScalarDyad::*;
+    if a == DType::Complex || b == DType::Complex {
+        return None;
+    }
     match op {
         Eq | Ne | Lt | Le | Gt | Ge => Some(DType::Bool),
         DivJ => Some(DType::F64),
@@ -997,6 +1005,9 @@ fn working_type(k: &FusedKernel, inputs: &[Array]) -> Option<(DType, DType)> {
     let mut lets: Vec<DType> = Vec::new();
     let mut float = false;
     let mut integer_step = false;
+    if inputs.iter().any(|a| a.dtype() == DType::Complex) {
+        return None;
+    }
     for ins in &k.code {
         let t = match ins {
             Instr::Load(i) => inputs[*i].dtype(),
@@ -1559,7 +1570,7 @@ fn to_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
             Data::Bool(d) => d[0] as f64,
             Data::I64(d) => d[0] as f64,
             Data::F64(d) => d[0],
-            Data::Char(_) | Data::Box(_) => return Some(Vec::new()),
+            Data::Complex(_) | Data::Char(_) | Data::Box(_) => return Some(Vec::new()),
         };
         return Some(vec![v; w]);
     }
@@ -1567,7 +1578,7 @@ fn to_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
         Data::F64(_) => None,
         Data::I64(d) => Some(par::map(d, |&x| x as f64)),
         Data::Bool(d) => Some(par::map(d, |&x| x as f64)),
-        Data::Char(_) | Data::Box(_) => Some(Vec::new()),
+        Data::Complex(_) | Data::Char(_) | Data::Box(_) => Some(Vec::new()),
     }
 }
 
@@ -1864,6 +1875,8 @@ fn monad_name(op: ScalarMonad) -> &'static str {
         Ln => "^.",
         Pi => "o.",
         Factorial => "!",
+        Imaginary => "j.",
+        Polar => "r.",
     }
 }
 
@@ -1890,6 +1903,8 @@ fn dyad_name(op: ScalarDyad) -> &'static str {
         Root => "%:",
         Circle => "o.",
         Binomial => "!",
+        MakeComplex => "j.",
+        PolarBy => "r.",
     }
 }
 

@@ -42,7 +42,8 @@ typedef enum {
   JAY_BOOL = 1, /* uint8_t, 0 or 1 */
   JAY_I64 = 2,  /* int64_t */
   JAY_F64 = 3,  /* double */
-  JAY_CHAR = 4  /* uint32_t Unicode codepoints (UTF-32) */
+  JAY_CHAR = 4,   /* uint32_t Unicode codepoints (UTF-32) */
+  JAY_COMPLEX = 5 /* two doubles per element: real, then imaginary */
 } jay_dtype;
 
 /* A borrowed array descriptor: libjay copies what it needs, so the memory
@@ -51,7 +52,8 @@ typedef struct {
   jay_dtype dtype;
   int32_t rank;          /* 0 for a scalar */
   const uint64_t *shape; /* rank axis lengths; may be NULL when rank is 0 */
-  const void *data;      /* row-major, aligned for dtype; may be NULL when empty */
+  const void *data;      /* row-major, aligned for dtype; may be NULL when empty.
+                          * JAY_COMPLEX is double[2] per element, interleaved. */
 } jay_value;
 
 /* Sink for a program's output (J `echo`, APL `⎕←`). The text is UTF-8 and is
@@ -91,7 +93,8 @@ int32_t jay_result_rank(const jay_result *result);
 /* The result's axis lengths, borrowed from it; rank entries. */
 const uint64_t *jay_result_shape(const jay_result *result);
 
-/* The result's row-major elements, borrowed from it, typed by its dtype. */
+/* The result's row-major elements, borrowed from it, typed by its dtype.
+ * A JAY_COMPLEX result is double[2] per element, real then imaginary. */
 const void *jay_result_data(const jay_result *result);
 
 /* The result formatted the way its language displays it, with no trailing

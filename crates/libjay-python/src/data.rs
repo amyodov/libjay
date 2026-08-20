@@ -161,7 +161,10 @@ fn stream_error(stream: &mut FFI_ArrowArrayStream, code: i32) -> PyErr {
 /// DataFrame-to-matrix contract; anything else is one column of shape [M].
 fn assemble(obj: &Bound<'_, PyAny>, field: &Field, chunks: Vec<ArrayRef>) -> PyResult<Array> {
     let rows: usize = chunks.iter().map(|c| c.len()).sum();
-    let DataType::Struct(fields) = field.data_type() else {
+    // A struct of exactly `re` and `im` is one complex column, not a table
+    // of two: it is the single-array form of the paired-column convention.
+    let complex_struct = matches!(field.data_type(), DataType::Struct(f) if is_complex_pair(f));
+    let DataType::Struct(fields) = field.data_type().clone().to_owned() else {
         let mut parts = Vec::with_capacity(chunks.len());
         for chunk in &chunks {
             parts.push(column_data(chunk, field.name(), obj)?);
@@ -169,28 +172,91 @@ fn assemble(obj: &Bound<'_, PyAny>, field: &Field, chunks: Vec<ArrayRef>) -> PyR
         let data = concat_chunks(parts, field.data_type(), field.name())?;
         return Ok(Array::new(vec![rows], data));
     };
+    if complex_struct {
+        let mut parts = Vec::with_capacity(chunks.len());
+        for chunk in &chunks {
+            parts.push(column_data(chunk, field.name(), obj)?);
+        }
+        let data = concat_chunks(parts, field.data_type(), field.name())?;
+        return Ok(Array::new(vec![rows], data));
+    }
     let cols = fields.len();
     if cols == 0 {
         return Ok(Array::new(vec![rows, 0], Data::empty(DType::I64)));
     }
     let tables: Vec<StructArray> =
         chunks.into_iter().map(|c| StructArray::from(c.to_data())).collect();
-    let mut columns: Vec<Data> = Vec::with_capacity(cols);
+    let mut columns: Vec<Column> = Vec::with_capacity(cols);
     for (j, f) in fields.iter().enumerate() {
         let mut parts = Vec::with_capacity(tables.len());
         for table in &tables {
             parts.push(column_data(table.column(j), f.name(), obj)?);
         }
-        columns.push(concat_chunks(parts, f.data_type(), f.name())?);
+        columns.push(Column {
+            name: f.name().clone(),
+            arrow: type_name(f.data_type()),
+            data: concat_chunks(parts, f.data_type(), f.name())?,
+        });
     }
-    check_agreement(&columns, fields)?;
-    if cols == 1 {
-        let data = columns.pop().expect("one column");
-        return Ok(Array::new(vec![rows], data));
+    let mut columns = pair_complex_columns(columns);
+    check_agreement(&columns)?;
+    if columns.len() == 1 {
+        let c = columns.pop().expect("one column");
+        return Ok(Array::new(vec![rows], c.data));
     }
+    let cols = columns.len();
+    let datas: Vec<Data> = columns.into_iter().map(|c| c.data).collect();
     // Rows-leading output from column-major sources costs one interleaving
     // copy; columnar execution arrives with the parallel runtime.
-    Ok(Array::new(vec![rows, cols], interleave(&columns, rows)))
+    Ok(Array::new(vec![rows, cols], interleave(&datas, rows)))
+}
+
+/// Exactly two `Float64` children named `re` and `im`, in that order.
+fn is_complex_pair(fields: &arrow_schema::Fields) -> bool {
+    fields.len() == 2
+        && fields[0].name() == "re"
+        && fields[1].name() == "im"
+        && fields[0].data_type() == &DataType::Float64
+        && fields[1].data_type() == &DataType::Float64
+}
+
+/// One imported column: its name, the Arrow type it arrived as (for the
+/// diagnostic), and its elements.
+struct Column {
+    name: String,
+    arrow: String,
+    data: Data,
+}
+
+/// Two adjacent float columns named `x_re` and `x_im` are one complex
+/// column `x` — the paired-column convention a table carries complex data
+/// in, since Arrow has no complex type of its own.
+fn pair_complex_columns(columns: Vec<Column>) -> Vec<Column> {
+    let mut out: Vec<Column> = Vec::with_capacity(columns.len());
+    let mut it = columns.into_iter().peekable();
+    while let Some(column) = it.next() {
+        let stem = column.name.strip_suffix("_re").map(str::to_string);
+        let joined = stem.and_then(|stem| {
+            let next_is_pair = it
+                .peek()
+                .is_some_and(|c| c.name == format!("{stem}_im") && c.data.dtype() == DType::F64);
+            if !next_is_pair || column.data.dtype() != DType::F64 {
+                return None;
+            }
+            let imag = it.next().expect("peeked");
+            let (Data::F64(re), Data::F64(im)) = (&column.data, &imag.data) else {
+                return None;
+            };
+            let pairs: Vec<[f64; 2]> = re.iter().zip(im.iter()).map(|(&a, &b)| [a, b]).collect();
+            Some(Column {
+                name: stem,
+                arrow: "a _re/_im column pair".to_string(),
+                data: Data::Complex(pairs.into()),
+            })
+        });
+        out.push(joined.unwrap_or(column));
+    }
+    out
 }
 
 
@@ -236,6 +302,10 @@ fn interleave(columns: &[Data], rows: usize) -> Data {
             let s: Vec<&[f64]> = columns.iter().map(as_f64).collect();
             Data::F64(weave(&s, rows).into())
         }
+        DType::Complex => {
+            let s: Vec<&[[f64; 2]]> = columns.iter().map(as_complex).collect();
+            Data::Complex(weave(&s, rows).into())
+        }
         DType::Char | DType::Box => {
             unreachable!("character and boxed columns are refused on import")
         }
@@ -263,34 +333,42 @@ fn as_f64(d: &Data) -> &[f64] {
     }
 }
 
+fn as_complex(d: &Data) -> &[[f64; 2]] {
+    match d {
+        Data::Complex(b) => b,
+        _ => unreachable!("checked by check_agreement"),
+    }
+}
+
 /// All columns must land on one element type. Widening one of them behind
 /// the user's back can silently change values, so this refuses instead.
-fn check_agreement(columns: &[Data], fields: &arrow_schema::Fields) -> PyResult<()> {
+fn check_agreement(columns: &[Column]) -> PyResult<()> {
     let widest = columns
         .iter()
-        .map(Data::dtype)
+        .map(|c| c.data.dtype())
         .max_by_key(|d| match d {
             DType::Bool => 0,
             DType::I64 => 1,
             DType::F64 => 2,
-            DType::Char => 3,
-            DType::Box => 4,
+            DType::Complex => 3,
+            DType::Char => 4,
+            DType::Box => 5,
         })
         .expect("at least one column");
-    let Some(odd) = columns.iter().position(|c| c.dtype() != widest) else {
+    let Some(odd) = columns.iter().position(|c| c.data.dtype() != widest) else {
         return Ok(());
     };
     let target = arrow_name_for(widest);
-    let wide = columns.iter().position(|c| c.dtype() == widest).expect("widest exists");
+    let wide = columns.iter().position(|c| c.data.dtype() == widest).expect("widest exists");
     Err(JayError::new_err(format!(
         "columns disagree: '{}' is {} but '{}' is {}; cast explicitly \
          (e.g. {}.cast({})) — automatic promotion can silently damage values \
          above 2^53",
-        fields[odd].name(),
-        type_name(fields[odd].data_type()),
-        fields[wide].name(),
-        type_name(fields[wide].data_type()),
-        fields[odd].name(),
+        columns[odd].name,
+        columns[odd].arrow,
+        columns[wide].name,
+        columns[wide].arrow,
+        columns[odd].name,
         target,
     )))
 }
@@ -300,6 +378,7 @@ fn arrow_name_for(dtype: DType) -> &'static str {
         DType::Bool => "Boolean",
         DType::I64 => "Int64",
         DType::F64 => "Float64",
+        DType::Complex => "a struct of re/im, or a _re/_im column pair",
         DType::Char => "Utf8",
         DType::Box => "a nested column",
     }
@@ -367,6 +446,21 @@ fn column_data(array: &ArrayRef, name: &str, source: &Bound<'_, PyAny>) -> PyRes
                 describe(name),
                 type_name(&dt)
             )));
+        }
+        // A complex column: two Float64 children, real then imaginary.
+        DataType::Struct(ref fields) if is_complex_pair(fields) => {
+            let st = StructArray::from(array.to_data());
+            let re = reinterpret::<Float64Array>(&st.column(0).clone(), DataType::Float64)?;
+            let im = reinterpret::<Float64Array>(&st.column(1).clone(), DataType::Float64)?;
+            if re.null_count() > 0 || im.null_count() > 0 {
+                return Err(JayError::new_err(format!(
+                    "{} has nulls in its re/im children; fill or filter them first",
+                    describe(name)
+                )));
+            }
+            Data::Complex(
+                re.values().iter().zip(im.values().iter()).map(|(&a, &b)| [a, b]).collect(),
+            )
         }
         DataType::Utf8
         | DataType::LargeUtf8
@@ -522,6 +616,11 @@ fn read_array_interface(obj: &Bound<'_, PyAny>, iface: &Bound<'_, PyAny>) -> PyR
     let data = match (kind, width) {
         (b'i', 8) => Data::I64(unsafe { borrow_block(obj, address as *const i64, count) }),
         (b'f', 8) => Data::F64(unsafe { borrow_block(obj, address as *const f64, count) }),
+        // complex128 is two contiguous doubles per element, which is
+        // exactly `Data::Complex`'s own layout — so it borrows.
+        (b'c', 16) => {
+            Data::Complex(unsafe { borrow_block(obj, address as *const [f64; 2], count) })
+        }
         (b'i', 4) => Data::I64(unsafe { widen::<i32>(address, count) }),
         (b'i', 2) => Data::I64(unsafe { widen::<i16>(address, count) }),
         (b'i', 1) => Data::I64(unsafe { widen::<i8>(address, count) }),
@@ -548,7 +647,7 @@ fn read_array_interface(obj: &Bound<'_, PyAny>, iface: &Bound<'_, PyAny>) -> PyR
             return Err(JayError::new_err(format!(
                 "cannot read an array of dtype '{typestr}' as array data; \
                  that element type is not supported yet (supported: bool, \
-                 8/16/32/64-bit integers, 32/64-bit floats)"
+                 8/16/32/64-bit integers, 32/64-bit floats, complex128)"
             )));
         }
     };
@@ -671,6 +770,26 @@ pub fn export_capsules<'py>(
         }
         // Arrow booleans are bit-packed; ours are one byte each.
         Data::Bool(b) => Arc::new(BooleanArray::from(b.iter().map(|&v| v != 0).collect::<Vec<_>>())),
+        // Arrow has no complex type, so a complex result leaves as a struct
+        // of `re` and `im` — the single-array form of the paired-column
+        // convention. Splitting the interleaved buffer costs one copy;
+        // Arrow's layout gives no way to avoid it.
+        Data::Complex(b) => {
+            let re: Float64Array = b.iter().map(|z| z[0]).collect::<Vec<f64>>().into();
+            let im: Float64Array = b.iter().map(|z| z[1]).collect::<Vec<f64>>().into();
+            Arc::new(
+                StructArray::try_new(
+                    vec![
+                        Field::new("re", DataType::Float64, false),
+                        Field::new("im", DataType::Float64, false),
+                    ]
+                    .into(),
+                    vec![Arc::new(re) as ArrayRef, Arc::new(im) as ArrayRef],
+                    None,
+                )
+                .map_err(arrow_err)?,
+            )
+        }
         Data::Char(_) | Data::Box(_) => unreachable!("refused above"),
     };
     let (ffi_array, ffi_schema) = to_ffi(&arrow.to_data()).map_err(arrow_err)?;

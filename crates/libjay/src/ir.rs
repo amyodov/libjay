@@ -343,6 +343,7 @@ fn is_true(a: &Array, span: Span) -> Result<bool> {
         Data::F64(v) => Ok(v.as_slice()[0] != 0.0),
         Data::Bool(v) => Ok(v.as_slice()[0] != 0),
         Data::Char(v) => Ok(v.as_slice()[0] as u32 != 0),
+        Data::Complex(v) => Ok(v.as_slice()[0] != crate::complex::ZERO),
         Data::Box(_) => Err(Error::domain("a condition must be numeric, not boxed", span)),
     }
 }
