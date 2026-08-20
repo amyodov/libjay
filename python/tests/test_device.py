@@ -5,8 +5,9 @@ a CI runner has none, and the CPU path these tests compare against is
 covered by the rest of the suite anyway.
 """
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy")
 
 import jay
 from jay import JayError

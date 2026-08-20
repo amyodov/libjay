@@ -31,5 +31,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install pytest .
+      - run: pip install '.[test]'
       - run: pytest python/tests -q
