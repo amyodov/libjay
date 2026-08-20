@@ -246,7 +246,7 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
             }
             // One character is an atom; anything else is a vector.
             let shape = if chars.len() == 1 { vec![] } else { vec![chars.len()] };
-            let arr = Array::new(shape, Data::Char(chars));
+            let arr = Array::new(shape, Data::Char(chars.into()));
             out.push(Frag::Noun(Expr::Const(arr, span(start, i))));
             continue;
         }
@@ -327,10 +327,8 @@ fn symbol_frag(word: &str, span: Span) -> Option<Frag> {
                 Frag::Verb(VerbFrag::V(Verb::Prim(p)), span)
             } else if let Some(g) = adverb(word) {
                 Frag::Adverb(g, span)
-            } else if let Some(g) = conjunction(word) {
-                Frag::Conj(g, span)
             } else {
-                return None;
+                Frag::Conj(conjunction(word)?, span)
             }
         }
     })
@@ -902,7 +900,7 @@ mod tests {
         let e = one("'abc'");
         let a = konst(&e);
         assert_eq!(a.shape, vec![3]);
-        assert_eq!(a.data, Data::Char(vec!['a', 'b', 'c']));
+        assert_eq!(a.data, Data::Char(vec!['a', 'b', 'c'].into()));
         assert_eq!(e.span(), Span::new(0, 5));
     }
 
@@ -910,7 +908,7 @@ mod tests {
     fn one_character_string_is_an_atom() {
         let a = konst(&one("'a'"));
         assert_eq!(a.shape, Vec::<usize>::new());
-        assert_eq!(a.data, Data::Char(vec!['a']));
+        assert_eq!(a.data, Data::Char(vec!['a'].into()));
     }
 
     #[test]
@@ -924,7 +922,7 @@ mod tests {
     fn doubled_quote_is_an_escaped_quote() {
         let a = konst(&one("'it''s'"));
         assert_eq!(a.shape, vec![4]);
-        assert_eq!(a.data, Data::Char(vec!['i', 't', '\'', 's']));
+        assert_eq!(a.data, Data::Char(vec!['i', 't', '\'', 's'].into()));
     }
 
     #[test]
@@ -1412,7 +1410,7 @@ mod tests {
         let sp = SourceParts::from_source("'{a}'").expect("source parts");
         assert!(sp.param_names.is_empty());
         let a = konst(&parse(&sp).expect("parse")[0]);
-        assert_eq!(a.data, Data::Char(vec!['{', 'a', '}']));
+        assert_eq!(a.data, Data::Char(vec!['{', 'a', '}'].into()));
     }
 
     #[test]
