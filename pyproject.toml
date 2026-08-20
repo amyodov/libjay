@@ -6,16 +6,32 @@ build-backend = "maturin"
 name = "libjay"
 description = "Embedded J and APL: compile array-language expressions and run them in parallel"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Alex Myodov", email = "amyodov@gmail.com" }]
 requires-python = ">=3.10"
-keywords = ["j", "apl", "array", "dataframe", "arrow"]
+# PyPI ranks search on the summary and these; "libjay" itself carries no
+# searchable term, so the words someone might type live here.
+keywords = [
+    "j",
+    "apl",
+    "array-language",
+    "array-programming",
+    "vectorization",
+    "dataframe",
+    "polars",
+    "arrow",
+    "numpy",
+    "time-series",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Programming Language :: Rust",
+    "Programming Language :: Other",
     "Topic :: Software Development :: Interpreters",
+    "Topic :: Scientific/Engineering",
 ]
 dynamic = ["version"]
 
@@ -29,7 +45,9 @@ test = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/amyodov/libjay"
 Repository = "https://github.com/amyodov/libjay"
+Issues = "https://github.com/amyodov/libjay/issues"
 
 [project.scripts]
 libjay = "jay._cli:main"

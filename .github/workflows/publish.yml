@@ -1,0 +1,101 @@
+# Publishing is never automatic: this runs only when a GitHub release is
+# published, which is a manual act of the maintainer. The trust chain is
+# PyPI's trusted publisher for amyodov/libjay, which accepts uploads only
+# from this workflow file running in the `pypi` environment — OIDC, no token
+# stored anywhere.
+#
+# Unlike a pure-Python project, one release is a matrix of native wheels:
+# abi3-py310, one wheel per platform, users never invoke rustc. The sdist is
+# the fallback for platforms outside the matrix.
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+          - os: ubuntu-latest
+            target: aarch64
+          - os: macos-13 # Intel
+            target: x86_64
+          - os: macos-14 # Apple Silicon
+            target: aarch64
+          - os: windows-latest
+            target: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: auto
+      # Cold-import the wheel we just built (native targets only; the
+      # cross-compiled linux-aarch64 wheel cannot run on this runner).
+      - if: matrix.target != 'aarch64' || startsWith(matrix.os, 'macos')
+        shell: bash
+        run: |
+          pip install dist/*.whl
+          python -c "import jay; assert jay.j('(+/ % #) 1 2 3 4') == 2.5"
+          libjay -e "echo 'wheel ok'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.target }}
+          path: dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+  publish:
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+      - name: Wait for PyPI to serve this version
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          for _ in $(seq 1 30); do
+            got=$(curl -sS https://pypi.org/pypi/libjay/json |
+                  python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])" || true)
+            [ "$got" = "$want" ] && exit 0
+            sleep 10
+          done
+          echo "PyPI still serving $got, expected $want" >&2
+          exit 1
+
+      # The real user path, cold: the uvx one-liner the README promises.
+      - name: Cold-run uvx
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          ~/.local/bin/uvx --refresh libjay -e "(+/ % #) 1 2 3 4" | grep -qx "2.5"
