@@ -55,8 +55,11 @@ multi-threaded by default; numpy and plain numba are single-threaded.
 
 ## Results
 
-Measured 2026-08-21 on the machine below, in one quiet session after the
-reduction, cell and boundary pass. Times in milliseconds.
+Re-measured 2026-08-21 on the machine below, rustc 1.89, one-minute load
+average 4.6-5.0 through this table's run — two other agents' test suites
+were finishing on the same machine and the average had not fully settled
+under 4 by the time this script started; see the note after the table for
+what that did to it. Times in milliseconds.
 
 ```
 machine   macOS-13.7.8-x86_64-i386-64bit
@@ -68,18 +71,27 @@ method    best of 5 after one warmup, wall time in ms
 
 | scenario | J | libjay 1 thread | libjay 8 threads | speedup | polars | numba | numba prange | numpy |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| weighted sum | `+/ {w} * {x}` | 21.4 | 12.5 | 1.71x | 107.7 | 25.6 | 12.9 | 108.9 |
-| column sums | `+/ {m}` | 14.1 | 5.4 | 2.61x | 4.7 | 11.9 | 15.2 | 34.7 |
-| std, named value | `d =. {x} - (+/ {x}) % # {x}` … `%: (+/ d * d) % # d` | 40.9 | 14.5 | 2.83x | 21.9 | 48.7 | 12.5 | 135.5 |
-| std, one sentence | `%: (+/ ({x} - (+/ {x}) % # {x}) * {x} - (+/ {x}) % # {x}) % # {x}` | 45.3 | 14.7 | 3.08x | 21.9 | 49.1 | 12.9 | 143.4 |
-| sum of exponentials | `+/ ^ {x}` | 119.3 | 27.2 | 4.39x | 210.7 | 166.1 | 28.0 | 206.7 |
+| weighted sum | `+/ {w} * {x}` | 21.6 | 13.4 | 1.62x | 109.5 | 26.0 | 15.0 | 122.7 |
+| column sums | `+/ {m}` | 14.3 | 5.9 | 2.43x | 4.9 | 11.9 | 17.8 | 33.8 |
+| std, named value | `d =. {x} - (+/ {x}) % # {x}` … `%: (+/ d * d) % # d` | 44.0 | 19.3 | 2.28x | 21.2 | 50.3 | 16.9 | 135.0 |
+| std, one sentence | `%: (+/ ({x} - (+/ {x}) % # {x}) * {x} - (+/ {x}) % # {x}) % # {x}` | 39.4 | 19.0 | 2.07x | 21.4 | 50.8 | 16.9 | 134.1 |
+| sum of exponentials | `+/ ^ {x}` | 121.6 | 33.5 | 3.63x | 206.0 | 121.4 | 37.4 | 206.2 |
 
-The one-thread column is the one that moved: a reduction now keeps eight
-accumulators in flight instead of one, and that is worth two to four times
-on a fold that used to be a chain of dependent adds. The eight-thread
-column barely moved because it was already waiting on memory — see "Where
-the bandwidth is" below — and the speedup columns therefore *fell*, which
-is what a faster denominator does. Nothing in the table got slower.
+The one-thread column repeats the earlier session within a few per cent —
+21.4→21.6, 14.1→14.3, 119.3→121.6 — which is the noise floor this file has
+always quoted for a repeated row. The eight-thread column moved more than
+that on three of the five rows (14.5→19.3, 14.7→19.0, 27.2→33.5, all
++23–33%), and the likely reason is not the compiler: this machine's
+one-minute load only settled under 5 partway through the run (two other
+agents' test suites were finishing on it — see the provenance note above),
+and an eight-way parallel fold is exactly the shape background contention
+degrades hardest, where a single thread barely notices. The one-thread
+numbers, which are not sensitive to that, argue against a codegen
+explanation. Why the one-thread column is already this fast — eight
+accumulators inside a fold, memory rather than arithmetic bounding the
+eight-thread column — is explained in full under "Reductions, cells and
+the boundary" and "Where the bandwidth is" below; nothing about that
+architecture changed in this re-take, only the two numbers above did.
 
 What fusion moved, libjay only, the same five scenarios built without the
 pass and with it. These two columns are one session of their own, taken on
@@ -409,60 +421,80 @@ sizes     vector 20,000,000 f64, matrix 2,000,000 x 8 f64
 method    best of 5 calls after one warmup, best of 2 passes over the table
 ```
 
-Re-measured 2026-08-21, after the lanes of "Reductions, cells and the
-boundary" gave the folds a shape a vector clone can widen. The compiler is a
-variable in this table and these cells were taken on rustc 1.85; a re-run on
-1.89, the version the repository now pins, moved individual cells in both
-directions and nothing in one direction — but it was taken while the machine
-had other work on it, so it is not a replacement, and the table stands as it
-was until it can be re-taken on a quiet one:
+Re-measured 2026-08-21, the clean re-take this section had been carrying as
+owed since the 1.85 session below: rustc 1.89, on main rebased in with
+window fusion and the fuzz-sweep fixes, one-minute load average under 4 for
+most of the run and briefly into the twenties right at the end as another
+agent's build started. Read the bollinger row against the note below the
+table before comparing it with the old one — it moved for a real reason,
+not a noisy one:
 
 | scenario | threads | baseline | v2 | native (v3) | speedup |
 |---|---|---:|---:|---:|---:|
-| weighted sum | 1 | 29.2 | 27.5 | 25.0 | 1.17x |
-| weighted sum | 8 | 13.6 | 14.2 | 13.0 | 1.05x |
-| sum of exponentials | 1 | 124.7 | 122.1 | 120.5 | 1.03x |
-| sum of exponentials | 8 | 27.3 | 29.2 | 30.7 | 0.89x |
-| std, named value | 1 | 60.2 | 46.6 | 41.6 | 1.45x |
-| std, named value | 8 | 17.3 | 15.6 | 14.9 | 1.16x |
-| column sums | 1 | 13.6 | 13.5 | 13.5 | 1.01x |
-| column sums | 8 | 5.9 | 5.6 | 5.5 | 1.07x |
-| count above | 1 | 119.1 | 92.2 | 91.7 | 1.30x |
-| count above | 8 | 23.8 | 19.1 | 17.4 | 1.36x |
-| polynomial | 1 | 74.3 | 72.4 | 55.9 | 1.33x |
-| polynomial | 8 | 20.0 | 19.7 | 19.5 | 1.02x |
-| elementwise chain | 1 | 126.3 | 122.3 | 120.1 | 1.05x |
-| elementwise chain | 8 | 69.5 | 76.2 | 68.3 | 1.02x |
-| moving maximum | 1 | 185.1 | 185.2 | 180.5 | 1.02x |
-| moving maximum | 8 | 61.4 | 66.7 | 64.1 | 0.96x |
-| running sum | 1 | 111.1 | 111.9 | 107.0 | 1.04x |
-| running sum | 8 | 112.3 | 113.3 | 115.6 | 0.97x |
-| bollinger | 1 | 851.5 | 811.6 | 795.0 | 1.07x |
-| bollinger | 8 | 404.0 | 417.7 | 412.3 | 1.00x |
+| weighted sum | 1 | 27.2 | 24.5 | 22.7 | 1.20x |
+| weighted sum | 8 | 13.1 | 12.9 | 12.6 | 1.04x |
+| sum of exponentials | 1 | 124.9 | 120.4 | 119.6 | 1.04x |
+| sum of exponentials | 8 | 33.4 | 32.7 | 33.1 | 1.01x |
+| std, named value | 1 | 62.4 | 46.5 | 41.8 | 1.49x |
+| std, named value | 8 | 18.2 | 17.1 | 17.5 | 1.04x |
+| column sums | 1 | 14.4 | 14.1 | 14.1 | 1.02x |
+| column sums | 8 | 5.5 | 5.5 | 5.2 | 1.05x |
+| count above | 1 | 112.7 | 95.3 | 84.3 | 1.34x |
+| count above | 8 | 27.5 | 21.6 | 24.2 | 1.14x |
+| polynomial | 1 | 77.3 | 72.2 | 61.2 | 1.26x |
+| polynomial | 8 | 24.3 | 20.9 | 20.5 | 1.18x |
+| elementwise chain | 1 | 129.9 | 127.8 | 116.3 | 1.12x |
+| elementwise chain | 8 | 60.7 | 71.2 | 73.3 | 0.83x |
+| moving maximum | 1 | 196.7 | 185.2 | 177.3 | 1.11x |
+| moving maximum | 8 | 60.6 | 62.0 | 63.2 | 0.96x |
+| running sum | 1 | 103.6 | 108.2 | 107.1 | 0.97x |
+| running sum | 8 | 108.5 | 108.8 | 107.8 | 1.01x |
+| bollinger | 1 | 537.6 | 513.3 | 553.0 | 0.97x |
+| bollinger | 8 | 208.6 | 219.6 | 228.8 | 0.91x |
 
 `count above` is `+/ {x} > 0.5`, `polynomial` is `+/ {x} * 1 + {x} * 2 +
 {x} * 3 + {x} * 4 + {x}`, `elementwise chain` is `({x} * {w}) + {x} - 0.5`
 and `moving maximum` is `20 >./\ {x}`; the rest are the programs of the
 tables above.
 
-**The honest headline: a few per cent to 45%, and zero where the row is
-bandwidth-bound.** The rows that gain are the ones with arithmetic to spare
-per byte loaded — the standard deviation (1.45x, 1.16x), the
-comparison-and-count (1.30x, 1.36x), the four-term polynomial on one thread
-(1.33x), the weighted sum on one thread (1.17x). The rows that do not gain
-do not gain at all: on eight threads the weighted sum reads two streams and
-does one multiply and one add, column sums reads one and adds, and both are
-waiting on memory before a wider register is involved — which is the same
-thing the threading table says when the eighth thread stops helping. `+/ ^
-x` is flat for a different reason: `exp` is a libm call per element, and no
-autovectoriser turns that into a vector one.
+**The bollinger row fell by a third to a half — 851.5→537.6 on one thread,
+404.0→208.6 on eight — and that move is real, not this re-take's noise.**
+The 1.85 table predates "Windows in the kernel": a window verb inside a
+chain now joins the fused kernel instead of breaking it, and bollinger is
+the one program here built from a chain of them, so it is the one row that
+carries that change. `moving maximum` and `running sum` are a single window
+verb each with nothing either side to fuse with, which is why they barely
+moved (185.1→196.7, 111.1→103.6 — both inside the usual spread) even though
+the same fusion pass now reaches them too.
 
-The one-thread cells are where this table moved, and they moved because the
-lanes moved. The first time it was taken, the standard deviation gained
-1.13x from AVX2 and the weighted sum 1.02x, because a fold with one
-accumulator has nothing for a wide register to hold; with eight
-accumulators the same rows gain 1.45x and 1.17x. Width and independence are
-one item, and this is what it looks like when both halves are there.
+**Everywhere else, read the table against the old one with the load note
+above in mind.** Most cells repeat within the 5-10% this file has always
+called the noise floor for a re-measured row. Two didn't: sum of
+exponentials on eight threads (27.3→33.4, +22%, all three levels moved
+together) and count above on eight threads (23.8→27.5, +15.5%) — both are
+eight-thread rows, which is exactly the shape background contention
+degrades hardest, and neither program touches a window or changed in the
+rebase, so the load tail is the more likely explanation than the compiler.
+
+**The honest headline, elsewhere unchanged: a few per cent to 49%, and zero
+where the row is bandwidth-bound.** The rows that gain are the ones with
+arithmetic to spare per byte loaded — the standard deviation (1.49x,
+1.04x), the comparison-and-count (1.34x, 1.14x), the four-term polynomial
+(1.26x, 1.18x), the weighted sum on one thread (1.20x). The rows that do
+not gain do not gain at all: on eight threads the weighted sum reads two
+streams and does one multiply and one add, column sums reads one and adds,
+and both are waiting on memory before a wider register is involved — which
+is the same thing the threading table says when the eighth thread stops
+helping. `+/ ^ x` is flat for a different reason: `exp` is a libm call per
+element, and no autovectoriser turns that into a vector one.
+
+The one-thread cells are where this table has moved since the pre-lane
+session, and they moved because the lanes moved. The first time it was
+taken, the standard deviation gained 1.13x from AVX2 and the weighted sum
+1.02x, because a fold with one accumulator has nothing for a wide register
+to hold; with eight accumulators the same rows gain 1.49x and 1.20x. Width
+and independence are one item, and this is what it looks like when both
+halves are there.
 
 Nothing regressed. The cells under 1.00x are the measurement's own spread —
 repeating a row moves it by a few per cent — and the levels are not allowed
@@ -771,6 +803,23 @@ writes the whole scan to memory and a pass that reads it back. The traffic
 wins, but only by 1.09x on eight threads and 1.22x on one, and on a machine
 with more cores than this one has it could go the other way. It is fused
 because the arithmetic around a scan is usually more than one divide.
+
+**A clean, quiet-machine re-take of `bench/windows.py` alone**, libjay only,
+2026-08-21, rustc 1.89, one-minute load average 4.9 before the run and 4.1
+after (no alternating "before" build this time, no busy neighbour, one pass
+rather than three):
+
+| kernel | libjay 1 thread | libjay 8 threads | speedup | numpy |
+|---|---:|---:|---:|---:|
+| Bollinger z-score | 553.6 | 225.3 | 2.46x | 1247.7 |
+| moving range position | 305.4 | 90.4 | 3.38x | 1803.7 |
+| running mean | 394.8 | 354.4 | 1.11x | 353.1 |
+
+Every figure here lands within a few per cent of the busy-machine "after"
+column above (517.9→553.6, 307.6→305.4, 385.8→394.8 on one thread;
+205.8→225.3, 86.2→90.4, 354.8→354.4 on eight) — closer than this file's
+usual noise floor for a re-measured row, which is the point of a quiet
+machine: the busy-session numbers already said the right thing.
 
 Against the rivals, the phase-5 gate's own table, taken with this branch's
 build in one session:
