@@ -76,6 +76,10 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   no runtime deps, and dev/test deps deliberately float so CI tests against
   the polars/pyarrow users actually install; revisit if upstream churn makes
   CI flaky (then: locked default + scheduled latest job).
+  2026-08-21 — Ratified by the owner: Cargo.lock stays committed (consumers
+  of the library crate ignore it; wheels and binaries stay reproducible);
+  uv.lock stays ignored because libjay is a library with no runtime
+  dependencies — the dev/test extras float on purpose.
 - 2026-08-20 — Benchmark rivals (incl. numba, required by the original
   record's "measured against Polars and numba") live in the `bench` extra;
   the Intel-mac numba<0.62 pin is an environment marker there.
@@ -634,6 +638,11 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   carry a verb, which is a change to the data model and belongs to whichever
   wave wants adverb and conjunction definitions anyway.
 
+  *Superseded 2026-08-21 (Coverage wave 7): this was the mistake. A gerund
+  does not need `Array` to carry a `Verb` — it is boxed data, one atomic
+  representation (characters) per box. No data-model change. See wave 7,
+  below.*
+
   **Catenate-with-fill is J's rule, and only J's.** J overtakes both sides
   of a ragged catenation to the larger length, so `1 2 3 , i. 2 2` is 3×3;
   APL2 refuses the same shapes with a LENGTH ERROR, and GNU APL confirms it.
@@ -710,6 +719,10 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   answers for them was not pinned down far enough to implement from. Both
   the data model and that measurement belong to the wave that wants J's
   adverb and conjunction definitions anyway.
+
+  *Superseded 2026-08-21 (Coverage wave 7): no data-model change was needed,
+  and the measurement is done — `` `:6 `` is the train, `` `:3 `` is the
+  insert. See wave 7, below.*
 
   **The counting verbs carry exactness.** `$`, `#`, `#.`, `#:`, `p:` and
   `q:` answered with machine integers where J answers with extended ones —

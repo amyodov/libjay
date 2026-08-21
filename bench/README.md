@@ -34,6 +34,12 @@ so a plain `maturin develop` from the dev environment overwrites the release
 build with a debug one. Run the release build again before measuring
 anything.
 
+`rust-toolchain.toml` began pinning a compiler version only with the MSRV
+raise to 1.89 (see "SIMD dispatch"); sessions measured before that pin name
+no rustc version because none was fixed yet — whatever `rustc stable` gave
+on the day is what built them. "SIMD dispatch" names its version explicitly
+because the pin is precisely what that section studies.
+
 `bench.py` measures the rivals in its own process and every libjay number in
 a subprocess, because the thread count is fixed the first time the pool is
 used: `worker.py` is that subprocess. Each figure is the best wall time of
@@ -499,10 +505,11 @@ been elided and there would be none.
 
 ## GPU placement
 
-Phase 7. `bench/device.py` times the same fused kernels on the CPU and on
-this machine's GPU, at 20M f64 rows, three ways: the CPU with the whole
-thread pool, the device with ordinary arguments (so every call uploads
-them), and the device with the arguments already resident.
+Phase 7, measured 2026-08-21. `bench/device.py` times the same fused
+kernels on the CPU and on this machine's GPU, at 20M f64 rows, three ways:
+the CPU with the whole thread pool, the device with ordinary arguments (so
+every call uploads them), and the device with the arguments already
+resident.
 
 ```sh
 .venv-bench/bin/python bench/device.py
@@ -658,12 +665,12 @@ Measured 2026-08-21. A table used to be woven into one rows-leading block at
 the boundary; it now crosses as its columns and is folded where it lies.
 The figures come from `bench/layout.py`, run against two builds of libjay —
 the commit these changes sit on, and that commit with them applied, both
-compiled by the pinned toolchain — with the passes alternating, so a laptop
-that gets busy halfway through moves both columns and not one. Each figure
-is the best of five calls after a warmup, and each is the best of two
-alternating passes. The table is 2,500,000 x 8 f64 in a polars DataFrame,
-and the bind is inside the timed call: the boundary is part of what is
-measured, because for a DataFrame it used to be most of it.
+compiled by the pinned toolchain (rustc 1.89) — with the passes alternating,
+so a laptop that gets busy halfway through moves both columns and not one.
+Each figure is the best of five calls after a warmup, and each is the best
+of two alternating passes. The table is 2,500,000 x 8 f64 in a polars
+DataFrame, and the bind is inside the timed call: the boundary is part of
+what is measured, because for a DataFrame it used to be most of it.
 
 | program | before, 1 thread | after | before, 8 threads | after | |
 |---|---:|---:|---:|---:|---:|
@@ -707,8 +714,8 @@ control this table needs.
 ## Where the bandwidth is
 
 The weighted sum has been within a millisecond or two of `numba prange` for
-three sessions running, and this is why. Measured on the same laptop with plain
-Rust loops and no libjay in the picture, one thread:
+three sessions running, and this is why. Measured 2026-08-21 on the same
+laptop with plain Rust loops and no libjay in the picture, one thread:
 
 | what | time | GB/s |
 |---|---:|---:|
@@ -745,8 +752,9 @@ it was one output buffer instead of one per verb.
 
 ## The Python side
 
-Compiling is not free and `jay.j(...)` compiles every time it is called. It
-now answers from a bounded in-process table instead, keyed by the language,
+Measured 2026-08-21. Compiling is not free and `jay.j(...)` compiles every
+time it is called. It now answers from a bounded in-process table instead,
+keyed by the language,
 the source and the index origin: a compiled program is frozen, holds no
 data and is already documented as shareable between threads, so the second
 compilation of a source already seen is the first one handed back.
@@ -835,3 +843,7 @@ What is left, in the order the measurements rank it:
    its 160 MB result in than computing it, and that cost does not
    parallelise. A reuse pool would remove it; nothing portable and stable
    will.
+5. **AVX-512 measurement.** The x86-64-v4 rung is built and symbol-checked
+   (see "SIMD dispatch") but has never run: no machine on hand has the
+   hardware. Pending a runner that does; `tests/simd.rs --nocapture` reports
+   itself the day one shows up in CI.

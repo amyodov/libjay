@@ -67,20 +67,21 @@ uv run libjay examples/hello.apl                        # or run a file
 
 ## Status
 
-Early — 0.1.0 is the first release; what it ships is in
+Early — 0.1.0 is the first release; what has landed since is in
 [CHANGELOG.md](CHANGELOG.md). What's implemented, feature by feature, is the
-[status matrix](docs/status.md): 135 green / 26 partial / 18 red of 180 J
-valences, 79 green / 25 partial / 11 red of 115 APL valences. Both primitive
-sets are differential-tested against the reference implementations: 3816
-J and 1024 APL expressions, recorded as snapshots from black-box runs of the
-reference interpreters and replayed on every test run. The two agree
-everywhere except 29 APL sentences where libjay diverges on purpose, each
-recorded with the reason. A 20-period Bollinger z-score written as one J
-kernel runs 20M rows in 404 ms against the equivalent Polars pipeline's 755,
-agreeing to 8.7e-10. Dense numeric arrays, complex numbers, boxes, and J's
-exact types — extended-precision integers and rationals; things the
-languages have but libjay doesn't yet fail with an explicit "not supported
-yet".
+[status matrix](docs/status.md): 144 green / 24 partial / 7 red / 2 absent by
+design of 177 J valences, 85 green / 26 partial / 4 red of 115 APL valences.
+Both primitive sets are differential-tested against the reference
+implementations: 4028 J and 1155 APL expressions, recorded as snapshots from
+black-box runs of the reference interpreters and replayed on every test run.
+The two agree everywhere except 32 APL sentences where libjay diverges on
+purpose, each recorded with the reason. A 20-period Bollinger z-score written
+as one J kernel runs 20M rows in 404 ms against the equivalent Polars
+pipeline's 755, agreeing to 8.7e-10. The data model is dense numeric arrays,
+complex numbers, boxes, and J's exact types — extended-precision integers and
+rationals; what a language has and libjay does not yet (Decimal128, Arrow
+string/binary/list/dictionary columns, J's symbols and sparse arrays among
+them) fails with an explicit "not supported yet" rather than a wrong answer.
 Fused kernels can be placed on a GPU (`kernel.deploy("gpu")`, wgpu over
 Metal/Vulkan/DX12, in the ordinary wheel and dormant without an adapter);
 resident data runs 1.4x to 7.3x the 8-thread CPU at 20M rows. Next on the

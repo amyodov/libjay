@@ -23,15 +23,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - J's `L:` and `S:` now take two arguments as well as one.
 - J's `H.`, the generalised hypergeometric series.
 - Reading input, not just writing it: APL's `⍞` (one line of text) and `⎕`
-  (one line evaluated as APL), and J's `1!:1 ]1`, all read from the same
-  standard input the host provides — piped, typed, or supplied by the
-  embedding application. Every language surface (Rust, Python, C, and the
-  command line) gained the matching call, alongside the existing output
-  calls.
-- More of J's `!:` foreign conjunction: reading a value's storage type and
-  reading or writing one line of standard input now work. The calls that
-  would reach a file, the system clock, or another process are refused
-  with a clear "closed by the sandbox" message.
+  (one line evaluated as APL), and J's `1!:1 ]1` and `3!:0` (a value's
+  storage type), all read from the same standard input the host provides —
+  piped, typed, or supplied by the embedding application. Every language
+  surface (Rust, Python, C, and the command line) gained the matching call,
+  alongside the existing output calls. The rest of J's `!:` foreign
+  conjunction that would reach a file, the system clock, or another process
+  is refused with a clear "closed by the sandbox" message, distinct from
+  "not supported yet".
 - Faster execution on newer x86-64 processors, using the CPU's AVX-512
   instructions when present; picked up automatically at startup, with an
   explicit override available. Not yet benchmarked on real AVX-512
@@ -75,11 +74,13 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   threads) are now labelled distinctly from "not supported" and "not part
   of the language", so it reads as a deliberate boundary rather than a
   missing feature.
-- Minimum required Rust version raised to 1.89, needed for the AVX-512
-  support above; pinned in the repository so every build uses the same
-  compiler.
-- Updated third-party dependencies (the GPU backend, Python bindings, and
-  test tooling) to their latest versions; no user-visible change.
+- Minimum required Rust version raised to 1.89: needed for the AVX-512
+  support above, and for wgpu 30 (the GPU backend's dependency), which
+  needs a newer compiler than the previous floor; pinned in the repository
+  so every build uses the same compiler.
+- Updated third-party dependencies (the GPU backend to wgpu 30, Python
+  bindings, and test tooling) to their latest versions; no user-visible
+  change.
 
 ### Deprecated
 

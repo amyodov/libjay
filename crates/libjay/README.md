@@ -66,7 +66,10 @@ APL's `+/` is simply `Rank(Reduce(+), 1)` and no J assumption reaches the
 runtime. A compile-time pass fuses chains of elementwise primitives into one
 blockwise kernel, absorbing a trailing full-rank reduction; anything it will
 not fuse falls back to the subtree it replaced, so results and error messages
-cannot change. Dense arrays of bool / i64 / f64 / characters, row-major.
+cannot change. Dense arrays of bool / i64 / f64 / characters. `Array` carries
+a private row-major/column-major layout flag — every array libjay builds for
+itself is row-major, a table crosses from its columns without a copy, and
+transpose (`|:`, `⍉`) is exactly the flag flipped, moving no elements.
 
 ## Threads
 
