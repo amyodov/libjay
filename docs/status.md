@@ -18,7 +18,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 135 green / 26 partial / 18 red / 1 absent by design, of 180 valences
+**J: 138 green / 24 partial / 17 red / 1 absent by design, of 180 valences
 in the inventory.**
 
 **APL: 79 green / 25 partial / 11 red of 115 valences in the inventory.**
@@ -174,11 +174,11 @@ conjunctions above:
 |---|---|
 | `f.` fix | 🟢 names are substituted where used, so a fixed verb is the verb |
 | `M.` memo | 🟢 the cache belongs to the derived verb and lives as long as the program |
-| `L:` level | 🟡 monadic; a dyadic level is named |
-| `S:` spread | 🟡 monadic, as `L:` |
+| `L:` level | 🟢 both valences; the dyad descends both arguments together |
+| `S:` spread | 🟢 both valences, as `L:` |
 | `b.` boolean / characteristics | 🟡 `m b.` (the 32 boolean and bitwise functions) and `u b. 0` (the ranks); the other characteristics are named |
 | `$.` sparse | 🔴 |
-| `H.` hypergeometric | 🔴 |
+| `H.` hypergeometric | 🟢 the series, with the shared parameters cancelled; a series that neither converges nor overflows is refused by name |
 | `t.` Taylor series | 🔴 |
 | `t:` weighted Taylor | 🔴 |
 | `..` even | 🔴 |
@@ -197,8 +197,9 @@ conjunctions above:
 | Noun forks `(n g h)` | 🟡 literal noun only |
 | Verb (tacit) assignment `mean =. +/ % #` | 🟢 |
 | Displaying a bare tacit-verb name (`mean` after `mean =. +/ % #`) | 🔴 named not-yet |
+| Displaying a bare modifier name (`m` after `m =. /`) | 🔴 named not-yet |
 | `explain` facility | 🟢 |
-| Adverb and conjunction assignment | 🔴 |
+| Adverb and conjunction assignment `m =. /` | 🟢 the name is that modifier from the next sentence on |
 | Multiple assignment `'a b' =. …` | 🔴 |
 | `=.` vs `=:` scoping | 🟢 a definition has its own frame; `=:` names a global |
 | Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🟢 verbs; `{{ }}` modifier forms named |
@@ -301,10 +302,10 @@ conjunctions above:
 | `⊢` | 🟢 same | 🟢 right |
 | `⊣` | 🟢 same | 🟢 left |
 | `⎕←` output | 🟢 | — |
-| `⍞` character I/O | 🔴 | 🔴 |
+| `⍞` character I/O | 🔴 named | 🔴 named |
 | `→` branch | 🟡 inside a `∇` definition: labels, `→0`, `→(cond)/L`, `→⍬`; a label and a control structure in one definition is named | — |
 | `⍬` zilde | 🟢 | — |
-| `⌶` I-beam | 🔴 | 🔴 |
+| `⌶` I-beam | 🔴 named | 🔴 named |
 
 ## APL — operators
 
@@ -323,10 +324,10 @@ conjunctions above:
 | `∘` beside | 🟡 no oracle: GNU APL has no `∘` operator; Dyalog's `f∘g`, function operands only |
 | `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🟡 no oracle: GNU APL rejects it; Dyalog's `f⍛g` |
-| `⍢` under | 🔴 |
+| `⍢` under | 🔴 named |
 | `⌸` key | 🟡 no oracle: GNU APL rejects it; Dyalog's, with the operand taking the key and its group |
-| `⌺` stencil | 🔴 |
-| `⍠` variant | 🔴 |
+| `⌺` stencil | 🔴 named |
+| `⍠` variant | 🔴 named |
 | `&` spawn | 🔴 |
 
 ## APL — syntax and features
@@ -336,18 +337,18 @@ conjunctions above:
 | Stranding (vector notation) | 🟢 |
 | Nested arrays | 🟡 structural verbs, mixed simple arrays and prototype fills; the arithmetic still refuses a boxed operand |
 | `←` assignment, including inline | 🟢 |
-| Function assignment `F←+/` | 🔴 GNU APL rejects it; J's spelling has landed |
+| Function assignment `F←+/`, `F←+/÷≢` | 🟡 no oracle: GNU APL rejects it; the same extension as trains, and off with it |
 | Dfns `{⍵+1}`, `⍺`/`⍵`, `⋄` bodies, nesting | 🟢 |
 | Dfn assignment `F←{⍵×2}` | 🟢 |
 | Dfn guards `cond:expr`, `⍺←default`, `∇` self-reference | 🟡 guards and `∇` have no oracle (absent from GNU APL); `⍺←` follows the published default-only rule where GNU APL assigns unconditionally (recorded divergence) |
 | Dfn operators `⍺⍺` / `⍵⍵` | 🟡 no oracle: GNU APL has neither; a dfn naming one is an operator, and naming the operator keeps it one |
 | Tradfns `∇ Z←L F R;locals` … `∇` | 🟢 including APL's global-by-default scope rule, and the niladic form, which naming calls |
-| Trains (forks and atops) | 🔴 |
+| Trains (forks and atops) | 🟡 no oracle: GNU APL rejects them; Dyalog's rules, shipped as an extension (`Dialect.trains`, on by default) — 2-train atop, 3-train fork, a value left tine, longer trains grouped from the right |
 | Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included |
 | Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
 | Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`; the rest named |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
-| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟡 one preset — `Dialect::gnu_apl()`, the APL2/ISO line, which is the default; every point where the lineages diverge is a setting on it (nested model, `↑`/`⊃`, `⌷`, dfn result, `⍺←`, complex order, trains) and asking for the other reading is refused as not implemented yet |
+| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟡 one preset — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default; every point where the lineages diverge is a setting on it (nested model, `↑`/`⊃`, `⌷`, dfn result, `⍺←`, complex order, trains) and asking for the other reading is refused as not implemented yet. `trains` is the one setting whose two readings are both implemented, so turning it off gives the strict GNU sentence back |
 | `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS`), read-only; the ones that read a clock or a filesystem are closed by the sandbox |
 | Control structures `:If :While :Repeat :For :Select` | 🟡 no oracle: GNU APL rejects them |
 | `:Return` `:Leave` `:Continue` | 🟡 no oracle, as above |

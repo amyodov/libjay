@@ -54,7 +54,9 @@ fn the_defaults_resolve_to_this_apl() {
     assert_eq!(r.dfn_result, DfnResult::LastSentence);
     assert_eq!(r.default_arg, DefaultArg::Eager);
     assert_eq!(r.complex_order, ComplexOrder::RealThenImaginary);
-    assert!(!r.trains);
+    // Trains ship on, as an extension: GNU APL has none, and both readings
+    // are implemented, so the setting is a choice rather than a gap.
+    assert!(r.trains);
     // J counts from zero and has a tolerance of its own.
     let j = Dialect::default().rules(Lang::J).expect("J's defaults are implemented");
     assert_eq!(j.origin, 0);
@@ -82,7 +84,6 @@ fn asking_for_the_other_reading_is_refused_as_a_gap() {
             "complex_order",
             Dialect { complex_order: ComplexOrder::MagnitudeThenAngle, ..Dialect::default() },
         ),
-        ("trains", Dialect { trains: true, ..Dialect::default() }),
     ];
     for (name, dialect) in cases {
         let e = compile(Lang::Apl, "1 2 3", &dialect)
@@ -93,6 +94,22 @@ fn asking_for_the_other_reading_is_refused_as_a_gap() {
         // names the reading that was asked for.
         assert!(e.msg.contains("not supported yet"), "{name}: {}", e.msg);
     }
+}
+
+/// `trains` is the one setting whose two readings are both implemented:
+/// turning it off is asking for the strict GNU/APL2 sentence, where a run
+/// of functions is a syntax error and `F←+/` names nothing.
+#[test]
+fn trains_can_be_turned_off_for_the_strict_reading() {
+    let strict = Dialect { trains: false, ..Dialect::default() };
+    assert_eq!(val("(+/÷≢)1 2 3 4", &Dialect::default()), Array::scalar_f64(2.5));
+    for src in ["(+/÷≢)1 2 3 4", "F←+/÷≢"] {
+        let e = compile(Lang::Apl, src, &strict).expect_err("the strict reading has no trains");
+        assert_ne!(e.kind, ErrorKind::Internal, "{src}: {}", e.msg);
+    }
+    let e = compile(Lang::Apl, "F←+/", &strict).expect_err("the strict reading names no function");
+    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert!(e.msg.contains("function assignment"), "{}", e.msg);
 }
 
 #[test]

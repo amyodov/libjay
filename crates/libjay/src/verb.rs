@@ -867,6 +867,9 @@ pub enum Verb {
     /// v to the same arguments instead. A gap in libjay is not an error the
     /// program may handle, and goes straight through.
     Adverse(Box<Verb>, Box<Verb>),
+    /// J `m H. n`: the generalised hypergeometric function, summed as a
+    /// series over the numerator parameters m and the denominator ones n.
+    Hypergeometric { num: Vec<crate::complex::Cx>, den: Vec<crate::complex::Cx> },
     /// APL `f∘g` (beside): monad `f (g y)`, dyad `x f (g y)`. g prepares the
     /// right argument and the left one arrives untouched, which is what
     /// separates it from `⍥` (this crate's [`Verb::Compose`]).
@@ -901,6 +904,8 @@ impl Verb {
             Verb::Memo(v, _) => v.ranks(),
             Verb::WithObverse(v, _) | Verb::Adverse(v, _) => v.ranks(),
             Verb::Beside(..) => [RANK_INF, RANK_INF, RANK_INF],
+            // The series is summed for one value at a time.
+            Verb::Hypergeometric { .. } => [0, 0, 0],
             _ => [RANK_INF, RANK_INF, RANK_INF],
         }
     }
@@ -951,6 +956,9 @@ impl Verb {
             Verb::WithObverse(v, w) => format!("({}:.{})", v.name(), w.name()),
             Verb::Adverse(v, w) => format!("({}::{})", v.name(), w.name()),
             Verb::Beside(f, g) => format!("({}∘{})", f.name(), g.name()),
+            Verb::Hypergeometric { num, den } => {
+                format!("({} H. {})", cx_list(num), cx_list(den))
+            }
             Verb::Agenda(vs, w) => {
                 let names: Vec<String> = vs.iter().map(Verb::name).collect();
                 format!("({}@.{})", names.join("`"), w.name())
@@ -1010,7 +1018,8 @@ impl Verb {
             | Verb::Characteristics(_)
             | Verb::Explicit(_)
             | Verb::SelfRef
-            | Verb::Named(_) => false,
+            | Verb::Named(_)
+            | Verb::Hypergeometric { .. } => false,
             Verb::Memo(v, _) | Verb::Level { u: v, .. } => v.uses_tolerance(),
             Verb::WithObverse(v, _) => v.uses_tolerance(),
             Verb::Adverse(v, w) | Verb::Beside(v, w) | Verb::Before(v, w) => {
@@ -1061,6 +1070,7 @@ impl Verb {
                 v.is_pure()
             }
             Verb::Key(v) | Verb::Cut(v, _) | Verb::AlongAxis(v, _) => v.is_pure(),
+            Verb::Hypergeometric { .. } => true,
             Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => v.is_pure() && w.is_pure(),
             Verb::WithObverse(v, _) => v.is_pure(),
             Verb::Adverse(v, w) | Verb::Beside(v, w) | Verb::Before(v, w) => {
@@ -1220,6 +1230,7 @@ impl Verb {
                 let r = g.monad(y, ctx, span)?;
                 f.monad(&r, ctx, span)
             }
+            Verb::Hypergeometric { num, den } => hypergeometric(num, den, y, span),
             Verb::Agenda(vs, w) => {
                 agenda_pick(vs, w, None, y, ctx, span)?.monad(y, ctx, span)
             }
@@ -1290,8 +1301,8 @@ impl Verb {
             Verb::UserDerived { def, alpha, omega } => {
                 with_operands(alpha, omega.as_deref(), ctx, |c| def.dyad(x, y, c, span))
             }
-            Verb::Level { .. } => {
-                Err(Error::not_yet("a dyadic level or spread (x u L: n y)", span))
+            Verb::Level { u, level, spread } => {
+                at_level_dyad(u, *level, *spread, x, y, ctx, span)
             }
             Verb::Key(u) => key(u, x, y, ctx, span),
             Verb::Cut(u, n) => cut(u, Some(x), y, *n, ctx, span),
@@ -1314,6 +1325,9 @@ impl Verb {
             Verb::Beside(f, g) => {
                 let r = g.monad(y, ctx, span)?;
                 f.dyad(x, &r, ctx, span)
+            }
+            Verb::Hypergeometric { .. } => {
+                Err(Error::domain("m H. n has no dyadic meaning", span))
             }
             Verb::Agenda(vs, w) => {
                 agenda_pick(vs, w, Some(x), y, ctx, span)?.dyad(x, y, ctx, span)
@@ -7541,6 +7555,125 @@ fn map_level(u: &Verb, n: i64, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     Ok(Array::new(y.shape.clone(), Data::Box(cells.into())))
 }
 
+/// `x u L: n y` and `x u S: n y`: both arguments are descended together
+/// until each has reached level n, and u is applied to the pair. A side
+/// that has already reached its level is held while the other descends, so
+/// an unboxed left argument reaches every leaf of the right one.
+fn at_level_dyad(
+    u: &Verb,
+    level: i64,
+    spread: bool,
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    // A negative level counts down from each argument's own top, so the
+    // two sides can stop at different depths.
+    let depth = |a: &Array| if level < 0 { (boxing_level(a) + level).max(0) } else { level };
+    let (nx, ny) = (depth(x), depth(y));
+    if !spread {
+        return map_level_dyad(u, nx, ny, x, y, ctx, span);
+    }
+    let mut cells = Vec::new();
+    collect_level_dyad(u, nx, ny, x, y, ctx, span, &mut cells)?;
+    let count = cells.len();
+    assemble(&[count], cells, span)
+}
+
+/// The boxes to descend into on each side, and the shape the answer takes.
+struct LevelPairs {
+    left: Vec<Array>,
+    right: Vec<Array>,
+    shape: Vec<usize>,
+}
+
+/// One step of the descent. `None` where neither side has any box left,
+/// which is where u applies.
+fn level_pairs(
+    nx: i64,
+    ny: i64,
+    x: &Array,
+    y: &Array,
+    span: Span,
+) -> Result<Option<LevelPairs>> {
+    let bx = x.as_boxes().filter(|_| boxing_level(x) > nx);
+    let by = y.as_boxes().filter(|_| boxing_level(y) > ny);
+    Ok(match (bx, by) {
+        (None, None) => None,
+        (Some(bx), None) => {
+            let n = bx.len();
+            Some(LevelPairs {
+                left: bx.to_vec(),
+                right: vec![y.clone(); n],
+                shape: x.shape.clone(),
+            })
+        }
+        (None, Some(by)) => {
+            let n = by.len();
+            Some(LevelPairs {
+                left: vec![x.clone(); n],
+                right: by.to_vec(),
+                shape: y.shape.clone(),
+            })
+        }
+        (Some(bx), Some(by)) => {
+            if x.shape != y.shape {
+                return Err(Error::new(
+                    ErrorKind::Length,
+                    format!(
+                        "the levels do not agree: left shape {}, right shape {}",
+                        show_shape(&x.shape),
+                        show_shape(&y.shape)
+                    ),
+                    Some(span),
+                ));
+            }
+            Some(LevelPairs { left: bx.to_vec(), right: by.to_vec(), shape: x.shape.clone() })
+        }
+    })
+}
+
+fn map_level_dyad(
+    u: &Verb,
+    nx: i64,
+    ny: i64,
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let Some(step) = level_pairs(nx, ny, x, y, span)? else {
+        return u.dyad(x, y, ctx, span);
+    };
+    let mut cells = Vec::with_capacity(step.left.len());
+    for (a, b) in step.left.iter().zip(step.right.iter()) {
+        cells.push(map_level_dyad(u, nx, ny, a, b, ctx, span)?);
+    }
+    Ok(Array::new(step.shape, Data::Box(cells.into())))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_level_dyad(
+    u: &Verb,
+    nx: i64,
+    ny: i64,
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+    out: &mut Vec<Array>,
+) -> Result<()> {
+    let Some(step) = level_pairs(nx, ny, x, y, span)? else {
+        out.push(u.dyad(x, y, ctx, span)?);
+        return Ok(());
+    };
+    for (a, b) in step.left.iter().zip(step.right.iter()) {
+        collect_level_dyad(u, nx, ny, a, b, ctx, span, out)?;
+    }
+    Ok(())
+}
+
 fn collect_level(
     u: &Verb,
     n: i64,
@@ -7572,6 +7705,122 @@ fn poly_coeffs(y: &Array, span: Span) -> Result<Vec<Cx>> {
         Data::Complex(v) => Ok(v.as_slice().to_vec()),
         _ => Err(Error::internal("coefficients did not cast to complex")),
     }
+}
+
+// --------------------------------------------------- hypergeometric series
+
+/// Terms the series is allowed before it is called divergent.
+const HYPERGEOMETRIC_TERMS: usize = 1 << 16;
+
+/// A parameter list, for a derived verb's name.
+fn cx_list(v: &[Cx]) -> String {
+    v.iter()
+        .map(|z| if z[1] == 0.0 { format!("{}", z[0]) } else { format!("{}j{}", z[0], z[1]) })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `(m H. n) y`: the generalised hypergeometric function, summed term by
+/// term from the ratio between neighbours —
+/// `t[k+1] = t[k] × (Π(m+k) ÷ Π(n+k)) × y ÷ (k+1)`.
+///
+/// A parameter on both sides contributes the same factor to each product,
+/// so the pairs are cancelled first: that is what makes `0 H. 0` the
+/// exponential rather than a term of `0÷0`.
+fn hypergeometric(num: &[Cx], den: &[Cx], y: &Array, span: Span) -> Result<Array> {
+    let (num, den) = cancel_parameters(num, den);
+    let at = poly_coeffs(y, span)?;
+    let mut out = Vec::with_capacity(at.len());
+    for z in &at {
+        out.push(hypergeometric_at(&num, &den, *z, span)?);
+    }
+    let mut a = complex_or_real(out);
+    a.shape = y.shape.clone();
+    Ok(a)
+}
+
+/// The parameters left once every value common to both lists is dropped
+/// from each, one occurrence at a time.
+fn cancel_parameters(num: &[Cx], den: &[Cx]) -> (Vec<Cx>, Vec<Cx>) {
+    let mut left: Vec<Cx> = Vec::with_capacity(num.len());
+    let mut right: Vec<Cx> = den.to_vec();
+    for a in num {
+        match right.iter().position(|b| b == a) {
+            Some(i) => {
+                right.remove(i);
+            }
+            None => left.push(*a),
+        }
+    }
+    (left, right)
+}
+
+fn hypergeometric_at(num: &[Cx], den: &[Cx], z: Cx, span: Span) -> Result<Cx> {
+    // Wholly real arguments are summed in real arithmetic, where dividing
+    // by a zero parameter gives the infinity J answers with; the complex
+    // quotient would make that same division a NaN in both parts.
+    let real = |v: &[Cx]| v.iter().all(|c| c[1] == 0.0);
+    if z[1] == 0.0 && real(num) && real(den) {
+        let n: Vec<f64> = num.iter().map(|c| c[0]).collect();
+        let d: Vec<f64> = den.iter().map(|c| c[0]).collect();
+        return Ok([hypergeometric_real(&n, &d, z[0], span)?, 0.0]);
+    }
+    let mut sum = cx::ONE;
+    let mut term = cx::ONE;
+    for k in 0..HYPERGEOMETRIC_TERMS {
+        let kk = [k as f64, 0.0];
+        let mut ratio = z;
+        for a in num {
+            ratio = cx::mul(ratio, cx::add(*a, kk));
+        }
+        for b in den {
+            ratio = cx::div(ratio, cx::add(*b, kk));
+        }
+        term = cx::div(cx::mul(term, ratio), [k as f64 + 1.0, 0.0]);
+        if !term[0].is_finite() || !term[1].is_finite() {
+            // A zero denominator parameter, or a term past the range of a
+            // double: the sum is the infinity (or NaN) the term became.
+            return Ok(term);
+        }
+        let before = sum;
+        sum = cx::add(sum, term);
+        // The series has converged once a term no longer moves the sum.
+        if sum == before {
+            return Ok(sum);
+        }
+    }
+    Err(Error::domain(
+        format!("the hypergeometric series did not converge within {HYPERGEOMETRIC_TERMS} terms"),
+        span,
+    ))
+}
+
+fn hypergeometric_real(num: &[f64], den: &[f64], z: f64, span: Span) -> Result<f64> {
+    let mut sum = 1.0f64;
+    let mut term = 1.0f64;
+    for k in 0..HYPERGEOMETRIC_TERMS {
+        let kk = k as f64;
+        let mut ratio = z;
+        for a in num {
+            ratio *= a + kk;
+        }
+        for b in den {
+            ratio /= b + kk;
+        }
+        term = term * ratio / (kk + 1.0);
+        if !term.is_finite() {
+            return Ok(term);
+        }
+        let before = sum;
+        sum += term;
+        if sum == before {
+            return Ok(sum);
+        }
+    }
+    Err(Error::domain(
+        format!("the hypergeometric series did not converge within {HYPERGEOMETRIC_TERMS} terms"),
+        span,
+    ))
 }
 
 /// A complex vector as an array, real where every imaginary part is zero.

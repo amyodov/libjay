@@ -116,3 +116,19 @@ F←{⍵+1 ⋄ ⍵+2} ⋄ F 5
 ? a negative count inside a vector is legal here, a length error there
 1 ¯2/1 2
 ? a negative count inside a vector is legal here, a length error there
+// Trains and function assignment: a Dyalog extension libjay ships on by
+// default (`Dialect.trains`), so a run of functions is a function here and
+// a SYNTAX ERROR in GNU APL, which has neither. Turning the setting off
+// gives GNU APL's reading back. These lines pin the extension against the
+// oracle: if a later GNU APL grows trains, the pair stops disagreeing and
+// `record` says so.
+(+/÷≢)1 2 3 4
+? a train here, a SYNTAX ERROR there
+(⌈/-⌊/)3 1 4 1 5
+? a train here, a SYNTAX ERROR there
+1 2(⊣,⊢)3 4
+? a train here, a SYNTAX ERROR there
+F←+/÷≢ ⋄ F 1 2 3 4
+? a named tacit function here, a SYNTAX ERROR there
+F←+/ ⋄ F 1 2 3
+? a named derived function here, a SYNTAX ERROR there

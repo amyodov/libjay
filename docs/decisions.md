@@ -890,3 +890,53 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   (`.github/dependabot.yml`) watches cargo, pip and github-actions weekly,
   each grouped into one PR. README gained a three-badge line (PyPI version,
   crates.io version, CI status) under the title.
+- 2026-08-21 — APL trains and function assignment ship as an EXTENSION, on
+  by default, under the `trains` dialect setting that already existed and
+  read false. The rule the wave settles: a feature the oracle merely LACKS
+  is not a reason to withhold it, while a feature the oracle ANSWERS
+  DIFFERENTLY still binds — `⍺←`, complex ordering and the vector
+  replication count stay as they were, and `⊆ ∘ ⍥ ⍛ f⍤g ⌸` were already
+  shipped on this reasoning. So `Dialect::gnu_apl()` (and therefore
+  `Dialect::default()`, which tests/dialect.rs pins equal to it) now sets
+  `trains: true`, and `Dialect::rules` no longer refuses the setting: both
+  readings are implemented, which makes `trains` the one field on the
+  object that is a CHOICE rather than a queue position. Trains and function
+  assignment are one flag because they are one question — may a function
+  stand where a value belongs — and splitting them would let a host ask for
+  half a language. The rules are Dyalog's: 2-train atop, 3-train fork, a
+  literal value as the left tine, longer runs grouped from the right, `⊢`
+  and `⊣` as identity tines. They lower to the existing `Verb::Atop`,
+  `Verb::Fork` and `Verb::NounFork` — the same engine J's forks use, so no
+  new semantics reach the runtime, and a computed left tine is a named gap
+  on both sides for the same reason. Implementation note: parentheses now
+  close inside `fold_operators` rather than in a pass after it, because the
+  operator to the right of `)` has to see the train as one function; that
+  also fixed `(+)/1 2 3`, which GNU APL answers 6 and libjay had been
+  refusing, and `1 0 1(/)1 2 3`, where the reference reads the parentheses
+  around a bare operator glyph as transparent. No oracle covers a train, so
+  the shapes are hand-tested in tests/wave6.rs and the extension is pinned
+  against GNU APL's SYNTAX ERROR in corpus/apl/divergences.txt — if a later
+  GNU APL grows trains, the recorded pair stops disagreeing and `record`
+  says so.
+- 2026-08-21 — J names adverbs and conjunctions: `m =. /`, `c =. @`. A
+  modifier is applied while the sentence holding it is PARSED, so a named
+  one has to be resolved then, exactly as a named verb is; `Names` grew a
+  second table beside `verbs`, and a name can still change part of speech
+  in either direction. `Expr::ModDef` is the resulting sentence — silent,
+  like `Expr::VerbDef`, and carrying only the spelling so that `explain`
+  can show it. What stays a named gap is WRITING a new modifier (`1 :`,
+  `2 :`) and the tacit translator (`13 :`); so does displaying a bare
+  modifier name, which now says so by name rather than as a syntax error.
+- 2026-08-21 — `L:` and `S:` gained their dyads and `H.` landed. The dyadic
+  level descends both arguments together and holds a side that has reached
+  its level while the other descends, which is what makes `1 ,L:0 (3;4)`
+  reach every leaf; two sides that both still have boxes must agree in
+  shape. `m H. n` sums the generalised hypergeometric series from the ratio
+  between neighbouring terms, with the parameters the two lists SHARE
+  cancelled first — that cancellation is what makes `0 H. 0` the
+  exponential rather than a term of `0÷0`, and the oracle confirms it.
+  Wholly real arguments are summed in real arithmetic so that a zero
+  denominator parameter gives the infinity J answers with rather than a
+  complex NaN. A series that neither converges nor overflows within 2¹⁶
+  terms is refused by name; the reference loops forever on the same
+  sentence, which is one place a cap is better than fidelity.

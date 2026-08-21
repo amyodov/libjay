@@ -68,6 +68,11 @@ pub enum Expr {
     /// name, so nothing runs here; the node is kept so that the sentence
     /// still yields no value, and so that [`Program::explain`] can show it.
     VerbDef { name: String, verb: Verb, span: Span },
+    /// A sentence that named an adverb or a conjunction (J `m =. /`). A
+    /// modifier is applied when the sentence holding it is parsed, so this
+    /// node carries only what the name stands for; like
+    /// [`Expr::VerbDef`] it runs nothing and yields nothing.
+    ModDef { name: String, spelling: String, conjunction: bool, span: Span },
 }
 
 /// A control-flow sentence. Every body is a block: a list of sentences whose
@@ -161,7 +166,8 @@ impl Expr {
                 | Expr::Param(..)
                 | Expr::Name(..)
                 | Expr::Control(..)
-                | Expr::VerbDef { .. } => Vec::new(),
+                | Expr::VerbDef { .. }
+                | Expr::ModDef { .. } => Vec::new(),
                 Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => vec![value],
                 Expr::AmendIndex { slots, value, .. } => {
                     slots.iter().flatten().chain(std::iter::once(&**value)).collect()
@@ -189,7 +195,8 @@ impl Expr {
             | Expr::PrintPass { span, .. }
             | Expr::Fused { span, .. }
             | Expr::Elided { span, .. }
-            | Expr::VerbDef { span, .. } => *span,
+            | Expr::VerbDef { span, .. }
+            | Expr::ModDef { span, .. } => *span,
         }
     }
 
@@ -207,7 +214,8 @@ impl Expr {
             | Expr::PrintPass { span, .. }
             | Expr::Fused { span, .. }
             | Expr::Elided { span, .. }
-            | Expr::VerbDef { span, .. } => *span = to,
+            | Expr::VerbDef { span, .. }
+            | Expr::ModDef { span, .. } => *span = to,
         }
     }
 
@@ -222,6 +230,7 @@ impl Expr {
                 | Expr::PrintPass { .. }
                 | Expr::Elided { .. }
                 | Expr::VerbDef { .. }
+                | Expr::ModDef { .. }
         )
     }
 }
@@ -851,8 +860,9 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
             ctx.env.define(name.clone(), verb.clone());
             Ok(Array::scalar_i64(0))
         }
-        // A record of what the program was: a silent sentence whose value
-        // is never read.
-        Expr::Elided { .. } => Ok(Array::scalar_i64(0)),
+        // A record of what the program was, and a named modifier, which the
+        // parser has already applied everywhere it is used: silent
+        // sentences whose value is never read.
+        Expr::Elided { .. } | Expr::ModDef { .. } => Ok(Array::scalar_i64(0)),
     }
 }

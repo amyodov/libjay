@@ -52,6 +52,11 @@ pub fn parse(src: &SourceParts) -> Result<Vec<Expr>> {
 #[derive(Clone, Default)]
 struct Names {
     verbs: HashMap<String, Verb>,
+    /// Names given an adverb or a conjunction (`m =. /`), by the spelling
+    /// they stand for and whether it is a conjunction. A modifier is
+    /// applied when a sentence is parsed, so the name has to be resolved
+    /// then too, exactly as a verb name is.
+    mods: HashMap<String, (bool, &'static str)>,
     /// Names that hold a value by the time a sentence is read. Only the
     /// diagnostics need this: a name that is neither a verb nor a value is
     /// an undefined name, not a sentence the parser has yet to learn.
@@ -60,7 +65,7 @@ struct Names {
 
 impl Names {
     fn parse_sentence(&self, mut sentence: Vec<Frag>) -> Result<Expr> {
-        substitute_verbs(&mut sentence, &self.verbs);
+        substitute_names(&mut sentence, &self.verbs, &self.mods);
         parse_sentence(sentence, &self.nouns)
     }
 
@@ -69,6 +74,14 @@ impl Names {
         match stmt {
             Expr::VerbDef { name, verb, .. } => {
                 self.verbs.insert(name.clone(), verb.clone());
+                self.mods.remove(name);
+                self.nouns.remove(name);
+            }
+            Expr::ModDef { name, spelling, conjunction: is_conj, .. } => {
+                let glyph = if *is_conj { conjunction(spelling) } else { adverb(spelling) };
+                let glyph = glyph.expect("the spelling came from the modifier tables");
+                self.mods.insert(name.clone(), (*is_conj, glyph));
+                self.verbs.remove(name);
                 self.nouns.remove(name);
             }
             // A name given a noun stops being a verb, at any depth: J lets
@@ -78,6 +91,7 @@ impl Names {
                 assigned_names(other, &mut assigned);
                 for name in assigned {
                     self.verbs.remove(&name);
+                    self.mods.remove(&name);
                     self.nouns.insert(name);
                 }
             }
@@ -659,17 +673,25 @@ fn one_expr(mut stmts: Vec<Expr>, span: Span) -> Result<Expr> {
     }
 }
 
-/// Replace every name known to be a verb by that verb, except where the
-/// name is the target of an assignment, which is a definition of the name
-/// rather than a use of it.
-fn substitute_verbs(sentence: &mut [Frag], verbs: &HashMap<String, Verb>) {
+/// Replace every name known to be a verb or a modifier by what it stands
+/// for, except where the name is the target of an assignment, which is a
+/// definition of the name rather than a use of it.
+fn substitute_names(
+    sentence: &mut [Frag],
+    verbs: &HashMap<String, Verb>,
+    mods: &HashMap<String, (bool, &'static str)>,
+) {
     for i in 0..sentence.len() {
         let Frag::Name(name, span) = &sentence[i] else { continue };
+        let (name, span) = (name.clone(), *span);
         if sentence.get(i + 1).is_some_and(Frag::is_assign) {
             continue;
         }
-        if let Some(v) = verbs.get(name) {
-            sentence[i] = Frag::Verb(VerbFrag::V(v.clone()), *span);
+        if let Some(v) = verbs.get(&name) {
+            sentence[i] = Frag::Verb(VerbFrag::V(v.clone()), span);
+        } else if let Some(&(conj, glyph)) = mods.get(&name) {
+            sentence[i] =
+                if conj { Frag::Conj(glyph, span) } else { Frag::Adverb(glyph, span) };
         }
     }
 }
@@ -713,6 +735,10 @@ enum Frag {
     /// A finished verb definition: `mean =. +/ % #`. It belongs to no part
     /// of speech, so no rule reaches it and it can only end a sentence.
     VerbDef(String, Verb, Span),
+    /// A finished modifier definition: `m =. /`. Like `VerbDef`, it belongs
+    /// to no part of speech and can only end a sentence. The flag says
+    /// whether the spelling is a conjunction.
+    ModDef(String, bool, &'static str, Span),
     /// A control word, with the name `for_i.` binds when it has one. Only a
     /// definition's body may hold one.
     Control(&'static str, Option<String>, Span),
@@ -748,7 +774,8 @@ impl Frag {
             | Frag::AssignGlobal(s)
             | Frag::DdOpen(s)
             | Frag::DdClose(s)
-            | Frag::VerbDef(_, _, s) => *s,
+            | Frag::VerbDef(_, _, s)
+            | Frag::ModDef(_, _, _, s) => *s,
             Frag::Control(_, _, s) => *s,
             Frag::Gerund(_, s) => *s,
         }
@@ -1557,9 +1584,23 @@ fn parse_sentence(tokens: Vec<Frag>, nouns: &HashSet<String>) -> Result<Expr> {
         match stack.pop().expect("checked length") {
             f @ (Frag::Noun(_) | Frag::Name(..)) => return as_noun(f),
             Frag::VerbDef(name, verb, span) => return Ok(Expr::VerbDef { name, verb, span }),
+            Frag::ModDef(name, conjunction, spelling, span) => {
+                return Ok(Expr::ModDef {
+                    name,
+                    spelling: spelling.to_string(),
+                    conjunction,
+                    span,
+                })
+            }
             Frag::Verb(VerbFrag::V(_), span) => {
                 return Err(Error::not_yet(
                     "tacit verb definitions (a sentence that is a verb)",
+                    span,
+                ));
+            }
+            Frag::Adverb(_, span) | Frag::Conj(_, span) => {
+                return Err(Error::not_yet(
+                    "displaying a modifier (a sentence that is an adverb or a conjunction)",
                     span,
                 ));
             }
@@ -2031,7 +2072,14 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
             Ok(Frag::Verb(VerbFrag::V(level), span))
         }
         "`:" => Err(Error::not_yet("evoke gerund (`:)", span)),
-        "H." => Err(Error::not_yet("the hypergeometric conjunction (m H. n)", span)),
+        // `m H. n`: the generalised hypergeometric function, m the
+        // numerator parameters and n the denominator ones. Both are nouns,
+        // and an empty list on either side is the ordinary case of none.
+        "H." => {
+            let num = series_parameters(&u, span)?;
+            let den = series_parameters(&v, span)?;
+            Ok(Frag::Verb(VerbFrag::V(Verb::Hypergeometric { num, den }), span))
+        }
         // Threads reach outside the expression, which the sandbox closes;
         // libjay's own parallelism is not something a sentence asks for.
         // That is a property of libjay, not a queue position.
@@ -2091,6 +2139,23 @@ fn compose(u: Frag, v: Frag, infinite: bool, span: Span) -> Result<Frag> {
 const LARGEST_TOLERANCE: f64 = 5.820_766_091_346_741e-11;
 
 /// A conjunction's single numeric noun operand.
+/// One side's parameter list for `m H. n`: a numeric list, known now.
+fn series_parameters(f: &Frag, span: Span) -> Result<Vec<crate::complex::Cx>> {
+    let Some(arr) = as_const(f) else {
+        return Err(Error::not_yet("computed hypergeometric parameters (m H. n)", span));
+    };
+    if arr.count() == 0 {
+        return Ok(Vec::new());
+    }
+    if arr.rank() > 1 {
+        return Err(Error::parse("a hypergeometric parameter list is a vector", span));
+    }
+    match arr.data.cast(crate::dtype::DType::Complex) {
+        Some(Data::Complex(v)) => Ok(v.as_slice().to_vec()),
+        _ => Err(Error::parse("hypergeometric parameters are numbers", span)),
+    }
+}
+
 fn one_atom(f: &Frag, what: &str, span: Span) -> Result<f64> {
     let Some(arr) = as_const(f) else {
         return Err(Error::not_yet(format!("a computed {what} specification"), span));
@@ -2263,11 +2328,15 @@ fn apply_assign(target: Frag, value: Frag, scope: Scope) -> Result<Frag> {
             // the name and substitutes the verb into later sentences.
             Frag::Verb(VerbFrag::V(verb), _) => Ok(Frag::VerbDef(name, verb, span)),
             Frag::Verb(VerbFrag::Cap, _) => Err(Error::not_yet("assigning [: on its own", span)),
+            // Naming a modifier is settled at parse time too: the name
+            // stands for the spelling wherever a later sentence writes it.
+            Frag::Adverb(g, _) => Ok(Frag::ModDef(name, false, g, span)),
+            Frag::Conj(g, _) => Ok(Frag::ModDef(name, true, g, span)),
             v if v.is_noun() => {
                 let value = as_noun(v)?;
                 Ok(Frag::Noun(Expr::Assign { name, value: Box::new(value), scope, span }))
             }
-            _ => Err(Error::not_yet("adverb and conjunction assignment", span)),
+            _ => Err(Error::not_yet("assigning a gerund", span)),
         },
         Frag::Noun(_) => Err(Error::not_yet("multiple assignment", span)),
         other => Err(Error::internal(format!("expected an assignment target, got {other:?}"))),
@@ -3028,10 +3097,33 @@ mod tests {
     }
 
     #[test]
-    fn adverb_and_conjunction_assignment_are_not_supported_yet() {
-        let e = err("insert =. /");
+    fn assignment_names_an_adverb_or_a_conjunction() {
+        match one("insert =. /") {
+            Expr::ModDef { name, spelling, conjunction, .. } => {
+                assert_eq!(name, "insert");
+                assert_eq!(spelling, "/");
+                assert!(!conjunction);
+            }
+            other => panic!("expected a modifier definition, got {other:?}"),
+        }
+        match one("atop =. @") {
+            Expr::ModDef { spelling, conjunction, .. } => {
+                assert_eq!(spelling, "@");
+                assert!(conjunction);
+            }
+            other => panic!("expected a modifier definition, got {other:?}"),
+        }
+        // The name is a modifier from there on, so the sentence that uses
+        // it parses around it as the glyph would.
+        let s = stmts("insert =. /\n+ insert 1 2 3");
+        assert!(matches!(s[1], Expr::Monad { verb: Verb::Reduce(_), .. }), "{:?}", s[1]);
+    }
+
+    #[test]
+    fn a_sentence_that_is_a_modifier_is_a_named_gap() {
+        let e = err("insert =. /\ninsert");
         assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("adverb and conjunction assignment"), "{}", e.msg);
+        assert!(e.msg.contains("displaying a modifier"), "{}", e.msg);
     }
 
     #[rstest]
