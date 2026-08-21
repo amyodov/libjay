@@ -44,8 +44,8 @@ jobs:
             smoke: true
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: PyO3/maturin-action@v1
@@ -60,7 +60,7 @@ jobs:
           pip install dist/*.whl
           python -c "import jay; assert jay.j('(+/ % #) 1 2 3 4') == 2.5"
           libjay -e "echo 'wheel ok'"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.target }}
           path: dist
@@ -87,8 +87,8 @@ jobs:
             libs: jay.dll jay.lib
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.100
         with:
           targets: ${{ matrix.triple }}
       - run: cargo build --release -p libjay-capi --target ${{ matrix.triple }}
@@ -101,7 +101,7 @@ jobs:
             cp "target/${{ matrix.triple }}/release/$f" bundle/
           done
           cd bundle && tar czf "../libjay-capi-${{ matrix.triple }}.tar.gz" *
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: capi-${{ matrix.triple }}
           path: libjay-capi-*.tar.gz
@@ -109,12 +109,12 @@ jobs:
   sdist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@v1
         with:
           command: sdist
           args: --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist
@@ -128,7 +128,7 @@ jobs:
       id-token: write
       contents: write # attach assets to the release
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -176,8 +176,8 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.100
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
       - run: cargo publish -p libjay
