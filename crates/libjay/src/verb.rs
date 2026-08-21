@@ -6584,6 +6584,22 @@ multiversioned! {
     ) -> bool = window_fold_range_body;
 }
 
+/// The windows of `w` items of `v` that begin at `lo` and after, folded into
+/// `out` — one item per window, `out.len()` of them.
+///
+/// The fused kernel folds the windows of a block it computed itself, and
+/// calls this to do it: the blocking is counted from `v`'s own start, so a
+/// caller whose buffer starts on a multiple of `w` groups every window
+/// exactly as the pass over the whole argument groups it. False when a step
+/// left the element type.
+pub(crate) fn windows_into<T, F>(v: &[T], w: usize, lo: usize, out: &mut [T], step: &F) -> bool
+where
+    T: Copy + Default,
+    F: Fn(T, T) -> (T, bool),
+{
+    window_fold_range(v, v.len(), w, lo, out, step)
+}
+
 fn window_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, w: usize) -> Option<Vec<i64>> {
     use ScalarDyad::*;
     match op {

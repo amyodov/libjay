@@ -176,6 +176,198 @@ fn a_sequence_fuses_every_sentence() {
     }
 }
 
+// ----------------------------------------------------------- the windows
+
+/// Chains with a window stage in them. Each is checked against its own
+/// unfused tree, where the windows are a pass of their own over an array
+/// the chain then reads back.
+const WINDOWS: &[&str] = &[
+    // The Bollinger z-score: the program the stage exists for. `s` is the
+    // moving sum, `19 }. {x}` the closes aligned on the window's last item.
+    "s =. 20 +/\\ {x}\n((20 * 19 }. {x}) - s) % %: 0.001 + (20 * 20 +/\\ *: {x}) - s * s",
+    // A moving mean against the item it ends on.
+    "(19 }. {x}) - (20 +/\\ {x}) % 20",
+    // The moving range, and the item's place inside it.
+    "(20 >./\\ {x}) - 20 <./\\ {x}",
+    "((19 }. {x}) - 20 <./\\ {x}) % 0.001 + (20 >./\\ {x}) - 20 <./\\ {x}",
+    // Windows over a chain the kernel computes for itself.
+    "20 +/\\ *: {x} + 1",
+    "1 + 5 */\\ 1 + {x} % 100",
+    "3 +/\\ {x} <. {w}",
+    // Integers and booleans through the same stage.
+    "(4 }. {a}) - 5 +/\\ {a}",
+    "5 >./\\ {a} * 2",
+    "3 +/\\ {p} + {q}",
+    // A reduction over the windows, folded into the same pass.
+    "+/ 20 +/\\ *: {x}",
+    "<./ 5 +/\\ {x} + {w}",
+    // A window over a window: the outer one is the stage, the inner one is
+    // the pass it has always been.
+    "1 + 4 +/\\ 3 +/\\ {x}",
+    // A scalar beside the windows, which stands on either axis.
+    "2 * 20 +/\\ {x}",
+];
+
+/// Chains with a running fold in them.
+const SCANS: &[&str] = &[
+    "(+/\\ {x}) % 1 + | {x}",
+    "(+/\\ *: {x}) - +/\\ {x}",
+    ">./\\ {x} - {w}",
+    "1 + +/\\ {a} * 2",
+    "{x} - +/\\ {x} * 0.001",
+    "+/\\ {p} + {q}",
+    // APL's scan is the same stage under its own spelling.
+    "1 + +\\ 2 × {x}",
+];
+
+#[test]
+fn every_window_chain_computes_what_it_replaced() {
+    for src in WINDOWS {
+        assert!(is_fused(&program(Lang::J, src)), "`{src}` did not fuse");
+        // Sizes shorter than the window, either side of the parallel
+        // threshold, and one that is not a whole number of blocks.
+        for n in [1usize, 5, 25, 1_000, 100_000] {
+            same(Lang::J, src, n);
+        }
+    }
+}
+
+#[test]
+fn every_scan_chain_computes_what_it_replaced() {
+    for src in SCANS {
+        let lang = if src.contains('×') { Lang::Apl } else { Lang::J };
+        assert!(is_fused(&program(lang, src)), "`{src}` did not fuse");
+        for n in [1usize, 2, 25, 1_000, 100_000] {
+            same(lang, src, n);
+        }
+    }
+}
+
+/// A window is folded from the items it covers and nothing else, so a huge
+/// value in one window leaves the next window exactly as it was. A running
+/// accumulator differenced pairwise — the cheap way to move a sum along —
+/// would carry that value into every window after it.
+#[test]
+fn a_window_carries_no_error_from_the_windows_before_it() {
+    let n = 10_000;
+    let mut v = vec![1.0f64; n];
+    v[0] = 1e17;
+    let p = program(Lang::J, "1 + 4 +/\\ {x}");
+    let args = vec![Array::from_f64(v)];
+    let got = run(&p, &args).unwrap().unwrap().to_f64_vec().unwrap();
+    assert_eq!(got[0], 1e17 + 4.0);
+    // Every window past the first covers four ones exactly.
+    for (i, &g) in got.iter().enumerate().skip(1) {
+        assert_eq!(g, 5.0, "window {i} carried the first item's error");
+    }
+    assert_eq!(run(&p, &args), run(&unfused(&p), &args));
+}
+
+/// Where the shapes do not prove that the other inputs are aligned on the
+/// window's last item, the kernel hands the chain back and the chain says
+/// what it would have said.
+#[test]
+fn a_chain_the_window_cannot_align_hands_itself_back() {
+    let cases: &[&str] = &[
+        // One item too many on the left: a length error, and the same one.
+        "(18 }. {x}) - 20 +/\\ {x}",
+        // The whole argument against its own windows.
+        "{x} - 20 +/\\ {x}",
+        // Two window lengths in one chain: two wide axes, so neither is a
+        // stage and the sentence runs as it was written.
+        "(20 +/\\ {x}) - 10 +/\\ 11 }. {x}",
+    ];
+    for src in cases {
+        let p = program(Lang::J, src);
+        let args: Vec<Array> = p.params.iter().map(|s| data(&s.name, 1_000)).collect();
+        assert_eq!(run(&p, &args), run(&unfused(&p), &args), "`{src}`");
+    }
+}
+
+#[test]
+fn a_window_the_axis_cannot_hold_hands_the_chain_back() {
+    // No window of twenty items fits three of them: J's answer is an empty
+    // result whose shape the verb decides, which is the chain's business.
+    let p = program(Lang::J, "1 + 20 +/\\ {x}");
+    let before = fallback_count();
+    for n in [1usize, 3, 19] {
+        let args = vec![data("x", n)];
+        assert_eq!(run(&p, &args), run(&unfused(&p), &args), "at {n} items");
+    }
+    assert!(fallback_count() > before, "the kernel did not decline the short axis");
+}
+
+#[test]
+fn the_edges_of_the_window_length_hold() {
+    // One item per window is the argument itself; the whole axis in one
+    // window is one item.
+    for (src, n) in [("1 + 1 +/\\ {x}", 64usize), ("1 + 64 +/\\ {x}", 64), ("1 + 63 +/\\ {x}", 64)] {
+        let p = program(Lang::J, src);
+        assert!(is_fused(&p), "`{src}` did not fuse");
+        let args = vec![data("x", n)];
+        assert_eq!(run(&p, &args), run(&unfused(&p), &args), "`{src}` at {n}");
+    }
+    // A window longer than the kernel takes is left to the pass it was.
+    let long = format!("1 + {} +/\\ {{x}}", jay::fuse::MAX_WINDOW + 1);
+    let p = program(Lang::J, &long);
+    assert!(!is_fused(&p), "a window past the limit was absorbed");
+}
+
+/// The window leaves of a chain all stand on the same axis, so an
+/// elementwise tree over them is as valid as one over plain columns. These
+/// are generated the same way the elementwise fuzz generates its own.
+#[test]
+fn random_window_chains_agree_with_the_interpreter() {
+    let windowed: &[&str] = &[
+        "(19 }. {x})",
+        "(20 +/\\ {x})",
+        "(20 >./\\ {x})",
+        "(20 <./\\ {w})",
+        "(20 +/\\ *: {w})",
+        "(19 }. {a})",
+        "(20 +/\\ {a})",
+        "(20 <./\\ {b})",
+        "2",
+        "0.5",
+    ];
+    let mut rng = Rng::new(20_260_822);
+    let mut fused_any = 0;
+    for i in 0..300 {
+        let body = expr_of(&mut rng, 3, windowed);
+        let src = if i % 4 == 0 { format!("+/ {body}") } else { body };
+        let p = program(Lang::J, &src);
+        if is_fused(&p) {
+            fused_any += 1;
+        }
+        let args: Vec<Array> = p.params.iter().map(|s| data(&s.name, 117)).collect();
+        match (run(&p, &args), run(&unfused(&p), &args)) {
+            (Ok(Some(f)), Ok(Some(u))) => {
+                assert!(identical(&f, &u), "`{src}`\n  fused {f:?}\n  plain {u:?}")
+            }
+            (f, u) => assert_eq!(f, u, "`{src}`"),
+        }
+    }
+    assert!(fused_any > 200, "only {fused_any} of 300 random window chains fused");
+}
+
+#[test]
+fn random_scan_chains_agree_with_the_interpreter() {
+    let scanned: &[&str] = &["{x}", "(+/\\ {x})", "(>./\\ {w})", "(+/\\ {a})", "{a}", "2", "0.5"];
+    let mut rng = Rng::new(20_260_823);
+    for i in 0..300 {
+        let body = expr_of(&mut rng, 3, scanned);
+        let src = if i % 4 == 0 { format!("+/ {body}") } else { body };
+        let p = program(Lang::J, &src);
+        let args: Vec<Array> = p.params.iter().map(|s| data(&s.name, 117)).collect();
+        match (run(&p, &args), run(&unfused(&p), &args)) {
+            (Ok(Some(f)), Ok(Some(u))) => {
+                assert!(identical(&f, &u), "`{src}`\n  fused {f:?}\n  plain {u:?}")
+            }
+            (f, u) => assert_eq!(f, u, "`{src}`"),
+        }
+    }
+}
+
 // ------------------------------------------------- across the sentences
 
 /// Every program here names a value that nothing needs as an array, so the
@@ -252,7 +444,7 @@ fn a_use_a_kernel_cannot_take_keeps_the_name() {
         // Printed on the way past.
         "d =. {x} + 1\necho d\n+/ d * d",
         // Read by a verb no kernel covers.
-        "d =. {x} + 1\n+/\\ d",
+        "d =. {x} + 1\n|. d",
         "d =. {x} + 1\n3 }. d",
         // Read once inside a kernel and once as a whole array.
         "d =. {x} + 1\n(+/ d * d) , d",
@@ -262,11 +454,6 @@ fn a_use_a_kernel_cannot_take_keeps_the_name() {
         "d =. {x} + 1\nd =. d + 1\n+/ d * d",
         // A single verb: moving it would move a whole pass, not remove one.
         "d =. 3 }. {x}\n+/ d * d",
-        // The moving sum of the Bollinger kernel: a window verb never joins
-        // a kernel, so `s` is a whole array however often it is read, and
-        // copying it into the two places that read it would compute the
-        // moving sum twice.
-        "s =. 20 +/\\ {x}\n((20 * 19 }. {x}) - s) % %: (20 * 20 +/\\ *: {x}) - s * s",
         // Nothing reads it at all.
         "d =. {x} + 1\n+/ {x} * {x}",
     ];

@@ -237,6 +237,10 @@ fn chain_body(
                 out.push_str(&format!("  let {name} = {e};\n"));
                 stack.push(name);
             }
+            // A window step and a running fold read items the shader's own
+            // element does not: they stay on the CPU.
+            Instr::Window(..) => return Err("a moving window"),
+            Instr::Scan(_) => return Err("a running fold"),
             Instr::Dyad(op) => {
                 let b = stack.pop().ok_or("dyad")?;
                 let a = stack.pop().ok_or("dyad")?;

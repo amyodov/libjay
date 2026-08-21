@@ -27,7 +27,10 @@ use crate::error::Span;
 use crate::ir::{Expr, Program, Scope};
 use crate::par;
 use crate::simd::multiversioned;
-use crate::verb::{tol_cmp, DyadOp, MonadOp, ScalarDyad, ScalarMonad, Tol, Verb, RANK_INF};
+use crate::verb::{
+    tol_cmp, windows_into, DyadOp, MonadOp, ScalarDyad, ScalarMonad, Tol, Verb, WindowKind,
+    RANK_INF,
+};
 
 /// Elements a block buffer holds.
 ///
@@ -38,6 +41,15 @@ use crate::verb::{tol_cmp, DyadOp, MonadOp, ScalarDyad, ScalarMonad, Tol, Verb, 
 /// lands within a few per cent of the best, because what the kernel is
 /// really bounded by is streaming the leaves in from memory once.
 pub const BLOCK: usize = 8_192;
+
+/// The largest window a kernel absorbs.
+///
+/// A block computes the wide axis its own windows need, which is the block
+/// plus a halo of about three window lengths, and holds it in the same
+/// buffers the arithmetic uses. Past this size the halo is most of the work
+/// and the buffers are past any cache worth staying in, so a longer window
+/// stays outside the kernel and takes the pass it has always taken.
+pub const MAX_WINDOW: usize = 1_024;
 
 /// One step of a kernel: postfix, so operands are already on the stack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +66,39 @@ pub enum Instr {
     Store(usize),
     /// Push let `k` again.
     Let(usize),
+    /// Fold every window of `k` consecutive items of the top of the stack
+    /// into one item. The operand stands on the wide axis and the result on
+    /// the kernel's own, which is `k - 1` items shorter.
+    Window(ScalarDyad, usize),
+    /// Replace the top of the stack with its running fold: item `i` becomes
+    /// the fold of items `0 .. i`. Both stand on the same axis.
+    Scan(ScalarDyad),
+}
+
+/// Which axis a value inside a kernel stands on.
+///
+/// A kernel that folds windows reads two: the one its result stands on, and
+/// the wider one every window step reads, which is `k - 1` items longer.
+/// Where a value stands is decided by the chain — everything under a window
+/// step is wide — so the two never have to be told apart at run time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Dom {
+    Result,
+    Wide,
+}
+
+/// The stages a chain absorbs.
+///
+/// A chain takes moving windows or running folds, not both, and every
+/// window step in one kernel folds windows of the same length: that is what
+/// leaves exactly two axes to align, which shapes alone can then decide.
+/// Anything else — a second window length, a window inside a window, a
+/// running fold beside a window — is read as a leaf and runs as the pass it
+/// was.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Plan {
+    window: Option<usize>,
+    scan: bool,
 }
 
 /// What one evaluation of a kernel produces.
@@ -80,6 +125,20 @@ pub struct FusedKernel {
     /// so this is not the identity, and the fallback needs it to give every
     /// leaf back the value it was given.
     leaves: Vec<usize>,
+    /// The axis each input is read on. None is an input the chain reads on
+    /// both, which only a scalar can satisfy.
+    doms: Vec<Option<Dom>>,
+    /// The axis each let stands on, which is the axis every repeat it was
+    /// taken for was written on.
+    let_doms: Vec<Dom>,
+    /// The stages the chain was built with, so that the fallback walks it
+    /// exactly as the pass walked it.
+    plan: Plan,
+    /// The window every window step folds, when the code holds one.
+    window: Option<usize>,
+    /// Running folds in the code. Each carries an accumulator from block to
+    /// block, so a kernel that has any runs its blocks in order.
+    scans: usize,
     /// The dialect's comparison tolerance, so that a comparison inside the
     /// kernel answers exactly as the same comparison outside it does.
     tol: Tol,
@@ -172,6 +231,43 @@ fn absorbable_reduce(v: &Verb) -> Option<ScalarDyad> {
     matches!(op, Add | Mul | Min | Max).then_some(op)
 }
 
+/// The moving fold this dyad performs, if the kernel can absorb it: `k u/\ y`
+/// over an associative arithmetic `u` and a window the compiler knows the
+/// length of. A left argument of more than one number is a frame — several
+/// window lengths, several results — and stays outside.
+fn absorbable_window(e: &Expr) -> Option<(ScalarDyad, usize)> {
+    let Expr::Dyad { verb: Verb::Windowed(u, WindowKind::Prefix), x, .. } = e else {
+        return None;
+    };
+    let op = absorbable_reduce(u)?;
+    let Expr::Const(a, _) = &**x else { return None };
+    if a.rank() != 0 {
+        return None;
+    }
+    let k = *a.to_i64_vec()?.first()?;
+    // A negative left argument cuts the argument into chunks and a zero
+    // takes the empty runs between the items: neither is a moving window.
+    (1..=MAX_WINDOW as i64).contains(&k).then_some((op, k as usize))
+}
+
+/// The running fold this monad performs, if the kernel can absorb it. J's
+/// `u\` and APL's `f\` are the same scan; `u\.` folds from the far end,
+/// where an accumulator cannot be handed from one block to the next.
+fn absorbable_scan(e: &Expr) -> Option<ScalarDyad> {
+    let Expr::Monad { verb, .. } = e else { return None };
+    // APL's `f\` scans the last axis, which over the vector this stage
+    // insists on is the whole argument — the same wrapper `+/` wears.
+    let inner = match verb {
+        Verb::Rank(u, r) if r[0] >= 1 => &**u,
+        v => v,
+    };
+    let Verb::Windowed(u, kind) = inner else { return None };
+    if *kind == WindowKind::Suffix {
+        return None;
+    }
+    absorbable_reduce(u)
+}
+
 /// Is this the tally, applied to the array as a whole? `#"1` and its like
 /// count the items of cells instead, which is not what the shape says.
 fn is_tally(v: &Verb) -> bool {
@@ -187,6 +283,10 @@ enum Node {
     Leaf(usize),
     Monad(ScalarMonad, Box<Node>),
     Dyad(ScalarDyad, Box<Node>, Box<Node>),
+    /// A moving fold: its operand stands on the wide axis, it on the
+    /// kernel's own.
+    Window(ScalarDyad, usize, Box<Node>),
+    Scan(ScalarDyad, Box<Node>),
 }
 
 /// The subtrees a chain reads.
@@ -202,17 +302,24 @@ struct Leaves<'a> {
     inputs: Vec<&'a Expr>,
     /// The input each leaf position reads, in chain order.
     order: Vec<usize>,
+    /// The axis each input is read on, None where the chain reads it on
+    /// both — which only a scalar can be.
+    doms: Vec<Option<Dom>>,
 }
 
 impl<'a> Leaves<'a> {
-    fn push(&mut self, e: &'a Expr) -> usize {
+    fn push(&mut self, e: &'a Expr, dom: Dom) -> usize {
         let i = match self.inputs.iter().position(|&p| same(p, e)) {
             Some(i) => i,
             None => {
                 self.inputs.push(e);
+                self.doms.push(Some(dom));
                 self.inputs.len() - 1
             }
         };
+        if self.doms[i] != Some(dom) {
+            self.doms[i] = None;
+        }
         self.order.push(i);
         i
     }
@@ -226,55 +333,121 @@ struct Inline<'a> {
     hits: usize,
 }
 
-/// Build the chain rooted at `e`, collecting the subtrees that feed it.
-fn chain<'a>(e: &'a Expr, lv: &mut Leaves<'a>, sub: &mut Option<Inline<'a>>) -> Node {
-    let read_through = match (e, sub.as_ref()) {
+/// The name a chain reads through, where the pass is moving one.
+fn read_through<'a>(e: &Expr, sub: Option<&Inline<'a>>) -> Option<&'a Expr> {
+    match (e, sub) {
         (Expr::Name(n, _), Some(s)) if n == s.name => Some(s.def),
         _ => None,
+    }
+}
+
+/// The stages the chain rooted at `e` may absorb.
+///
+/// Decided before the chain is built and then consulted by everything that
+/// walks it, so the pass, the fallback and the inliner all read the same
+/// tree. Window lengths are collected from the positions a window could be
+/// absorbed at; where they do not all agree there is more than one wide
+/// axis, and none is taken.
+fn plan_of(e: &Expr, sub: Option<&Inline<'_>>) -> Plan {
+    fn walk(e: &Expr, sub: Option<&Inline<'_>>, inside: bool, ks: &mut Vec<usize>, s: &mut bool) {
+        if let Some(def) = read_through(e, sub) {
+            return walk(def, sub, inside, ks, s);
+        }
+        match e {
+            Expr::Monad { verb, y, .. } if fusable_monad(verb).is_some() => {
+                walk(y, sub, inside, ks, s)
+            }
+            Expr::Dyad { verb, x, y, .. } if fusable_dyad(verb).is_some() => {
+                walk(y, sub, inside, ks, s);
+                walk(x, sub, inside, ks, s);
+            }
+            Expr::Dyad { y, .. } if !inside && absorbable_window(e).is_some() => {
+                ks.push(absorbable_window(e).expect("just matched").1);
+                walk(y, sub, true, ks, s);
+            }
+            Expr::Monad { y, .. } if absorbable_scan(e).is_some() => {
+                *s = true;
+                walk(y, sub, inside, ks, s);
+            }
+            _ => {}
+        }
+    }
+    let (mut ks, mut scan) = (Vec::new(), false);
+    walk(e, sub, false, &mut ks, &mut scan);
+    let window = match ks.split_first() {
+        Some((k, rest)) if rest.iter().all(|r| r == k) => Some(*k),
+        _ => None,
     };
-    if let Some(def) = read_through {
+    Plan { window, scan: window.is_none() && scan }
+}
+
+/// Build the chain rooted at `e`, collecting the subtrees that feed it.
+fn chain<'a>(
+    e: &'a Expr,
+    lv: &mut Leaves<'a>,
+    sub: &mut Option<Inline<'a>>,
+    plan: Plan,
+    dom: Dom,
+) -> Node {
+    if read_through(e, sub.as_ref()).is_some() {
+        let def = read_through(e, sub.as_ref()).expect("just matched");
         if let Some(s) = sub.as_mut() {
             s.hits += 1;
         }
-        return chain(def, lv, sub);
+        return chain(def, lv, sub, plan, dom);
     }
     match e {
-        Expr::Monad { verb, y, .. } => match fusable_monad(verb) {
-            Some(op) => Node::Monad(op, Box::new(chain(y, lv, sub))),
-            None => Node::Leaf(lv.push(e)),
-        },
-        Expr::Dyad { verb, x, y, .. } => match fusable_dyad(verb) {
-            Some(op) => {
-                let ry = chain(y, lv, sub);
-                let rx = chain(x, lv, sub);
-                Node::Dyad(op, Box::new(rx), Box::new(ry))
+        Expr::Monad { verb, y, .. } => {
+            if let Some(op) = fusable_monad(verb) {
+                return Node::Monad(op, Box::new(chain(y, lv, sub, plan, dom)));
             }
-            None => Node::Leaf(lv.push(e)),
-        },
-        _ => Node::Leaf(lv.push(e)),
+            if plan.scan && let Some(op) = absorbable_scan(e) {
+                return Node::Scan(op, Box::new(chain(y, lv, sub, plan, dom)));
+            }
+            Node::Leaf(lv.push(e, dom))
+        }
+        Expr::Dyad { verb, x, y, .. } => {
+            if let Some(op) = fusable_dyad(verb) {
+                let ry = chain(y, lv, sub, plan, dom);
+                let rx = chain(x, lv, sub, plan, dom);
+                return Node::Dyad(op, Box::new(rx), Box::new(ry));
+            }
+            // A window inside a window would want a third axis; only the
+            // outer one is taken, and the inner reads as the leaf it is.
+            if dom == Dom::Result
+                && let Some((op, k)) = absorbable_window(e)
+                && plan.window == Some(k)
+            {
+                return Node::Window(op, k, Box::new(chain(y, lv, sub, plan, Dom::Wide)));
+            }
+            Node::Leaf(lv.push(e, dom))
+        }
+        _ => Node::Leaf(lv.push(e, dom)),
     }
 }
 
 fn ops(n: &Node) -> usize {
     match n {
         Node::Leaf(_) => 0,
-        Node::Monad(_, y) => 1 + ops(y),
+        Node::Monad(_, y) | Node::Window(_, _, y) | Node::Scan(_, y) => 1 + ops(y),
         Node::Dyad(_, x, y) => 1 + ops(x) + ops(y),
     }
 }
 
-/// Every subtree of the chain that computes something.
-fn subtrees<'a>(n: &'a Node, out: &mut Vec<&'a Node>) {
+/// Every subtree of the chain that computes something, with the axis it
+/// stands on.
+fn subtrees<'a>(n: &'a Node, dom: Dom, out: &mut Vec<(&'a Node, Dom)>) {
     if ops(n) == 0 {
         return;
     }
-    out.push(n);
+    out.push((n, dom));
     match n {
         Node::Leaf(_) => {}
-        Node::Monad(_, y) => subtrees(y, out),
+        Node::Monad(_, y) | Node::Scan(_, y) => subtrees(y, dom, out),
+        Node::Window(_, _, y) => subtrees(y, Dom::Wide, out),
         Node::Dyad(_, x, y) => {
-            subtrees(x, out);
-            subtrees(y, out);
+            subtrees(x, dom, out);
+            subtrees(y, dom, out);
         }
     }
 }
@@ -286,34 +459,48 @@ fn subtrees<'a>(n: &'a Node, out: &mut Vec<&'a Node>) {
 /// and read it twice. Each of these becomes a let — a block buffer of its
 /// own, held for the length of the block. Only maximal repeats are taken,
 /// so a repeat inside a let is part of that let rather than one more.
-fn lets_of(n: &Node) -> Vec<Node> {
+///
+/// A value written on both axes of a windowed chain is not one value: the
+/// two are different lengths and read different items, so a repeat counts
+/// only against the repeats on its own axis, and only where the other axis
+/// holds none.
+fn lets_of(n: &Node) -> Vec<(Node, Dom)> {
     let mut all = Vec::new();
-    subtrees(n, &mut all);
+    subtrees(n, Dom::Result, &mut all);
     let mut out = Vec::new();
-    fn walk(n: &Node, all: &[&Node], out: &mut Vec<Node>) {
-        if ops(n) >= 1 && all.iter().filter(|m| **m == n).count() >= 2 {
-            if !out.contains(n) {
-                out.push(n.clone());
+    fn walk(n: &Node, dom: Dom, all: &[(&Node, Dom)], out: &mut Vec<(Node, Dom)>) {
+        let count = |d: Dom| all.iter().filter(|(m, md)| *m == n && *md == d).count();
+        if ops(n) >= 1 && count(dom) >= 2 && count(other(dom)) == 0 {
+            if !out.iter().any(|(m, _)| m == n) {
+                out.push((n.clone(), dom));
             }
             return;
         }
         match n {
             Node::Leaf(_) => {}
-            Node::Monad(_, y) => walk(y, all, out),
+            Node::Monad(_, y) | Node::Scan(_, y) => walk(y, dom, all, out),
+            Node::Window(_, _, y) => walk(y, Dom::Wide, all, out),
             Node::Dyad(_, x, y) => {
-                walk(x, all, out);
-                walk(y, all, out);
+                walk(x, dom, all, out);
+                walk(y, dom, all, out);
             }
         }
     }
-    walk(n, &all, &mut out);
+    walk(n, Dom::Result, &all, &mut out);
     out
+}
+
+fn other(d: Dom) -> Dom {
+    match d {
+        Dom::Result => Dom::Wide,
+        Dom::Wide => Dom::Result,
+    }
 }
 
 /// Postfix code for the chain: the lets first, each into a slot of its own,
 /// then the chain that reads them.
-fn emit_all(n: &Node, lets: &[Node], code: &mut Vec<Instr>) {
-    for (k, l) in lets.iter().enumerate() {
+fn emit_all(n: &Node, lets: &[(Node, Dom)], code: &mut Vec<Instr>) {
+    for (k, (l, _)) in lets.iter().enumerate() {
         // A let is emitted from the lets before it, so it cannot read
         // itself; maximal repeats never nest, so there is nothing else.
         emit(l, &lets[..k], code);
@@ -323,8 +510,8 @@ fn emit_all(n: &Node, lets: &[Node], code: &mut Vec<Instr>) {
 }
 
 /// Postfix code for the chain: a dyad's left operand is pushed first.
-fn emit(n: &Node, lets: &[Node], code: &mut Vec<Instr>) {
-    if let Some(k) = lets.iter().position(|l| l == n) {
+fn emit(n: &Node, lets: &[(Node, Dom)], code: &mut Vec<Instr>) {
+    if let Some(k) = lets.iter().position(|(l, _)| l == n) {
         code.push(Instr::Let(k));
         return;
     }
@@ -333,6 +520,14 @@ fn emit(n: &Node, lets: &[Node], code: &mut Vec<Instr>) {
         Node::Monad(op, y) => {
             emit(y, lets, code);
             code.push(Instr::Monad(*op));
+        }
+        Node::Window(op, k, y) => {
+            emit(y, lets, code);
+            code.push(Instr::Window(*op, *k));
+        }
+        Node::Scan(op, y) => {
+            emit(y, lets, code);
+            code.push(Instr::Scan(*op));
         }
         Node::Dyad(op, x, y) => {
             emit(x, lets, code);
@@ -368,7 +563,7 @@ fn slots(code: &[Instr]) -> usize {
                 stack.pop();
                 continue;
             }
-            Instr::Monad(_) => 1,
+            Instr::Monad(_) | Instr::Window(..) | Instr::Scan(_) => 1,
             Instr::Dyad(_) => 2,
         };
         max = max.max(live + 1);
@@ -514,14 +709,39 @@ fn build<'a>(
     if let Some(s) = sub.as_mut() {
         s.hits = 0;
     }
+    let plan = plan_of(root, sub.as_ref());
     let mut lv = Leaves::default();
-    let node = chain(root, &mut lv, sub);
+    let node = chain(root, &mut lv, sub, plan, Dom::Result);
     if ops(&node) < least || !lv.inputs.iter().all(|l| replayable(l)) {
         return None;
     }
     let mut code = Vec::new();
-    emit_all(&node, &lets_of(&node), &mut code);
-    let kernel = FusedKernel { slots: slots(&code), code, yields, leaves: lv.order, tol };
+    let lets = lets_of(&node);
+    emit_all(&node, &lets, &mut code);
+    let window = code.iter().find_map(|i| match i {
+        Instr::Window(_, k) => Some(*k),
+        _ => None,
+    });
+    let scans = code.iter().filter(|i| matches!(i, Instr::Scan(_))).count();
+    // A running fold hands its accumulator from one block to the next, so
+    // its blocks run forwards and in order; an absorbed reduction folds
+    // them backwards, which is the insert's own order. A chain that wants
+    // both runs as the passes it was written as.
+    if scans > 0 && matches!(yields, Yield::Reduce(_)) {
+        return None;
+    }
+    let kernel = FusedKernel {
+        slots: slots(&code),
+        code,
+        yields,
+        leaves: lv.order,
+        doms: lv.doms,
+        let_doms: lets.iter().map(|(_, d)| *d).collect(),
+        plan,
+        window,
+        scans,
+        tol,
+    };
     Some((kernel, lv.inputs))
 }
 
@@ -571,20 +791,21 @@ fn try_fuse(e: &Expr, tol: Tol) -> Option<Expr> {
 /// time, which for a leaf like `19 }. {close}` is a whole array.
 pub(crate) fn fallback_tree(k: &FusedKernel, orig: &Expr, values: &[Array]) -> Expr {
     let mut next = 0;
+    let plan = k.plan;
     let tree = match orig {
         // An absorbed reduction sits above the chain; only the chain's own
         // leaves were evaluated.
         Expr::Monad { verb, y, span } if matches!(k.yields, Yield::Reduce(_)) => Expr::Monad {
             verb: verb.clone(),
-            y: Box::new(substitute(y, values, k, &mut next)),
+            y: Box::new(substitute(y, values, k, &mut next, plan, Dom::Result)),
             span: *span,
         },
         // A tally is not applied at all: the chain alone runs, and the
         // count of what it made is what the node yields.
         Expr::Monad { verb, y, .. } if k.yields == Yield::Tally && is_tally(verb) => {
-            substitute(y, values, k, &mut next)
+            substitute(y, values, k, &mut next, plan, Dom::Result)
         }
-        e => substitute(e, values, k, &mut next),
+        e => substitute(e, values, k, &mut next, plan, Dom::Result),
     };
     debug_assert_eq!(next, k.leaves.len(), "the fallback found different leaves");
     tree
@@ -602,17 +823,43 @@ pub(crate) fn fallback_finish(k: &FusedKernel, v: Array) -> Array {
 
 /// Walk the chain exactly as [`chain`] walked it, so the leaves take their
 /// values in the order they were numbered in.
-fn substitute(e: &Expr, values: &[Array], k: &FusedKernel, next: &mut usize) -> Expr {
+fn substitute(
+    e: &Expr,
+    values: &[Array],
+    k: &FusedKernel,
+    next: &mut usize,
+    plan: Plan,
+    dom: Dom,
+) -> Expr {
     match e {
         Expr::Monad { verb, y, span } if fusable_monad(verb).is_some() => Expr::Monad {
             verb: verb.clone(),
-            y: Box::new(substitute(y, values, k, next)),
+            y: Box::new(substitute(y, values, k, next, plan, dom)),
             span: *span,
         },
+        Expr::Monad { verb, y, span } if plan.scan && absorbable_scan(e).is_some() => {
+            Expr::Monad {
+                verb: verb.clone(),
+                y: Box::new(substitute(y, values, k, next, plan, dom)),
+                span: *span,
+            }
+        }
         Expr::Dyad { verb, x, y, span } if fusable_dyad(verb).is_some() => {
-            let ry = substitute(y, values, k, next);
-            let rx = substitute(x, values, k, next);
+            let ry = substitute(y, values, k, next, plan, dom);
+            let rx = substitute(x, values, k, next, plan, dom);
             Expr::Dyad { verb: verb.clone(), x: Box::new(rx), y: Box::new(ry), span: *span }
+        }
+        Expr::Dyad { verb, x, y, span }
+            if dom == Dom::Result
+                && absorbable_window(e).map(|(_, k)| k) == plan.window
+                && plan.window.is_some() =>
+        {
+            Expr::Dyad {
+                verb: verb.clone(),
+                x: x.clone(),
+                y: Box::new(substitute(y, values, k, next, plan, Dom::Wide)),
+                span: *span,
+            }
         }
         leaf => {
             let v = values[k.leaves[*next]].clone();
@@ -676,7 +923,7 @@ fn inlinable(stmts: &[Expr], i: usize, name: &str, value: &Expr, tol: Tol) -> bo
         return false;
     }
     let mut lv = Leaves::default();
-    if ops(&chain(value, &mut lv, &mut None)) < 1 {
+    if ops(&chain(value, &mut lv, &mut None, plan_of(value, None), Dom::Result)) < 1 {
         return false;
     }
     let mut guarded = vec![name.to_string()];
@@ -733,7 +980,8 @@ fn rewrite(
     tol: Tol,
 ) -> Option<Vec<Expr>> {
     let mut lv = Leaves::default();
-    chain(value, &mut lv, &mut None);
+    let plan = plan_of(value, None);
+    chain(value, &mut lv, &mut None, plan, Dom::Result);
     // A leaf that is more than a name or a constant becomes a sentence of
     // its own, evaluated once and where it was evaluated before.
     let mut hoists = Vec::new();
@@ -752,7 +1000,7 @@ fn rewrite(
         });
         bound.push(Some(n));
     }
-    let def = with_leaves(value, &lv, &bound);
+    let def = with_leaves(value, &lv, &bound, plan, Dom::Result);
     let (kernel, leaves) = build(&def, Yield::Tally, 1, &mut None, tol)?;
     let inputs = leaves.into_iter().map(|l| fuse_expr(l.clone(), tol)).collect();
     let guard = Expr::Assign {
@@ -775,19 +1023,38 @@ fn rewrite(
 
 /// The chain with its hoisted leaves replaced by the names they were bound
 /// to. Walks exactly as [`chain`] walks, so the leaves are the same ones.
-fn with_leaves(e: &Expr, lv: &Leaves<'_>, bound: &[Option<String>]) -> Expr {
+fn with_leaves(e: &Expr, lv: &Leaves<'_>, bound: &[Option<String>], plan: Plan, dom: Dom) -> Expr {
     match e {
         Expr::Monad { verb, y, span } if fusable_monad(verb).is_some() => Expr::Monad {
             verb: verb.clone(),
-            y: Box::new(with_leaves(y, lv, bound)),
+            y: Box::new(with_leaves(y, lv, bound, plan, dom)),
             span: *span,
         },
+        Expr::Monad { verb, y, span } if plan.scan && absorbable_scan(e).is_some() => {
+            Expr::Monad {
+                verb: verb.clone(),
+                y: Box::new(with_leaves(y, lv, bound, plan, dom)),
+                span: *span,
+            }
+        }
         Expr::Dyad { verb, x, y, span } if fusable_dyad(verb).is_some() => Expr::Dyad {
             verb: verb.clone(),
-            x: Box::new(with_leaves(x, lv, bound)),
-            y: Box::new(with_leaves(y, lv, bound)),
+            x: Box::new(with_leaves(x, lv, bound, plan, dom)),
+            y: Box::new(with_leaves(y, lv, bound, plan, dom)),
             span: *span,
         },
+        Expr::Dyad { verb, x, y, span }
+            if dom == Dom::Result
+                && absorbable_window(e).map(|(_, k)| k) == plan.window
+                && plan.window.is_some() =>
+        {
+            Expr::Dyad {
+                verb: verb.clone(),
+                x: x.clone(),
+                y: Box::new(with_leaves(y, lv, bound, plan, Dom::Wide)),
+                span: *span,
+            }
+        }
         leaf => {
             let bind = lv
                 .inputs
@@ -997,6 +1264,21 @@ fn dyad_type(op: ScalarDyad, a: DType, b: DType) -> Option<DType> {
     }
 }
 
+/// The dtype the unfused pipeline gives a fold over items of this type —
+/// a moving window's, or a running one's. Booleans fold as the integers
+/// they count as, which is what the windowed and scanning fast paths do.
+fn fold_type(op: ScalarDyad, a: DType) -> Option<DType> {
+    use ScalarDyad::*;
+    if !matches!(op, Add | Mul | Min | Max) {
+        return None;
+    }
+    match a {
+        DType::Bool | DType::I64 => Some(DType::I64),
+        DType::F64 => Some(DType::F64),
+        _ => None,
+    }
+}
+
 /// The type the kernel computes in, and the dtype of its mapped result.
 ///
 /// Every value in the program is computed in one type, so it must be one
@@ -1030,6 +1312,7 @@ pub(crate) fn working_type(k: &FusedKernel, inputs: &[Array]) -> Option<(DType, 
         let t = match ins {
             Instr::Load(i) => inputs[*i].dtype(),
             Instr::Monad(op) => monad_type(*op, stack.pop()?)?,
+            Instr::Window(op, _) | Instr::Scan(op) => fold_type(*op, stack.pop()?)?,
             Instr::Dyad(op) => {
                 let b = stack.pop()?;
                 let a = stack.pop()?;
@@ -1073,29 +1356,140 @@ pub(crate) fn working_type(k: &FusedKernel, inputs: &[Array]) -> Option<(DType, 
 
 // ------------------------------------------------------------- execution
 
+/// Where a value inside a block stands. A repeated scalar stands wherever
+/// it is read, so it takes the axis of whatever it is combined with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum On {
+    Result,
+    Wide,
+    Either,
+}
+
+fn combine(a: On, b: On) -> On {
+    if a == On::Either {
+        b
+    } else {
+        a
+    }
+}
+
+fn placed(d: Option<Dom>) -> On {
+    match d {
+        Some(Dom::Result) => On::Result,
+        Some(Dom::Wide) => On::Wide,
+        None => On::Either,
+    }
+}
+
+/// One block of work: the result items it writes, and the items of the wide
+/// axis its window steps read to write them.
+#[derive(Clone, Copy)]
+struct Extent {
+    start: usize,
+    len: usize,
+    wide_start: usize,
+    wide_len: usize,
+}
+
+impl Extent {
+    /// The block that writes result items `start .. start + len`.
+    ///
+    /// The window fold cuts the wide axis into runs of `k` counted from the
+    /// axis's own start and joins one run's suffix to the next run's
+    /// prefix, so which items a window is folded from, and in what
+    /// grouping, depend on where the window lies and never on where a block
+    /// boundary fell. This block therefore reads from the start of the run
+    /// its first window begins in to the end of the run its last item lies
+    /// in: the same arithmetic, item for item, as one pass over the whole
+    /// axis.
+    fn of(start: usize, len: usize, window: Option<usize>, wide: usize) -> Extent {
+        let Some(k) = window else {
+            return Extent { start, len, wide_start: start, wide_len: len };
+        };
+        let lo = start - start % k;
+        let hi = ((start + len + k - 2) / k + 1) * k;
+        Extent { start, len, wide_start: lo, wide_len: hi.min(wide) - lo }
+    }
+
+    fn len_on(&self, dom: On) -> usize {
+        match dom {
+            On::Wide => self.wide_len,
+            _ => self.len,
+        }
+    }
+}
+
 /// One input, in the working type: either the values themselves or one
 /// value repeated, which is how a rank-0 argument reaches every element.
 struct Loaded<'a, T> {
     data: &'a [T],
     splat: bool,
+    /// The axis the chain reads this input on.
+    on: On,
 }
 
 impl<T> Loaded<'_, T> {
     #[inline]
-    fn block(&self, start: usize, len: usize) -> &[T] {
+    fn block(&self, at: &Extent, dom: On) -> &[T] {
         if self.splat {
-            &self.data[..len]
-        } else {
-            &self.data[start..start + len]
+            return &self.data[..at.len_on(dom)];
+        }
+        let (start, len) = match self.on {
+            On::Wide => (at.wide_start, at.wide_len),
+            _ => (at.start, at.len),
+        };
+        &self.data[start..start + len]
+    }
+}
+
+/// What a stack entry refers to: an input, or a block buffer and the axis
+/// the value in it stands on.
+#[derive(Clone, Copy)]
+enum Slot {
+    Input(usize),
+    Block(usize, On),
+}
+
+/// The buffers one thread reuses from block to block.
+struct Scratch<T> {
+    cells: Vec<T>,
+    /// Elements one block buffer holds: a block's result items, and the
+    /// halo of the wide axis its window steps read around them.
+    width: usize,
+    free: Vec<usize>,
+    stack: Vec<Slot>,
+    lets: Vec<usize>,
+    /// One accumulator per running fold in the code, carried from block to
+    /// block so that the fold is the one the unfused scan performs.
+    carry: Vec<Option<T>>,
+}
+
+impl<T: Copy + Default> Scratch<T> {
+    /// Room for one thread's blocks of `w` result items each.
+    ///
+    /// A window step reads the run its first window begins in and the run
+    /// its last item lies in, so a block of `w` items reads fewer than
+    /// `w + 3k` items of the wide axis, and every buffer is that wide.
+    fn new(k: &FusedKernel, w: usize) -> Scratch<T> {
+        let width = w + 3 * k.window.unwrap_or(0);
+        Scratch {
+            cells: vec![T::default(); k.slots * width],
+            width,
+            free: Vec::with_capacity(k.slots),
+            stack: Vec::with_capacity(k.slots),
+            lets: Vec::new(),
+            carry: vec![None; k.scans],
         }
     }
 }
 
-/// What a stack entry refers to: an input, or a block buffer.
-#[derive(Clone, Copy)]
-enum Slot {
-    Input(usize),
-    Block(usize),
+/// The leaf loops one working type runs, one block of one instruction at a
+/// time. All of a kernel's arithmetic goes through these four.
+struct Steps<M, D, W, S> {
+    monad: M,
+    dyad: D,
+    window: W,
+    scan: S,
 }
 
 /// Block buffer `d` for writing, plus read-only access to the others.
@@ -1117,109 +1511,167 @@ fn split_slots<'s, T>(
     })
 }
 
-/// Run the kernel's map over elements `start .. start + len`.
+/// Run the kernel over one block.
 ///
 /// `out`, when given, receives the last instruction's result directly and
 /// the returned index means nothing; otherwise the result stays in the
-/// block buffer that index names. None means an integer step left i64 and
-/// the caller must fall back.
-#[allow(clippy::too_many_arguments)]
-fn exec_block<T, M, D>(
-    code: &[Instr],
+/// block buffer that index names. None means a step left the working type
+/// and the caller must fall back.
+fn exec_block<T, M, D, W, S>(
+    k: &FusedKernel,
     srcs: &[Loaded<'_, T>],
-    start: usize,
-    len: usize,
-    scratch: &mut [T],
-    w: usize,
-    free: &mut Vec<usize>,
-    stack: &mut Vec<Slot>,
-    lets: &mut Vec<usize>,
+    at: &Extent,
+    sc: &mut Scratch<T>,
     out: Option<&mut [T]>,
-    mon: &M,
-    dya: &D,
+    steps: &Steps<M, D, W, S>,
 ) -> Option<usize>
 where
     T: Copy,
     M: Fn(ScalarMonad, &[T], &mut [T]) -> bool,
     D: Fn(ScalarDyad, &[T], &[T], &mut [T]) -> bool,
+    W: Fn(ScalarDyad, usize, &[T], usize, &mut [T]) -> bool,
+    S: Fn(ScalarDyad, &[T], Option<T>, &mut [T]) -> Option<T>,
 {
+    let Scratch { cells, width, free, stack, lets, carry } = sc;
+    let w = *width;
     stack.clear();
     free.clear();
     lets.clear();
-    let nslots = scratch.len() / w;
+    let nslots = cells.len() / w;
     free.extend((0..nslots).rev());
-    let last = code.len() - 1;
-    let head = if out.is_some() { last } else { code.len() };
-    for ins in &code[..head] {
+    let place = |s: &Slot| match s {
+        Slot::Input(j) => srcs[*j].on,
+        Slot::Block(_, o) => *o,
+    };
+    let last = k.code.len() - 1;
+    let head = if out.is_some() { last } else { k.code.len() };
+    let mut scanned = 0usize;
+    for ins in &k.code[..head] {
         match ins {
-            Instr::Load(k) => stack.push(Slot::Input(*k)),
+            Instr::Load(j) => stack.push(Slot::Input(*j)),
             Instr::Monad(op) => {
                 let a = stack.pop()?;
+                let dom = place(&a);
+                let len = at.len_on(dom);
                 let d = free.pop()?;
-                let (dst, get) = split_slots(scratch, w, d);
+                let (dst, get) = split_slots(cells, w, d);
                 let av = match a {
-                    Slot::Input(k) => srcs[k].block(start, len),
-                    Slot::Block(i) => &get(i)[..len],
+                    Slot::Input(j) => srcs[j].block(at, dom),
+                    Slot::Block(i, _) => &get(i)[..len],
                 };
-                if !mon(*op, av, &mut dst[..len]) {
+                if !(steps.monad)(*op, av, &mut dst[..len]) {
                     return None;
                 }
                 release(free, lets, a);
-                stack.push(Slot::Block(d));
+                stack.push(Slot::Block(d, dom));
+            }
+            Instr::Scan(op) => {
+                let a = stack.pop()?;
+                let dom = place(&a);
+                let len = at.len_on(dom);
+                let d = free.pop()?;
+                let (dst, get) = split_slots(cells, w, d);
+                let av = match a {
+                    Slot::Input(j) => srcs[j].block(at, dom),
+                    Slot::Block(i, _) => &get(i)[..len],
+                };
+                carry[scanned] = Some((steps.scan)(*op, av, carry[scanned], &mut dst[..len])?);
+                scanned += 1;
+                release(free, lets, a);
+                stack.push(Slot::Block(d, dom));
+            }
+            Instr::Window(op, size) => {
+                let a = stack.pop()?;
+                let d = free.pop()?;
+                let (dst, get) = split_slots(cells, w, d);
+                let av = match a {
+                    Slot::Input(j) => srcs[j].block(at, On::Wide),
+                    Slot::Block(i, _) => &get(i)[..at.wide_len],
+                };
+                let first = at.start - at.wide_start;
+                if !(steps.window)(*op, *size, av, first, &mut dst[..at.len]) {
+                    return None;
+                }
+                release(free, lets, a);
+                stack.push(Slot::Block(d, On::Result));
             }
             Instr::Dyad(op) => {
                 let b = stack.pop()?;
                 let a = stack.pop()?;
+                let dom = combine(place(&a), place(&b));
+                let len = at.len_on(dom);
                 let d = free.pop()?;
-                let (dst, get) = split_slots(scratch, w, d);
+                let (dst, get) = split_slots(cells, w, d);
                 let av = match a {
-                    Slot::Input(k) => srcs[k].block(start, len),
-                    Slot::Block(i) => &get(i)[..len],
+                    Slot::Input(j) => srcs[j].block(at, dom),
+                    Slot::Block(i, _) => &get(i)[..len],
                 };
                 let bv = match b {
-                    Slot::Input(k) => srcs[k].block(start, len),
-                    Slot::Block(i) => &get(i)[..len],
+                    Slot::Input(j) => srcs[j].block(at, dom),
+                    Slot::Block(i, _) => &get(i)[..len],
                 };
-                if !dya(*op, av, bv, &mut dst[..len]) {
+                if !(steps.dyad)(*op, av, bv, &mut dst[..len]) {
                     return None;
                 }
                 for s in [a, b] {
                     release(free, lets, s);
                 }
-                stack.push(Slot::Block(d));
+                stack.push(Slot::Block(d, dom));
             }
-            Instr::Store(k) => {
-                let Slot::Block(i) = stack.pop()? else { return None };
-                if lets.len() != *k {
+            Instr::Store(j) => {
+                let Slot::Block(i, _) = stack.pop()? else { return None };
+                if lets.len() != *j {
                     return None;
                 }
                 lets.push(i);
             }
-            Instr::Let(k) => stack.push(Slot::Block(*lets.get(*k)?)),
+            // A let stands where the pass computed it, which is the one
+            // axis every repeat it stands for was written on.
+            Instr::Let(j) => {
+                stack.push(Slot::Block(*lets.get(*j)?, placed(Some(*k.let_doms.get(*j)?))))
+            }
         }
     }
     let Some(dst) = out else {
         return match stack.pop()? {
-            Slot::Block(i) => Some(i),
+            Slot::Block(i, _) => Some(i),
             // Every kernel ends in an operation, so the result is a buffer.
             Slot::Input(_) => None,
         };
     };
     // The last instruction writes the caller's buffer instead of a block.
-    let dst = &mut dst[..len];
-    let view = |s: Slot| match s {
-        Slot::Input(k) => srcs[k].block(start, len),
-        Slot::Block(i) => &scratch[i * w..i * w + len],
+    // The chain's root stands on the result's own axis, whatever its
+    // operands stand on.
+    let dst = &mut dst[..at.len];
+    let view = |s: Slot, dom: On| match s {
+        Slot::Input(j) => srcs[j].block(at, dom),
+        Slot::Block(i, o) => &cells[i * w..i * w + at.len_on(o)],
     };
-    let ok = match code[last] {
+    let ok = match k.code[last] {
         Instr::Monad(op) => {
-            let a = view(stack.pop()?);
-            mon(op, a, dst)
+            let a = stack.pop()?;
+            (steps.monad)(op, view(a, On::Result), dst)
+        }
+        Instr::Scan(op) => {
+            let a = stack.pop()?;
+            match (steps.scan)(op, view(a, On::Result), carry[scanned], dst) {
+                Some(c) => {
+                    carry[scanned] = Some(c);
+                    true
+                }
+                None => false,
+            }
+        }
+        Instr::Window(op, size) => {
+            let a = stack.pop()?;
+            let first = at.start - at.wide_start;
+            (steps.window)(op, size, view(a, On::Wide), first, dst)
         }
         Instr::Dyad(op) => {
             let b = stack.pop()?;
             let a = stack.pop()?;
-            dya(op, view(a), view(b), dst)
+            let dom = combine(place(&a), place(&b));
+            (steps.dyad)(op, view(a, dom), view(b, dom), dst)
         }
         // A kernel ends in the operation that makes its result.
         Instr::Load(_) | Instr::Store(_) | Instr::Let(_) => return None,
@@ -1230,52 +1682,47 @@ where
 /// Give a block buffer back, unless a let is holding it for the rest of
 /// the block.
 fn release(free: &mut Vec<usize>, lets: &[usize], s: Slot) {
-    if let Slot::Block(i) = s && !lets.contains(&i) {
+    if let Slot::Block(i, _) = s
+        && !lets.contains(&i)
+    {
         free.push(i);
     }
 }
 
 /// The whole mapped result, one block at a time. None on integer overflow.
-fn map_pass<T, M, D>(
+fn map_pass<T, M, D, W, S>(
     k: &FusedKernel,
     srcs: &[Loaded<'_, T>],
     n: usize,
-    mon: M,
-    dya: D,
+    wide: usize,
+    steps: &Steps<M, D, W, S>,
 ) -> Option<Vec<T>>
 where
     T: Copy + Default + Send + Sync,
     M: Fn(ScalarMonad, &[T], &mut [T]) -> bool + Sync + Send,
     D: Fn(ScalarDyad, &[T], &[T], &mut [T]) -> bool + Sync + Send,
+    W: Fn(ScalarDyad, usize, &[T], usize, &mut [T]) -> bool + Sync + Send,
+    S: Fn(ScalarDyad, &[T], Option<T>, &mut [T]) -> Option<T> + Sync + Send,
 {
-    let (out, ok) = par::fill(n, |start, part: &mut [T]| {
+    let run = |start: usize, part: &mut [T]| {
         let w = BLOCK.min(part.len()).max(1);
-        let mut scratch = vec![T::default(); k.slots * w];
-        let mut free = Vec::with_capacity(k.slots);
-        let mut stack = Vec::with_capacity(k.slots);
-        let mut lets = Vec::new();
+        let mut sc = Scratch::new(k, w);
         for (b, chunk) in part.chunks_mut(w).enumerate() {
-            let len = chunk.len();
-            let ok = exec_block(
-                &k.code,
-                srcs,
-                start + b * w,
-                len,
-                &mut scratch,
-                w,
-                &mut free,
-                &mut stack,
-                &mut lets,
-                Some(chunk),
-                &mon,
-                &dya,
-            );
-            if ok.is_none() {
+            let at = Extent::of(start + b * w, chunk.len(), k.window, wide);
+            if exec_block(k, srcs, &at, &mut sc, Some(chunk), steps).is_none() {
                 return false;
             }
         }
         true
-    });
+    };
+    if k.scans > 0 {
+        // A running fold hands its accumulator to the next block, so the
+        // blocks run in one order on one thread. That is the order the
+        // unfused scan runs them in, and it rounds where that rounds.
+        let mut out = vec![T::default(); n];
+        return run(0, &mut out).then_some(out);
+    }
+    let (out, ok) = par::fill(n, run);
     ok.then_some(out)
 }
 
@@ -1334,38 +1781,36 @@ multiversioned! {
 }
 
 /// Fold the mapped values of `lo .. hi` right to left, block by block.
-#[allow(clippy::too_many_arguments)]
-fn fold_range<T, M, D, S>(
+fn fold_range<T, M, D, W, C, S>(
     k: &FusedKernel,
     srcs: &[Loaded<'_, T>],
     lo: usize,
     hi: usize,
-    mon: &M,
-    dya: &D,
+    wide: usize,
+    steps: &Steps<M, D, W, C>,
     step: &S,
 ) -> Option<T>
 where
     T: Copy + Default,
     M: Fn(ScalarMonad, &[T], &mut [T]) -> bool,
     D: Fn(ScalarDyad, &[T], &[T], &mut [T]) -> bool,
+    W: Fn(ScalarDyad, usize, &[T], usize, &mut [T]) -> bool,
+    C: Fn(ScalarDyad, &[T], Option<T>, &mut [T]) -> Option<T>,
     S: Fn(T, T) -> Option<T>,
 {
     let w = BLOCK.min(hi - lo).max(1);
-    let mut scratch = vec![T::default(); k.slots * w];
-    let mut free = Vec::with_capacity(k.slots);
-    let mut stack = Vec::with_capacity(k.slots);
-    let mut lets = Vec::new();
+    let mut sc = Scratch::new(k, w);
     let mut acc: Option<T> = None;
     // Blocks run backwards and the accumulator carries across them, so the
     // fold is the insert's own right-to-left order over the whole range.
+    // Nothing a block computes depends on the block before it: a running
+    // fold, which would, is never absorbed under a reduction.
     for b in (0..(hi - lo).div_ceil(w)).rev() {
         let start = lo + b * w;
         let len = (hi - start).min(w);
-        let slot = exec_block(
-            &k.code, srcs, start, len, &mut scratch, w, &mut free, &mut stack, &mut lets, None,
-            mon, dya,
-        )?;
-        let block = fold_block(&scratch[slot * w..slot * w + len], step)?;
+        let at = Extent::of(start, len, k.window, wide);
+        let slot = exec_block(k, srcs, &at, &mut sc, None, steps)?;
+        let block = fold_block(&sc.cells[slot * sc.width..slot * sc.width + len], step)?;
         acc = Some(match acc {
             None => block,
             Some(a) => step(block, a)?,
@@ -1375,27 +1820,29 @@ where
 }
 
 /// The mapped values folded into one. None on integer overflow.
-fn reduce_pass<T, M, D, S>(
+fn reduce_pass<T, M, D, W, C, S>(
     k: &FusedKernel,
     srcs: &[Loaded<'_, T>],
     n: usize,
-    mon: M,
-    dya: D,
+    wide: usize,
+    steps: &Steps<M, D, W, C>,
     step: S,
 ) -> Option<T>
 where
     T: Copy + Default + Send + Sync,
     M: Fn(ScalarMonad, &[T], &mut [T]) -> bool + Sync + Send,
     D: Fn(ScalarDyad, &[T], &[T], &mut [T]) -> bool + Sync + Send,
+    W: Fn(ScalarDyad, usize, &[T], usize, &mut [T]) -> bool + Sync + Send,
+    C: Fn(ScalarDyad, &[T], Option<T>, &mut [T]) -> Option<T> + Sync + Send,
     S: Fn(T, T) -> Option<T> + Sync + Send,
 {
     let chunks = par::chunks(n, n * k.code.len());
     if chunks < 2 {
-        return fold_range(k, srcs, 0, n, &mon, &dya, &step);
+        return fold_range(k, srcs, 0, n, wide, steps, &step);
     }
     let per = n.div_ceil(chunks);
     let parts = par::map_indexed(n.div_ceil(per), |c| {
-        fold_range(k, srcs, c * per, ((c + 1) * per).min(n), &mon, &dya, &step)
+        fold_range(k, srcs, c * per, ((c + 1) * per).min(n), wide, steps, &step)
     });
     // The chunks combine right to left, the order they were folded in. That
     // regroups an associative float fold, which is the §5.9 contract; only
@@ -1618,6 +2065,93 @@ multiversioned! {
     fn dyad_i64(op: ScalarDyad, a: &[i64], b: &[i64], dst: &mut [i64]) -> bool = dyad_i64_body;
 }
 
+/// One block's running fold, continued from the accumulator the block
+/// before it left. None when a step left the element type.
+///
+/// The accumulator runs the length of the argument, one step per item, in
+/// the order the unfused scan takes them: what the fused kernel saves is
+/// the traffic around the scan, not the scan.
+#[inline(always)]
+fn scan_block_body<T, F>(v: &[T], carry: Option<T>, dst: &mut [T], step: &F) -> Option<T>
+where
+    T: Copy,
+    F: Fn(T, T) -> (T, bool),
+{
+    let mut over = false;
+    let (mut acc, from) = match carry {
+        Some(a) => (a, 0),
+        None => {
+            // The first item of a scan is the item itself.
+            dst[0] = v[0];
+            (v[0], 1)
+        }
+    };
+    for (slot, &x) in dst.iter_mut().zip(v).skip(from) {
+        let (r, o) = step(acc, x);
+        acc = r;
+        over |= o;
+        *slot = acc;
+    }
+    (!over).then_some(acc)
+}
+
+multiversioned! {
+    /// One block of a running fold. The steps depend on one another, so
+    /// what a wider vector reaches here is the loop around them.
+    fn scan_block[T: Copy, F: Fn(T, T) -> (T, bool)](
+        v: &[T],
+        carry: Option<T>,
+        dst: &mut [T],
+        step: &F,
+    ) -> Option<T> = scan_block_body;
+}
+
+/// The windows of a block of floats, folded one per result item. The step
+/// is chosen before the fold so that the fold itself is one plain loop.
+fn window_pass_f64(op: ScalarDyad, k: usize, v: &[f64], first: usize, dst: &mut [f64]) -> bool {
+    use ScalarDyad::*;
+    match op {
+        Add => windows_into(v, k, first, dst, &|a: f64, b: f64| (a + b, false)),
+        Mul => windows_into(v, k, first, dst, &|a: f64, b: f64| (a * b, false)),
+        Min => windows_into(v, k, first, dst, &|a: f64, b: f64| (a.min(b), false)),
+        Max => windows_into(v, k, first, dst, &|a: f64, b: f64| (a.max(b), false)),
+        _ => false,
+    }
+}
+
+fn window_pass_i64(op: ScalarDyad, k: usize, v: &[i64], first: usize, dst: &mut [i64]) -> bool {
+    use ScalarDyad::*;
+    match op {
+        Add => windows_into(v, k, first, dst, &i64::overflowing_add),
+        Mul => windows_into(v, k, first, dst, &i64::overflowing_mul),
+        Min => windows_into(v, k, first, dst, &|a: i64, b: i64| (a.min(b), false)),
+        Max => windows_into(v, k, first, dst, &|a: i64, b: i64| (a.max(b), false)),
+        _ => false,
+    }
+}
+
+fn scan_pass_f64(op: ScalarDyad, v: &[f64], carry: Option<f64>, dst: &mut [f64]) -> Option<f64> {
+    use ScalarDyad::*;
+    match op {
+        Add => scan_block(v, carry, dst, &|a: f64, b: f64| (a + b, false)),
+        Mul => scan_block(v, carry, dst, &|a: f64, b: f64| (a * b, false)),
+        Min => scan_block(v, carry, dst, &|a: f64, b: f64| (a.min(b), false)),
+        Max => scan_block(v, carry, dst, &|a: f64, b: f64| (a.max(b), false)),
+        _ => None,
+    }
+}
+
+fn scan_pass_i64(op: ScalarDyad, v: &[i64], carry: Option<i64>, dst: &mut [i64]) -> Option<i64> {
+    use ScalarDyad::*;
+    match op {
+        Add => scan_block(v, carry, dst, &i64::overflowing_add),
+        Mul => scan_block(v, carry, dst, &i64::overflowing_mul),
+        Min => scan_block(v, carry, dst, &|a: i64, b: i64| (a.min(b), false)),
+        Max => scan_block(v, carry, dst, &|a: i64, b: i64| (a.max(b), false)),
+        _ => None,
+    }
+}
+
 /// One fold step of an absorbed reduction. None on integer overflow.
 fn step_i64(op: ScalarDyad, a: i64, b: i64) -> Option<i64> {
     use ScalarDyad::*;
@@ -1708,14 +2242,72 @@ pub(crate) fn common_shape(inputs: &[Array]) -> Option<Option<Vec<usize>>> {
     Some(shape.cloned())
 }
 
+/// The axes a kernel's inputs stand on: the shape of its result, and the
+/// length of the wide axis its window steps read.
+///
+/// This is the whole of the alignment rule, and it is decided by shapes
+/// alone. Where a chain reads an input is settled when the chain is built —
+/// everything under a window step is wide — so all that is left at run time
+/// is that the inputs on one axis agree with each other, and that the two
+/// axes stand `k - 1` items apart. `19 }. y` beside `20 +/\ y` passes
+/// because it is 19 items shorter; `18 }. y` beside it does not, and the
+/// chain runs and raises the length error it was going to raise. Nothing is
+/// shifted or padded here: an input arrives as the items it holds.
+struct Axes {
+    shape: Vec<usize>,
+    /// Items of the wide axis, when there is a window step to read it.
+    wide: usize,
+}
+
+fn axes(k: &FusedKernel, inputs: &[Array]) -> Option<Axes> {
+    let Some(window) = k.window else {
+        // Every input a scalar: no work worth blocking, and a reduction
+        // would need the leading axis a scalar has not got.
+        let shape = common_shape(inputs)??;
+        // A running fold folds items, and a block of this kernel is
+        // elements: over anything but a vector the two are not the same
+        // fold, so a higher-rank argument goes the way it went.
+        if k.scans > 0 && shape.len() != 1 {
+            return None;
+        }
+        return Some(Axes { shape, wide: 0 });
+    };
+    let (mut wide, mut result) = (None, None);
+    for (a, dom) in inputs.iter().zip(&k.doms) {
+        // A scalar reaches every item of whatever it is combined with, so
+        // it stands on either axis and constrains neither.
+        if a.rank() == 0 {
+            continue;
+        }
+        // A window folds the items of a vector. An input the chain reads on
+        // both axes cannot be two lengths at once.
+        let (Some(d), 1) = (dom, a.rank()) else { return None };
+        let seen = if *d == Dom::Wide { &mut wide } else { &mut result };
+        match seen {
+            None => *seen = Some(a.shape[0]),
+            Some(m) if *m == a.shape[0] => {}
+            Some(_) => return None,
+        }
+    }
+    let wide = wide?;
+    if wide < window {
+        // No window fits: the result has no items, which the chain builds
+        // out of the verb's own answer for an empty argument.
+        return None;
+    }
+    let count = wide - window + 1;
+    if result.is_some_and(|m| m != count) {
+        return None;
+    }
+    Some(Axes { shape: vec![count], wide })
+}
+
 /// Run a fused node. None means the kernel declined and the caller must
 /// evaluate the original subtree, which is always allowed to be slower and
 /// never allowed to differ.
 pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
     let reducing = matches!(k.yields, Yield::Reduce(_));
-    // Every input a scalar: no work worth blocking, and a reduction would
-    // need the leading axis a scalar has not got.
-    let shape = common_shape(inputs)??;
+    let Axes { shape, wide } = axes(k, inputs)?;
     let n: usize = shape.iter().product();
     if n == 0 {
         return None;
@@ -1732,30 +2324,40 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
         // error. There is nothing else a tally wants from the values.
         return Some(Array::scalar_i64(shape[0] as i64));
     }
-    let w = BLOCK.min(n).max(1);
+    // A repeated scalar is one block long, and a block reads its window
+    // halo as well as its own items.
+    let w = BLOCK.min(n).max(1) + 3 * k.window.unwrap_or(0);
     // The kernel's comparisons carry the tolerance the program was compiled
     // with, so a fused comparison answers as the unfused one does.
     let tol = k.tol;
-    let cmp_f64 = move |op, a: &[f64], b: &[f64], dst: &mut [f64]| dyad_f64(op, a, b, dst, tol);
-    let sign_f64 = move |op, a: &[f64], dst: &mut [f64]| monad_f64(op, a, dst, tol);
+    let on = |j: usize| placed(k.doms[j]);
 
     let data = if working == DType::F64 {
+        let steps = Steps {
+            monad: move |op, a: &[f64], dst: &mut [f64]| monad_f64(op, a, dst, tol),
+            dyad: move |op, a: &[f64], b: &[f64], dst: &mut [f64]| dyad_f64(op, a, b, dst, tol),
+            window: window_pass_f64,
+            scan: scan_pass_f64,
+        };
         let owned: Vec<Option<Vec<f64>>> = inputs.iter().map(|a| to_f64(a, w)).collect();
         let srcs: Vec<Loaded<f64>> = inputs
             .iter()
             .zip(&owned)
-            .map(|(a, o)| match o {
-                Some(v) => Loaded { data: v, splat: a.rank() == 0 },
-                None => Loaded { data: a.as_f64_slice().unwrap_or(&[]), splat: false },
+            .enumerate()
+            .map(|(j, (a, o))| match o {
+                Some(v) => Loaded { data: v, splat: a.rank() == 0, on: on(j) },
+                None => {
+                    Loaded { data: a.as_f64_slice().unwrap_or(&[]), splat: false, on: on(j) }
+                }
             })
             .collect();
         match k.reduce() {
             None => {
-                let out = map_pass(k, &srcs, n, sign_f64, cmp_f64)?;
+                let out = map_pass(k, &srcs, n, wide, &steps)?;
                 float_result(out, root)
             }
             Some(op) => {
-                let v = reduce_pass(k, &srcs, n, sign_f64, cmp_f64, |a, b| step_f64(op, a, b))?;
+                let v = reduce_pass(k, &srcs, n, wide, &steps, |a, b| step_f64(op, a, b))?;
                 // A comparison at the root maps to exact 0 and 1, which the
                 // fold keeps exact; the reduction of booleans is integer.
                 match root {
@@ -1765,23 +2367,31 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
             }
         }
     } else {
+        let steps = Steps {
+            monad: monad_i64,
+            dyad: dyad_i64,
+            window: window_pass_i64,
+            scan: scan_pass_i64,
+        };
         let owned: Vec<Option<Vec<i64>>> = inputs.iter().map(|a| to_i64(a, w)).collect();
         let srcs: Vec<Loaded<i64>> = inputs
             .iter()
             .zip(&owned)
-            .map(|(a, o)| match o {
-                Some(v) => Loaded { data: v, splat: a.rank() == 0 },
-                None => Loaded { data: a.as_i64_slice().unwrap_or(&[]), splat: false },
+            .enumerate()
+            .map(|(j, (a, o))| match o {
+                Some(v) => Loaded { data: v, splat: a.rank() == 0, on: on(j) },
+                None => {
+                    Loaded { data: a.as_i64_slice().unwrap_or(&[]), splat: false, on: on(j) }
+                }
             })
             .collect();
         match k.reduce() {
             None => {
-                let out = map_pass(k, &srcs, n, monad_i64, dyad_i64)?;
+                let out = map_pass(k, &srcs, n, wide, &steps)?;
                 int_result(out, root)
             }
             Some(op) => {
-                let v =
-                    reduce_pass(k, &srcs, n, monad_i64, dyad_i64, |a, b| step_i64(op, a, b))?;
+                let v = reduce_pass(k, &srcs, n, wide, &steps, |a, b| step_i64(op, a, b))?;
                 Data::I64(vec![v].into())
             }
         }
@@ -1829,6 +2439,9 @@ pub enum Decline {
     /// The preconditions held, so a step went out of range mid-block:
     /// integer overflow, which the chain redoes in a wider type.
     Overflow,
+    /// A window step wants one vector axis longer than the window, and
+    /// every other input aligned on the window's last item.
+    Window,
 }
 
 impl Decline {
@@ -1839,6 +2452,7 @@ impl Decline {
             Decline::ReduceShape => "the reduction needs one axis of two or more items",
             Decline::WorkingType => "no single working type holds every step exactly",
             Decline::Overflow => "an integer step left 64-bit range",
+            Decline::Window => "the window does not fit the axis, or the inputs are not aligned with it",
         }
     }
 }
@@ -1850,8 +2464,8 @@ impl Decline {
 /// see in advance is an overflow — which is what is left when every
 /// precondition holds.
 pub fn decline_reason(k: &FusedKernel, inputs: &[Array]) -> Option<Decline> {
-    let Some(Some(shape)) = common_shape(inputs) else {
-        return Some(Decline::Agreement);
+    let Some(Axes { shape, .. }) = axes(k, inputs) else {
+        return Some(if k.window.is_some() { Decline::Window } else { Decline::Agreement });
     };
     let n: usize = shape.iter().product();
     if n == 0 {
@@ -1872,7 +2486,7 @@ pub struct Summary {
     /// Arithmetic steps: the monads and dyads, not the loads and stores.
     pub ops: usize,
     /// Those steps in the order the kernel performs them.
-    pub op_names: Vec<&'static str>,
+    pub op_names: Vec<String>,
     /// The reduction folded into the same pass, if there is one.
     pub reduce: Option<&'static str>,
     /// True when the whole chain collapsed to a count of its own items.
@@ -1883,6 +2497,10 @@ pub struct Summary {
     pub inputs: usize,
     /// Elements one block buffer holds.
     pub block: usize,
+    /// The window every window step folds, when the kernel has one.
+    pub window: Option<usize>,
+    /// Running folds the kernel carries from block to block.
+    pub scans: usize,
 }
 
 impl std::fmt::Display for Summary {
@@ -1900,18 +2518,26 @@ impl std::fmt::Display for Summary {
         if self.lets > 0 {
             write!(f, "; {} let slot{}", self.lets, if self.lets == 1 { "" } else { "s" })?;
         }
+        if let Some(k) = self.window {
+            write!(f, "; window {k}")?;
+        }
+        if self.scans > 0 {
+            write!(f, "; {} running fold{}", self.scans, if self.scans == 1 { "" } else { "s" })?;
+        }
         write!(f, "; block {}", self.block)
     }
 }
 
 /// Describe a compiled kernel: what it computes, and with what.
 pub fn summary(k: &FusedKernel) -> Summary {
-    let mut op_names = Vec::new();
+    let mut op_names: Vec<String> = Vec::new();
     let mut lets = 0usize;
     for ins in &k.code {
         match ins {
-            Instr::Monad(op) => op_names.push(monad_name(*op)),
-            Instr::Dyad(op) => op_names.push(dyad_name(*op)),
+            Instr::Monad(op) => op_names.push(monad_name(*op).to_string()),
+            Instr::Dyad(op) => op_names.push(dyad_name(*op).to_string()),
+            Instr::Window(op, k) => op_names.push(format!("{k} {}/\\", dyad_name(*op))),
+            Instr::Scan(op) => op_names.push(format!("{}/\\", dyad_name(*op))),
             Instr::Store(_) => lets += 1,
             Instr::Load(_) | Instr::Let(_) => {}
         }
@@ -1924,6 +2550,8 @@ pub fn summary(k: &FusedKernel) -> Summary {
         lets,
         inputs: k.leaves.iter().copied().max().map_or(0, |m| m + 1),
         block: BLOCK,
+        window: k.window,
+        scans: k.scans,
     }
 }
 

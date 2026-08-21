@@ -64,6 +64,22 @@ fn a_fused_chain_is_marked_with_what_its_kernel_holds() {
 }
 
 #[test]
+fn a_window_stage_shows_the_window_it_folds() {
+    let text = explain("(3 }. 1.0 2 3 4 5 6) - (4 +/\\ 1.0 2 3 4 5 6) % 4");
+    assert_has(&text, "fused kernel (");
+    assert_has(&text, "4 +/\\");
+    assert_has(&text, "window 4");
+    assert_has(&text, "[kernel ran]");
+}
+
+#[test]
+fn a_running_fold_shows_as_a_stage_of_its_own() {
+    let text = explain("1 + +/\\ 2 * 1.0 2 3 4");
+    assert_has(&text, "+/\\");
+    assert_has(&text, "1 running fold");
+}
+
+#[test]
 fn a_program_the_pass_rewrote_names_what_it_inlined() {
     let text = explain("m =. +/ 1.0 2 3\nd =. 1.0 2 3 - m\n+/ d * d");
     assert_has(&text, "inlined into kernels: d");
