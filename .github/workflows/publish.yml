@@ -88,8 +88,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.85"
           targets: ${{ matrix.triple }}
       - run: cargo build --release -p libjay-capi --target ${{ matrix.triple }}
       - name: Bundle
@@ -177,7 +178,9 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
       - run: cargo publish -p libjay
