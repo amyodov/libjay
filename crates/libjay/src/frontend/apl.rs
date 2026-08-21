@@ -168,6 +168,11 @@ enum OpGlyph {
     Before,
     /// `⌸` key (Dyalog): each distinct major cell with what shares it.
     Key,
+    /// `.` between two functions: the inner product, `+.×` above all. The
+    /// operand on its right is a function too, as `∘.`'s is.
+    Dot,
+    /// `⍠` variant: one dialect knob overridden for this application.
+    Variant,
 }
 
 impl OpGlyph {
@@ -187,6 +192,8 @@ impl OpGlyph {
             OpGlyph::Each => '¨',
             OpGlyph::Before => '⍛',
             OpGlyph::Key => '⌸',
+            OpGlyph::Dot => '.',
+            OpGlyph::Variant => '⍠',
         }
     }
 }
@@ -667,7 +674,6 @@ fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
 /// it under. These are queue positions, not unknown characters.
 fn queued_glyph(ch: char) -> Option<&'static str> {
     Some(match ch {
-        '⍠' => "the variant operator (f⍠v)",
         '⌶' => "I-beam (⌶)",
         // Dyalog's spawn. Named as a queue position rather than reported as
         // an unknown character; whether libjay's sandbox opens APL's
@@ -693,6 +699,10 @@ fn op_for(ch: char) -> Option<OpGlyph> {
         '¨' => Some(OpGlyph::Each),
         '⍛' => Some(OpGlyph::Before),
         '⌸' => Some(OpGlyph::Key),
+        '⍠' => Some(OpGlyph::Variant),
+        // A `.` that is not the start of a number and not the tail of `∘.`
+        // is the inner-product operator.
+        '.' => Some(OpGlyph::Dot),
         _ => None,
     }
 }
@@ -1252,7 +1262,10 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         }
         // `f∘g` and `f⍥g` need a function on both sides; the right one is
         // taken here so the ordinary "operand to the left" path can run.
-        if matches!(op, OpGlyph::Jot | OpGlyph::Over | OpGlyph::Before | OpGlyph::Under) {
+        if matches!(
+            op,
+            OpGlyph::Jot | OpGlyph::Over | OpGlyph::Before | OpGlyph::Under | OpGlyph::Dot
+        ) {
             let Some(gtok) = it.peek().filter(|x| matches!(x.kind, Tok::Func(_))) else {
                 return Err(Error::not_yet(
                     format!("{} with a value operand", op.glyph()),
@@ -1288,6 +1301,13 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     let composed = Verb::Compose(Box::new(f), Box::new(g));
                     Verb::Atop(Box::new(back), Box::new(composed))
                 }
+                // `f.g` folds with f what g made of every row and column:
+                // `+.×` is the matrix product, `∧.=` asks which rows match.
+                OpGlyph::Dot => Verb::InnerProduct {
+                    u: Box::new(Verb::Reduce(Box::new(f))),
+                    v: Box::new(g),
+                    apl: true,
+                },
                 _ => Verb::Compose(Box::new(f), Box::new(g)),
             };
             out.push(Token { kind: Tok::Func(derived), span });
@@ -1315,6 +1335,8 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     | OpGlyph::Stencil
                     | OpGlyph::Before
                     | OpGlyph::Key
+                    | OpGlyph::Dot
+                    | OpGlyph::Variant
                     | OpGlyph::Each => {
                         return Err(Error::parse(
                             format!("{} needs a function to its left", op.glyph()),
@@ -1375,6 +1397,19 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             }
             OpGlyph::Commute => Verb::Commute(Box::new(f)),
             OpGlyph::Key => Verb::KeyPairs(Box::new(f)),
+            // `f⍠B`: one setting of the dialect overridden for this
+            // application and no other.
+            OpGlyph::Variant => {
+                let (options, ospan) = variant_options(&mut it, t.span)?;
+                let derived = variant(f, &options, Span::merge(span, ospan))?;
+                out.push(Token { kind: Tok::Func(derived), span: Span::merge(span, ospan) });
+                continue;
+            }
+            // `.` reached with no function on its right: `+.` alone is not
+            // a function in either lineage.
+            OpGlyph::Dot => {
+                return Err(Error::parse("the inner product . needs a function on its right", t.span));
+            }
             // Each: the function runs on the contents of every item and
             // its result goes back into an item. A simple scalar result
             // stays simple, which is APL's enclosure rule.
@@ -1505,6 +1540,119 @@ fn take_axis(
         return Err(Error::domain(format!("axis {} does not exist", k + origin), spec.span));
     }
     Ok(Some((k as usize, span)))
+}
+
+/// The options `⍠` was given, as `(name, value)` pairs.
+///
+/// A bare number is the PRINCIPAL option, which for every function libjay
+/// gives a variant is the comparison tolerance — so it arrives here named
+/// `CT`. The other published spelling is one or more parenthesised pairs,
+/// `⍠('IO' 0)` and `⍠('IO' 0)('CT' 0)`, whose halves are both literals.
+/// A computed option is a named gap: the variant is settled when the
+/// program is compiled, as the dialect it overrides is.
+fn variant_options(
+    it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
+    span: Span,
+) -> Result<(Vec<(String, Array)>, Span)> {
+    if let Some(tok) = it.peek().filter(|t| literal(&t.kind).is_some()) {
+        let (value, vspan) = (literal(&tok.kind).expect("peeked a literal").clone(), tok.span);
+        it.next();
+        return Ok((vec![("CT".to_string(), value)], vspan));
+    }
+    let mut options = Vec::new();
+    let mut last = span;
+    while it.peek().is_some_and(|t| matches!(t.kind, Tok::LParen)) {
+        it.next();
+        let mut inside: Vec<Array> = Vec::new();
+        loop {
+            let Some(tok) = it.next() else {
+                return Err(Error::parse("unmatched ( after ⍠", span));
+            };
+            last = tok.span;
+            if matches!(tok.kind, Tok::RParen) {
+                break;
+            }
+            match literal(&tok.kind) {
+                Some(a) => inside.push(a.clone()),
+                None => {
+                    return Err(Error::not_yet(
+                        "a computed variant option (f⍠v with a name or an expression)",
+                        tok.span,
+                    ));
+                }
+            }
+        }
+        let [name, value] = inside.as_slice() else {
+            return Err(Error::parse("a variant option is a name and a value", last));
+        };
+        let Data::Char(cs) = &name.data else {
+            return Err(Error::parse("a variant option starts with its name", last));
+        };
+        options.push((cs.as_slice().iter().collect::<String>().to_uppercase(), value.clone()));
+    }
+    if options.is_empty() {
+        let where_ = it.peek().map_or(span, |t| t.span);
+        return Err(Error::not_yet(
+            "a computed variant option (f⍠v with a name or an expression)",
+            where_,
+        ));
+    }
+    Ok((options, last))
+}
+
+/// `f⍠B`: f with the dialect settings B names overridden for this
+/// application. `CT` is the comparison tolerance, which is the same
+/// mechanism J spells `!.`; `IO` is the index origin, which is resolved
+/// into the primitives when the program is compiled, so overriding it
+/// derives the verb again.
+fn variant(f: Verb, options: &[(String, Array)], span: Span) -> Result<Verb> {
+    let mut out = f;
+    for (name, value) in options {
+        out = match name.as_str() {
+            "CT" => {
+                let Some(ct) = value.to_f64_vec().and_then(|v| v.first().copied()) else {
+                    return Err(Error::domain("a comparison tolerance is a number", span));
+                };
+                if !out.uses_tolerance() {
+                    return Err(Error::domain(
+                        format!(
+                            "the comparison tolerance is not an option of {}: it consults none",
+                            out.name()
+                        ),
+                        span,
+                    ));
+                }
+                if !(0.0..1.0).contains(&ct) {
+                    return Err(Error::domain(
+                        "a comparison tolerance lies between 0 and 1",
+                        span,
+                    ));
+                }
+                Verb::Fit(Box::new(out), ct)
+            }
+            "IO" => {
+                let Some(io) = value.to_i64_vec().and_then(|v| v.first().copied()) else {
+                    return Err(Error::domain("an index origin is a whole number", span));
+                };
+                if io != 0 && io != 1 {
+                    return Err(Error::domain("an index origin is 0 or 1", span));
+                }
+                crate::verb::with_origin(&out, io).ok_or_else(|| {
+                    Error::domain(
+                        format!("the index origin is not an option of {}", out.name()),
+                        span,
+                    )
+                })?
+            }
+            other => {
+                return Err(Error::not_yet(
+                    format!("the variant option {other} (f⍠v)"),
+                    span,
+                ));
+            }
+        };
+    }
+    Ok(out)
 }
 
 /// `(/)` is `/`: parentheses around a bare operator glyph are transparent,

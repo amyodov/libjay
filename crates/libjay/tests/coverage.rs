@@ -684,8 +684,8 @@ fn apl_table_makes_a_matrix() {
 #[test]
 fn newly_spelled_words_name_what_they_still_lack() {
     let cases = [
-        (Lang::J, "2 ;: 'a b'", "sequential machine"),
-        (Lang::J, "2 \": 1.5", "format with a specification"),
+        (Lang::J, "2 $. 1 2", "sparse arrays"),
+        (Lang::J, "2 s: 'a b'", "symbols"),
         (Lang::J, "+ &. (+/ % #) 1 2", "obverse"),
         (Lang::Apl, "1∘×2", "∘ with a value operand"),
     ];

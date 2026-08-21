@@ -33,6 +33,24 @@ class TestNumpy:
         assert j("+/ {x}", {"x": a}).tolist() == [3, 5, 7]
         assert j('+/"1 {x}', {"x": a}).tolist() == [3, 12]
 
+    def test_matrix_product_over_borrowed_blocks(self):
+        # `+/ . *` (APL `+.×`) reads both numpy blocks where they lie and
+        # answers what the reference BLAS would.
+        a = self.np.arange(12, dtype=self.np.float64).reshape(3, 4)
+        b = self.np.arange(20, dtype=self.np.float64).reshape(4, 5)
+        want = (a @ b).ravel().tolist()
+        got = j("{x} +/ . * {y}", {"x": a, "y": b})
+        assert got.shape == (3, 5)
+        flat = [v for row in got.tolist() for v in row]
+        assert flat == pytest.approx(want)
+        apl_out = jay.apl("{x}+.×{y}", {"x": a, "y": b}).tolist()
+        assert [v for row in apl_out for v in row] == pytest.approx(want)
+
+    def test_whole_matrix_product_stays_whole(self):
+        a = self.np.arange(6, dtype=self.np.int64).reshape(2, 3)
+        b = self.np.arange(6, dtype=self.np.int64).reshape(3, 2)
+        assert j("{x} +/ . * {y}", {"x": a, "y": b}).tolist() == [[10, 13], [28, 40]]
+
     def test_borrowed_memory_is_not_copied(self):
         # The result of `]` is the input array; writing through numpy is
         # visible to it, which is what zero-copy means.

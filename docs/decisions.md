@@ -1463,3 +1463,88 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   failed once ("no Trusted Publishing config") until the owner registered
   the publisher on crates.io, then succeeded on a `--failed` rerun with no
   rebuild. From here every release reaches all three targets unattended.
+- 2026-08-21 — The inner product, one engine for both languages. `u . v`
+  and `f.g` are one IR node (`Verb::InnerProduct { u, v, apl }`) whose
+  dyad pairs x's last axis with y's first and whose monad is J's
+  determinant. Three choices behind it, all settled against the oracles:
+  - **The shape rule is shared and the operand rule is not.** Probing
+    jconsole settled J's: x is taken in cells at v's dyadic LEFT rank, or
+    at rank 1 where that is smaller (`*` and `*"0` give a matrix product,
+    `,` and `,:` read the whole of x), the WHOLE of y meets each cell, and
+    u is applied MONADICALLY to the result — so `+/` folds because it is a
+    fold, not because the conjunction makes one, and `(i.2 3) <. . * i.3 2`
+    is a floor of a `2 3 2` table. GNU APL's `f.g` instead takes one vector
+    from each side. The two agree for every scalar g, which is every
+    published use, so the flag chooses the route and not the answer.
+  - **APL's inner step runs under J's agreement rule.** APL conformability
+    — equal shapes, or one side a scalar — describes a whole application,
+    and the pairing an inner product asks for (row element against column
+    element) is the leading-axis one J spells out. Running `∧.=` by the
+    fast J route therefore needs that rule for the one dyad inside, and it
+    is set and put back around the application. The alternative was a
+    row-and-column loop for every scalar g, which is two small allocations
+    per output cell; the loop is still there and runs for a non-scalar g,
+    where the two languages genuinely differ.
+  - **`+/ . *` is a kernel, everything else is the cell machinery.** Real
+    machine numbers go through a blocked pass over the two buffers —
+    blocked on the shared axis so a slice of y is reused across a block of
+    output rows, split by whole rows (`par::fill_rows`), and multiversioned
+    like every other hot loop; no hand-written SIMD, as the owner invariant
+    requires. Integers keep their type, with one magnitude bound computed
+    up front deciding whether the vectorising loop can overflow at all and
+    a checked loop behind it. Measured at 1000×1000 f64: 55 ms against
+    numpy/OpenBLAS's 20 ms, so about 2.5× off a tuned BLAS; at 1000×1000
+    i64, 89 ms against numpy's 2268 ms, because BLAS has no integer path
+    and numpy falls back to its own loop. Layout is not the kernel's
+    business: a column-major block is materialised by the same rule every
+    other verb uses.
+  - **The determinant follows the published recursion, not a formula.**
+    The oracle settled the expansion as being down the FIRST column, with
+    v's identity element where the columns run out and u over nothing where
+    the rows do — which is what makes `-/ . * 2 1 $ 5 6` be `5-6` and
+    `-/ . * 0 0 $ 0` be 1. The recursion is memoised on the set of rows
+    still in play, so it costs `2^n` rather than `n!`, and past 16 rows it
+    names the limit. `-/ . *` over machine numbers goes by elimination
+    instead, which is what jconsole does from three rows up (its answer
+    there is a float even for whole input); the exact types keep the
+    recursion and stay exact.
+- 2026-08-21 — APL's `⍠` is a one-call override of a dialect knob, settled
+  at compile time. GNU APL rejects the glyph, so there is no oracle and the
+  published Dyalog shape is the whole specification; libjay implements the
+  two options that correspond to settings it already has. `CT` — the
+  principal option, so a bare number sets it — becomes `Verb::Fit`, which
+  is the same mechanism J spells `!.`. `IO` derives the verb AGAIN with the
+  other origin (`verb::with_origin` rewrites the origin every primitive
+  carries), because the index origin is resolved into the primitives when
+  the program is compiled: a variant is not an argument the verb reads at
+  run time, it is the dialect answering differently for one application.
+  That is also why an option must be a literal: `f⍠B` with a name or an
+  expression is a computed variant, which would mean carrying the dialect
+  into the runtime, and it is named rather than guessed at. A setting the
+  verb does not consult (`+⍠0`, `⍋⍠0.5`) is not one of its options and says
+  so; `⌶` stays out for a different reason — see below.
+- 2026-08-21 — The sequential machine (dyadic `;:`) is implemented to the
+  published table-driven form and no further. The dictionary gives the
+  boxed argument `f ; s ; m ; ijrd`, a `p q 2` transition table, output
+  codes 0 to 6 and result forms 0 to 5; every one of those was probed
+  against jconsole and matches, including two things the page does not
+  spell out — that the end of the input with `d` of `_1` ends the word in
+  hand without a transition (so the trace has no row for it), and that the
+  table position such a word reports is the one class 0 would have given in
+  the state reached. What is NOT implemented is codes 4 and 5, which emit a
+  VECTOR rather than a word: the reference coalesces successive vector
+  emissions into one span, and nothing published says what a machine that
+  mixes them with word emissions should answer. Guessing at it would put a
+  wrong answer behind a right-looking spelling, so the code is named. A map
+  over a numeric argument is named for the same reason: jconsole answers
+  `(0;s;0 1) ;: 0 0 1 0 1 1` with a length error, so whatever it wants
+  there is not "index the map by the value".
+- 2026-08-21 — `⌶` (I-beam) moves from 🔴 to ⚪, and APL's `&` (spawn) with
+  it. A 🔴 is a promise libjay has made; an I-beam has no published
+  contract to promise — what it does is each interpreter's own business —
+  so keeping it red claimed a queue position for work that can never be
+  specified. `&` joins J's `T.` and `t.` under the sandbox rule. With
+  those moved and this wave's four landed, nothing in APL's primitive
+  tables is red and J's red is exactly `s:` and `$.`, which are storage
+  kinds — an interned string and a sparse layout — rather than primitives:
+  the 0.3 type work, named as such.

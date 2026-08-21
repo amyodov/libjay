@@ -468,8 +468,7 @@ fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
         (Lang::J, "s: <'abc'", "symbols"),
         (Lang::J, "$. 1 2", "sparse"),
-        (Lang::J, "2 \": 1.5", "format with a specification"),
-        (Lang::Apl, "1(+⍠2)2", "variant"),
+        (Lang::Apl, "1(=⍠('ZZ' 2))2", "variant option ZZ"),
     ];
     for (lang, src, what) in cases {
         let e = err(*lang, src);

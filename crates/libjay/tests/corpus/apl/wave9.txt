@@ -1,0 +1,52 @@
+// Wave 9: the inner product `f.g`. The variant operator `⍠` is not here:
+// GNU APL rejects the glyph, so its rows are held by tests/wave9.rs
+// instead.
+
+// The matrix product, at every rank the shape rule reaches.
+(2 3⍴⍳6)+.×(3 2⍴⍳6)
+1 2 3+.×1 2 3
+(3 3⍴⍳9)+.×⍳3
+(⍳3)+.×3 3⍴⍳9
+⍴(2 3 4⍴⍳24)+.×(4 5⍴⍳20)
+(2 3 4⍴⍳24)+.×(4 5⍴⍳20)
+(2 2⍴1 2 3 4)+.×2 2 2⍴⍳8
+⍴(2 2⍴1 2 3 4)+.×2 2 2⍴⍳8
+2+.×3 4
+(2 3⍴⍳6)+.×2
+1 2 3+.×2
+(⍳0)+.×⍳0
+(0.5×2 3⍴⍳6)+.×0.25×3 2⍴⍳6
+1 2 3-.×4 5 6
+1 2 3×.+4 5 6
+(2 2⍴1 2 3 4)⌈.+(2 2⍴1 2 3 4)
+(2 2⍴1 2 3 4)⌊.+(2 2⍴1 2 3 4)
+(⍳3)∨.∧(⍳3)
+(3 3⍴1 0 0 0 1 0 0 0 1)∧.=3 3⍴1 0 0 0 1 0 0 0 1
+(2 3⍴1 0 1 0 1 0)∨.∧3 2⍴1 1 0 0 1 1
+1 2 3+.=1 2 4
+'ab'∧.='ab'
+'ab'∧.='ac'
+(2 3⍴'abcabc')∧.=2 3⍴'abcabx'
+3 2⍴'abcabc'
+(2 3⍴'abcabc')∧.=3 2⍴'abcabc'
+
+// A non-scalar g: each row of x meets each column of y as a vector.
+(2 2⍴1 2 3 4)+.,2 2⍴1 2 3 4
+⍴(2 2⍴1 2 3 4)+.,2 2⍴1 2 3 4
+
+// What the inner product refuses.
+(⍳3)+.×2 3⍴⍳6
+(2 3⍴⍳6)∧.=2 3⍴⍳6
++.×⍳3
+
+// `∘.` still parses as the outer product, and a decimal point still parses
+// as one.
+2 3∘.×1 2
+2.5×2
+(2 3⍴⍳6)+.×⍉2 3⍴⍳6
+⍉2 3⍴⍳6
+
+// The derived function is a function like any other.
+(3 2⍴⍳6)+.×⍨2 3⍴⍳6
++/,(40 40⍴⍳1600)+.×40 40⍴⍳1600
++/,(0.5×40 40⍴⍳1600)+.×0.25×40 40⍴⍳1600

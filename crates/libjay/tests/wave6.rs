@@ -256,7 +256,7 @@ fn the_gaps_this_wave_leaves_name_themselves() {
         (Lang::Apl, "3+F←+/", "inside a larger sentence"),
         // A glyph the language has and libjay has not reached is a queue
         // position, not an unknown character.
-        (Lang::Apl, "1⍠2", "variant"),
+        (Lang::Apl, "1(=⍠A)2", "computed variant option"),
         (Lang::Apl, "⌶3", "I-beam"),
     ];
     for (lang, src, what) in cases {

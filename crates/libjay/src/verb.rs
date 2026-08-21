@@ -742,6 +742,16 @@ pub enum DyadOp {
     /// APL `x ⍕ y`: format by specification — one width and precision per
     /// column of the last axis, or one pair for the whole argument.
     FormatSpec,
+    /// J `x ": y`: format by specification — one `w j d` complex value per
+    /// column of the last axis, or one for the whole argument. A negative
+    /// width asks for the exponential form; a value that does not fit its
+    /// field is written as asterisks.
+    FormatSpecJ,
+    /// J `x ". y`: the numbers a line of text spells, with x standing in
+    /// for every word that is not one.
+    ParseNumbers,
+    /// J `x ;: y`: the sequential machine x describes, run over y.
+    SequentialMachine,
     /// J `x m b. y`: the boolean function whose truth table `m` numbers,
     /// on two bits for `m` below 16 and on every bit of two integers for
     /// `m` from 16 to 31.
@@ -971,6 +981,13 @@ pub enum Verb {
     /// left to right and folding right to left. `` `:6 `` is a train and is
     /// built at parse time, so it never reaches here.
     Evoke(Vec<Verb>, i64),
+    /// J `u . v` and APL `f.g`: the inner product, of which `+/ . *` and
+    /// `+.×` are the matrix product. Dyadically each cell of x at v's
+    /// dyadic LEFT rank — 1 where that rank is smaller — meets the whole
+    /// of y under v, and u folds what comes back. Monadically, which is
+    /// J's alone, it is the determinant by minors down the first column:
+    /// `-/ . *` is the determinant proper.
+    InnerProduct { u: Box<Verb>, v: Box<Verb>, apl: bool },
 }
 
 impl Verb {
@@ -1003,6 +1020,9 @@ impl Verb {
             Verb::Beside(..) => [RANK_INF, RANK_INF, RANK_INF],
             // The series is summed for one value at a time.
             Verb::Hypergeometric { .. } => [0, 0, 0],
+            // The determinant is over a table; the dyad reads both
+            // arguments whole and takes their cells itself.
+            Verb::InnerProduct { .. } => [2, RANK_INF, RANK_INF],
             _ => [RANK_INF, RANK_INF, RANK_INF],
         }
     }
@@ -1070,6 +1090,7 @@ impl Verb {
                 let sizes: Vec<String> = w.iter().map(i64::to_string).collect();
                 format!("({}⌺{})", u.name(), sizes.join(" "))
             }
+            Verb::InnerProduct { u, v, .. } => format!("({} . {})", u.name(), v.name()),
         }
     }
 
@@ -1143,6 +1164,7 @@ impl Verb {
             }
             Verb::Evoke(vs, _) => vs.iter().any(Verb::uses_tolerance),
             Verb::Stencil(u, _) => u.uses_tolerance(),
+            Verb::InnerProduct { u, v, .. } => u.uses_tolerance() || v.uses_tolerance(),
             Verb::Fork(f, g, h) => {
                 f.uses_tolerance() || g.uses_tolerance() || h.uses_tolerance()
             }
@@ -1194,6 +1216,7 @@ impl Verb {
             Verb::Agenda(vs, w) => w.is_pure() && vs.iter().all(Verb::is_pure),
             Verb::Evoke(vs, _) => vs.iter().all(Verb::is_pure),
             Verb::Stencil(u, _) => u.is_pure(),
+            Verb::InnerProduct { u, v, .. } => u.is_pure() && v.is_pure(),
             Verb::Amend(_) | Verb::ShiftFill(_) | Verb::Characteristics(_) => true,
             Verb::AmendVerb(v) | Verb::Level { u: v, .. } => v.is_pure(),
             // A memo answers from its cache, so the verb inside it must be
@@ -1366,6 +1389,7 @@ impl Verb {
             }
             Verb::Evoke(vs, n) => evoke(vs, *n, None, y, ctx, span),
             Verb::Stencil(u, w) => stencil(u, w, y, ctx, span),
+            Verb::InnerProduct { u, v, apl } => determinant(u, v, *apl, y, ctx, span),
         }
     }
 
@@ -1538,6 +1562,7 @@ impl Verb {
                 agenda_pick(vs, w, Some(x), y, ctx, span)?.dyad(x, y, ctx, span)
             }
             Verb::Evoke(vs, n) => evoke(vs, *n, Some(x), y, ctx, span),
+            Verb::InnerProduct { u, v, apl } => inner_product(u, v, *apl, x, y, ctx, span),
             Verb::Stencil(..) => {
                 Err(Error::domain("f⌺w has no dyadic meaning", span))
             }
@@ -5588,6 +5613,510 @@ fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     assemble(&frame, cells, span)
 }
 
+/// The same verb with a different index origin — APL's `f⍠('IO' n)`.
+///
+/// The origin is a dialect setting, resolved into the primitives when the
+/// program is compiled, so overriding it for one application means deriving
+/// the verb again with the other value. None where the verb has no origin
+/// to change, which is what makes `⎕IO` not one of its options.
+pub(crate) fn with_origin(v: &Verb, origin: i64) -> Option<Verb> {
+    match v {
+        Verb::Prim(p) => {
+            let mut out = *p;
+            let mut changed = false;
+            out.monad = match p.monad {
+                MonadOp::GradeUp { .. } => {
+                    changed = true;
+                    MonadOp::GradeUp { origin }
+                }
+                MonadOp::GradeDown { .. } => {
+                    changed = true;
+                    MonadOp::GradeDown { origin }
+                }
+                MonadOp::IotaApl { .. } => {
+                    changed = true;
+                    MonadOp::IotaApl { origin }
+                }
+                MonadOp::Indices { boxed_coords, .. } => {
+                    changed = true;
+                    MonadOp::Indices { origin, boxed_coords }
+                }
+                MonadOp::Roll { fixed, float_at_zero, .. } => {
+                    changed = true;
+                    MonadOp::Roll { origin, fixed, float_at_zero }
+                }
+                other => other,
+            };
+            out.dyad = match p.dyad {
+                DyadOp::IndexOf { .. } => {
+                    changed = true;
+                    DyadOp::IndexOf { origin }
+                }
+                DyadOp::IndexOfLast { .. } => {
+                    changed = true;
+                    DyadOp::IndexOfLast { origin }
+                }
+                DyadOp::CollateGrade { down, .. } => {
+                    changed = true;
+                    DyadOp::CollateGrade { down, origin }
+                }
+                DyadOp::Squad { .. } => {
+                    changed = true;
+                    DyadOp::Squad { origin }
+                }
+                DyadOp::Pick { .. } => {
+                    changed = true;
+                    DyadOp::Pick { origin }
+                }
+                DyadOp::SelectAxis { axis, rank, .. } => {
+                    changed = true;
+                    DyadOp::SelectAxis { axis, rank, origin }
+                }
+                DyadOp::Deal { fixed, .. } => {
+                    changed = true;
+                    DyadOp::Deal { origin, fixed }
+                }
+                other => other,
+            };
+            changed.then_some(Verb::Prim(out))
+        }
+        Verb::Rank(u, r) => Some(Verb::Rank(Box::new(with_origin(u, origin)?), *r)),
+        Verb::Reduce(u) => Some(Verb::Reduce(Box::new(with_origin(u, origin)?))),
+        Verb::Windowed(u, k) => Some(Verb::Windowed(Box::new(with_origin(u, origin)?), *k)),
+        Verb::Commute(u) => Some(Verb::Commute(Box::new(with_origin(u, origin)?))),
+        Verb::Each(u, e) => Some(Verb::Each(Box::new(with_origin(u, origin)?), *e)),
+        Verb::Fit(u, n) => Some(Verb::Fit(Box::new(with_origin(u, origin)?), *n)),
+        Verb::AlongAxis(u, k) => Some(Verb::AlongAxis(Box::new(with_origin(u, origin)?), *k)),
+        _ => None,
+    }
+}
+
+// ------------------------------------------------------- inner product
+
+/// The scalar operation a bare primitive performs dyadically, for the fast
+/// paths that recognise `+` and `*` rather than applying them.
+fn scalar_dyad_of(v: &Verb) -> Option<ScalarDyad> {
+    match v {
+        Verb::Prim(p) => match p.dyad {
+            DyadOp::Scalar(op) => Some(op),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// True where the verb folds a list with one scalar operation, which is
+/// what `+/` and `∧/` are and what the matrix product's fast path needs.
+fn folds_with(u: &Verb, op: ScalarDyad) -> bool {
+    matches!(u, Verb::Reduce(inner) if scalar_dyad_of(inner) == Some(op))
+}
+
+/// `x u . v y`: the inner product.
+///
+/// x is taken in cells at v's dyadic left rank, or at rank 1 where that is
+/// smaller — the rule that makes `+/ . *` a matrix product and leaves a
+/// whole-argument v (`,`, `,:`) reading the whole of x. Each cell meets the
+/// WHOLE of y under v, and u folds what comes back.
+fn inner_product(
+    u: &Verb,
+    v: &Verb,
+    apl: bool,
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    if let Some(a) = matrix_product(u, v, x, y, span) {
+        return Ok(a);
+    }
+    // APL pairs each row of x with each COLUMN of y, which parts from J's
+    // reading exactly where v does not apply to atoms.
+    if apl && scalar_dyad_of(v).is_none() {
+        return apl_inner_product(u, v, x, y, ctx, span);
+    }
+    if !apl {
+        return inner_cells(u, v, x, y, ctx, span);
+    }
+    // A scalar v pairs one element of the row with one element of the
+    // column, which is the leading-axis pairing J spells out and APL's own
+    // conformability rule — about whole applications — does not describe.
+    // The definition asks for that pairing, so the inner application runs
+    // under it and the caller's rule is put back afterwards.
+    let saved = ctx.cfg.agreement;
+    ctx.cfg.agreement = Agreement::LeadingPrefix;
+    let out = inner_cells(u, v, x, y, ctx, span);
+    ctx.cfg.agreement = saved;
+    out
+}
+
+/// The inner product by the cell machinery: x's cells at v's dyadic left
+/// rank, or at rank 1 where that is smaller, each against the whole of y.
+fn inner_cells(
+    u: &Verb,
+    v: &Verb,
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let cell_rank = effective_rank(v.ranks()[1].max(1), x.rank());
+    let frame_rank = x.rank() - cell_rank;
+    if frame_rank == 0 {
+        let inner = v.dyad(x, y, ctx, span)?;
+        return u.monad(&inner, ctx, span);
+    }
+    let frame = x.shape[..frame_rank].to_vec();
+    let n: usize = frame.iter().product();
+    if n == 0 {
+        return assemble(&frame, Vec::new(), span);
+    }
+    let work = x.count().max(y.count());
+    let pure = u.is_pure() && v.is_pure();
+    let cells = each_cell(n, work, pure, ctx, |i, c| {
+        let inner = v.dyad(&x.cell_at(frame_rank, i), y, c, span)?;
+        u.monad(&inner, c, span)
+    })?;
+    assemble(&frame, cells, span)
+}
+
+/// APL's `f.g` where g is not a scalar function: every vector along x's
+/// LAST axis meets every vector along y's FIRST axis, and f folds each
+/// result. With a scalar g this is the same as J's reading, which is the
+/// path that runs it.
+fn apl_inner_product(
+    u: &Verb,
+    v: &Verb,
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    // A scalar argument stands for as many copies of itself as the other
+    // side's shared axis asks for; two scalars share an axis of one.
+    let k = match (x.rank(), y.rank()) {
+        (0, 0) => 1,
+        (0, _) => y.shape[0],
+        _ => x.shape[x.rank() - 1],
+    };
+    if x.rank() > 0 && y.rank() > 0 && x.shape[x.rank() - 1] != y.shape[0] {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("inner product over {} and {} elements", x.shape[x.rank() - 1], y.shape[0]),
+            Some(span),
+        ));
+    }
+    let lead: &[usize] = if x.rank() > 0 { &x.shape[..x.rank() - 1] } else { &[] };
+    let trail: &[usize] = if y.rank() > 0 { &y.shape[1..] } else { &[] };
+    let rows: usize = lead.iter().product();
+    let cols: usize = trail.iter().product();
+    let mut frame = lead.to_vec();
+    frame.extend_from_slice(trail);
+    let n = rows * cols;
+    if n == 0 {
+        return assemble(&frame, Vec::new(), span);
+    }
+    let vector = |d: &Data, at: &dyn Fn(usize) -> usize| {
+        let mut out = Data::empty(d.dtype());
+        for t in 0..k {
+            out.push_from(d, at(t));
+        }
+        Array::new(vec![k], out)
+    };
+    let pure = u.is_pure() && v.is_pure();
+    let cells = each_cell(n, x.count().max(y.count()), pure, ctx, |i, c| {
+        let (r, col) = (i / cols, i % cols);
+        let left = vector(&x.data, &|t| if x.rank() > 0 { r * k + t } else { 0 });
+        let right = vector(&y.data, &|t| if y.rank() > 0 { t * cols + col } else { 0 });
+        let inner = v.dyad(&left, &right, c, span)?;
+        u.monad(&inner, c, span)
+    })?;
+    assemble(&frame, cells, span)
+}
+
+/// `+/ . *` (APL `+.×`) over real machine numbers: the matrix product, run
+/// as a blocked pass over the two buffers instead of by the cell machinery.
+/// The shape rule is the general one — x's last axis pairs with y's first —
+/// so an argument of any rank comes through here. None sends the
+/// application back to the general path.
+fn matrix_product(u: &Verb, v: &Verb, x: &Array, y: &Array, span: Span) -> Option<Array> {
+    if !folds_with(u, ScalarDyad::Add) || scalar_dyad_of(v) != Some(ScalarDyad::Mul) {
+        return None;
+    }
+    if x.rank() == 0 || y.rank() == 0 {
+        return None;
+    }
+    let k = x.shape[x.rank() - 1];
+    if k != y.shape[0] {
+        return None;
+    }
+    let rows: usize = x.shape[..x.rank() - 1].iter().product();
+    let cols: usize = y.shape[1..].iter().product();
+    let mut shape = x.shape[..x.rank() - 1].to_vec();
+    shape.extend_from_slice(&y.shape[1..]);
+    if crate::limits::elements(&shape, span).is_err() {
+        return None;
+    }
+    let whole = matches!(x.dtype(), DType::Bool | DType::I64)
+        && matches!(y.dtype(), DType::Bool | DType::I64);
+    if whole
+        && let (Some(xs), Some(ys)) = (x.to_i64_vec(), y.to_i64_vec())
+        && let Some(out) = matmul_whole(&xs, &ys, rows, k, cols)
+    {
+        return Some(Array::new(shape, Data::I64(out.into())));
+    }
+    let (xs, ys) = (x.to_f64_vec()?, y.to_f64_vec()?);
+    let out = par::fill_rows(rows, cols, rows * k * cols, |r0, part| {
+        matmul_f64(&xs, &ys, k, cols, r0, part);
+    });
+    Some(Array::new(shape, Data::F64(out.into())))
+}
+
+/// Elements a block of the matrix product's inner axis covers at once: the
+/// slice of y one pass over the output rows reuses. 128 rows of a 1000-wide
+/// table is a megabyte, which is what a second-level cache holds.
+const MATMUL_BLOCK: usize = 128;
+
+#[inline(always)]
+fn matmul_f64_body(xs: &[f64], ys: &[f64], k: usize, n: usize, r0: usize, out: &mut [f64]) {
+    if n == 0 {
+        return;
+    }
+    let rows = out.len() / n;
+    for k0 in (0..k).step_by(MATMUL_BLOCK) {
+        let k1 = (k0 + MATMUL_BLOCK).min(k);
+        for r in 0..rows {
+            let left = &xs[(r0 + r) * k..(r0 + r + 1) * k];
+            let dst = &mut out[r * n..(r + 1) * n];
+            for (t, &a) in left.iter().enumerate().take(k1).skip(k0) {
+                let row = &ys[t * n..(t + 1) * n];
+                for (o, &b) in dst.iter_mut().zip(row) {
+                    *o += a * b;
+                }
+            }
+        }
+    }
+}
+
+multiversioned! {
+    /// One block of output rows of a float matrix product. `out` is the
+    /// block, `r0` the row it starts at; the accumulator is the output
+    /// itself, which arrives zeroed.
+    fn matmul_f64(
+        xs: &[f64],
+        ys: &[f64],
+        k: usize,
+        n: usize,
+        r0: usize,
+        out: &mut [f64],
+    ) -> () = matmul_f64_body;
+}
+
+#[inline(always)]
+fn matmul_i64_body(xs: &[i64], ys: &[i64], k: usize, n: usize, r0: usize, out: &mut [i64]) {
+    if n == 0 {
+        return;
+    }
+    let rows = out.len() / n;
+    for k0 in (0..k).step_by(MATMUL_BLOCK) {
+        let k1 = (k0 + MATMUL_BLOCK).min(k);
+        for r in 0..rows {
+            let left = &xs[(r0 + r) * k..(r0 + r + 1) * k];
+            let dst = &mut out[r * n..(r + 1) * n];
+            for (t, &a) in left.iter().enumerate().take(k1).skip(k0) {
+                let row = &ys[t * n..(t + 1) * n];
+                for (o, &b) in dst.iter_mut().zip(row) {
+                    *o = o.wrapping_add(a.wrapping_mul(b));
+                }
+            }
+        }
+    }
+}
+
+multiversioned! {
+    /// One block of output rows of an integer matrix product. Reached only
+    /// where the values cannot overflow, so wrapping arithmetic is exact
+    /// arithmetic here and the loop vectorises.
+    fn matmul_i64(
+        xs: &[i64],
+        ys: &[i64],
+        k: usize,
+        n: usize,
+        r0: usize,
+        out: &mut [i64],
+    ) -> () = matmul_i64_body;
+}
+
+/// The same product over integers. None where a product or a sum leaves
+/// i64, which sends the whole pass to floats, as every other integer
+/// primitive does.
+fn matmul_whole(xs: &[i64], ys: &[i64], rows: usize, k: usize, n: usize) -> Option<Vec<i64>> {
+    // A bound on the largest partial sum decides once, for the whole pass,
+    // whether the plain loop can overflow at all. Where it cannot, the
+    // vectorised kernel runs; where it might, the checked loop does, and
+    // leaving i64 anywhere sends the whole product to floats.
+    let bound = |v: &[i64]| v.iter().map(|&a| (a as i128).abs()).max().unwrap_or(0);
+    if bound(xs).saturating_mul(bound(ys)).saturating_mul(k as i128) <= i64::MAX as i128 {
+        return Some(par::fill_rows(rows, n, rows * k * n, |r0, part| {
+            matmul_i64(xs, ys, k, n, r0, part);
+        }));
+    }
+    let mut out = vec![0i64; rows * n];
+    for r in 0..rows {
+        let left = &xs[r * k..(r + 1) * k];
+        let dst = &mut out[r * n..(r + 1) * n];
+        for (t, &a) in left.iter().enumerate() {
+            for (o, &b) in dst.iter_mut().zip(&ys[t * n..(t + 1) * n]) {
+                *o = a.checked_mul(b).and_then(|p| o.checked_add(p))?;
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Rows a determinant by minors is computed for at most. The recursion is
+/// memoised on the set of rows still in play, so the cost is `2^n` cells
+/// rather than `n!` — but it is still exponential, and past this the
+/// message names the limit instead of running out of memory.
+const DETERMINANT_MINORS_MAX: usize = 16;
+
+/// `u . v y`: the determinant by minors down the FIRST column — for each
+/// row in turn, that row's leading element under v with the determinant of
+/// the table the row and the column leave behind, all folded by u. With no
+/// columns left the value is v's identity element; with no rows left it is
+/// u over nothing.
+fn determinant(
+    u: &Verb,
+    v: &Verb,
+    apl: bool,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    if apl {
+        return Err(Error::domain("an inner product has no monadic meaning in APL", span));
+    }
+    // The determinant is of a table, so an argument of higher rank frames
+    // one answer per 2-cell. Nothing above applies the rank machinery for
+    // this verb: its dyad reads both arguments whole.
+    if y.rank() > 2 {
+        let frame = y.shape[..y.rank() - 2].to_vec();
+        let n: usize = frame.iter().product();
+        let pure = u.is_pure() && v.is_pure();
+        let cells = each_cell(n, y.count(), pure, ctx, |i, c| {
+            determinant(u, v, apl, &y.cell_at(y.rank() - 2, i), c, span)
+        })?;
+        return assemble(&frame, cells, span);
+    }
+    let rows = y.items();
+    let cols = y.item_size();
+    if folds_with(u, ScalarDyad::Sub)
+        && scalar_dyad_of(v) == Some(ScalarDyad::Mul)
+        && rows == cols
+        && rows >= 3
+        && matches!(y.dtype(), DType::Bool | DType::I64 | DType::F64)
+        && let Some(values) = y.to_f64_vec()
+    {
+        return Ok(Array::scalar_f64(determinant_lu(values, rows)));
+    }
+    if rows > DETERMINANT_MINORS_MAX {
+        return Err(Error::not_yet(
+            format!(
+                "a determinant of more than {DETERMINANT_MINORS_MAX} rows by minors \
+                 (only -/ . * over machine numbers has a direct method)"
+            ),
+            span,
+        ));
+    }
+    let mut seen: HashMap<u64, Array> = HashMap::new();
+    let all = if rows == 64 { u64::MAX } else { (1u64 << rows) - 1 };
+    minors(u, v, y, cols, rows, all, &mut seen, ctx, span)
+}
+
+/// One node of the expansion: the determinant of the table `left` still
+/// names rows of, with the leading columns the recursion has consumed
+/// already dropped.
+#[allow(clippy::too_many_arguments)]
+fn minors(
+    u: &Verb,
+    v: &Verb,
+    y: &Array,
+    cols: usize,
+    rows: usize,
+    left: u64,
+    seen: &mut HashMap<u64, Array>,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    if let Some(a) = seen.get(&left) {
+        return Ok(a.clone());
+    }
+    // One row and one column go at every step, so how many rows are left
+    // says which column this node starts at.
+    let column = rows - left.count_ones() as usize;
+    let value = if column >= cols {
+        let data = reduce_identity(v, 1).ok_or_else(|| {
+            Error::not_yet(
+                format!("the identity element of {} (a determinant with no columns)", v.name()),
+                span,
+            )
+        })?;
+        Array::new(Vec::new(), data)
+    } else if left == 0 {
+        u.monad(&Array::new(vec![0], Data::empty(DType::I64)), ctx, span)?
+    } else {
+        let mut terms = Vec::with_capacity(left.count_ones() as usize);
+        for r in 0..rows {
+            if left & (1 << r) == 0 {
+                continue;
+            }
+            let minor = minors(u, v, y, cols, rows, left & !(1 << r), seen, ctx, span)?;
+            let head = Array::new(Vec::new(), y.data.slice(r * cols + column, r * cols + column + 1));
+            terms.push(v.dyad(&head, &minor, ctx, span)?);
+        }
+        let n = terms.len();
+        u.monad(&assemble(&[n], terms, span)?, ctx, span)?
+    };
+    seen.insert(left, value.clone());
+    Ok(value)
+}
+
+/// `-/ . * y` over machine numbers: the determinant by Gaussian
+/// elimination with partial pivoting, which is how the reference computes
+/// it from three rows up — and why its answer there is a float even where
+/// every element is whole.
+fn determinant_lu(mut a: Vec<f64>, n: usize) -> f64 {
+    let mut det = 1.0f64;
+    for c in 0..n {
+        let mut pivot = c;
+        for r in c + 1..n {
+            if a[r * n + c].abs() > a[pivot * n + c].abs() {
+                pivot = r;
+            }
+        }
+        if a[pivot * n + c] == 0.0 {
+            return 0.0;
+        }
+        if pivot != c {
+            for j in 0..n {
+                a.swap(c * n + j, pivot * n + j);
+            }
+            det = -det;
+        }
+        let head = a[c * n + c];
+        det *= head;
+        for r in c + 1..n {
+            let factor = a[r * n + c] / head;
+            if factor == 0.0 {
+                continue;
+            }
+            for j in c..n {
+                a[r * n + j] -= factor * a[c * n + j];
+            }
+        }
+    }
+    det
+}
+
 /// Monadic meaning of a primitive, applied to one cell.
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     match p.monad {
@@ -5991,6 +6520,9 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::PolyIntegral => poly_integral(x, y, span),
         DyadOp::TruthTable(m) => truth_table(m, x, y, span),
         DyadOp::FormatSpec => format_spec(x, y, &cfg.fmt, span),
+        DyadOp::FormatSpecJ => format_spec_j(x, y, &cfg.fmt, span),
+        DyadOp::ParseNumbers => parse_numbers(x, y, span),
+        DyadOp::SequentialMachine => sequential_machine(x, y, span),
         DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, span),
         DyadOp::ExactForm => exact_form(x, y, span),
         DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
@@ -9803,6 +10335,331 @@ fn format_spec(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Array>
             }
             out.extend(std::iter::repeat_n(' ', widths[c] - len));
             out.extend(s.chars());
+        }
+    }
+    let mut shape = if y.rank() == 0 { Vec::new() } else { y.shape[..y.rank() - 1].to_vec() };
+    shape.push(line);
+    Ok(Array::new(shape, Data::Char(out.into())))
+}
+
+/// J `x ;: y`: the sequential machine.
+///
+/// x is the boxed description `f ; s ; m ; ijrd`, of which `m` and `ijrd`
+/// may be left off. `s` is the transition table, shaped `p q 2`: at state
+/// `r` and input class `c`, `s[r;c;0]` is the state to go to and
+/// `s[r;c;1]` the output code — 0 nothing, 1 start a word here, 2 end a
+/// word and start another, 3 end a word, 6 stop. `m` maps an input element
+/// to its class, indexed by the character's codepoint; with none, a
+/// numeric argument IS the classes. `ijrd` is the starting position, the
+/// starting word (`_1` for none), the starting state and what to do with
+/// the end of the input: a class to make one last transition with, or `_1`
+/// to end the word in hand. `f` picks the answer: 0 the boxed words, 1
+/// their elements catenated, 2 each word's position and length, 3 the
+/// table position that ended it, 4 both, 5 the whole trace.
+fn sequential_machine(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let Some(parts) = x.as_boxes() else {
+        return Err(Error::domain("a sequential machine is a boxed description", span));
+    };
+    if x.rank() > 1 || !(2..=4).contains(&parts.len()) {
+        return Err(Error::domain(
+            "a sequential machine is 2 to 4 boxes: f ; s ; m ; ijrd",
+            span,
+        ));
+    }
+    let whole = |a: &Array, what: &str| -> Result<Vec<i64>> {
+        a.to_i64_vec().ok_or_else(|| Error::domain(format!("{what} is whole numbers"), span))
+    };
+    let form = *whole(&parts[0], "a sequential machine's result form")?
+        .first()
+        .ok_or_else(|| Error::domain("a sequential machine needs a result form", span))?;
+    if !(0..=5).contains(&form) {
+        return Err(Error::domain(format!("{form} is not a result form of 0 to 5"), span));
+    }
+    let table = &parts[1];
+    if table.rank() != 3 || table.shape[2] != 2 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "a sequential machine's transition table is shaped p q 2",
+            Some(span),
+        ));
+    }
+    let (states, classes) = (table.shape[0], table.shape[1]);
+    let entries = whole(table, "a transition table")?;
+    let map = parts.get(2).filter(|a| a.count() > 0);
+    let start = match parts.get(3) {
+        Some(a) => whole(a, "a sequential machine's starting values")?,
+        None => Vec::new(),
+    };
+    let start = if start.is_empty() { vec![0, -1, 0, -1] } else { start };
+    if start.len() != 4 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            "a sequential machine starts from four values: i j r d",
+            Some(span),
+        ));
+    }
+    let (mut i, mut word, mut state, ending) = (start[0], start[1], start[2], start[3]);
+    let n = y.count() as i64;
+
+    // The class of the element at `at`: read through the map where there
+    // is one, and the element itself where there is not.
+    let codes: Option<Vec<i64>> = match map {
+        Some(m) => Some(whole(m, "a sequential machine's map")?),
+        None => None,
+    };
+    let values: Vec<i64> = match (&y.data, &codes) {
+        (Data::Char(v), Some(_)) => v.as_slice().iter().map(|&c| c as i64).collect(),
+        (_, None) => y
+            .to_i64_vec()
+            .ok_or_else(|| Error::domain("a sequential machine over characters needs a map", span))?,
+        _ => {
+            return Err(Error::not_yet(
+                "a sequential machine's map over a numeric argument (x's third box)",
+                span,
+            ));
+        }
+    };
+    let class_at = |at: i64| -> Result<i64> {
+        let raw = values[at as usize];
+        let Some(m) = &codes else { return Ok(raw) };
+        if raw < 0 || raw as usize >= m.len() {
+            return Err(Error::new(
+                ErrorKind::Domain,
+                format!("{raw} is outside a map of {} entries", m.len()),
+                Some(span),
+            ));
+        }
+        Ok(m[raw as usize])
+    };
+
+    let mut trace: Vec<i64> = Vec::new();
+    let mut words: Vec<(i64, i64, i64)> = Vec::new();
+    let mut emit = |word: i64, at: i64, place: i64| -> Result<()> {
+        if word < 0 {
+            return Err(Error::new(
+                ErrorKind::Domain,
+                "a sequential machine ended a word before one had begun",
+                Some(span),
+            ));
+        }
+        words.push((word, at - word, place));
+        Ok(())
+    };
+    loop {
+        let class = if i < n {
+            class_at(i)?
+        } else if ending >= 0 {
+            ending
+        } else {
+            // The input is spent and the end asks for no transition: what
+            // is in hand is the last word. The reference gives it the table
+            // position class 0 in the state reached would have.
+            if word >= 0 {
+                emit(word, i, classes as i64 * state)?;
+            }
+            break;
+        };
+        if state < 0 || state as usize >= states || class < 0 || class as usize >= classes {
+            return Err(Error::new(
+                ErrorKind::Domain,
+                format!(
+                    "state {state} and class {class} are outside a {states} by {classes} table"
+                ),
+                Some(span),
+            ));
+        }
+        let at = (state as usize * classes + class as usize) * 2;
+        let (next, code) = (entries[at], entries[at + 1]);
+        trace.extend_from_slice(&[i, word, state, class, next, code]);
+        let place = class + classes as i64 * state;
+        state = next;
+        match code {
+            0 => {}
+            1 => word = i,
+            2 => {
+                emit(word, i, place)?;
+                word = i;
+            }
+            3 => {
+                emit(word, i, place)?;
+                word = -1;
+            }
+            4 | 5 => {
+                return Err(Error::not_yet(
+                    "a sequential machine's vector output (codes 4 and 5)",
+                    span,
+                ));
+            }
+            6 => break,
+            other => {
+                return Err(Error::domain(
+                    format!("{other} is not a sequential machine output code"),
+                    span,
+                ));
+            }
+        }
+        if i >= n {
+            break;
+        }
+        i += 1;
+    }
+    Ok(sequential_result(form, &words, &trace, y))
+}
+
+/// The answer a sequential machine's result form asks for, out of the words
+/// it marked off and the trace it left.
+fn sequential_result(form: i64, words: &[(i64, i64, i64)], trace: &[i64], y: &Array) -> Array {
+    let piece = |&(at, len, _): &(i64, i64, i64)| {
+        Array::new(vec![len as usize], y.data.slice(at as usize, (at + len) as usize))
+    };
+    match form {
+        0 => Array::new(
+            vec![words.len()],
+            Data::Box(words.iter().map(piece).collect::<Vec<_>>().into()),
+        ),
+        1 => {
+            let mut data = Data::empty(y.dtype());
+            for w in words {
+                data.extend_from(&piece(w).data);
+            }
+            let n = data.len();
+            Array::new(vec![n], data)
+        }
+        2 => Array::new(
+            vec![words.len(), 2],
+            Data::I64(words.iter().flat_map(|&(at, len, _)| [at, len]).collect::<Vec<_>>().into()),
+        ),
+        3 => Array::from_i64(words.iter().map(|&(_, _, place)| place).collect()),
+        4 => Array::new(
+            vec![words.len(), 3],
+            Data::I64(
+                words
+                    .iter()
+                    .flat_map(|&(at, len, place)| [at, len, place])
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+        ),
+        _ => Array::new(vec![trace.len() / 6, 6], Data::I64(trace.to_vec().into())),
+    }
+}
+
+/// J `x ". y`: the numbers the characters of y spell, with x standing in
+/// for every blank-separated word that is not a number. y arrives as one
+/// line — the verb's right rank is 1 — so a character matrix is read a row
+/// at a time and the rows are framed back together.
+fn parse_numbers(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let Data::Char(text) = &y.data else {
+        return Err(Error::domain("reading numbers from text needs characters", span));
+    };
+    if x.count() != 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "the stand-in for an unreadable word is one value",
+            Some(span),
+        ));
+    }
+    let line: String = text.as_slice().iter().collect();
+    crate::frontend::j::numbers_from_text(&line, x)
+        .ok_or_else(|| Error::domain("the stand-in for an unreadable word is a number", span))
+}
+
+/// One field of J's `x ": y`, without its padding: `w j d` says how wide
+/// the field is and how many digits follow the point, and a NEGATIVE width
+/// asks for the exponential form instead of the fixed one.
+fn format_field(value: f64, precision: usize, exponential: bool, neg: char) -> String {
+    let sign = |s: String| match s.strip_prefix('-') {
+        // A value that rounds to nothing keeps no sign, as the reference
+        // has it: `5j2 ": _0.001` is ` 0.00`.
+        Some(rest) if rest.bytes().all(|b| !b.is_ascii_digit() || b == b'0') => rest.to_string(),
+        Some(rest) => format!("{neg}{rest}"),
+        None => s,
+    };
+    if !exponential {
+        return sign(format!("{value:.precision$}"));
+    }
+    // `1.500e3`, `1.234e_4`: the mantissa to the asked-for precision, then
+    // the exponent written as J writes an integer.
+    let text = format!("{value:.precision$e}");
+    let (mantissa, exponent) = text.split_once('e').unwrap_or((text.as_str(), "0"));
+    let exponent = match exponent.strip_prefix('-') {
+        Some(rest) => format!("{neg}{rest}"),
+        None => exponent.to_string(),
+    };
+    format!("{}e{exponent}", sign(mantissa.to_string()))
+}
+
+/// J `x ": y`: format by specification.
+///
+/// x is one complex `w j d` per column of y's last axis, or one for all of
+/// them: `w` is the field width and `d` the digits after the point. A width
+/// of zero takes whatever the column needs, with a blank between it and the
+/// column before. A value too wide for its field is written as asterisks
+/// rather than refused, which is what the reference does.
+fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Array> {
+    let Some(spec) = x.to_complex_vec() else {
+        return Err(Error::domain("a format specification is numbers", span));
+    };
+    if y.dtype() == DType::Box {
+        return Err(Error::domain("format by specification takes numbers", span));
+    }
+    let Some(values) = y.to_f64_vec() else {
+        return Err(Error::domain("format by specification takes numbers", span));
+    };
+    let cols = if y.rank() == 0 { 1 } else { y.shape[y.rank() - 1] };
+    let rows = if cols == 0 { 0 } else { y.count() / cols };
+    let fields: Vec<[f64; 2]> = match spec.len() {
+        1 => vec![spec[0]; cols],
+        n if n == cols => spec,
+        n => {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!("{n} specification value(s) for {cols} column(s)"),
+                Some(span),
+            ));
+        }
+    };
+    let text = |r: usize, c: usize| {
+        let [w, d] = fields[c];
+        format_field(values[r * cols + c], d.max(0.0) as usize, w < 0.0, fmt.neg)
+    };
+    // A width of zero is the widest value in the column, and a blank
+    // between it and whatever stands to its left.
+    let widths: Vec<usize> = (0..cols)
+        .map(|c| {
+            let w = fields[c][0];
+            if w != 0.0 {
+                return w.abs() as usize;
+            }
+            let wide = (0..rows).map(|r| text(r, c).chars().count()).max().unwrap_or(0);
+            wide + usize::from(c > 0)
+        })
+        .collect();
+    let line: usize = widths.iter().sum();
+    let mut out: Vec<char> = Vec::with_capacity(rows * line);
+    for r in 0..rows {
+        for c in 0..cols {
+            let s = text(r, c);
+            // The exponential form is written from the LEFT, one column of
+            // sign in front of it; the fixed one is right-justified.
+            let (lead, body) = match (fields[c][0] < 0.0, s.strip_prefix(fmt.neg)) {
+                (false, _) => (String::new(), s.as_str()),
+                (true, Some(rest)) => (fmt.neg.to_string(), rest),
+                (true, None) => (" ".to_string(), s.as_str()),
+            };
+            let len = lead.chars().count() + body.chars().count();
+            if len > widths[c] {
+                out.extend(std::iter::repeat_n('*', widths[c]));
+                continue;
+            }
+            if fields[c][0] < 0.0 {
+                out.extend(lead.chars());
+                out.extend(body.chars());
+                out.extend(std::iter::repeat_n(' ', widths[c] - len));
+            } else {
+                out.extend(std::iter::repeat_n(' ', widths[c] - len));
+                out.extend(body.chars());
+            }
         }
     }
     let mut shape = if y.rank() == 0 { Vec::new() } else { y.shape[..y.rank() - 1].to_vec() };

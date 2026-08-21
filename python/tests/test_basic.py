@@ -385,7 +385,7 @@ class TestErrors:
 
     def test_not_yet_wording(self):
         with pytest.raises(JayError, match="not supported yet"):
-            j("2 ;: 'a b'")
+            j("2 s: 'a b'")
 
     def test_parse_error(self):
         with pytest.raises(JayError):

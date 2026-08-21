@@ -64,7 +64,7 @@ feature — that is a promise, not a refusal.
 | `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity; a complex argument is a named gap | binomial: x things chosen from y, defined on the reals through gamma; complex is the same gap |
 | `j.` | `0j1 * y` | `x + 0j1 * y` |
 | `r.` | `^ 0j1 * y`: the unit complex at angle y | `x * ^ 0j1 * y`: polar coordinates |
-| `":` | format: the characters that display the argument | not supported yet (format with a specification) |
+| `":` | format: the characters that display the argument | format by specification: x is one complex `w j d` per column of y's last axis, or one for all of them — `w` the field width, `d` the digits after the point, and the rounding half-to-even. A width of 0 takes what the column needs, with one blank in front of every column but the first; a NEGATIVE width asks for the exponential form, written from the left behind one column of sign. A value too wide for its field is written as that many asterisks rather than refused, and a character or boxed argument is a domain error |
 | `o.` | pi times y | circle function k (see below) |
 | `{` | catalogue: one element from each item of y, in every combination — the shapes of the items make the result's shape and each element of it is one choice, boxed | from: each atom of x selects an item (negative from the end). A BOXED x is J's index specification: `<A` with a simple A reads A's last axis as one index per leading axis, the axes ahead of it framing the result; `<(c0;c1;…)` gives one component per axis, a scalar component dropping its axis and a boxed one meaning the complement — which is how `a:` selects a whole axis |
 | `{.` | head | take (negative = from end; overtake fills) |
@@ -81,9 +81,9 @@ feature — that is a promise, not a refusal.
 | `A.` | anagram index: where the permutation y's items RANK as stands among the permutations of that length, lexicographically | the x-th permutation of y's items; a negative x counts back from the last. Characters have no anagram index monadically, as in J |
 | `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation, and one shorter than y applies to y's leading items with the rest brought round to the front (`0 1 C. 'abcde'` is `cdeab`). An atom left argument is a named gap |
 | `u:` | codepoints become characters; characters are answered with themselves | form 3 gives codepoints, form 10 gives the characters they name; the byte-oriented forms are a named gap |
-| `;:` | words: J's own tokeniser over a string, one box per word. A run of numeric literals separated by blanks is ONE word (`;: '1 2 3'` has one), `NB.` swallows the rest of the line, and an unclosed quote is a parse error | not supported yet (sequential machine) |
+| `;:` | words: J's own tokeniser over a string, one box per word. A run of numeric literals separated by blanks is ONE word (`;: '1 2 3'` has one), `NB.` swallows the rest of the line, and an unclosed quote is a parse error | the sequential machine — see below |
 | `L.` | the boxing level: 0 for anything unboxed, one more than the deepest content otherwise. APL's `≡` counts the array itself as well, so the two differ by one on a simple array | — |
-| `".` | do: the characters are compiled as a J program and run HERE, over the names the sentence itself can see — `". 'a =. 3'` assigns in the surrounding scope. A `{name}` hole inside the string has nothing to bind to and is refused | not supported yet (numbers from text) |
+| `".` | do: the characters are compiled as a J program and run HERE, over the names the sentence itself can see — `". 'a =. 3'` assigns in the surrounding scope. A `{name}` hole inside the string has nothing to bind to and is refused | the numbers a line of text spells: the line is split at blanks and every word read as a J numeric literal, with the atom x standing in for a word that is not one. One word gives a scalar, as reading that line as a noun would, and several give a vector of that many. The right rank is 1, so a character matrix is read a row at a time and the rows framed with fills |
 | `%.` | matrix inverse — the least-squares pseudo-inverse of a taller matrix; a wider one is refused, a singular one is a domain error | matrix divide: the least-squares solution of `y a = x` |
 | `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`; a boxed argument of that form converts back to coefficients | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial |
 | `p..` | the derivative of the polynomial y's ascending coefficients describe, as coefficients | the integral, with x as the constant term |
@@ -227,6 +227,85 @@ recovered by matching that rank: `u@v` is `u@:v` at v's ranks, `u&v` and
 guessed at: a capped fork (`[: f g` is an atop by the time the tree has it,
 so it writes itself out as `@:`) and any verb libjay has no J spelling for,
 which reports "the atomic representation of … is not supported yet".
+
+### The inner product (`u . v`, APL `f.g`)
+
+`x u . v y` pairs x's LAST axis with y's FIRST and leaves what is left of
+each as the shape of the answer, which is the one rule behind the matrix
+product `+/ . *` (`+.×`), the row match `*./ . =` (`∧.=`), the shortest-path
+step `<./ . +` (`⌊.+`) and the rest. An argument of any rank goes through
+it: `(i.2 3 4) +/ . * i. 4 5` is shaped `2 3 5`. A scalar on either side
+stands for as many copies of itself as the shared axis asks for.
+
+The two languages part on how the operand is applied, and both readings are
+implemented. J takes x in cells at v's dyadic LEFT rank — or at rank 1
+where that rank is smaller — hands the WHOLE of y to v once per cell, and
+applies u MONADICALLY to what comes back: so `+/ . ,` catenates a row onto
+the whole table (`(i.2 3) +/ . , i.3 2` is a 3-list), and u need not fold at
+all — `(i.2 3) <. . * i.3 2` is shaped `2 3 2`. APL's operand takes one
+vector from each side: the vector along x's last axis and the vector along
+y's first, so `(2 2⍴⍳4)+., 2 2⍴⍳4` catenates two 2-lists and folds the four
+elements. Where g is a scalar function — which is every published use — the
+two readings are the same value, and libjay computes it by the J route,
+under the leading-axis pairing that route needs.
+
+`+/ . *` and `+.×` over real machine numbers do not go through the cell
+machinery at all: the product runs as a blocked pass over the two buffers,
+blocked on the shared axis so that a slice of y is reused across a block of
+output rows, split by whole rows across the thread pool, and compiled once
+per CPU feature level like every other hot loop. Whole numbers stay whole,
+with one bound computed up front deciding whether the vectorising loop can
+overflow at all; where it might, a checked loop runs and leaving i64
+anywhere sends the whole product to floats, as it does everywhere else.
+Neither argument's layout matters — a column-major block is materialised by
+the same rule any other verb uses.
+
+Monadically — J's alone; APL gives `f.g` no monadic valence — `u . v y` is
+the determinant by minors down the FIRST column: for each row in turn, that
+row's leading element under v with the determinant of the table the row and
+the column leave behind, all folded by u. `-/ . *` is the determinant
+proper and `+/ . *` the same expansion without the alternating sign. Two
+base cases finish it: with no columns left the value is v's identity
+element (so `-/ . * 0 0 $ 0` is 1), and with no rows left it is u over
+nothing (so `-/ . * 0 2 $ 0` is 0). The argument is read as a table of
+items, so a list is a single column and `-/ . * 1 2 3` is `-/ 1 2 3`; the
+monad's rank is 2, so an argument of higher rank gives one determinant per
+table.
+
+`-/ . *` over machine numbers goes by Gaussian elimination with partial
+pivoting instead, which is what the reference does from three rows up — and
+why its answer there is a float even where every element is whole. Every
+other combination expands by minors, memoised on the set of rows still in
+play, which is `2^n` work rather than `n!`; past 16 rows the diagnostic
+names the limit rather than running out of memory. The exact types take
+that route too, so an extended argument gives an exact determinant.
+
+### The sequential machine (`x ;: y`)
+
+The dyad of `;:` runs a table-driven state machine over y. x is the boxed
+description `f ; s ; m ; ijrd`, of which `m` and `ijrd` may be left off:
+
+- `s` is the transition table, shaped `p q 2`. At state `r` and input class
+  `c`, `s[r;c;0]` is the state to go to and `s[r;c;1]` the output code.
+- `m` maps an input element to its class, indexed by the character's
+  codepoint — `' ' = a.` classifies blanks as 1 and everything else as 0.
+  With no map at all a numeric argument IS the classes; a map over a
+  numeric argument is a named gap.
+- `ijrd` is four numbers, `0 _1 0 _1` by default: where to start reading,
+  where the word in hand began (`_1` for none), the starting state, and
+  what the end of the input does — a class to make one last transition
+  with, or `_1` to end the word in hand and stop.
+- `f` picks the answer: `0` the boxed words, `1` their elements catenated,
+  `2` each word's position and length, `3` the table position that ended
+  it (`c + q*r`), `4` both of those, `5` the whole trace, one row per
+  transition holding `i`, the word's start, the state, the class, and the
+  table entry those two chose.
+
+The output codes are `0` (nothing), `1` (a word starts here), `2` (end the
+word and start another here), `3` (end the word), and `6` (stop). Codes 4
+and 5 emit a VECTOR rather than a word; that reading is named rather than
+guessed at. Ending a word before one has begun is an error, as it is in the
+reference.
 
 ### The obverse table
 
@@ -465,7 +544,12 @@ last axis), `⍀` (scan, leading axis), `⍤` (rank), `⍨` (commute), `⍣`
 of every item and its result goes back into an item — a simple scalar
 result stays simple, so `2×¨1 2 3` is flat and `⍴¨'ab' 'cde'` is nested),
 `∘.f` (outer product — the same table J spells
-`x u/ y`, e.g. `1 2 3∘.×1 2 3`). A scan's k-th element is the reduce of the
+`x u/ y`, e.g. `1 2 3∘.×1 2 3`), and `f.g` (the inner product, `+.×` above
+all — see "The inner product" under J, which carries the shape rule both
+languages share and the one place their readings of `g` part). A `.` is the
+inner-product operator only where it is neither the start of a number nor
+the tail of `∘.`, so `2.5×2` and `2 3∘.×1 2` read as they always did. A
+scan's k-th element is the reduce of the
 first k, so it folds right to left like the reduce and not like a left
 fold: `-\1 2 3` is `1 ¯1 2`. `⍣` also takes a FUNCTION right operand:
 `f⍣g` applies f until `new g old` holds, so `f⍣≡` is the fixed point.
@@ -490,6 +574,19 @@ per leading axis, the edges filled with 0 or a blank, so `(+/⌺3)1 2 3 4 5`
 is `3 6 9 12 9`; Dyalog's two-row form, which also gives the movement, is
 a named gap. None of these six operators is in GNU APL — see "Which APL"
 above.
+
+`f⍠B` is the variant: one setting of the dialect overridden for ONE
+application and no other. A bare number is the principal option, which for
+every function libjay gives a variant is the comparison tolerance, so
+`1 (=⍠0) 1+1E¯14` is 0 where `1 = 1+1E¯14` is 1. The named forms are
+parenthesised literal pairs — `⍳⍠('IO' 0)`, `=⍠('CT' 0)` — and several may
+be given at once, applied left to right. `CT` is the same mechanism J
+spells `!.`; `IO` derives the verb again with the other index origin, which
+is what makes the variant an override of the dialect rather than an
+argument to the verb, and a verb that has no origin to change says so. An
+option libjay does not have, or one that is not settled when the program is
+compiled, is named. GNU APL rejects the glyph outright, so `⍠` has no
+oracle: tests/wave9.rs holds its rules instead.
 
 A dfn that names `⍺⍺` or `⍵⍵` is an OPERATOR rather than a function: it
 takes the function on its left, and one on its right where it named `⍵⍵`.
@@ -1314,19 +1411,28 @@ sections above is also collected here.
   Recursion inside the derived verb's own body, by `$:` or by a verb's name,
   works as it does anywhere else. `13 : '…'` and `{{)n` are gaps too.
 - Named on their own, beyond what
-  the tables above already mark "not supported yet": J's dyad of `;:` (the
-  sequential machine), `s:` (symbols), `$.` (sparse), the inner product
-  `u . v`, a NEGATIVE block size in a tessellation with the movement row
-  left implicit, the atomic representation of a capped fork or an explicit
-  definition, and `!.` as a fill on any verb but `|.`; APL's `⍠` (variant),
-  `⌶` (I-beam), `&` (spawn), a nested argument to dyadic `⍕`, a stencil
-  with a movement row, and a label sharing a definition with a control
-  structure.
+  the tables above already mark "not supported yet": J's `s:` (symbols) and
+  `$.` (sparse), which are STORAGE KINDS rather than verbs — an interned
+  string and a sparse layout — and are the 0.3 type work rather than a
+  primitive each; a determinant by minors of more than 16 rows (the
+  expansion is exponential, and only `-/ . *` over machine numbers has a
+  direct method); the two vector output codes of the sequential machine and
+  its map over a numeric argument; a NEGATIVE block size in a tessellation
+  with the movement row left implicit; the atomic representation of a
+  capped fork or an explicit definition; and `!.` as a fill on any verb but
+  `|.`. In APL: a variant option other than `⎕CT` and `⎕IO`, or one that is
+  not settled when the program is compiled; a nested argument to dyadic
+  `⍕`; a stencil with a movement row; and a label sharing a definition with
+  a control structure.
   The APL glyphs are reported by NAME rather than as unknown
   characters: a glyph the language has and libjay has not reached is a
-  queue position, and the diagnostic says which one. `T.` and `t.` are not
-  queue positions: both run a verb in J's own threads, which the sandbox
-  does not open (see "Sandbox" above), and `d.` `D.` `D:` `t:` `..` `.:`
+  queue position, and the diagnostic says which one. Three spellings are
+  NOT queue positions. `T.` and `t.` (J) and `&` (APL) run in the
+  language's own threads, which the sandbox does not open (see "Sandbox"
+  above). `⌶` (I-beam) is implementation-defined: what it does is each
+  interpreter's own business, and there is no published contract to follow,
+  so libjay refuses to invent one rather than promising a behaviour it
+  would have to guess at. And `d.` `D.` `D:` `t:` `..` `.:`
   are not in the language the reference implements at all — it rejects
   every one of those spellings as an invalid inflection.
   J's map `{::`, the index specifications of `{` and `}`, amend with a verb
@@ -1337,8 +1443,11 @@ sections above is also collected here.
   bitwise functions) and the explicit modifiers `1 :`, `2 :` and the
   `{{ }}` that names an operand all work, as do APL's `⍳` on a shape, mixed simple
   arrays, prototype fills, partitioned enclose at any rank, dyadic `⍕`,
-  `⊆`, `⍛`, `⍢`, `⌺`, `f⍤g`, `⌸`, trains, function assignment, the branch
-  `→` and the niladic `∇`. J's gerunds are boxed data now, so `` ` ``,
+  `⊆`, `⍛`, `⍢`, `⌺`, `f⍤g`, `⌸`, `f.g`, `f⍠B`, trains, function
+  assignment, the branch `→` and the niladic `∇`. J's inner product
+  `u . v` works in both valences, and so do the sequential machine
+  (dyadic `;:`), format by specification (dyadic `":`) and reading numbers
+  out of text (dyadic `".`). J's gerunds are boxed data now, so `` ` ``,
   `@.` and `` `: `` all read the same atomic representations. Boxes and
   complex numbers are both implemented; bigints and rationals (the exact
   types) are too — see "The numeric tower and the exact types" above.

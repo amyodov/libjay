@@ -6,6 +6,34 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased
 
 ### Added
+
+- The inner product: J's `u . v` and APL's `f.g`. `+/ . *` and `+.×` are
+  the matrix product, `*./ . =` and `∧.=` ask which rows match, `<./ . +`
+  and `⌊.+` take a shortest-path step, and any pair of functions works at
+  any rank. The matrix product over numbers is a blocked, parallel,
+  vectorised pass over the two blocks rather than an interpreted loop:
+  measured on a 1000×1000 pair of doubles it runs about 2.5× behind
+  numpy's tuned BLAS, and on whole numbers — where BLAS has no path and
+  numpy falls back to its own loop — about 25× ahead of it. Whole numbers
+  in give whole numbers out.
+- J's monadic `u . v`, the determinant: `-/ . * m` is the determinant
+  proper, and the same expansion with other functions is available.
+  Ordinary numbers go by elimination; exact integers and rationals keep
+  their exactness.
+- APL's `⍠`, the variant operator: one setting of the dialect overridden
+  for one application. `1 (=⍠0) 1+1E¯14` compares exactly where the
+  program's own comparison tolerance would not, and `⍳⍠('IO' 0)` counts
+  from zero inside a program that counts from one.
+- J's sequential machine, the dyad of `;:`: a table-driven tokeniser
+  written as a state machine, in all six of its result forms — the words
+  themselves, their positions and lengths, or a full trace of the run.
+- J's format by specification, the dyad of `":`: a field width and a
+  number of decimals per column, with an exponential form and the
+  reference's asterisks for a value that does not fit.
+- J's number reading, the dyad of `".`: the numbers a line of text spells,
+  with a value of your choosing standing in for anything that is not one —
+  `0 ". '1 2 x 3'` is `1 2 0 3`.
+
 ### Changed
 
 - Elementwise passes over two different element types — complex against
@@ -15,6 +43,13 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   argument one block at a time. Results are unchanged to the last bit; at
   20M elements `{c} + {f}` runs 2.5x faster, `{i} + {f}` 2.2x and
   `+/ {i} * {f}` 5.5x. See bench/README.md, "Mixed-type passes".
+- Two APL spellings moved from "not supported yet" to "absent by design",
+  because neither is work that can be queued: `⌶` (I-beam) is defined by
+  each interpreter for itself and has no published behaviour to follow,
+  and `&` (spawn) starts an APL thread, which libjay's sandbox does not
+  open — the same rule J's `T.` and `t.` already fell under. With those
+  moved, nothing in APL's primitive tables is a promise, and J's remaining
+  two, `s:` and `$.`, are storage kinds rather than primitives.
 
 ### Fixed
 

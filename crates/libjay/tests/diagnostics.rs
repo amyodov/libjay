@@ -194,12 +194,17 @@ fn j_name_and_valence_errors_name_the_word() {
 const J_PROMISES: &[Case] = &[
     j("_2 <;.3 i. 5", ErrorKind::NotYet, "_2 <;.3 i. 5", &["movement row"]),
     j("* b. _1", ErrorKind::NotYet, "* b. _1", &["obverse"]),
-    j("1 \". '2'", ErrorKind::NotYet, "1 \". '2'", &["numbers from text"]),
-    j("+ . * i. 2 2", ErrorKind::NotYet, "+ . *", &["inner product"]),
+    j("2 $. 1 2", ErrorKind::NotYet, "2 $. 1 2", &["sparse"]),
+    j("+/ . * i. 17 17", ErrorKind::NotYet, "+/ . * i. 17 17", &["determinant"]),
     j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign 9!:18"]),
     j("m =. /\nm", ErrorKind::NotYet, "m", &["displaying a modifier"]),
     j("s: 'a'", ErrorKind::NotYet, "s: 'a'", &["symbols"]),
-    j("'a' ;: 'b'", ErrorKind::NotYet, "'a' ;: 'b'", &["sequential machine"]),
+    j(
+        "(0;(2 2 2 $ 0 0 1 4 0 1 1 0);(' ' = a.)) ;: 'a b'",
+        ErrorKind::NotYet,
+        "(0;(2 2 2 $ 0 0 1 4 0 1 1 0);(' ' = a.)) ;: 'a b'",
+        &["sequential machine"],
+    ),
     j("(+/ % #) ^: _1 [ 1 2 3", ErrorKind::NotYet, "(+/ % #) ^: _1", &["obverse"]),
 ];
 
@@ -387,7 +392,8 @@ fn apl_name_errors_name_the_name() {
 // --- APL: the gaps ------------------------------------------------------
 
 const APL_PROMISES: &[Case] = &[
-    apl("1(+⍠2)2", ErrorKind::NotYet, "⍠", &["variant"]),
+    apl("1(=⍠('ZZ' 2))2", ErrorKind::NotYet, "=⍠('ZZ' 2)", &["variant option ZZ"]),
+    apl("1(=⍠A)2", ErrorKind::NotYet, "A", &["computed variant option"]),
     apl("3+F←+/", ErrorKind::NotYet, "F←+/", &["naming a function inside"]),
     apl("(A+×)4", ErrorKind::NotYet, "A", &["computed value"]),
     apl("⍕[1]⍳3", ErrorKind::NotYet, "[1]", &["axis specification for ⍕"]),

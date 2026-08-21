@@ -642,7 +642,7 @@ fn the_fixed_seed_roll_repeats() {
 #[test]
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
-        (Lang::J, "2 ;: 'a bc'", "sequential machine"),
+        (Lang::J, "2 s: 'a bc'", "symbols"),
         (Lang::Apl, "1∘×2", "∘ with a value operand"),
     ];
     for (lang, src, what) in cases {

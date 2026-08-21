@@ -1131,7 +1131,7 @@ fn primitive(word: &str) -> Option<Prim> {
         "#:" => prim("#:", M::EncodeBits, D::Encode, [INF, 1, 0]),
         "!" => prim("!", M::Scalar(SM::Factorial), D::Scalar(SD::Binomial), [0, 0, 0]),
         "\":" => {
-            prim("\":", M::Format, D::NotYet("format with a specification"), [INF, 1, INF])
+            prim("\":", M::Format, D::FormatSpecJ, [INF, 1, INF])
         }
         "o." => prim("o.", M::Scalar(SM::Pi), D::Scalar(SD::Circle), [0, 0, 0]),
         "j." => prim("j.", M::Scalar(SM::Imaginary), D::Scalar(SD::MakeComplex), [0, 0, 0]),
@@ -1199,15 +1199,15 @@ fn primitive(word: &str) -> Option<Prim> {
         ";:" => prim(
             ";:",
             M::Words,
-            D::NotYet("sequential machine (dyadic ;:)"),
+            D::SequentialMachine,
             [INF, INF, INF],
         ),
         "L." => prim("L.", M::LevelOf, D::None, [INF, INF, INF]),
         "\"." => prim(
             "\".",
             M::Execute { apl: false },
-            D::NotYet("numbers from text (dyadic \".)"),
-            [1, INF, INF],
+            D::ParseNumbers,
+            [1, INF, 1],
         ),
         "A." => prim("A.", M::AnagramIndex, D::AnagramFrom, [1, 0, INF]),
         "C." => prim("C.", M::CycleForm, D::Permute, [INF, INF, INF]),
@@ -1785,6 +1785,33 @@ fn parse_plain(word: &str, span: Span) -> Result<Num> {
 /// One numeric word list as an array. The widest type any word reached
 /// carries the whole vector: `1 2 3x` is extended throughout, and one
 /// rational or float among the words pulls its neighbours up with it.
+/// J `x ". y`: the numbers one line of text spells.
+///
+/// The line is split at blanks and every word read as a J numeric literal;
+/// a word that is not one takes the value `fallback` instead, which is what
+/// separates this from `".` the monad — a line that does not parse is
+/// answered rather than refused. One word gives a scalar, as reading that
+/// line as a noun would; several give a vector of that many.
+///
+/// None where the fallback is not a number: there is nothing to stand in
+/// with.
+pub(crate) fn numbers_from_text(line: &str, fallback: &Array) -> Option<Array> {
+    let stand_in = match &fallback.data {
+        Data::Bool(v) => Num::I(i64::from(*v.as_slice().first()?)),
+        Data::I64(v) => Num::I(*v.as_slice().first()?),
+        Data::F64(v) => Num::F(*v.as_slice().first()?),
+        Data::Ext(v) => Num::X(v.as_slice().first()?.clone()),
+        Data::Rat(v) => Num::R(v.as_slice().first()?.clone()),
+        Data::Complex(v) => Num::C(*v.as_slice().first()?),
+        Data::Char(_) | Data::Box(_) => return None,
+    };
+    let nums: Vec<Num> = line
+        .split_whitespace()
+        .map(|w| parse_number(w, Span::new(0, 0)).unwrap_or_else(|_| stand_in.clone()))
+        .collect();
+    Some(num_array(&nums))
+}
+
 fn num_array(nums: &[Num]) -> Array {
     use crate::exact::{Ext, Rat};
     let shape = if nums.len() == 1 { vec![] } else { vec![nums.len()] };
@@ -2416,7 +2443,17 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             "t. runs a verb in one of J's thread pools, which libjay does not open",
             span,
         )),
-        "." => Err(Error::not_yet("the inner product (u . v)", span)),
+        // `u . v`: the inner product, of which `+/ . *` is the matrix
+        // product and `-/ . *` the determinant.
+        "." => {
+            let f = verb_operand(u, span)?;
+            let g = verb_operand(v, span)?;
+            Ok(Frag::Verb(VerbFrag::V(Verb::InnerProduct {
+                u: Box::new(f),
+                v: Box::new(g),
+                apl: false,
+            }), span))
+        }
         "!:" => foreign(&u, &v, span),
         // `u : v` is J's monad/dyad conjunction. The explicit definitions
         // spelled `3 : '…'` and `4 : '…'` are read by the lexer and never
@@ -3223,10 +3260,10 @@ mod tests {
 
     #[test]
     fn unimplemented_meanings_reach_the_verb_not_the_parser() {
-        let (v, _, _) = dyad_of(&one("2 ;: 'a b'"));
-        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("sequential machine (dyadic ;:)"));
-        let (v, _) = monad_of(&one("\": 1 2"));
-        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("format with a specification"));
+        let (v, _, _) = dyad_of(&one("2 $. 'a b'"));
+        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("sparse arrays ($.)"));
+        let (v, _, _) = dyad_of(&one("2 s: 'a b'"));
+        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("symbols (s:)"));
     }
 
     #[test]

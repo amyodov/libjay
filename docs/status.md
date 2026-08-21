@@ -8,20 +8,26 @@ published vocabulary of each language, not the part libjay reaches today.
 | 🟢 | implemented — differential-tested wherever an oracle covers it |
 | 🟡 | partial: works, with the caveat named in the row |
 | 🔴 | not yet — a promise, and the compiler says so by name |
-| ⚪ | absent here by design (nulls and other things libjay refuses to guess at) |
+| ⚪ | absent here by design (nulls, threads, and other things libjay refuses to guess at) |
 | — | the language gives this spelling no meaning in that valence |
 
 Nothing is permanently excluded. A 🔴 is a queue position; a ⚪ is a
-deliberate refusal to invent data, not a closed door.
+deliberate refusal to invent data or behaviour, not a closed door. The
+⚪ rows a reader is most likely to look for: `⌶` is implementation-defined
+— what an I-beam does is the interpreter's own business, and libjay will
+not invent a contract for a spelling that has no published one — while `&`
+(APL) and `T.`/`t.` (J) start the language's own threads, which the sandbox
+does not open.
 
 Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 148 green / 20 partial / 7 red / 2 absent by design, of 177 valences
+**J: 150 green / 22 partial / 3 red / 2 absent by design, of 177 valences
 in the inventory.**
 
-**APL: 89 green / 22 partial / 4 red of 115 valences in the inventory.**
+**APL: 90 green / 23 partial / 3 absent by design, of 116 valences in the
+inventory. Nothing in APL's primitive tables is red.**
 
 ## J — verbs
 
@@ -112,12 +118,12 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | Spelling | Monad | Dyad |
 |---|---|---|
 | `;` | 🟢 raze | 🟢 link |
-| `;:` | 🟢 words | 🔴 sequential machine |
+| `;:` | 🟢 words | 🟡 sequential machine: the table-driven form `(f;s;m;ijrd) ;: y`, with output codes 0 to 3 and 6 and every result form 0 to 5; the two vector codes (4 and 5) and a map over a numeric argument are named |
 | `L.` | 🟢 level of | — |
-| `":` | 🟢 default format | 🔴 format by specification |
-| `".` | 🟢 do; the string runs over the names around it | 🔴 numbers |
+| `":` | 🟢 default format | 🟢 format by specification: `w j d` per column, width 0 for what the values need, a negative width for the exponential form, asterisks for what does not fit |
+| `".` | 🟢 do; the string runs over the names around it | 🟢 numbers, x standing in for a word that is not one |
 | `u:` | 🟢 unicode | 🟡 unicode; forms 3 and 10, the byte-oriented ones named |
-| `s:` | 🔴 symbol; an interned-string type libjay has no place for yet | 🔴 symbol |
+| `s:` | 🔴 symbol; an interned-string type libjay has no place for yet — a 0.3 storage kind, with `$.` | 🔴 symbol |
 | `[` | 🟢 same | 🟢 left |
 | `]` | 🟢 same | 🟢 right |
 | `echo` | 🟢 print | — |
@@ -155,7 +161,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `&.` under | 🟢 `v^:_1 @: u &: v`, over the obverse table |
 | `&.:` under | 🟢 the same on whole arguments |
 | `^:` power | 🟡 a literal count, a list of them, `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives (the obverse); a computed count not yet |
-| `.` dot product | 🔴 |
+| `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
 | `:` explicit definition | 🟡 `1 :`, `2 :`, `3 :`, `4 :`, and the `m : 0` body on the lines below; `13 :` not yet |
 | `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named |
 | `!.` fit | 🟡 the tolerance meaning, and the fill for `\|.` (the shift); a fill on any other verb is named |
@@ -177,7 +183,7 @@ conjunctions above:
 | `L:` level | 🟢 both valences; the dyad descends both arguments together |
 | `S:` spread | 🟢 both valences, as `L:` |
 | `b.` boolean / characteristics | 🟢 `m b.` (the 32 boolean and bitwise functions) and all three characteristics: `0` the ranks, `1` the identity function, `_1` the obverse |
-| `$.` sparse | 🔴 |
+| `$.` sparse | 🔴 a storage kind rather than a verb: the 0.3 type work, with `s:` |
 | `H.` hypergeometric | 🟢 the series, with the shared parameters cancelled; a series that neither converges nor overflows is refused by name |
 | `t.` task | ⚪ the reference spells `t.` the TASK conjunction — it runs a verb in one of J's thread pools and answers with a pyx. The sandbox does not open those threads, as it does not for `T.` |
 | `t:` | — the reference rejects the spelling as an invalid inflection, as it does `d.`, `D.` and `D:` |
@@ -313,7 +319,7 @@ conjunctions above:
 | `⎕` evaluated input | 🟢 one line, run as APL over the program's own names | — |
 | `→` branch | 🟡 inside a `∇` definition: labels, `→0`, `→(cond)/L`, `→⍬`; a label and a control structure in one definition is named | — |
 | `⍬` zilde | 🟢 | — |
-| `⌶` I-beam | 🔴 named | 🔴 named |
+| `⌶` I-beam | ⚪ implementation-defined | ⚪ the same |
 
 ## APL — operators
 
@@ -335,8 +341,9 @@ conjunctions above:
 | `⍢` under | 🟡 no oracle: GNU APL rejects it; Dyalog's `g⍣¯1 ⊢ (g x) f (g y)`, over the same obverse table J's `&.:` uses |
 | `⌸` key | 🟡 no oracle: GNU APL rejects it; Dyalog's, with the operand taking the key and its group |
 | `⌺` stencil | 🟡 no oracle: GNU APL rejects it; Dyalog's monadic-window form — one size per leading axis, the windows centred and the edges filled. The two-row form that also gives the movement is named |
-| `⍠` variant | 🔴 named |
-| `&` spawn | 🔴 named |
+| `.` inner product | 🟢 `f.g`: `+.×` is the matrix product, `∧.=` asks which rows match. Each vector along x's last axis meets each vector along y's first under g, and f folds the result |
+| `⍠` variant | 🟡 one dialect setting overridden for one application: `⎕CT` (the principal option, so a bare number sets it) and `⎕IO`, as literal options — `=⍠0`, `⍳⍠('IO' 0)`. Another option, or one that is not settled when the program is compiled, is named. No oracle: GNU APL rejects the glyph |
+| `&` spawn | ⚪ starts an APL thread, which the sandbox does not open — as J's `T.` and `t.` do not |
 
 ## APL — syntax and features
 

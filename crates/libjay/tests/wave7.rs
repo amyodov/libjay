@@ -281,8 +281,9 @@ fn the_gaps_this_wave_leaves_name_themselves() {
     // `t:` is not a J inflection at all — the reference rejects the
     // spelling, so there is nothing to promise.
     assert_eq!(err(Lang::J, "(^ t: 3) 1").kind, ErrorKind::Language);
-    // `⍠` is still queued.
-    assert_eq!(err(Lang::Apl, "1(+⍠2)2").kind, ErrorKind::NotYet);
+    // `⌶` is still queued: what an I-beam does is the implementation's own
+    // business, so there is nothing published to follow.
+    assert_eq!(err(Lang::Apl, "1(⌶)2").kind, ErrorKind::NotYet);
 }
 
 #[test]

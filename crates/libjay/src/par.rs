@@ -154,6 +154,31 @@ where
     fill_chunks(n, n.div_ceil(threads), parallel, f)
 }
 
+/// Fill `rows` rows of `width` outputs each, split by WHOLE rows: `f` is
+/// handed the index of the first row of its block and that block's outputs.
+/// A kernel that walks a row at a time — the matrix product's inner pass —
+/// needs the split to fall on a row boundary, which the elementwise
+/// splitters do not promise.
+pub fn fill_rows<U, F>(rows: usize, width: usize, work: usize, f: F) -> Vec<U>
+where
+    U: Copy + Default + Send,
+    F: Fn(usize, &mut [U]) + Sync + Send,
+{
+    let mut out = vec![U::default(); rows * width];
+    let threads = parallelism();
+    if width > 0 && rows >= threads && worth_it(work) {
+        let per = rows.div_ceil(threads);
+        in_pool(|| {
+            out.par_chunks_mut(per * width)
+                .enumerate()
+                .for_each(|(k, part)| f(k * per, part));
+        });
+    } else if rows > 0 {
+        f(0, &mut out);
+    }
+    out
+}
+
 /// Fill `n` outputs whose computation can fail.
 ///
 /// Several chunks may fail at once and rayon reports one of them. Every

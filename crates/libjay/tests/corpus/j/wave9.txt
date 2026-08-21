@@ -1,0 +1,172 @@
+// Wave 9: the inner product `u . v` in both valences, the sequential
+// machine (dyadic `;:`), format by specification (dyadic `":`) and reading
+// numbers out of text (dyadic `".`).
+
+// The matrix product, at every rank the shape rule reaches.
+(i.2 3) +/ . * i.3 2
+(i.2 3) +/ .* i.3 2
+1 2 3 +/ . * 1 2 3
+(i.3 3) +/ . * i.3
+(i.3) +/ . * i.3 3
+$ (i.2 3 4) +/ . * i. 4 5
+(i.2 3 4) +/ . * i. 4 5
+(i.2 2) +/ . * i. 2 2 2
+2 +/ . * i.3 3
+(i.2 2) +/ . * 5
+$ (2 0 $ 0) +/ . * (0 3 $ 0)
+(2 0 $ 0) +/ . * (0 3 $ 0)
+3!:0 (i.2 3) +/ . * i.3 2
+(0.5 * i.2 3) +/ . * 0.25 * i.3 2
+1 2 3 -/ . * 4 5 6
+1 2 3 */ . + 4 5 6
+(i.2 3) <./ . + i.3 2
+(i.2 3) >./ . + i.3 2
+(i.2 3) *./ . = i.2 3
+(i.3 2) *./ . = i.3 2
+(2 3 $ 1 0 1 0 1 0) +./ . *. 3 2 $ 1 1 0 0 1 1
+
+// u is applied monadically to what v made, so it need not be a reduction.
+(i.2 3) <. . * i.3 2
+$ (i.2 3) <. . * i.3 2
+(i.2 3) ,/ . * i.3 2
+
+// v's own left rank decides how much of x one application sees.
+(i.2 3) +/ . , i.3 2
+(i.2 3) +/ . ,: i.3 2
+1 0 1 +/ . # i.3 2
+
+// The determinant: `-/ . *` and its relatives, by minors down the first
+// column.
+-/ . * 2 2 $ 1 2 3 4
+-/ . * 3 3 $ 2 0 1 1 3 2 1 1 1
++/ . * 3 3 $ 2 0 1 1 3 2 1 1 1
+-/ . * i. 4 4
+-/ . * 4 2 $ 1 2 3 4 5 6 7 8
+-/ . * 2 1 $ 5 6
+-/ . * 1 2 $ 5 6
+-/ . * 2 3 $ 1 2 3 4 5 6
+-/ . * 1 1 $ 7
+-/ . * 0 0 $ 0
+-/ . + 0 0 $ 0
+-/ . * 0 1 $ 0
+-/ . * 2 0 $ 0
+-/ . * 1 2 3
+-/ . * 5
+-/ . + 2 2 $ 1 2 3 4
+*/ . + 2 2 $ 1 2 3 4
+-/ . * i. 2 2 2
+-/ . * 2 2 $ 1x 2 3 4
+-/ . * 3 3 $ 1x 2 3 4 5 6 7 8 10
+-/ . * 3 3 $ 0.5 1.5 2 3 4 5 6 7 8
+
+// The sequential machine. The table is `p q 2`: a state, an input class,
+// and the pair (next state, output code).
+(0;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+(1;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+(2;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+(3;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+(4;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+(5;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+(0;(2 2 2 $ 0 0 1 2 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+(2;(2 2 2 $ 0 0 1 2 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+(0;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef'
+(2;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef'
+(5;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 0) ;: '  ab cd  ef'
+(0;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 0) ;: '  ab cd  ef'
+(0;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 1) ;: '  ab cd  ef'
+(0;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);2 _1 1 _1) ;: '  ab cd  ef  '
+(0;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: ''
+(0;(4 2 2$ 1 1 2 1  1 0 2 2  2 0 3 0  1 2 2 0);('''' = a.)) ;: '''The Power of the Powerless'' by Havel and ''1984'' by Orwell'
+(2;(4 2 2$ 1 1 2 1  1 0 2 2  2 0 3 0  1 2 2 0);('''' = a.)) ;: '''The Power of the Powerless'' by Havel and ''1984'' by Orwell'
+(3;(4 2 2$ 1 1 2 1  1 0 2 2  2 0 3 0  1 2 2 0);('''' = a.)) ;: '''The Power of the Powerless'' by Havel and ''1984'' by Orwell'
+(4;(4 2 2$ 1 1 2 1  1 0 2 2  2 0 3 0  1 2 2 0);('''' = a.)) ;: '''The Power of the Powerless'' by Havel and ''1984'' by Orwell'
+(1;(4 2 2$ 1 1 2 0  1 0 2 3  2 0 3 0  1 1 2 0);('''' = a.)) ;: '''The Power of the Powerless'' by Havel and ''1984'' by Orwell'
+(0;(4 2 2$ 1 1 2 1  1 0 2 1  2 0 3 0  1 3 2 0);('''' = a.)) ;: '''Preposterous!''  He couldn''t go on.'
+(0;(4 2 2$ 1 1 2 1  1 0 2 1  2 0 3 0  1 3 2 0);('''' = a.);0 _1 0 0) ;: '''Preposterous!''  He couldn''t go on.'
+(0;(2 2 2 $ 0 0 1 3 0 1 1 0);(' ' = a.);0 _1 1 6) ;: '  ab cd  ef'
+(0;(2 2 2 $ 0 0 1 6 0 1 1 0);(' ' = a.);0 _1 1 _1) ;: '  ab cd  ef  '
+
+// Format by specification: `w j d` is the width and the digits after the
+// point, one per column or one for all of them.
+5j2 ": 1.5
+$ 5j2 ": 1.5
+8j3 ": 1.5 2.25 3
+(5j2, 8j3) ": 2 2 $ 1.5 2.25 3 4
+6 ": 1.5 2.25
+0 ": 1.5 2.25
+5j2 ": 2 2 $ 1 2 3 4
+3 ": 1 2 3
+1 ": 1 2 3
+2j0 ": 1.5 2.5 3.5
+5j2 ": i. 2 3
+$ 5j2 ": i. 2 3 2
+5j2 ": 3
+5j2 ": 1r2
+0j2 ": 1.5 20.25
+$ 0j2 ": 1.5 20.25
+$ 0 ": 1 2 3
+0 ": 2 2 $ 1 22 333 4
+$ 0 ": 2 2 $ 1 22 333 4
+0 ": i. 3 3
+$ 0 ": i. 3 3
+(5j2 , 0) ": 2 2 $ 1.5 2.25 3 4
+$ (5j2 , 0) ": 2 2 $ 1.5 2.25 3 4
+(0 , 5j2) ": 2 2 $ 1.5 2.25 3 4
+$ (0 , 5j2) ": 2 2 $ 1.5 2.25 3 4
+5j2 ": 12345.678
+5j2 ": 1e20
+5j2 ": _0.001
+5j3 ": _0.001
+6j3 ": 0.0005
+8j2 ": _1.5
+4j2 ": 1.5
+3j2 ": 1.5
+_6j2 ": 1.5
+_9j2 ": 1.5
+_10j2 ": 1.5
+_12j3 ": 1500.25
+_12j3 ": 0.00012345
+_12j3 ": _1500.25
+_8j2 ": 1500
+_8j0 ": 1.5
+_8j2 ": 1.5 2.5
+_1 ": 1 2 3
+_5j1 ": 1.5 2.5
+5 ": 'abc'
+5j2 ": < 1 2
+(5j2 , 8j3 , 4j1) ": 2 2 $ 1.5 2.25 3 4
+
+// Reading numbers out of text: x stands in for a word that is not one.
+0 ". 'abc'
+0 ". '1 2 3'
+_1 ". '1 2 x 3'
+0 ". '12abc'
+_5 ". 'abc'
+0 ". 2 3 $ '1 234 5'
+0 ". ''
+$ 0 ". ''
+0 ". '_3.5e2'
+0 ". '2+3'
+99 ". 'oops'
+$ 0 ". 'abc'
+$ 0 ". '1'
+$ 0 ". '1 2'
+$ 0 ". 'abc def'
+0 ". '  1   2  '
+0 ". '1r2 3'
+0 ". '1j2 3'
+0 ". '2.5 _3.5'
+1 2 3 ". 'a b'
+0 ". 3 $ 'abc'
+
+// The derived verb is a verb like any other: it can be named, ranked,
+// composed and fed a transposed argument.
+mp =. +/ . *\n(i.2 3) mp i.3 2
+(i.2 3) (+/ . *)"2 i.3 2
+(i.2 3) +/ . * &.: (2&*) i.3 2
+(i.2 3) +/ . * |: i.2 3
+(+/ . *) b. 0
+(-/ . *) b. 0
++/ . * i. 5 5
++/ , (i. 40 40) +/ . * i. 40 40
++/ , (0.5 * i. 40 40) +/ . * 0.25 * i. 40 40

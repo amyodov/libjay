@@ -426,6 +426,11 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             verb_lines(f, depth + 1, p, tr, out);
             verb_lines(g, depth + 1, p, tr, out);
         }
+        Verb::InnerProduct { u, v, .. } => {
+            head(out, "inner product (u . v; the matrix product for +/ . *)");
+            verb_lines(u, depth + 1, p, tr, out);
+            verb_lines(v, depth + 1, p, tr, out);
+        }
         Verb::UserDerived { def, alpha, omega } => {
             head(out, "a user-written operator with its operands");
             verb_lines(def, depth + 1, p, tr, out);
