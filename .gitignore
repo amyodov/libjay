@@ -10,3 +10,4 @@ uv.lock
 *.pyd
 *.dylib
 /lj.png
+.apl.history

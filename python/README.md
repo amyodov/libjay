@@ -20,8 +20,6 @@ semantics (J reduces along the leading axis, APL along the trailing one).
 
 ## Install
 
-Not yet on PyPI. Once published:
-
 ```sh
 uvx libjay -e '(+/ % #) 3 1 4 1 5'      # try the CLI with no install
 uv add libjay                            # or: pip install libjay

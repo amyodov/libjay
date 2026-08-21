@@ -4,6 +4,11 @@ description = "Independent, modern implementations of the J and APL array langua
 readme = "README.md"
 keywords = ["j", "apl", "array", "vectorization", "language"]
 categories = ["compilers", "mathematics", "science"]
+# The differential suite is developed against the repository, not the
+# published crate: its corpora and recorded snapshots are several thousand
+# expressions of test data, and the recorder that refreshes them lives in a
+# workspace crate that is not published at all.
+exclude = ["tests/"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -597,7 +597,7 @@ pub enum DyadOp {
     Right,
     /// x (APL `⊣`).
     Left,
-    /// x |. y: rotate axis k of y left by x[k] (negative rotates right).
+    /// `x |. y`: rotate axis k of y left by `x[k]` (negative rotates right).
     Rotate,
     /// Catenate along the LEADING axis (J `,`, APL `⍪`).
     AppendLeading,
@@ -619,7 +619,7 @@ pub enum DyadOp {
     NotMatch,
     /// x /: y and x \: y: x's items reordered by the grade of y's items.
     GradeSelect { down: bool },
-    /// `x # y` (J), `x/y` and `x⌿y` (APL): item i of y repeated x[i] times.
+    /// `x # y` (J), `x/y` and `x⌿y` (APL): item i of y repeated `x[i]` times.
     /// A one-element x applies to every item.
     Copy,
     /// `x #. y` / `x ⊥ y`: mixed-radix decode. A scalar x is the base for
@@ -858,7 +858,7 @@ pub enum Verb {
     /// that a definition can call itself by its own name.
     Named(String),
     /// J `u :. v`: u, with v declared to be its obverse. The declaration is
-    /// what [`obverse`] answers with; applying the verb applies u.
+    /// what `obverse` answers with; applying the verb applies u.
     WithObverse(Box<Verb>, Box<Verb>),
     /// J `m@.v`: agenda — v's value at the arguments picks which of the
     /// gerund's verbs to apply.

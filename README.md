@@ -31,17 +31,22 @@ jay.apl("+⌿2 3⍴⍳6")        # [5 7 9]  — APL's leading-axis sum
 
 ## Try it
 
-Not yet on PyPI. From a checkout (Rust toolchain required):
+No setup, no Rust toolchain — the wheels are prebuilt:
+
+```sh
+uvx libjay -e '(+/ % #) 3 1 4 1 5'                      # 2.8
+uvx libjay -e "⎕←'Hello, world!'" --lang apl            # APL
+uv add libjay                                           # or: pip install libjay
+```
+
+From a checkout (Rust toolchain required):
 
 ```sh
 uv venv && uv pip install maturin
 uv run maturin develop
 uv run libjay -e '(+/ % #) 3 1 4 1 5'                   # 2.8
-uv run libjay -e "⎕←'Hello, world!'" --lang apl         # APL
 uv run libjay examples/hello.apl                        # or run a file
 ```
-
-Once published, `uvx libjay -e '...'` will do all of that with no setup.
 
 ## Where next
 
@@ -57,19 +62,23 @@ Once published, `uvx libjay -e '...'` will do all of that with no setup.
 
 ## Status
 
-Early. What's implemented, feature by feature, is the
-[status matrix](docs/status.md): 100 green / 24 partial / 59 red of 183 J
-valences, 62 green / 21 partial / 33 red of 116 APL valences. Both primitive
-sets are differential-tested against the reference implementations: 3483
-J and 895 APL expressions, recorded as snapshots from black-box runs of the
-reference interpreters and replayed on every test run, 100% agreement. A
-20-period Bollinger z-score written as one J kernel runs 20M rows in 404 ms
-against the equivalent Polars pipeline's 755, agreeing to 8.7e-10. Dense numeric arrays, complex numbers, boxes, and J's exact
-types — extended-precision integers and rationals; things the languages
-have but libjay doesn't yet fail with an explicit "not supported yet".
+Early — 0.1.0 is the first release; what it ships is in
+[CHANGELOG.md](CHANGELOG.md). What's implemented, feature by feature, is the
+[status matrix](docs/status.md): 135 green / 26 partial / 18 red of 180 J
+valences, 79 green / 25 partial / 11 red of 115 APL valences. Both primitive
+sets are differential-tested against the reference implementations: 3816
+J and 1024 APL expressions, recorded as snapshots from black-box runs of the
+reference interpreters and replayed on every test run. The two agree
+everywhere except 29 APL sentences where libjay diverges on purpose, each
+recorded with the reason. A 20-period Bollinger z-score written as one J
+kernel runs 20M rows in 404 ms against the equivalent Polars pipeline's 755,
+agreeing to 8.7e-10. Dense numeric arrays, complex numbers, boxes, and J's
+exact types — extended-precision integers and rationals; things the
+languages have but libjay doesn't yet fail with an explicit "not supported
+yet".
 Fused kernels can be placed on a GPU (`kernel.deploy("gpu")`, wgpu over
 Metal/Vulkan/DX12, in the ordinary wheel and dormant without an adapter);
-resident data runs 1.5x to 5x the 8-thread CPU at 20M rows. Next on the
+resident data runs 1.4x to 7.3x the 8-thread CPU at 20M rows. Next on the
 roadmap: more of both languages. The APL implemented today is the APL2/ISO
 line, verified against GNU APL; Dyalog-specific behaviour is a planned
 dialect switch (see [docs/coverage.md#which-apl](docs/coverage.md#which-apl)).

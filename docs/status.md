@@ -18,10 +18,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 134 green / 27 partial / 18 red / 1 absent by design, of 180 valences
+**J: 135 green / 26 partial / 18 red / 1 absent by design, of 180 valences
 in the inventory.**
 
-**APL: 78 green / 26 partial / 11 red of 115 valences in the inventory.**
+**APL: 79 green / 25 partial / 11 red of 115 valences in the inventory.**
 
 ## J — verbs
 

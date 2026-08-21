@@ -17,7 +17,7 @@
 //! A chain does not have to be written as one sentence. `d =. {x} - m`
 //! followed by `+/ d * d` names a value that nothing needs as an array, and
 //! the pass moves such a value into the sentences that read it — see
-//! [`inline_once`] for the rules that keep that sound.
+//! `inline_once` for the rules that keep that sound.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1838,7 +1838,7 @@ impl Decline {
 
 /// Why this kernel would decline these inputs, or None if it would run.
 ///
-/// A read-only mirror of the preconditions at the top of [`run`]: it looks
+/// A read-only mirror of the preconditions at the top of `run`: it looks
 /// at shapes and dtypes only, never at values, so the one thing it cannot
 /// see in advance is an overflow — which is what is left when every
 /// precondition holds.

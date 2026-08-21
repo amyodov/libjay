@@ -67,6 +67,10 @@ manifest-path = "crates/libjay-python/Cargo.toml"
 module-name = "jay._jay"
 python-source = "python"
 features = ["pyo3/extension-module"]
+# An sdist is assembled from what cargo needs plus the Python source, and
+# neither reaches the repository root, so the licence PKG-INFO promises has
+# to be named. The wheel picks it up on its own.
+include = [{ path = "LICENSE", format = "sdist" }]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

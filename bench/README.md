@@ -514,11 +514,12 @@ What the numbers say:
   thirty times the kernel itself. A device is worth naming only for data
   that stays there, which is what `upload` and `keep_on_device` are for.
 - **Arithmetic per element decides the win.** The weighted sum moves two
-  columns and does one multiply: 1.5x, because both processors are waiting
-  on memory. The polynomial does five operations on one column and the sum
-  of exponentials a transcendental: 4.7x and 5.1x. The pattern is the same
-  one the SIMD section found — the width was never the limit, the memory
-  was — read the other way round.
+  columns and does one multiply: 3.3x, and it is the row where both
+  processors spend the most of their time waiting on memory. The polynomial
+  does five operations on one column and the sum of exponentials a
+  transcendental: 2.7x and 7.3x. The pattern is the same one the SIMD
+  section found — the width was never the limit, the memory was — read the
+  other way round.
 - **The standard deviation is a mixed placement**, and honestly so: the two
   `+/ {x}` passes it needs are single verbs, which the fusion pass does not
   fuse and the device therefore never sees. Only the map-reduce over them

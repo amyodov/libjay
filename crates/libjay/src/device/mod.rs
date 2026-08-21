@@ -9,7 +9,7 @@
 //! What runs on a GPU this phase is the fused elementwise kernel and nothing
 //! else. [`crate::fuse`] already compiles a chain of scalar verbs into a
 //! postfix program over blocks, with an optional reduction folded in — that
-//! is a kernel description, and [`codegen`] turns it into WGSL at run time.
+//! is a kernel description, and `codegen` turns it into WGSL at run time.
 //! Anything outside a fused node, and any fused node the generator declines,
 //! runs where it always ran.
 //!
