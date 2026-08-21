@@ -80,7 +80,9 @@ fast-forward (squash multi-commit work first) — never a merge commit.
 Self-contained work (docs, CI, devtools, corpus recording, SIMD, audits)
 runs in its own git worktree; engine core (verb.rs, frontends, fuse.rs)
 stays in the shared tree with at most two agents. A branch must pass the
-full gate on its own before it lands. Decisions with reasoning go to docs/decisions.md, not here.
+full gate on its own before it lands — and ONLY THE ORCHESTRATOR LANDS IT:
+a subagent never merges, rebases onto main, fast-forwards main, or pushes;
+it reports its branch name and final commit. Decisions with reasoning go to docs/decisions.md, not here.
 
 ## Working notes
 
