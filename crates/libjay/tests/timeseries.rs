@@ -92,10 +92,10 @@ fn j_suffix_scans_apply_the_verb_to_every_suffix() {
     assert_eq!(val(Lang::J, "-/\\. 1 2 3 4"), i64s(&[4], &[-2, 3, -1, 4]));
     assert_eq!(val(Lang::J, "+/\\. i. 2 3"), i64s(&[2, 3], &[3, 5, 7, 3, 4, 5]));
     assert_eq!(val(Lang::J, "+/\\. i. 0"), i64s(&[0], &[]));
-    // The outfix (the dyad of `\.`) is not implemented.
-    let e = err(Lang::J, "2 +/\\. 1 2 3");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("outfix"), "{}", e.msg);
+    // The outfix (the dyad of `\.`) leaves out every run of x items.
+    assert_eq!(val(Lang::J, "2 +/\\. 1 2 3"), i64s(&[2], &[3, 1]));
+    assert_eq!(val(Lang::J, "2 +/\\. i. 5"), i64s(&[4], &[9, 7, 5, 3]));
+    assert_eq!(val(Lang::J, "3 -/\\. i. 5"), i64s(&[3], &[-1, -4, -1]));
 }
 
 #[test]
@@ -128,10 +128,11 @@ fn apl_scan_of_a_non_associative_function_reduces_each_prefix() {
     assert_eq!(val(Lang::Apl, "÷\\1 2 3"), f64s(&[3], &[1.0, 0.5, 1.5]));
     // J spells the same thing `-/\`, and gets the same answer.
     assert_eq!(val(Lang::J, "-/\\ 1 2 3"), val(Lang::Apl, "-\\1 2 3"));
-    // APL has no dyadic scan; `x\y` is expand, which is not implemented.
-    let e = err(Lang::Apl, "1 0 1\\1 2 3");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("expand"), "{}", e.msg);
+    // APL has no dyadic scan; `x\y` after a value is expand, a function of
+    // its own: every 1 takes an item, every 0 leaves a fill.
+    assert_eq!(val(Lang::Apl, "1 0 1\\1 2"), i64s(&[3], &[1, 0, 2]));
+    assert_eq!(val(Lang::Apl, "1 0 1⍀1 2"), i64s(&[3], &[1, 0, 2]));
+    assert_eq!(val(Lang::Apl, "1 0 0 1\\'ab'"), text(&[4], "a  b"));
 }
 
 // --- moving windows -----------------------------------------------------
@@ -301,7 +302,7 @@ fn power_operands_that_are_not_a_count_are_named() {
         // A verb operand is the count, so a count that is not a whole
         // number is what the diagnostic names.
         ("+ ^: (% & 2) 5", "count must be an integer"),
-        ("+ ^: _1 (5)", "obverse"),
+        ("(+/ % #) ^: _1 (5)", "obverse"),
         ("+ ^: 1.5 (5)", "whole number"),
     ] {
         let e = err(Lang::J, src);

@@ -130,10 +130,19 @@ fn j_catenate_is_leading_axis() {
     assert_eq!(val(Lang::J, "'ab' , 'cd'"), text(&[4], "abcd"));
     assert_eq!(val(Lang::J, "'ab' , 'c'"), text(&[3], "abc"));
     assert_eq!(err(Lang::J, "1 2 , 'ab'").kind, ErrorKind::Type);
-    // Item shapes that disagree would need fill, which is still to come.
-    let e = err(Lang::J, "1 2 3 , i. 2 2");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("fill"), "{}", e.msg);
+    // Item shapes that disagree are overtaken to the larger, which fills.
+    assert_eq!(
+        val(Lang::J, "1 2 3 , i. 2 2"),
+        i64s(&[3, 3], &[1, 2, 3, 0, 1, 0, 2, 3, 0])
+    );
+    assert_eq!(
+        val(Lang::J, "(i. 2 2) , 1 2 3"),
+        i64s(&[3, 3], &[0, 1, 0, 2, 3, 0, 1, 2, 3])
+    );
+    assert_eq!(
+        val(Lang::J, "(i. 2 3) , i. 2 2"),
+        i64s(&[4, 3], &[0, 1, 2, 3, 4, 5, 0, 1, 0, 2, 3, 0])
+    );
     // Two ranks apart is a rank error.
     assert_eq!(err(Lang::J, "1 2 3 , i. 2 2 2").kind, ErrorKind::Rank);
 }
@@ -379,12 +388,13 @@ fn increment_decrement_double_halve_square() {
     assert_eq!(val(Lang::J, "-. 5"), Array::scalar_i64(-4));
     assert_eq!(val(Lang::Apl, "~0 1"), bits(&[2], &[1, 0]));
     assert_eq!(err(Lang::Apl, "~0.25").kind, ErrorKind::Domain);
-    // The dyadic halves of these words are still to come.
-    for (src, what) in [("2 +: 3", "nor"), ("2 *: 3", "nand"), ("2 -. 3", "less")] {
-        let e = err(Lang::J, src);
-        assert_eq!(e.kind, ErrorKind::NotYet, "{src}");
-        assert!(e.msg.contains(what), "{src}: {}", e.msg);
-    }
+    // The dyads of `+:` and `*:` are the boolean pair, and read nothing
+    // else; `-.` dyadically removes items rather than subtracting.
+    assert_eq!(val(Lang::J, "1 0 1 +: 0 1 1"), bits(&[3], &[0, 0, 0]));
+    assert_eq!(val(Lang::J, "1 0 1 *: 0 1 1"), bits(&[3], &[1, 1, 0]));
+    assert_eq!(err(Lang::J, "2 +: 3").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::J, "2 *: 3").kind, ErrorKind::Domain);
+    assert_eq!(val(Lang::J, "1 2 3 4 -. 2 4"), i64s(&[2], &[1, 3]));
 }
 
 // --- nub ----------------------------------------------------------------
@@ -514,7 +524,8 @@ fn table_pairs_every_cell_with_every_cell() {
     assert_eq!(val(Lang::J, "(i.2 3) (,\"1)/ 1 2"), i64s(&[2, 5], &[0, 1, 2, 1, 2, 3, 4, 5, 1, 2]));
     // Two scalars leave no frame at all.
     assert_eq!(val(Lang::J, "2 +/ 3"), Array::scalar_i64(5));
-    // `∘` on its own is Dyalog's compose, which is a separate gap.
+    // `∘` on its own is Dyalog's beside; a value operand is a separate gap.
+    assert_eq!(val(Lang::Apl, "1 2 3+∘×1 2 3"), i64s(&[3], &[2, 3, 4]));
     assert_eq!(err(Lang::Apl, "1∘×2").kind, ErrorKind::NotYet);
 }
 
@@ -665,30 +676,20 @@ fn apl_table_makes_a_matrix() {
 #[test]
 fn newly_spelled_words_name_what_they_still_lack() {
     let cases = [
-        (Lang::J, ",. 1 2", "ravel items"),
         (Lang::J, "{ 1 2", "catalogue"),
         (Lang::J, "e. 1 2", "raze-in"),
-        (Lang::J, "~: 1 2", "nub sieve"),
-        (Lang::Apl, "1 2∪3", "union"),
-        (Lang::Apl, "∩1 2", "intersection"),
-        (Lang::Apl, "1 2∩3", "intersection"),
+        (Lang::J, "{:: 1 2", "map"),
+        (Lang::J, "2 ;: 'a b'", "sequential machine"),
         (Lang::Apl, "1 2⍋3 1 2", "collation"),
         (Lang::Apl, "1 2⍒3 1 2", "collation"),
-        (Lang::Apl, "1 2⍱0 1", "nor"),
-        (Lang::Apl, "1 2⍲0 1", "nand"),
-        (Lang::Apl, "1 2~3", "without"),
         (Lang::J, "2 \": 1.5", "format with a specification"),
         (Lang::Apl, "2⍕1.5", "format with a specification"),
-        (Lang::J, "+ &. - 1", "under (&.)"),
-        (Lang::J, "+ &.: - 1", "under (&.)"),
-        (Lang::Apl, "1 2 3+∘×1 2 3", "beside (∘)"),
+        (Lang::J, "+ &. (+/ % #) 1 2", "obverse"),
+        (Lang::Apl, "1∘×2", "∘ with a value operand"),
         // Boxes arrived; what they still lack is named too.
         (Lang::J, "/: 1;2", "grading boxed arrays"),
-        (Lang::J, "L. 1;2", "level of"),
         (Lang::Apl, "⍋⊂1 2", "grading boxed arrays"),
         (Lang::Apl, "1 0 1⊂2 2⍴⍳4", "partitioned enclose on a matrix"),
-        (Lang::Apl, "1⊃(1 2)(3 4)", "pick"),
-        (Lang::Apl, "↓2 3⍴⍳6", "split"),
     ];
     for (lang, src, what) in cases {
         let e = err(lang, src);

@@ -20,6 +20,15 @@ cargo build -p libjay-capi --release
 cc app.c -Icrates/libjay-capi/include -Ltarget/release -ljay -o app
 ```
 
+Each GitHub release also attaches prebuilt bundles as assets — one
+`libjay-capi-<target-triple>.tar.gz` per platform, holding `jay.h` and that
+platform's shared and static libraries: `x86_64-unknown-linux-gnu`,
+`aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-pc-windows-msvc`.
+There is no `aarch64-unknown-linux-gnu` bundle; a linux-aarch64 C caller
+builds from source with the command above. The Python wheels cover
+linux-aarch64 (and every other platform above) regardless — this gap is C
+ABI only.
+
 The header, `crates/libjay-capi/include/jay.h`, is hand-written C99 and is
 the contract; every declaration carries a one-line comment.
 
@@ -55,11 +64,22 @@ language default. J's index origin is 0 and is not configurable.
 ### Data
 
 Values cross as `jay_value`: a dtype tag, a rank, `rank` axis lengths, and a
-row-major element buffer. Booleans are one `uint8_t` (0 or 1) per element,
-characters are `uint32_t` Unicode codepoints (UTF-32) in both directions.
+row-major element buffer. `jay_dtype` has five tags: `JAY_BOOL` (one
+`uint8_t`, 0 or 1), `JAY_I64`, `JAY_F64`, `JAY_CHAR` (`uint32_t` Unicode
+codepoints, UTF-32 in both directions), and `JAY_COMPLEX` — two `double`s
+per element, real then imaginary, the layout of C99's `double _Complex`.
 Anything else — a boolean byte that is not 0 or 1, an unknown tag, a NULL
 buffer for a non-empty array — is reported as an error rather than guessed
 at.
+
+Boxes and J's exact types (extended-precision integers, rationals) have no
+`jay_dtype` tag, so a `jay_value` argument can never be one of them. A
+program whose result comes out boxed, extended or rational fails `jay_run`
+instead of guessing: "boxed results are not in the C ABI yet" for a box,
+"extended-precision results are not in the C ABI yet; convert with `_1 x:`
+first" and "rational results are not in the C ABI yet; convert with `_1 x:`
+first" for the other two — `_1 x:` converts to a machine number inside the
+expression, before the result crosses the boundary.
 
 A `jay_value` is borrowed: it only has to stay valid for the duration of the
 `jay_run` call. **Input is copied at the boundary today.** The Arrow and
@@ -86,9 +106,10 @@ Failures hand back a `jay_error *`. `jay_error_message` renders it the way
 the CLI would, with the source line and a caret under the offending text:
 
 ```
-length error: shapes do not agree: 3 and 2
+length error: arguments do not agree: left shape 3, right shape 2
   1 2 3 + 1 2
   ^^^^^^^^^^^
+note: frames first differ at axis 0: 3 vs 2
 ```
 
 Compile errors point into the source you passed to `jay_compile`; run errors

@@ -1,0 +1,172 @@
+// Wave 4: classification and sets, permutations, text, the prime queries,
+// under and the obverse table, gerunds, sandboxed execute, and the outfix.
+
+// Self-classify, the nub sieve, and the two boolean dyads.
+= 1 2 1 3
+= 'aba'
+= 5
+~: 1 2 1 3
+~: 'abca'
+1 0 1 +: 0 1 1
+1 0 1 *: 0 1 1
+1 2 3 4 -. 2 4
+'hello' -. 'l'
+1 2 3 -. 4 5
+1 0 1 -. 0 1 1
+
+// Ravel items.
+,. i. 3
+,. i. 2 3
+,. 'abc'
+$ ,. i. 2 3 4
+
+// The alphabet and the ace.
+$ a.
+65 { a.
+a. i. 'A'
+$ a:
+# a:
+
+// Constant verbs.
+_: 5
+3: 5
+_9: 5
+2 3: 4
+0: i. 2 3
+
+// Anagram index, and the permutation an index names.
+A. 2 0 1
+A. 0 1 2
+A. 1 0 2
+A. i. 4
+A. 3 1 2
+1 A. 0 1 2
+3 A. i. 3
+0 A. 'abc'
+5 A. 'abcd'
+23 A. i. 4
+_1 A. i. 4
+
+// Cycles, both directions, and permuting by either form.
+C. 2 0 1
+C. 0 1 2
+C. 1 0 3 2
+C. 0 2 1
+C. 2 0 1 3
+C. <0 1 2
+C. (0 1);(2 3)
+1 0 2 C. 'abcd'
+1 0 2 C. 'abcde'
+2 0 1 C. 'abcd'
+2 0 1 3 C. 'abcd'
+0 1 C. 'abcde'
+0 2 1 C. 'abcde'
+3 0 1 2 C. 'abcde'
+(<0 1) C. 'abcd'
+(<0 1 2) C. 'abcd'
+((0 1);(2 3)) C. 'abcde'
+
+// Member of interval.
+'ab' E. 'abcabc'
+1 2 E. 1 2 3 1 2
+'xy' E. 'abc'
+'abcd' E. 'ab'
+
+// Unicode.
+u: 65
+u: 65 66 67
+u: 'abc'
+3 u: 'abc'
+10 u: 97
+10 u: 955
+
+// The boxing level.
+L. 3
+L. <3
+L. <<3
+L. (1;(<<2))
+L. 1 2 3
+L. 'abc'
+
+// Words: J's own tokeniser over a string.
+;: 'a + b * 3'
+;: 'i.5 + _3'
+;: '2 + 2 NB. hi'
+;: 'foo=.3'
+;: '1 2 3'
+;: 'a1 b_2 c.'
+;: 'if. x do. end.'
+# ;: 'a b c'
+;: '''ab'' + x'
+
+// The prime queries.
+_1 p: 7
+_1 p: 30
+0 p: 7
+0 p: 8
+1 p: 7
+1 p: 8
+2 p: 10
+3 p: 10
+4 p: 10
+_4 p: 100
+1 q: 12
+2 q: 12
+3 q: 12
+0 q: 12
+__ q: 12
+__ q: 60
+
+// Under, which needs the obverse of its right operand.
++/&.:*: 3 4
+2 +&.*: 3
+-&.- 5
+%&.% 4
+2 +&.^. 3
+|.&.|. 1 2 3
++/&.|. 1 2 3
+2 %&.^. 8
+2 +&.>: 3
+'ab' ,&.|. 'cd'
++/&.:>: 1 2 3
+
+// Negative powers, which are the obverse applied that many times.
+- ^:_1 ] 5
++&2 ^:_1 ] 5
+*&3 ^:_1 ] 12
+^&2 ^:_1 ] 9
+^.^:_1 ] 2
+|.^:_1 ] 1 2 3
++:^:_1 ] 8
+(*:@:>:)^:_1 ] 9
+>:^:_2 ] 5
+
+// Gerunds and agenda.
+1 (+`-`*)@.(0) 2
+1 (+`-`*)@.(1) 2
+1 (+`-`*)@.(2) 2
+(<.`>.)@.(2&<) 5
+(<.`>.)@.(2&<) 1.5
+
+// Adverse: the second verb answers a refusal of the first.
+(+/ :: 0) 'abc'
+(+/ :: _1:) 1 2 3
+
+// Execute, over the names the sentence itself can see.
+". '2+2'
+". 'i. 3'
+". '1 2 3'
+a =. 3\n". 'a + 1'
+z =. ". 'b =. 7'\nb * 2
+c =. 10\nz =. ". 'c =. c + 5'\nc
+
+// The outfix: the verb over what is left when a run of x items goes.
+2 +/\\. i. 5
+3 -/\\. i. 5
+2 +/\\. 1 2 3
+1 +/\\. 1 2 3
+
+// Catenate with fill.
+1 2 3 , i. 2 2
+(i. 2 2) , 1 2 3
+(i.2 3) , (i. 2 2)

@@ -586,3 +586,58 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   data already resident. Uploading 20M elements costs about 120 ms, ten to
   thirty times the kernel, so a device is worth naming only for data that
   stays there. Details in bench/README.md.
+
+- 2026-08-21 — **Coverage wave 4.** Four design choices are worth recording;
+  the rest of the wave is ordinary implementation and lives in the status
+  matrix and in docs/coverage.md.
+
+  **The obverse is a table, not a search.** `u&.v`, `u&.:v` and every
+  negative power `u^:_n` need one answer: what undoes v? libjay answers it
+  from a fixed table of the verbs whose inverse is another verb it can
+  already write down — the self-inverses (`+` `-` `%` `-.` `|.` `|:`), the
+  pairs (`^`/`^.`, `*:`/`%:`, `+:`/`-:`, `>:`/`<:`, `<`/`>`, `#.`/`#:`) and
+  the bonded arithmetic (`n&+`/`-&n`, `n&*`/`%&n`, `^&n`, `n&^`, and `n&-`
+  and `n&%`, which undo themselves). Everything derived inverts by inverting
+  its parts, so the table stays small while `&.` reaches a long way past it:
+  `(*:@:>:)^:_1` works because an atop inverts in the other order. The
+  alternative — searching numerically for an inverse — would answer
+  confidently and sometimes wrongly, so a verb outside the table says "the
+  obverse of (+/ % #) is not supported yet" by name. `u :. v` is the escape
+  hatch: it declares an obverse where the table has none, and changes
+  nothing else about how u applies. `u&.v` is then built as
+  `v^:_1 @: (u &: v)`, which is J's own definition and needed no new
+  combinator; only `:.` did.
+
+  **Execute is inside the sandbox, not a hole in it.** J's `". y` and APL's
+  `⍎ y` compile their argument as a program of the same language and run it
+  in the caller's own environment — the names the sentence can see are the
+  names the string can see, in both directions, so `". 'a =. 3'` assigns
+  where it stands. This does not widen the sandbox: the contract is about
+  what a primitive may TOUCH (stdio open, other I/O closed), and evaluating
+  an expression touches nothing the caller could not touch already. Two
+  consequences fall out and are enforced. A `{name}` interpolation hole
+  inside the string has no binding to reach and is refused rather than
+  quietly reading the outer program's arguments. And a diagnostic from
+  inside is re-pointed at the sentence that ran the string, carrying the
+  inner rendering as a note, because the inner spans index a source the
+  caller never sees — diagnostics are contract, and a caret into a string
+  the user cannot see is not one.
+
+  **A gerund is a parse fragment, not a boxed noun.** J spells a gerund as a
+  boxed noun, which lets `` `: `` turn one back into a verb and lets a
+  gerund be computed. libjay makes `` ` `` produce a fragment of the parse
+  holding the verbs themselves, because `@.` — the only reader a gerund has
+  today — wants verbs and not an encoding of them, and because a `Verb` is
+  not a value the `Array` types can hold. The cost is named rather than
+  hidden: `` `: `` (evoke gerund) stays a gap, and a computed gerund is not
+  expressible. Making a gerund a real noun means giving `Array` a way to
+  carry a verb, which is a change to the data model and belongs to whichever
+  wave wants adverb and conjunction definitions anyway.
+
+  **Catenate-with-fill is J's rule, and only J's.** J overtakes both sides
+  of a ragged catenation to the larger length, so `1 2 3 , i. 2 2` is 3×3;
+  APL2 refuses the same shapes with a LENGTH ERROR, and GNU APL confirms it.
+  The fill is therefore keyed off the dialect's agreement rule
+  (`Agreement::LeadingPrefix`) rather than applied everywhere, which is the
+  same axis the two languages already differ on: J fills where APL insists
+  on conformability. One `catenate` still serves both; it takes the flag.

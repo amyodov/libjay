@@ -570,9 +570,8 @@ fn j_primes_and_factors() {
 fn primes_refuse_what_they_have_no_answer_for() {
     assert_eq!(err(Lang::J, "p: _1").kind, ErrorKind::Domain);
     assert_eq!(err(Lang::J, "q: 0").kind, ErrorKind::Domain);
-    let e = err(Lang::J, "2 p: 10");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("prime"), "{}", e.msg);
+    // A left argument that names no query at all is refused by name.
+    assert_eq!(err(Lang::J, "5 p: 10").kind, ErrorKind::Domain);
 }
 
 // --- roll and deal -------------------------------------------------------
@@ -644,12 +643,10 @@ fn the_fixed_seed_roll_repeats() {
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
         (Lang::J, "{:: 'abc';'de'", "map"),
-        (Lang::J, ";: 'a bc'", "words"),
-        (Lang::J, "2 q: 12", "prime exponents"),
+        (Lang::J, "2 ;: 'a bc'", "sequential machine"),
         (Lang::J, "(+ }) 1 2 3", "amend with a verb operand"),
-        (Lang::Apl, "⌷⍳5", "materialise"),
         (Lang::Apl, "1 0 1⊂2 2⍴⍳4", "partitioned enclose on a matrix"),
-        (Lang::Apl, "1 2 3+∘×1 2 3", "beside (∘)"),
+        (Lang::Apl, "1∘×2", "∘ with a value operand"),
     ];
     for (lang, src, what) in cases {
         let e = err(*lang, src);

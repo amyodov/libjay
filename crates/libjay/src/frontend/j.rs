@@ -14,7 +14,8 @@ use crate::error::{Error, ErrorKind, Result, Span};
 use crate::frontend::{Segment, SourceParts};
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
-    DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
+    BoolDyad, DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind,
+    RANK_INF,
 };
 
 /// Parse a J program (one sentence per line) into IR statements.
@@ -711,6 +712,10 @@ enum Frag {
     /// `{{` and `}}`, the direct definition's brackets.
     DdOpen(Span),
     DdClose(Span),
+    /// A gerund: the verbs `` ` `` has tied together. J spells one as a
+    /// boxed noun; here it is a fragment of its own, and `@.` is what reads
+    /// it.
+    Gerund(Vec<Verb>, Span),
 }
 
 /// `[:` has the verb category but no verb of its own: it is only meaningful
@@ -738,6 +743,7 @@ impl Frag {
             | Frag::DdClose(s)
             | Frag::VerbDef(_, _, s) => *s,
             Frag::Control(_, _, s) => *s,
+            Frag::Gerund(_, s) => *s,
         }
     }
 
@@ -768,8 +774,12 @@ impl Frag {
         matches!(self, Frag::Conj(..))
     }
 
+    fn is_gerund(&self) -> bool {
+        matches!(self, Frag::Gerund(..))
+    }
+
     fn is_avn(&self) -> bool {
-        self.is_adverb() || self.is_verb() || self.is_noun()
+        self.is_adverb() || self.is_verb() || self.is_noun() || self.is_gerund()
     }
 
     fn is_cavn(&self) -> bool {
@@ -807,23 +817,23 @@ fn primitive(word: &str) -> Option<Prim> {
         "|" => prim("|", M::Scalar(SM::Abs), D::Scalar(SD::Residue), [0, 0, 0]),
         "<." => prim("<.", M::Scalar(SM::Floor), D::Scalar(SD::Min), [0, 0, 0]),
         ">." => prim(">.", M::Scalar(SM::Ceil), D::Scalar(SD::Max), [0, 0, 0]),
-        "=" => prim("=", M::NotYet("self-classify (monadic =)"), D::Scalar(SD::Eq), [INF, 0, 0]),
+        "=" => prim("=", M::SelfClassify, D::Scalar(SD::Eq), [INF, 0, 0]),
         "<" => prim("<", M::Enclose(Enclose::Always), D::Scalar(SD::Lt), [INF, 0, 0]),
         ">" => prim(">", M::Open, D::Scalar(SD::Gt), [0, 0, 0]),
         "<:" => prim("<:", M::Scalar(SM::Dec), D::Scalar(SD::Le), [0, 0, 0]),
         ">:" => prim(">:", M::Scalar(SM::Inc), D::Scalar(SD::Ge), [0, 0, 0]),
-        "+:" => prim("+:", M::Scalar(SM::Double), D::NotYet("nor (dyadic +:)"), [0, 0, 0]),
-        "*:" => prim("*:", M::Scalar(SM::Square), D::NotYet("nand (dyadic *:)"), [0, 0, 0]),
+        "+:" => prim("+:", M::Scalar(SM::Double), D::Boolean(BoolDyad::Nor), [0, 0, 0]),
+        "*:" => prim("*:", M::Scalar(SM::Square), D::Boolean(BoolDyad::Nand), [0, 0, 0]),
         "-:" => prim("-:", M::Scalar(SM::Halve), D::Match, [0, INF, INF]),
-        "-." => prim("-.", M::Scalar(SM::OneMinus), D::NotYet("less (dyadic -.)"), [0, 0, 0]),
+        "-." => prim("-.", M::Scalar(SM::OneMinus), D::Less, [0, INF, INF]),
         "*." => prim("*.", M::ComplexParts { polar: true }, D::Scalar(SD::Lcm), [0, 0, 0]),
         "+." => prim("+.", M::ComplexParts { polar: false }, D::Scalar(SD::Gcd), [0, 0, 0]),
-        "~:" => prim("~:", M::NotYet("nub sieve (monadic ~:)"), D::Scalar(SD::Ne), [INF, 0, 0]),
+        "~:" => prim("~:", M::NubSieve, D::Scalar(SD::Ne), [INF, 0, 0]),
         "~." => prim("~.", M::Nub, D::None, [INF, INF, INF]),
         "$" => prim("$", M::ShapeOf, D::Reshape, [INF, 1, INF]),
         "," => prim(",", M::Ravel, D::AppendLeading, [INF, INF, INF]),
         // `,.` is J's `,"_1`; `verb_for` wraps it in that rank.
-        ",." => prim(",.", M::NotYet("ravel items (monadic ,.)"), D::AppendLeading, [INF, INF, INF]),
+        ",." => prim(",.", M::Ravel, D::AppendLeading, [INF, INF, INF]),
         ",:" => prim(",:", M::Itemize, D::Laminate, [INF, INF, INF]),
         "#" => prim("#", M::Tally, D::Copy, [INF, 1, INF]),
         "#." => prim("#.", M::DecodeBits, D::Decode, [1, 1, 1]),
@@ -855,8 +865,8 @@ fn primitive(word: &str) -> Option<Prim> {
         // The dyad reads the whole argument: `2 x: y` gives every value a
         // numerator and a denominator, which becomes a trailing axis.
         "x:" => prim("x:", M::ToExact, D::ExactForm, [INF, 0, INF]),
-        "p:" => prim("p:", M::NthPrime, D::NotYet("prime metadata (dyadic p:)"), [0, 0, 0]),
-        "q:" => prim("q:", M::PrimeFactors, D::NotYet("prime exponents (dyadic q:)"), [0, 0, 0]),
+        "p:" => prim("p:", M::NthPrime, D::PrimeMeta, [0, 0, 0]),
+        "q:" => prim("q:", M::PrimeFactors, D::PrimeExponents, [0, 0, 0]),
         "%." => prim("%.", M::MatrixInverse, D::MatrixDivide, [2, INF, 2]),
         // The monad takes the whole argument: one invocation is one run of
         // the generator, consumed in ravel order.
@@ -889,14 +899,25 @@ fn primitive(word: &str) -> Option<Prim> {
         ";" => prim(";", M::Raze, D::Link, [INF, INF, INF]),
         ";:" => prim(
             ";:",
-            M::NotYet("words (monadic ;:)"),
+            M::Words,
             D::NotYet("sequential machine (dyadic ;:)"),
             [INF, INF, INF],
         ),
-        "L." => prim(
-            "L.",
-            M::NotYet("level of (L.)"),
-            D::None,
+        "L." => prim("L.", M::LevelOf, D::None, [INF, INF, INF]),
+        "\"." => prim(
+            "\".",
+            M::Execute { apl: false, origin: 0 },
+            D::NotYet("numbers from text (dyadic \".)"),
+            [1, INF, INF],
+        ),
+        "A." => prim("A.", M::AnagramIndex, D::AnagramFrom, [1, 0, INF]),
+        "C." => prim("C.", M::CycleForm, D::Permute, [INF, INF, INF]),
+        "E." => prim("E.", M::None, D::FindSeq, [INF, INF, INF]),
+        "u:" => prim("u:", M::Unicode { pass_chars: true }, D::UnicodeForm, [INF, 0, INF]),
+        "s:" => prim(
+            "s:",
+            M::NotYet("symbols (s:)"),
+            D::NotYet("symbols (s:)"),
             [INF, INF, INF],
         ),
         "]" => prim("]", M::Same, D::Right, [INF, INF, INF]),
@@ -904,6 +925,19 @@ fn primitive(word: &str) -> Option<Prim> {
         "echo" => prim("echo", M::Echo, D::None, [INF, INF, INF]),
         _ => return None,
     })
+}
+
+/// The constant nouns J spells as inflected words. `a.` is the 256
+/// characters of J's alphabet in codepoint order; `a:` is the ace, the box
+/// holding an empty numeric list.
+fn noun_word(word: &str) -> Option<Array> {
+    match word {
+        "a." => Some(Array::from_chars(
+            (0u32..256).map(|c| char::from_u32(c).expect("a Latin-1 codepoint")).collect(),
+        )),
+        "a:" => Some(Array::boxed(Array::empty(crate::dtype::DType::I64))),
+        _ => None,
+    }
 }
 
 /// The verb a word denotes. Every word but `,.` is a bare primitive; J's
@@ -916,12 +950,55 @@ fn verb_for(word: &str) -> Option<Verb> {
     Some(Verb::Prim(p))
 }
 
+/// A constant verb: the noun itself, whatever the arguments are. `3:` and
+/// the noun operand of `::` both need one.
+fn constant_verb(n: Array) -> Verb {
+    // `n [ (x ] y)` is n whatever the arguments are, and the noun fork has
+    // both valences, which a bond does not.
+    Verb::NounFork(
+        n,
+        Box::new(verb_for("[").expect("`[` is a primitive")),
+        Box::new(verb_for("]").expect("`]` is a primitive")),
+    )
+}
+
+/// The spelling of a constant verb: `_9:` … `9:`, and `_:` for infinity.
+/// The word must be complete — `3::` is the adverse conjunction after a
+/// number, not a constant verb.
+fn constant_verb_word(cs: &[(usize, char)], i: usize) -> Option<(usize, Array)> {
+    let at = |k: usize| cs.get(k).map(|&(_, c)| c);
+    let (digits, value) = match (at(i), at(i + 1), at(i + 2)) {
+        (Some('_'), Some(':'), _) => (2, f64::INFINITY),
+        (Some('_'), Some(d), Some(':')) if d.is_ascii_digit() => {
+            (3, -((d as u8 - b'0') as f64))
+        }
+        (Some(d), Some(':'), _) if d.is_ascii_digit() => (2, (d as u8 - b'0') as f64),
+        _ => return None,
+    };
+    if at(i + digits) == Some(':') {
+        return None;
+    }
+    let arr = if value.is_infinite() {
+        Array::scalar_f64(value)
+    } else {
+        Array::scalar_i64(value as i64)
+    };
+    Some((digits, arr))
+}
+
+/// The verb one J spelling denotes, for the parts of the evaluator that
+/// need to name a verb rather than parse one — the obverse table above all.
+pub(crate) fn verb_named(word: &str) -> Option<Verb> {
+    verb_for(word)
+}
+
 const ADVERBS: [&str; 6] = ["/", "\\", "/.", "\\.", "~", "}"];
 
 /// Conjunction spellings. The ones without a meaning here are recognised so
 /// that their diagnostic names the conjunction rather than the word.
-const CONJUNCTIONS: [&str; 16] = [
+const CONJUNCTIONS: [&str; 18] = [
     "\"", "@", "@.", "@:", "&", "&.", "&.:", "&:", "^:", ";.", "!.", "!:", "`", "`:", ".", ":",
+    ":.", "::",
 ];
 
 fn adverb(word: &str) -> Option<&'static str> {
@@ -1025,6 +1102,11 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
             out.push(Frag::Noun(Expr::Const(arr, span(start, i))));
             continue;
         }
+        if let Some((len, n)) = constant_verb_word(&cs, i) {
+            out.push(Frag::Verb(VerbFrag::V(constant_verb(n)), span(i, i + len)));
+            i += len;
+            continue;
+        }
         if starts_number(&cs, i) {
             // Numeric words separated only by blanks form one vector.
             let start = i;
@@ -1041,7 +1123,12 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
                 while at(k).is_some_and(char::is_whitespace) {
                     k += 1;
                 }
-                if k < cs.len() && starts_number(&cs, k) {
+                // A constant verb (`3:`) ends the numeric word rather than
+                // joining it: `2 3: 4` is 2, the verb `3:`, and 4.
+                if k < cs.len()
+                    && starts_number(&cs, k)
+                    && constant_verb_word(&cs, k).is_none()
+                {
                     i = k;
                 } else {
                     break;
@@ -1063,6 +1150,11 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
                 if let Some(v) = verb_for(inflected) {
                     i += 1;
                     out.push(Frag::Verb(VerbFrag::V(v), span(start, i)));
+                    continue;
+                }
+                if let Some(n) = noun_word(inflected) {
+                    i += 1;
+                    out.push(Frag::Noun(Expr::Const(n, span(start, i))));
                     continue;
                 }
                 if let Some((word, suffix)) = control_word(inflected) {
@@ -1467,7 +1559,8 @@ fn match_rule(s: &[Frag]) -> Option<Rule> {
     // Slot 0 is only ever context: an edge, or a fragment that keeps the
     // reduction from reaching further left than it should.
     let ctx = |i: usize| s.get(i).is_some_and(|f| f.is_edge() || f.is_avn());
-    let verb_or_noun = |i: usize| s.get(i).is_some_and(|f| f.is_real_verb() || f.is_noun());
+    let verb_or_noun =
+        |i: usize| s.get(i).is_some_and(|f| f.is_real_verb() || f.is_noun() || f.is_gerund());
     if is(0, Frag::is_edge) && is(1, Frag::is_real_verb) && is(2, Frag::is_noun) {
         return Some(Rule::Monad1);
     }
@@ -1691,13 +1784,28 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
         }
         "&" => compose(u, v, false, span),
         "&:" => compose(u, v, true, span),
-        // `u&.>` is the one under libjay has: open each box, apply u, box
-        // the result again. The general conjunction needs verb inverses.
+        // `u&.>` is the one under that is not built out of an inverse:
+        // opening each box and boxing the result again is J's each.
         "&." if is_open(&v) => {
             let f = verb_operand(u, span)?;
             Ok(Frag::Verb(VerbFrag::V(Verb::Each(Box::new(f), Enclose::Always)), span))
         }
-        "&." | "&.:" => Err(Error::not_yet("under (&.) — needs verb inverses", span)),
+        // `u&.v` is `v^:_1 @: u &: v`: v prepares both arguments, u runs on
+        // what it made, and v's obverse puts the answer back. `&.` does it
+        // at v's monadic rank, `&.:` on the arguments whole — the same
+        // difference `&` and `&:` have.
+        "&." | "&.:" => {
+            let f = verb_operand(u, span)?;
+            let g = verb_operand(v, span)?;
+            let back = obverse_of(&g, span)?;
+            let composed = Verb::Compose(Box::new(f), Box::new(g.clone()));
+            let under = Verb::Atop(Box::new(back), Box::new(composed));
+            if glyph == "&.:" {
+                return Ok(Frag::Verb(VerbFrag::V(under), span));
+            }
+            let rank = g.ranks()[0];
+            Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(under), [rank; 3])), span))
+        }
         "^:" => {
             let f = verb_operand(u, span)?;
             if v.is_verb() {
@@ -1707,7 +1815,11 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
                 let p = Verb::PowerV(Box::new(f), Box::new(g));
                 return Ok(Frag::Verb(VerbFrag::V(p), span));
             }
+            // A negative power runs the obverse that many times, which is
+            // what makes `u^:_1` the inverse.
+            let negative = as_const(&v).and_then(Array::to_f64_vec).is_some_and(|n| n[0] < 0.0);
             let p = power_spec(&v, span)?;
+            let f = if negative { obverse_of(&f, span)? } else { f };
             Ok(Frag::Verb(VerbFrag::V(Verb::PowerN(Box::new(f), p)), span))
         }
         ";." => {
@@ -1739,9 +1851,52 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
             }
             Ok(Frag::Verb(VerbFrag::V(Verb::Fit(Box::new(f), n)), span))
         }
+        // `u :. v` declares v to be u's obverse; it changes nothing about
+        // how u applies, only what `^:_1` and `&.` may then do with it.
+        ":." => {
+            let f = verb_operand(u, span)?;
+            let g = verb_operand(v, span)?;
+            Ok(Frag::Verb(
+                VerbFrag::V(Verb::WithObverse(Box::new(f), Box::new(g))),
+                span,
+            ))
+        }
+        // `u@.v` picks one verb of the gerund u by v's value at the
+        // arguments; a noun on the right picks one now and for good.
+        "@." => {
+            let vs = gerund_verbs(&u, span)?;
+            if v.is_verb() {
+                let w = verb_operand(v, span)?;
+                return Ok(Frag::Verb(VerbFrag::V(Verb::Agenda(vs, Box::new(w))), span));
+            }
+            let at = one_atom(&v, "agenda", span)?;
+            if at.fract() != 0.0 {
+                return Err(Error::parse("an agenda index must be a whole number", span));
+            }
+            let picked = crate::verb::pick_gerund(&vs, at as i64, span)?;
+            Ok(Frag::Verb(VerbFrag::V(picked), span))
+        }
+        // `u`v` ties verbs into a gerund, which only `@.` reads so far.
+        "`" => {
+            let mut vs = gerund_verbs(&u, span)?;
+            vs.extend(gerund_verbs(&v, span)?);
+            Ok(Frag::Gerund(vs, span))
+        }
         // `3 : '...'` and its relatives are J's explicit definitions, not a
         // composition; the diagnostic should say so.
         ":" => Err(Error::not_yet("explicit definitions (3 : '...' and 4 : '...')", span)),
+        // `u :: v` answers a refusal of u by running v instead. A noun on
+        // the right is the constant verb yielding it, as J reads it.
+        "::" => {
+            let f = verb_operand(u, span)?;
+            let g = if v.is_noun() {
+                constant_verb(bond_noun(&v, span)?)
+            } else {
+                verb_operand(v, span)?
+            };
+            Ok(Frag::Verb(VerbFrag::V(Verb::Adverse(Box::new(f), Box::new(g))), span))
+        }
+        "`:" => Err(Error::not_yet("evoke gerund (`:)", span)),
         _ => Err(Error::not_yet(format!("composition ({glyph})"), span)),
     }
 }
@@ -1865,13 +2020,32 @@ fn power_spec(f: &Frag, span: Span) -> Result<Power> {
     if n == f64::INFINITY {
         return Ok(Power::Converge);
     }
-    if n < 0.0 {
-        return Err(Error::not_yet("obverse (u^:_1 and other negative powers)", span));
-    }
     if n.fract() != 0.0 {
         return Err(Error::parse("power must be a whole number", span));
     }
+    if n < 0.0 {
+        // A negative power is the obverse applied that many times; the
+        // caller substitutes the obverse for the verb.
+        return Ok(Power::Times((-n) as u64));
+    }
     Ok(Power::Times(n as u64))
+}
+
+/// The obverse of a verb, or the diagnostic naming the verb that has none.
+fn obverse_of(v: &Verb, span: Span) -> Result<Verb> {
+    crate::verb::obverse(v).ok_or_else(|| {
+        Error::not_yet(format!("the obverse of {} (no inverse is known)", v.name()), span)
+    })
+}
+
+/// The verbs a gerund fragment holds. A lone verb is a gerund of one, which
+/// is what makes `u`v`w` build up left to right.
+fn gerund_verbs(f: &Frag, span: Span) -> Result<Vec<Verb>> {
+    match f {
+        Frag::Gerund(vs, _) => Ok(vs.clone()),
+        Frag::Verb(VerbFrag::V(v), _) => Ok(vec![v.clone()]),
+        _ => Err(Error::not_yet("a gerund of anything but verbs", span)),
+    }
 }
 
 fn apply_fork(f: Frag, g: Frag, h: Frag) -> Result<Frag> {
@@ -2272,10 +2446,10 @@ mod tests {
 
     #[test]
     fn unimplemented_meanings_reach_the_verb_not_the_parser() {
-        let (v, _, _) = dyad_of(&one("2 *: 8"));
-        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("nand (dyadic *:)"));
-        let (v, _) = monad_of(&one("= 1 2"));
-        assert_eq!(prim_of(&v).monad, MonadOp::NotYet("self-classify (monadic =)"));
+        let (v, _, _) = dyad_of(&one("2 ;: 'a b'"));
+        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("sequential machine (dyadic ;:)"));
+        let (v, _) = monad_of(&one("{:: 1 2"));
+        assert_eq!(prim_of(&v).monad, MonadOp::NotYet("map (monadic {::)"));
     }
 
     #[test]
@@ -2364,11 +2538,11 @@ mod tests {
     }
 
     #[rstest]
-    #[case("+ &. - y", "under (&.)")]
-    #[case("+ &.: - y", "under (&.)")]
     #[case("+ ^: {n} y", "computed power")]
-    #[case("+ ^: _1 y", "obverse")]
+    #[case("(+/ % #) ^: _1 y", "the obverse of")]
+    #[case("(+/ % #) &. , y", "the obverse of")]
     #[case("(1 + 2) & , y", "bonds over a non-literal noun")]
+    #[case("+ `: 6 y", "evoke gerund")]
     fn other_conjunctions_are_not_supported_yet(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);

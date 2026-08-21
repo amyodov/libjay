@@ -18,9 +18,9 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 100 green / 24 partial / 59 red of 183 valences in the inventory.**
+**J: 125 green / 26 partial / 32 red of 183 valences in the inventory.**
 
-**APL: 62 green / 21 partial / 33 red of 116 valences in the inventory.**
+**APL: 73 green / 25 partial / 17 red of 115 valences in the inventory.**
 
 ## J — verbs
 
@@ -40,10 +40,10 @@ tables are listed separately and not counted.
 | `\|` | 🟢 magnitude | 🟢 residue |
 | `<:` | 🟢 decrement | 🟢 less or equal |
 | `>:` | 🟢 increment | 🟢 larger or equal |
-| `+:` | 🟢 double | 🔴 not-or |
-| `*:` | 🟢 square | 🔴 not-and |
+| `+:` | 🟢 double | 🟢 nor; both arguments must be 0 or 1 |
+| `*:` | 🟢 square | 🟢 nand; same |
 | `-:` | 🟢 halve | 🟢 match |
-| `-.` | 🟢 not (`1-y`) | 🔴 less |
+| `-.` | 🟢 not (`1-y`) | 🟢 less (the items of x that y has not) |
 | `+.` | 🟢 real/imaginary | 🟡 GCD; integral reals, or Gaussian integers |
 | `*.` | 🟢 length/angle | 🟡 LCM; integral reals, or Gaussian integers |
 | `!` | 🟡 factorial; a complex argument is a named gap | 🟡 out of; same |
@@ -53,8 +53,8 @@ tables are listed separately and not counted.
 | `r.` | 🟢 angle | 🟢 polar |
 | `p.` | 🔴 roots | 🔴 polynomial |
 | `p..` | 🔴 poly. derivative | 🔴 poly. integral |
-| `p:` | 🟢 the y-th prime | 🔴 primality and the factorisation table |
-| `q:` | 🟢 prime factors | 🔴 prime exponents |
+| `p:` | 🟢 the y-th prime | 🟢 the prime queries: `_1` `0` `1` `2` `3` `4` `_4` |
+| `q:` | 🟢 prime factors | 🟡 prime exponents; `x>0` and `__`, the negative forms named |
 | `?` | 🟡 roll; libjay's own stream, not J's | 🟡 deal; same |
 | `?.` | 🟡 roll, fixed seed; libjay's own stream | 🟡 deal, fixed seed; same |
 | `x:` | 🟢 extend precision | 🟡 to rational; forms 1, 2, `_1`, `_2` |
@@ -63,10 +63,10 @@ tables are listed separately and not counted.
 
 | Spelling | Monad | Dyad |
 |---|---|---|
-| `=` | 🔴 self-classify | 🟢 equal |
+| `=` | 🟢 self-classify | 🟢 equal |
 | `<` | 🟢 box | 🟢 less than |
 | `>` | 🟢 open | 🟢 larger than |
-| `~:` | 🔴 nub sieve | 🟢 not-equal |
+| `~:` | 🟢 nub sieve | 🟢 not-equal |
 | `~.` | 🟢 nub | — |
 
 `-:` (halve / match) is in the arithmetic table. Comparison carries J's
@@ -78,8 +78,8 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 |---|---|---|
 | `$` | 🟢 shape of | 🟡 reshape; an empty argument is refused, not filled |
 | `#` | 🟢 tally | 🟢 copy |
-| `,` | 🟢 ravel | 🟡 append; unequal item shapes need fill |
-| `,.` | 🔴 ravel items | 🟢 stitch |
+| `,` | 🟢 ravel | 🟢 append; unequal item shapes are overtaken, which fills |
+| `,.` | 🟢 ravel items | 🟢 stitch |
 | `,:` | 🟢 itemize | 🟢 laminate |
 | `\|.` | 🟢 reverse | 🟢 rotate |
 | `\|:` | 🟢 transpose | 🔴 dyadic transpose |
@@ -100,22 +100,22 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `i:` | 🟢 steps | 🟢 index of last |
 | `I.` | 🟢 indices | 🟢 interval index |
 | `e.` | 🔴 raze in | 🟢 member of |
-| `E.` | — | 🔴 member of interval |
+| `E.` | — | 🟢 member of interval |
 | `/:` | 🟡 grade up; boxes need total ordering | 🟢 sort |
 | `\:` | 🟡 grade down; boxes need total ordering | 🟢 sort |
-| `A.` | 🔴 anagram index | 🔴 anagram |
-| `C.` | 🔴 cycle-direct | 🔴 permute |
+| `A.` | 🟢 anagram index | 🟢 anagram |
+| `C.` | 🟢 cycle-direct | 🟡 permute; a direct or cyclic permutation, not an atom |
 
 ### Boxes, format, system
 
 | Spelling | Monad | Dyad |
 |---|---|---|
 | `;` | 🟢 raze | 🟢 link |
-| `;:` | 🔴 words | 🔴 sequential machine |
-| `L.` | 🔴 level of | — |
+| `;:` | 🟢 words | 🔴 sequential machine |
+| `L.` | 🟢 level of | — |
 | `":` | 🟢 default format | 🔴 format by specification |
-| `".` | 🔴 do — sandboxed design needed | 🔴 numbers |
-| `u:` | 🔴 unicode | 🔴 unicode |
+| `".` | 🟢 do; the string runs over the names around it | 🔴 numbers |
+| `u:` | 🟢 unicode | 🟡 unicode; forms 3 and 10, the byte-oriented ones named |
 | `s:` | 🔴 symbol | 🔴 symbol |
 | `[` | 🟢 same | 🟢 left |
 | `]` | 🟢 same | 🟢 right |
@@ -125,11 +125,11 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 
 | Spelling | Status |
 |---|---|
-| `a.` alphabet | 🔴 |
-| `a:` ace (boxed empty) | 🔴 |
+| `a.` alphabet | 🟢 |
+| `a:` ace (boxed empty) | 🟢 |
 | `_` `__` infinities | 🟢 |
 | `_.` indeterminate | 🔴 |
-| `_9:` … `9:`, `_:` constant verbs | 🔴 |
+| `_9:` … `9:`, `_:` constant verbs | 🟢 |
 
 ## J — adverbs
 
@@ -137,7 +137,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 |---|---|---|
 | `/` | 🟢 insert | 🟢 table |
 | `\` | 🟢 prefix | 🟢 infix |
-| `\.` | 🟢 suffix | 🔴 outfix |
+| `\.` | 🟢 suffix | 🟢 outfix |
 | `/.` | 🟢 oblique | 🟢 key |
 | `~` | 🟢 reflex | 🟢 passive |
 | `}` | 🟡 noun operand (`m} y` selects) | 🟡 noun operand; `u}` not yet |
@@ -151,20 +151,20 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `@:` at | 🟢 |
 | `&` bond / compose | 🟡 verbs compose, literal nouns bond; computed nouns not yet |
 | `&:` appose | 🟢 |
-| `&.` under | 🟡 only `u&.>` (each); the general case needs inverses |
-| `&.:` under | 🔴 |
-| `^:` power | 🟡 literal count, `_`, or a verb count; negatives (the obverse) not yet |
+| `&.` under | 🟢 `v^:_1 @: u &: v`, over the obverse table |
+| `&.:` under | 🟢 the same on whole arguments |
+| `^:` power | 🟡 literal count, `_`, a verb count, and negatives (the obverse); a computed count not yet |
 | `.` dot product | 🔴 |
 | `:` explicit definition | 🟡 `3 :` and `4 :`; `1 :`, `2 :`, `13 :` not yet |
 | `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`) and `;.0`; `;.3` not yet |
 | `!.` fit (tolerance) | 🟡 the tolerance meaning; `!.` as a fill not yet |
 | `!:` foreign | 🔴 sandboxed design needed |
-| `` ` `` tie (gerund) | 🔴 |
+| `` ` `` tie (gerund) | 🟡 a gerund of verbs; only `@.` reads one |
 | `` `: `` evoke gerund | 🔴 |
-| `@.` agenda | 🔴 |
+| `@.` agenda | 🟢 |
 | `[:` cap | 🟢 |
-| `::` adverse | 🔴 |
-| `:.` obverse | 🔴 |
+| `::` adverse | 🟢 |
+| `:.` obverse | 🟢 declares what undoes a verb |
 
 Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 `t:` `T.` `..` `.:` `$.` — 15 spellings, none recognised yet.
@@ -195,7 +195,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Verb rank machinery, frames, framing fill | 🟢 |
 | Leading-prefix agreement | 🟢 |
 | Overtake fill | 🟢 |
-| Catenate with fill | 🔴 |
+| Catenate with fill | 🟢 |
 | Comparison tolerance (default `=`, `!.`) | 🟢 2⁻⁴⁴, and `u!.n` |
 | Integer, float, `_` negative, `1e_3` exponent literals | 🟢 |
 | Complex literals `1j2`, `1ad45`, `1ar1` | 🟢 |
@@ -230,7 +230,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Glyph | Monad | Dyad |
 |---|---|---|
 | `=` | — | 🟢 equal |
-| `≠` | 🔴 nub sieve | 🟢 not equal |
+| `≠` | 🟢 nub sieve | 🟢 not equal |
 | `<` | — | 🟢 less than |
 | `≤` | — | 🟢 less or equal |
 | `>` | — | 🟢 greater than |
@@ -239,26 +239,26 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `≢` | 🟢 tally | 🟢 not match |
 | `∧` | — | 🟡 LCM/and; integral values only |
 | `∨` | — | 🟡 GCD/or; integral values only |
-| `⍲` | — | 🔴 nand |
-| `⍱` | — | 🔴 nor |
-| `~` | 🟢 not | 🔴 without |
+| `⍲` | — | 🟢 nand |
+| `⍱` | — | 🟢 nor |
+| `~` | 🟢 not | 🟢 without |
 
 ### Structural
 
 | Glyph | Monad | Dyad |
 |---|---|---|
 | `⍴` | 🟢 shape | 🟡 reshape; an empty argument is refused, not filled |
-| `,` | 🟢 ravel | 🟡 catenate (last axis); unequal shapes need fill |
+| `,` | 🟢 ravel | 🟡 catenate (last axis); a mixed character and numeric result is refused |
 | `⍪` | 🟢 table | 🟡 catenate (leading axis); same |
 | `⌽` | 🟢 reverse | 🟢 rotate |
 | `⊖` | 🟢 reverse first | 🟡 rotate first; a vector left argument reads per axis |
 | `⍉` | 🟢 transpose | 🔴 dyadic transpose |
 | `↑` | 🟢 first | 🟡 take; overtaking a nested array fills with the empty box |
-| `↓` | 🔴 split | 🟢 drop |
+| `↓` | 🟡 no oracle: GNU APL has no monadic `↓`; Dyalog's split | 🟢 drop |
 | `⊂` | 🟢 enclose | 🟡 partitioned enclose; a vector argument only |
-| `⊃` | 🟢 disclose / mix | 🔴 pick |
+| `⊃` | 🟢 disclose / mix | 🟢 pick |
 | `⊆` | 🔴 no oracle: not in GNU APL's character set | 🔴 same |
-| `⌷` | 🔴 materialise — GNU APL has no monad either | 🟢 index (APL2: one scalar per axis) |
+| `⌷` | 🟡 no oracle: materialise, which Dyalog makes the identity | 🟢 index (APL2: one scalar per axis) |
 | `⊥` | — | 🟡 decode; folds the last axis, not the leading one |
 | `⊤` | — | 🟢 encode |
 
@@ -269,9 +269,9 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `⍳` | 🟡 scalar only; vector argument is a named not-yet | 🟢 index of |
 | `⍸` | 🟢 where | 🟢 interval index |
 | `∊` | 🟢 enlist | 🟢 membership |
-| `⍷` | — | 🔴 find |
-| `∪` | 🟢 unique | 🔴 union |
-| `∩` | 🔴 | 🔴 intersection |
+| `⍷` | — | 🟢 find |
+| `∪` | 🟢 unique | 🟢 union |
+| `∩` | — | 🟢 intersection |
 | `⍋` | 🟡 grade up; nested needs total ordering | 🔴 collating grade |
 | `⍒` | 🟡 grade down; nested needs total ordering | 🔴 collating grade |
 
@@ -280,13 +280,13 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Glyph | Monad | Dyad |
 |---|---|---|
 | `⍕` | 🟢 format | 🔴 format by specification |
-| `⍎` | 🔴 execute — sandboxed design needed | — |
+| `⍎` | 🟢 execute; the string runs over the names around it | — |
 | `⊢` | 🟢 same | 🟢 right |
 | `⊣` | 🟢 same | 🟢 left |
 | `⎕←` output | 🟢 | — |
 | `⍞` character I/O | 🔴 | 🔴 |
 | `→` branch | 🔴 named (label-based goto) | — |
-| `⍬` zilde | 🔴 | — |
+| `⍬` zilde | 🟢 | — |
 | `⌶` I-beam | 🔴 | 🔴 |
 
 ## APL — operators
@@ -297,14 +297,14 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | `⌿` reduce (leading axis) | 🟢 |
 | `/` `⌿` replicate (after an operand) | 🟢 |
 | `\` `⍀` scan | 🟢 |
-| `\` `⍀` expand (after an operand) | 🔴 |
+| `\` `⍀` expand (after an operand) | 🟢 |
 | `¨` each | 🟢 |
 | `⍨` commute | 🟢 |
 | `∘.` outer product | 🟢 |
 | `⍤` rank | 🟡 rank specification only; `f⍤g` is not in GNU APL either |
 | `⍣` power | 🟡 literal count or a function operand (`f⍣≡`); negatives not yet |
-| `∘` beside | 🔴 no oracle: GNU APL has no `∘` operator |
-| `⍥` over | 🔴 no oracle: not in GNU APL's character set |
+| `∘` beside | 🟡 no oracle: GNU APL has no `∘` operator; Dyalog's `f∘g`, function operands only |
+| `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🔴 no oracle: GNU APL rejects it |
 | `⍢` under | 🔴 |
 | `⌸` key | 🔴 |
@@ -330,7 +330,7 @@ Other modifiers, all 🔴: `b.` `d.` `D.` `D:` `f.` `H.` `L:` `M.` `S:` `t.`
 | Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
 | Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`; the rest named |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
-| `⎕`-system names as runtime variables | 🔴 |
+| `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS`), read-only; the ones that read a clock or a filesystem are closed by the sandbox |
 | Control structures `:If :While :Repeat :For :Select` | 🟡 no oracle: GNU APL rejects them |
 | `:Return` `:Leave` `:Continue` | 🟡 no oracle, as above |
 | Exact-or-scalar conformability | 🟢 |

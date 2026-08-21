@@ -40,9 +40,10 @@ compile error, `Program::render_error` a run error, both the way the CLI
 would:
 
 ```
-length error: shapes do not agree: 3 and 2
+length error: arguments do not agree: left shape 3, right shape 2
   1 2 3 + 1 2
   ^^^^^^^^^^^
+note: frames first differ at axis 0: 3 vs 2
 ```
 
 `jay::fmt::format_array(&value, &program.fmt)` renders a result the way its

@@ -191,10 +191,14 @@ fn j_each_opens_applies_and_boxes_again() {
     );
     // J always boxes the result again, even a bare number.
     assert_eq!(val(Lang::J, "+ &.> 1;2"), val(Lang::J, "1;2"));
-    // `&.` over anything else still needs verb inverses.
-    let e = err(Lang::J, "+ &. - 1");
+    // `&.` over anything else runs the general under, which needs the
+    // right operand's obverse: `+&.- y` is `- (+ (- y))`, so it negates.
+    assert_eq!(val(Lang::J, "+ &. - 1"), Array::scalar_i64(1));
+    assert_eq!(val(Lang::J, "- &. - 5"), Array::scalar_i64(-5));
+    // A verb with no known inverse says so by name.
+    let e = err(Lang::J, "+ &. (+/ % #) 1 2");
     assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("under"), "{}", e.msg);
+    assert!(e.msg.contains("obverse"), "{}", e.msg);
 }
 
 #[test]
@@ -268,10 +272,12 @@ fn apl_enlist_depth_and_split() {
     assert_eq!(val(Lang::Apl, "≡'ab' 'cd'"), Array::scalar_i64(2));
     assert_eq!(val(Lang::Apl, "≡1(2(3 4))"), Array::scalar_i64(3));
 
-    // Split is what GNU APL itself has no monadic `↓` for.
-    let e = err(Lang::Apl, "↓2 3⍴⍳6");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("split"), "{}", e.msg);
+    // Split: GNU APL has no monadic `↓`, so this follows Dyalog — the
+    // vectors along the last axis, each enclosed.
+    let split = val(Lang::Apl, "↓2 3⍴⍳6");
+    assert_eq!(split.shape, vec![2]);
+    assert_eq!(val(Lang::Apl, "2⊃↓2 3⍴⍳6"), i64s(&[3], &[4, 5, 6]));
+    assert_eq!(val(Lang::Apl, "≡↓2 3⍴⍳6"), Array::scalar_i64(2));
 }
 
 // --- the structural verbs over boxes ------------------------------------

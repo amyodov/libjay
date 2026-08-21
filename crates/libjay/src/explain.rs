@@ -391,6 +391,28 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             head(out, &format!("along axis {k}"));
             verb_lines(u, depth + 1, p, tr, out);
         }
+        Verb::Beside(f, g) => {
+            head(out, "beside ∘ (the right argument is prepared)");
+            verb_lines(f, depth + 1, p, tr, out);
+            verb_lines(g, depth + 1, p, tr, out);
+        }
+        Verb::Adverse(u, w) => {
+            head(out, "adverse :: (the second verb answers a refusal)");
+            verb_lines(u, depth + 1, p, tr, out);
+            verb_lines(w, depth + 1, p, tr, out);
+        }
+        Verb::WithObverse(u, w) => {
+            head(out, "verb with a declared obverse :.");
+            verb_lines(u, depth + 1, p, tr, out);
+            verb_lines(w, depth + 1, p, tr, out);
+        }
+        Verb::Agenda(vs, w) => {
+            head(out, &format!("agenda @. over {} verbs", vs.len()));
+            for u in vs {
+                verb_lines(u, depth + 1, p, tr, out);
+            }
+            verb_lines(w, depth + 1, p, tr, out);
+        }
         Verb::Windowed(u, kind) => {
             head(
                 out,

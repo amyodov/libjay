@@ -14,7 +14,8 @@ use crate::error::{Error, Result, Span};
 use crate::frontend::{Segment, SourceParts};
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
-    DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind, RANK_INF,
+    BoolDyad, DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind,
+    RANK_INF,
 };
 
 /// Parse an APL program (sentences separated by newlines or `⋄`) into IR
@@ -116,6 +117,8 @@ enum OpGlyph {
     Power,
     /// `∘.` — outer product; unlike the rest, its operand is on its right.
     JotDot,
+    /// `⍥` over: `f⍥g` prepares both arguments with g, then applies f.
+    Over,
     /// `∘` on its own — Dyalog's `f∘g`, which libjay does not have yet.
     Jot,
     /// `¨` — each.
@@ -133,6 +136,7 @@ impl OpGlyph {
             OpGlyph::Commute => '⍨',
             OpGlyph::Power => '⍣',
             OpGlyph::JotDot | OpGlyph::Jot => '∘',
+            OpGlyph::Over => '⍥',
             OpGlyph::Each => '¨',
         }
     }
@@ -255,9 +259,9 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '=' => Prim { name: "=", monad: M::None, dyad: D::Scalar(SD::Eq), ranks: [0, 0, 0] },
         '≠' => Prim {
             name: "≠",
-            monad: M::NotYet("nub sieve (monadic ≠)"),
+            monad: M::NubSieve,
             dyad: D::Scalar(SD::Ne),
-            ranks: [0, 0, 0],
+            ranks: [RANK_INF, 0, 0],
         },
         '<' => Prim { name: "<", monad: M::None, dyad: D::Scalar(SD::Lt), ranks: [0, 0, 0] },
         '≤' => Prim { name: "≤", monad: M::None, dyad: D::Scalar(SD::Le), ranks: [0, 0, 0] },
@@ -287,13 +291,13 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '∪' => Prim {
             name: "∪",
             monad: M::Nub,
-            dyad: D::NotYet("union (dyadic ∪)"),
+            dyad: D::Union,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '∩' => Prim {
             name: "∩",
-            monad: M::NotYet("intersection (∩)"),
-            dyad: D::NotYet("intersection (∩)"),
+            monad: M::None,
+            dyad: D::Intersect,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '∧' => Prim { name: "∧", monad: M::None, dyad: D::Scalar(SD::Lcm), ranks: [0, 0, 0] },
@@ -301,13 +305,13 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '⍱' => Prim {
             name: "⍱",
             monad: M::None,
-            dyad: D::NotYet("nor (⍱)"),
+            dyad: D::Boolean(BoolDyad::Nor),
             ranks: [0, 0, 0],
         },
         '⍲' => Prim {
             name: "⍲",
             monad: M::None,
-            dyad: D::NotYet("nand (⍲)"),
+            dyad: D::Boolean(BoolDyad::Nand),
             ranks: [0, 0, 0],
         },
         '⍟' => Prim {
@@ -319,8 +323,8 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '~' => Prim {
             name: "~",
             monad: M::Scalar(SM::Not),
-            dyad: D::NotYet("without (dyadic ~)"),
-            ranks: [0, 0, 0],
+            dyad: D::Less,
+            ranks: [0, RANK_INF, RANK_INF],
         },
         '≡' => Prim {
             name: "≡",
@@ -412,7 +416,7 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         // GNU APL's `⌷` is APL2's: one scalar index per axis, no monad.
         '⌷' => Prim {
             name: "⌷",
-            monad: M::NotYet("materialise (monadic ⌷)"),
+            monad: M::Same,
             dyad: D::Squad { origin },
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
@@ -431,12 +435,12 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '⊃' => Prim {
             name: "⊃",
             monad: M::Open,
-            dyad: D::NotYet("pick (dyadic ⊃)"),
+            dyad: D::Pick { origin },
             ranks: [0, RANK_INF, RANK_INF],
         },
         '↓' => Prim {
             name: "↓",
-            monad: M::NotYet("split (monadic ↓) — nested arrays"),
+            monad: M::Split,
             dyad: D::Drop,
             ranks: [RANK_INF, 1, RANK_INF],
         },
@@ -470,6 +474,18 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
             dyad: D::Scalar(SD::Circle),
             ranks: [0, 0, 0],
         },
+        '⍷' => Prim {
+            name: "⍷",
+            monad: M::None,
+            dyad: D::FindSeq,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        '⍎' => Prim {
+            name: "⍎",
+            monad: M::Execute { apl: true, origin },
+            dyad: D::None,
+            ranks: [1, RANK_INF, RANK_INF],
+        },
         _ => return None,
     };
     Some(p)
@@ -486,6 +502,35 @@ fn verb_for(ch: char, origin: i64) -> Option<Verb> {
     Some(Verb::Prim(p))
 }
 
+/// A `⎕`-name: the pure ones libjay answers, and a clear refusal for the
+/// ones that would have to reach outside the sandbox.
+///
+/// `⎕IO` and `⎕CT` are the dialect's own settings, readable but not
+/// assignable — the compiler fixed them before the program ran.
+fn quad_name(name: &str, origin: i64, span: Span) -> Result<Tok> {
+    let chars = |s: &str| Tok::Value(Array::from_chars(s.chars().collect()));
+    Ok(match name {
+        "A" => chars("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+        "D" => chars("0123456789"),
+        "IO" => Tok::Value(Array::scalar_i64(origin)),
+        "CT" => Tok::Value(Array::scalar_f64(crate::verb::Tol::APL.ct)),
+        "UCS" => Tok::Func(Verb::Prim(Prim {
+            name: "⎕UCS",
+            monad: MonadOp::Unicode { pass_chars: false },
+            dyad: DyadOp::None,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        })),
+        // The ones that would read a clock, a workspace or a file.
+        "TS" | "AI" | "TC" | "WA" | "SI" | "LC" | "NL" | "EX" | "FIO" | "NA" | "SH" | "CMD"
+        | "MAP" | "SVO" | "SVQ" | "TZ" | "DL" => Err(Error::new(
+            crate::ErrorKind::NotYet,
+            format!("⎕{name} is closed by the sandbox: it reads outside the program"),
+            Some(span),
+        ))?,
+        other => Err(Error::not_yet(format!("the system name ⎕{other}"), span))?,
+    })
+}
+
 fn op_for(ch: char) -> Option<OpGlyph> {
     match ch {
         '/' => Some(OpGlyph::Slash),
@@ -496,9 +541,22 @@ fn op_for(ch: char) -> Option<OpGlyph> {
         '⍨' => Some(OpGlyph::Commute),
         '⍣' => Some(OpGlyph::Power),
         '∘' => Some(OpGlyph::Jot),
+        '⍥' => Some(OpGlyph::Over),
         '¨' => Some(OpGlyph::Each),
         _ => None,
     }
+}
+
+/// Expand as a function: `x\\y` along the last axis, `x⍀y` along the
+/// leading one, matching the two axes replicate distinguishes.
+fn expand_verb(leading: bool) -> Verb {
+    let p = Prim {
+        name: if leading { "⍀" } else { "\\" },
+        monad: MonadOp::None,
+        dyad: DyadOp::Expand,
+        ranks: if leading { [RANK_INF, 1, RANK_INF] } else { [RANK_INF, 1, 1] },
+    };
+    Verb::Prim(p)
 }
 
 /// Replicate as a function: `x/y` along the last axis, `x⌿y` along the
@@ -654,6 +712,14 @@ fn lex_text(
                     Span::new(offset + i, offset + i + clen),
                 ));
             }
+            // `⍬` is the empty numeric vector, written as a constant.
+            '⍬' => {
+                cur.push(Token {
+                    kind: Tok::Value(Array::empty(crate::dtype::DType::I64)),
+                    span: Span::new(offset + i, offset + i + clen),
+                });
+                i += clen;
+            }
             '(' => {
                 cur.push(Token { kind: Tok::LParen, span: Span::new(offset + i, offset + i + 1) });
                 i += 1;
@@ -698,10 +764,23 @@ fn lex_text(
                     }
                 }
                 if j > after {
-                    return Err(Error::not_yet(
-                        "system variables (⎕IO is a compiler dialect setting)",
-                        Span::new(offset + i, offset + j),
-                    ));
+                    let span = Span::new(offset + i, offset + j);
+                    let name = text[after..j].to_uppercase();
+                    // Every system name libjay answers is read-only: the
+                    // ones that are settings were fixed by the dialect
+                    // before the program was compiled.
+                    if text[j..].trim_start().starts_with('←') {
+                        return Err(Error::not_yet(
+                            format!(
+                                "assigning system variables (⎕{name} is a compiler \
+                                 dialect setting, read-only here)"
+                            ),
+                            span,
+                        ));
+                    }
+                    cur.push(Token { kind: quad_name(&name, origin, span)?, span });
+                    i = j;
+                    continue;
                 }
                 cur.push(Token { kind: Tok::Quad, span: Span::new(offset + i, offset + after) });
                 i = after;
@@ -966,8 +1045,35 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
             out.push(Token { kind: Tok::Func(Verb::Reduce(Box::new(f))), span });
             continue;
         }
-        if op == OpGlyph::Jot {
-            return Err(Error::not_yet("beside (∘) composition: Dyalog's f∘g", t.span));
+        // `f∘g` and `f⍥g` need a function on both sides; the right one is
+        // taken here so the ordinary "operand to the left" path can run.
+        if matches!(op, OpGlyph::Jot | OpGlyph::Over) {
+            let Some(gtok) = it.peek().filter(|x| matches!(x.kind, Tok::Func(_))) else {
+                return Err(Error::not_yet(
+                    format!("{} with a value operand", op.glyph()),
+                    t.span,
+                ));
+            };
+            let gspan = gtok.span;
+            let Some(Token { kind: Tok::Func(g), .. }) = it.next() else {
+                unreachable!("peeked a function")
+            };
+            let Some(Token { kind: Tok::Func(f), span: fspan }) = out.pop() else {
+                return Err(Error::not_yet(
+                    format!("{} with a value operand", op.glyph()),
+                    t.span,
+                ));
+            };
+            let span = Span::merge(fspan, gspan);
+            // Beside runs g on the right argument only; over runs it on
+            // both. Neither is in GNU APL, so both follow Dyalog.
+            let derived = if op == OpGlyph::Jot {
+                Verb::Beside(Box::new(f), Box::new(g))
+            } else {
+                Verb::Compose(Box::new(f), Box::new(g))
+            };
+            out.push(Token { kind: Tok::Func(derived), span });
+            continue;
         }
         // Left operand: a function, derived or not.
         let left_is_func = matches!(out.last().map(|x| &x.kind), Some(Tok::Func(_)));
@@ -979,15 +1085,14 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
                 let f = match op {
                     OpGlyph::Slash => copy_verb(false),
                     OpGlyph::SlashBar => copy_verb(true),
-                    OpGlyph::Backslash => return Err(Error::not_yet("expand (x\\y)", t.span)),
-                    OpGlyph::BackslashBar => {
-                        return Err(Error::not_yet("expand along the leading axis (x⍀y)", t.span));
-                    }
+                    OpGlyph::Backslash => expand_verb(false),
+                    OpGlyph::BackslashBar => expand_verb(true),
                     OpGlyph::Rank
                     | OpGlyph::Commute
                     | OpGlyph::Power
                     | OpGlyph::JotDot
                     | OpGlyph::Jot
+                    | OpGlyph::Over
                     | OpGlyph::Each => {
                         return Err(Error::parse(
                             format!("{} needs a function to its left", op.glyph()),
@@ -1099,7 +1204,9 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
                 continue;
             }
             // Both are answered before the left operand is taken.
-            OpGlyph::JotDot | OpGlyph::Jot => unreachable!("handled above"),
+            OpGlyph::JotDot | OpGlyph::Jot | OpGlyph::Over => {
+                unreachable!("handled above")
+            }
         };
         out.push(Token { kind: Tok::Func(derived), span });
     }
@@ -2410,10 +2517,15 @@ mod tests {
     }
 
     #[test]
-    fn system_variables_are_not_yet() {
+    fn system_variables_are_read_only() {
         let e = err("⎕IO←0");
         assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("system variables"), "{}", e.msg);
+        assert!(e.msg.contains("assigning system variables"), "{}", e.msg);
+        // The ones that would reach outside the program are refused by
+        // name, whether they are read or written.
+        let e = err("⎕TS");
+        assert_eq!(e.kind, ErrorKind::NotYet);
+        assert!(e.msg.contains("closed by the sandbox"), "{}", e.msg);
     }
 
     // --- the primitive table -------------------------------------------
@@ -2443,11 +2555,11 @@ mod tests {
     #[case('≢', MonadOp::Tally, DyadOp::NotMatch)]
     #[case('≡', MonadOp::Depth, DyadOp::Match)]
     #[case('∊', MonadOp::Enlist, DyadOp::MemberApl)]
-    #[case('∪', MonadOp::Nub, DyadOp::NotYet("union (dyadic ∪)"))]
+    #[case('∪', MonadOp::Nub, DyadOp::Union)]
     #[case('∧', MonadOp::None, DyadOp::Scalar(ScalarDyad::Lcm))]
     #[case('∨', MonadOp::None, DyadOp::Scalar(ScalarDyad::Gcd))]
     #[case('⍟', MonadOp::Scalar(ScalarMonad::Ln), DyadOp::Scalar(ScalarDyad::Log))]
-    #[case('~', MonadOp::Scalar(ScalarMonad::Not), DyadOp::NotYet("without (dyadic ~)"))]
+    #[case('~', MonadOp::Scalar(ScalarMonad::Not), DyadOp::Less)]
     #[case('⊖', MonadOp::Reverse, DyadOp::Rotate)]
     #[case('⍋', MonadOp::GradeUp { origin: 1 }, DyadOp::NotYet("dyadic grade (collation)"))]
     #[case('⍒', MonadOp::GradeDown { origin: 1 }, DyadOp::NotYet("dyadic grade (collation)"))]
@@ -2455,8 +2567,8 @@ mod tests {
     #[case('⊣', MonadOp::Same, DyadOp::Left)]
     #[case('↑', MonadOp::First, DyadOp::Take)]
     #[case('⊂', MonadOp::Enclose(Enclose::ExceptSimpleScalar), DyadOp::PartitionEnclose)]
-    #[case('⊃', MonadOp::Open, DyadOp::NotYet("pick (dyadic ⊃)"))]
-    #[case('↓', MonadOp::NotYet("split (monadic ↓) — nested arrays"), DyadOp::Drop)]
+    #[case('⊃', MonadOp::Open, DyadOp::Pick { origin: 1 })]
+    #[case('↓', MonadOp::Split, DyadOp::Drop)]
     fn primitive_meanings(#[case] glyph: char, #[case] monad: MonadOp, #[case] dyad: DyadOp) {
         let src = format!("{glyph}1");
         let e = one(&src);
@@ -2472,11 +2584,11 @@ mod tests {
     }
 
     #[test]
-    fn monadic_not_equal_is_the_nub_sieve_placeholder() {
+    fn monadic_not_equal_is_the_nub_sieve() {
         let e = one("≠1");
         match e {
             Expr::Monad { verb, .. } => {
-                assert_eq!(as_prim(&verb).monad, MonadOp::NotYet("nub sieve (monadic ≠)"));
+                assert_eq!(as_prim(&verb).monad, MonadOp::NubSieve);
             }
             other => panic!("expected a monad, got {other:?}"),
         }
@@ -2643,12 +2755,11 @@ mod tests {
     }
 
     #[rstest]
-    #[case("1 0 1\\1 2 3", "expand")]
-    #[case("1 0 1⍀1 2 3", "expand")]
-    fn expand_is_not_yet(#[case] src: &str, #[case] msg: &str) {
-        let e = err(src);
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains(msg), "{}", e.msg);
+    #[case("1 0 1\\1 2 3")]
+    #[case("1 0 1⍀1 2 3")]
+    fn expand_after_a_value_is_a_function(#[case] src: &str) {
+        let e = one(src);
+        assert_eq!(as_prim(verb_of(&e)).dyad, DyadOp::Expand);
     }
 
     #[test]

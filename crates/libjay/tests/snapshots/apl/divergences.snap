@@ -139,10 +139,6 @@
 ? graded there, a `grading boxed arrays` gap here
 < <error>
 > 1 2
-= 1 2⊃(1 2)(3 4)
-? pick there, a named gap here
-< <error>
-> 2
 = ⍳2 3
 ? a nested index array there, a named gap here
 < <error>

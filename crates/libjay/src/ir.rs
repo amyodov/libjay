@@ -307,7 +307,7 @@ pub(crate) enum Flow {
 /// Run a block of sentences: the value is the last sentence's, and an
 /// assignment yields the value it assigned (the top level is the one place
 /// that discards it, and `Program::exec` applies that rule itself).
-fn run_block(
+pub(crate) fn run_block(
     stmts: &[Expr],
     last: Option<Array>,
     ctx: &mut Ctx<'_>,

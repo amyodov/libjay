@@ -452,6 +452,34 @@ pub enum MonadOp {
     /// complex number as a two-element vector, which becomes a new trailing
     /// axis. A real argument is the pair `y 0` / `|y| 0`.
     ComplexParts { polar: bool },
+    /// J `=`: self-classify — one row per distinct item, holding 1 where
+    /// that item stands among y's items.
+    SelfClassify,
+    /// J `~:` / APL `≠`: nub sieve — 1 at each item that has not occurred
+    /// before.
+    NubSieve,
+    /// J `u:` / APL `⎕UCS`: codepoints become characters, characters become
+    /// their codepoints. `pass_chars` is J's monad, which answers characters
+    /// with themselves rather than converting them.
+    Unicode { pass_chars: bool },
+    /// J `;:`: J's own tokeniser over a character list, one box per word.
+    Words,
+    /// J `L.`: the boxing level — 0 for anything unboxed, one more than the
+    /// deepest content otherwise.
+    LevelOf,
+    /// J `A.`: the anagram index of the permutation y's items rank as.
+    AnagramIndex,
+    /// J `C.`: a direct permutation as its cycles, or a boxed list of
+    /// cycles as the direct permutation. The argument's type decides which.
+    CycleForm,
+    /// APL `↓`: split — each major cell of y enclosed, the leading axis
+    /// becoming the shape of the result.
+    Split,
+    /// J `". y` / APL `⍎ y`: compile the characters of y as a program of
+    /// this language and run it here, over the names the caller already
+    /// has. Nothing else about the sandbox changes: the nested program can
+    /// reach exactly what the outer one can.
+    Execute { apl: bool, origin: i64 },
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -537,8 +565,50 @@ pub enum DyadOp {
     /// J `x ? y` / `x ?. y` and APL `x ? y`: deal — x distinct values from
     /// the y below `origin + y`.
     Deal { origin: i64, fixed: bool },
+    /// J `+:` and `*:` / APL `⍱` and `⍲`: the two boolean operations that
+    /// have no other reading. Both arguments must be 0 or 1.
+    Boolean(BoolDyad),
+    /// J `x -. y` / APL `x ~ y`: the items of x that are not items of y.
+    Less,
+    /// APL `x ∪ y`: x's items, then y's items that x does not already have.
+    Union,
+    /// APL `x ∩ y`: the items of x that y also has, in x's order.
+    Intersect,
+    /// J `x A. y`: y's items under the x-th permutation of the items, the
+    /// permutations counted in lexicographic order.
+    AnagramFrom,
+    /// J `x C. y`: y's items permuted by x — a direct permutation, or a
+    /// boxed list of cycles.
+    Permute,
+    /// J `x E. y` / APL `x ⍷ y`: 1 at each position of y where a copy of x
+    /// begins.
+    FindSeq,
+    /// J `x u: y`: which conversion — 3 and 4 take characters to
+    /// codepoints, 8 and 10 take codepoints to characters.
+    UnicodeForm,
+    /// J `x p: y`: which fact about primes — `_1` counts the primes below
+    /// y, 0 asks whether y is composite, 1 whether it is prime, and `x` of
+    /// magnitude 4 steps to the next or previous prime.
+    PrimeMeta,
+    /// J `x q: y`: the exponents of the first x primes in y, or, for `__`,
+    /// the distinct primes over their exponents as a 2-row table.
+    PrimeExponents,
+    /// APL `x ⊃ y`: pick — follow the path x into y, opening a level a step.
+    Pick { origin: i64 },
+    /// APL `x \ y` and `x ⍀ y`: expand — a 1 in x takes the next item of y,
+    /// a 0 puts a fill in its place.
+    Expand,
     NotYet(&'static str),
     None,
+}
+
+/// The dyadic operations that read and write booleans and nothing else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoolDyad {
+    /// J `+:`, APL `⍱`: neither.
+    Nor,
+    /// J `*:`, APL `⍲`: not both.
+    Nand,
 }
 
 /// A primitive verb: a name for diagnostics, both valence meanings, and
@@ -643,6 +713,20 @@ pub enum Verb {
     /// A verb named earlier in the program, looked up when it is applied so
     /// that a definition can call itself by its own name.
     Named(String),
+    /// J `u :. v`: u, with v declared to be its obverse. The declaration is
+    /// what [`obverse`] answers with; applying the verb applies u.
+    WithObverse(Box<Verb>, Box<Verb>),
+    /// J `m@.v`: agenda — v's value at the arguments picks which of the
+    /// gerund's verbs to apply.
+    Agenda(Vec<Verb>, Box<Verb>),
+    /// J `u :: v`: adverse — apply u, and if the language refuses it, apply
+    /// v to the same arguments instead. A gap in libjay is not an error the
+    /// program may handle, and goes straight through.
+    Adverse(Box<Verb>, Box<Verb>),
+    /// APL `f∘g` (beside): monad `f (g y)`, dyad `x f (g y)`. g prepares the
+    /// right argument and the left one arrives untouched, which is what
+    /// separates it from `⍥` (this crate's [`Verb::Compose`]).
+    Beside(Box<Verb>, Box<Verb>),
 }
 
 impl Verb {
@@ -664,6 +748,8 @@ impl Verb {
             | Verb::PowerV(..)
             | Verb::PowerUntil(..)
             | Verb::AlongAxis(..) => [RANK_INF, RANK_INF, RANK_INF],
+            Verb::WithObverse(v, _) | Verb::Adverse(v, _) => v.ranks(),
+            Verb::Beside(..) => [RANK_INF, RANK_INF, RANK_INF],
             _ => [RANK_INF, RANK_INF, RANK_INF],
         }
     }
@@ -698,6 +784,13 @@ impl Verb {
             Verb::Explicit(d) => d.name.clone(),
             Verb::SelfRef => "$:".to_string(),
             Verb::Named(n) => n.clone(),
+            Verb::WithObverse(v, w) => format!("({}:.{})", v.name(), w.name()),
+            Verb::Adverse(v, w) => format!("({}::{})", v.name(), w.name()),
+            Verb::Beside(f, g) => format!("({}∘{})", f.name(), g.name()),
+            Verb::Agenda(vs, w) => {
+                let names: Vec<String> = vs.iter().map(Verb::name).collect();
+                format!("({}@.{})", names.join("`"), w.name())
+            }
         }
     }
 
@@ -748,6 +841,13 @@ impl Verb {
             // An explicit definition's body is a program of its own; `!.`
             // has no reach into it.
             Verb::Amend(_) | Verb::Explicit(_) | Verb::SelfRef | Verb::Named(_) => false,
+            Verb::WithObverse(v, _) => v.uses_tolerance(),
+            Verb::Adverse(v, w) | Verb::Beside(v, w) => {
+                v.uses_tolerance() || w.uses_tolerance()
+            }
+            Verb::Agenda(vs, w) => {
+                w.uses_tolerance() || vs.iter().any(Verb::uses_tolerance)
+            }
             Verb::Fork(f, g, h) => {
                 f.uses_tolerance() || g.uses_tolerance() || h.uses_tolerance()
             }
@@ -785,6 +885,9 @@ impl Verb {
             }
             Verb::Key(v) | Verb::Cut(v, _) | Verb::AlongAxis(v, _) => v.is_pure(),
             Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => v.is_pure() && w.is_pure(),
+            Verb::WithObverse(v, _) => v.is_pure(),
+            Verb::Adverse(v, w) | Verb::Beside(v, w) => v.is_pure() && w.is_pure(),
+            Verb::Agenda(vs, w) => w.is_pure() && vs.iter().all(Verb::is_pure),
             Verb::Amend(_) => true,
             // An explicit definition reads and writes the program's names,
             // so its cells can never be run out of order on other threads —
@@ -887,6 +990,18 @@ impl Verb {
                 crate::ir::call_explicit(&d, None, y, ctx, span)
             }
             Verb::Named(n) => named_verb(ctx, n, span)?.monad(y, ctx, span),
+            Verb::WithObverse(v, _) => v.monad(y, ctx, span),
+            Verb::Adverse(v, w) => match v.monad(y, ctx, span) {
+                Err(e) if e.kind != ErrorKind::NotYet => w.monad(y, ctx, span),
+                other => other,
+            },
+            Verb::Beside(f, g) => {
+                let r = g.monad(y, ctx, span)?;
+                f.monad(&r, ctx, span)
+            }
+            Verb::Agenda(vs, w) => {
+                agenda_pick(vs, w, None, y, ctx, span)?.monad(y, ctx, span)
+            }
         }
     }
 
@@ -898,9 +1013,9 @@ impl Verb {
             }
             // `x u\ y` needs the frame machinery: its left cell is an atom.
             Verb::Windowed(_, WindowKind::Prefix) => self.dyad_ranked(x, y, ctx, span),
-            Verb::Windowed(_, WindowKind::Suffix) => {
-                Err(Error::not_yet("outfix (x u\\. y)", span))
-            }
+            // `x u\. y` is the outfix: u over y with each run of x
+            // consecutive items left out.
+            Verb::Windowed(u, WindowKind::Suffix) => outfix(u, x, y, ctx, span),
             Verb::Windowed(_, WindowKind::Scan) => {
                 Err(Error::not_yet("dyadic scan (x f\\ y)", span))
             }
@@ -948,6 +1063,18 @@ impl Verb {
                 crate::ir::call_explicit(&d, Some(x), y, ctx, span)
             }
             Verb::Named(n) => named_verb(ctx, n, span)?.dyad(x, y, ctx, span),
+            Verb::WithObverse(v, _) => v.dyad(x, y, ctx, span),
+            Verb::Adverse(v, w) => match v.dyad(x, y, ctx, span) {
+                Err(e) if e.kind != ErrorKind::NotYet => w.dyad(x, y, ctx, span),
+                other => other,
+            },
+            Verb::Beside(f, g) => {
+                let r = g.monad(y, ctx, span)?;
+                f.dyad(x, &r, ctx, span)
+            }
+            Verb::Agenda(vs, w) => {
+                agenda_pick(vs, w, Some(x), y, ctx, span)?.dyad(x, y, ctx, span)
+            }
             // J gives a bond one valence only.
             Verb::BondLeft(..) | Verb::BondRight(..) => {
                 Err(Error::domain(format!("{} has no dyadic meaning", self.name()), span))
@@ -1448,7 +1575,7 @@ fn raze(y: &Array, span: Span) -> Result<Array> {
 fn link(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let head = Array::boxed(x.clone());
     let tail = if y.dtype() == DType::Box { y.clone() } else { Array::boxed(y.clone()) };
-    catenate(&head, &tail, true, span)
+    catenate(&head, &tail, true, false, span)
 }
 
 /// Every item of `y` boxed; an already boxed array is left alone.
@@ -1474,10 +1601,10 @@ fn strand(x: &Array, y: &Array, span: Span) -> Result<Array> {
                 span,
             ));
         }
-        return catenate(&one(&item), y, true, span);
+        return catenate(&one(&item), y, true, false, span);
     }
     let head = if item.dtype() == DType::Box { item } else { Array::boxed(item) };
-    catenate(&one(&head), &box_items(y), true, span)
+    catenate(&one(&head), &box_items(y), true, false, span)
 }
 
 // -------------------------------------------------- elementwise operations
@@ -3720,16 +3847,44 @@ fn cat_promote(a: &Array, other: &Array, rank: usize, axis: usize, span: Span) -
 }
 
 /// Catenate along the leading or the last axis.
-fn catenate(x: &Array, y: &Array, leading: bool, span: Span) -> Result<Array> {
+fn catenate(
+    x: &Array,
+    y: &Array,
+    leading: bool,
+    fill: bool,
+    span: Span,
+) -> Result<Array> {
     let rank = x.rank().max(y.rank()).max(1);
     let axis = if leading { 0 } else { rank - 1 };
     let xa = cat_promote(x, y, rank, axis, span)?;
     let ya = cat_promote(y, x, rank, axis, span)?;
-    for k in 0..rank {
-        if k != axis && xa.shape[k] != ya.shape[k] {
-            return Err(Error::not_yet("catenate with fill", span));
-        }
+    // Axes other than the one being joined must agree. J overtakes both
+    // sides to the larger length, which fills; APL insists they conform,
+    // and the reference refuses the ragged case outright.
+    let mut ragged = false;
+    let want: Vec<i64> = (0..rank)
+        .map(|k| {
+            ragged |= k != axis && xa.shape[k] != ya.shape[k];
+            xa.shape[k].max(ya.shape[k]) as i64
+        })
+        .collect();
+    if ragged && !fill {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("catenating shapes {:?} and {:?}", xa.shape, ya.shape),
+            Some(span),
+        ));
     }
+    let (xa, ya) = if ragged {
+        let fit = |a: &Array| -> Result<Array> {
+            let mut to = want.clone();
+            to[axis] = a.shape[axis] as i64;
+            take(&Array::from_i64(to), a, span)
+        };
+        (fit(&xa)?, fit(&ya)?)
+    } else {
+        (xa, ya)
+    };
     let dt = DType::promote(xa.dtype(), ya.dtype()).ok_or_else(|| {
         let boxed = xa.dtype() == DType::Box || ya.dtype() == DType::Box;
         let what = if boxed {
@@ -4134,6 +4289,15 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             roll(y, origin, fixed, float_at_zero, span)
         }
         MonadOp::ComplexParts { polar } => complex_parts(y, polar, span),
+        MonadOp::SelfClassify => Ok(self_classify(y, ctx.cfg.tol)),
+        MonadOp::NubSieve => Ok(nub_sieve(y, ctx.cfg.tol)),
+        MonadOp::Unicode { pass_chars } => unicode(y, pass_chars, span),
+        MonadOp::Words => words(y, span),
+        MonadOp::LevelOf => Ok(Array::scalar_i64(boxing_level(y))),
+        MonadOp::AnagramIndex => anagram_index(y, span),
+        MonadOp::CycleForm => cycle_form(y, span),
+        MonadOp::Split => Ok(split_items(y)),
+        MonadOp::Execute { apl, origin } => execute(y, apl, origin, ctx, span),
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         MonadOp::None => {
             Err(Error::domain(format!("{} has no monadic meaning", p.name), span))
@@ -4312,8 +4476,14 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::Right => Ok(y.clone()),
         DyadOp::Left => Ok(x.clone()),
         DyadOp::Rotate => rotate(x, y, span),
-        DyadOp::AppendLeading => catenate(x, y, true, span),
-        DyadOp::AppendLast => catenate(x, y, false, span),
+        // Only J fills a ragged catenation; APL's conformability rule
+        // refuses it, as the reference does.
+        DyadOp::AppendLeading => {
+            catenate(x, y, true, cfg.agreement == Agreement::LeadingPrefix, span)
+        }
+        DyadOp::AppendLast => {
+            catenate(x, y, false, cfg.agreement == Agreement::LeadingPrefix, span)
+        }
         DyadOp::IndexOf { origin } => Ok(index_of(x, y, origin, tol)),
         DyadOp::MemberJ => Ok(member_j(x, y, tol)),
         DyadOp::MemberApl => Ok(member_apl(x, y, tol)),
@@ -4338,6 +4508,18 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::Fetch => fetch(x, y, span),
         DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, span),
         DyadOp::ExactForm => exact_form(x, y, span),
+        DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
+        DyadOp::Less => Ok(set_less(x, y, tol)),
+        DyadOp::Union => union_items(x, y, tol, span),
+        DyadOp::Intersect => Ok(intersect_items(x, y, tol)),
+        DyadOp::AnagramFrom => anagram_from(x, y, span),
+        DyadOp::Permute => permute(x, y, span),
+        DyadOp::FindSeq => Ok(find_seq(x, y, tol)),
+        DyadOp::UnicodeForm => unicode_form(x, y, span),
+        DyadOp::PrimeMeta => prime_meta(x, y, span),
+        DyadOp::PrimeExponents => prime_exponents(x, y, span),
+        DyadOp::Pick { origin } => pick(x, y, origin, span),
+        DyadOp::Expand => expand(x, y, span),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -6298,6 +6480,884 @@ fn put_element(dst: &mut Data, at: usize, src: &Data, from: usize) {
         // Both sides were cast to one type above.
         _ => debug_assert!(false, "amend across types"),
     }
+}
+
+/// Which of an agenda's verbs the selector picks. The selector runs at the
+/// same arguments the agenda was given, and its value must be one index.
+fn agenda_pick(
+    vs: &[Verb],
+    w: &Verb,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Verb> {
+    let chosen = match x {
+        None => w.monad(y, ctx, span)?,
+        Some(x) => w.dyad(x, y, ctx, span)?,
+    };
+    let at = chosen
+        .to_i64_vec()
+        .and_then(|v| v.first().copied())
+        .ok_or_else(|| Error::domain("an agenda index must be an integer", span))?;
+    pick_gerund(vs, at, span)
+}
+
+/// One verb of a gerund by index, with the diagnostic the out-of-range case
+/// deserves.
+pub(crate) fn pick_gerund(vs: &[Verb], at: i64, span: Span) -> Result<Verb> {
+    usize::try_from(at)
+        .ok()
+        .and_then(|k| vs.get(k))
+        .cloned()
+        .ok_or_else(|| {
+            Error::domain(
+                format!("agenda {at} is out of range: the gerund has {} verbs", vs.len()),
+                span,
+            )
+        })
+}
+
+/// `x u\. y`: u applied to y with every run of x consecutive items removed.
+/// A run of x items has `1 + (#y) - x` places to sit, and that is how many
+/// results there are.
+fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let k = one_int(x, "an outfix width", span)?;
+    let n = y.items() as i64;
+    if k < 0 {
+        return Err(Error::not_yet("a negative outfix width (x u\\. y)", span));
+    }
+    if k > n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("an outfix of {k} items over {n}"),
+            Some(span),
+        ));
+    }
+    let mut cells = Vec::with_capacity((n - k + 1) as usize);
+    for start in 0..=(n - k) {
+        let keep: Vec<usize> = (0..n as usize)
+            .filter(|&i| i < start as usize || i >= (start + k) as usize)
+            .collect();
+        cells.push(u.monad(&select_items(&as_list(y), &keep), ctx, span)?);
+    }
+    assemble(&[cells.len()], cells, span)
+}
+
+// ---------------------------------------------------------------- obverses
+
+/// The verb that undoes this one, where libjay knows of one.
+///
+/// This is J's obverse table, and it is deliberately a table rather than a
+/// search: a verb is here only when its inverse is another verb libjay can
+/// already write down. Everything built out of those — the compositions,
+/// the bonds, `u^:n` — inverts by inverting its parts, so the table stays
+/// small while `&.`, `&.:` and the negative powers reach a long way past
+/// it. A verb that is not here has no obverse, and the diagnostic says so
+/// by name.
+pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
+    let swap = |name: &'static str| -> Option<Verb> {
+        crate::frontend::j::verb_named(name)
+    };
+    Some(match v {
+        Verb::Prim(p) => {
+            use ScalarMonad as SM;
+            let by_monad: Option<&'static str> = match p.monad {
+                // Every one of these is its own inverse.
+                MonadOp::Scalar(SM::Conj | SM::Neg | SM::Recip | SM::OneMinus)
+                | MonadOp::Reverse
+                | MonadOp::TransposeAxes => Some(p.name),
+                MonadOp::Scalar(SM::Exp) => Some("^."),
+                MonadOp::Scalar(SM::Ln) => Some("^"),
+                MonadOp::Scalar(SM::Sqrt) => Some("*:"),
+                MonadOp::Scalar(SM::Square) => Some("%:"),
+                MonadOp::Scalar(SM::Double) => Some("-:"),
+                MonadOp::Scalar(SM::Halve) => Some("+:"),
+                MonadOp::Scalar(SM::Inc) => Some("<:"),
+                MonadOp::Scalar(SM::Dec) => Some(">:"),
+                MonadOp::Enclose(_) => Some(">"),
+                MonadOp::Open => Some("<"),
+                MonadOp::DecodeBits => Some("#:"),
+                MonadOp::EncodeBits => Some("#."),
+                _ => None,
+            };
+            swap(by_monad?)?
+        }
+        // An explicit obverse (`u :. v`) is the whole answer.
+        Verb::WithObverse(_, w) => (**w).clone(),
+        // A composition inverts by inverting its parts, in the other order.
+        Verb::Atop(f, g) => {
+            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?))
+        }
+        Verb::Compose(f, g) | Verb::Beside(f, g) => {
+            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?))
+        }
+        Verb::Rank(f, r) => Verb::Rank(Box::new(obverse(f)?), *r),
+        Verb::Fit(f, n) => Verb::Fit(Box::new(obverse(f)?), *n),
+        // `u^:n` undone is `u^:_1` done n times.
+        Verb::PowerN(f, Power::Times(n)) => {
+            Verb::PowerN(Box::new(obverse(f)?), Power::Times(*n))
+        }
+        Verb::BondLeft(m, f) => bond_obverse(m, f, true)?,
+        Verb::BondRight(f, n) => bond_obverse(n, f, false)?,
+        _ => return None,
+    })
+}
+
+/// The obverse of a bonded arithmetic verb. `left` says which side the noun
+/// was bonded to, which is what tells `n - y` (its own inverse) from
+/// `y - n` (whose inverse adds).
+fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
+    let Verb::Prim(p) = f else { return None };
+    let named = |name: &'static str| crate::frontend::j::verb_named(name);
+    let bond = |name: &'static str, arg: &Array| -> Option<Verb> {
+        let g = named(name)?;
+        Some(if left {
+            Verb::BondLeft(arg.clone(), Box::new(g))
+        } else {
+            Verb::BondRight(Box::new(g), arg.clone())
+        })
+    };
+    use ScalarDyad as SD;
+    let DyadOp::Scalar(op) = p.dyad else { return None };
+    match (op, left) {
+        // `n - y` and `n % y` undo themselves; the other side does not.
+        (SD::Sub | SD::DivJ | SD::DivApl, true) => bond(p.name, n),
+        (SD::Add, _) => bond("-", n),
+        (SD::Sub, false) => bond("+", n),
+        (SD::Mul, _) => bond("%", n),
+        (SD::DivJ | SD::DivApl, false) => bond("*", n),
+        // `y ^ n` is undone by the n-th root; `n ^ y` by the base-n log.
+        (SD::Pow, false) => Some(Verb::BondLeft(n.clone(), Box::new(named("%:")?))),
+        (SD::Pow, true) => Some(Verb::BondLeft(n.clone(), Box::new(named("^.")?))),
+        (SD::Log, true) => Some(Verb::BondLeft(n.clone(), Box::new(named("^")?))),
+        (SD::Root, true) => Some(Verb::BondLeft(n.clone(), Box::new(named("^")?))),
+        _ => None,
+    }
+}
+
+// ------------------------------------------------- classification and sets
+
+/// `= y`: one row per distinct item, marking where that item stands. A
+/// scalar has one item, so it answers a 1×1 table.
+fn self_classify(y: &Array, tol: Tol) -> Array {
+    let items = if y.rank() == 0 { 1 } else { y.items() };
+    let keys = nub(&as_list(y), tol);
+    let rows = keys.items();
+    let mut out = Vec::with_capacity(rows * items);
+    for i in 0..rows {
+        let key = item_or_self(&keys, i);
+        for j in 0..items {
+            out.push(arrays_match(&key, &item_or_self(y, j), tol) as u8);
+        }
+    }
+    Array::new(vec![rows, items], Data::Bool(out.into()))
+}
+
+/// `~: y` / `≠ y`: 1 at each item that has not been seen before.
+fn nub_sieve(y: &Array, tol: Tol) -> Array {
+    let items = if y.rank() == 0 { 1 } else { y.items() };
+    let mut seen: Vec<Array> = Vec::new();
+    let mut out = Vec::with_capacity(items);
+    for i in 0..items {
+        let cell = item_or_self(y, i);
+        let fresh = !seen.iter().any(|s| arrays_match(s, &cell, tol));
+        if fresh {
+            seen.push(cell);
+        }
+        out.push(fresh as u8);
+    }
+    Array::new(vec![items], Data::Bool(out.into()))
+}
+
+/// A rank-0 argument as the one-item list it behaves as for the set verbs.
+fn as_list(y: &Array) -> Array {
+    if y.rank() == 0 { Array::new(vec![1], y.data.clone()) } else { y.clone() }
+}
+
+/// The values of `y` that an item of shape `item_rank` could match: y's
+/// cells of that rank, framed by whatever axes are left. A y with no room
+/// for a frame is one such value, which is what lets `(i.3 2) -. 2 3`
+/// remove the row rather than nothing.
+fn conforming_cells(y: &Array, item_rank: usize) -> Vec<Array> {
+    let frame_rank = y.rank().saturating_sub(item_rank);
+    let nf: usize = y.shape[..frame_rank].iter().product();
+    (0..nf).map(|i| y.cell_at(frame_rank, i)).collect()
+}
+
+/// Which items of `y` occur among the values of `x` that could match one.
+fn item_marks(y: &Array, x: &Array, tol: Tol) -> Vec<bool> {
+    let n = if y.rank() == 0 { 1 } else { y.items() };
+    let item_rank = y.rank().saturating_sub(1);
+    let against = conforming_cells(x, item_rank);
+    (0..n)
+        .map(|i| {
+            let cell = item_or_self(y, i);
+            against.iter().any(|c| arrays_match(&cell, c, tol))
+        })
+        .collect()
+}
+
+/// `x -. y` / `x ~ y`: x's items with the ones y also has removed.
+fn set_less(x: &Array, y: &Array, tol: Tol) -> Array {
+    let xs = as_list(x);
+    let marks = item_marks(&xs, y, tol);
+    let keep: Vec<usize> = (0..marks.len()).filter(|&i| !marks[i]).collect();
+    select_items(&xs, &keep)
+}
+
+/// `x ∩ y`: x's items that y also has, in x's order and with x's repeats.
+fn intersect_items(x: &Array, y: &Array, tol: Tol) -> Array {
+    let xs = as_list(x);
+    let marks = item_marks(&xs, y, tol);
+    let keep: Vec<usize> = (0..marks.len()).filter(|&i| marks[i]).collect();
+    select_items(&xs, &keep)
+}
+
+/// `x ∪ y`: x's items, then the items of y that are new. x keeps whatever
+/// repeats it has; APL's union only sieves the right argument.
+fn union_items(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
+    let xs = as_list(x);
+    let ys = as_list(y);
+    let marks = item_marks(&ys, &xs, tol);
+    let mut extra: Vec<usize> = Vec::new();
+    for (i, &seen) in marks.iter().enumerate() {
+        if seen {
+            continue;
+        }
+        let cell = item_or_self(&ys, i);
+        if !extra.iter().any(|&j| arrays_match(&item_or_self(&ys, j), &cell, tol)) {
+            extra.push(i);
+        }
+    }
+    catenate(&xs, &select_items(&ys, &extra), true, false, span)
+}
+
+/// `x E. y` / `x ⍷ y`: 1 at each position of y where a copy of x begins.
+/// A pattern longer than y matches nowhere, and the answer is still shaped
+/// like y's items, as both references have it.
+fn find_seq(x: &Array, y: &Array, tol: Tol) -> Array {
+    let xs = as_list(x);
+    let ys = as_list(y);
+    let (k, n) = (xs.items(), ys.items());
+    let mut out = vec![0u8; n];
+    if k > 0 && k <= n {
+        for (start, slot) in out.iter_mut().enumerate().take(n - k + 1) {
+            let hit = (0..k).all(|d| {
+                arrays_match(&item_or_self(&xs, d), &item_or_self(&ys, start + d), tol)
+            });
+            *slot = hit as u8;
+        }
+    }
+    Array::new(vec![n], Data::Bool(out.into()))
+}
+
+/// `+:` and `*:` dyadically, and APL's `⍱` and `⍲`: both arguments must
+/// already be booleans, which is the only domain either reference gives
+/// them.
+fn bool_dyad(op: BoolDyad, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    let bit = |a: &Array| -> Result<u8> {
+        match a.to_i64_vec().as_deref() {
+            Some([0]) => Ok(0),
+            Some([1]) => Ok(1),
+            _ => Err(Error::domain("this verb reads values of 0 or 1", span)),
+        }
+    };
+    let _ = cfg;
+    let (a, b) = (bit(x)?, bit(y)?);
+    let v = match op {
+        BoolDyad::Nor => u8::from(a == 0 && b == 0),
+        BoolDyad::Nand => u8::from(a == 0 || b == 0),
+    };
+    Ok(Array::new(vec![], Data::Bool(vec![v].into())))
+}
+
+// ------------------------------------------------------------ permutations
+
+/// The ranks of y's items: the position each would take in a stable sort.
+/// This is the permutation `A.` reports the index of, which is why a list
+/// that is not itself a permutation still has an anagram index.
+fn item_ranks(y: &Array, span: Span) -> Result<Vec<usize>> {
+    no_grading_boxes(y, span)?;
+    if !y.dtype().is_numeric() {
+        return Err(Error::domain("an anagram index needs numbers", span));
+    }
+    let order = grade_order(&as_list(y), false);
+    let mut ranks = vec![0usize; order.len()];
+    for (place, &i) in order.iter().enumerate() {
+        ranks[i] = place;
+    }
+    Ok(ranks)
+}
+
+/// `A. y`: where the permutation y's items rank as stands in the
+/// lexicographic list of the permutations of that length.
+fn anagram_index(y: &Array, span: Span) -> Result<Array> {
+    let ranks = item_ranks(y, span)?;
+    let n = ranks.len();
+    let mut index: i128 = 0;
+    for i in 0..n {
+        let smaller = ranks[i + 1..].iter().filter(|&&r| r < ranks[i]).count() as i128;
+        index = index
+            .checked_mul((n - i) as i128)
+            .and_then(|v| v.checked_add(smaller))
+            .ok_or_else(|| Error::not_yet("an anagram index too large for an integer", span))?;
+    }
+    i64::try_from(index)
+        .map(Array::scalar_i64)
+        .map_err(|_| Error::not_yet("an anagram index too large for an integer", span))
+}
+
+/// `x A. y`: y's items in the order the x-th permutation puts them. A
+/// negative x counts back from the last permutation, as J's does.
+fn anagram_from(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let idx = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("an anagram index must be an integer", span))?;
+    let Some(&want) = idx.first() else {
+        return Err(Error::internal("anagram with no index"));
+    };
+    let ys = as_list(y);
+    let n = ys.items();
+    let mut total: i128 = 1;
+    for k in 1..=n as i128 {
+        total = total
+            .checked_mul(k)
+            .ok_or_else(|| Error::not_yet("permuting more items than an integer counts", span))?;
+    }
+    let mut at = want as i128;
+    if at < 0 {
+        at += total;
+    }
+    if at < 0 || at >= total {
+        return Err(Error::domain(
+            format!("permutation {want} is out of range: {n} items have {total} of them"),
+            span,
+        ));
+    }
+    // The factorial number system, read most significant digit first: each
+    // digit picks one of the items still unused.
+    let mut pool: Vec<usize> = (0..n).collect();
+    let mut order = Vec::with_capacity(n);
+    let mut fact = total;
+    for i in 0..n {
+        fact /= (n - i) as i128;
+        let d = (at / fact) as usize;
+        at %= fact;
+        order.push(pool.remove(d));
+    }
+    Ok(select_items(&ys, &order))
+}
+
+/// `C. y`: the two directions between a direct permutation and its cycles.
+/// A boxed argument holds cycles and answers the permutation; anything else
+/// is a permutation and answers its cycles.
+fn cycle_form(y: &Array, span: Span) -> Result<Array> {
+    if y.dtype() == DType::Box {
+        let perm = cycles_to_direct(y, span)?;
+        return Ok(Array::from_i64(perm.iter().map(|&i| i as i64).collect()));
+    }
+    let perm = direct_permutation(y, span)?;
+    let mut boxes: Vec<Array> = Vec::new();
+    let mut done = vec![false; perm.len()];
+    for start in 0..perm.len() {
+        if done[start] {
+            continue;
+        }
+        let mut cycle = Vec::new();
+        let mut at = start;
+        while !done[at] {
+            done[at] = true;
+            cycle.push(at);
+            at = perm[at];
+        }
+        // J writes each cycle starting at its largest element, and lists
+        // the cycles in order of those.
+        let top = cycle.iter().position(|&v| v == *cycle.iter().max().unwrap()).unwrap();
+        cycle.rotate_left(top);
+        boxes.push(Array::boxed(Array::from_i64(
+            cycle.iter().map(|&i| i as i64).collect(),
+        )));
+    }
+    boxes.sort_by_key(|b| b.as_boxes().map(|s| s[0].to_i64_vec().unwrap()[0]).unwrap_or(0));
+    let n = boxes.len();
+    let inner: Vec<Array> =
+        boxes.into_iter().map(|b| b.as_boxes().unwrap()[0].clone()).collect();
+    Ok(Array::new(vec![n], Data::Box(inner.into())))
+}
+
+/// A direct permutation's entries, checked to be one.
+fn direct_permutation(y: &Array, span: Span) -> Result<Vec<usize>> {
+    let v = y
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a permutation is a list of integers", span))?;
+    let n = v.len();
+    let mut seen = vec![false; n];
+    let mut out = Vec::with_capacity(n);
+    for &i in &v {
+        let k = usize::try_from(i).ok().filter(|&k| k < n && !seen[k]).ok_or_else(|| {
+            Error::domain(format!("{i} does not belong to a permutation of {n} items"), span)
+        })?;
+        seen[k] = true;
+        out.push(k);
+    }
+    Ok(out)
+}
+
+/// The direct permutation a boxed list of cycles stands for. Its length is
+/// one past the largest element any cycle mentions; everything unmentioned
+/// stays where it is.
+fn cycles_to_direct(y: &Array, span: Span) -> Result<Vec<usize>> {
+    let boxes = y.as_boxes().ok_or_else(|| Error::internal("cycles from a simple array"))?;
+    let mut cycles: Vec<Vec<usize>> = Vec::new();
+    let mut top = 0usize;
+    for b in boxes {
+        let v = b
+            .to_i64_vec()
+            .ok_or_else(|| Error::domain("a cycle is a list of integers", span))?;
+        let mut cycle = Vec::with_capacity(v.len());
+        for &i in &v {
+            let k = usize::try_from(i)
+                .map_err(|_| Error::domain(format!("{i} is not an index"), span))?;
+            top = top.max(k + 1);
+            cycle.push(k);
+        }
+        cycles.push(cycle);
+    }
+    let mut perm: Vec<usize> = (0..top).collect();
+    for cycle in &cycles {
+        for w in 0..cycle.len() {
+            // Cycle (a b c) sends a's slot to b's item, b's to c's, c's to a's.
+            perm[cycle[w]] = cycle[(w + 1) % cycle.len()];
+        }
+    }
+    Ok(perm)
+}
+
+/// `x C. y`: y's items permuted by x. A boxed x holds cycles; a numeric x
+/// is a direct permutation, and one shorter than y applies to y's last
+/// items with the leading ones brought round to the front — J's extension
+/// of a short permutation.
+fn permute(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let ys = as_list(y);
+    let n = ys.items();
+    let cyclic = x.dtype() == DType::Box;
+    if !cyclic && x.rank() == 0 {
+        return Err(Error::not_yet("permuting by a single atom (x C. y)", span));
+    }
+    let mut perm =
+        if cyclic { cycles_to_direct(x, span)? } else { direct_permutation(&as_list(x), span)? };
+    if perm.len() > n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("a permutation of {} items applied to {n}", perm.len()),
+            Some(span),
+        ));
+    }
+    if perm.len() < n {
+        if cyclic {
+            // Cycles name only what moves: everything else stays put.
+            perm.extend(perm.len()..n);
+        } else {
+            // A short direct permutation applies to the items it counts,
+            // and the ones past it come round to the front.
+            let head: Vec<usize> = (perm.len()..n).collect();
+            perm.splice(0..0, head);
+        }
+    }
+    Ok(select_items(&ys, &perm))
+}
+
+// ------------------------------------------------------- text and structure
+
+/// `u: y` and `⎕UCS`: characters and their codepoints. `pass_chars` is J's
+/// monad, which answers characters with themselves; APL's `⎕UCS` converts
+/// in both directions.
+fn unicode(y: &Array, pass_chars: bool, span: Span) -> Result<Array> {
+    if y.dtype() == DType::Char {
+        if pass_chars {
+            return Ok(y.clone());
+        }
+        return Ok(chars_to_codes(y));
+    }
+    codes_to_chars(y, span)
+}
+
+fn chars_to_codes(y: &Array) -> Array {
+    let Data::Char(v) = &y.data else { return y.clone() };
+    Array::new(y.shape.clone(), Data::I64(v.iter().map(|&c| c as i64).collect()))
+}
+
+fn codes_to_chars(y: &Array, span: Span) -> Result<Array> {
+    let v = y
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a codepoint must be an integer", span))?;
+    let mut out = Vec::with_capacity(v.len());
+    for &c in &v {
+        let ch = u32::try_from(c).ok().and_then(char::from_u32).ok_or_else(|| {
+            Error::domain(format!("{c} is not a Unicode codepoint"), span)
+        })?;
+        out.push(ch);
+    }
+    Ok(Array::new(y.shape.clone(), Data::Char(out.into())))
+}
+
+/// `x u: y`: 3 asks for codepoints, 10 for the characters they name. The
+/// other forms J defines are byte-oriented and are named, not guessed at.
+fn unicode_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let form = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a conversion form is an integer", span))?
+        .first()
+        .copied()
+        .unwrap_or(0);
+    match form {
+        3 if y.dtype() == DType::Char => Ok(chars_to_codes(y)),
+        3 => Err(Error::domain("form 3 converts characters to codepoints", span)),
+        10 => codes_to_chars(y, span),
+        n => Err(Error::not_yet(format!("the byte-oriented unicode form ({n} u:)"), span)),
+    }
+}
+
+/// `L. y`: how deep the boxing goes. Anything unboxed is level 0.
+fn boxing_level(y: &Array) -> i64 {
+    match y.as_boxes() {
+        None => 0,
+        Some(bs) => 1 + bs.iter().map(boxing_level).max().unwrap_or(0),
+    }
+}
+
+/// `↓ y`: split — the vectors along the last axis, each enclosed, laid out
+/// in the shape the remaining axes give. GNU APL has no monadic `↓`; this
+/// follows Dyalog's published definition.
+fn split_items(y: &Array) -> Array {
+    if y.rank() == 0 {
+        return Array::boxed(y.clone());
+    }
+    let last = y.shape[y.rank() - 1];
+    let outer: Vec<usize> = y.shape[..y.rank() - 1].to_vec();
+    let n: usize = outer.iter().product();
+    let mut boxes = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut data = Data::empty(y.dtype());
+        for k in 0..last {
+            push_elem(&mut data, &y.data, i * last + k);
+        }
+        boxes.push(Array::new(vec![last], data));
+    }
+    Array::new(outer, Data::Box(boxes.into()))
+}
+
+/// `x ⊃ y`: pick. Each item of x is one step of a path — a boxed step is a
+/// whole coordinate vector, a simple one indexes the items.
+fn pick(x: &Array, y: &Array, origin: i64, span: Span) -> Result<Array> {
+    let xs = as_list(x);
+    let mut cur = y.clone();
+    for i in 0..xs.items() {
+        let step = open_cell(&item_or_self(&xs, i));
+        let idx = step
+            .to_i64_vec()
+            .ok_or_else(|| Error::domain("a pick path holds integers", span))?;
+        let base =
+            if cur.rank() == 0 { Array::new(vec![1], cur.data.clone()) } else { cur.clone() };
+        if idx.len() > base.rank() {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!(
+                    "a path step of {} index(es) into a value of rank {}",
+                    idx.len(),
+                    cur.rank()
+                ),
+                Some(span),
+            ));
+        }
+        let zeroed: Vec<i64> = idx.iter().map(|&v| v - origin).collect();
+        let at = cell_index(&base, &zeroed, span)?;
+        cur = open_cell(&base.cell_at(idx.len(), at));
+    }
+    Ok(cur)
+}
+
+// ------------------------------------------------------------------ primes
+
+/// `x p: y`: the facts about primes J spells with this conjunction of
+/// arguments. Every form here reads one integer and answers about it.
+fn prime_meta(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let form = one_int(x, "a prime query", span)?;
+    let n = one_int(y, "a prime query", span)?;
+    match form {
+        // How many primes are below y.
+        -1 => Ok(Array::scalar_i64(primes_below(n, span)?)),
+        // Whether y is prime, and its negation.
+        0 => Ok(Array::scalar_bool(!is_prime(n))),
+        1 => Ok(Array::scalar_bool(is_prime(n))),
+        // The factorisation as a table, and its top row on its own.
+        2 | 3 => {
+            let (ps, es) = factor_table(n, span)?;
+            let k = ps.len();
+            if form == 3 {
+                return Ok(Array::from_i64(ps));
+            }
+            let mut all = ps;
+            all.extend(es);
+            Ok(Array::new(vec![2, k], Data::I64(all.into())))
+        }
+        // The neighbouring primes.
+        4 => Ok(Array::scalar_i64(next_prime(n, span)?)),
+        -4 => Ok(Array::scalar_i64(previous_prime(n, span)?)),
+        other => Err(Error::domain(format!("{other} is not a prime query"), span)),
+    }
+}
+
+/// `x q: y`: the exponents of the primes in y — of the first x of them, or,
+/// for `__`, of the ones that actually divide y over a second row.
+fn prime_exponents(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let n = one_int(y, "prime exponents", span)?;
+    let count = x.to_f64_vec().and_then(|v| v.first().copied()).unwrap_or(0.0);
+    let (ps, es) = factor_table(n, span)?;
+    if count == f64::NEG_INFINITY {
+        let k = ps.len();
+        let mut all = ps;
+        all.extend(es);
+        return Ok(Array::new(vec![2, k], Data::I64(all.into())));
+    }
+    let want = one_int(x, "prime exponents", span)?;
+    if want < 0 {
+        return Err(Error::not_yet(format!("the prime exponent form ({want} q:)"), span));
+    }
+    let mut out = Vec::with_capacity(want as usize);
+    for i in 0..want {
+        let p = nth_prime(i, span)?;
+        out.push(ps.iter().position(|&q| q == p).map_or(0, |at| es[at]));
+    }
+    Ok(Array::from_i64(out))
+}
+
+/// y's distinct prime factors, ascending, and how often each divides it.
+fn factor_table(n: i64, span: Span) -> Result<(Vec<i64>, Vec<i64>)> {
+    let factors = prime_factors(n, span)?;
+    let mut ps: Vec<i64> = Vec::new();
+    let mut es: Vec<i64> = Vec::new();
+    for f in factors {
+        if ps.last() == Some(&f) {
+            *es.last_mut().unwrap() += 1;
+        } else {
+            ps.push(f);
+            es.push(1);
+        }
+    }
+    Ok((ps, es))
+}
+
+fn is_prime(n: i64) -> bool {
+    if n < 2 {
+        return false;
+    }
+    let mut d = 2i64;
+    while d.saturating_mul(d) <= n {
+        if n % d == 0 {
+            return false;
+        }
+        d += 1;
+    }
+    true
+}
+
+fn primes_below(n: i64, span: Span) -> Result<i64> {
+    if n < 0 {
+        return Err(Error::domain("counting the primes below a negative number", span));
+    }
+    Ok((2..n).filter(|&k| is_prime(k)).count() as i64)
+}
+
+fn next_prime(n: i64, span: Span) -> Result<i64> {
+    let mut k = n.checked_add(1).ok_or_else(|| Error::domain("no next prime", span))?;
+    while !is_prime(k) {
+        k = k.checked_add(1).ok_or_else(|| Error::domain("no next prime", span))?;
+    }
+    Ok(k)
+}
+
+fn previous_prime(n: i64, span: Span) -> Result<i64> {
+    let mut k = n - 1;
+    while k >= 2 {
+        if is_prime(k) {
+            return Ok(k);
+        }
+        k -= 1;
+    }
+    Err(Error::domain(format!("there is no prime below {n}"), span))
+}
+
+/// One whole number from an argument that has to hold exactly that.
+fn one_int(a: &Array, what: &str, span: Span) -> Result<i64> {
+    a.to_i64_vec()
+        .and_then(|v| v.first().copied())
+        .ok_or_else(|| Error::domain(format!("{what} needs an integer"), span))
+}
+
+/// `x \\ y`: expand. Every 1 in x takes the next item of y; every 0 leaves
+/// the type's fill in its place.
+fn expand(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let mask = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("an expansion mask holds 0s and 1s", span))?;
+    if mask.iter().any(|&b| b != 0 && b != 1) {
+        return Err(Error::domain("an expansion mask holds 0s and 1s", span));
+    }
+    let ys = as_list(y);
+    let taken = mask.iter().filter(|&&b| b == 1).count();
+    let n = ys.items();
+    // A one-item argument spreads over every slot the mask opens.
+    let spread = n == 1 && taken != 1;
+    if !spread && taken != n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("an expansion mask taking {taken} item(s) over {n}"),
+            Some(span),
+        ));
+    }
+    let m = ys.item_size();
+    let mut data = Data::empty(ys.dtype());
+    let mut at = 0usize;
+    for &b in &mask {
+        if b == 1 {
+            let from = if spread { 0 } else { at };
+            for k in 0..m {
+                push_elem(&mut data, &ys.data, from * m + k);
+            }
+            at += 1;
+        } else {
+            for _ in 0..m {
+                data.push_fill();
+            }
+        }
+    }
+    let mut shape = ys.shape.clone();
+    if shape.is_empty() {
+        shape.push(mask.len());
+    } else {
+        shape[0] = mask.len();
+    }
+    Ok(Array::new(shape, data))
+}
+
+/// `". y` and `⍎ y`: the characters of y as a program of this language,
+/// compiled now and run here.
+///
+/// The nested program shares the caller's names and its output sink, which
+/// is what makes `". 'a =. 3'` assign in the scope the sentence stands in.
+/// It reaches nothing the caller could not reach: the sandbox contract is
+/// about what a primitive may touch, and evaluation touches nothing new.
+fn execute(y: &Array, apl: bool, origin: i64, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let Data::Char(v) = &y.data else {
+        return Err(Error::domain("execute reads a character list", span));
+    };
+    let src: String = v.iter().collect();
+    let lang = if apl { crate::Lang::Apl } else { crate::Lang::J };
+    let dialect = crate::Dialect { index_origin: apl.then_some(origin) };
+    let nested = crate::compile(lang, &src, &dialect).map_err(|e| nested_error(e, &src, span))?;
+    if !nested.params.is_empty() {
+        return Err(Error::domain(
+            "an executed string cannot take host data: `{name}` has nothing to bind to",
+            span,
+        ));
+    }
+    let mut rec = None;
+    let (value, _) = crate::ir::run_block(&nested.stmts, None, ctx, &mut rec)
+        .map_err(|e| nested_error(e, &src, span))?;
+    value.ok_or_else(|| Error::domain("the executed string yielded no value", span))
+}
+
+/// An error from an executed string, re-pointed at the sentence that ran it.
+/// The inner diagnostic still reads in full, as a note, because its spans
+/// point into a source the caller never sees.
+fn nested_error(e: Error, src: &str, span: Span) -> Error {
+    let inner = e.render(src);
+    let mut out = Error::new(e.kind, format!("in the executed string: {}", e.msg), Some(span));
+    out.notes.push(inner.trim_end().to_string());
+    out
+}
+
+// ------------------------------------------------------------------- words
+
+/// `;: y`: J's own word rules over a character list, each word a box. A run
+/// of numeric literals separated by blanks is one word, which is what makes
+/// `'1 2 3'` a single number and `'i.5'` two words.
+fn words(y: &Array, span: Span) -> Result<Array> {
+    let Data::Char(v) = &y.data else {
+        return Err(Error::domain("words reads a character list", span));
+    };
+    let src: Vec<char> = v.as_slice().to_vec();
+    let n = src.len();
+    let mut out: Vec<Array> = Vec::new();
+    let mut i = 0usize;
+    let numeric_start = |k: usize| -> bool {
+        k < n && (src[k].is_ascii_digit() || src[k] == '_')
+    };
+    while i < n {
+        let c = src[i];
+        if c == ' ' || c == '\t' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        if c == '\'' {
+            i += 1;
+            loop {
+                if i >= n {
+                    return Err(Error::parse("a word list ends inside a string", span));
+                }
+                if src[i] == '\'' {
+                    i += 1;
+                    if i < n && src[i] == '\'' {
+                        i += 1;
+                        continue;
+                    }
+                    break;
+                }
+                i += 1;
+            }
+        } else if c.is_ascii_alphabetic() {
+            while i < n && (src[i].is_ascii_alphanumeric() || src[i] == '_') {
+                i += 1;
+            }
+            if i < n && (src[i] == '.' || src[i] == ':') {
+                i += 1;
+            }
+            // `NB.` swallows the rest of the line, comment and all.
+            if src[start..i].iter().collect::<String>() == "NB." {
+                while i < n && src[i] != '\n' {
+                    i += 1;
+                }
+            }
+        } else if numeric_start(i) {
+            loop {
+                while i < n && (src[i].is_ascii_alphanumeric() || src[i] == '.' || src[i] == '_')
+                {
+                    i += 1;
+                }
+                // A blank between two numeric literals keeps one word.
+                let mut j = i;
+                while j < n && src[j] == ' ' {
+                    j += 1;
+                }
+                if j > i && numeric_start(j) {
+                    i = j;
+                    continue;
+                }
+                break;
+            }
+        } else {
+            i += 1;
+            while i < n && (src[i] == '.' || src[i] == ':') {
+                i += 1;
+            }
+        }
+        out.push(Array::from_chars(src[start..i].to_vec()));
+    }
+    let k = out.len();
+    Ok(Array::new(vec![k], Data::Box(out.into())))
 }
 
 #[cfg(test)]

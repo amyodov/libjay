@@ -69,9 +69,10 @@ Braces always mean *data binding*, never splicing text into the program.
 Errors point into your expression, in both languages:
 
 ```
-length error: left shape 2, right shape 3
+length error: arguments do not agree: left shape 2, right shape 3
   1 2 + 1 2 3
-      ^
+  ^^^^^^^^^^^
+note: frames first differ at axis 0: 2 vs 3
 ```
 
 ## Real data, zero-copy
@@ -100,6 +101,37 @@ reports and stops rather than guessing on your behalf. The full table of what
 is zero-copy, copied, refused and not supported yet is in
 [docs/coverage.md](https://github.com/amyodov/libjay/blob/main/docs/coverage.md#the-data-boundary).
 
+## Boxes, and lists of strings
+
+A Python list whose items don't share one shape — a list of strings, a
+ragged list of lists — becomes a boxed array on the way in, and a boxed
+result converts back to nested Python data on the way out:
+
+```python
+jay.j("# &.> {names}", {"names": ["ab", "cde"]}).tolist()   # [2, 3]
+jay.j("{names}", {"names": ["ab", "cde"]}).tolist()          # ['ab', 'cde']
+```
+
+## Complex numbers
+
+Both languages' arithmetic runs on complex values; `numpy.complex128`
+crosses the boundary zero-copy and a scalar result is a Python `complex`:
+
+```python
+jay.j("{z} * {z}", {"z": 3 + 4j})   # (-7+24j)
+jay.j("%: _4")                       # 2j — square root of a negative
+```
+
+## Big integers and exact rationals
+
+J's exact types — `x:` for arbitrary-precision integers, `r` for exact
+ratios — cross as Python's `int` and `fractions.Fraction`, both ways:
+
+```python
+jay.j("! 30x")          # 265252859812191058636308480000000, a plain int
+jay.j("1r2 + 1r3")      # Fraction(5, 6)
+```
+
 ## Seeing what an expression became
 
 A compiled expression is not the string you wrote. `+/ % #` is a *fork*;
@@ -112,6 +144,10 @@ print(k.explain({"x": [4.0, 5.0, 6.0]}))
 ```
 
 ```
+source:
+  +/ {w} * {x}
+parameters: w, x
+
 sentence 1  |  +/ {w} * {x}
   fused kernel (1 op: *; +/ absorbed; block 8192)  → scalar float  [kernel ran]
     in 0:
@@ -139,7 +175,9 @@ neither changes the answer.
 ```python
 jay.devices()
 # [Device(name='AMD Radeon Pro 560', backend='metal',
-#         kind='discrete GPU', f64=False)]
+#         kind='discrete GPU', f64=False),
+#  Device(name='Intel(R) HD Graphics 630', backend='metal',
+#         kind='integrated GPU', f64=False)]
 
 k = jay.j.compile("+/ {w} * {x}").bind({"w": w, "x": x})
 g = k.deploy("gpu")

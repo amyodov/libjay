@@ -112,12 +112,9 @@
 // length of `⍕`.
 ⍴⍕(1 2)(3 4)
 ? one space between items here, two there
-// Named gaps: ordering boxes needs J's total array ordering, and
-// these two glyphs have their nested valence still to come.
+// A named gap: ordering boxes needs J's total array ordering.
 ⍋(1 2)(3 4)
 ? graded there, a `grading boxed arrays` gap here
-1 2⊃(1 2)(3 4)
-? pick there, a named gap here
 // The index generator on a vector of lengths: an array of index vectors
 // there, a named gap here. Refusing it is the point — the monad has rank
 // ∞ so the rank machinery cannot quietly frame it into a plain 2 by 3.
