@@ -868,3 +868,25 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   removed locally and `CRATES_PUBLISH=true` set, so from 0.1.1 the crate
   publishes through OIDC in the same run as PyPI once the owner registers
   the trusted publisher on crates.io.
+- 2026-08-21 — Post-release CI hardening, first-release hygiene pass. The
+  releasing skill folded in what 0.1.0 taught: the tag may already be at
+  HEAD with green CI (skip creation rather than fail), the crates.io
+  bootstrap is now steady state (OIDC, `CRATES_PUBLISH=true`; the trusted
+  publisher registration is a checklist line until confirmed), release notes
+  are `--notes-file docs/release-notes-X.md` with the CHANGELOG section
+  landing in the bump commit, and post-publish verification grew the checks
+  that proved useful (release asset count, crates.io `max_version`, docs.rs
+  200 with its ~30-minute lag, a cold `uvx --refresh`). CI itself gained:
+  a weekly `schedule` cron on `publish.yml` that runs the full wheel/C-ABI
+  matrix dry (the existing `workflow_dispatch` path, publishing nothing —
+  the `publish`/`crates` jobs stay gated on `github.event_name == 'release'`
+  and additionally on `vars.CRATES_PUBLISH`, both untouched); a `docs` job in
+  `ci.yml` running `cargo doc -p libjay --no-deps` with
+  `RUSTDOCFLAGS=-D warnings`, catching a docs.rs-breaking link before the
+  push instead of after; `cargo publish -p libjay --dry-run` added to the
+  `rust` job, cheap insurance against packaging drift; and one Python matrix
+  leg (3.10) that builds the sdist with `uv build --sdist` and installs from
+  it, since that path was previously only checked by hand. Dependabot
+  (`.github/dependabot.yml`) watches cargo, pip and github-actions weekly,
+  each grouped into one PR. README gained a three-badge line (PyPI version,
+  crates.io version, CI status) under the title.

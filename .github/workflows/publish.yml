@@ -14,6 +14,12 @@ on:
     types: [published]
   # Dry run: builds every wheel and the sdist, publishes nothing.
   workflow_dispatch:
+  # Same dry run, weekly, so the wheel matrix doesn't rot in the gap between
+  # releases (a runner image update, a toolchain drift). Publishes nothing:
+  # the publish/crates jobs below are gated on the release event, which a
+  # schedule never is.
+  schedule:
+    - cron: "0 6 * * 1"
 
 jobs:
   wheels:

@@ -17,6 +17,19 @@ jobs:
       - run: cargo test -p libjay
       - run: cargo build -p libjay-capi && cargo test -p libjay-capi
       - run: cargo clippy -p libjay -p libjay-capi -p libjay-testkit -p libjay-devtools --all-targets -- -D warnings
+      # Cheap packaging check: catches drift like a missing LICENSE or a
+      # broken `exclude` before a release tries to publish for real.
+      - run: cargo publish -p libjay --dry-run
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      # docs.rs builds with warnings denied; a broken intra-doc link fails
+      # here instead of showing up as a broken page on docs.rs after publish.
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc -p libjay --no-deps
 
   python:
     runs-on: ubuntu-latest
@@ -33,3 +46,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install '.[test]'
       - run: pytest python/tests -q
+      # The sdist path (source-only install, no prebuilt wheel) was only
+      # ever checked by hand; one matrix leg now builds and installs it.
+      - if: matrix.python-version == '3.10'
+        name: sdist build and install smoke
+        run: |
+          pip install uv
+          uv build --sdist
+          pip install dist/*.tar.gz
+          python -c "import jay; assert jay.j('(+/ % #) 1 2 3 4') == 2.5"

@@ -133,6 +133,28 @@ hand, parametrised over data, never asserting on call wiring. They are the
 place for a primitive's edge cases and for the exact text of a diagnostic. The
 corpora are for breadth; these are for intent.
 
+## CI
+
+What runs where, and why the split matters:
+
+- **Every push and pull request** (`ci.yml`): `cargo test` — the replay
+  battery, snapshots only, no interpreter, no network — plus clippy, the
+  Python suite on 3.10 and 3.14, a `cargo doc` pass with warnings denied
+  (what docs.rs would fail on, caught before the push reaches it), a
+  `cargo publish --dry-run` packaging check, and one Python matrix leg that
+  builds the sdist and installs from it rather than from a wheel.
+- **Weekly, and on demand** (`publish.yml`'s `schedule` and
+  `workflow_dispatch` triggers): the full wheel matrix and the C ABI bundles
+  build for real, publishing nothing — the `publish`/`crates` jobs stay
+  gated on the release event. This is what catches a runner image or
+  toolchain drifting under the matrix between releases, when nothing else
+  would touch it.
+- **Only on the recording machine, only by hand**: `jay-corpus record`,
+  which is the one thing in the repository that spawns the reference
+  interpreters (see CLAUDE.md's oracle paths). CI never runs it and never
+  has the interpreters installed; the snapshots it produces are what CI
+  replays.
+
 ## Where the code is
 
 - `crates/libjay-testkit` — the corpus and snapshot formats, the comparison,

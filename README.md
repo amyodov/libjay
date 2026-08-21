@@ -1,5 +1,9 @@
 # libjay
 
+[![PyPI](https://img.shields.io/pypi/v/libjay)](https://pypi.org/project/libjay/)
+[![crates.io](https://img.shields.io/crates/v/libjay)](https://crates.io/crates/libjay)
+[![CI](https://github.com/amyodov/libjay/actions/workflows/ci.yml/badge.svg)](https://github.com/amyodov/libjay/actions/workflows/ci.yml)
+
 Independent, modern implementations of the [J](https://www.jsoftware.com/)
 and APL array languages — as much of each language as possible, embeddable
 from Rust, Python and anything with a C FFI. Expressions compile from string

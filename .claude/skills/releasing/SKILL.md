@@ -8,10 +8,10 @@ disable-model-invocation: true
 # Release a version of libjay
 
 One release reaches PyPI (a matrix of native wheels plus an sdist),
-crates.io (the `libjay` core crate — once bootstrapped, see step 5), the git
-tag, and the GitHub release. Releases only happen when the user asks for one
-— `disable-model-invocation` enforces that, and nothing in this file
-overrides it. The version being released is `$1` (e.g. `0.2.0`): a bare
+crates.io (the `libjay` core crate, via OIDC trusted publishing — see step
+5), the git tag, and the GitHub release. Releases only happen when the user
+asks for one — `disable-model-invocation` enforces that, and nothing in this
+file overrides it. The version being released is `$1` (e.g. `0.2.0`): a bare
 semver, no leading `v` — the tag adds it.
 
 The publish pipeline is: GitHub release → `.github/workflows/publish.yml`
@@ -46,10 +46,22 @@ The single version source is `[workspace.package] version` in the root
 `Cargo.toml` — the wheel (pyproject has `dynamic = ["version"]`), the crates,
 `jay.__version__`, and `jay_version()` in the C ABI all read it from there.
 
+A 0.1.x patch bump is the normal shape of a release right now: most releases
+are a coverage wave (more valences, more corpus) rather than a breaking or
+feature change, and semver's patch slot is where those land pre-1.0.
+
 - Set `version = "$1"` in the root `Cargo.toml`.
-- `cargo check -q` so `Cargo.lock` follows.
-- Commit both together. The version in the artifacts and the version being
-  tagged must be the same string.
+- `cargo check -q` so `Cargo.lock` follows — **it must be committed with the
+  bump**; a release built from a stale lockfile is not the tree that was
+  tested.
+- Add `$1`'s section to `CHANGELOG.md`, above `## Unreleased` (which stays,
+  emptied back to its placeholder headings) and above the previous version.
+- Write `docs/release-notes-$1.md`: what changed and what it displaces, same
+  prose rules as everything else — this file is also the `gh release create`
+  body (step 3).
+- Commit `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and the release-notes
+  file together. The version in the artifacts and the version being tagged
+  must be the same string.
 
 ## 3. Tag and release
 
@@ -65,14 +77,25 @@ gh run list --branch main --limit 1 --json headSha,conclusion --jq '.[0] | "\(.h
 That has to print the bump commit and `success`. If it does not, stop: the
 tag is the point of no return.
 
+The tag may already exist at HEAD — this happened for 0.1.0, when the tag
+was created before this step ran. Check first, and skip creation rather than
+failing on "tag already exists":
+
 ```bash
-git tag v$1 && git push origin v$1
-gh release create v$1 --title "v$1 — <short summary>" --notes "<what changed and why it matters>"
+if git rev-parse -q --verify "refs/tags/v$1" >/dev/null; then
+  # It's only safe to reuse: the tag must point at HEAD, and HEAD's CI (just
+  # checked above) must be green. If the tag points anywhere else, stop —
+  # that is a real conflict, not this shortcut.
+  [ "$(git rev-parse v$1)" = "$(git rev-parse HEAD)" ] || { echo "v$1 exists but not at HEAD" >&2; exit 1; }
+  echo "v$1 already at HEAD with green CI — skipping tag creation"
+else
+  git tag v$1 && git push origin v$1
+fi
+gh release create v$1 --title "v$1 — <short summary>" --notes-file docs/release-notes-$1.md
 ```
 
-Release notes follow the prose rules in CLAUDE.md: what changed and what it
-displaces, not a file list. Creating the release is the publish trigger —
-after this line, the release is happening.
+Creating the release is the publish trigger — after this line, the release
+is happening.
 
 ## 4. Watch and verify
 
@@ -82,29 +105,46 @@ The wheel matrix takes a while (five native builds plus an sdist):
 gh run watch $(gh run list --workflow publish.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status
 ```
 
-Then confirm the release is real from a user's seat:
+Then confirm the release is real from a user's seat — every check below
+proved useful catching a real gap after 0.1.0, so run all of them, not just
+the first that passes:
 
+- `gh release view v$1 --json assets -q '.assets | length'` → `10` (five
+  wheels, one sdist, four C ABI bundles).
 - `curl -s https://pypi.org/pypi/libjay/json` → `info.version == "$1"`, and
   the file list shows five wheels + one sdist.
-- Cold-run the real user path:
+- `curl -s https://crates.io/api/v1/crates/libjay | python3 -c "import json,sys; print(json.load(sys.stdin)['crate']['max_version'])"`
+  → `$1`.
+- `curl -s -o /dev/null -w '%{http_code}' https://docs.rs/libjay/$1/jay/` →
+  `200`. docs.rs builds after crates.io accepts the upload, not
+  instantly — allow up to ~30 minutes before treating a non-200 as a
+  failure.
+- Cold-run the real user path, from a clean cache so nothing is left over
+  from testing an earlier version:
   `uvx --refresh libjay -e '(+/ % #) 1 2 3 4'` → `2.5`, and
   `uvx --refresh libjay -e "⎕←'hello'" --lang apl` → `hello`.
 
 ## 5. crates.io
 
-The `crates` job in publish.yml publishes the core crate with the same
-version, via crates.io trusted publishing (OIDC), after PyPI succeeds. It is
-gated on the repo variable `CRATES_PUBLISH == "true"`.
+Steady state (from 0.1.1 on): the `crates` job in publish.yml publishes the
+core crate with the same version, via crates.io trusted publishing (OIDC —
+no token stored anywhere), in the `crates` GitHub environment, after PyPI
+succeeds. It runs by itself; nothing in this step is a manual action anymore
+except the one-time item below. Gated on the repo variable
+`CRATES_PUBLISH == "true"`, which is already set.
 
-Bootstrap (first release only, owner actions): crates.io cannot attach a
-trusted publisher to a crate that does not exist, so the first publish is
-manual — `cargo publish -p libjay` with the owner's token — then on
-crates.io: Settings → Trusted Publishing → add GitHub `amyodov/libjay`,
-workflow `publish.yml`, environment `crates`; create the `crates`
-environment on GitHub; set the repo variable
-(`gh variable set CRATES_PUBLISH --body true`). From the next release the
-job runs by itself. Verify: `https://crates.io/api/v1/crates/libjay` reports
-`$1`, and docs.rs builds (`https://docs.rs/libjay`).
+- [ ] **One-time owner action, not yet confirmed done**: register the
+  trusted publisher on crates.io — Settings → Trusted Publishing → GitHub
+  `amyodov/libjay`, workflow `publish.yml`, environment `crates`. Until this
+  is confirmed, treat the `crates` job as unverified even though it will
+  run: check its result after this release, and once a real OIDC publish has
+  succeeded, delete this checklist line and the paragraph above it that
+  hedges on it.
+
+Bootstrap (already done, 0.1.0 only, kept here as history): crates.io cannot
+attach a trusted publisher to a crate that does not exist, so the very first
+publish was manual — `cargo publish -p libjay` with the owner's token, which
+was then removed locally.
 
 The binding crate (`libjay-python`) and the C ABI crate (`libjay-capi`) stay
 `publish = false`: wheel users get the binding inside the wheel, C users
