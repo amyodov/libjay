@@ -28,16 +28,23 @@ cpu       i386, 8 logical threads
 rustc     1.89 (rust-toolchain.toml)
 python    3.12.9, numpy 2.2.6, polars 1.43.2, numba 0.61.2
 sizes     OHLCV 20,000,000 minute bars, audio 16,000,000 samples
-method    best of 5 after one warmup, wall time in ms
-date      2026-08-21, one-minute load average 53.0
-peak RSS  2.15 GB
+method    best of 5 after one warmup, 2 alternating passes, wall time in ms
+date      2026-08-21, one-minute load average 4.1
+peak RSS  2.51 GB
 ```
 
 Correctness comes first and is untimed: every implementation is checked
-against a reference that computes each window from its own items, over
-the leading 288,000 bars and 131,072 samples, before
-anything is measured. The script
-stops if any two disagree.
+against a reference that computes each window from its own items, over the
+leading 288,000 bars and 131,072 samples, before anything
+is measured. The script stops if any two disagree.
+
+**Memory.** The peak RSS above is the largest of the harness and its two
+libjay subprocesses, and the largest workload is the one that decides it:
+VWAP holds six columns of 20,000,000 rows — five f64 and one i64, about
+0.96 GB — as numpy arrays, as the Polars frame that
+wraps them without copying, and as whatever each implementation allocates for
+its answer. libjay's own share is zero: every column crosses the boundary
+borrowed, and only a verb that needs the rows woven together ever makes a copy.
 
 libjay's two columns come from subprocesses with `LIBJAY_THREADS` set,
 because the pool's size is fixed the first time it is used. Polars runs
@@ -49,70 +56,125 @@ numba and its eight-thread column against Polars.
 
 | workload | libjay 1 thread | libjay 8 threads | speedup | polars | numba | numpy |
 |---|---:|---:|---:|---:|---:|---:|
-| cumulative return | 686.8 | 471.7 | 1.46x | 1059.1 | 572.2 | 785.5 |
-| golden cross (20/50/200) | 2205.5 | 1014.6 | 2.17x | 765.3 | 100.6 | 1280.1 |
-| Bollinger bands (20, 2σ) | 666.9 | 276.6 | 2.41x | 832.9 | 81.5 | 1504.2 |
-| RSI(14), Wilder smoothing | *quadratic: see Recurrences* | *quadratic: see Recurrences* | *quadratic: see Recurrences* | 1941.1 | 314.1 | n/a |
-| VWAP per day | *rows x groups: see Where libjay loses* | *rows x groups: see Where libjay loses* | *rows x groups: see Where libjay loses* | 650.3 | 102.7 | 401.0 |
-| maximum drawdown | 163.5 | 382.1 | 0.43x | 488.7 | 33.2 | 499.5 |
-| volatility regime | 617.7 | 695.2 | 0.89x | 1066.3 | 206.4 | 1785.0 |
-| low-pass and peak count | 1455.5 | 1595.1 | 0.91x | 1677.7 | 41.2 | 208.8 |
-| frame RMS in dB | 675.4 | 917.5 | 0.74x | 103.7 | 22.1 | 45.9 |
-| single-bin detection | 457.9 | 313.5 | 1.46x | 189.4 | 57.9 | 228.2 |
-| naive DFT of one frame | 30.8 | 80.1 | 0.38x | n/a | 2.1 | 0.867 |
-| rolling cross-correlation | 149.0 | 76.8 | 1.94x | 385.9 | 64.0 | 184.7 |
+| cumulative return | 650.8 | 378.0 | 1.72x | 899.0 | 440.0 | 711.8 |
+| golden cross (20/50/200) | 1729.4 | 690.9 | 2.50x | 556.9 | 96.5 | 1150.2 |
+| Bollinger bands (20, 2σ) | 593.8 | 206.5 | 2.88x | 747.4 | 77.8 | 1407.9 |
+| RSI(14), Wilder smoothing | *quadratic: see Where libjay loses* | — | — | 1691.5 | 144.0 | n/a |
+| VWAP per day | *rows x groups: see Where libjay loses* | — | — | 510.6 | 69.5 | 320.2 |
+| maximum drawdown | 169.9 | 159.6 | 1.07x | 405.5 | 30.9 | 375.9 |
+| volatility regime | 541.1 | 190.6 | 2.84x | 907.4 | 184.4 | 1390.7 |
+| low-pass and peak count | 1087.2 | 427.2 | 2.55x | 1183.0 | 33.5 | 167.2 |
+| frame RMS in dB | 535.0 | 478.6 | 1.12x | 86.2 | 20.8 | 42.9 |
+| single-bin detection | 345.9 | 156.8 | 2.21x | 172.0 | 55.7 | 183.7 |
+| naive DFT of one frame | 19.6 | 15.2 | 1.29x | n/a | 1.4 | 0.720 |
+| rolling cross-correlation | 115.6 | 43.3 | 2.67x | 357.0 | 47.6 | 153.0 |
+
+### What the table says
+
+**On eight threads libjay beats Polars on seven of the nine rows both can
+run, beats numpy on seven of ten, and beats numba on two.** That is the
+honest summary, and all three halves have one cause. A libjay sentence
+becomes one or two passes over the column where a Polars pipeline is four or
+five, which is where the wins come from; a numba loop is *one* pass that
+keeps its accumulators in registers and never writes an intermediate at all,
+which is where the losses come from. The two rows where libjay beats the
+numba loop — the cumulative return and the rolling cross-correlation — are
+the two where the loop has real arithmetic per element and libjay has four
+cores to put on it.
+
+**On one thread libjay loses to numba on every row**, by two to thirteen
+times. That is the gap this file exists to name, and it is a gap in traffic,
+not in arithmetic: a fused kernel still reads and writes whole columns
+between the steps a hand-written loop keeps in registers.
+
+**Two workloads libjay cannot run at these sizes at all**, and one spelling
+of a third, each for a reason named and diagnosed under "Where libjay loses"
+below: Wilder's smoothing, because the general suffix scan `u/\.` is
+quadratic; VWAP, because the key `+//.` costs rows × groups; and the
+single-bin *recurrence* spelling, which is linear but interpreted a scalar
+at a time (the vectorised spelling of the same quantity is in the table and
+runs fine). The first and third are one missing rule — an affine fold step
+is a running fold, and a running fold is already a kernel instruction. The
+second is one algorithm — hash the distinct keys once.
+
+**Three more rows lose for reasons that are equally specific.** Frame RMS
+spends 457 of its 535 one-thread milliseconds in `$`, reshaping a vector
+into a matrix element by element when the element count already matches;
+hand libjay the matrix and the same fold is 19 ms against numpy's 43. The
+peak count folds its 32-tap filter four times, because the fusion pass moves
+a named value into every sentence that reads it and this one reads it at
+four alignments. The golden cross is the same shape at a smaller scale:
+three window folds where numba slides three accumulators through one pass,
+and it is the one row Polars wins outright.
+
+**Where libjay is at its best it is at its best by a lot.** The rolling
+cross-correlation — two shifted views of one buffer, multiplied, and a
+window fold over the product — is eight times Polars, three and a half times
+numpy and slightly faster than the numba loop, on a sentence of thirty-four
+characters. Bollinger bands, the volatility regime and the cumulative return
+are the same shape and the same story: three to seven times numpy, and level
+with or ahead of the hand-written loop once the threads are in.
+
+**Correctness is the part with no caveats.** Every implementation of every
+workload agrees with a reference that computes each window from its own
+items, and the three rows whose answer is an integer — two crossing counts
+and a peak count — agree exactly, over 20 million bars, across four
+independent implementations.
 
 ## Where libjay loses
 
-Three sentences above have no libjay figure, and this is why. Each is
-measured at the sizes it can be run at, beside the rival that has a
-linear answer — one call, not a best of five, because the shape of the
-curve is the whole point and a repeat would not change it.
+Two workloads above have no libjay figure, and a third has a second
+spelling that would have none — this is why. Each is measured at the
+sizes it can be run at, beside the rival that has a linear answer: one
+call, not a best of five, because the shape of the curve is the whole
+point and a repeat would not change it.
 
 ### Wilder smoothing — the suffix scan `u/\.`
 
-| bars | libjay, one call | numba | ratio |
+| bars | libjay, one call, 1 thread | numba | ratio |
 |---:|---:|---:|---:|
-| 1,000 | 831.2 | 0.006 | 131,727x |
-| 2,000 | 3322.9 | 0.007 | 498,866x |
-| 4,000 | 12847.9 | 0.012 | 1,113,235x |
-| 8,000 | 87297.2 | 0.037 | 2,373,046x |
+| 1,000 | 724.7 | 0.004 | 179,791x |
+| 2,000 | 2967.0 | 0.007 | 421,029x |
+| 4,000 | 12184.3 | 0.012 | 1,054,277x |
+| 8,000 | 46530.3 | 0.025 | 1,834,501x |
 
 Each suffix is folded from scratch, so the work is n²/2 steps of a
 general dyad rather than n. Every doubling of the input quadruples the time,
-which the table shows and which puts 20M rows out of reach by eleven orders
-of magnitude. What would answer it is a rule that recognises an affine step
+which the table shows: 46 seconds at 8,000 bars means about nine years at
+20 million. What would answer it is a rule that recognises an affine step
 — `[ + c * ]` — and hands `u/\.` to the running-fold machinery the fused
 kernel already runs `+/\` with.
 
 ### Goertzel — the fold `([ + w * ])/`
 
-| samples | libjay, one call | numba | ratio |
+| samples | libjay, one call, 1 thread | numba | ratio |
 |---:|---:|---:|---:|
-| 16,384 | 19.6 | 0.056 | 349x |
-| 65,536 | 89.8 | 0.229 | 392x |
-| 262,144 | 352.1 | 1.2 | 290x |
-| 1,048,576 | 1289.8 | 3.9 | 327x |
+| 16,384 | 12.4 | 0.054 | 229x |
+| 65,536 | 48.1 | 0.209 | 230x |
+| 262,144 | 195.2 | 0.831 | 235x |
+| 1,048,576 | 786.9 | 3.6 | 220x |
 
 This one is linear — the fold really does make one pass — but each
 step is a general dyad applied to a pair of complex scalars through the whole
-interpreter, at about 5 microseconds an element against numba's 2
-nanoseconds. It is the cost of *not* being in a kernel, and it is the same
+interpreter, at 750 nanoseconds an element against numba's 3.5.
+It is the cost of *not* being in a kernel, and it is the same
 missing rule: a fold whose step is affine is a running fold, and a running
 fold is already a kernel instruction.
 
 ### VWAP — the key `+//.`
 
-| bars | libjay, one call | polars | ratio |
+| bars | libjay, one call, 1 thread | polars | ratio |
 |---:|---:|---:|---:|
-| 36,000 | 145.8 | 20.4 | 7x |
-| 72,000 | 309.1 | 1.8 | 174x |
-| 144,000 | 1610.7 | 23.3 | 69x |
-| 288,000 | 7887.2 | 7.1 | 1,106x |
+| 36,000 | 46.0 | 0.700 | 66x |
+| 72,000 | 167.2 | 1.1 | 158x |
+| 144,000 | 652.6 | 1.6 | 396x |
+| 288,000 | 2554.0 | 3.0 | 845x |
 
 `x u/. y` costs rows × groups, not rows: the implementation finds
-each group by sweeping the whole key vector for it. 288,000 bars over 200
-days is 4 seconds; 20M bars over 13,889 days would be six hours, so the row
+each group by sweeping the whole key vector for it — eight times the bars
+over eight times the days is 56 times the work, which is what the table
+shows. 288,000 bars over 200 days is two and a half seconds; 20M bars over
+13,889 days is 4,800 times that, or about three and a half hours, so the row
 above has no libjay figure at all. Polars sorts or hashes the keys once and
 is linear. This is not a language gap — the key is implemented and correct —
 it is one algorithm inside it, and a hash of the distinct keys followed by a
@@ -124,9 +186,13 @@ single pass would close it outright.
 
 Log returns, summed and exponentiated back into a cumulative return curve.
 
+**J**
+
 ```j
 _1 + ^ +/\ ^. (1 }. {close}) % _1 }. {close}
 ```
+
+**Polars**
 
 ```python
 def polars_cumret(d):
@@ -137,11 +203,25 @@ def polars_cumret(d):
     return lambda: df.select((logret.cum_sum().exp() - 1).alias("cr")).to_series()[1:]
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_cumulative_return(c):
+    out = np.empty(c.shape[0] - 1)
+    s = 0.0
+    for i in range(1, c.shape[0]):
+        s += np.log(c[i] / c[i - 1])
+        out[i - 1] = np.exp(s) - 1.0
+    return out
+
+
 def numba_cumret(d):
     c = d["close"]
     return lambda: nb_cumulative_return(c)
 ```
+
+**numpy**
 
 ```python
 def numpy_cumret(d):
@@ -149,16 +229,21 @@ def numpy_cumret(d):
     return lambda: np.exp(np.cumsum(np.log(c[1:] / c[:-1]))) - 1.0
 ```
 
-A running sum is a serial dependency however it is spelled, and this
-row is one: `+/\` carries an accumulator from block to block, so libjay's
-thread pool has nothing to split and the eight-thread column is the
-one-thread column. What it does buy is the fusion around the scan — the
-division, the logarithm, the exponential and the decrement are steps of one
-pass rather than four buffers of 160 MB each.
+**One of the two rows libjay beats the numba loop on**, and the more
+surprising of them, because a running sum is a serial dependency however it
+is spelled: `+/\` carries an accumulator from block to block and the thread
+pool has nothing to split there. What threads *can* take is everything
+around it — the division, the logarithm, the exponential and the decrement —
+and that is where the 1.7x comes from. The logarithm and the exponential are
+the reason: they are enough arithmetic per element that four cores matter,
+which is exactly the case the `+/ ^ y` row of bench/README.md makes on a
+kernel instead of a workload.
 
 ### golden cross (20/50/200)
 
 Three moving averages and the number of times the fast one crosses the slow.
+
+**J**
 
 ```j
 a =. (20 +/\ {close}) % 20
@@ -168,6 +253,8 @@ p =. (180 }. a) > 150 }. b
 q =. (150 }. b) > g
 (+/ (1 }. p) ~: _1 }. p) , +/ (1 }. q) ~: _1 }. q
 ```
+
+**Polars**
 
 ```python
 def polars_golden(d):
@@ -190,11 +277,42 @@ def polars_golden(d):
     return run
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_golden_cross(c, fast, slow, long):
+    n = c.shape[0]
+    sf = ss = sl = 0.0
+    for i in range(long):
+        sl += c[i]
+        if i >= long - slow:
+            ss += c[i]
+        if i >= long - fast:
+            sf += c[i]
+    prev_a = sf / fast > ss / slow
+    prev_b = ss / slow > sl / long
+    a_cross = b_cross = 0
+    for i in range(long, n):
+        sf += c[i] - c[i - fast]
+        ss += c[i] - c[i - slow]
+        sl += c[i] - c[i - long]
+        a = sf / fast > ss / slow
+        b = ss / slow > sl / long
+        if a != prev_a:
+            a_cross += 1
+        if b != prev_b:
+            b_cross += 1
+        prev_a, prev_b = a, b
+    return np.array([a_cross, b_cross])
+
+
 def numba_golden(d):
     c = d["close"]
     return lambda: nb_golden_cross(c, MA_FAST, MA_SLOW, MA_LONG)
 ```
+
+**numpy**
 
 ```python
 def numpy_golden(d):
@@ -214,16 +332,30 @@ def numpy_golden(d):
     return run
 ```
 
-Three moving sums, two comparisons and two counts of adjacent
-disagreement — every step is a window verb or an elementwise one, which is
-the shape libjay's fused kernel was built for. The counts are integers and
-are required to match exactly: a crossing is a place where two moving
-averages are equal, so if two spellings of a moving average disagreed in the
-last bits this is the row that would show it.
+**All four agree on the count exactly**, which is the first thing to
+say about a row whose answer is an integer. A crossing is a place where two
+moving averages are equal, so this is the workload where two spellings of a
+moving average would show a disagreement in the last bits — and none of them
+does: over 20M bars the closest the fast and slow averages ever come to each
+other is 5.9e-6, and the four ways of computing them differ by around 1e-8,
+so the crossings land on the same bars in all four.
+
+**This is the one row Polars wins outright**, and libjay is seven times the
+numba loop. Three moving averages is three window folds, and libjay's fold
+reads and writes the whole column for each of them — `b` is read by both
+signals, so its 50-wide fold runs twice, four folds in all. numba slides
+three accumulators along the closes in a single pass and touches 160 MB
+once; Polars' `rolling_mean` does something close to the same. libjay's fold
+is blocked rather than sliding on purpose — that is what makes each window's
+rounding the rounding of that window alone, which is what the paragraph
+above is made of — but the traffic it costs is real, and on a workload with
+three windows in it that trade stops paying.
 
 ### Bollinger bands (20, 2σ)
 
 The fraction of closes outside the 20-bar, two-sigma band.
+
+**J**
 
 ```j
 s =. 20 +/\ {close}
@@ -231,6 +363,8 @@ v =. (20 * 20 +/\ *: {close}) - s * s
 d =. (20 * 19 }. {close}) - s
 (+/ (| d) > 2.0 * %: v) % # d
 ```
+
+**Polars**
 
 ```python
 def polars_bollinger(d):
@@ -245,11 +379,33 @@ def polars_bollinger(d):
     return lambda: df.select(outside.mean()).item()
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_bollinger_outside(c, w, k):
+    n = c.shape[0]
+    s = q = 0.0
+    for i in range(w):
+        s += c[i]
+        q += c[i] * c[i]
+    outside = 0
+    for i in range(w - 1, n):
+        if i >= w:
+            s += c[i] - c[i - w]
+            q += c[i] * c[i] - c[i - w] * c[i - w]
+        d = w * c[i] - s
+        if abs(d) > k * np.sqrt(w * q - s * s):
+            outside += 1
+    return outside / (n - w + 1)
+
+
 def numba_bollinger(d):
     c = d["close"]
     return lambda: nb_bollinger_outside(c, BOLL, BOLL_K)
 ```
+
+**numpy**
 
 ```python
 def numpy_bollinger(d):
@@ -269,11 +425,15 @@ def numpy_bollinger(d):
 The phase-5 gate's kernel with a threshold on the end of it. Both
 moving sums — of the closes and of their squares — are folded inside one
 blockwise kernel, so the band is never materialised: what crosses memory is
-the closes in and one bit per bar out.
+the closes in and one bit per bar out. Three and a half times Polars and
+almost seven times numpy on eight threads, and the widest margin over numpy
+in the file; two and a half times numba, which writes nothing at all.
 
 ### RSI(14), Wilder smoothing
 
 The classic momentum oscillator: an exponential recurrence on gains and losses.
+
+**J**
 
 ```j
 d =. (1 }. {close}) - _1 }. {close}
@@ -281,6 +441,8 @@ ag =. |. ([ + 0.9285714285714286 * ])/\. |. 0 >. d
 al =. |. ([ + 0.9285714285714286 * ])/\. |. 0 >. - d
 100 - 100 % 1 + ag % al
 ```
+
+**Polars**
 
 ```python
 def polars_rsi(d):
@@ -296,11 +458,29 @@ def polars_rsi(d):
     return lambda: df.select((100 - 100 / (1 + rs)).alias("rsi")).to_series()[1:]
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_rsi(c, period):
+    n = c.shape[0]
+    out = np.empty(n - 1)
+    k = 1.0 - 1.0 / period
+    ag = al = 0.0
+    for i in range(1, n):
+        d = c[i] - c[i - 1]
+        ag = k * ag + (d if d > 0.0 else 0.0)
+        al = k * al + (-d if d < 0.0 else 0.0)
+        out[i - 1] = 100.0 - 100.0 / (1.0 + ag / al)
+    return out
+
+
 def numba_rsi(d):
     c = d["close"]
     return lambda: nb_rsi(c, RSI_PERIOD)
 ```
+
+**numpy**
 
 ```python
 def numpy_rsi(d):
@@ -314,8 +494,9 @@ recurrence, and J's spelling of one is the suffix scan `u/\.` — correct in
 libjay, and quadratic: every suffix is folded from scratch. Measured at
 1,000 to 8,000 rows the time grows as n², so 20M rows is not a number that
 exists. numba's loop does it in one pass and Polars has `ewm_mean` natively,
-so both win outright, and the numpy row is a Python loop for the same reason
-libjay has no answer: numpy has no first-order recurrence either.
+so both win outright; the numpy column is empty for a version of libjay's own
+reason — numpy has no first-order recurrence either, so its only spelling is
+a Python loop over twenty million samples.
 
 What would fix it is narrow and known: `u/\.` and `u/\` over an associative
 or affine step are a single right-to-left accumulation, which is what `+/\`
@@ -328,10 +509,14 @@ this file libjay should not be asked to do.
 
 Volume-weighted average price, grouped by trading day over minute bars.
 
+**J**
+
 ```j
 p =. ({high} + {low} + {close}) % 3
 ({day} +//. p * {volume}) % {day} +//. {volume}
 ```
+
+**Polars**
 
 ```python
 def polars_vwap(d):
@@ -344,13 +529,28 @@ def polars_vwap(d):
                       .agg(vwap.alias("vwap")).get_column("vwap"))
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_vwap(day, high, low, close, volume, days):
+    num = np.zeros(days)
+    den = np.zeros(days)
+    for i in range(day.shape[0]):
+        d = day[i]
+        num[d] += (high[i] + low[i] + close[i]) / 3.0 * volume[i]
+        den[d] += volume[i]
+    return num / den
+
+
 def numba_vwap(d):
     day, high, low, close, volume = (d[k] for k in
                                      ("day", "high", "low", "close", "volume"))
     days = int(day[-1]) + 1
     return lambda: nb_vwap(day, high, low, close, volume, days)
 ```
+
+**numpy**
 
 ```python
 def numpy_vwap(d):
@@ -384,9 +584,13 @@ reader to do.
 
 The deepest fall from a running peak.
 
+**J**
+
 ```j
 >./ 1 - {close} % >./\ {close}
 ```
+
+**Polars**
 
 ```python
 def polars_drawdown(d):
@@ -397,11 +601,28 @@ def polars_drawdown(d):
     return lambda: df.select(dd.max()).item()
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_max_drawdown(c):
+    peak = c[0]
+    worst = 0.0
+    for i in range(c.shape[0]):
+        if c[i] > peak:
+            peak = c[i]
+        dd = 1.0 - c[i] / peak
+        if dd > worst:
+            worst = dd
+    return worst
+
+
 def numba_drawdown(d):
     c = d["close"]
     return lambda: nb_max_drawdown(c)
 ```
+
+**numpy**
 
 ```python
 def numpy_drawdown(d):
@@ -411,12 +632,18 @@ def numpy_drawdown(d):
 
 A running maximum, then a maximum of the deficit: a scan and a
 reduction, which fuse into one pass. Like the cumulative return it carries an
-accumulator, so it does not thread — but it also never writes the running
-maximum down, which is what the other three all do.
+accumulator, so it does not thread — the eight-thread figure is the
+one-thread figure — but it also never writes the running maximum down, which
+is what the other three all do, and that is why it is two and a half times
+Polars and two and a half times numpy on a single core. numba is five times
+faster still, because a maximum and a compare in registers is about as
+little work per element as a loop can have.
 
 ### volatility regime
 
 Rolling 20-bar standard deviation of returns, and the share of bars above 1.5x its mean.
+
+**J**
 
 ```j
 r =. (1 }. {close}) % _1 }. {close}
@@ -424,6 +651,8 @@ s =. 20 +/\ r
 v =. %: 0 >. (20 * 20 +/\ *: r) - s * s
 (+/ v > 1.5 * (+/ v) % # v) % # v
 ```
+
+**Polars**
 
 ```python
 def polars_volregime(d):
@@ -442,11 +671,41 @@ def polars_volregime(d):
     return run
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_vol_regime(c, w, factor):
+    n = c.shape[0] - 1
+    vol = np.empty(n - w + 1)
+    s = q = 0.0
+    total = 0.0
+    for i in range(n):
+        r = c[i + 1] / c[i]
+        s += r
+        q += r * r
+        if i >= w:
+            p = c[i - w + 1] / c[i - w]
+            s -= p
+            q -= p * p
+        if i >= w - 1:
+            v = np.sqrt(max(w * q - s * s, 0.0))
+            vol[i - w + 1] = v
+            total += v
+    threshold = factor * total / vol.shape[0]
+    hot = 0
+    for i in range(vol.shape[0]):
+        if vol[i] > threshold:
+            hot += 1
+    return hot / vol.shape[0]
+
+
 def numba_volregime(d):
     c = d["close"]
     return lambda: nb_vol_regime(c, VOL_WINDOW, VOL_REGIME)
 ```
+
+**numpy**
 
 ```python
 def numpy_volregime(d):
@@ -469,17 +728,27 @@ Two passes by construction — the threshold is the mean of the
 volatility series, so the series has to exist before it can be compared with
 its own average. libjay writes it once and reads it back, which is what the
 `v` on the left of the last sentence is: a named value the fusion pass leaves
-alone precisely because a later sentence needs the whole array.
+alone precisely because a later sentence needs the whole array — the rule
+this row exists to exercise, and the opposite decision from the one the peak
+count below suffers from.
+
+Even paying for that buffer, eight threads land level with the numba loop
+(191 against 184) and seven times numpy, because everything either side of
+the buffer is one pass.
 
 ### low-pass and peak count
 
 A 32-tap moving-average filter, then the local maxima of what comes out.
+
+**J**
 
 ```j
 y =. (32 +/\ {x}) % 32
 m =. 1 }. _1 }. y
 +/ (m > _2 }. y) *. m > 2 }. y
 ```
+
+**Polars**
 
 ```python
 def polars_peaks(d):
@@ -493,11 +762,34 @@ def polars_peaks(d):
     return lambda: df.select(peak.sum()).item()
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_lowpass_peaks(x, w):
+    n = x.shape[0] - w + 1
+    s = 0.0
+    for i in range(w):
+        s += x[i]
+    prev2 = prev1 = 0.0
+    peaks = 0
+    for i in range(n):
+        if i > 0:
+            s += x[i + w - 1] - x[i - 1]
+        y = s / w
+        if i >= 2 and prev1 > prev2 and prev1 > y:
+            peaks += 1
+        prev2 = prev1
+        prev1 = y
+    return peaks
+
+
 def numba_peaks(d):
     x = d["x"]
     return lambda: nb_lowpass_peaks(x, LOWPASS)
 ```
+
+**numpy**
 
 ```python
 def numpy_peaks(d):
@@ -513,18 +805,35 @@ def numpy_peaks(d):
 ```
 
 Peak detection is `(y > prev) & (y > next)`, and in J a shift is a
-drop: `_2 }. y` and `2 }. y` are the two neighbours of `1 }. _1 }. y`. Since
-an owned slice became a view, none of those three drops copies anything — the
-sentence is three pointers into one buffer, and the filter that produced it
-is a window step of the same kernel.
+drop: `_2 }. y` and `2 }. y` are the two neighbours of `1 }. _1 }. y`. libjay
+beats Polars here by two and a half times and loses to numpy by two and a
+half times, which is the interesting part.
+
+**The filter runs four times.** `explain` says so: the fusion pass moves a
+named value into every sentence that reads it, and `y` is read at four
+different alignments, so the 32-wide fold is a step of four kernels instead
+of a buffer written once and sliced three ways. numpy folds once, into 128
+MB it then takes three views of; numba slides one accumulator and keeps two
+scalars. Writing the drops on the argument instead of on the result — three
+separate `32 +/\ … }. {x}` — changes nothing (1214 ms against 1122 on one
+thread, 511 against 476 on eight, both spellings paired in one session),
+because the pass moves the chain either way.
+
+The rule that decides this is measured in bench/README.md under "Is folding
+the moving sum twice worth not writing it down?", where the answer at two
+uses was yes. At four uses it is no, and the rule does not count.
 
 ### frame RMS in dB
 
 The signal cut into 1024-sample frames, each frame's rms in decibels.
 
+**J**
+
 ```j
 20 * 10 ^. %: (+/"1 *: 15625 1024 $ {x}) % 1024
 ```
+
+**Polars**
 
 ```python
 def polars_frame_rms(d):
@@ -535,11 +844,27 @@ def polars_frame_rms(d):
     return lambda: df.select((20 * rms.log10()).alias("db")).to_series()
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_frame_rms_db(x, frame):
+    frames = x.shape[0] // frame
+    out = np.empty(frames)
+    for f in range(frames):
+        s = 0.0
+        for i in range(f * frame, (f + 1) * frame):
+            s += x[i] * x[i]
+        out[f] = 20.0 * np.log10(np.sqrt(s / frame))
+    return out
+
+
 def numba_frame_rms(d):
     x = d["x"]
     return lambda: nb_frame_rms_db(x, FRAME)
 ```
+
+**numpy**
 
 ```python
 def numpy_frame_rms(d):
@@ -547,18 +872,38 @@ def numpy_frame_rms(d):
     return lambda: 20.0 * np.log10(np.sqrt((x.reshape(-1, FRAME) ** 2).mean(axis=1)))
 ```
 
-Reshape and reduce along the rows: `n 1024 $ {x}` gives the frames
-and `+/"1` folds each where it lies, which is the row fold that stopped
-building an array per cell. No other engine here spells it as a reshape:
-Polars reaches for an Array column and numba for a nested loop.
+Reshape and reduce along the rows — `n 1024 $ {x}` gives the frames
+and `+/"1` folds each where it lies. It is the shortest expression in the
+suite and libjay's worst row: eleven times numpy and twenty-three times
+numba.
+
+**The reshape is the whole of it.** Timed separately at 16M samples on one
+thread: `$ {x}` costs nothing at all, `$ (15625 1024 $ {x})` — asking only
+for the *shape* of the reshaped signal, no arithmetic anywhere in it —
+costs 457 ms of the row's 535, and the row fold over a matrix libjay is
+handed directly (`+/"1 {m}`) costs 19 ms, against numpy's 43 for the same
+answer. A reshape that keeps the element count is a change of shape and
+nothing else; this one copies 128 MB an element at a time.
+
+Second, smaller: `explain` reports the fused kernel *declining* this program
+— "the reduction needs one axis of two or more items" — so `*:` writes a
+whole 128 MB buffer that the fold then reads back. `+/"1 *: {m}` is 51 ms
+against `+/"1 {m}`'s 19, and numpy's `einsum('ij,ij->i')`, which fuses the
+same two steps, is 12.
+
+Neither is a language gap. Hand libjay the matrix and it wins the row.
 
 ### single-bin detection
 
 The power in one frequency bin over the whole signal.
 
+**J**
+
 ```j
 *: | +/ {x} * {w}
 ```
+
+**Polars**
 
 ```python
 def polars_goertzel(d):
@@ -575,12 +920,26 @@ def polars_goertzel(d):
     return lambda: df.select((re ** 2 + im ** 2).alias("power")).item()
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_goertzel(x, wr, wi):
+    """The single-bin power, as the first-order complex recurrence
+    z <- x[n] + w*z read from the last sample back, in real arithmetic."""
+    zr = zi = 0.0
+    for i in range(x.shape[0] - 1, -1, -1):
+        zr, zi = x[i] + wr * zr - wi * zi, wr * zi + wi * zr
+    return zr * zr + zi * zi
+
+
 def numba_goertzel(d):
     x = d["x"]
     step = goertzel_step(x.shape[0])
     return lambda: nb_goertzel(x, step.real, step.imag)
 ```
+
+**numpy**
 
 ```python
 def numpy_goertzel(d):
@@ -592,26 +951,57 @@ def numpy_goertzel(d):
 The Goertzel recurrence z ← x[n] + w·z summed over the whole signal
 is exactly Σ x[n]·wⁿ, so the vectorised spelling is a complex weighted sum
 and this row measures that. The recurrence spelling of the same quantity —
-the fold `([ + w * ])/` — is under "Recurrences" below, and it is 10,000
-times slower. Polars has no complex dtype, so its version carries the real
-and imaginary weights as two columns and pays for two passes.
+the fold `([ + w * ])/` — is under "Where libjay loses" below, and it is
+about 330 times slower than numba's loop.
+
+**libjay wins this on eight threads and only just**, and the reason it is
+not further ahead is traffic it chose. The vectorised spelling needs the
+table of complex weights, so it reads 128 MB of signal and 256 MB of
+weights; numba's recurrence generates each weight from the last and reads
+only the signal, which is why one core of it beats four of libjay's. Polars
+keeps the weights as two real columns — 256 MB rather than 384 — and lands
+between the two. The row is memory-bound and the ranking is the byte count.
+What would remove libjay's extra 256 MB is the recurrence spelling being
+fast, which is the same missing rule as RSI's.
+
+Polars has no complex dtype, so its version carries the real and imaginary
+weights as two columns — which is what a Polars user would have to do.
 
 ### naive DFT of one frame
 
 A 1024-point discrete fourier transform written as a matrix-vector product.
 
+**J**
+
 ```j
 | +/"1 {m} *"1 {f}
 ```
 
-Polars: not applicable — see below.
+**Polars** — not applicable; see below.
+
+**numba**
 
 ```python
+@njit(cache=True)
+def nb_dft_frame(mr, mi, f):
+    n = f.shape[0]
+    out = np.empty(n)
+    for k in range(n):
+        ar = ai = 0.0
+        for i in range(n):
+            ar += mr[k, i] * f[i]
+            ai += mi[k, i] * f[i]
+        out[k] = np.sqrt(ar * ar + ai * ai)
+    return out
+
+
 def numba_dft(d):
     m, f = dft_matrix(), np.ascontiguousarray(d["x"][:FRAME])
     mr, mi = np.ascontiguousarray(m.real), np.ascontiguousarray(m.imag)
     return lambda: nb_dft_frame(mr, mi, f)
 ```
+
+**numpy**
 
 ```python
 def numpy_dft(d):
@@ -626,13 +1016,25 @@ pairs the frame with each row rather than with each row's *index*, which is
 what J's leading-axis agreement would otherwise do. Polars has neither a
 complex dtype nor a matrix product, so it does not appear.
 
+**numpy wins this by twenty times and deserves to**: `m @ f` is a BLAS
+`zgemv`, a blocked, hand-tuned kernel forty years in the making. libjay
+materialises the 1024×1024 complex product — 16 MB — and reduces it, which
+is two passes where BLAS has one and no temporary. There is no fusion rule
+that closes that gap; a matrix product wants a matrix-product kernel, and
+the place to put one is the inner product `u . v` when it lands. Until then
+this row is what a matrix product costs when it is spelled out of pieces.
+
 ### rolling cross-correlation
 
 The dot product of the signal with itself at lag 64, over every 1024-sample window.
 
+**J**
+
 ```j
 1024 +/\ (_64 }. {x}) * 64 }. {x}
 ```
+
+**Polars**
 
 ```python
 def polars_xcorr(d):
@@ -652,11 +1054,29 @@ def polars_xcorr(d):
     return run
 ```
 
+**numba**
+
 ```python
+@njit(cache=True)
+def nb_xcorr(x, lag, w):
+    n = x.shape[0] - lag
+    out = np.empty(n - w + 1)
+    s = 0.0
+    for i in range(w):
+        s += x[i] * x[i + lag]
+    out[0] = s
+    for i in range(1, n - w + 1):
+        s += x[i + w - 1] * x[i + w - 1 + lag] - x[i - 1] * x[i - 1 + lag]
+        out[i] = s
+    return out
+
+
 def numba_xcorr(d):
     x = d["x"]
     return lambda: nb_xcorr(x, XCORR_LAG, XCORR_WINDOW)
 ```
+
+**numpy**
 
 ```python
 def numpy_xcorr(d):
@@ -670,8 +1090,11 @@ def numpy_xcorr(d):
     return run
 ```
 
-Two shifted views of one buffer, multiplied, and a moving sum over
-the product: the whole sentence is one fused pass with a window step in it,
-and the drops that align the two copies cost nothing. This is the shape
-libjay is best at, and the table says so.
+**libjay's best row, and the second one it beats the numba loop
+on.** Two shifted views of one buffer, multiplied, and a moving sum over the
+product: the whole sentence is one fused pass with a window step in it, and
+the drops that align the two copies cost nothing since an owned slice became
+a view. Eight times Polars, three and a half times numpy, and a shade under
+the hand-written loop — which is what four cores buy on a program that reads
+its argument twice and writes one result. Thirty-four characters.
 
