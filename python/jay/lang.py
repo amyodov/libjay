@@ -30,7 +30,10 @@ class APL:
     that the differential suite verifies. The settings below are the points
     where the APL lineages differ; each defaults to that line's reading, and
     asking for the other one is a "not implemented yet" error from the
-    compiler rather than a silently different answer.
+    compiler rather than a silently different answer. ``trains`` is the
+    exception: both of its readings are implemented, and it ships on as an
+    extension because refusing a feature the oracle merely lacks serves
+    nobody.
     """
 
     @dataclass(frozen=True)
@@ -61,8 +64,11 @@ class APL:
         """How a grade orders complex values: "real-then-imaginary" or
         "magnitude-then-angle"."""
 
-        trains: bool = False
-        """Whether a run of functions in a value's place is a train."""
+        trains: bool = True
+        """Whether a function may stand where a value belongs: a run of
+        functions is then a train, and ``F←+/`` names one. Ships on, as an
+        extension GNU APL has neither spelling of; False is the strict
+        reading, where both are a syntax error."""
 
     # The one preset that exists, and the default: GNU APL's reading.
     Dialect.gnu = Dialect()

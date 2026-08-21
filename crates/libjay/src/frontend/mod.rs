@@ -107,8 +107,9 @@ pub enum ComplexOrder {
 /// The enum fields are the points where the APL lineages diverge. libjay
 /// implements the APL2/ISO line that GNU APL embodies; the other arm of
 /// each is refused by [`Dialect::rules`] as not implemented yet, so
-/// selecting it is honest rather than silently wrong.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// selecting it is honest rather than silently wrong. `trains` is the
+/// exception: both of its readings are implemented, so it is a choice.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dialect {
     /// APL `⎕IO`. J's index origin is 0 and is not configurable.
     pub index_origin: Option<i64>,
@@ -120,13 +121,24 @@ pub struct Dialect {
     pub dfn_result: DfnResult,
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
-    /// Whether a run of functions in a value's place is a train.
+    /// Whether a function may stand where a value belongs: a run of
+    /// functions is then a train, and `F←+/` names one. Both readings are
+    /// implemented, so this is a choice and not a gap. It ships on, as an
+    /// extension: GNU APL refuses both spellings, and refusing a feature
+    /// the oracle merely lacks serves nobody.
     pub trains: bool,
+}
+
+impl Default for Dialect {
+    fn default() -> Dialect {
+        Dialect::gnu_apl()
+    }
 }
 
 impl Dialect {
     /// The APL libjay implements: the APL2/ISO line GNU APL embodies and
-    /// the oracle verifies. Written out rather than derived, so that every
+    /// the oracle verifies, plus the extensions listed in
+    /// `docs/coverage.md`. Written out rather than derived, so that every
     /// setting's shipped value is stated in one place; it is equal to
     /// `Dialect::default()`, which the tests pin.
     pub fn gnu_apl() -> Dialect {
@@ -139,7 +151,7 @@ impl Dialect {
             dfn_result: DfnResult::LastSentence,
             default_arg: DefaultArg::Eager,
             complex_order: ComplexOrder::RealThenImaginary,
-            trains: false,
+            trains: true,
         }
     }
 
@@ -203,9 +215,6 @@ impl Dialect {
             ComplexOrder::MagnitudeThenAngle => {
                 return Err(refuse("grading complex values by magnitude and angle"))
             }
-        }
-        if self.trains {
-            return Err(refuse("trains"));
         }
         let origin = match lang {
             Lang::J => 0,

@@ -397,7 +397,8 @@ fn replayable(e: &Expr) -> bool {
         | Expr::Elided { .. }
         | Expr::Control(..)
         | Expr::AmendIndex { .. }
-        | Expr::VerbDef { .. } => false,
+        | Expr::VerbDef { .. }
+        | Expr::ModDef { .. } => false,
         Expr::Monad { verb, y, .. } => verb.is_pure() && replayable(y),
         Expr::Dyad { verb, x, y, .. } => verb.is_pure() && replayable(x) && replayable(y),
         Expr::Fused { inputs, .. } => inputs.iter().all(replayable),
@@ -716,7 +717,8 @@ fn uses_land(e: &Expr, name: &str, def: &Expr, tol: Tol) -> Option<usize> {
         | Expr::Elided { .. }
         | Expr::Control(..)
         | Expr::AmendIndex { .. }
-        | Expr::VerbDef { .. } => None,
+        | Expr::VerbDef { .. }
+        | Expr::ModDef { .. } => None,
     }
 }
 
@@ -850,7 +852,8 @@ fn free_names(e: &Expr, out: &mut Vec<String>) {
         | Expr::Elided { .. }
         | Expr::Control(..)
         | Expr::AmendIndex { .. }
-        | Expr::VerbDef { .. } => {}
+        | Expr::VerbDef { .. }
+        | Expr::ModDef { .. } => {}
     }
 }
 
@@ -870,7 +873,8 @@ fn assigns_any(e: &Expr, names: &[String]) -> bool {
         | Expr::Elided { .. }
         | Expr::Control(..)
         | Expr::AmendIndex { .. }
-        | Expr::VerbDef { .. } => false,
+        | Expr::VerbDef { .. }
+        | Expr::ModDef { .. } => false,
     }
 }
 
@@ -885,7 +889,8 @@ pub fn is_fused(p: &Program) -> bool {
             | Expr::Elided { .. }
             | Expr::Control(..)
             | Expr::AmendIndex { .. }
-            | Expr::VerbDef { .. } => false,
+            | Expr::VerbDef { .. }
+        | Expr::ModDef { .. } => false,
             Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => any(value),
             Expr::Monad { y, .. } => any(y),
             Expr::Dyad { x, y, .. } => any(x) || any(y),

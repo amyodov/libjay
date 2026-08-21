@@ -1,0 +1,56 @@
+# libjay reference snapshot: APL (GNU APL) — corpus/apl/wave6.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreter. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> TEXT`  one line of the reference's answer.
+#   `< TEXT`  one line of libjay's answer (divergence records only).
+#   `? TEXT`  why the two are expected to differ (divergence records only).
+#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`  a comment.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= (+)/1 2 3
+> 6
+= (×)/1 2 3 4
+> 24
+= (⌈)/3 1 4 1 5
+> 5
+= (+)\\1 2 3
+> 1 3 6
+= (⌊)/3 1 4 1 5
+> 1
+= (+/)1 2 3
+> 6
+= (+/)¨(1 2)(3 4 5)
+> 3 12
+= (⌽)1 2 3
+> 3 2 1
+= (-)¨1 2 3
+> ¯1 ¯2 ¯3
+= 2(+)3
+> 5
+= (⍴)1 2 3
+> 3
+= 1 0 1(/)1 2 3
+> 1 3
+= (+)⌿2 3⍴⍳6
+> 5 7 9
+= ((+))/1 2 3
+> 6
+= (+/)⍤1⊢2 3⍴⍳6
+> 6 15
+= (⌈/)-(⌊/)3 1 4 1 5
+> ¯1
+= 1 0 1(⌿)1 2 3
+> 1 3
+= 1 1 0(\\)1 2
+> 1 2 0
+= (/)1 2 3
+> <error>
+= 1 0 1(\\)1 2 3
+> <error>

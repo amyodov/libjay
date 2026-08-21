@@ -259,11 +259,24 @@ class TestDialect:
             {"dfn_result": "first-non-assignment"},
             {"default_arg": "lazy"},
             {"complex_order": "magnitude-then-angle"},
-            {"trains": True},
         ]:
             c = APL.create_compiler(APL.Dialect(**setting))
             with pytest.raises(JayError, match="not supported yet"):
                 c.compile("1 2 3")
+
+    def test_trains_are_an_extension_that_can_be_turned_off(self):
+        from jay.lang import APL
+
+        # GNU APL has no trains and no function assignment; libjay ships
+        # both on, and the strict reading is a setting away.
+        assert APL.Dialect().trains is True
+        assert apl("(+/÷≢)1 2 3 4") == 2.5
+        assert apl("MEAN←+/÷≢\nMEAN 1 2 3 4") == 2.5
+        strict = APL.create_compiler(APL.Dialect(trains=False))
+        with pytest.raises(JayError):
+            strict.compile("(+/÷≢)1 2 3 4")
+        # Grouping a single function is not the extension, and stays.
+        assert strict("(+)/1 2 3") == 6
 
     def test_an_unknown_setting_value_is_named(self):
         from jay.lang import APL
@@ -306,9 +319,16 @@ class TestNamedVerbs:
     def test_naming_a_verb_yields_nothing(self):
         assert j("1 + 1\nmean =. +/ % #") is None
 
-    def test_apl_function_assignment_is_not_yet(self):
-        with pytest.raises(JayError, match="function assignment"):
-            apl.compile("F←+/")
+    def test_apl_function_assignment_names_a_function(self):
+        assert apl("F←+/\nF 1 2 3") == 6
+        assert apl("F←+/") is None
+
+    def test_a_named_apl_function_is_a_function_in_a_train(self):
+        assert apl("S←+/\nM←S÷≢\nM 1 2 3 4") == 2.5
+
+    def test_j_names_an_adverb(self):
+        assert j("m =. /\n+ m 1 2 3") == 6
+        assert j("c =. &\n2 (+ c *:) 3") == 13
 
 
 class TestExplain:

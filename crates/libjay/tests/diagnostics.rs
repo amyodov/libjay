@@ -198,7 +198,7 @@ const J_PROMISES: &[Case] = &[
     j("1 \". '2'", ErrorKind::NotYet, "1 \". '2'", &["numbers from text"]),
     j("+ . * i. 2 2", ErrorKind::NotYet, "+ . *", &["inner product"]),
     j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign conjunction"]),
-    j("m =. /", ErrorKind::NotYet, "m =. /", &["adverb and conjunction assignment"]),
+    j("m =. /\nm", ErrorKind::NotYet, "m", &["displaying a modifier"]),
     j("s: 'a'", ErrorKind::NotYet, "s: 'a'", &["symbols"]),
     j("'a' ;: 'b'", ErrorKind::NotYet, "'a' ;: 'b'", &["sequential machine"]),
     j("/: < 1 2", ErrorKind::NotYet, "/: < 1 2", &["grading boxed"]),
@@ -382,7 +382,8 @@ fn apl_name_errors_name_the_name() {
 const APL_PROMISES: &[Case] = &[
     apl("2⍉3 3⍴⍳9", ErrorKind::NotYet, "2⍉3 3⍴⍳9", &["dyadic transpose"]),
     apl("1 2 3⍒4", ErrorKind::NotYet, "1 2 3⍒4", &["dyadic grade"]),
-    apl("F←+/", ErrorKind::NotYet, "F←+/", &["function assignment"]),
+    apl("3+F←+/", ErrorKind::NotYet, "F←+/", &["naming a function inside"]),
+    apl("(A+×)4", ErrorKind::NotYet, "A", &["computed value"]),
     apl("⍕[1]⍳3", ErrorKind::NotYet, "[1]", &["axis specification for ⍕"]),
     apl("⍋⊂1 2", ErrorKind::NotYet, "⍋⊂1 2", &["grading boxed"]),
     apl("2 3⍕⊂1 2", ErrorKind::NotYet, "2 3⍕⊂1 2", &["nested"]),

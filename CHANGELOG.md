@@ -7,6 +7,21 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- APL trains, as an extension shipped on by default under the `trains`
+  dialect setting: `(g h)` is an atop, `(f g h)` a fork, a literal value
+  may be a fork's left tine, and longer runs group from the right. `⊢` and
+  `⊣` are the identity tines. They lower to the same fork and atop verbs
+  the J frontend builds.
+- APL function assignment: `F←+/` names a derived function and `F←+/÷≢` a
+  train, under the same `trains` setting. `Dialect(trains=False)` restores
+  GNU APL's reading, where both are a syntax error.
+- J names adverbs and conjunctions: `m =. /`, `c =. @`. The name is that
+  modifier from the next sentence on.
+- J `L:` and `S:` gained their dyads: both arguments are descended together
+  and a side that has reached its level is held while the other descends.
+- J `H.`, the generalised hypergeometric series, with the parameters the
+  two lists share cancelled first.
+
 ### Changed
 
 ### Deprecated
@@ -14,6 +29,13 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 ### Fixed
+
+- APL's `⍢`, `⌺`, `⍠`, `⌶` and `⍞` are reported as named gaps rather than
+  unknown characters.
+- APL `(+)/1 2 3` is 6, as the reference answers it: a parenthesised
+  function now closes before the operator to its right binds, and
+  parentheses around a bare operator glyph (`1 0 1(/)1 2 3`) are
+  transparent.
 
 ### Security
 
