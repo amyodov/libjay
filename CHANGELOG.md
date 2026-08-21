@@ -6,6 +6,12 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased
 
 ### Added
+### Changed
+### Fixed
+
+## 0.2.0 — 2026-08-21
+
+### Added
 
 - APL trains: a run of bare functions now reads as a fork or an atop —
   `(f g h)` applies `f` and `h` to the argument and combines the results
