@@ -1548,3 +1548,10 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   tables is red and J's red is exactly `s:` and `$.`, which are storage
   kinds — an interned string and a sparse layout — rather than primitives:
   the 0.3 type work, named as such.
+- 2026-08-21 — Supply-chain gate after the arrayref attack (RUSTSEC-2026-0260;
+  the repo was verified unaffected: none of arrayref/internment/
+  append-only-vec/proc-macro1 in any lockfile revision or the cargo cache):
+  cargo-deny with the RustSec advisory DB, yanked = deny, explicit bans of
+  the three poisoned versions and the proc-macro1 typosquat, a license
+  allowlist, and unknown-registry/git denial; enforced locally (deny.toml)
+  and in CI on every push.

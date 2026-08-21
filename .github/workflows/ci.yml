@@ -28,6 +28,14 @@ jobs:
       # broken `exclude` before a release tries to publish for real.
       - run: cargo publish -p libjay --dry-run
 
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # RustSec advisories, pinned bans (the 2026-08-20 arrayref attack),
+      # license allowlist, and registry-source checks. deny.toml is the config.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
   docs:
     runs-on: ubuntu-latest
     steps:
