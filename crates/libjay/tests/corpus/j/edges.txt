@@ -1,0 +1,120 @@
+// Edge cases for the spellings the rest of the corpus barely touches:
+// empty and one-item arguments, rank 0 against a one-item vector, zero and
+// negative parameters, characters and boxes where the spelling admits them.
+// The thin rows were found by counting each spelling across corpus/j.
+
+// [ — left, and identity as a monad
+[ i. 3 4
+[ i. 0
+[ 'abc'
+3 [ 4
+'abc' [ 5
+(<1 2) [ 3
+1 2 3 [ i. 0
+[ <'abc'
+
+// [: — the cap, which makes the fork above it monadic
+([: +/ *:) 1 2 3
+([: # ~.) 1 1 2 3 3
+([: < ,) i. 2 2
+([: ": #) 'abc'
+([: |. }.) i. 5
+([: +/ ,) i. 0
+1 ([: + +/) 2 3 4
+([: # $) i. 2 3 4
+
+// _9: … 9: and _: — the constant verbs
+3: 5
+_5: i. 3
+0: 'abc'
+9: i. 0
+_: 7
+$ 4: i. 2 3
+2 _3: 4
+_9: <'abc'
+
+// :: — the adverse, which answers when the left verb refuses
+(1 2&+ :: _1:) 1 2 3
+(1 2&+ :: _1:) 1 2
+('abc'&+ :: _1:) 1
+(#. :: _1:) 'abc'
+(<: :: 0:) 5
+(%: :: _1:) _4
+(1 2&+ :: ]) 1 2 3
+
+// &.: — under, on the whole argument rather than cell by cell
++/&.:*: 3 4
++/&.:*: i. 0
++&.:*: 3 4
++/&.:^. 1 2 3
+|.&.:>: i. 3
+-&.:>: 5 2
++/&.:j. 1 2
+
+// &: — appose: the verb applies to both arguments at once
++/&:*: 1 2 3
++&:*: 3 4
+,&:< 1 2
+,&:>: 1 2
++/&:i. 3
+#&:, i. 2 3
++&:*: 0
+
+// a. — the alphabet. Its ends are control characters, which no recording
+// can carry, so every line here reads a PRINTABLE part of it.
+# a.
+a. i. 'a'
+65 { a.
+97 98 99 { a.
+a. i. 'abc'
+(a. i. 'A') { a.
+3 {. 97 }. a.
+a. -: a. /: a.
+
+// E. — find: where x occurs in y
+'ab' E. 'abcab'
+1 2 E. 1 2 3 1 2
+'' E. 'abc'
+'abc' E. 'ab'
+1 E. 1 1 1
+'a' E. ''
+(i. 2 2) E. i. 3 3
+'aa' E. 'aaa'
+
+// M. — memo, which must not change the answer
+(*: M.) 4
+(+/ M.) 1 2 3
+(i. M.) 3
+2 (+ M.) 3
+(] M.) 'abc'
+(<. M.) 2.7
+(+/ M.) i. 0
+
+// j. — imaginary and complex
+j. 3
+j. 0
+j. _0.5
+j. i. 3
+3 j. 4
+1 2 j. 3 4
+0 j. _1
+j. i. 0
+
+// r. — angle and polar
+r. 0
+r. 1j1
+r. i. 3
+1 r. 0
+2 r. 1p1
+1 2 r. 0 1
+_1 r. 0
+r. i. 0
+
+// :. — the obverse, which ^:_1 then uses
+(*: :. %:) 3
+(*: :. %:)^:_1 ] 9
+(+: :. -:) 4
+(+: :. -:)^:_1 ] 8
+(>: :. <:)^:_1 ] 5
+(] :. ])^:_1 ] 'abc'
+(+: :. -:)^:_1 i. 0

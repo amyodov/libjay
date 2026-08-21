@@ -284,7 +284,10 @@ fn apl_structural() {
     assert_eq!(run(Lang::Apl, "2↑9 8 7"), Some(i64s(&[2], &[9, 8])));
     assert_eq!(run(Lang::Apl, "¯2↑9 8 7"), Some(i64s(&[2], &[8, 7])));
     assert_eq!(run(Lang::Apl, "5↑1 2"), Some(i64s(&[5], &[1, 2, 0, 0, 0])));
-    assert_eq!(run(Lang::Apl, "1↓3 3⍴⍳9"), Some(i64s(&[2, 3], &[4, 5, 6, 7, 8, 9])));
+    // APL wants one count per axis, so a table needs two of them; J's rule,
+    // where a short list leaves the remaining axes whole, is not APL's.
+    assert_eq!(run(Lang::Apl, "1 0↓3 3⍴⍳9"), Some(i64s(&[2, 3], &[4, 5, 6, 7, 8, 9])));
+    assert_eq!(err(Lang::Apl, "1↓3 3⍴⍳9").kind, ErrorKind::Length);
     assert_eq!(run(Lang::Apl, ",2 2⍴⍳4"), Some(i64s(&[4], &[1, 2, 3, 4])));
 }
 

@@ -130,3 +130,87 @@ $ ,/ i. 0
 ,/ i. 0 3
 $ ,/ i. 0 3
 ,/ i. 3
+
+// Take and drop count AXES. More counts than the argument has axes is a
+// length error, and only a SCALAR right argument stretches to meet them —
+// `1 2 {. 5` is a 1 by 2 table. Take also wants at least one count where
+// drop is content with none.
+2 2 {. 5
+$ 2 2 {. 5
+1 2 {. 5
+1 0 1 {. 0
+2 0 1 {. 5
+1 2 }. 5
+$ 1 2 }. 5
+$ 0 0 {. 5
+2 3 {. i. 5
+2 3 }. i. 5
+_2 3 {. i. 5
+(i. 0) {. 1 2 3
+(i. 0) {. 5
+$ (i. 0) {. 5
+(i. 0) }. 1 2 3
+$ (i. 0) }. 5
+
+// A count of zero on an axis after the first empties that axis; it is not
+// the "leave it alone" that a zero DROP is, so the fast path that moves a
+// run of whole items does not apply to it.
+$ 2 0 {. i. 3 4
+2 0 {. i. 3 4
+$ 2 0 }. i. 3 4
+$ 3 2 {. i. 3 4
+$ _3 _2 {. i. 3 4
+
+// The ZERO polynomial: no leading coefficient to divide by, and every
+// number is a root of it. J answers `0 ; ''`, and only a non-zero constant
+// has no root form at all.
+p. 0
+p. 0 0
+p. 0 0 0
+p. i. 0
+p. 0 0 0 3
+
+// GCD and LCM of numbers that are not whole. The pair is read as the
+// decimals it prints as — 1.23 and 4.56 are 123 and 456 hundredths — so
+// three hundredths divides both; a binary Euclid would find nothing.
+1.5 +. 2.5
+1.5 *. 2.5
+0.1 +. 0.2
+0.1 *. 0.3
+1.23 +. 4.56
+1.23 *. 4.56
+_1.5 +. 2.25
+_1.5 *. 2.5
+1.5 *. _2.5
+2.5 +. 0
+0.5 *. 0
+0 +. 1.5
+1e_15 +. 1
+3.14159 +. 2.71828
+1e_3 +. 1e_5
+1.5 2.5 +. 0.5 0.25
+0.3 +. 0.2
+0.7 +. 0.3
+
+// An empty array inside a box still has a SHAPE: every axis but the last
+// counts a row and the last one is how wide the cell draws, so `<0 3$0` is
+// three wide with no lines in it.
+< 0 3 $ 0
+< 0 5 $ 0
+< 2 0 $ 0
+< 0 0 $ 0
+< i. 0
+< i. 0 3 4
+(<i. 0 3) , <1 2
+(3 1 4 1 5) ; (0 3 $ 0)
+
+// Decode accumulates in the exact types when it is given them: a 19-digit
+// integer keeps every digit, and rational digits give a rational answer.
+#. 9223372036854775806
+#. _9223372036854775806
+#.&.> (_9223372036854775806)
+#. 1r2 1r3
+#. 1 2 3x
+#. 123x
+2 #. 1 0 1
+10 #. 1 2 3

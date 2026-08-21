@@ -406,14 +406,11 @@ fn apl_spaces_a_nested_display() {
 
 #[test]
 fn arithmetic_on_boxes_says_to_open_them() {
-    for (lang, src) in [
-        (Lang::J, "1 + <1"),
-        (Lang::J, "(<1) + 1"),
-        (Lang::J, "- <1"),
-        (Lang::J, "+/ 1;2;3"),
-        (Lang::Apl, "1+⊂1 2"),
-        (Lang::Apl, "-⊂1 2"),
-    ] {
+    // J only: a box is a type error there. APL's scalar functions PERVADE
+    // a nested argument instead, which the next test pins down.
+    for (lang, src) in
+        [(Lang::J, "1 + <1"), (Lang::J, "(<1) + 1"), (Lang::J, "- <1"), (Lang::J, "+/ 1;2;3")]
+    {
         let e = err(lang, src);
         assert_eq!(e.kind, ErrorKind::Type, "{src}");
         assert!(e.msg.contains("boxed"), "{src}: {}", e.msg);
@@ -421,6 +418,20 @@ fn arithmetic_on_boxes_says_to_open_them() {
     }
     // A verb that does not do arithmetic still folds over boxes.
     assert_eq!(val(Lang::J, ",/ 1;2;3"), val(Lang::J, "1;2;3"));
+}
+
+#[test]
+fn apl_scalar_functions_pervade_a_nested_argument() {
+    // The function reaches the simple values at the bottom, and the answer
+    // keeps the nesting it found.
+    assert_eq!(val(Lang::Apl, "1+⊂1 2"), val(Lang::Apl, "⊂2 3"));
+    assert_eq!(val(Lang::Apl, "-⊂1 2"), val(Lang::Apl, "⊂¯1 ¯2"));
+    assert_eq!(val(Lang::Apl, "(1 2)(3 4)+1"), val(Lang::Apl, "(2 3)(4 5)"));
+    assert_eq!(val(Lang::Apl, "(1 2)(3 4)+(10 20)(30 40)"), val(Lang::Apl, "(11 22)(33 44)"));
+    // Depth is preserved all the way down.
+    assert_eq!(val(Lang::Apl, "1+⊂⊂1 2"), val(Lang::Apl, "⊂⊂2 3"));
+    // A comparison pervades too, rather than matching the boxes.
+    assert_eq!(val(Lang::Apl, "((1 2)(3 4)=1 3)≡(1 0)(1 0)"), val(Lang::Apl, "1=1"));
 }
 
 #[test]

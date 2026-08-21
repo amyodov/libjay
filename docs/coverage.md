@@ -1221,8 +1221,8 @@ libjay follows J where APL2 stops at DOMAIN ERROR:
 libjay is more permissive:
 
 - `∪` is nub over ITEMS, so a matrix is legal; GNU APL's monad takes vectors
-  only. `∩`, `~` and `∪` dyadically work over items here for the same
-  reason.
+  only. The DYADIC set functions — `∪`, `∩` and `~` — follow GNU APL and
+  refuse anything deeper than a vector, which is where J's `-.` differs.
 - monadic `↓`, monadic `⌷`, `⎕A`, `⎕D`, `∘`, `⍥`, `⍢` and `⌺` are not in
   GNU APL at all — no oracle, tested against hand-written expectations in
   tests/wave4.rs and tests/wave7.rs instead; see "Which APL" above.
@@ -1257,11 +1257,31 @@ libjay is stricter, or simply elsewhere:
   by roughly the square root of `⎕CT`, so `1J1=1.0000000001J1` is 1 there.
 - a sequence yields its last sentence and prints nothing on the way, so
   `1 2 3⋄4 5` is `4 5`; GNU APL prints the value of every statement.
+- `< ≤ > ≥` need numbers. GNU APL extends them to characters, ordering
+  characters among themselves and before every number, so `'a'<'b'` and
+  `'a'<5` are both 1 there. libjay refuses, as the standard and J do and as
+  it already refuses to order a complex number.
+- monadic `⊣` is the identity, which is what the status table promises and
+  what the Dyalog line has. GNU APL gives it no result at all: `⊣1 2 3` and
+  `⍴⊣1 2 3` both display nothing.
+- matching two EMPTY nested arrays compares their prototypes in APL2, and
+  libjay compares only the shape and whether the type is character. `⍬≡''`
+  is 0 on both sides and `⍬≡0⍴⊂1` is 1 on both; `⍬≡0⍴⊂⍬` is where the
+  prototype would decide, and that is a named gap here.
+- an operator's left operand may itself be derived: `+/⍣0`, `⌈¨⍣2` and
+  `+/⍤1` are the reduction, the each and the reduction-by-rows repeated or
+  ranked. GNU APL binds the inner operator first — it reads `+(/⍣0)` — and
+  raises SYNTAX ERROR, so every `f/⍣n` and `f/⍤r` parts company there. The
+  fuzz generator parenthesises the operand for exactly this reason.
 
-One entry is GNU APL's bug rather than a dialect difference, pinned so that a
-later release fixing it is noticed: a scan whose axis has length 1 loses that
-axis there, so `+\2 1⍴⍳12` comes back as a 2-vector and `+\,5` as a scalar.
-`⌽`, `⌿` and every other axis length are fine.
+Two entries are GNU APL's bug rather than a dialect difference, pinned so
+that a later release fixing them is noticed. A scan whose axis has length 1
+loses that axis there, so `+\2 1⍴⍳12` comes back as a 2-vector and `+\,5` as
+a scalar; `⌽`, `⌿` and every other axis length are fine. And a decode whose
+radix axis is EMPTY — `(⍳0)⊥2 3⍴⍳6`, `(2 0⍴0)⊥⍳0` — has a shape there that
+GNU APL agrees with (`⍴` answers 3 and 2) and a value it cannot print: asking
+for the value raises DOMAIN ERROR. Every answer is the empty sum, which is
+zero, and that is what libjay gives.
 
 ## Known gaps
 
@@ -1273,8 +1293,6 @@ sections above is also collected here.
 - Catenating items whose shapes differ fills in J and is refused in APL, as
   each reference has it: `1 2 3 , i. 2 2` overtakes both sides to 3 columns,
   while `(2 2⍴⍳4) ⍪ 1 2 3` is a length error.
-- LCM/GCD accept floats only when every value is integral. J computes a real
-  GCD (`2.5 +. 5` is `2.5`); libjay reports "not supported yet".
 - A bonded noun (`n&v`, `u&n`) has to be a literal, as a noun fork's left
   tine does; a computed one says "bonds over a non-literal noun is not
   supported yet".

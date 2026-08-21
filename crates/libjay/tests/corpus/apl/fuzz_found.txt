@@ -37,3 +37,81 @@
 ⍴(1 1⍴5)+1 2 3
 (,5)+2 3⍴⍳6
 ⍴(2 3⍴⍳6)+,5
+// A rank-0 frame — a true scalar — gives way to the other side, and
+// between two one-cell frames that are not scalars the answer keeps the
+// RIGHT one. Only the equal-frames case had been getting this right.
+⍴(,5)+¯3
+⍴¯3+,5
+⍴(1 1⍴5)+,3
+⍴(,5)+1 1⍴3
+⍴(1 1⍴5)+3
+⍴(1 1 1⍴5)+1 1⍴3
+⍴(,5)+⍳0
+⍴(⍳0)+,5
+(,5)+¯3
+⍴(,5)∨¯3
+
+// Take and drop want one count per AXIS, where J is content with fewer:
+// `1↑2 3⍴⍳6` is a length error. A scalar right argument still stretches to
+// whatever rank the count list asks for.
+1 2↑5
+⍴1 2↑5
+⍴0 0↑5
+⍴(⍳0)↑5
+⍴(⍳0)↓5
+2↑⍳0
+2 0↑2 3⍴⍳6
+⍴2 0↑2 3⍴⍳6
+2 2↑2 3⍴⍳6
+1 0↓3 3⍴⍳9
+
+// Decode over an empty radix axis: every answer is the empty sum, and the
+// frame is still `(¯1↓⍴x),1↓⍴y`. libjay used to hand the printer a scalar
+// with no data in it and crash.
+(⍳0)⊥1 2 3
+(⍳0)⊥1.5 2.5 ¯0.5
+(⍳0)⊥⍳0
+⍴(⍳0)⊥1 2 3
+(0 2⍴0)⊥1 2
+⍴(0 2⍴0)⊥1 2
+×⍀(÷\\((⍳0)⊥(1.5 2.5 ¯0.5)))
+
+// The set functions read their arguments as lists and refuse anything
+// deeper, where J's `-.` works on the items of a table.
+1 2 3∩2 3 4
+'abc'∩'bcd'
+(⍳0)∩1 2
+1 2∩⍳0
+1 2 2 3~2 3
+'abc'~'b'
+(⍳0)~1
+
+// A grade orders ITEMS, so a scalar has none to order.
+⍋⍳0
+⍋2 3⍴⍳6
+⍋'hello'
+⍒'hello'
+
+// Scalar functions PERVADE a nested argument: they reach the simple values
+// at the bottom and the answer keeps the nesting.
+(1 2)(3 4)+1
+1+(1 2)(3 4)
+-(1 2)(3 4)
+(⊂1 2)+⊂3 4
+(1 2)(3 4)+(10 20)(30 40)
+×⊂⍳3
+1+⊂⊂1 2
+(1 2)(3 4)=1 3
+(1 2)(3 4)≡(1 2)(3 4)
+(⊂⍳3)∘.⌊¯3
+≢(1 2)(3 4)+1
+⍴(⊂1 2)+1
+
+// Replication extends an argument of ONE item along the axis, as it
+// extends a scalar, where J's `#` calls the same pair a length error.
+2 0 1/,5
+2 2⌿,5
+1 0 1/3 1⍴1 2 3
+2 0 1/5
+1 0/2 2⍴⍳4
+2 3⌿2 2⍴⍳4

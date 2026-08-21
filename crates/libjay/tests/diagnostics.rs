@@ -326,7 +326,10 @@ const APL_DOMAIN: &[Case] = &[
     apl("~2", ErrorKind::Domain, "~2", &["0 or 1"]),
     apl("?0", ErrorKind::Domain, "?0", &["empty"]),
     apl("⍳¯1", ErrorKind::Domain, "⍳¯1", &["nonnegative"]),
-    apl("⍟⊂1 2", ErrorKind::Type, "⍟⊂1 2", &["boxed", "open them first"]),
+    // APL's scalar functions pervade a nested argument, so the boxed
+    // diagnostic is J's alone; what stays wrong here is the CHARACTER
+    // inside the nesting.
+    apl("⍟⊂'ab'", ErrorKind::Type, "⍟⊂'ab'", &["character"]),
     apl("'ab'+1", ErrorKind::Type, "'ab'+1", &["character"]),
 ];
 

@@ -1233,7 +1233,7 @@ impl Verb {
                 // Scalar verbs have cell rank 0: the cells are the elements,
                 // so the whole buffer is one elementwise pass.
                 if let MonadOp::Scalar(op) = p.monad {
-                    return scalar_monad(op, y, ctx.cfg.tol, span);
+                    return scalar_monad(op, y, ctx.cfg, span);
                 }
                 // A MIXED SIMPLE array is already simple, so opening it
                 // changes nothing — and its cells could not be framed back
@@ -1383,7 +1383,7 @@ impl Verb {
             Verb::Prim(p) => match p.monad {
                 // Elementwise: every element is read and written where it
                 // lies, so the answer carries the argument's own layout.
-                MonadOp::Scalar(op) => Some(scalar_monad(op, y, ctx.cfg.tol, span)),
+                MonadOp::Scalar(op) => Some(scalar_monad(op, y, ctx.cfg, span)),
                 // The shape is the logical one whatever the buffer does.
                 MonadOp::ShapeOf | MonadOp::Tally => Some(monad_op(p, y, ctx, span)),
                 // Reversing the axes of a column-major buffer is reading the
@@ -1807,12 +1807,17 @@ fn agree(
                 return Ok(Pairing { frame: fx.to_vec(), n, x_div: 1, y_div: 1 });
             }
             // APL extends any frame of ONE cell, whatever its rank, not
-            // only a scalar one: `(1 1⍴5)+1 2 3` is `6 7 8`.
-            if fx.iter().product::<usize>() == 1 {
+            // only a scalar one: `(1 1⍴5)+1 2 3` is `6 7 8`. A rank-0 frame
+            // — a true scalar — always gives way to the other side, and
+            // between two one-cell frames that are not scalars the answer
+            // keeps the RIGHT one: `(1 1⍴5)+,3` is a one-item VECTOR, while
+            // `(1 1⍴5)+3` keeps the 1 by 1 table.
+            let one = |f: &[usize]| f.iter().product::<usize>() == 1;
+            if fx.is_empty() || (one(fx) && !fy.is_empty()) {
                 let n: usize = fy.iter().product();
                 return Ok(Pairing { frame: fy.to_vec(), n, x_div: n.max(1), y_div: 1 });
             }
-            if fy.iter().product::<usize>() == 1 {
+            if fy.is_empty() || one(fy) {
                 let n: usize = fx.iter().product();
                 return Ok(Pairing { frame: fx.to_vec(), n, x_div: 1, y_div: n.max(1) });
             }
@@ -3165,9 +3170,124 @@ fn gcd_i128(a: i128, b: i128) -> i128 {
     a
 }
 
+/// A finite float as `p / 10^s`, read off the shortest decimal that prints
+/// back as this value — which is the number the user wrote and the number
+/// both references show.
+fn decimal_parts(v: f64) -> Option<(i128, u32)> {
+    if !v.is_finite() {
+        return None;
+    }
+    let text = format!("{v:e}");
+    let (mantissa, exponent) = text.split_once('e')?;
+    let exponent: i32 = exponent.parse().ok()?;
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let mut digits: i128 = format!("{whole}{fraction}").parse().ok()?;
+    let mut scale = fraction.len() as i32 - exponent;
+    // A negative scale is a whole number with trailing zeros; fold them in
+    // so every value arrives as `p / 10^s` with s at least zero.
+    while scale < 0 {
+        digits = digits.checked_mul(10)?;
+        scale += 1;
+    }
+    // Beyond this the products below leave i128, and the Euclid fallback
+    // takes over.
+    (scale <= 34).then_some((digits, scale as u32))
+}
+
+/// The GCD of two reals read as the decimals they are printed as: `1.23`
+/// and `4.56` are 123 and 456 hundredths, so their GCD is three hundredths.
+/// That is what J answers, and a binary Euclid cannot reach it — the two
+/// have no common divisor at all in the dyadic rationals they really are.
+fn gcd_decimal(a: f64, b: f64) -> Option<f64> {
+    let (pa, sa) = decimal_parts(a)?;
+    let (pb, sb) = decimal_parts(b)?;
+    let scale = sa.max(sb);
+    let lift = |p: i128, s: u32| 10i128.checked_pow(scale - s).and_then(|k| p.checked_mul(k));
+    let g = gcd_i128(lift(pa, sa)?, lift(pb, sb)?);
+    // Dividing through a decimal string keeps the one rounding the value
+    // itself carries, where a multiply by 10^s of its own would add another.
+    format!("{g}e-{scale}").parse().ok()
+}
+
+/// The real GCD, by Euclid on the values themselves. Floats cannot reach an
+/// exact zero remainder, so a remainder within the comparison tolerance of
+/// zero — or of the divisor, which is the same step seen from the other end
+/// — is taken to be zero. That is what makes `0.1 +. 0.2` answer `0.1`
+/// rather than grinding down to a rounding error.
+fn gcd_f64(a: f64, b: f64, tol: Tol) -> Option<f64> {
+    let (mut a, mut b) = (a.abs(), b.abs());
+    if !a.is_finite() || !b.is_finite() {
+        return None;
+    }
+    // Euclid on reals converges as fast as it does on integers; the bound
+    // is a guard, not the usual exit.
+    for _ in 0..1000 {
+        if b == 0.0 {
+            return Some(a);
+        }
+        if a == 0.0 {
+            return Some(b);
+        }
+        // The quotient's floor is TOLERANT, as J's `<.` is: a quotient a
+        // rounding error below an integer is that integer, and the step
+        // then lands on a remainder of zero instead of on the divisor. What
+        // is left can only fall just outside [0, b), so it is clamped.
+        let q = a / b;
+        let mut k = q.floor();
+        if tol.eq(q, k + 1.0) {
+            k += 1.0;
+        }
+        let mut r = a - b * k;
+        if r <= 0.0 || tol.eq(r, b) {
+            r = 0.0;
+        }
+        a = b;
+        b = r;
+    }
+    Some(a)
+}
+
+/// The real LCM/GCD pass: Euclid on the values, which is what J answers for
+/// a pair that is not whole. An infinite operand has no answer, and both
+/// references refuse it.
+#[allow(clippy::too_many_arguments)]
+fn real_lcm_gcd(
+    op: ScalarDyad,
+    xs: &[f64],
+    xoff: usize,
+    xdiv: usize,
+    ys: &[f64],
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+    tol: Tol,
+    span: Span,
+) -> Result<Data> {
+    let mut out = vec![0.0f64; n];
+    let mut ok = true;
+    zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, 0, &mut out, |a, b, slot| {
+        let Some(g) = gcd_decimal(a, b).or_else(|| gcd_f64(a, b, tol)) else {
+            ok = false;
+            return false;
+        };
+        *slot = if op == ScalarDyad::Gcd {
+            g
+        } else if g == 0.0 {
+            0.0
+        } else {
+            a / g * b
+        };
+        true
+    });
+    if !ok {
+        return Err(Error::domain("LCM/GCD needs finite values", span));
+    }
+    Ok(Data::F64(out.into()))
+}
+
 /// LCM/GCD over two buffers. Two booleans stay boolean, where the pair is
-/// exactly logical and (LCM) / or (GCD); integers give integers; floats are
-/// accepted only when every value is integral.
+/// exactly logical and (LCM) / or (GCD); integers give integers; the real
+/// GCD of fractions runs the same Euclid on the values themselves.
 #[allow(clippy::too_many_arguments)]
 fn lcm_gcd_data(
     op: ScalarDyad,
@@ -3178,6 +3298,7 @@ fn lcm_gcd_data(
     yoff: usize,
     ydiv: usize,
     n: usize,
+    tol: Tol,
     span: Span,
 ) -> Result<Data> {
     let t = arith_type(x.dtype(), y.dtype(), span)?;
@@ -3198,7 +3319,7 @@ fn lcm_gcd_data(
         let yf = borrow_f64(y, &mut ty);
         let integral = |v: &[f64]| v.iter().all(|&a| a.fract() == 0.0 && fits_i64(a));
         if !integral(xf) || !integral(yf) {
-            return Err(Error::not_yet("LCM/GCD on floats", span));
+            return real_lcm_gcd(op, xf, xoff, xdiv, yf, yoff, ydiv, n, tol, span);
         }
         (
             xf.iter().map(|&a| a as i64).collect::<Vec<_>>(),
@@ -3551,7 +3672,7 @@ fn scalar_dyad_data(
         return compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span);
     }
     if matches!(op, Lcm | Gcd) {
-        return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
+        return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span);
     }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
     if t.is_exact()
@@ -3588,6 +3709,57 @@ fn scalar_dyad_data(
 }
 
 /// Elementwise dyadic application of a scalar operation to whole arrays.
+/// Frame the results of a pervading scalar function. Cells that all came
+/// back simple scalars make a simple array again — `(1 2)+(3 4)` is a plain
+/// vector — and anything else is enclosed, which is what keeps the nesting.
+fn frame_pervaded(frame: Vec<usize>, cells: Vec<Array>, span: Span) -> Result<Array> {
+    if cells.iter().all(|c| c.rank() == 0 && c.dtype() != DType::Box) {
+        return assemble(&frame, cells, span);
+    }
+    let boxes: Vec<Array> = cells.into_iter().collect();
+    Ok(Array::new(frame, Data::Box(boxes.into())))
+}
+
+/// APL's scalar functions PERVADE a nested argument: they descend through
+/// the boxes, item by item, and apply to the simple values at the bottom.
+/// The two sides agree by the ordinary scalar rule at every level, so a
+/// scalar spreads over a nested array's items as it does over a simple
+/// array's elements. J has no such rule — a box there is a type error.
+fn pervade_dyad(
+    op: ScalarDyad,
+    x: &Array,
+    y: &Array,
+    cfg: EvalCfg,
+    span: Span,
+) -> Result<Array> {
+    let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
+    if p.n == 0 {
+        return Ok(Array::new(p.frame, Data::empty(DType::Box)));
+    }
+    let (xr, yr) = (x.to_row_major(), y.to_row_major());
+    let mut cells = Vec::with_capacity(p.n);
+    for i in 0..p.n {
+        let a = open_cell(&atom(&xr, i / p.x_div));
+        let b = open_cell(&atom(&yr, i / p.y_div));
+        cells.push(scalar_dyad(op, &a, &b, cfg, span)?);
+    }
+    frame_pervaded(p.frame, cells, span)
+}
+
+/// The monadic half of [`pervade_dyad`].
+fn pervade_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    if y.count() == 0 {
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Box)));
+    }
+    let yr = y.to_row_major();
+    let mut cells = Vec::with_capacity(y.count());
+    for i in 0..y.count() {
+        let a = open_cell(&atom(&yr, i));
+        cells.push(scalar_monad(op, &a, cfg, span)?);
+    }
+    frame_pervaded(y.shape.clone(), cells, span)
+}
+
 fn scalar_dyad(
     op: ScalarDyad,
     x: &Array,
@@ -3595,6 +3767,11 @@ fn scalar_dyad(
     cfg: EvalCfg,
     span: Span,
 ) -> Result<Array> {
+    if cfg.rules.lang == crate::Lang::Apl
+        && (x.dtype() == DType::Box || y.dtype() == DType::Box)
+    {
+        return pervade_dyad(op, x, y, cfg, span);
+    }
     let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
     // Nothing to apply the verb to: `'a' + ''` is an empty, not a type
     // error, because no pair of elements was ever formed. The agreement
@@ -3684,8 +3861,12 @@ fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
 }
 
 /// Elementwise monadic application to a whole array.
-fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Array> {
+fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     use ScalarMonad::*;
+    if cfg.rules.lang == crate::Lang::Apl && y.dtype() == DType::Box {
+        return pervade_monad(op, y, cfg, span);
+    }
+    let tol = cfg.tol;
     let d = &y.data;
     // An empty argument has no element for the verb to run on, so its type
     // never comes up: `%: ''` is an empty, not a type error.
@@ -4596,7 +4777,7 @@ pub(crate) fn catenate(
         let fit = |a: &Array| -> Result<Array> {
             let mut to = want.clone();
             to[axis] = a.shape[axis] as i64;
-            take(&Array::from_i64(to), a, false, span)
+            take(&Array::from_i64(to), a, false, false, span)
         };
         (fit(&xa)?, fit(&ya)?)
     } else {
@@ -4659,7 +4840,11 @@ fn copy_items(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
     if !apl && counts.iter().any(|&c| c < 0) {
         return Err(Error::domain("replication counts must be nonnegative", span));
     }
-    let scalar_y = y.rank() == 0;
+    // A scalar right argument stands in for every count, and in APL so does
+    // an argument of ONE item along the axis: `2 0 1/,5` is `5 5 5`, where
+    // J's `#` calls the same pair a length error.
+    let one_item = apl && x.rank() > 0 && y.rank() > 0 && y.items() == 1 && counts.len() != 1;
+    let scalar_y = y.rank() == 0 || one_item;
     let m = y.item_size();
     let n = if x.rank() == 0 || !scalar_y { y.items() } else { counts.len() };
     let per = if x.rank() == 0 { vec![counts[0]; n] } else { counts };
@@ -4688,8 +4873,9 @@ fn copy_items(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
             }
         }
     }
-    // A scalar argument has one item, so replicating it yields a vector.
-    let mut shape = if scalar_y { vec![1] } else { y.shape.clone() };
+    // A scalar argument has one item, so replicating it yields a vector; an
+    // extended one-item argument keeps the shape it already had.
+    let mut shape = if y.rank() == 0 { vec![1] } else { y.shape.clone() };
     shape[0] = total;
     Ok(Array::new(shape, data))
 }
@@ -4782,9 +4968,46 @@ fn is_integral(a: &Array) -> bool {
     !matches!(a.dtype(), DType::F64 | DType::Rat | DType::Char)
 }
 
+/// The decode of exact digits in exact radices, accumulated in the exact
+/// types. Whole numbers keep every digit — a 19-digit integer decoded
+/// through f64 loses its last two — and rational digits give a rational
+/// answer, which is what J reports for `#. 1r2 1r3`. `None` hands the pass
+/// back to the float path, which also reports the length errors.
+fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
+    let yr = y.to_row_major();
+    let digits = to_rat_vec(&yr.data)?;
+    let two = Rat::from_int(Ext::from(2));
+    let radix: Vec<Rat> = match x {
+        None => vec![two; digits.len()],
+        Some(x) => {
+            let r = to_rat_vec(&x.to_row_major().data)?;
+            match r.len() {
+                1 => vec![r[0].clone(); digits.len()],
+                n if n == digits.len() => r,
+                _ => return None,
+            }
+        }
+    };
+    let mut acc = Rat::from_int(Ext::from(0));
+    for (d, b) in digits.iter().zip(&radix) {
+        acc = acc.mul(b).add(d);
+    }
+    let exact_in = |a: &Array| matches!(a.dtype(), DType::Ext | DType::Rat);
+    if exact_in(y) || x.is_some_and(exact_in) {
+        return Some(Array::new(Vec::new(), exact_data(DType::Ext, vec![acc])));
+    }
+    // Plain integers in, a plain integer out — but only while it fits; the
+    // float path widens beyond that, as both references do.
+    let whole = acc.to_int()?;
+    Some(Array::scalar_i64(exact::ext_to_i64(&whole)?))
+}
+
 /// `x #. y` / `x ⊥ y`: the digits y read in the radices x. A scalar x is the
 /// radix of every position; otherwise the two have the same length.
 fn decode(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
+    if let Some(exact) = decode_exact(x, y) {
+        return Ok(exact);
+    }
     let digits = digits_of(y, "decode", span)?;
     let radix: Vec<f64> = match x {
         None => vec![2.0; digits.len()],
@@ -4817,12 +5040,15 @@ fn decode(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
 fn decode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let digits = digits_of(y, "decode", span)?;
     let radices = digits_of(x, "decode", span)?;
-    // The digit axis is y's leading one; a scalar y has one digit.
+    // The digit axis is y's leading one; a scalar y has one digit. The
+    // frames are the counts of the axes the digit axis leaves over, and a
+    // count is a product of axis lengths rather than a division: an axis of
+    // length zero on either side leaves no elements to divide by.
     let k = if y.rank() == 0 { 1 } else { y.shape[0] };
-    let n = if k == 0 { 0 } else { digits.len() / k.max(1) };
+    let n: usize = if y.rank() == 0 { 1 } else { y.shape[1..].iter().product() };
     let (rows, width) = match x.rank() {
         0 => (1usize, 0usize),
-        r => (radices.len() / x.shape[r - 1].max(1), x.shape[r - 1]),
+        r => (x.shape[..r - 1].iter().product(), x.shape[r - 1]),
     };
     if width != 0 && width != k {
         return Err(Error::new(
@@ -4831,11 +5057,15 @@ fn decode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
             Some(span),
         ));
     }
+    // A radix axis of length zero weighs nothing: every answer is the empty
+    // sum, whatever the digits are. Only a SCALAR x spreads its one radix
+    // over all k digits.
+    let per_row = if x.rank() > 0 && width == 0 { 0 } else { k };
     let mut out = vec![0.0f64; rows * n];
     for i in 0..rows {
         for j in 0..n {
             let mut acc = 0.0f64;
-            for d in 0..k {
+            for d in 0..per_row {
                 let b = if width == 0 { radices[0] } else { radices[i * width + d] };
                 acc = acc * b + digits[d * n + j];
             }
@@ -5022,7 +5252,7 @@ fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
 /// Monadic meaning of a primitive, applied to one cell.
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     match p.monad {
-        MonadOp::Scalar(op) => scalar_monad(op, y, ctx.cfg.tol, span),
+        MonadOp::Scalar(op) => scalar_monad(op, y, ctx.cfg, span),
         MonadOp::ShapeOf => {
             Ok(carry_exact(Array::from_i64(y.shape.iter().map(|&n| n as i64).collect()), y))
         }
@@ -5034,9 +5264,16 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Tail => Ok(tail(y)),
         MonadOp::Curtail => Ok(curtail(y)),
         MonadOp::Reverse => Ok(reverse(y)),
+        // Monadic `∪` stays nub over ITEMS at any rank, which is a
+        // recorded divergence from GNU APL's vectors-only monad.
         MonadOp::Nub => Ok(nub(y, ctx.cfg.tol)),
         MonadOp::GradeUp { origin } | MonadOp::GradeDown { origin } => {
             check_gradable(y, ctx.cfg.rules.complex_order, span)?;
+            // APL grades the ITEMS of an array, so a scalar has none to
+            // grade; J answers with the one-item permutation.
+            if ctx.cfg.rules.lang == crate::Lang::Apl && y.rank() == 0 {
+                return Err(Error::domain("a grade needs an array, not a scalar", span));
+            }
             let down = matches!(p.monad, MonadOp::GradeDown { .. });
             let order = grade_order(y, down);
             Ok(Array::from_i64(order.iter().map(|&i| origin + i as i64).collect()))
@@ -5189,7 +5426,16 @@ fn reshape(x: &Array, y: &Array, by_items: bool, span: Span) -> Result<Array> {
 /// items, which is a slice of the buffer rather than an element-by-element
 /// walk. `keep` is the items to end up with, `from` the first of them.
 fn leading_run(y: &Array, counts: &[i64], drop: bool) -> Option<Array> {
-    if y.rank() == 0 || counts.is_empty() || counts[1..].iter().any(|&c| c != 0) {
+    if y.rank() == 0 || counts.is_empty() {
+        return None;
+    }
+    // The fast path holds only while every count after the first leaves its
+    // axis alone. A drop of nothing is a zero; a take of everything is the
+    // axis's own length, since a take of zero empties the axis instead.
+    let trailing_untouched = counts[1..].iter().enumerate().all(|(a, &c)| {
+        if drop { c == 0 } else { c.unsigned_abs() as usize == y.shape[a + 1] }
+    });
+    if !trailing_untouched {
         return None;
     }
     let n = y.items();
@@ -5208,22 +5454,41 @@ fn leading_run(y: &Array, counts: &[i64], drop: bool) -> Option<Array> {
     Some(section(y, lo, lo + keep))
 }
 
-fn take(x: &Array, y: &Array, prototype_fill: bool, span: Span) -> Result<Array> {
+/// A count list the argument's rank cannot take. APL wants exactly one
+/// count per axis; J takes fewer and leaves the rest of the axes whole, but
+/// neither language takes more, and only a SCALAR right argument stretches
+/// to whatever rank the list asks for.
+fn count_rank(verb: &str, counts: usize, rank: usize, span: Span) -> Error {
+    Error::new(
+        ErrorKind::Length,
+        format!("{counts} {verb} counts for a rank-{rank} argument"),
+        Some(span),
+    )
+}
+
+fn take(x: &Array, y: &Array, prototype_fill: bool, apl: bool, span: Span) -> Result<Array> {
     let counts = axis_counts(x, "take", span)?;
     // APL overtakes a nested array with the PROTOTYPE of its first item —
     // that item's shape, with a zero for every number and a blank for every
     // character. J fills with the empty box instead.
     let fill = if prototype_fill { prototype_of(y) } else { None };
     let promoted;
-    // A scalar right argument is treated as a one-item vector.
+    // A scalar right argument is treated as a one-item array of whatever
+    // rank the count list asks for: `1 2 {. 5` is a 1 by 2 table.
     let base = if y.rank() == 0 {
-        promoted = Array::new(vec![1], y.data.clone());
+        promoted = Array::new(vec![1; counts.len()], y.data.clone());
         &promoted
     } else {
         y
     };
-    if counts.len() > base.rank() {
-        return Err(Error::not_yet("take with more axes than the rank", span));
+    // J's take, unlike its drop, wants at least one count.
+    let wrong = if apl {
+        counts.len() != base.rank()
+    } else {
+        counts.len() > base.rank() || (counts.is_empty() && base.rank() > 0)
+    };
+    if wrong {
+        return Err(count_rank("take", counts.len(), base.rank(), span));
     }
     if let Some(run) = leading_run(base, &counts, false) {
         return Ok(run);
@@ -5282,17 +5547,19 @@ fn prototype_of(y: &Array) -> Option<Array> {
     Some(zeroed(first))
 }
 
-fn drop_(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn drop_(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
     let counts = axis_counts(x, "drop", span)?;
     let promoted;
     let base = if y.rank() == 0 {
-        promoted = Array::new(vec![1], y.data.clone());
+        promoted = Array::new(vec![1; counts.len()], y.data.clone());
         &promoted
     } else {
         y
     };
-    if counts.len() > base.rank() {
-        return Err(Error::not_yet("drop with more axes than the rank", span));
+    let wrong =
+        if apl { counts.len() != base.rank() } else { counts.len() > base.rank() };
+    if wrong {
+        return Err(count_rank("drop", counts.len(), base.rank(), span));
     }
     if let Some(run) = leading_run(base, &counts, true) {
         return Ok(run);
@@ -5327,8 +5594,11 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         // cells then agree among themselves.
         DyadOp::Scalar(op) => scalar_dyad(op, x, y, cfg, span),
         DyadOp::Reshape => reshape(x, y, cfg.agreement == Agreement::LeadingPrefix, span),
-        DyadOp::Take => take(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
-        DyadOp::Drop => drop_(x, y, span),
+        DyadOp::Take => {
+            let apl = cfg.rules.lang == crate::Lang::Apl;
+            take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, span)
+        }
+        DyadOp::Drop => drop_(x, y, cfg.rules.lang == crate::Lang::Apl, span),
         DyadOp::Right => Ok(y.clone()),
         DyadOp::Left => Ok(x.clone()),
         DyadOp::Rotate => rotate(x, y, span),
@@ -5344,7 +5614,16 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::MemberJ => Ok(member_j(x, y, tol)),
         DyadOp::MemberApl => Ok(member_apl(x, y, tol)),
         DyadOp::From => from_index(x, y, span),
-        DyadOp::Match => Ok(Array::scalar_bool(arrays_match(x, y, tol))),
+        DyadOp::Match => {
+            // APL tells an empty CHARACTER array from an empty numeric one
+            // — their prototypes differ — where J's `-:` reads only the
+            // shape once there is nothing left to compare.
+            let empties_differ = cfg.rules.lang == crate::Lang::Apl
+                && x.count() == 0
+                && y.count() == 0
+                && (x.dtype() == DType::Char) != (y.dtype() == DType::Char);
+            Ok(Array::scalar_bool(!empties_differ && arrays_match(x, y, tol)))
+        }
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
         DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules.complex_order, span),
         DyadOp::Copy => copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
@@ -5376,12 +5655,23 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, span),
         DyadOp::ExactForm => exact_form(x, y, span),
         DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
-        DyadOp::Less => Ok(set_less(x, y, tol)),
-        DyadOp::Union => union_items(x, y, tol, span),
-        DyadOp::Intersect => Ok(intersect_items(x, y, tol)),
+        DyadOp::Less => {
+            set_rank(cfg, "without", x, y, span)?;
+            Ok(set_less(x, y, tol))
+        }
+        DyadOp::Union => {
+            set_rank(cfg, "union", x, y, span)?;
+            union_items(x, y, tol, span)
+        }
+        DyadOp::Intersect => {
+            set_rank(cfg, "intersection", x, y, span)?;
+            Ok(intersect_items(x, y, tol))
+        }
         DyadOp::AnagramFrom => anagram_from(x, y, span),
         DyadOp::Permute => permute(x, y, span),
-        DyadOp::FindSeq => Ok(find_seq(x, y, tol)),
+        DyadOp::FindSeq => {
+            find_seq(x, y, tol, cfg.rules.lang == crate::Lang::Apl, span)
+        }
         DyadOp::UnicodeForm => unicode_form(x, y, span),
         DyadOp::PrimeMeta => prime_meta(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::PrimeExponents => prime_exponents(x, y, span).map(|r| carry_exact2(r, x, y)),
@@ -8833,6 +9123,13 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
     while c.len() > 1 && c[c.len() - 1] == cx::ZERO {
         c.pop();
     }
+    // The ZERO polynomial has no leading coefficient to divide by and every
+    // number for a root: J answers `0 ; ''`, a zero multiplier and no roots
+    // at all. Only a non-zero constant has no root form.
+    if c.iter().all(|&k| k == cx::ZERO) {
+        let pair = vec![Array::scalar_i64(0), Array::new(vec![0], Data::empty(DType::I64))];
+        return Ok(Array::new(vec![2], Data::Box(pair.into())));
+    }
     if c.len() < 2 {
         return Err(Error::domain("a polynomial's roots need a coefficient of x", span));
     }
@@ -9575,6 +9872,11 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
             ) {
                 return Some(v.clone());
             }
+            // `j. y` turns y a quarter turn about the origin; turning it
+            // back is a quarter turn the other way, which is `-@j.`.
+            if matches!(p.monad, MonadOp::Scalar(SM::Imaginary)) {
+                return Some(Verb::Atop(Box::new(swap("-")?), Box::new(swap("j.")?)));
+            }
             let by_monad: Option<&'static str> = match p.monad {
                 MonadOp::Scalar(SM::Exp) => Some("^."),
                 MonadOp::Scalar(SM::Ln) => Some("^"),
@@ -9718,6 +10020,20 @@ fn set_less(x: &Array, y: &Array, tol: Tol) -> Array {
     select_items(&xs, &keep)
 }
 
+/// APL's set functions read their arguments as lists and refuse anything
+/// deeper: `1 2∩2 3⍴⍳6` is a RANK ERROR where J's `-.` and `~.` would work
+/// on the items of a table.
+fn set_rank(cfg: EvalCfg, what: &str, x: &Array, y: &Array, span: Span) -> Result<()> {
+    if cfg.rules.lang == crate::Lang::Apl && (x.rank() > 1 || y.rank() > 1) {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("{what} takes vectors, not rank {} and rank {}", x.rank(), y.rank()),
+            Some(span),
+        ));
+    }
+    Ok(())
+}
+
 /// `x ∩ y`: x's items that y also has, in x's order and with x's repeats.
 fn intersect_items(x: &Array, y: &Array, tol: Tol) -> Array {
     let xs = as_list(x);
@@ -9746,22 +10062,52 @@ fn union_items(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
 }
 
 /// `x E. y` / `x ⍷ y`: 1 at each position of y where a copy of x begins.
-/// A pattern longer than y matches nowhere, and the answer is still shaped
-/// like y's items, as both references have it.
-fn find_seq(x: &Array, y: &Array, tol: Tol) -> Array {
-    let xs = as_list(x);
-    let ys = as_list(y);
-    let (k, n) = (xs.items(), ys.items());
+/// The answer is shaped like y, and the search runs over all of y's axes at
+/// once, so a table is looked for inside a table. A pattern that would run
+/// off an edge matches nowhere; an EMPTY pattern matches everywhere, being
+/// a run of no elements.
+///
+/// The two languages align the pattern differently: J wants the two ranks
+/// to agree, counting a scalar pattern as a one-element list, while APL
+/// pads the pattern with leading axes of one and takes any rank up to y's.
+fn find_seq(x: &Array, y: &Array, tol: Tol, apl: bool, span: Span) -> Result<Array> {
+    let (xr, yr) = (x.rank(), y.rank());
+    if apl && xr > yr {
+        // A pattern with more axes than the argument fits nowhere in it.
+        return Ok(Array::new(y.shape.clone(), Data::Bool(vec![0u8; y.count()].into())));
+    }
+    if !apl && xr.max(1) != yr {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("a rank-{xr} pattern in a rank-{yr} argument"),
+            Some(span),
+        ));
+    }
+    let mut pattern = vec![1usize; yr];
+    pattern[yr - xr..].copy_from_slice(&x.shape);
+    let n = y.count();
     let mut out = vec![0u8; n];
-    if k > 0 && k <= n {
-        for (start, slot) in out.iter_mut().enumerate().take(n - k + 1) {
-            let hit = (0..k).all(|d| {
-                arrays_match(&item_or_self(&xs, d), &item_or_self(&ys, start + d), tol)
-            });
+    let (xrm, yrm) = (x.to_row_major(), y.to_row_major());
+    let yst = strides(&y.shape);
+    let cells: usize = pattern.iter().product();
+    let mut at = vec![0usize; yr];
+    for slot in out.iter_mut() {
+        if (0..yr).all(|a| at[a] + pattern[a] <= y.shape[a]) {
+            let mut off = vec![0usize; yr];
+            let mut hit = true;
+            for k in 0..cells {
+                let i: usize = (0..yr).map(|a| (at[a] + off[a]) * yst[a]).sum();
+                if !arrays_match(&atom(&xrm, k), &atom(&yrm, i), tol) {
+                    hit = false;
+                    break;
+                }
+                odometer(&mut off, &pattern);
+            }
             *slot = hit as u8;
         }
+        odometer(&mut at, &y.shape);
     }
-    Array::new(vec![n], Data::Bool(out.into()))
+    Ok(Array::new(y.shape.clone(), Data::Bool(out.into())))
 }
 
 /// `+:` and `*:` dyadically, and APL's `⍱` and `⍲`: both arguments must
@@ -11228,10 +11574,17 @@ mod tests {
             .dyad(&Array::scalar_i64(3), &Array::from_chars(vec!['a']), &mut c, sp())
             .unwrap();
         assert_eq!(r.data, Data::Char(vec!['a', ' ', ' '].into()));
+        // More counts than the argument has axes: a length error, as both
+        // references answer. Only a scalar right argument stretches.
         let e = head_v()
             .dyad(&Array::from_i64(vec![1, 1]), &Array::from_i64(vec![1, 2]), &mut c, sp())
             .unwrap_err();
-        assert_eq!(e.kind, ErrorKind::NotYet);
+        assert_eq!(e.kind, ErrorKind::Length);
+        let r = head_v()
+            .dyad(&Array::from_i64(vec![1, 2]), &Array::scalar_i64(5), &mut c, sp())
+            .unwrap();
+        assert_eq!(r.shape, vec![1, 2]);
+        assert_eq!(ints(&r), vec![5, 0]);
     }
 
     #[test]

@@ -115,6 +115,40 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed APL operator precedence so a parenthesised function binds before
   an operator to its right, matching the reference implementation —
   `(+)/1 2 3` now evaluates to 6.
+- APL's scalar functions reach inside a nested argument, as APL2 has them:
+  `(1 2)(3 4)+1` is `(2 3)(4 5)`, and every arithmetic, comparison and
+  logical function pervades to the simple values at the bottom. They used
+  to refuse a nested argument outright.
+- APL's `⊥` over an EMPTY radix axis crashed the printer: `(⍳0)⊥1 2 3` now
+  answers 0, and the result's frame is `(¯1↓⍴x),1↓⍴y` whatever axis is
+  empty.
+- APL scalar extension between two frames of ONE cell kept the wrong one, so
+  `⍴(,5)+¯3` was empty where it is `1`. A rank-0 frame gives way to the
+  other side, and between two one-cell frames that are not scalars the
+  answer keeps the right one.
+- Take and drop count AXES. More counts than the argument has axes is a
+  length error in both languages, and only a scalar right argument stretches
+  to meet them (`1 2 {. 5` is a 1 by 2 table); APL wants exactly one count
+  per axis where J is content with fewer. A count of zero on an axis after
+  the first now empties that axis instead of leaving it alone.
+- APL's replication extends an argument of one item along the axis, as it
+  extends a scalar: `2 0 1/,5` is `5 5 5`.
+- APL's dyadic `∪`, `∩` and `~` take vectors, as GNU APL has them; a grade
+  needs an array rather than a scalar; and `≡` tells an empty character
+  array from an empty numeric one.
+- `E.`/`⍷` search every axis at once and answer in the shape of the right
+  argument, so a table is found inside a table. An empty pattern matches
+  everywhere.
+- J's LCM and GCD accept numbers that are not whole: the pair is read as the
+  decimals it prints as, so `1.23 +. 4.56` is `0.03` and `2.5 +. 5` is 2.5.
+- J's `#.` accumulates in the exact types when it is given them, so a
+  19-digit integer keeps every digit and `#. 1r2 1r3` is `4r3`.
+- J's `m&v` and `u&n` apply to the whole argument, as `m&v b. 0` reports:
+  `1 2&+ 1 2` is `2 4`, not a two-by-two table.
+- J's `p.` answers `0 ; ''` for the zero polynomial instead of refusing it,
+  and `j.` has an obverse, so `+/&.:j.` works.
+- An empty array inside a box keeps its shape on screen: `<0 3⍴0` draws a
+  cell three wide with no lines in it.
 
 ### Security
 

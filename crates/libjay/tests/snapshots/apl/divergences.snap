@@ -154,3 +154,56 @@
 ? a named derived function here, a SYNTAX ERROR there
 < 6
 > gnu: <error>
+= 'a'<'b'
+? no order on characters here, the collating order there
+< <error>
+> gnu: 1
+= 'a'≤'b'
+? no order on characters here, the collating order there
+< <error>
+> gnu: 1
+= 'a'<5
+? no order between a character and a number here, one there
+< <error>
+> gnu: 1
+= 5<'a'
+? no order between a character and a number here, one there
+< <error>
+> gnu: 0
+= (⍳0)⊥2 3⍴⍳6
+? zeros here, a DOMAIN ERROR on display there
+< 0 0 0
+> gnu: <error>
+= (2 0⍴0)⊥⍳0
+? zeros here, a DOMAIN ERROR on display there
+< 0 0
+> gnu: <error>
+= +/⍣0 ⍳3
+? a derived left operand here, a SYNTAX ERROR there
+< 1 2 3
+> gnu: <error>
+= ⌈¨⍣2 ⍳3
+? a derived left operand here, a SYNTAX ERROR there
+< 1 2 3
+> gnu: <error>
+= +/⍤1⊢2 3⍴⍳6
+? a derived left operand here, a SYNTAX ERROR there
+< 6 15
+> gnu: <error>
+= ⊣1 2 3
+? identity here, no result at all there
+< 1 2 3
+> gnu:
+= ⊣'abc'
+? identity here, no result at all there
+< abc
+> gnu:
+= ⊣2 3⍴⍳6
+? identity here, no result at all there
+< 1 2 3
+< 4 5 6
+> gnu:
+= ⍬≡0⍴⊂⍬
+? prototypes of empty nested arrays are not compared here
+< 1
+> gnu: 0

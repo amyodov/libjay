@@ -2448,18 +2448,18 @@ fn compose(u: Frag, v: Frag, infinite: bool, span: Span) -> Result<Frag> {
     if u.is_noun() && v.is_noun() {
         return Err(Error::not_yet("noun-operand conjunctions", span));
     }
-    // A bond applies its verb dyadically, so it takes the rank of the side
-    // the argument arrives on.
+    // A bond applies its verb dyadically to the WHOLE argument: `m&v y` is
+    // `m v y`, and its rank is infinite whatever v's is — `1 2&+ b. 0`
+    // reports `_ _ _`, and `1 2&+ i. 2 2` agrees row by row rather than
+    // pairing the noun with every atom.
     if u.is_noun() {
         let m = bond_noun(&u, span)?;
         let g = as_verb(v)?.0;
-        let rank = g.ranks()[2];
-        return verb(Verb::Rank(Box::new(Verb::BondLeft(m, Box::new(g))), [rank; 3]));
+        return verb(Verb::BondLeft(m, Box::new(g)));
     }
     let f = as_verb(u)?.0;
     let n = bond_noun(&v, span)?;
-    let rank = f.ranks()[1];
-    verb(Verb::Rank(Box::new(Verb::BondRight(Box::new(f), n)), [rank; 3]))
+    verb(Verb::BondRight(Box::new(f), n))
 }
 
 /// The largest comparison tolerance `!.` accepts, as J's does: 2^-34.
@@ -3351,30 +3351,21 @@ mod tests {
 
     #[test]
     fn a_noun_operand_bonds_the_conjunction() {
-        // The bond takes the rank of the side its argument arrives on.
+        // `m&v y` is `m v y` whole. The bond's own rank is infinite — J's
+        // `1 2&+ b. 0` reports `_ _ _` — and the verb inside it applies its
+        // own ranks to the pair.
         let (v, _) = monad_of(&one("1 & + y"));
         match &v {
-            Verb::Rank(inner, ranks) => {
-                assert_eq!(*ranks, [0, 0, 0]);
-                match &**inner {
-                    Verb::BondLeft(a, g) => {
-                        assert_eq!(a.as_i64_slice(), Some(&[1i64][..]));
-                        assert_eq!(prim_of(g).name, "+");
-                    }
-                    other => panic!("expected a left bond, got {other:?}"),
-                }
+            Verb::BondLeft(a, g) => {
+                assert_eq!(a.as_i64_slice(), Some(&[1i64][..]));
+                assert_eq!(prim_of(g).name, "+");
             }
-            other => panic!("expected a ranked bond, got {other:?}"),
+            other => panic!("expected a left bond, got {other:?}"),
         }
+        assert_eq!(v.ranks(), [crate::verb::RANK_INF; 3]);
         let (v, _) = monad_of(&one("{. & 2 y"));
-        match &v {
-            // `{.` has left rank 1, so `{.&2` reads its argument by rows.
-            Verb::Rank(inner, ranks) => {
-                assert_eq!(*ranks, [1, 1, 1]);
-                assert!(matches!(**inner, Verb::BondRight(..)), "got {inner:?}");
-            }
-            other => panic!("expected a ranked bond, got {other:?}"),
-        }
+        assert!(matches!(v, Verb::BondRight(..)), "got {v:?}");
+        assert_eq!(v.ranks(), [crate::verb::RANK_INF; 3]);
     }
 
     #[test]

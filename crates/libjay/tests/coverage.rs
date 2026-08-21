@@ -342,11 +342,17 @@ fn lcm_and_gcd() {
     assert_eq!(val(Lang::Apl, "12∨18"), Array::scalar_i64(6));
     assert_eq!(val(Lang::Apl, "(1 2 3>2)∧1 2 3>1"), bits(&[3], &[0, 0, 1]));
     assert_eq!(err(Lang::Apl, "∧1 2").kind, ErrorKind::Domain);
-    // Integral floats compute; anything else waits.
+    // Integral floats compute as integers do, and a fraction computes as
+    // the decimal it is printed as: 1.23 and 4.56 are 123 and 456
+    // hundredths, so three hundredths divides both.
     assert_eq!(val(Lang::J, "4.0 *. 6.0"), f64s(&[], &[12.0]));
-    let e = err(Lang::J, "2.5 +. 5");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("LCM/GCD on floats"), "{}", e.msg);
+    assert_eq!(val(Lang::J, "2.5 +. 5"), f64s(&[], &[2.5]));
+    assert_eq!(val(Lang::J, "1.5 +. 2.5"), f64s(&[], &[0.5]));
+    assert_eq!(val(Lang::J, "1.5 *. 2.5"), f64s(&[], &[7.5]));
+    assert_eq!(val(Lang::J, "0.1 +. 0.2"), f64s(&[], &[0.1]));
+    assert_eq!(val(Lang::J, "1.23 +. 4.56"), f64s(&[], &[0.03]));
+    // An infinite operand has no answer, and J reports one too.
+    assert_eq!(err(Lang::J, "_ +. 2").kind, ErrorKind::Domain);
 }
 
 // --- logarithm and root -------------------------------------------------

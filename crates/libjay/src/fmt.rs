@@ -118,7 +118,7 @@ fn laid_out(shape: &[usize], texts: Vec<String>, text_layout: bool) -> String {
 /// them separate planes exactly as they do for numbers.
 fn format_boxed(a: &Array, opts: &FmtOpts) -> String {
     let boxes = a.as_boxes().expect("boxed data");
-    let blocks: Vec<Vec<String>> = boxes.iter().map(|b| block(b, opts)).collect();
+    let blocks: Vec<(Vec<String>, usize)> = boxes.iter().map(|b| block(b, opts)).collect();
     let rank = a.rank();
     let (nrows, ncols) = match rank {
         0 => (1, 1),
@@ -127,9 +127,8 @@ fn format_boxed(a: &Array, opts: &FmtOpts) -> String {
     };
     // Column widths span the whole array, as they do for numeric columns.
     let mut widths = vec![0usize; ncols];
-    for (i, b) in blocks.iter().enumerate() {
-        let w = b.iter().map(|l| width(l)).max().unwrap_or(0);
-        widths[i % ncols] = widths[i % ncols].max(w);
+    for (i, (_, w)) in blocks.iter().enumerate() {
+        widths[i % ncols] = widths[i % ncols].max(*w);
     }
     let frame: &[usize] = if rank > 2 { &a.shape[..rank - 2] } else { &[] };
     let planes: usize = frame.iter().product();
@@ -151,20 +150,33 @@ fn format_boxed(a: &Array, opts: &FmtOpts) -> String {
     out
 }
 
-/// One box's contents as display lines. An empty array shows as a single
-/// empty line, which is what gives `<''` a cell of width zero rather than
-/// no cell at all.
-fn block(a: &Array, opts: &FmtOpts) -> Vec<String> {
+/// One box's contents as display lines, and the width they need.
+///
+/// An empty array has no text at all, and its SHAPE decides the cell:
+/// every axis but the last counts a row, and the last one is how wide the
+/// cell draws. So `<''` is one empty line inside a zero-wide cell, `<0 3$0`
+/// is a cell three wide with no lines in it, and `<2 0$0` is two empty
+/// lines. The width has to travel beside the lines because a cell with no
+/// lines still has one.
+fn block(a: &Array, opts: &FmtOpts) -> (Vec<String>, usize) {
+    if a.count() == 0 && a.rank() > 0 {
+        let rank = a.rank();
+        let rows: usize = a.shape[..rank - 1].iter().product();
+        let w = a.shape[rank - 1];
+        return (vec![" ".repeat(w); rows], w);
+    }
     let text = format_array(a, opts);
     if text.is_empty() {
-        return vec![String::new()];
+        return (vec![String::new()], 0);
     }
-    text.lines().map(str::to_string).collect()
+    let lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let w = lines.iter().map(|l| width(l)).max().unwrap_or(0);
+    (lines, w)
 }
 
 fn push_boxed_plane(
     out: &mut String,
-    blocks: &[Vec<String>],
+    blocks: &[(Vec<String>, usize)],
     nrows: usize,
     ncols: usize,
     widths: &[usize],
@@ -189,11 +201,11 @@ fn push_boxed_plane(
         let row = &blocks[r * ncols..(r + 1) * ncols];
         // A row is as tall as its tallest cell; the others are padded
         // underneath, which is where J puts the blanks.
-        let height = row.iter().map(Vec::len).max().unwrap_or(1);
+        let height = row.iter().map(|(lines, _)| lines.len()).max().unwrap_or(1);
         for k in 0..height {
             let mut line = String::new();
             line.push(if fence { '|' } else { ' ' });
-            for (c, cell) in row.iter().enumerate() {
+            for (c, (cell, _)) in row.iter().enumerate() {
                 if !fence && c > 0 {
                     line.push(' ');
                 }
