@@ -28,13 +28,13 @@ num-integer = "0.1"
 num-traits = "0.2"
 # Blocking on wgpu's futures: libjay's surface is synchronous, and the
 # device calls are the only asynchronous thing behind it.
-pollster = "0.4"
+pollster = "1.0"
 rayon = "1.12.0"
 # The device backend. Always compiled in — one artifact per platform — and
 # dormant when the machine offers no adapter. Only the native backends and
 # the WGSL front end are wanted; shaders are generated and compiled at run
 # time, so nothing here runs at build time.
-wgpu = { version = "26", default-features = false, features = [
+wgpu = { version = "30", default-features = false, features = [
     "std",
     "wgsl",
     "metal",
@@ -45,8 +45,8 @@ wgpu = { version = "26", default-features = false, features = [
 [dev-dependencies]
 # Validating generated WGSL without an adapter: the f64 path cannot be run
 # on a Metal machine, but it can be parsed and type-checked here.
-naga = { version = "26", features = ["wgsl-in"] }
+naga = { version = "30", features = ["wgsl-in"] }
 # The corpus/snapshot plumbing the differential suites replay, shared with
 # the `jay-corpus` recorder in libjay-devtools.
 libjay-testkit = { path = "../libjay-testkit" }
-rstest = "0.25"
+rstest = "0.26"
