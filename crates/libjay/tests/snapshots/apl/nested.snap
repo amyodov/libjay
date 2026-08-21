@@ -1,134 +1,139 @@
-# libjay reference snapshot: APL (GNU APL) — corpus/apl/nested.txt.
+# libjay reference snapshot: APL — corpus/apl/nested.txt.
 # Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
-# the live reference interpreter. Do not edit by hand; the workflow is in
+# the live reference interpreters. Do not edit by hand; the workflow is in
 # docs/testing.md.
 #
 # One record per expression, in corpus order:
-#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
-#   `> TEXT`  one line of the reference's answer.
-#   `< TEXT`  one line of libjay's answer (divergence records only).
-#   `? TEXT`  why the two are expected to differ (divergence records only).
-#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
-#   `# TEXT`  a comment.
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
 # A side whose single line is `<error>` refused the sentence. An empty answer
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
 = ⍴⊂1 2 3
->
+> gnu:
 = ≡⊂1 2 3
-> 2
+> gnu: 2
 = ⊂5
-> 5
+> gnu: 5
 = ≡⊂5
-> 0
+> gnu: 0
 = ≡⊂⊂1 2
-> 3
+> gnu: 3
 = ⊃'ab' 'cd'
-> ab
-> cd
+> gnu: ab
+> gnu: cd
 = ⍴⊃'ab' 'cd'
-> 2 2
+> gnu: 2 2
 = ⊃3
-> 3
+> gnu: 3
 = ⊃⊂1 2
-> 1 2
+> gnu: 1 2
 = ⊃(1 2)(3 4 5)
-> 1 2 0
-> 3 4 5
+> gnu: 1 2 0
+> gnu: 3 4 5
 = ⍴⊃(1 2)(3 4 5)
-> 2 3
+> gnu: 2 3
 = ⍴⊃⍳0
-> 0
+> gnu: 0
 = ⊃'abc'
-> abc
+> gnu: abc
 = 2×¨1 2 3
-> 2 4 6
+> gnu: 2 4 6
 = ≢¨'ab' 'cde'
-> 2 3
+> gnu: 2 3
 = +/¨(1 2)(3 4)
-> 3 7
+> gnu: 3 7
 = ∊⍴¨'ab' 'cde'
-> 2 3
+> gnu: 2 3
 = ∊1+¨(1 2)(3 4)
-> 2 3 4 5
+> gnu: 2 3 4 5
 = ∊(1 2)+¨(1 2)(3 4)
-> 2 3 5 6
+> gnu: 2 3 5 6
 = ⍴(1 2)(3 4)
-> 2
+> gnu: 2
 = ≡(1 2)(3 4)
-> 2
+> gnu: 2
 = ⍴'ab' 'cd'
-> 2
+> gnu: 2
 = ≡'ab' 'cd'
-> 2
+> gnu: 2
 = ⍴1 2 3
-> 3
+> gnu: 3
 = ≡1 2 3
-> 1
+> gnu: 1
 = ⍴1 (2 3)
-> 2
+> gnu: 2
 = ⍴1 2 (3 4)
-> 3
+> gnu: 3
 = ⍴'ab' 1 2
-> 3
+> gnu: 3
 = ∊(1 2)(3 4 5)
-> 1 2 3 4 5
+> gnu: 1 2 3 4 5
 = ∊'ab' 'cd'
-> abcd
+> gnu: abcd
 = ∊2 3⍴⍳6
-> 1 2 3 4 5 6
+> gnu: 1 2 3 4 5 6
 = ⍴∊5
-> 1
+> gnu: 1
 = ∊(1 2)((3 4)(5 6))
-> 1 2 3 4 5 6
+> gnu: 1 2 3 4 5 6
 = ≡1
-> 0
+> gnu: 0
 = ≡'abc'
-> 1
+> gnu: 1
 = ≡1(2(3 4))
-> 3
+> gnu: 3
 = ↑(1 2)(3 4)
-> 1 2
+> gnu: 1 2
 = ↑1 2 3
-> 1
+> gnu: 1
 = ⍴↑1 2 3
->
+> gnu:
 = ↑2 3⍴⍳6
-> 1
+> gnu: 1
 = ↑⍳0
-> 0
+> gnu: 0
 = ⍴2 2⍴(1 2)(3 4)(5 6)(7 8)
-> 2 2
+> gnu: 2 2
 = ≡2 2⍴(1 2)(3 4)(5 6)(7 8)
-> 2
+> gnu: 2
 = ∊2 2⍴(1 2)(3 4)(5 6)(7 8)
-> 1 2 3 4 5 6 7 8
+> gnu: 1 2 3 4 5 6 7 8
 = ⍴∪(1 2)(3 4)(1 2)
-> 2
+> gnu: 2
 = ∊∪(1 2)(3 4)(1 2)
-> 1 2 3 4
+> gnu: 1 2 3 4
 = ⍴,⊂1 2
-> 1
+> gnu: 1
 = ∊⌽(1 2)(3 4)
-> 3 4 1 2
+> gnu: 3 4 1 2
 = ⍴2↑(1 2)(3 4)(5 6)
-> 2
+> gnu: 2
 = ∊2↑(1 2)(3 4)(5 6)
-> 1 2 3 4
+> gnu: 1 2 3 4
 = ⍴1↓(1 2)(3 4)(5 6)
-> 2
+> gnu: 2
 = (1 2)(3 4)⍳⊂3 4
-> 2
+> gnu: 2
 = (1 2)(3 4)⍳(3 4)
-> 3 3
+> gnu: 3 3
 = (1 2)∊(1 2)(3 4)
-> 0 0
+> gnu: 0 0
 = 'ab' 'cd'∊'ab' 'xy'
-> 1 0
+> gnu: 1 0
 = ≢(1 2)(3 4)(5 6)
-> 3
+> gnu: 3
 = ⍴(⊂1 2),⊂3 4
-> 2
+> gnu: 2
 = ∊(⊂1 2),⊂3 4
-> 1 2 3 4
+> gnu: 1 2 3 4

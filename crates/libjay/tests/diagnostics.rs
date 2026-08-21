@@ -192,9 +192,8 @@ fn j_name_and_valence_errors_name_the_word() {
 // --- J: the gaps --------------------------------------------------------
 
 const J_PROMISES: &[Case] = &[
-    j("e. 1 2", ErrorKind::NotYet, "e. 1 2", &["raze-in"]),
-    j("{ 1 2 3", ErrorKind::NotYet, "{ 1 2 3", &["catalogue"]),
-    j("1 2 |: i. 2 3", ErrorKind::NotYet, "1 2 |: i. 2 3", &["dyadic transpose"]),
+    j("_2 <;.3 i. 5", ErrorKind::NotYet, "_2 <;.3 i. 5", &["movement row"]),
+    j("* b. _1", ErrorKind::NotYet, "* b. _1", &["obverse"]),
     j("1 \". '2'", ErrorKind::NotYet, "1 \". '2'", &["numbers from text"]),
     j("+ . * i. 2 2", ErrorKind::NotYet, "+ . *", &["inner product"]),
     j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign 9!:18"]),
@@ -386,8 +385,7 @@ fn apl_name_errors_name_the_name() {
 // --- APL: the gaps ------------------------------------------------------
 
 const APL_PROMISES: &[Case] = &[
-    apl("2⍉3 3⍴⍳9", ErrorKind::NotYet, "2⍉3 3⍴⍳9", &["dyadic transpose"]),
-    apl("1 2 3⍒4", ErrorKind::NotYet, "1 2 3⍒4", &["dyadic grade"]),
+    apl("1(+⍠2)2", ErrorKind::NotYet, "⍠", &["variant"]),
     apl("3+F←+/", ErrorKind::NotYet, "F←+/", &["naming a function inside"]),
     apl("(A+×)4", ErrorKind::NotYet, "A", &["computed value"]),
     apl("⍕[1]⍳3", ErrorKind::NotYet, "[1]", &["axis specification for ⍕"]),

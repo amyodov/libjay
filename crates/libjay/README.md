@@ -22,6 +22,10 @@ let program = compile(Lang::J, "(+/ % #) {x}", &Dialect::default())?;
 
 let x = Array::new(vec![5], Data::F64(vec![3.0, 1.0, 4.0, 1.0, 5.0].into()));
 let value = program.run(&[x], &mut |s| print!("{s}"))?;   // Some(2.8) — the mean
+
+let mut lines = ["3 1 4"].into_iter().map(str::to_string);
+let echoed = jay::compile(Lang::Apl, "⍞", &Dialect::default())?
+    .run_io(&[], &mut |s| print!("{s}"), &mut || lines.next())?;   // reads one line
 ```
 
 `{name}` holes become parameters. `program.params` reports them in the order

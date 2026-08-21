@@ -16,6 +16,12 @@ uvx libjay timeseries.ijs         # a moving-window Bollinger z-score
 uvx libjay boxes.ijs              # a boxed list of strings, opened and razed
 uvx libjay defs.ijs               # an explicit verb, recursive, with if.
 uvx libjay dfn.apl                # a dfn, with the ⍺← default-argument idiom
+uvx libjay trains.apl             # a fork, an atop, a noun tine, a named tacit fn
+uvx libjay modifiers.ijs          # explicit adverb/conjunction, {{ }}, a named adverb
+uvx libjay exact.ijs              # extended integers and exact rationals
+uvx libjay complex.ijs            # sqrt of a negative, polar form
+printf 'hello\n' | uvx libjay examples/input.apl   # ⍞ reads a line, ⍞← echoes it
+printf 'hello\n' | uvx libjay examples/input.ijs   # 1!:1 ]1 / 1!:2 ]2, same idea
 uv run --with libjay --no-project python quickstart.py          # the Python API end to end
 ```
 
@@ -104,4 +110,47 @@ no left argument, the default 1:
 3 1 4
 left argument 10:
 30 10 40
+```
+
+### `trains.apl`
+
+```
+3.875
+¯9
+9.75
+3.875
+```
+
+### `modifiers.ijs`
+
+```
+16
+4
+18
+10
+```
+
+### `exact.ijs`
+
+```
+265252859812191058636308480000000
+5r6
+15511210043330985984000000
+```
+
+### `complex.ijs`
+
+```
+0j2
+2 1.5708
+0.707107j0.707107
+```
+
+### `input.apl` / `input.ijs`
+
+Run as `printf 'hello\n' | uvx libjay examples/input.apl` (piped input, since
+`⍞`/`1!:1 ]1` read a line from standard input); both print the same line:
+
+```
+you said: hello
 ```

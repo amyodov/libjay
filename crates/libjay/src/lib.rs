@@ -14,6 +14,7 @@ mod explain;
 pub mod fmt;
 pub mod frontend;
 pub mod fuse;
+pub mod gerund;
 pub mod ir;
 pub mod limits;
 mod par;
@@ -21,7 +22,7 @@ mod rng;
 pub mod simd;
 pub mod verb;
 
-pub use array::{Array, Buf, Data, Owner};
+pub use array::{joins_made, layouts_made, Array, Buf, Data, Layout, Owner};
 pub use complex::Cx;
 pub use device::{Device, Precision};
 pub use dtype::DType;

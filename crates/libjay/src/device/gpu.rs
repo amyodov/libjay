@@ -26,10 +26,13 @@ fn instance() -> Option<&'static wgpu::Instance> {
             if wgpu::Instance::enabled_backend_features().is_empty() {
                 return None;
             }
-            // `from_env_or_default` honours wgpu's own `WGPU_BACKEND` and
-            // friends, which is how a host — or a test that wants the
-            // no-adapter path — restricts what is looked for.
-            Some(wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default()))
+            // The `_from_env` constructor honours wgpu's own `WGPU_BACKEND`
+            // and friends, which is how a host — or a test that wants the
+            // no-adapter path — restricts what is looked for. libjay never
+            // presents, so the instance carries no display handle.
+            Some(wgpu::Instance::new(
+                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+            ))
         })
         .as_ref()
 }
@@ -57,7 +60,10 @@ fn describe(a: &wgpu::Adapter) -> DeviceInfo {
 /// Every adapter the platform reports.
 pub(super) fn enumerate() -> Vec<DeviceInfo> {
     let Some(inst) = instance() else { return Vec::new() };
-    inst.enumerate_adapters(wgpu::Backends::all()).iter().map(describe).collect()
+    pollster::block_on(inst.enumerate_adapters(wgpu::Backends::all()))
+        .iter()
+        .map(describe)
+        .collect()
 }
 
 /// The machine's preferred adapter, opened once and shared.
@@ -73,6 +79,10 @@ fn open() -> Option<Arc<Gpu>> {
         power_preference: wgpu::PowerPreference::HighPerformance,
         force_fallback_adapter: false,
         compatible_surface: None,
+        // Bucketing rounds the reported limits down to hide which adapter
+        // this is. libjay is not a browser and wants the real numbers: the
+        // device call below asks for the adapter's own limits.
+        apply_limit_buckets: false,
     }))
     .ok()?;
     let info = describe(&adapter);
@@ -93,7 +103,7 @@ fn open() -> Option<Arc<Gpu>> {
     .ok()?;
     // An error that escapes an error scope would otherwise reach wgpu's
     // default handler, which panics. Every failure here is a fallback.
-    device.on_uncaptured_error(Box::new(|e| {
+    device.on_uncaptured_error(Arc::new(|e| {
         eprintln!("libjay: the device reported an error: {e}");
     }));
     Some(Arc::new(Gpu {
@@ -118,9 +128,9 @@ struct Gpu {
 impl Gpu {
     /// Run `f` with validation errors collected rather than raised.
     fn scoped<T>(&self, f: impl FnOnce() -> T) -> Result<T, DeviceError> {
-        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let v = f();
-        match pollster::block_on(self.device.pop_error_scope()) {
+        match pollster::block_on(scope.pop()) {
             None => Ok(v),
             Some(e) => Err(DeviceError(e.to_string())),
         }
@@ -186,8 +196,10 @@ impl Backend for Gpu {
             })
         })?;
         {
-            let mut view = buffer.get_mapped_range_mut(..);
-            super::codegen::write_bytes(&mut view[..bytes], values, p);
+            let mut view = buffer
+                .get_mapped_range_mut(..)
+                .map_err(|e| DeviceError(format!("mapping an input buffer: {e}")))?;
+            view.slice(..bytes).write_iter(super::codegen::byte_iter(values, p));
         }
         buffer.unmap();
         Ok(Handle(Arc::new(buffer)))
@@ -280,14 +292,17 @@ impl Gpu {
             *flag.lock().expect("map result") = Some(r);
         });
         self.device
-            .poll(wgpu::PollType::Wait)
+            .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| DeviceError(format!("waiting for the device: {e}")))?;
         match done.lock().expect("map result").take() {
             Some(Ok(())) => {}
             Some(Err(e)) => return Err(DeviceError(format!("reading back: {e}"))),
             None => return Err(DeviceError("the device never finished".into())),
         }
-        let out = staging.get_mapped_range(..).to_vec();
+        let out = staging
+            .get_mapped_range(..)
+            .map_err(|e| DeviceError(format!("mapping the readback buffer: {e}")))?
+            .to_vec();
         staging.unmap();
         Ok(out)
     }

@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::array::{Array, Data};
+use crate::array::{Array, Buf, Data, Layout};
 use crate::complex::{self as cx, Cx};
 use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
@@ -208,10 +208,8 @@ impl Env {
     }
 
     pub fn get(&self, name: &str) -> Option<Array> {
-        if let Some(frame) = self.frames.last() {
-            if let Some(v) = frame.get(name) {
-                return Some(v.clone());
-            }
+        if let Some(frame) = self.frames.last() && let Some(v) = frame.get(name) {
+            return Some(v.clone());
         }
         self.globals.get(name).cloned()
     }
@@ -505,6 +503,16 @@ pub enum MonadOp {
     Ravel,
     /// Reverse the axes (J `|:`, APL `⍉`).
     TransposeAxes,
+    /// `{ y`: catalogue — one element from each item of y, in every
+    /// combination, each combination boxed.
+    Catalogue,
+    /// J `5!:1`: the atomic representation of the entity a boxed name
+    /// stands for, boxed. A noun stands for itself, so its representation
+    /// is the pair `('0'; <value)`.
+    AtomicRep,
+    /// `e. y`: raze-in — for every element of y, which items of the raze
+    /// of y it holds.
+    RazeIn,
     /// First item (J `{.`).
     Head,
     /// All but the first item (J `}.`).
@@ -684,6 +692,21 @@ pub enum DyadOp {
     /// axis of the result, which is what makes one operation serve J's
     /// per-atom `#:` (right rank 0) and APL's `⊤` (right rank infinite).
     Encode,
+    /// `x ⍋ y` and `x ⍒ y`: the items of y graded by where each of their
+    /// characters sits in the collating array x.
+    CollateGrade { down: bool, origin: i64 },
+    /// `x |: y`: y with the named axes moved to the end. A boxed x groups
+    /// axes to be run together, which is the diagonal.
+    TransposeJ,
+    /// `x ⍉ y`: x says, for each axis of y, which axis of the result it
+    /// becomes; a repeated destination runs those axes together.
+    TransposeApl,
+    /// `x ⊥ y` on arguments of rank 2 and above: the inner product `+.×`
+    /// over the LAST axis of x and the LEADING axis of y.
+    DecodeApl,
+    /// `x ⊤ y` where x has rank 2 or more: x's LEADING axis is the radix,
+    /// and its remaining axes frame the result along with y's.
+    EncodeApl,
     /// `x ,: y`: the two arguments as the items of a new leading axis.
     Laminate,
     /// J `;`: link — `(<x)` before y, which is taken as it is when it is
@@ -694,7 +717,7 @@ pub enum DyadOp {
     /// J `x I. y` / APL `x ⍸ y`: which interval of the ascending x each cell
     /// of y falls in. The field is what the language adds to the count of
     /// items below it: nothing in J, `⎕IO - 1` in APL.
-    IntervalIndex { offset: i64 },
+    IntervalIndex { offset: i64, closed: bool },
     /// J `x i: y`: where each cell of y LAST sits among the items of x.
     IndexOfLast { origin: i64 },
     /// J `x %. y` / APL `x ⌹ y`: the least-squares solution of `y a = x`.
@@ -808,12 +831,17 @@ pub enum WindowKind {
 }
 
 /// How many times a [`Verb::PowerN`] applies its verb.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Power {
     /// Exactly `n` applications; 0 is the identity.
     Times(u64),
     /// Iterate until a result matches the one before it (J `u^:_`).
     Converge,
+    /// A list of counts: one answer per count, framed (`u^:(0 1 2)`). A
+    /// boxed count is spelled this way too — `u^:(<n)` is `u^:(i.n)`.
+    Each(Vec<u64>),
+    /// Every result on the way to convergence, framed (`u^:a:`).
+    ConvergeTrace,
 }
 
 /// Iterations `Power::Converge` allows before giving up.
@@ -933,6 +961,16 @@ pub enum Verb {
     /// right argument and the left one arrives untouched, which is what
     /// separates it from `⍥` (this crate's [`Verb::Compose`]).
     Beside(Box<Verb>, Box<Verb>),
+    /// APL `f⌺w` (Dyalog's stencil): f applied to the window of `w` cells
+    /// centred on each cell of y in turn, the edges filled. One size per
+    /// leading axis; the axes past them travel with the cell.
+    Stencil(Box<Verb>, Vec<i64>),
+    /// J `` m`:n `` for the two forms that are not a train: `0` applies
+    /// every verb of the gerund to the arguments and frames the answers,
+    /// `3` inserts the verbs between the items of y, cycling through them
+    /// left to right and folding right to left. `` `:6 `` is a train and is
+    /// built at parse time, so it never reaches here.
+    Evoke(Vec<Verb>, i64),
 }
 
 impl Verb {
@@ -980,6 +1018,8 @@ impl Verb {
             Verb::Commute(v) => format!("{}~", v.name()),
             Verb::PowerN(v, Power::Converge) => format!("{}^:_", v.name()),
             Verb::PowerN(v, Power::Times(n)) => format!("{}^:{n}", v.name()),
+            Verb::PowerN(v, Power::Each(_)) => format!("{}^:n", v.name()),
+            Verb::PowerN(v, Power::ConvergeTrace) => format!("{}^:a:", v.name()),
             Verb::Fork(f, g, h) => format!("({} {} {})", f.name(), g.name(), h.name()),
             Verb::NounFork(_, g, h) => format!("(n {} {})", g.name(), h.name()),
             Verb::Hook(f, g) => format!("({} {})", f.name(), g.name()),
@@ -1021,6 +1061,14 @@ impl Verb {
             Verb::Agenda(vs, w) => {
                 let names: Vec<String> = vs.iter().map(Verb::name).collect();
                 format!("({}@.{})", names.join("`"), w.name())
+            }
+            Verb::Evoke(vs, n) => {
+                let names: Vec<String> = vs.iter().map(Verb::name).collect();
+                format!("({}`:{n})", names.join("`"))
+            }
+            Verb::Stencil(u, w) => {
+                let sizes: Vec<String> = w.iter().map(i64::to_string).collect();
+                format!("({}⌺{})", u.name(), sizes.join(" "))
             }
         }
     }
@@ -1093,6 +1141,8 @@ impl Verb {
             Verb::Agenda(vs, w) => {
                 w.uses_tolerance() || vs.iter().any(Verb::uses_tolerance)
             }
+            Verb::Evoke(vs, _) => vs.iter().any(Verb::uses_tolerance),
+            Verb::Stencil(u, _) => u.uses_tolerance(),
             Verb::Fork(f, g, h) => {
                 f.uses_tolerance() || g.uses_tolerance() || h.uses_tolerance()
             }
@@ -1142,6 +1192,8 @@ impl Verb {
             // definition called any other way does.
             Verb::UserDerived { .. } => false,
             Verb::Agenda(vs, w) => w.is_pure() && vs.iter().all(Verb::is_pure),
+            Verb::Evoke(vs, _) => vs.iter().all(Verb::is_pure),
+            Verb::Stencil(u, _) => u.is_pure(),
             Verb::Amend(_) | Verb::ShiftFill(_) | Verb::Characteristics(_) => true,
             Verb::AmendVerb(v) | Verb::Level { u: v, .. } => v.is_pure(),
             // A memo answers from its cache, so the verb inside it must be
@@ -1157,8 +1209,25 @@ impl Verb {
     }
 
     /// Full monadic application including rank/frame machinery.
+    ///
+    /// This is one of the two places a column-major argument is dealt with:
+    /// the verbs that read one natively get it as it lies, and every other
+    /// verb gets the rows it assumes, materialised once here.
     pub fn monad(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let _depth = Nesting::enter(span)?;
+        if y.is_row_major() {
+            return self.monad_rows(y, ctx, span);
+        }
+        match self.monad_columns(y, ctx, span) {
+            Some(r) => r,
+            None => self.monad_rows(&y.to_row_major(), ctx, span),
+        }
+    }
+
+    /// Monadic application to an argument whose buffer is row-major, which
+    /// is what everything below assumes.
+    fn monad_rows(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+        debug_assert!(y.is_row_major());
         match self {
             Verb::Prim(p) => {
                 // Scalar verbs have cell rank 0: the cells are the elements,
@@ -1207,7 +1276,7 @@ impl Verb {
                 runs(v, y, *kind == WindowKind::Suffix, ctx, span)
             }
             Verb::Commute(v) => v.dyad(y, y, ctx, span),
-            Verb::PowerN(v, p) => power(v, *p, None, y, ctx, span),
+            Verb::PowerN(v, p) => power(v, p.clone(), None, y, ctx, span),
             Verb::Fork(f, g, h) => {
                 let l = f.monad(y, ctx, span)?;
                 let r = h.monad(y, ctx, span)?;
@@ -1295,12 +1364,87 @@ impl Verb {
             Verb::Agenda(vs, w) => {
                 agenda_pick(vs, w, None, y, ctx, span)?.monad(y, ctx, span)
             }
+            Verb::Evoke(vs, n) => evoke(vs, *n, None, y, ctx, span),
+            Verb::Stencil(u, w) => stencil(u, w, y, ctx, span),
+        }
+    }
+
+    /// Monadic application to a column-major argument, for the verbs that
+    /// read one where it lies. None means this verb is not one of them and
+    /// the caller must materialise the rows first.
+    ///
+    /// Every arm here either reads the buffer in an order it chooses (the
+    /// folds), reads it elementwise (order cannot matter), or answers from
+    /// the shape alone. Nothing else may be added without the same argument
+    /// holding for it.
+    fn monad_columns(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Option<Result<Array>> {
+        debug_assert!(!y.is_row_major());
+        match self {
+            Verb::Prim(p) => match p.monad {
+                // Elementwise: every element is read and written where it
+                // lies, so the answer carries the argument's own layout.
+                MonadOp::Scalar(op) => Some(scalar_monad(op, y, ctx.cfg.tol, span)),
+                // The shape is the logical one whatever the buffer does.
+                MonadOp::ShapeOf | MonadOp::Tally => Some(monad_op(p, y, ctx, span)),
+                // Reversing the axes of a column-major buffer is reading the
+                // same buffer as a row-major one of the reversed shape: the
+                // transpose that costs nothing.
+                MonadOp::TransposeAxes => Some(Ok(transpose_axes(y))),
+                _ => None,
+            },
+            // `u/ y` folds the leading axis, and in this layout the leading
+            // axis is what each contiguous run holds.
+            Verb::Reduce(v) => reduce_columns(v, y).map(Ok),
+            // `u/"1 y` folds each row across the columns, which is one
+            // elementwise pass per column and no transpose at all.
+            Verb::Rank(v, r) => {
+                if y.rank() != effective_rank(r[0], y.rank()) + 1 {
+                    return None;
+                }
+                reduce_rows_columns(v, y).map(Ok)
+            }
+            _ => None,
         }
     }
 
     /// Full dyadic application including rank/frame/agreement machinery.
+    ///
+    /// The other place a column-major argument is dealt with: an
+    /// elementwise verb over arguments that agree exactly reads the buffers
+    /// as they lie and keeps the layout, and everything else is given rows.
     pub fn dyad(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let _depth = Nesting::enter(span)?;
+        if x.is_row_major() && y.is_row_major() {
+            return self.dyad_rows(x, y, ctx, span);
+        }
+        if let Some(layout) = self.elementwise_layout(x, y) {
+            return Ok(self.dyad_rows(x, y, ctx, span)?.with_layout(layout));
+        }
+        self.dyad_rows(&x.to_row_major(), &y.to_row_major(), ctx, span)
+    }
+
+    /// The layout a dyadic result keeps when its arguments are not both
+    /// row-major: an elementwise primitive over a scalar and an array, or
+    /// over two arrays of one shape and one layout, computes each element
+    /// from the elements at its own index and nothing else.
+    fn elementwise_layout(&self, x: &Array, y: &Array) -> Option<Layout> {
+        let Verb::Prim(p) = self else { return None };
+        if !matches!(p.dyad, DyadOp::Scalar(_)) {
+            return None;
+        }
+        if x.rank() == 0 {
+            return Some(y.layout());
+        }
+        if y.rank() == 0 {
+            return Some(x.layout());
+        }
+        (x.shape == y.shape && x.layout() == y.layout()).then(|| x.layout())
+    }
+
+    /// Dyadic application proper: reached with row-major arguments, or with
+    /// arguments whose layout the verb above has established it is
+    /// indifferent to.
+    fn dyad_rows(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         match self {
             Verb::Prim(_) | Verb::Rank(_, _) | Verb::Each(..) => {
                 self.dyad_ranked(x, y, ctx, span)
@@ -1314,7 +1458,7 @@ impl Verb {
                 Err(Error::not_yet("dyadic scan (x f\\ y)", span))
             }
             Verb::Commute(v) => v.dyad(y, x, ctx, span),
-            Verb::PowerN(v, p) => power(v, *p, Some(x), y, ctx, span),
+            Verb::PowerN(v, p) => power(v, p.clone(), Some(x), y, ctx, span),
             // `x u/ y` is the table: every cell of x against every cell of y.
             Verb::Reduce(v) => table(v, x, y, ctx, span),
             Verb::Fork(f, g, h) => {
@@ -1392,6 +1536,10 @@ impl Verb {
             }
             Verb::Agenda(vs, w) => {
                 agenda_pick(vs, w, Some(x), y, ctx, span)?.dyad(x, y, ctx, span)
+            }
+            Verb::Evoke(vs, n) => evoke(vs, *n, Some(x), y, ctx, span),
+            Verb::Stencil(..) => {
+                Err(Error::domain("f⌺w has no dyadic meaning", span))
             }
             // J gives a bond one valence only.
             Verb::BondLeft(..) | Verb::BondRight(..) => {
@@ -1681,7 +1829,7 @@ fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
     if cells.is_empty() {
         // Nothing to take a cell shape from. J runs the verb on a fill cell
         // to learn the shape; we yield an empty array of the frame's shape.
-        return Ok(Array { shape: frame.to_vec(), data: Data::empty(DType::I64) });
+        return Ok(Array::new(frame.to_vec(), Data::empty(DType::I64)));
     }
     let mut dt = cells[0].dtype();
     for c in &cells[1..] {
@@ -1764,7 +1912,8 @@ fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
 /// Element `i` of `a` as a rank-0 array — the cell an operation of rank 0
 /// sees.
 fn atom(a: &Array, i: usize) -> Array {
-    Array { shape: Vec::new(), data: a.data.slice(i, i + 1) }
+    debug_assert!(a.is_row_major(), "an atom out of a column-major buffer");
+    Array::new(Vec::new(), a.data.slice(i, i + 1))
 }
 
 /// `< y` / `⊂ y`.
@@ -1790,7 +1939,7 @@ fn first(y: &Array) -> Array {
     if y.count() == 0 {
         let mut d = Data::empty(y.dtype());
         d.push_fill();
-        return open_cell(&Array { shape: Vec::new(), data: d });
+        return open_cell(&Array::new(Vec::new(), d));
     }
     open_cell(&atom(y, 0))
 }
@@ -2923,10 +3072,10 @@ fn compare_data(
         });
         return Ok(Data::Bool(out.into()));
     }
-    if DType::promote(dx, dy).is_some_and(DType::is_exact) {
-        if let Some(d) = exact_compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n) {
-            return Ok(d);
-        }
+    if DType::promote(dx, dy).is_some_and(DType::is_exact)
+        && let Some(d) = exact_compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n)
+    {
+        return Ok(d);
     }
     if dx == DType::Complex || dy == DType::Complex {
         if !equality {
@@ -3036,10 +3185,10 @@ fn lcm_gcd_data(
         // The Gaussian-integer versions, which is what both references give.
         return complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
     }
-    if t.is_exact() {
-        if let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)? {
-            return Ok(d);
-        }
+    if t.is_exact()
+        && let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)?
+    {
+        return Ok(d);
     }
     let both_bool = x.dtype() == DType::Bool && y.dtype() == DType::Bool;
     let float = t == DType::F64;
@@ -3248,7 +3397,7 @@ fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
                 _ => r.signum(),
             })
             .collect();
-        return Some(Array { shape, data: Data::Ext(out.into()) });
+        return Some(Array::new(shape, Data::Ext(out.into())).with_layout(y.layout()));
     }
     let two = Rat::from_int(Ext::from(2));
     let mut out = Vec::with_capacity(v.len());
@@ -3273,7 +3422,7 @@ fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
         };
         out.push(value);
     }
-    Some(Array { shape, data: exact_data(y.dtype(), out) })
+    Some(Array::new(shape, exact_data(y.dtype(), out)).with_layout(y.layout()))
 }
 
 /// `x: y`: the argument in the exact types. Whole values become extended
@@ -3301,7 +3450,7 @@ fn to_exact(y: &Array, span: Span) -> Result<Array> {
             ));
         }
     };
-    Ok(Array { shape: y.shape.clone(), data })
+    Ok(Array::new(y.shape.clone(), data).with_layout(y.layout()))
 }
 
 /// `_1 x: y`: an exact value back as a machine number — an extended integer
@@ -3310,10 +3459,12 @@ fn from_exact(y: &Array) -> Array {
     let shape = y.shape.clone();
     match &y.data {
         Data::Ext(v) => match v.iter().map(exact::ext_to_i64).collect::<Option<Vec<i64>>>() {
-            Some(out) => Array { shape, data: Data::I64(out.into()) },
-            None => Array { shape, data: Data::F64(v.iter().map(exact::ext_to_f64).collect()) },
+            Some(out) => Array::new(shape, Data::I64(out.into())).with_layout(y.layout()),
+            None => Array::new(shape, Data::F64(v.iter().map(exact::ext_to_f64).collect()))
+                .with_layout(y.layout()),
         },
-        Data::Rat(v) => Array { shape, data: Data::F64(v.iter().map(Rat::to_f64).collect()) },
+        Data::Rat(v) => Array::new(shape, Data::F64(v.iter().map(Rat::to_f64).collect()))
+            .with_layout(y.layout()),
         _ => y.clone(),
     }
 }
@@ -3403,12 +3554,12 @@ fn scalar_dyad_data(
         return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
     }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
-    if t.is_exact() {
-        if let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)? {
-            return Ok(d);
-        }
-        // No exact answer: widen, exactly as an integer overflow does.
+    if t.is_exact()
+        && let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)?
+    {
+        return Ok(d);
     }
+    // No exact answer above: widen, exactly as an integer overflow does.
     if t == DType::I64 && !matches!(op, DivJ | DivApl | Log | Root | Circle) {
         // Binomial reaches this path: a whole pair has a whole answer, and
         // the i64 step declines (None) exactly where J widens to float.
@@ -3425,10 +3576,8 @@ fn scalar_dyad_data(
         || pass_leaves_reals(op, x, xoff, xdiv, y, yoff, ydiv, n)
     {
         let data = complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span)?;
-        if op == Circle && circle_reads_a_part(x, xoff, xdiv, n) {
-            if let Data::Complex(v) = &data {
-                return Ok(Data::F64(v.iter().map(|z| z[0]).collect()));
-            }
+        if op == Circle && circle_reads_a_part(x, xoff, xdiv, n) && let Data::Complex(v) = &data {
+            return Ok(Data::F64(v.iter().map(|z| z[0]).collect()));
         }
         return Ok(data);
     }
@@ -3531,7 +3680,7 @@ fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
             Data::Complex(par::map(v, |&z| step(z)).into())
         }
     };
-    Ok(Array { shape: y.shape.clone(), data })
+    Ok(Array::new(y.shape.clone(), data).with_layout(y.layout()))
 }
 
 /// Elementwise monadic application to a whole array.
@@ -3546,12 +3695,10 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
     if d.dtype() == DType::Complex || monad_leaves_reals(op, d) {
         return complex_monad(op, y, span);
     }
-    if d.dtype().is_exact() {
-        if let Some(a) = exact_monad(op, y) {
-            return Ok(a);
-        }
-        // No exact answer: the float pass below takes over.
+    if d.dtype().is_exact() && let Some(a) = exact_monad(op, y) {
+        return Ok(a);
     }
+    // No exact answer above: the float pass below takes over.
     // The float-only operations borrow float data as it lies; anything else
     // is widened once into `tmp` first.
     let mut tmp = Vec::new();
@@ -3724,29 +3871,28 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
             }
         }
     };
-    Ok(Array { shape: y.shape.clone(), data })
+    Ok(Array::new(y.shape.clone(), data).with_layout(y.layout()))
 }
 
 // -------------------------------------------------- structural operations
 
 /// Reverse the axes.
+///
+/// Nothing moves: reversing every axis is exactly what reading the same
+/// buffer in the other layout does, so this is a reversed shape, the same
+/// buffer, and the flag flipped. Whatever reads the result either knows
+/// both layouts or is handed the rows, materialised once and only if some
+/// verb really needs them.
 fn transpose_axes(y: &Array) -> Array {
     if y.rank() < 2 {
         return y.clone();
     }
     let out_shape: Vec<usize> = y.shape.iter().rev().copied().collect();
-    let src_strides = strides(&y.shape);
-    let r = y.rank();
-    let n = y.count();
-    let mut data = Data::empty(y.dtype());
-    let mut coord = vec![0usize; r];
-    for _ in 0..n {
-        // Output coordinate k indexes source axis r-1-k.
-        let idx: usize = (0..r).map(|k| coord[k] * src_strides[r - 1 - k]).sum();
-        push_elem(&mut data, &y.data, idx);
-        odometer(&mut coord, &out_shape);
-    }
-    Array::new(out_shape, data)
+    let flipped = match y.layout() {
+        Layout::RowMajor => Layout::ColMajor,
+        Layout::ColMajor => Layout::RowMajor,
+    };
+    Array::new(out_shape, y.data.clone()).with_layout(flipped)
 }
 
 /// J `i.`: an ascending sequence laid out in shape |y|, running backwards
@@ -4031,6 +4177,140 @@ fn grade_order(y: &Array, down: bool) -> Vec<usize> {
     idx
 }
 
+/// `x ⍋ y` and `x ⍒ y`: every character of y is keyed by where it first
+/// occurs in the collating array x — the coordinate read with the LAST axis
+/// most significant, and one past the end for a character x does not hold —
+/// and the items of y are ordered by those keys read left to right.
+fn collate_grade(x: &Array, y: &Array, down: bool, origin: i64, span: Span) -> Result<Array> {
+    let chars_of = |a: &Array| -> Result<Vec<char>> {
+        match a.row_major_data() {
+            Data::Char(v) => Ok(v.as_slice().to_vec()),
+            _ => Err(Error::domain("a collating grade takes characters", span)),
+        }
+    };
+    let (xs, ys) = (chars_of(x)?, chars_of(y)?);
+    let xshape = if x.rank() == 0 { vec![1] } else { x.shape.clone() };
+    let width = xshape.len();
+    // The key of a character: its first coordinate in x, reversed so the
+    // last axis decides first. A character x does not hold sorts after
+    // every one it does.
+    let absent: Vec<usize> = xshape.iter().rev().copied().collect();
+    let mut keys: std::collections::HashMap<char, Vec<usize>> =
+        std::collections::HashMap::new();
+    let xst = strides(&xshape);
+    for (i, &c) in xs.iter().enumerate() {
+        keys.entry(c).or_insert_with(|| {
+            (0..width).map(|a| (i / xst[a]) % xshape[a]).rev().collect()
+        });
+    }
+    let key_of = |c: char| keys.get(&c).unwrap_or(&absent).clone();
+    let n = if y.rank() == 0 { 1 } else { y.items() };
+    let m = if n == 0 { 0 } else { ys.len() / n };
+    let item_keys: Vec<Vec<usize>> = (0..n)
+        .map(|i| ys[i * m..(i + 1) * m].iter().flat_map(|&c| key_of(c)).collect())
+        .collect();
+    let mut idx: Vec<usize> = (0..n).collect();
+    if down {
+        idx.sort_by(|&a, &b| item_keys[b].cmp(&item_keys[a]));
+    } else {
+        idx.sort_by(|&a, &b| item_keys[a].cmp(&item_keys[b]));
+    }
+    Ok(Array::from_i64(idx.into_iter().map(|i| origin + i as i64).collect()))
+}
+
+/// `5!:1 <'name'`: the atomic representation of what the name stands for.
+/// A verb answers with the representation of the verb, a value with the
+/// noun pair; either way the answer is boxed, as the reference has it.
+fn atomic_rep(y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<Array> {
+    let name = match y.as_boxes() {
+        Some([b]) if y.rank() == 0 => crate::gerund::text_of(b),
+        _ => None,
+    };
+    let Some(name) = name else {
+        return Err(Error::domain("5!:1 takes a boxed name", span));
+    };
+    if let Some(v) = ctx.env.verb(&name) {
+        let ar = crate::gerund::verb_ar(v).ok_or_else(|| {
+            Error::not_yet(
+                format!("the atomic representation of {}", v.name()),
+                span,
+            )
+        })?;
+        return Ok(Array::boxed(ar.to_array()));
+    }
+    match ctx.env.get(&name) {
+        Some(a) => Ok(Array::boxed(crate::gerund::Ar::Noun(a).to_array())),
+        None => Err(Error::new(
+            ErrorKind::Value,
+            format!("undefined name: {name}"),
+            Some(span),
+        )),
+    }
+}
+
+/// `{ y`: the catalogue — every way of taking one element from each item
+/// of y. The shapes of the items, opened, make the result's shape, and each
+/// element of it is the boxed vector of one choice from each.
+fn catalogue(y: &Array, span: Span) -> Result<Array> {
+    let items = if y.rank() == 0 { vec![y.clone()] } else { y.cells(1) };
+    // A boxed item stands for its contents; a simple one for itself.
+    let opened: Vec<Array> = items
+        .iter()
+        .map(|it| match it.as_boxes() {
+            Some(bs) if it.rank() == 0 => bs[0].clone(),
+            _ => it.clone(),
+        })
+        .collect();
+    let mut shape: Vec<usize> = Vec::new();
+    for o in &opened {
+        shape.extend_from_slice(&o.shape);
+    }
+    let total: usize = shape.iter().product();
+    let mut out = Vec::with_capacity(total);
+    let mut coord = vec![0usize; shape.len()];
+    for _ in 0..total {
+        let mut at = 0usize;
+        let mut picks = Vec::with_capacity(opened.len());
+        for o in &opened {
+            let st = strides(&o.shape);
+            let idx: usize = (0..o.rank()).map(|a| coord[at + a] * st[a]).sum();
+            at += o.rank();
+            let mut data = Data::empty(o.dtype());
+            push_elem(&mut data, o.row_major_data(), idx);
+            picks.push(Array::new(vec![], data));
+        }
+        out.push(assemble(&[picks.len()], picks, span)?);
+        odometer(&mut coord, &shape);
+    }
+    Ok(Array::new(shape, Data::Box(out.into())))
+}
+
+/// `e. y`: for every element of y, which items of the raze of y it holds —
+/// so the answer is shaped `($y), #items of the raze`.
+fn raze_in(y: &Array, tol: Tol, span: Span) -> Result<Array> {
+    let all = raze(y, span)?;
+    let n = if all.rank() == 0 { 1 } else { all.items() };
+    let elements: Vec<Array> = (0..y.count())
+        .map(|i| {
+            let mut data = Data::empty(y.dtype());
+            push_elem(&mut data, y.row_major_data(), i);
+            let one = Array::new(vec![], data);
+            match one.as_boxes() {
+                Some(bs) => bs[0].clone(),
+                None => one,
+            }
+        })
+        .collect();
+    let mut out = Vec::with_capacity(elements.len() * n);
+    for e in &elements {
+        let row = member_j(&all, e, tol);
+        out.extend_from_slice(row.to_i64_vec().unwrap_or_default().as_slice());
+    }
+    let mut shape = y.shape.clone();
+    shape.push(n);
+    Ok(Array::new(shape, Data::Bool(out.into_iter().map(|v| v as u8).collect::<Vec<u8>>().into())))
+}
+
 /// Select items of `y` in the given order.
 fn select_items(y: &Array, order: &[usize]) -> Array {
     let m = y.item_size();
@@ -4090,6 +4370,11 @@ fn grade_select(
 pub(crate) fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
     if x.shape != y.shape {
         return false;
+    }
+    // The comparison is element against element in buffer order, so two
+    // values laid out differently are compared in the one order.
+    if x.layout() != y.layout() {
+        return arrays_match(&x.to_row_major(), &y.to_row_major(), tol);
     }
     // Two empty arrays of the same shape match whatever their types are,
     // which is what both references answer for `'' -: i. 0`.
@@ -4163,10 +4448,19 @@ fn member_apl(x: &Array, y: &Array, tol: Tol) -> Array {
         // A box's elements are whole arrays and an exact value has no cheap
         // key, so both are compared by content; a box never equals a plain
         // number or character.
+        // `⊂5` is `5` in APL, so a box holding a simple scalar compares as
+        // that scalar: `1 2 3 ∊ (1 2)(3)` finds the 3.
+        let opened = |a: &Array, i: usize| -> Array {
+            let e = atom(a, i);
+            match e.as_boxes() {
+                Some([b]) if b.rank() == 0 && b.dtype() != DType::Box => b.clone(),
+                _ => e,
+            }
+        };
         let out: Vec<u8> = (0..n)
             .map(|i| {
-                let e = atom(x, i);
-                u8::from((0..y.count()).any(|j| arrays_match(&e, &atom(y, j), tol)))
+                let e = opened(x, i);
+                u8::from((0..y.count()).any(|j| arrays_match(&e, &opened(y, j), tol)))
             })
             .collect();
         return Array::new(x.shape.clone(), Data::Bool(out.into()));
@@ -4266,7 +4560,7 @@ fn cat_promote(a: &Array, other: &Array, rank: usize, axis: usize, span: Span) -
 }
 
 /// Catenate along the leading or the last axis.
-fn catenate(
+pub(crate) fn catenate(
     x: &Array,
     y: &Array,
     leading: bool,
@@ -4517,6 +4811,76 @@ fn decode(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(vec![], narrow(vec![acc], integral)))
 }
 
+/// `x ⊥ y` on arguments of rank 2 and above: the inner product `+.×` over
+/// the LAST axis of x and the LEADING axis of y. A scalar x is the radix
+/// for every digit, as it is for a vector argument.
+fn decode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let digits = digits_of(y, "decode", span)?;
+    let radices = digits_of(x, "decode", span)?;
+    // The digit axis is y's leading one; a scalar y has one digit.
+    let k = if y.rank() == 0 { 1 } else { y.shape[0] };
+    let n = if k == 0 { 0 } else { digits.len() / k.max(1) };
+    let (rows, width) = match x.rank() {
+        0 => (1usize, 0usize),
+        r => (radices.len() / x.shape[r - 1].max(1), x.shape[r - 1]),
+    };
+    if width != 0 && width != k {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{width} radices for {k} digits"),
+            Some(span),
+        ));
+    }
+    let mut out = vec![0.0f64; rows * n];
+    for i in 0..rows {
+        for j in 0..n {
+            let mut acc = 0.0f64;
+            for d in 0..k {
+                let b = if width == 0 { radices[0] } else { radices[i * width + d] };
+                acc = acc * b + digits[d * n + j];
+            }
+            out[i * n + j] = acc;
+        }
+    }
+    let mut shape: Vec<usize> = if x.rank() == 0 {
+        Vec::new()
+    } else {
+        x.shape[..x.rank() - 1].to_vec()
+    };
+    if y.rank() > 0 {
+        shape.extend_from_slice(&y.shape[1..]);
+    }
+    let integral = is_integral(y) && is_integral(x);
+    Ok(Array::new(shape, narrow(out, integral)))
+}
+
+/// `x ⊤ y` where x has rank 2 or more: x's LEADING axis is the radix and
+/// its remaining axes frame the answer, so the result is shaped `(⍴x), ⍴y`.
+fn encode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let radices = digits_of(x, "encode", span)?;
+    let values = digits_of(y, "encode", span)?;
+    let k = if x.rank() == 0 { 1 } else { x.shape[0] };
+    let frames = if k == 0 { 0 } else { radices.len() / k };
+    let n = values.len();
+    let mut out = vec![0.0f64; k * frames * n];
+    let mut radix = vec![0.0f64; k];
+    let mut cell = vec![0.0f64; k];
+    for p in 0..frames {
+        for (i, r) in radix.iter_mut().enumerate() {
+            *r = radices[i * frames + p];
+        }
+        for (j, &v) in values.iter().enumerate() {
+            encode_one(&radix, v, &mut cell);
+            for i in 0..k {
+                out[(i * frames + p) * n + j] = cell[i];
+            }
+        }
+    }
+    let mut shape = x.shape.clone();
+    shape.extend_from_slice(&y.shape);
+    Ok(Array::new(shape, narrow(out, is_integral(x) && is_integral(y))))
+}
+
 /// The number of binary digits `#: y` uses: enough for the largest magnitude
 /// in the whole argument, and never fewer than one.
 fn bit_width(values: &[f64], span: Span) -> Result<usize> {
@@ -4702,6 +5066,9 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Enclose(rule) => Ok(enclose(y, rule)),
         MonadOp::Open => Ok(open_cell(y)),
         MonadOp::Raze => raze(y, span),
+        MonadOp::Catalogue => catalogue(y, span),
+        MonadOp::AtomicRep => atomic_rep(y, ctx, span),
+        MonadOp::RazeIn => raze_in(y, ctx.cfg.tol, span),
         MonadOp::First => Ok(first(y)),
         MonadOp::Enlist => enlist(y, span),
         MonadOp::Depth => Ok(Array::scalar_i64(depth(y))),
@@ -4981,12 +5348,19 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
         DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules.complex_order, span),
         DyadOp::Copy => copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
+        DyadOp::CollateGrade { down, origin } => collate_grade(x, y, down, origin, span),
+        DyadOp::TransposeJ => transpose_j(x, y, span),
+        DyadOp::TransposeApl => transpose_apl(x, y, cfg.rules.origin, span),
+        DyadOp::DecodeApl => decode_apl(x, y, span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::EncodeApl => encode_apl(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Decode => decode(Some(x), y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Encode => encode(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, span),
         DyadOp::Link => link(x, y, span),
         DyadOp::Strand => strand(x, y, span),
-        DyadOp::IntervalIndex { offset } => interval_index(x, y, offset, tol, span),
+        DyadOp::IntervalIndex { offset, closed } => {
+            interval_index(x, y, offset, closed, tol, span)
+        }
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
         DyadOp::MatrixDivide => matrix_divide(x, y, span),
         DyadOp::PartitionEnclose => partition_enclose(x, y, span),
@@ -5488,6 +5862,285 @@ fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> 
     }
 }
 
+// ------------------------------------------------- folds over the columns
+//
+// A column-major buffer holds each column of the matrix contiguously, so
+// the two reductions a table is asked for are both cheaper here than they
+// are over rows: the leading-axis fold is one flat fold per column, and the
+// row fold is one pass that reads the columns side by side. Neither
+// regroups anything the row-major path does not already regroup, and
+// neither materialises the transpose.
+
+/// The `runs` runs of `len` elements a buffer holds, as slices.
+///
+/// A buffer that arrived as parts — one per column of an imported table —
+/// hands its parts back, so reading a table column by column never makes
+/// the join and never copies. Any other buffer is cut into runs, which for
+/// an owned or borrowed one is free as well.
+fn run_slices<T: Clone>(b: &Buf<T>, runs: usize, len: usize) -> Vec<&[T]> {
+    if let Some(parts) = b.parts() && parts.len() == runs && parts.iter().all(|p| p.len() == len) {
+        return parts.iter().map(Buf::as_slice).collect();
+    }
+    let flat = b.as_slice();
+    (0..runs).map(|c| &flat[c * len..(c + 1) * len]).collect()
+}
+
+/// Fold each of `runs` contiguous runs of `len` elements into one value,
+/// right to left.
+///
+/// A long run takes the flat fold, which keeps several accumulators in
+/// flight and splits itself across threads; a short one is a run like any
+/// other and takes the run fold, which parallelises across the runs
+/// instead. Both fold in the insert's own order, up to the regrouping an
+/// associative float fold is already allowed (§5.9).
+fn fold_columns<T, F>(cols: &[&[T]], len: usize, assoc: bool, step: F) -> Option<Vec<T>>
+where
+    T: Copy + Default + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    // A column long enough to split takes the threads for itself, one
+    // column at a time; a shorter one is folded whole and the split is
+    // across the columns. Either way each column is folded by the flat
+    // fold, which keeps its lanes and its contracted regrouping.
+    if par::worth_it(len) {
+        let mut out = Vec::with_capacity(cols.len());
+        for c in cols {
+            out.push(fold_flat(c, len, assoc, &step)?);
+        }
+        return Some(out);
+    }
+    let (out, ok) = par::fill_wide(cols.len(), cols.len() * len, |start, part: &mut [T]| {
+        let mut ok = true;
+        for (k, slot) in part.iter_mut().enumerate() {
+            match fold_flat(cols[start + k], len, assoc, &step) {
+                Some(v) => *slot = v,
+                None => ok = false,
+            }
+        }
+        ok
+    });
+    ok.then_some(out)
+}
+
+/// Fold every column of a column-major buffer, one value per column.
+fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Option<Data> {
+    use ScalarDyad::*;
+    if !matches!(op, Add | Sub | Mul | Min | Max) {
+        return None;
+    }
+    let assoc = is_associative(op);
+    macro_rules! by {
+        ($v:expr, $add:expr, $sub:expr, $mul:expr, $min:expr, $max:expr) => {{
+            let cols = run_slices($v, runs, len);
+            match op {
+                Add => fold_columns(&cols, len, assoc, $add),
+                Sub => fold_columns(&cols, len, assoc, $sub),
+                Mul => fold_columns(&cols, len, assoc, $mul),
+                Min => fold_columns(&cols, len, assoc, $min),
+                Max => fold_columns(&cols, len, assoc, $max),
+                _ => None,
+            }?
+        }};
+    }
+    match d {
+        Data::F64(v) => Some(Data::F64(
+            by!(
+                v,
+                |a: f64, b: f64| (a + b, false),
+                |a: f64, b: f64| (a - b, false),
+                |a: f64, b: f64| (a * b, false),
+                |a: f64, b: f64| (a.min(b), false),
+                |a: f64, b: f64| (a.max(b), false)
+            )
+            .into(),
+        )),
+        Data::I64(v) => Some(Data::I64(
+            by!(
+                v,
+                i64::overflowing_add,
+                i64::overflowing_sub,
+                i64::overflowing_mul,
+                |a: i64, b: i64| (a.min(b), false),
+                |a: i64, b: i64| (a.max(b), false)
+            )
+            .into(),
+        )),
+        Data::Complex(v) => {
+            if !matches!(op, Add | Sub | Mul) {
+                return None;
+            }
+            Some(Data::Complex(
+                by!(
+                    v,
+                    |a: Cx, b: Cx| (cx::add(a, b), false),
+                    |a: Cx, b: Cx| (cx::sub(a, b), false),
+                    |a: Cx, b: Cx| (cx::mul(a, b), false),
+                    |_: Cx, _: Cx| unreachable!("refused above"),
+                    |_: Cx, _: Cx| unreachable!("refused above")
+                )
+                .into(),
+            ))
+        }
+        // Booleans reduce as integers, which is what promotion says the
+        // general path would produce; widen once and fold. The widening is
+        // done column by column, so a table that arrived as columns is not
+        // joined in order to widen it.
+        Data::Bool(v) => {
+            let widened: Vec<Buf<i64>> = run_slices(v, runs, len)
+                .iter()
+                .map(|c| Buf::from_vec(par::map(c, |&b| b as i64)))
+                .collect();
+            fold_columns_data(op, &Data::I64(Buf::join(widened)), runs, len)
+        }
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+    }
+}
+
+/// `u/ y` over a column-major argument: the leading axis is what each
+/// contiguous run holds, so every run folds where it lies and no transpose
+/// is made. None means the verb, the type or the shape is not one this
+/// covers.
+fn reduce_columns(v: &Verb, y: &Array) -> Option<Array> {
+    let Verb::Prim(p) = v else { return None };
+    let DyadOp::Scalar(op) = p.dyad else { return None };
+    if !y.dtype().is_numeric() {
+        return None;
+    }
+    let n = y.shape[0];
+    let m: usize = y.shape[1..].iter().product();
+    // An empty leading axis reduces to the operation's identity, which the
+    // general path knows and this one does not.
+    if n == 0 || m == 0 {
+        return None;
+    }
+    let shape = y.shape[1..].to_vec();
+    // One item reduces to that item, type and all: the insert never runs.
+    // The trailing axes lie column-major, which is what the result keeps.
+    if n == 1 {
+        return Some(Array::col_major(shape, y.data.clone()));
+    }
+    let data = fold_columns_data(op, &y.data, m, n)?;
+    Some(Array::col_major(shape, data))
+}
+
+/// Fold the rows of a column-major matrix: one pass that reads the columns
+/// side by side, each row folded right to left in the insert's own order.
+fn fold_across<T, F>(cols: &[&[T]], rows: usize, step: F) -> Option<Vec<T>>
+where
+    T: Copy + Default + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    let (last, rest) = cols.split_last()?;
+    let (out, ok) = par::fill(rows, |start, part: &mut [T]| {
+        let mut over = false;
+        for (k, slot) in part.iter_mut().enumerate() {
+            let i = start + k;
+            let mut acc = last[i];
+            for c in rest.iter().rev() {
+                let (r, o) = step(c[i], acc);
+                acc = r;
+                over |= o;
+            }
+            *slot = acc;
+        }
+        !over
+    });
+    ok.then_some(out)
+}
+
+fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Option<Data> {
+    use ScalarDyad::*;
+    if !matches!(op, Add | Sub | Mul | Min | Max) {
+        return None;
+    }
+    macro_rules! by {
+        ($v:expr, $add:expr, $sub:expr, $mul:expr, $min:expr, $max:expr) => {{
+            let parts = run_slices($v, cols, rows);
+            match op {
+                Add => fold_across(&parts, rows, $add),
+                Sub => fold_across(&parts, rows, $sub),
+                Mul => fold_across(&parts, rows, $mul),
+                Min => fold_across(&parts, rows, $min),
+                Max => fold_across(&parts, rows, $max),
+                _ => None,
+            }?
+        }};
+    }
+    match d {
+        Data::F64(v) => Some(Data::F64(
+            by!(
+                v,
+                |a: f64, b: f64| (a + b, false),
+                |a: f64, b: f64| (a - b, false),
+                |a: f64, b: f64| (a * b, false),
+                |a: f64, b: f64| (a.min(b), false),
+                |a: f64, b: f64| (a.max(b), false)
+            )
+            .into(),
+        )),
+        Data::I64(v) => Some(Data::I64(
+            by!(
+                v,
+                i64::overflowing_add,
+                i64::overflowing_sub,
+                i64::overflowing_mul,
+                |a: i64, b: i64| (a.min(b), false),
+                |a: i64, b: i64| (a.max(b), false)
+            )
+            .into(),
+        )),
+        Data::Complex(v) => {
+            if !matches!(op, Add | Sub | Mul) {
+                return None;
+            }
+            Some(Data::Complex(
+                by!(
+                    v,
+                    |a: Cx, b: Cx| (cx::add(a, b), false),
+                    |a: Cx, b: Cx| (cx::sub(a, b), false),
+                    |a: Cx, b: Cx| (cx::mul(a, b), false),
+                    |_: Cx, _: Cx| unreachable!("refused above"),
+                    |_: Cx, _: Cx| unreachable!("refused above")
+                )
+                .into(),
+            ))
+        }
+        Data::Bool(v) => {
+            let widened: Vec<Buf<i64>> = run_slices(v, cols, rows)
+                .iter()
+                .map(|c| Buf::from_vec(par::map(c, |&b| b as i64)))
+                .collect();
+            fold_across_data(op, &Data::I64(Buf::join(widened)), rows, cols)
+        }
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+    }
+}
+
+/// `u/"1 y` over a column-major matrix: every row folded across the
+/// columns, without the transpose the row-major path would need first.
+fn reduce_rows_columns(u: &Verb, y: &Array) -> Option<Array> {
+    let Verb::Reduce(inner) = u else { return None };
+    let Verb::Prim(p) = &**inner else { return None };
+    let DyadOp::Scalar(op) = p.dyad else { return None };
+    // Only a matrix: at higher rank the cells this folds are not the runs
+    // the buffer holds.
+    if y.rank() != 2 || !y.dtype().is_numeric() {
+        return None;
+    }
+    let (rows, cols) = (y.shape[0], y.shape[1]);
+    // An empty cell reduces to the operation's identity, which the general
+    // path knows and this one does not.
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    if cols == 1 {
+        // A cell of one element reduces to that element, type and all.
+        return Some(Array::new(vec![rows], y.data.clone()));
+    }
+    let data = fold_across_data(op, &y.data, rows, cols)?;
+    Some(Array::new(vec![rows], data))
+}
+
 /// `u/"1 y` and its like: a reduction whose cells are vectors, answered by
 /// folding every cell out of the one buffer.
 ///
@@ -5552,26 +6205,22 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
             )),
         };
     }
-    if y.dtype().is_numeric() {
-        if let Verb::Prim(p) = v {
-            if let DyadOp::Scalar(op) = p.dyad {
-                // The typed fold covers the arithmetic reductions and runs
-                // in parallel wherever the fold order allows; it declines
-                // (integer overflow, an operation with its own type rules)
-                // by returning None, and then the general fold below runs.
-                if let Some(d) = reduce_typed(op, &y.data, n, m) {
-                    return Ok(Array::new(cell_shape, d));
-                }
-                // Fold over the raw buffer, one whole item per step, without
-                // materialising item arrays.
-                let mut acc = y.data.slice((n - 1) * m, n * m);
-                for i in (0..n - 1).rev() {
-                    acc =
-                        scalar_dyad_data(op, &y.data, i * m, 1, &acc, 0, 1, m, ctx.cfg.tol, span)?;
-                }
-                return Ok(Array::new(cell_shape, acc));
-            }
+    if y.dtype().is_numeric() && let Verb::Prim(p) = v && let DyadOp::Scalar(op) = p.dyad {
+        // The typed fold covers the arithmetic reductions and runs
+        // in parallel wherever the fold order allows; it declines
+        // (integer overflow, an operation with its own type rules)
+        // by returning None, and then the general fold below runs.
+        if let Some(d) = reduce_typed(op, y.row_major_data(), n, m) {
+            return Ok(Array::new(cell_shape, d));
         }
+        // Fold over the raw buffer, one whole item per step, without
+        // materialising item arrays.
+        let mut acc = y.data.slice((n - 1) * m, n * m);
+        for i in (0..n - 1).rev() {
+            acc =
+                scalar_dyad_data(op, &y.data, i * m, 1, &acc, 0, 1, m, ctx.cfg.tol, span)?;
+        }
+        return Ok(Array::new(cell_shape, acc));
     }
     let mut acc = y.item(n - 1);
     for i in (0..n - 1).rev() {
@@ -5999,15 +6648,13 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
     let base = promoted.as_ref().unwrap_or(y);
     let n = base.items();
     let m = base.item_size();
-    if n > 0 && base.dtype().is_numeric() {
-        if let Some(op) = folded_op(u) {
-            // Folding from the right is the insert's own order, so it holds
-            // for any step; folding from the left needs associativity.
-            if back || is_associative(op) {
-                if let Some(d) = scan_typed(op, &base.data, n, m, back) {
-                    return Ok(Array::new(base.shape.clone(), d));
-                }
-            }
+    if n > 0 && base.dtype().is_numeric() && let Some(op) = folded_op(u) {
+        // Folding from the right is the insert's own order, so it holds
+        // for any step; folding from the left needs associativity.
+        if (back || is_associative(op))
+            && let Some(d) = scan_typed(op, base.row_major_data(), n, m, back)
+        {
+            return Ok(Array::new(base.shape.clone(), d));
         }
     }
     let cells = each_cell(n, n * m, u.is_pure(), ctx, |i, c| {
@@ -6023,16 +6670,14 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
 /// window too large to build, leaves the result a plain empty vector.
 fn empty_windows(u: &Verb, y: &Array, w: usize, ctx: &mut Ctx<'_>, span: Span) -> Array {
     let m = y.item_size();
-    if u.is_pure() {
-        if let Some(cells) = w.checked_mul(m).filter(|&s| s <= 1 << 20) {
-            let mut shape = y.shape.clone();
-            shape[0] = w;
-            let probe = Array::new(shape, fill_data(y.dtype(), cells));
-            if let Ok(cell) = u.monad(&probe, ctx, span) {
-                let mut shape = vec![0usize];
-                shape.extend_from_slice(&cell.shape);
-                return Array::new(shape, Data::empty(cell.dtype()));
-            }
+    if u.is_pure() && let Some(cells) = w.checked_mul(m).filter(|&s| s <= 1 << 20) {
+        let mut shape = y.shape.clone();
+        shape[0] = w;
+        let probe = Array::new(shape, fill_data(y.dtype(), cells));
+        if let Ok(cell) = u.monad(&probe, ctx, span) {
+            let mut shape = vec![0usize];
+            shape.extend_from_slice(&cell.shape);
+            return Array::new(shape, Data::empty(cell.dtype()));
         }
     }
     Array::new(vec![0], Data::empty(DType::I64))
@@ -6079,14 +6724,12 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
         return Ok(empty_windows(u, base, w, ctx, span));
     }
     let count = n - w + 1;
-    if w > 0 && base.dtype().is_numeric() {
-        if let Some(op) = folded_op(u) {
-            if let Some(d) = window_typed(op, &base.data, n, m, w) {
-                let mut shape = base.shape.clone();
-                shape[0] = count;
-                return Ok(Array::new(shape, d));
-            }
-        }
+    if w > 0 && base.dtype().is_numeric()
+        && let Some(op) = folded_op(u) && let Some(d) = window_typed(op, &base.data, n, m, w)
+    {
+        let mut shape = base.shape.clone();
+        shape[0] = count;
+        return Ok(Array::new(shape, d));
     }
     let work = count.saturating_mul(w).saturating_mul(m);
     let cells = each_cell(count, work, u.is_pure(), ctx, |i, c| {
@@ -6124,6 +6767,38 @@ fn power(
                 if arrays_match(&next, &acc, ctx.cfg.tol) {
                     return Ok(next);
                 }
+                acc = next;
+            }
+            Err(Error::domain("the iteration did not converge", span))
+        }
+        // One answer per count. The counts are taken in the order given and
+        // the walk is shared: the applications are counted from 0 upwards
+        // and an answer is kept wherever a count asks for it.
+        Power::Each(ref counts) => {
+            let mut acc = y.clone();
+            let mut done = 0u64;
+            let mut order: Vec<usize> = (0..counts.len()).collect();
+            order.sort_by_key(|&i| counts[i]);
+            let mut cells: Vec<Option<Array>> = vec![None; counts.len()];
+            for i in order {
+                while done < counts[i] {
+                    acc = step(&acc, ctx)?;
+                    done += 1;
+                }
+                cells[i] = Some(acc.clone());
+            }
+            let cells: Vec<Array> = cells.into_iter().map(|c| c.expect("every count filled")).collect();
+            assemble(&[cells.len()], cells, span)
+        }
+        Power::ConvergeTrace => {
+            let mut acc = y.clone();
+            let mut cells = vec![acc.clone()];
+            for _ in 0..CONVERGE_LIMIT {
+                let next = step(&acc, ctx)?;
+                if arrays_match(&next, &acc, ctx.cfg.tol) {
+                    return assemble(&[cells.len()], cells, span);
+                }
+                cells.push(next.clone());
                 acc = next;
             }
             Err(Error::domain("the iteration did not converge", span))
@@ -6258,7 +6933,14 @@ fn where_indices(y: &Array, origin: i64, boxed: bool, span: Span) -> Result<Arra
 ///
 /// `offset` is what the language adds to that count: nothing in J, and
 /// `⎕IO - 1` in APL, which is what both references answer.
-fn interval_index(x: &Array, y: &Array, offset: i64, tol: Tol, span: Span) -> Result<Array> {
+fn interval_index(
+    x: &Array,
+    y: &Array,
+    offset: i64,
+    closed: bool,
+    tol: Tol,
+    span: Span,
+) -> Result<Array> {
     let bounds = x
         .to_f64_vec()
         .ok_or_else(|| Error::domain("interval index needs numeric bounds", span))?;
@@ -6267,7 +6949,13 @@ fn interval_index(x: &Array, y: &Array, offset: i64, tol: Tol, span: Span) -> Re
         .ok_or_else(|| Error::domain("interval index needs numeric values", span))?;
     let out: Vec<i64> = vals
         .iter()
-        .map(|&v| offset + bounds.iter().filter(|&&b| tol.lt(b, v)).count() as i64)
+        .map(|&v| {
+            // APL counts a bound EQUAL to the value, J does not: `1 3 5⍸3`
+            // is 2 where `1 3 5 I. 3` is 1.
+            let count =
+                bounds.iter().filter(|&&b| if closed { !tol.lt(v, b) } else { tol.lt(b, v) });
+            offset + count.count() as i64
+        })
         .collect();
     Ok(Array::new(y.shape.clone(), Data::I64(out.into())))
 }
@@ -6333,7 +7021,7 @@ fn roll(
     if bounds.iter().any(|&b| b < 0) {
         return Err(Error::domain("roll needs non-negative numbers", span));
     }
-    if !float_at_zero && bounds.iter().any(|&b| b == 0) {
+    if !float_at_zero && bounds.contains(&0) {
         return Err(Error::domain("? 0 has no value: the range is empty", span));
     }
     // A zero anywhere makes the whole answer float, as J's does.
@@ -6607,29 +7295,56 @@ fn squad(x: &Array, y: &Array, origin: i64, span: Span) -> Result<Array> {
             Some(span),
         ));
     }
-    let idx = x
-        .to_i64_vec()
-        .ok_or_else(|| Error::domain("index must be an integer", span))?;
-    if idx.len() != y.rank() {
+    // One item of x per axis of y. An item is a scalar, which drops its
+    // axis, or an enclosed vector, which keeps it and selects that many.
+    let items: Vec<Array> = if x.rank() == 0 { vec![x.clone()] } else { x.cells(1) };
+    if items.len() != y.rank() {
         return Err(Error::new(
             ErrorKind::Rank,
-            format!("{} index(es) for an argument of rank {}", idx.len(), y.rank()),
+            format!("{} index(es) for an argument of rank {}", items.len(), y.rank()),
             Some(span),
         ));
     }
-    let st = strides(&y.shape);
-    let mut at = 0usize;
-    for (k, &i) in idx.iter().enumerate() {
-        let j = i - origin;
-        if j < 0 || j as usize >= y.shape[k] {
-            return Err(Error::domain(
-                format!("index {i} is out of range on axis {k}"),
-                span,
-            ));
+    let mut specs = Vec::with_capacity(items.len());
+    let mut shape = Vec::new();
+    for (k, item) in items.iter().enumerate() {
+        let spec = match item.as_boxes() {
+            Some(bs) if item.rank() == 0 => bs[0].clone(),
+            _ => item.clone(),
+        };
+        let idx = spec
+            .to_i64_vec()
+            .ok_or_else(|| Error::domain("index must be an integer", span))?;
+        for &i in &idx {
+            let j = i - origin;
+            if j < 0 || j as usize >= y.shape[k] {
+                return Err(Error::domain(
+                    format!("index {i} is out of range on axis {k}"),
+                    span,
+                ));
+            }
         }
-        at += j as usize * st[k];
+        shape.extend_from_slice(&spec.shape);
+        specs.push((spec.shape.clone(), idx));
     }
-    Ok(atom(y, at))
+    let y = y.to_row_major();
+    let st = strides(&y.shape);
+    let total: usize = shape.iter().product();
+    let mut data = Data::empty(y.dtype());
+    let mut coord = vec![0usize; shape.len()];
+    for _ in 0..total {
+        let mut at = 0usize;
+        let mut used = 0usize;
+        for (k, (sshape, idx)) in specs.iter().enumerate() {
+            let sst = strides(sshape);
+            let pick: usize = (0..sshape.len()).map(|a| coord[used + a] * sst[a]).sum();
+            used += sshape.len();
+            at += (idx[pick] - origin) as usize * st[k];
+        }
+        push_elem(&mut data, y.row_major_data(), at);
+        odometer(&mut coord, &shape);
+    }
+    Ok(Array::new(shape, data))
 }
 
 /// One bracket slot of APL indexing: axis `axis` of `y` selected by `x`.
@@ -7170,10 +7885,17 @@ fn tessellate(
 ) -> Result<Array> {
     // A single vector gives the sizes; the blocks then move one at a time.
     let (movement, size) = rectangle(x, span)?;
-    let movement = movement.unwrap_or_else(|| vec![1; size.len()]);
-    if size.iter().any(|&s| s < 0) {
-        return Err(Error::not_yet("a tessellation with a negative size", span));
+    // A negative size reverses its axis, which is well defined only where
+    // the movement is written out: given a bare vector of sizes the
+    // reference answers with something the magnitude plays no part in, and
+    // libjay will not guess at it.
+    if size.iter().any(|&s| s < 0) && movement.is_none() {
+        return Err(Error::not_yet(
+            "a negative block size without a movement row (x u;.3 y)",
+            span,
+        ));
     }
+    let movement = movement.unwrap_or_else(|| vec![1; size.len()]);
     if size.len() > y.rank() {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -7183,7 +7905,7 @@ fn tessellate(
     }
     let mut frame = Vec::with_capacity(size.len());
     for k in 0..size.len() {
-        let (len, step, block) = (y.shape[k] as i64, movement[k], size[k]);
+        let (len, step, block) = (y.shape[k] as i64, movement[k], size[k].abs());
         if step <= 0 {
             return Err(Error::domain("a tessellation moves by a positive step", span));
         }
@@ -7199,9 +7921,13 @@ fn tessellate(
     let mut coord = vec![0usize; frame.len()];
     for _ in 0..total {
         let origin: Vec<i64> = (0..frame.len()).map(|k| coord[k] as i64 * movement[k]).collect();
-        // A block at the far edge is cut short by what is left of the axis.
+        // A block at the far edge is cut short by what is left of the axis;
+        // a negative size keeps its sign, which reverses that axis.
         let block: Vec<i64> = (0..frame.len())
-            .map(|k| size[k].min(y.shape[k] as i64 - origin[k]))
+            .map(|k| {
+                let len = size[k].abs().min(y.shape[k] as i64 - origin[k]);
+                if size[k] < 0 { -len } else { len }
+            })
             .collect();
         cells.push(u.monad(&subarray(y, &origin, &block, span)?, ctx, span)?);
         odometer(&mut coord, &frame);
@@ -7256,6 +7982,123 @@ fn front_to_axis(y: &Array, k: usize) -> Array {
         });
     }
     permute_axes(y, &src)
+}
+
+/// `x |: y` and `x ⍉ y`: y with each of its axes sent where the left
+/// argument says. Several axes sharing a destination are run together,
+/// which is the diagonal, and the result is as long there as the shortest
+/// of them.
+fn transpose_to(y: &Array, dest: &[usize], span: Span) -> Result<Array> {
+    let rank_out = dest.iter().copied().max().map_or(0, |m| m + 1);
+    let mut out_shape = vec![usize::MAX; rank_out];
+    for (a, &d) in dest.iter().enumerate() {
+        out_shape[d] = out_shape[d].min(y.shape[a]);
+    }
+    if out_shape.contains(&usize::MAX) {
+        return Err(Error::new(
+            ErrorKind::Domain,
+            "a transpose must name every axis of the result",
+            Some(span),
+        ));
+    }
+    let y = y.to_row_major();
+    let st = strides(&y.shape);
+    let n: usize = out_shape.iter().product();
+    let mut data = Data::empty(y.dtype());
+    let mut coord = vec![0usize; rank_out];
+    for _ in 0..n {
+        let idx: usize = dest.iter().enumerate().map(|(a, &d)| coord[d] * st[a]).sum();
+        push_elem(&mut data, &y.data, idx);
+        odometer(&mut coord, &out_shape);
+    }
+    Ok(Array::new(out_shape, data))
+}
+
+/// `x ⍉ y`: x names, for each axis of y in turn, the axis of the result it
+/// becomes. Two axes given the same destination are run together.
+fn transpose_apl(x: &Array, y: &Array, io: i64, span: Span) -> Result<Array> {
+    let axes = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a transpose is given whole numbers", span))?;
+    if axes.len() != y.rank() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{} axes for a rank-{} value", axes.len(), y.rank()),
+            Some(span),
+        ));
+    }
+    let mut dest = Vec::with_capacity(axes.len());
+    for a in axes {
+        let d = a - io;
+        if d < 0 || d as usize >= y.rank() {
+            return Err(Error::new(
+                ErrorKind::Domain,
+                format!("axis {a} is outside a rank-{} value", y.rank()),
+                Some(span),
+            ));
+        }
+        dest.push(d as usize);
+    }
+    transpose_to(y, &dest, span)
+}
+
+/// `x |: y`: x names the axes to move to the END, in the order given; the
+/// rest keep their order in front. A boxed x groups axes, and the axes of
+/// one group are run together — the diagonal.
+fn transpose_j(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let groups: Vec<Vec<i64>> = match x.as_boxes() {
+        Some(bs) => bs
+            .iter()
+            .map(|b| {
+                b.to_i64_vec().ok_or_else(|| {
+                    Error::domain("a transpose is given whole numbers", span)
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+        None => x
+            .to_i64_vec()
+            .ok_or_else(|| Error::domain("a transpose is given whole numbers", span))?
+            .into_iter()
+            .map(|a| vec![a])
+            .collect(),
+    };
+    let r = y.rank();
+    // Which group each axis belongs to; an axis named twice is an error, as
+    // it is in J.
+    let mut group_of = vec![None; r];
+    for (g, axes) in groups.iter().enumerate() {
+        for &a in axes {
+            let k = if a < 0 { a + r as i64 } else { a };
+            if k < 0 || k as usize >= r {
+                return Err(Error::new(
+                    ErrorKind::Domain,
+                    format!("axis {a} is outside a rank-{r} value"),
+                    Some(span),
+                ));
+            }
+            if group_of[k as usize].is_some() {
+                return Err(Error::new(
+                    ErrorKind::Domain,
+                    format!("axis {a} is named twice in a transpose"),
+                    Some(span),
+                ));
+            }
+            group_of[k as usize] = Some(g);
+        }
+    }
+    let leading = group_of.iter().filter(|g| g.is_none()).count();
+    let mut dest = vec![0usize; r];
+    let mut next = 0;
+    for a in 0..r {
+        match group_of[a] {
+            None => {
+                dest[a] = next;
+                next += 1;
+            }
+            Some(g) => dest[a] = leading + g,
+        }
+    }
+    transpose_to(y, &dest, span)
 }
 
 /// `y` with output axis `a` reading source axis `src[a]`.
@@ -7584,10 +8427,8 @@ fn memoised(
     if !keyed {
         return apply(ctx);
     }
-    if let Ok(map) = cache.lock() {
-        if let Some(hit) = map.get(&key) {
-            return Ok(hit.clone());
-        }
+    if let Ok(map) = cache.lock() && let Some(hit) = map.get(&key) {
+        return Ok(hit.clone());
     }
     let out = apply(ctx)?;
     if let Ok(mut map) = cache.lock() {
@@ -8092,16 +8933,44 @@ fn narrow_numbers(a: Array) -> Array {
 /// representation of a verb, which libjay does not publish.
 fn characteristics(u: &Verb, y: &Array, span: Span) -> Result<Array> {
     let which = y.to_i64_vec().and_then(|v| v.first().copied());
-    if which != Some(0) {
-        return Err(Error::not_yet("a verb characteristic other than `u b. 0`", span));
+    let chars = |s: String| Ok(Array::from_chars(s.chars().collect()));
+    match which {
+        Some(0) => {
+            let ranks = u.ranks();
+            Ok(Array::from_f64(
+                ranks
+                    .iter()
+                    .map(|&r| if r == RANK_INF { f64::INFINITY } else { r as f64 })
+                    .collect(),
+            ))
+        }
+        // `u b. _1` and `u b. 1` answer with a spelling, not a verb: the
+        // obverse, and the verb that yields the identity element of a
+        // reduction over no items.
+        Some(-1) => match obverse(u) {
+            Some(v) => chars(v.name()),
+            None => Err(Error::not_yet(
+                format!("the obverse of {} (no inverse is known)", u.name()),
+                span,
+            )),
+        },
+        Some(1) => match reduce_identity(u, 1).as_ref().map(identity_spelling) {
+            Some(s) => chars(s),
+            None => Err(Error::not_yet(
+                format!("the identity function of {} (u b. 1)", u.name()),
+                span,
+            )),
+        },
+        _ => Err(Error::not_yet("a verb characteristic other than 0, 1 and _1", span)),
     }
-    let ranks = u.ranks();
-    Ok(Array::from_f64(
-        ranks
-            .iter()
-            .map(|&r| if r == RANK_INF { f64::INFINITY } else { r as f64 })
-            .collect(),
-    ))
+}
+
+/// J spells an identity function as the neutral cell reshaped to the frame
+/// of the argument: `+ b. 1` is `0 $~ }.@$`.
+fn identity_spelling(d: &Data) -> String {
+    let one = Array::new(Vec::new(), d.slice(0, 1));
+    let text = crate::fmt::format_array(&one, &crate::fmt::FmtOpts::J);
+    format!("{} $~ }}.@$", text.trim())
 }
 
 /// Run `f` with `⍺⍺` and `⍵⍵` naming the operands a user-written operator
@@ -8165,14 +9034,12 @@ fn key_pairs(
 ) -> Result<Array> {
     let base = if keys.rank() == 0 { Array::new(vec![1], keys.data.clone()) } else { keys.clone() };
     let n = base.items();
-    if let Some(v) = values {
-        if v.items() != n {
-            return Err(Error::new(
-                ErrorKind::Length,
-                format!("{n} key(s) for {} item(s)", v.items()),
-                Some(span),
-            ));
-        }
+    if let Some(v) = values && v.items() != n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{n} key(s) for {} item(s)", v.items()),
+            Some(span),
+        ));
     }
     let groups = group_positions(&base, ctx.cfg.tol);
     let origin = ctx.cfg.rules.origin;
@@ -8396,6 +9263,12 @@ pub fn amend_at(
             Some(span),
         ));
     }
+    // The positions below are row-major offsets into both buffers, so a
+    // column-major one is laid out before it is read or written.
+    if !base.is_row_major() || !value.is_row_major() {
+        let (b, v) = (base.to_row_major(), value.to_row_major());
+        return amend_at(&b, slots, &v, origin, span);
+    }
     // One list of positions per axis, and the shape the value must match.
     let mut axes: Vec<Vec<usize>> = Vec::with_capacity(slots.len());
     let mut selected: Vec<usize> = Vec::new();
@@ -8533,6 +9406,102 @@ pub(crate) fn pick_gerund(vs: &[Verb], at: i64, span: Span) -> Result<Verb> {
         })
 }
 
+/// `` m`:0 `` and `` m`:3 ``, the two evoke-gerund forms that are not a
+/// train. `0` applies every verb of the gerund to the arguments and frames
+/// the answers; `3` inserts the verbs between the items of y, taking them
+/// left to right and cycling, and folds right to left as insert does.
+fn evoke(
+    vs: &[Verb],
+    form: i64,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    if vs.is_empty() {
+        return Err(Error::domain("an evoked gerund is empty", span));
+    }
+    if form == 0 {
+        let mut cells = Vec::with_capacity(vs.len());
+        for v in vs {
+            cells.push(match x {
+                None => v.monad(y, ctx, span)?,
+                Some(x) => v.dyad(x, y, ctx, span)?,
+            });
+        }
+        return assemble(&[vs.len()], cells, span);
+    }
+    if x.is_some() {
+        return Err(Error::domain("m`:3 has no dyadic meaning", span));
+    }
+    let items = if y.rank() == 0 { vec![y.clone()] } else { y.cells(1) };
+    let Some((last, rest)) = items.split_last() else {
+        return Err(Error::domain("m`:3 needs an argument with items", span));
+    };
+    let mut acc = last.clone();
+    for (i, item) in rest.iter().enumerate().rev() {
+        acc = vs[i % vs.len()].dyad(item, &acc, ctx, span)?;
+    }
+    Ok(acc)
+}
+
+/// `(f⌺w) y` (Dyalog's stencil): the window of `w` cells centred on each
+/// cell of y, with the edges filled, and f applied to each. There is one
+/// size per leading axis of y and the axes past them travel whole, so the
+/// answer is framed by the axes the windows moved along.
+fn stencil(u: &Verb, w: &[i64], y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    if w.len() > y.rank() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("a stencil of {} axis/axes into a rank-{} value", w.len(), y.rank()),
+            Some(span),
+        ));
+    }
+    if w.iter().any(|&n| n <= 0) {
+        return Err(Error::domain("a stencil window is a positive size", span));
+    }
+    let y = y.to_row_major();
+    let k = w.len();
+    let st = strides(&y.shape);
+    let frame: Vec<usize> = y.shape[..k].to_vec();
+    // The window's own shape: the sizes, then whatever the cell carries.
+    let mut wshape: Vec<usize> = w.iter().map(|&n| n as usize).collect();
+    wshape.extend_from_slice(&y.shape[k..]);
+    let inner: usize = y.shape[k..].iter().product();
+    let total: usize = frame.iter().product();
+    let mut cells = Vec::with_capacity(total);
+    let mut at = vec![0usize; frame.len()];
+    let mut coord = vec![0usize; k];
+    for _ in 0..total {
+        let mut data = Data::empty(y.dtype());
+        coord.iter_mut().for_each(|c| *c = 0);
+        let count: usize = w.iter().map(|&n| n as usize).product();
+        for _ in 0..count {
+            let mut base = 0usize;
+            let mut inside = true;
+            for a in 0..k {
+                let off = at[a] as i64 + coord[a] as i64 - (w[a] - 1) / 2;
+                if off < 0 || off >= y.shape[a] as i64 {
+                    inside = false;
+                    break;
+                }
+                base += off as usize * st[a];
+            }
+            for j in 0..inner {
+                if inside {
+                    push_elem(&mut data, &y.data, base + j);
+                } else {
+                    data.push_fill();
+                }
+            }
+            odometer(&mut coord, &wshape[..k]);
+        }
+        cells.push(u.monad(&Array::new(wshape.clone(), data), ctx, span)?);
+        odometer(&mut at, &frame);
+    }
+    assemble(&frame, cells, span)
+}
+
 /// `x u\. y`: u applied to y with every run of x consecutive items removed.
 /// A run of x items has `1 + (#y) - x` places to sit, and that is how many
 /// results there are.
@@ -8579,11 +9548,18 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
     Some(match v {
         Verb::Prim(p) => {
             use ScalarMonad as SM;
-            let by_monad: Option<&'static str> = match p.monad {
-                // Every one of these is its own inverse.
+            // Every one of these is its own inverse, whichever language
+            // spelled it: the verb itself is the answer, so no name is
+            // looked up (an APL glyph has no entry in J's table).
+            if matches!(
+                p.monad,
                 MonadOp::Scalar(SM::Conj | SM::Neg | SM::Recip | SM::OneMinus)
-                | MonadOp::Reverse
-                | MonadOp::TransposeAxes => Some(p.name),
+                    | MonadOp::Reverse
+                    | MonadOp::TransposeAxes
+            ) {
+                return Some(v.clone());
+            }
+            let by_monad: Option<&'static str> = match p.monad {
                 MonadOp::Scalar(SM::Exp) => Some("^."),
                 MonadOp::Scalar(SM::Ln) => Some("^"),
                 MonadOp::Scalar(SM::Sqrt) => Some("*:"),
@@ -8640,9 +9616,12 @@ fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
     match (op, left) {
         // `n - y` and `n % y` undo themselves; the other side does not.
         (SD::Sub | SD::DivJ | SD::DivApl, true) => bond(p.name, n),
-        (SD::Add, _) => bond("-", n),
+        // Adding or multiplying is undone by taking the noun off the
+        // RIGHT, whichever side it was bonded to: `2&+` is undone by `-&2`
+        // and not by `2&-`.
+        (SD::Add, _) => Some(Verb::BondRight(Box::new(named("-")?), n.clone())),
+        (SD::Mul, _) => Some(Verb::BondRight(Box::new(named("%")?), n.clone())),
         (SD::Sub, false) => bond("+", n),
-        (SD::Mul, _) => bond("%", n),
         (SD::DivJ | SD::DivApl, false) => bond("*", n),
         // `y ^ n` is undone by the n-th root; `n ^ y` by the base-n log.
         (SD::Pow, false) => Some(Verb::BondLeft(n.clone(), Box::new(named("%:")?))),
@@ -9550,16 +10529,17 @@ mod tests {
         Array::new(vec![rows, cols], Data::I64(v.into()))
     }
 
+    /// The elements in reading order, whatever layout the result kept.
     fn ints(a: &Array) -> Vec<i64> {
-        a.as_i64_slice().expect("integer result").to_vec()
+        a.to_row_major().as_i64_slice().expect("integer result").to_vec()
     }
 
     fn floats(a: &Array) -> Vec<f64> {
-        a.as_f64_slice().expect("float result").to_vec()
+        a.to_row_major().as_f64_slice().expect("float result").to_vec()
     }
 
     fn bools(a: &Array) -> Vec<u8> {
-        match &a.data {
+        match &a.to_row_major().data {
             Data::Bool(v) => v.to_vec(),
             other => panic!("expected boolean result, got {other:?}"),
         }
@@ -9897,7 +10877,7 @@ mod tests {
     #[test]
     fn booleans_widen_to_integers_in_arithmetic() {
         ctx!(c);
-        let bits = Array { shape: vec![3], data: Data::Bool(vec![1, 0, 1].into()) };
+        let bits = Array::new(vec![3], Data::Bool(vec![1, 0, 1].into()));
         let r = plus().dyad(&bits, &bits, &mut c, sp()).unwrap();
         assert_eq!(r.dtype(), DType::I64);
         assert_eq!(ints(&r), vec![2, 0, 2]);
@@ -10044,7 +11024,7 @@ mod tests {
         assert_eq!(floats(&r), vec![-1.0, 0.0, 1.0]);
         let r = residue_v().monad(&Array::from_i64(vec![-3, 3]), &mut c, sp()).unwrap();
         assert_eq!(ints(&r), vec![3, 3]);
-        let bits = Array { shape: vec![2], data: Data::Bool(vec![0, 1].into()) };
+        let bits = Array::new(vec![2], Data::Bool(vec![0, 1].into()));
         let r = minus().monad(&bits, &mut c, sp()).unwrap();
         assert_eq!(r.dtype(), DType::I64);
         assert_eq!(ints(&r), vec![0, -1]);
@@ -10502,10 +11482,8 @@ mod tests {
         let v = Verb::Rank(b(Verb::Atop(b(echo_v()), b(head_v()))), [1, 1, 1]);
         let mut seen: Vec<i64> = Vec::new();
         let mut sink = |s: &str| {
-            if let Some(first) = s.split_whitespace().next() {
-                if let Ok(n) = first.parse::<i64>() {
-                    seen.push(n);
-                }
+            if let Some(first) = s.split_whitespace().next() && let Ok(n) = first.parse::<i64>() {
+                seen.push(n);
             }
         };
         let mut env = Env::new(Vec::new());

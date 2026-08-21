@@ -91,19 +91,21 @@ pub(crate) fn groups_for(n: usize) -> usize {
 
 // ------------------------------------------------------------------ buffers
 
-/// Write host floats into a device buffer as its element bytes.
+/// Host floats as the element bytes a device buffer holds them in.
 ///
-/// Straight into the destination: the arrays this uploads are tens of
-/// megabytes, and an intermediate `Vec` would be one more pass over all of
-/// them for nothing.
-pub(crate) fn write_bytes(dst: &mut [u8], v: &[f64], p: Precision) {
-    let w = p.size();
-    for (slot, x) in dst.chunks_exact_mut(w).zip(v) {
+/// An iterator rather than a filled buffer: mapped device memory is written
+/// through a write-only reference that hands out one slot at a time, and the
+/// arrays this uploads are tens of megabytes, so an intermediate `Vec` would
+/// be one more pass over all of them for nothing.
+pub(crate) fn byte_iter(v: &[f64], p: Precision) -> impl Iterator<Item = u8> {
+    v.iter().flat_map(move |&x| {
+        let mut b = [0u8; 8];
         match p {
-            Precision::F64 => slot.copy_from_slice(&x.to_ne_bytes()),
-            Precision::F32 => slot.copy_from_slice(&(*x as f32).to_ne_bytes()),
+            Precision::F64 => b.copy_from_slice(&x.to_ne_bytes()),
+            Precision::F32 => b[..4].copy_from_slice(&(x as f32).to_ne_bytes()),
         }
-    }
+        b.into_iter().take(p.size())
+    })
 }
 
 /// `n` device elements as host floats.
@@ -518,11 +520,7 @@ mod tests {
     #[test]
     fn elements_survive_the_round_trip() {
         let v = vec![1.0, -2.5, 1e300, 0.0];
-        let bytes = |p: Precision| {
-            let mut b = vec![0u8; v.len() * p.size()];
-            write_bytes(&mut b, &v, p);
-            b
-        };
+        let bytes = |p: Precision| byte_iter(&v, p).collect::<Vec<u8>>();
         let b = bytes(Precision::F64);
         assert_eq!(from_bytes(&b, Precision::F64, v.len()), v);
         let b = bytes(Precision::F32);

@@ -1,241 +1,246 @@
-# libjay reference snapshot: J (jconsole) — corpus/j/fuzz_found.txt.
+# libjay reference snapshot: J — corpus/j/fuzz_found.txt.
 # Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
-# the live reference interpreter. Do not edit by hand; the workflow is in
+# the live reference interpreters. Do not edit by hand; the workflow is in
 # docs/testing.md.
 #
 # One record per expression, in corpus order:
-#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
-#   `> TEXT`  one line of the reference's answer.
-#   `< TEXT`  one line of libjay's answer (divergence records only).
-#   `? TEXT`  why the two are expected to differ (divergence records only).
-#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
-#   `# TEXT`  a comment.
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
 # A side whose single line is `<error>` refused the sentence. An empty answer
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
 = 6 $ i. 2 3
-> 0 1 2
-> 3 4 5
-> 0 1 2
-> 3 4 5
-> 0 1 2
-> 3 4 5
+> j: 0 1 2
+> j: 3 4 5
+> j: 0 1 2
+> j: 3 4 5
+> j: 0 1 2
+> j: 3 4 5
 = $ 6 $ i. 2 3
-> 6 3
+> j: 6 3
 = $ 3 $ i. 3 4
-> 3 4
+> j: 3 4
 = 3 $ i. 3 4
-> 0 1  2  3
-> 4 5  6  7
-> 8 9 10 11
+> j: 0 1  2  3
+> j: 4 5  6  7
+> j: 8 9 10 11
 = $ 2 3 $ i. 3 4
-> 2 3 4
+> j: 2 3 4
 = $ 2 3 4 $ i. 2 3
-> 2 3 4 3
+> j: 2 3 4 3
 = 4 $ 3 1 $ 1 2 3
-> 1
-> 2
-> 3
-> 1
+> j: 1
+> j: 2
+> j: 3
+> j: 1
 = $ 4 $ 3 1 $ 1 2 3
-> 4 1
+> j: 4 1
 = 1 $ 2 2 $ 1;2;3;4
-> +-+-+
-> |1|2|
-> +-+-+
+> j: +-+-+
+> j: |1|2|
+> j: +-+-+
 = 3 1 $ ^. 2 3 $ i. 6
->      __       0 0.693147
->
-> 1.09861 1.38629  1.60944
->
->      __       0 0.693147
+> j:      __       0 0.693147
+> j:
+> j: 1.09861 1.38629  1.60944
+> j:
+> j:      __       0 0.693147
 = 2 3 $ i. 6
-> 0 1 2
-> 3 4 5
+> j: 0 1 2
+> j: 3 4 5
 = 4 $ 1 2 3
-> 1 2 3 1
+> j: 1 2 3 1
 = 2 $ 5
-> 5 5
+> j: 5 5
 = '' $ 5
-> 5
+> j: 5
 = '' $ i. 3 4
-> 0 1 2 3
+> j: 0 1 2 3
 = $ '' $ i. 3 4
-> 4
+> j: 4
 = '' $ (<i. 2 2);5
-> +-----+
-> |+---+|
-> ||0 1||
-> ||2 3||
-> |+---+|
-> +-----+
+> j: +-----+
+> j: |+---+|
+> j: ||0 1||
+> j: ||2 3||
+> j: |+---+|
+> j: +-----+
 = 2 3 $ i. 0
-> <error>
+> j: <error>
 = 2 3 $ ''
-> <error>
+> j: <error>
 = 3 $ 0 3 $ 0
-> <error>
+> j: <error>
 = $ 2 3 $ i. 0 0
-> 2 3 0
+> j: 2 3 0
 = 3 +/\\. i. 2
->
+> j:
 = $ 3 +/\\. i. 2
-> 0
+> j: 0
 = 2 +/\\. i. 2
-> 0
+> j: 0
 = 2 >./\\. 123x
->
+> j:
 = 9 */\\. 3 3 $ 1 0 0 0 1 0 0 0 1
->
+> j:
 = 3 -/\\. 1r2 1r3
->
+> j:
 = 0 +/\\. i. 5
-> 10 10 10 10 10 10
+> j: 10 10 10 10 10 10
 = _1 +/\\. i. 5
-> 10 9 8 7 6
+> j: 10 9 8 7 6
 = _2 +/\\. i. 5
-> 9 5 6
+> j: 9 5 6
 = _2 <./\\. i. 5
-> 2 0 0
+> j: 2 0 0
 = _3 +/\\. i. 5
-> 7 3
+> j: 7 3
 = _7 +/\\. i. 5
-> 0
+> j: 0
 = $ _2 +/\\. i. 0
-> 0
+> j: 0
 = 'a' = 1
-> 0
+> j: 0
 = 'abc' = 1 2 3
-> 0 0 0
+> j: 0 0 0
 = 'a' ~: 1
-> 1
+> j: 1
 = (<1) = 1
-> 0
+> j: 0
 = (1;2) = 1 2
-> 0 0
+> j: 0 0
 = (<1) = <1
-> 1
+> j: 1
 = 0 = <'abc'
-> 0
+> j: 0
 = (i. 2 3 4) ~: 1;2 3
-> 1 1 1 1
-> 1 1 1 1
-> 1 1 1 1
->
-> 1 1 1 1
-> 1 1 1 1
-> 1 1 1 1
+> j: 1 1 1 1
+> j: 1 1 1 1
+> j: 1 1 1 1
+> j:
+> j: 1 1 1 1
+> j: 1 1 1 1
+> j: 1 1 1 1
 = (2 7 1 8) ~:"_1 'a'
-> 1 1 1 1
+> j: 1 1 1 1
 = a: ~: 3 3 $ 1 0 0 0 1 0 0 0 1
-> 1 1 1
-> 1 1 1
-> 1 1 1
+> j: 1 1 1
+> j: 1 1 1
+> j: 1 1 1
 = 1 -: 'a'
-> 0
+> j: 0
 = 'a' e. 1 2
-> 0
+> j: 0
 = 1 0 1 # 5
-> 5 5
+> j: 5 5
 = 2 2 # 5
-> 5 5 5 5
+> j: 5 5 5 5
 = 1 0 1 # 1 2 3
-> 1 3
+> j: 1 3
 = 3 # 2 2 $ i. 4
-> 0 1
-> 0 1
-> 0 1
-> 2 3
-> 2 3
-> 2 3
+> j: 0 1
+> j: 0 1
+> j: 0 1
+> j: 2 3
+> j: 2 3
+> j: 2 3
 = 1 2 # 2 2 $ i. 4
-> 0 1
-> 2 3
-> 2 3
+> j: 0 1
+> j: 2 3
+> j: 2 3
 = * 1e_15
-> 0
+> j: 0
 = * 1e_14
-> 0
+> j: 0
 = * 5e_14
-> 0
+> j: 0
 = * 6e_14
-> 1
+> j: 1
 = * 1e_13
-> 1
+> j: 1
 = * 1e_300
-> 0
+> j: 0
 = * _1e_15
-> 0
+> j: 0
 = _ | 0
-> 0
+> j: 0
 = _ | 5
-> 5
+> j: 5
 = _ | 5.5
-> 5.5
+> j: 5.5
 = _ | _5
-> _
+> j: _
 = __ | _5
-> _5
+> j: _5
 = __ | 0
-> 0
+> j: 0
 = __ | 5
-> __
+> j: __
 = 1 *:;.2 (2 3 $ i. 6)
-> 0  1  4
->
-> 9 16 25
+> j: 0  1  4
+> j:
+> j: 9 16 25
 = $ 1 *:;.2 (2 3 $ i. 6)
-> 2 1 3
+> j: 2 1 3
 = 0 <;.1 i. 3
->
+> j:
 = 1 <;.1 i. 3
-> +-+-+-+
-> |0|1|2|
-> +-+-+-+
+> j: +-+-+-+
+> j: |0|1|2|
+> j: +-+-+-+
 = 1 1.5 /: 'a'
-> 1
+> j: 1
 = 1 2 3 /: 'ab'
-> 1 2
+> j: 1 2
 = 2.0 4.0 6.0 \\: 'a'
-> 2
+> j: 2
 = 2 {. 2.0 4.0 6.0 \\: 'a'
-> 2 0
+> j: 2 0
 = %: ''
->
+> j:
 = $ %: ''
-> 0
+> j: 0
 = - ''
->
+> j:
 = '' + 1
->
+> j:
 = $ '' + 1
-> 0
+> j: 0
 = '' + i. 0
->
+> j:
 = 'a' + ''
->
+> j:
 = $ 'a' + ''
-> 0
+> j: 0
 = (<1) + ''
->
+> j:
 = $ (<1) + ''
-> 0
+> j: 0
 = '' ^ 3
->
+> j:
 = 2 <;.2 i. 3
-> <error>
+> j: <error>
 = _2 <;.2 i. 3
-> <error>
+> j: <error>
 = 2 0 1 #.;.1 0.1 0.2 0.3
-> <error>
+> j: <error>
 = ,/ i. 0
->
+> j:
 = $ ,/ i. 0
-> 0
+> j: 0
 = ,/ i. 0 3
->
+> j:
 = $ ,/ i. 0 3
-> 0
+> j: 0
 = ,/ i. 3
-> 0 1 2
+> j: 0 1 2

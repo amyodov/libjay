@@ -1,169 +1,174 @@
-# libjay reference snapshot: APL (GNU APL) — corpus/apl/arithmetic.txt.
+# libjay reference snapshot: APL — corpus/apl/arithmetic.txt.
 # Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
-# the live reference interpreter. Do not edit by hand; the workflow is in
+# the live reference interpreters. Do not edit by hand; the workflow is in
 # docs/testing.md.
 #
 # One record per expression, in corpus order:
-#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
-#   `> TEXT`  one line of the reference's answer.
-#   `< TEXT`  one line of libjay's answer (divergence records only).
-#   `? TEXT`  why the two are expected to differ (divergence records only).
-#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
-#   `# TEXT`  a comment.
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
 # A side whose single line is `<error>` refused the sentence. An empty answer
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
 = 2+2
-> 4
+> gnu: 4
 = 1 2 3×10
-> 10 20 30
+> gnu: 10 20 30
 = 10÷4
-> 2.5
+> gnu: 2.5
 = 0÷0
-> 1
+> gnu: 1
 = 5÷0
-> <error>
+> gnu: <error>
 = 0÷5
-> 0
+> gnu: 0
 = -1 ¯2 3
-> ¯1 2 ¯3
+> gnu: ¯1 2 ¯3
 = +1 ¯2 3
-> 1 ¯2 3
+> gnu: 1 ¯2 3
 = ×¯5 0 5
-> ¯1 0 1
+> gnu: ¯1 0 1
 = 2*10
-> 1024
+> gnu: 1024
 = 2*0.5
-> 1.414213562
+> gnu: 1.414213562
 = 2*¯1
-> 0.5
+> gnu: 0.5
 = 0*0
-> 1
+> gnu: 1
 = 2⍟8
-> 3
+> gnu: 3
 = 10⍟100
-> 2
+> gnu: 2
 = ⍟1 2
-> 0 0.6931471806
+> gnu: 0 0.6931471806
 = |¯3 3 ¯0.5
-> 3 3 0.5
+> gnu: 3 3 0.5
 = 3|1 2 3 4 5 6
-> 1 2 0 1 2 0
+> gnu: 1 2 0 1 2 0
 = ¯3|1 2 3 4 5 6
-> ¯2 ¯1 0 ¯2 ¯1 0
+> gnu: ¯2 ¯1 0 ¯2 ¯1 0
 = 0|7 ¯7
-> 7 ¯7
+> gnu: 7 ¯7
 = 1.5|7
-> 1
+> gnu: 1
 = 2⌈1 3
-> 2 3
+> gnu: 2 3
 = 2⌊1 3
-> 1 2
+> gnu: 1 2
 = ⌈1.5 ¯1.5
-> 2 ¯1
+> gnu: 2 ¯1
 = ⌊1.5 ¯1.5
-> 1 ¯2
+> gnu: 1 ¯2
 = ⌈¯2.5
-> ¯2
+> gnu: ¯2
 = ⌊¯2.5
-> ¯3
+> gnu: ¯3
 = ¯3.5⌊2
-> ¯3.5
+> gnu: ¯3.5
 = 2+3.5
-> 5.5
+> gnu: 5.5
 = 1 2 3+0.5
-> 1.5 2.5 3.5
+> gnu: 1.5 2.5 3.5
 = 0.1+0.2
-> 0.3
+> gnu: 0.3
 = 1÷3
-> 0.3333333333
+> gnu: 0.3333333333
 = 1÷7
-> 0.1428571429
+> gnu: 0.1428571429
 = 9223372036854775807+1
-> 9.223372037E18
+> gnu: 9.223372037E18
 = 1 2 3=1 5 3
-> 1 0 1
+> gnu: 1 0 1
 = 1 2 3≠1 5 3
-> 0 1 0
+> gnu: 0 1 0
 = 1 2 3<2 2 2
-> 1 0 0
+> gnu: 1 0 0
 = 1 2 3≤2 2 2
-> 1 1 0
+> gnu: 1 1 0
 = 1 2 3>2 2 2
-> 0 0 1
+> gnu: 0 0 1
 = 1 2 3≥2 2 2
-> 0 1 1
+> gnu: 0 1 1
 = 1 0 1∧1 1 0
-> 1 0 0
+> gnu: 1 0 0
 = 1 0 1∨1 1 0
-> 1 1 1
+> gnu: 1 1 1
 = 4∧6
-> 12
+> gnu: 12
 = 12∨18
-> 6
+> gnu: 6
 = ~0 1
-> 1 0
+> gnu: 1 0
 = (2 3⍴⍳6)>3
-> 0 0 0
-> 1 1 1
+> gnu: 0 0 0
+> gnu: 1 1 1
 = !0 1 2 3 4 5
-> 1 1 2 6 24 120
+> gnu: 1 1 2 6 24 120
 = !10
-> 3628800
+> gnu: 3628800
 = !0.5
-> 0.8862269255
+> gnu: 0.8862269255
 = !2.5
-> 3.32335097
+> gnu: 3.32335097
 = 2!5
-> 10
+> gnu: 10
 = 0!5
-> 1
+> gnu: 1
 = 5!5
-> 1
+> gnu: 1
 = 6!5
-> 0
+> gnu: 0
 = 2!5 6 7
-> 10 15 21
+> gnu: 10 15 21
 = 3!100
-> 161700
+> gnu: 161700
 = 2!5.5
-> 12.375
+> gnu: 12.375
 = ○1
-> 3.141592654
+> gnu: 3.141592654
 = ○0 1 2
-> 0 3.141592654 6.283185307
+> gnu: 0 3.141592654 6.283185307
 = 1○0.5
-> 0.4794255386
+> gnu: 0.4794255386
 = 2○0.5
-> 0.8775825619
+> gnu: 0.8775825619
 = 3○0.5
-> 0.5463024898
+> gnu: 0.5463024898
 = 4○0.5
-> 1.118033989
+> gnu: 1.118033989
 = 5○0.5
-> 0.5210953055
+> gnu: 0.5210953055
 = 6○0.5
-> 1.127625965
+> gnu: 1.127625965
 = 7○0.5
-> 0.4621171573
+> gnu: 0.4621171573
 = ¯1○0.5
-> 0.5235987756
+> gnu: 0.5235987756
 = ¯2○0.5
-> 1.047197551
+> gnu: 1.047197551
 = ¯3○0.5
-> 0.463647609
+> gnu: 0.463647609
 = ¯4○2
-> 1.732050808
+> gnu: 1.732050808
 = ¯5○0.5
-> 0.4812118251
+> gnu: 0.4812118251
 = ¯6○2
-> 1.316957897
+> gnu: 1.316957897
 = ¯7○0.5
-> 0.5493061443
+> gnu: 0.5493061443
 = 0○0.5
-> 0.8660254038
+> gnu: 0.8660254038
 = 2○○1
-> ¯1
+> gnu: ¯1
 = 1 2 3○1
-> 0.8414709848 0.5403023059 1.557407725
+> gnu: 0.8414709848 0.5403023059 1.557407725

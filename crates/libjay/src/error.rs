@@ -111,14 +111,12 @@ impl Error {
     /// Render with a caret line pointing into `src` (the display source).
     pub fn render(&self, src: &str) -> String {
         let mut out = format!("{}: {}", self.kind.label(), self.msg);
-        if let Some(span) = self.span {
-            if let Some((line, col_start, col_len)) = locate(src, span) {
-                out.push_str("\n  ");
-                out.push_str(line);
-                out.push_str("\n  ");
-                out.push_str(&" ".repeat(col_start));
-                out.push_str(&"^".repeat(col_len.max(1)));
-            }
+        if let Some(span) = self.span && let Some((line, col_start, col_len)) = locate(src, span) {
+            out.push_str("\n  ");
+            out.push_str(line);
+            out.push_str("\n  ");
+            out.push_str(&" ".repeat(col_start));
+            out.push_str(&"^".repeat(col_len.max(1)));
         }
         for n in &self.notes {
             out.push_str("\nnote: ");

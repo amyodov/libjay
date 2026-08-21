@@ -1,38 +1,43 @@
-# libjay reference snapshot: J (jconsole) — corpus/j/named.txt.
+# libjay reference snapshot: J — corpus/j/named.txt.
 # Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
-# the live reference interpreter. Do not edit by hand; the workflow is in
+# the live reference interpreters. Do not edit by hand; the workflow is in
 # docs/testing.md.
 #
 # One record per expression, in corpus order:
-#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
-#   `> TEXT`  one line of the reference's answer.
-#   `< TEXT`  one line of libjay's answer (divergence records only).
-#   `? TEXT`  why the two are expected to differ (divergence records only).
-#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
-#   `# TEXT`  a comment.
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
 # A side whose single line is `<error>` refused the sentence. An empty answer
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
 = mean =. +/ % #\nmean 1 2 3 4
-> 2.5
+> j: 2.5
 = mean =. +/ % #\n(mean - {.) 1 2 3 4
-> 1.5
+> j: 1.5
 = mean =. +/ % #\nmean"1 i. 3 3
-> 1 4 7
+> j: 1 4 7
 = mean =. +/ % #\n2 * mean 1 2 3 4
-> 5
+> j: 5
 = n =. #\n2 n 1 2 3
-> 1 1 2 2 3 3
+> j: 1 1 2 2 3 3
 = f =. +/\nf =. #\nf 1 2 3
-> 3
+> j: 3
 = a =. 1 2 3\na =. +/\na 1 2 3
-> 6
+> j: 6
 = f =. +/\nf =. 10 20\nf
-> 10 20
+> j: 10 20
 = g =. +/ % #\nh =. g @: ,\nh i. 2 3
-> 2.5
+> j: 2.5
 = sq =. *:\nsq 1 2 3
-> 1 4 9
+> j: 1 4 9
 = d =. }.\nd 1 2 3
-> 2 3
+> j: 2 3

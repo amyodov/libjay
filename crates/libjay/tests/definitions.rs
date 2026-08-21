@@ -149,7 +149,7 @@ fn control_words_libjay_has_not_are_named(#[case] src: &str, #[case] msg: &str) 
 /// not an error the program can handle, so it goes straight through.
 #[test]
 fn try_does_not_swallow_a_not_yet() {
-    let e = fails(Lang::J, "f =. 3 : 0\ntry.\ne. y\ncatch.\n0\nend.\n)\nf 1");
+    let e = fails(Lang::J, "f =. 3 : 0\ntry.\n2 ;: y\ncatch.\n0\nend.\n)\nf 'a b'");
     assert_eq!(e.kind, ErrorKind::NotYet);
 }
 

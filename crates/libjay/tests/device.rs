@@ -212,7 +212,7 @@ fn an_integer_chain_stays_on_the_cpu() {
     let n = MIN_ELEMS * 2;
     let v = Array::from_i64((0..n as i64).collect());
     let p = program("+/ {x} * {x}");
-    assert_eq!(run(&p, &[v.clone()]), run_on(&p, &d, &[v.clone()]));
+    assert_eq!(run(&p, std::slice::from_ref(&v)), run_on(&p, &d, std::slice::from_ref(&v)));
     let text = p.explain_on(&d, Some(&[v]));
     assert!(text.contains("64-bit integers"), "{text}");
 }
@@ -225,7 +225,8 @@ fn a_chain_the_generator_declines_gives_the_cpu_answer() {
     // `^` has no f64 shader form; in f32 it has one. Either way the answer
     // must be the CPU's.
     let p = program("+/ ^ {x} % 1000");
-    same(&run(&p, &[x.clone()]), &run_on(&p, &d, &[x.clone()]), rel, "+/ ^ x % 1000");
+    let (cpu, dev) = (run(&p, std::slice::from_ref(&x)), run_on(&p, &d, std::slice::from_ref(&x)));
+    same(&cpu, &dev, rel, "+/ ^ x % 1000");
     let text = p.explain_on(&d, Some(&[x]));
     assert!(text.contains("device: "), "{text}");
 }

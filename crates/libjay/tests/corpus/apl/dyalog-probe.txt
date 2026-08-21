@@ -1,0 +1,122 @@
+// Expressions chosen to expose where the two APL lines part: the APL2/ISO
+// one GNU APL embodies and libjay follows, and Dyalog's. Every line here is
+// a place docs/coverage.md's "Which APL" table says the two answer
+// differently, or a printer whose output the two spell differently.
+//
+// libjay AGREES with GNU APL on every line below — that is the entry
+// requirement, so this file replays like any other theme. What makes it a
+// probe is the `dyalog:` column: recording it with
+// `jay-corpus record apl --impl dyalog` measures, in one run, how much of
+// the Dyalog line libjay does not implement. That count is a backlog for a
+// future Dyalog dialect, never a gate.
+//
+// The rows of the table where libjay ALREADY answers differently from GNU
+// APL — `⍺←` as a default, no order on complex numbers, a negative
+// replication count inside a vector, trains and function assignment, and a
+// dfn's value — are not here: they live in divergences.txt, whose records
+// carry the same `dyalog:` column. `⊆`, `⍥`, `⌸` and dfn guards are not
+// here either, for the opposite reason: GNU APL does not know the glyphs,
+// so libjay has nothing to be held to.
+
+// Monadic `↑`. FIRST here (the first element of the ravel, disclosed), MIX
+// in Dyalog (the items assembled into one array).
+↑1 2 3
+↑'abc'
+↑(1 2)(3 4)
+↑(1 2 3)(4 5)
+↑2 3⍴⍳6
+↑⍳0
+↑''
+↑⊂1 2
+↑(⊂1 2)(⊂3 4)
+
+// Monadic `⊃`. DISCLOSE/MIX here, FIRST in Dyalog: the other half of the
+// same swap.
+⊃(1 2)(3 4)
+⊃(1 2 3)(4 5)
+⊃'abc' 'de'
+⊃⍳3
+⊃5
+⊃⊂1 2 3
+⊃2 3⍴⍳6
+⊃(1 2)(3 4)(5 6)
+
+// Dyadic `⌷`. One scalar index per axis here; Dyalog takes an index vector
+// per axis, so an enclosed left argument selects several items at once.
+1 2⌷3 3⍴⍳9
+2⌷5 6 7 8
+(⊂2 3)⌷3 3⍴⍳9
+1 2 3⌷3 3⍴⍳9
+2 1⌷2 2⍴'abcd'
+
+// Dyadic `⊂`, partitioned enclose: a partition opens where the left
+// argument RISES. Dyalog spells that rule `⊆` and reads `⊂` as a boolean
+// partitioned enclose, so a left argument above 1 parts them.
+1 0 1⊂1 2 3
+1 1 0 1⊂⍳4
+1 0 0 1⊂'abcd'
+0 0 1 1⊂⍳4
+2 2 0 1⊂⍳4
+1 1 2 2⊂⍳4
+0 1 1 0⊂'abcd'
+1 0 1⊂2 3⍴⍳6
+
+// `⎕CT`: 1e¯13 here, 1e¯14 in Dyalog, so a difference between the two
+// lands on either side of the threshold.
+⎕CT
+1=1+1E¯13
+1=1+1E¯14
+1=1+1E¯12
+⌊1+1E¯13
+1 2 3⍳3+1E¯13
+
+// Replicate. A negative count is a run of fills; only the vector case
+// (divergences.txt) parts the two.
+¯2/5
+¯1/'a'
+2 3/1 2
+0 2/1 2
+1 0 1⌿3 3⍴⍳9
+3/⍳0
+
+// `⍸`: where, and interval index.
+⍸1 0 1 1
+⍸2 3⍴1 0 0 1 0 1
+⍸0 0
+10 20 30⍸5 15 25 35
+
+// `⍤` with a rank specification, where the two lines frame and fill cells
+// their own way.
+1 2 3(+⍤0)10 20 30
+(⍴⍤1)2 3⍴⍳6
+(⊂⍤1)2 3⍴⍳6
+(,⍤1)2 3⍴⍳6
+2(↑⍤1)2 3⍴⍳6
+
+// Nested arrays, and how each printer lays one out.
+∊(1 2)(3(4 5))
+≡⊂⊂1
+⍕2 3⍴⍳6
+2 3⍴⊂1 2
+5⍴⊂''
+(1 2)(3 4)⍳⊂1 2
+
+// The number printer itself: how many digits, and where it turns to
+// exponential notation.
+÷3
+2*63
+2*64
+!20
+0.1+0.2
+123456789012
+
+// `⎕IO←0`, which every one of the choices above is read under as well.
+@ io=0
+⍳3
+⍸1 0 1
+⍋3 1 2
+2⌷5 6 7 8
+↑1 2 3
+⊃(1 2)(3 4)
+1 2⌷3 3⍴⍳9
+⍸2 3⍴1 0 0 1 0 1

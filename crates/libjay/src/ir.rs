@@ -266,6 +266,9 @@ pub struct Program {
 pub(crate) struct Note {
     pub shape: Vec<usize>,
     pub dtype: crate::dtype::DType,
+    /// How the value's buffer was laid out — worth saying only when it was
+    /// not the row-major order everything assumes.
+    pub layout: crate::array::Layout,
     /// For a fused node: whether the kernel itself produced the value, and
     /// the reason it declined when it did not.
     pub kernel_ran: Option<bool>,
@@ -480,6 +483,7 @@ fn eval_stmt(
             Note {
                 shape: v.shape.clone(),
                 dtype: v.dtype(),
+                layout: v.layout(),
                 kernel_ran: None,
                 decline: None,
                 placement: crate::device::Placement::Default,
@@ -797,7 +801,14 @@ fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
         );
         t.insert(
             key(e),
-            Note { shape: v.shape.clone(), dtype: v.dtype(), kernel_ran, decline, placement },
+            Note {
+                shape: v.shape.clone(),
+                dtype: v.dtype(),
+                layout: v.layout(),
+                kernel_ran,
+                decline,
+                placement,
+            },
         );
     }
     Ok(v)
@@ -884,6 +895,7 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
                     Note {
                         shape: Vec::new(),
                         dtype: crate::dtype::DType::I64,
+                        layout: crate::array::Layout::RowMajor,
                         kernel_ran: Some(ran.is_some()),
                         decline,
                         placement,

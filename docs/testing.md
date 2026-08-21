@@ -39,17 +39,27 @@ an expression. `\n` inside an expression is a newline, so a multi-sentence
 program is one line; `\\` is a backslash.
 
 A snapshot is line-tagged plain text, one line per line of output, so a diff
-reads as one line per changed answer:
+reads as one line per changed answer. A record is a MAP: the sentence, then
+one group of lines per implementation that has been run over it.
 
 ```
-= 2 + 2        the sentence
-> 4            one line of the reference's answer
+= 2+2          the sentence
+> gnu: 4       one line of what GNU APL answered
+> dyalog: 4    one line of what Dyalog answered
 ```
+
+The implementation keys are `j` (jconsole), `gnu` (GNU APL) and `dyalog`
+(Dyalog APL); the namespace is open, and a key this build does not know is
+read and rewritten rather than dropped. libjay is held to the one its
+dialect FOLLOWS — `j` for J, `gnu` for APL, since `Dialect::default()` is
+the APL2/ISO line GNU APL embodies. Every other key is recorded data: see
+"Dyalog" below.
 
 `< TEXT` is libjay's own answer, recorded only in the divergence file; `? TEXT`
-is why the two are expected to differ; `@ io=N` sets `⎕IO` for the records
-after it; `# TEXT` is a comment. A side whose single line is `<error>` refused
-the sentence. The format is documented at the top of every snapshot file.
+is why libjay and the implementation it follows are expected to differ;
+`@ io=N` sets `⎕IO` for the records after it; `# TEXT` is a comment. A side
+whose single line is `<error>` refused the sentence. The format is documented
+at the top of every snapshot file.
 
 ## Collecting
 
@@ -62,13 +72,22 @@ cargo run -p libjay-devtools -- record j arithmetic
 cargo run -p libjay-devtools -- record j --check
 # record only what the snapshot does not have yet
 cargo run -p libjay-devtools -- record j --missing
+# a second implementation of the same language, into its own key
+cargo run -p libjay-devtools -- record apl --impl dyalog
 # corpus and snapshot sizes
 cargo run -p libjay-devtools -- stats
 ```
 
-`LIBJAY_ORACLE_J` and `LIBJAY_ORACLE_APL` override the interpreter paths; a
-missing interpreter is a failure, not a skip. Recording the whole of one
-language takes a few seconds — one process per expression, run in parallel.
+`--impl` names the implementation to record: `j` for J, `gnu` (the default)
+or `dyalog` for APL. A run writes THAT key and no other, so recording Dyalog
+leaves every GNU APL answer, and libjay's own recorded side, exactly as they
+were; `--missing` is per key as well.
+
+`LIBJAY_ORACLE_J`, `LIBJAY_ORACLE_APL` and `LIBJAY_ORACLE_DYALOG` override
+the interpreter paths. A missing interpreter is a failure for the
+implementation libjay is held to, and a clean skip for one it merely
+records. Recording the whole of one language takes a few seconds — one
+process per expression, run in parallel.
 
 `jay-corpus` is the only thing in the repository that spawns an interpreter.
 They stay black-box oracles: never linked, never read. The clean-room rule in
@@ -108,6 +127,79 @@ BOTH answers. The replay holds libjay to its own recorded side and fails if
 the two recorded answers have converged; `record` re-measures both and fails
 on a pair that no longer disagrees, which is the signal that the note (and the
 entry in docs/coverage.md) should go.
+
+## Dyalog
+
+Dyalog is a second APL, recorded under the `dyalog:` key beside GNU APL's.
+It is not a gate and never will be while `Dialect::default()` is the
+APL2/ISO line: an expression where libjay and Dyalog differ is the BACKLOG
+of a future Dyalog dialect — the work that dialect would have to do — not a
+regression in this one. The replay counts those expressions and says so in
+its per-theme line; nothing fails.
+
+```sh
+# what the two disagree about, expression by expression
+cargo run -p libjay-devtools -- stats apl --dialect-diff
+# how many answers each key holds
+cargo run -p libjay-devtools -- stats apl
+```
+
+`corpus/apl/dyalog-probe.txt` is the theme aimed at that question: every
+line is a place docs/coverage.md's "Which APL" table says the two lines
+part, and libjay agrees with GNU APL on all of them, so one Dyalog
+recording measures the gap in one run. The rows where libjay ALREADY
+differs from GNU APL (`⍺←`, complex ordering, the vector replication count,
+trains) are in `divergences.txt` instead, and its records carry the same
+`dyalog:` column.
+
+### Installing Dyalog and recording it
+
+Dyalog's download is account-gated, so it is on the recording machine only:
+never in the repository, never in CI, never in a wheel. The clean-room rule
+holds for it as for every other oracle — run it, never read it.
+
+1. Install Dyalog 19.0 for macOS. The recorder looks for
+   `/Applications/Dyalog-19.0.app/Contents/Resources/Dyalog/mapl` (any
+   `Dyalog-*.app`, highest version first), then `/opt/mdyalog/...`, then
+   `mapl` or `dyalog` on `PATH`. Anywhere else, say where:
+
+   ```sh
+   export LIBJAY_ORACLE_DYALOG=/path/to/mapl
+   ```
+
+2. Record. The first run checks the invocation on `2+2` before touching
+   anything, and reports what it found if the answer is not `4`:
+
+   ```sh
+   cargo run -p libjay-devtools -- record apl --impl dyalog
+   ```
+
+3. Read the summary — `libjay agrees on N and differs on M` — and the diff
+   of the snapshots, which now carry a `dyalog:` line per record. Commit
+   them: they are the dialect backlog, checked in.
+
+4. From then on, `record apl --impl dyalog --check` re-measures and reports;
+   it fails on nothing. `record apl --check` (GNU APL) keeps failing on
+   drift, as before.
+
+The invocation is `mapl -script FILE`: the sentence goes into a temporary
+script bracketed by two printed markers, under `⎕PW←32767 ⎕PP←10 ⎕ML←1` and
+the record's `⎕IO`, ending in `⎕OFF`. Only what the interpreter prints
+BETWEEN the markers is kept, so a banner or any session noise is dropped
+without being parsed; trailing spaces and the blank lines at either end go,
+interior blank lines stay (they carry the shape of a rank-3 result). A
+sentence whose closing marker never arrives — Dyalog abandons a script at
+the first error — is recorded as `<error>`, as is one whose output holds a
+named error or a caret line.
+
+That invocation was written from Dyalog's published documentation with no
+interpreter to try it on. Every assumption is listed at the top of
+`crates/libjay-devtools/src/dyalog.rs`, and two environment variables
+correct the two likeliest mistakes without a rebuild:
+`LIBJAY_ORACLE_DYALOG_FLAGS` replaces `-script` (add the version's quiet
+flag if a banner or an input echo shows up), and
+`LIBJAY_ORACLE_DYALOG_STDIN` feeds the script on stdin instead of naming a
+file.
 
 ## Adding a primitive
 

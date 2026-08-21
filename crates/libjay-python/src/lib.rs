@@ -113,15 +113,13 @@ impl Kernel {
         want_display: bool,
         keep_on_device: bool,
         inp: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<(PyObject, Option<String>)> {
+    ) -> PyResult<(Py<PyAny>, Option<String>)> {
         let args: Vec<Array> =
             values.iter().map(py_to_array).collect::<PyResult<_>>()?;
         let mut write_err: Option<PyErr> = None;
         let mut sink = |s: &str| {
-            if write_err.is_none() {
-                if let Err(e) = out.call1((s,)) {
-                    write_err = Some(e);
-                }
+            if write_err.is_none() && let Err(e) = out.call1((s,)) {
+                write_err = Some(e);
             }
         };
         // The reader's own failure is not the end of the input: it is held
@@ -219,7 +217,7 @@ struct DeviceArray {
 #[pymethods]
 impl DeviceArray {
     #[getter]
-    fn shape(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn shape(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         Ok(PyTuple::new(py, &self.array.shape)?.unbind().into())
     }
 
@@ -239,7 +237,7 @@ impl DeviceArray {
     }
 
     /// The value as ordinary Python data.
-    fn download(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn download(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         array_to_py(py, self.array.clone(), self.fmt)
     }
 
@@ -264,7 +262,7 @@ struct Value {
 #[pymethods]
 impl Value {
     #[getter]
-    fn shape(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn shape(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         Ok(PyTuple::new(py, &self.array.shape)?.unbind().into())
     }
 
@@ -277,7 +275,7 @@ impl Value {
         self.array.items()
     }
 
-    fn tolist(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn tolist(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         nested_list(py, &self.array, 0, 0, self.array.count())
     }
 
@@ -293,7 +291,7 @@ impl Value {
     }
 
     fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
-        match other.downcast::<Value>() {
+        match other.cast::<Value>() {
             Ok(v) => v.get().array == self.array,
             Err(_) => false,
         }
@@ -320,13 +318,13 @@ fn nested_list(
     axis: usize,
     start: usize,
     end: usize,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     if axis == a.rank() {
         return element_to_py(py, &a.data, start);
     }
     let n = a.shape[axis];
     let stride = (end - start) / n.max(1);
-    let items: Vec<PyObject> = (0..n)
+    let items: Vec<Py<PyAny>> = (0..n)
         .map(|i| nested_list(py, a, axis + 1, start + i * stride, start + (i + 1) * stride))
         .collect::<PyResult<_>>()?;
     Ok(PyList::new(py, items)?.unbind().into())
@@ -335,7 +333,7 @@ fn nested_list(
 /// An arbitrary-precision integer as a Python `int`. Python's own integers
 /// are unbounded, so the value crosses whole; the decimal spelling is the
 /// only representation both sides already agree on.
-fn ext_to_py(py: Python<'_>, v: &Ext) -> PyResult<PyObject> {
+fn ext_to_py(py: Python<'_>, v: &Ext) -> PyResult<Py<PyAny>> {
     if let Some(small) = jay::exact::ext_to_i64(v) {
         return Ok(small.into_pyobject(py)?.unbind().into());
     }
@@ -343,14 +341,14 @@ fn ext_to_py(py: Python<'_>, v: &Ext) -> PyResult<PyObject> {
 }
 
 /// A rational as a `fractions.Fraction`, which is Python's exact ratio.
-fn rat_to_py(py: Python<'_>, v: &Rat) -> PyResult<PyObject> {
+fn rat_to_py(py: Python<'_>, v: &Rat) -> PyResult<Py<PyAny>> {
     let fraction = py.import("fractions")?.getattr("Fraction")?;
     let num = ext_to_py(py, v.numer())?;
     let den = ext_to_py(py, v.denom())?;
     Ok(fraction.call1((num, den))?.unbind())
 }
 
-fn element_to_py(py: Python<'_>, data: &Data, i: usize) -> PyResult<PyObject> {
+fn element_to_py(py: Python<'_>, data: &Data, i: usize) -> PyResult<Py<PyAny>> {
     Ok(match data {
         Data::Bool(v) => (v[i] != 0).into_pyobject(py)?.to_owned().unbind().into(),
         Data::I64(v) => v[i].into_pyobject(py)?.unbind().into(),
@@ -371,7 +369,7 @@ fn element_to_py(py: Python<'_>, data: &Data, i: usize) -> PyResult<PyObject> {
 
 /// A whole array as plain Python data: a character vector is a string, a
 /// scalar is a number, anything else is a (nested) list.
-fn contents_to_py(py: Python<'_>, a: &Array) -> PyResult<PyObject> {
+fn contents_to_py(py: Python<'_>, a: &Array) -> PyResult<Py<PyAny>> {
     if a.rank() == 1 && a.dtype() == DType::Char {
         let s: String = match &a.data {
             Data::Char(v) => v.iter().collect(),
@@ -390,7 +388,11 @@ fn depth(a: &Array) -> i64 {
     }
 }
 
-fn array_to_py(py: Python<'_>, a: Array, fmt: FmtOpts) -> PyResult<PyObject> {
+fn array_to_py(py: Python<'_>, a: Array, fmt: FmtOpts) -> PyResult<Py<PyAny>> {
+    // Everything on this side of the boundary reads elements in row-major
+    // order — `tolist`, the repr, the Arrow export — so a value that was
+    // computed column-major is laid out once, here, and once only.
+    let a = if a.is_row_major() { a } else { a.to_row_major() };
     if a.rank() == 0 {
         // A scalar box hands back what it holds, at whatever shape that
         // has: `<1 2 3` is the vector 1 2 3, `<'abc'` the string.
@@ -399,10 +401,8 @@ fn array_to_py(py: Python<'_>, a: Array, fmt: FmtOpts) -> PyResult<PyObject> {
         }
         return element_to_py(py, &a.data, 0);
     }
-    if a.rank() == 1 {
-        if let Data::Char(v) = &a.data {
-            return Ok(PyString::new(py, &v.iter().collect::<String>()).unbind().into());
-        }
+    if a.rank() == 1 && let Data::Char(v) = &a.data {
+        return Ok(PyString::new(py, &v.iter().collect::<String>()).unbind().into());
     }
     Ok(Py::new(py, Value { array: a, fmt })?.into_any())
 }
@@ -429,10 +429,10 @@ fn fraction_to_rat(obj: &Bound<'_, PyAny>) -> PyResult<Option<Rat>> {
 
 fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     // bool first: PyBool is a PyInt subclass.
-    if let Ok(b) = obj.downcast::<PyBool>() {
+    if let Ok(b) = obj.cast::<PyBool>() {
         return Ok(Array::scalar_bool(b.is_true()));
     }
-    if obj.downcast::<PyInt>().is_ok() {
+    if obj.cast::<PyInt>().is_ok() {
         return match obj.extract::<i64>() {
             Ok(v) => Ok(Array::scalar_i64(v)),
             // Python's integers are unbounded; one that does not fit a
@@ -443,23 +443,20 @@ fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
                 let v: Ext = text.parse().map_err(|_| {
                     JayError::new_err(format!("cannot read {text} as an integer"))
                 })?;
-                Ok(Array { shape: vec![], data: Data::Ext(vec![v].into()) })
+                Ok(Array::new(vec![], Data::Ext(vec![v].into())))
             }
         };
     }
     if let Some(r) = fraction_to_rat(obj)? {
-        return Ok(Array { shape: vec![], data: Data::Rat(vec![r].into()) });
+        return Ok(Array::new(vec![], Data::Rat(vec![r].into())));
     }
-    if obj.downcast::<PyFloat>().is_ok() {
+    if obj.cast::<PyFloat>().is_ok() {
         return Ok(Array::scalar_f64(obj.extract::<f64>()?));
     }
-    if let Ok(z) = obj.downcast::<PyComplex>() {
-        return Ok(Array {
-            shape: vec![],
-            data: Data::Complex(vec![[z.real(), z.imag()]].into()),
-        });
+    if let Ok(z) = obj.cast::<PyComplex>() {
+        return Ok(Array::new(vec![], Data::Complex(vec![[z.real(), z.imag()]].into())));
     }
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         let chars: Vec<char> = s.to_str()?.chars().collect();
         return Ok(if chars.len() == 1 {
             Array::new(vec![], Data::Char(chars.into()))
@@ -467,17 +464,17 @@ fn py_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
             Array::from_chars(chars)
         });
     }
-    if let Ok(v) = obj.downcast::<Value>() {
+    if let Ok(v) = obj.cast::<Value>() {
         return Ok(v.get().array.clone());
     }
     // A device array is an array; the residency travels with the buffer.
-    if let Ok(v) = obj.downcast::<DeviceArray>() {
+    if let Ok(v) = obj.cast::<DeviceArray>() {
         return Ok(v.get().array.clone());
     }
     if let Some(imported) = data::try_import(obj) {
         return imported;
     }
-    if obj.downcast::<PyList>().is_ok() || obj.downcast::<PyTuple>().is_ok() {
+    if obj.cast::<PyList>().is_ok() || obj.cast::<PyTuple>().is_ok() {
         return sequence_to_array(obj);
     }
     Err(PyTypeError::new_err(format!(
@@ -724,6 +721,20 @@ fn compile_parts(
     Ok(Kernel { program: Arc::new(program), device: None })
 }
 
+/// How many times a table that crossed the boundary as columns has since
+/// had to be copied into one block. A test asserts this does not move.
+#[pyfunction]
+fn joins_made() -> u64 {
+    jay::joins_made()
+}
+
+/// How many times a column-major value has had its rows materialised. A
+/// test asserts which verbs make this move and which leave it alone.
+#[pyfunction]
+fn layouts_made() -> u64 {
+    jay::layouts_made()
+}
+
 #[pymodule]
 fn _jay(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -734,5 +745,7 @@ fn _jay(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compile, m)?)?;
     m.add_function(wrap_pyfunction!(compile_parts, m)?)?;
     m.add_function(wrap_pyfunction!(devices, m)?)?;
+    m.add_function(wrap_pyfunction!(joins_made, m)?)?;
+    m.add_function(wrap_pyfunction!(layouts_made, m)?)?;
     Ok(())
 }

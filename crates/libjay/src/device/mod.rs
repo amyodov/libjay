@@ -144,6 +144,15 @@ impl Device {
     /// the CPU is the identity.
     pub fn upload(&self, y: &Array) -> Result<Array, DeviceError> {
         let Some(backend) = self.backend() else { return Ok(y.clone()) };
+        // What goes to the device is the elements in row-major order; a
+        // column-major argument is laid out once before it leaves.
+        let laid_out;
+        let y = if y.is_row_major() {
+            y
+        } else {
+            laid_out = y.to_row_major();
+            &laid_out
+        };
         // A float array is uploaded from its own buffer; anything else is
         // converted once, and the conversion becomes the host mirror.
         let host = match &y.data {

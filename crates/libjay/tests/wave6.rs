@@ -252,14 +252,11 @@ fn the_gaps_this_wave_leaves_name_themselves() {
         // verb has not.
         (Lang::J, "f =. 13 : 'y + 1'", "tacit definitions"),
         (Lang::J, "m =. /\nm", "displaying a modifier"),
-        (Lang::J, "(^ t. 3) 0", "Taylor"),
         (Lang::Apl, "(A+×)4", "computed value"),
         (Lang::Apl, "3+F←+/", "inside a larger sentence"),
         // A glyph the language has and libjay has not reached is a queue
         // position, not an unknown character.
-        (Lang::Apl, "(3 3⍴1)⌺⊢2 3⍴⍳6", "stencil"),
         (Lang::Apl, "1⍠2", "variant"),
-        (Lang::Apl, "+⍢-3", "under"),
         (Lang::Apl, "⌶3", "I-beam"),
     ];
     for (lang, src, what) in cases {

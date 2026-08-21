@@ -56,15 +56,6 @@
 // is looser by about the square root of ⎕CT.
 1J1=1.0000000001J1
 ? ⎕CT on the magnitude here, a much looser threshold there
-// `⊥` on an argument of rank 2 or more: APL folds the LEADING axis (it
-// is an inner product), libjay folds the last one, which is J's `#.`
-// rank-1 framing. Vectors — the common case — agree. Fixing it needs an
-// axis-moving transpose the IR does not have yet, the same one dyadic
-// `⍉` is waiting for, so it is a named gap in docs/coverage.md.
-2⊥2 3⍴1 0 1 1 1 0
-? decode folds the last axis here, the leading one there
-2⊥2 2 3⍴⍳12
-? decode folds the last axis here, the leading one there
 // A sequence yields its last sentence and prints nothing on the way
 // (CLAUDE.md); GNU APL prints the value of every statement.
 1 2 3⋄4 5

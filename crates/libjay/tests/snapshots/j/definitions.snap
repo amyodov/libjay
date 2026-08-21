@@ -1,171 +1,176 @@
-# libjay reference snapshot: J (jconsole) — corpus/j/definitions.txt.
+# libjay reference snapshot: J — corpus/j/definitions.txt.
 # Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
-# the live reference interpreter. Do not edit by hand; the workflow is in
+# the live reference interpreters. Do not edit by hand; the workflow is in
 # docs/testing.md.
 #
 # One record per expression, in corpus order:
-#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
-#   `> TEXT`  one line of the reference's answer.
-#   `< TEXT`  one line of libjay's answer (divergence records only).
-#   `? TEXT`  why the two are expected to differ (divergence records only).
-#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
-#   `# TEXT`  a comment.
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
 # A side whose single line is `<error>` refused the sentence. An empty answer
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
 = f =. 3 : 'y + 1'\nf 5
-> 6
+> j: 6
 = f =. 3 : 'y * 2'\nf 21
-> 42
+> j: 42
 = f =. 4 : 'x + y'\n2 f 3
-> 5
+> j: 5
 = f =. 4 : 'x - y'\n10 f 4
-> 6
+> j: 6
 = f =. {{ y * 3 }}\nf 7
-> 21
+> j: 21
 = f =. {{ x + y }}\n2 f 3
-> 5
+> j: 5
 = f =. 3 : 0\nt =. y * 2\nt + 1\n)\nf 5
-> 11
+> j: 11
 = f =. 4 : 0\nt =. x * y\nt + 1\n)\n3 f 4
-> 13
+> j: 13
 = f =. 3 : 0\nt =. y * 2\n)\nf 5
-> 10
+> j: 10
 = f =. {{\nt =. y * 2\nt + 1\n}}\nf 5
-> 11
+> j: 11
 = f =. 3 : '# y'\n(f " 1) i. 3 4
-> 4 4 4
+> j: 4 4 4
 = f =. 3 : 'y + 1'\n(f , f) 5
-> 6 6
+> j: 6 6
 = f =. 3 : '# y'\n(+/ % f) 1 2 3 4
-> 2.5
+> j: 2.5
 = f =. 3 : 'y * 2'\nf @: >: 5
-> 12
+> j: 12
 = f =. 3 : 'y * 2'\nf " 0 i. 2 3
-> 0 2  4
-> 6 8 10
+> j: 0 2  4
+> j: 6 8 10
 = f =. 3 : 'z =. y + 1'\nf 5
-> 6
+> j: 6
 = f =. 3 : 'a =. y + 1 [ b =. 2'\nf 5
-> 6
+> j: 6
 = t =. 3 : 'if. y do. 1 else. 0 end.'\nt 0
-> 0
+> j: 0
 = t =. 3 : 'if. y do. 1 else. 0 end.'\nt 1
-> 1
+> j: 1
 = t =. 3 : 'if. y do. 1 else. 0 end.'\nt 0 1
-> 0
+> j: 0
 = t =. 3 : 'if. y do. 1 else. 0 end.'\nt 1 0
-> 1
+> j: 1
 = t =. 3 : 'if. y do. 1 else. 0 end.'\nt ''
-> 1
+> j: 1
 = t =. 3 : 'if. y do. 1 else. 0 end.'\nt 2
-> 1
+> j: 1
 = t =. 3 : 'if. y do. 1 else. 0 end.'\nt 0.0
-> 0
+> j: 0
 = t =. 3 : 'if. y do. 1 else. 0 end.'\nt i. 0
-> 1
+> j: 1
 = g =. 3 : 'if. y > 5 do. 1 elseif. y > 2 do. 2 elseif. do. 3 end.'\n(g 9), (g 4), (g 1)
-> 1 2 3
+> j: 1 2 3
 = b =. 3 : 'if. 0 do. 5 end. 7'\nb 0
-> 7
+> j: 7
 = a =. 3 : 'if. 0 do. 5 end.'\n$ a 0
-> 0 0
+> j: 0 0
 = w =. 3 : 0\nn =. 0\ns =. 0\nwhile. n < y do.\ns =. s + n\nn =. n + 1\nend.\ns\n)\nw 5
-> 10
+> j: 10
 = ws =. 3 : 0\nn =. 0\nwhilst. n < 0 do.\nn =. n + 1\nend.\nn\n)\nws 0
-> 1
+> j: 1
 = c =. 3 : 0\nwhile. 0 do.\n5\nend.\n)\n$ c 0
-> 0 0
+> j: 0 0
 = fr =. 3 : 0\ns =. 0\nfor. y do.\ns =. s + 1\nend.\ns\n)\nfr i. 4
-> 4
+> j: 4
 = fi =. 3 : 0\ns =. 0\nfor_i. y do.\ns =. s + i * 10 + i_index\nend.\ns\n)\nfi 3 4 5
-> 134
+> j: 134
 = d =. 3 : 0\ns =. 0\nfor_i. i. 0 do.\ns =. s + 1\nend.\ns\n)\nd 0
-> 0
+> j: 0
 = bc =. 3 : 0\ns =. 0\nfor_i. i. 10 do.\nif. i = 3 do. continue. end.\nif. i = 6 do. break. end.\ns =. s + i\nend.\ns\n)\nbc 0
-> 12
+> j: 12
 = se =. 3 : 0\nselect. y\ncase. 1 do. 'one'\ncase. 2 do. 'two'\nfcase. 3 do. 'three'\ncase. 4 do. 'four'\ncase. do. 'other'\nend.\n)\nse 1
-> one
+> j: one
 = se =. 3 : 0\nselect. y\ncase. 1 do. 'one'\ncase. 2 do. 'two'\nfcase. 3 do. 'three'\ncase. 4 do. 'four'\ncase. do. 'other'\nend.\n)\nse 3
-> four
+> j: four
 = se =. 3 : 0\nselect. y\ncase. 1 do. 'one'\ncase. 2 do. 'two'\nfcase. 3 do. 'three'\ncase. 4 do. 'four'\ncase. do. 'other'\nend.\n)\nse 9
-> other
+> j: other
 = sm =. 3 : 0\nselect. y\ncase. 1 2 do. 'a'\ncase. 3 do. 'b'\ncase. do. 'z'\nend.\n)\nsm 1
-> z
+> j: z
 = sm =. 3 : 0\nselect. y\ncase. 1 2 do. 'a'\ncase. 3 do. 'b'\ncase. do. 'z'\nend.\n)\nsm 1 2
-> a
+> j: a
 = r =. 3 : 'if. y > 3 do. return. end. 7'\nr 1
-> 7
+> j: 7
 = r =. 3 : 'if. y > 3 do. return. end. 7'\n$ r 5
-> 0 0
+> j: 0 0
 = r2 =. 3 : 'z =. 42 return. 7'\nr2 5
-> 42
+> j: 42
 = r4 =. 3 : 0\nif. y > 3 do.\n99\nreturn.\nend.\n7\n)\nr4 5
-> 99
+> j: 99
 = tc =. 3 : 0\ntry.\nz =. 1 + 'a'\n'no'\ncatch.\n'caught'\nend.\n)\ntc 0
-> caught
+> j: caught
 = tc =. 3 : 0\ntry.\ny + 1\ncatch.\n99\nend.\n)\ntc 5
-> 6
+> j: 6
 = t3 =. 3 : 0\ns =. 0\nfor_i. i.3 do.\ntry.\nif. i = 1 do. z =. 1 + 'a' end.\ns =. s + 1\ncatch.\ns =. s + 100\nend.\nend.\ns\n)\nt3 0
-> 102
+> j: 102
 = fac =. 3 : 'if. y <: 1 do. 1 else. y * fac y - 1 end.'\nfac 5
-> 120
+> j: 120
 = fac =. 3 : 'if. y <: 1 do. 1 else. y * fac y - 1 end.'\nfac 10
-> 3628800
+> j: 3628800
 = fib =. 3 : 'if. y < 2 do. y else. (fib y - 1) + fib y - 2 end.'\nfib 10
-> 55
+> j: 55
 = gl =: 100\ng =. 3 : 'gl + y'\ng 1
-> 101
+> j: 101
 = gl2 =: 7\nh =. 3 : 0\ngl2 =. 1\ngl2\n)\n(h 0), gl2
-> 1 7
+> j: 1 7
 = k =. 3 : 0\ngl3 =: 5\ngl3 + 1\n)\nk 0
-> 6
+> j: 6
 = k =. 3 : 0\ngl3 =: 5\ngl3 + 1\n)\nz =. k 0\ngl3
-> 5
+> j: 5
 = tl =. 55\nq =: 3 : 'tl + y'\nq 1
-> 56
+> j: 56
 = f =. {{ ({{ y + 1 }}) y * 2 }}\nf 5
-> 11
+> j: 11
 = outer =. 3 : 0\ninner =. 3 : 'y * 3'\ninner y + 1\n)\nouter 4
-> 15
+> j: 15
 = 16b1f
-> 31
+> j: 31
 = 16bff
-> 255
+> j: 255
 = 2b101
-> 5
+> j: 5
 = 3b12
-> 5
+> j: 5
 = 1b1
-> 1
+> j: 1
 = 0b1
-> 1
+> j: 1
 = _16b11
-> _15
+> j: _15
 = 2.5b10
-> 2.5
+> j: 2.5
 = 16b_1
-> _1
+> j: _1
 = 1p1
-> 3.14159
+> j: 3.14159
 = 1p2
-> 9.8696
+> j: 9.8696
 = 2p1
-> 6.28319
+> j: 6.28319
 = 1p0.5
-> 1.77245
+> j: 1.77245
 = 1p_1
-> 0.31831
+> j: 0.31831
 = _1p1
-> _3.14159
+> j: _3.14159
 = 1x1
-> 2.71828
+> j: 2.71828
 = 2x1
-> 5.43656
+> j: 5.43656
 = 1p1 2p1
-> 3.14159 6.28319
+> j: 3.14159 6.28319
 = 1e3
-> 1000
+> j: 1000
 = 1e_3
-> 0.001
+> j: 0.001

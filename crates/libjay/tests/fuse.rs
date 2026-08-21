@@ -86,13 +86,13 @@ fn both(lang: Lang, src: &str, n: usize) -> (Result<Option<Array>, String>, Resu
 /// pair is compared to 1e-12 relative and everything else exactly.
 fn same(lang: Lang, src: &str, n: usize) {
     let (fused, plain) = both(lang, src, n);
-    if let (Ok(Some(a)), Ok(Some(b))) = (&fused, &plain) {
-        if a.rank() == 0 && a.dtype() == DType::F64 && b.dtype() == DType::F64 {
-            let (x, y) = (a.to_f64_vec().unwrap()[0], b.to_f64_vec().unwrap()[0]);
-            let ok = x == y || (x - y).abs() <= 1e-12 * y.abs();
-            assert!(ok, "fused {x}, unfused {y} on `{src}` at {n} elements");
-            return;
-        }
+    if let (Ok(Some(a)), Ok(Some(b))) = (&fused, &plain)
+        && a.rank() == 0 && a.dtype() == DType::F64 && b.dtype() == DType::F64
+    {
+        let (x, y) = (a.to_f64_vec().unwrap()[0], b.to_f64_vec().unwrap()[0]);
+        let ok = x == y || (x - y).abs() <= 1e-12 * y.abs();
+        assert!(ok, "fused {x}, unfused {y} on `{src}` at {n} elements");
+        return;
     }
     assert_eq!(fused, plain, "fused and unfused disagree on `{src}` at {n} elements");
 }

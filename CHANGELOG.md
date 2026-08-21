@@ -7,56 +7,79 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- APL trains, as an extension shipped on by default under the `trains`
-  dialect setting: `(g h)` is an atop, `(f g h)` a fork, a literal value
-  may be a fork's left tine, and longer runs group from the right. `⊢` and
-  `⊣` are the identity tines. They lower to the same fork and atop verbs
-  the J frontend builds.
-- APL function assignment: `F←+/` names a derived function and `F←+/÷≢` a
-  train, under the same `trains` setting. `Dialect(trains=False)` restores
-  GNU APL's reading, where both are a syntax error.
-- J names adverbs and conjunctions: `m =. /`, `c =. @`. The name is that
-  modifier from the next sentence on.
-- J writes adverbs and conjunctions: `1 : '…'`, `2 : '…'`, the `1 : 0` and
-  `2 : 0` bodies on the lines below, and the `{{ … }}` whose body names an
-  operand. Operands arrive as `u` and `v` when they are verbs and as `m`
-  and `n` when they are nouns. A body that names `x` or `y` becomes the
-  derived verb's body; one that names neither runs when the modifier meets
-  its operands, so `1 : 'u @ u'` derives a tacit verb and `1 : '3 + 4'` a
-  noun. A `{{ }}`'s part of speech follows the operand names its body uses,
-  and the `{{)a` `{{)c` `{{)v` `{{)d` `{{)m` markers state it outright.
-- J `L:` and `S:` gained their dyads: both arguments are descended together
-  and a side that has reached its level is held while the other descends.
-- J `H.`, the generalised hypergeometric series, with the parameters the
-  two lists share cancelled first.
-- The input half of the sandbox. APL `⍞` is one line of input as a
-  character vector and `⎕` is one line evaluated as APL over the program's
-  own names; `⍞←` writes its argument's characters and nothing else, where
-  `⎕←` ends the line. J's `1!:1 ]1` reads a line and `x 1!:2 ]2` writes
-  one. Reading past the end of the input is a reported error, never an
-  empty line.
-- J's `!:` foreign conjunction, as a dispatcher over its two numbers:
-  `1!:1`, `1!:2` and `3!:0` (J's type code for an element type) are
-  implemented, the foreigns that reach a file, a script, the host, the
-  clock or a shared library are closed by the sandbox, and the ones that
-  only compute name themselves as gaps.
-- `Program::run_io` and `Program::run_on_io` attach an input source to a
-  run; `Program::run` and `Program::run_on` are unchanged and have none.
-  In Python, `Kernel.__call__`, `Kernel.run_display` and the one-shot take
-  `input=`, a callable answering one line per call and None at the end; it
-  defaults to this process's standard input, so `libjay -e '⍞' --lang apl`
-  reads what is piped or typed. In C, `jay_run_io` takes a `jay_read_fn`
-  beside the write callback; `jay_run` keeps its signature and its meaning.
-- `ErrorKind::Sandbox`, labelled "closed by the sandbox": a feature the
-  host closes, which is neither "not in the language" nor a promise to
-  implement it later.
+- APL trains: a run of bare functions now reads as a fork or an atop —
+  `(f g h)` applies `f` and `h` to the argument and combines the results
+  with `g`; `(g h)` applies `h` then `g`. A plain number may stand in a
+  fork's left position, and `⊢`/`⊣` mean "the argument itself". This is an
+  extension beyond strict APL2/GNU APL, on by default, with the strict
+  reading available as an option.
+- APL function assignment: a derived function or a whole train can be
+  named (`F←+/`, `F←+/÷≢`) and then applied like any other function.
+- J can name an adverb or conjunction on its own (`m =. /`, `c =. @`), not
+  only a verb.
+- J can define its own adverbs and conjunctions: `1 : '…'` and `2 : '…'`,
+  their multi-line forms, and the `{{ … }}` direct-definition syntax,
+  matching J's published vocabulary for writing them.
+- J's `L:` and `S:` now take two arguments as well as one.
+- J's `H.`, the generalised hypergeometric series.
+- Reading input, not just writing it: APL's `⍞` (one line of text) and `⎕`
+  (one line evaluated as APL), and J's `1!:1 ]1`, all read from the same
+  standard input the host provides — piped, typed, or supplied by the
+  embedding application. Every language surface (Rust, Python, C, and the
+  command line) gained the matching call, alongside the existing output
+  calls.
+- More of J's `!:` foreign conjunction: reading a value's storage type and
+  reading or writing one line of standard input now work. The calls that
+  would reach a file, the system clock, or another process are refused
+  with a clear "closed by the sandbox" message.
+- Faster execution on newer x86-64 processors, using the CPU's AVX-512
+  instructions when present; picked up automatically at startup, with an
+  explicit override available. Not yet benchmarked on real AVX-512
+  hardware.
+- J's gerunds are ordinary data now, exactly as the language has them: a
+  tie such as `` +`- `` produces a boxed value you can name, print, add to,
+  and build by hand. `` `: `` (evoke gerund) works in all three of its
+  forms — apply each verb and collect the answers, insert the verbs between
+  the items, or read the gerund as a train.
+- Dyadic transpose in both languages: J's `1 0 |: m` and APL's `2 1⍉m`,
+  including the diagonal forms `` (<0 1)|: `` and `1 1⍉`.
+- J's monadic `{` (catalogue: every combination of one element from each
+  item) and monadic `e.` (raze-in).
+- J's `_.`, the indeterminate value.
+- J's `u b. 1` and `u b. _1`: what a verb's identity element and inverse
+  are spelled as.
+- J's `^:` accepts a list of counts, and the boxed forms that collect
+  every intermediate result — `u^:(<n)` and `u^:a:`.
+- J's tessellation `;.3` accepts a negative block size, which reverses that
+  axis, where the movement row is written out.
+- APL's `⍢` (under) and `⌺` (stencil), and the collating grades `x⍋y` and
+  `x⍒y`.
 
 ### Changed
 
-- The refusals that were the sandbox speaking now carry
-  `ErrorKind::Sandbox` rather than `ErrorKind::Language`: APL's `⎕TS`,
-  `⎕AI`, `⎕FIO` and their relatives, and J's `T.`. The rendered text still
-  says "closed by the sandbox", now as the error's label.
+- A DataFrame no longer costs a copy to read. Its columns cross the
+  boundary borrowed, one Arrow buffer each, and libjay folds them where
+  they lie: `+/ df` (column sums) and `+/"1 df` (row sums) over a
+  2.5M x 8 table are 10 and 5 times faster end to end, and reading the
+  table's shape costs nothing at all. Programs that need the elements in
+  reading order — ravelling, indexing, printing — still pay for one copy,
+  now at the point they ask for it instead of on every call.
+- Transposing an array (`|:`, `⍉`) no longer moves any elements, at any
+  rank.
+- A Fortran-ordered numpy block — `np.asfortranarray(a)`, or the `.T` of an
+  ordinary one — is read where it lies instead of being refused with a
+  request to copy it. Views that are contiguous in neither order (strided
+  slices, sub-blocks, partial axis permutations) are still refused, with
+  the same message.
+- Refusals that come from the sandbox (closed I/O, the system clock,
+  threads) are now labelled distinctly from "not supported" and "not part
+  of the language", so it reads as a deliberate boundary rather than a
+  missing feature.
+- Minimum required Rust version raised to 1.89, needed for the AVX-512
+  support above; pinned in the repository so every build uses the same
+  compiler.
+- Updated third-party dependencies (the GPU backend, Python bindings, and
+  test tooling) to their latest versions; no user-visible change.
 
 ### Deprecated
 
@@ -64,12 +87,26 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- APL's `⍢`, `⌺`, `⍠`, `⌶` and `⍞` are reported as named gaps rather than
-  unknown characters.
-- APL `(+)/1 2 3` is 6, as the reference answers it: a parenthesised
-  function now closes before the operator to its right binds, and
-  parentheses around a bare operator glyph (`1 0 1(/)1 2 3`) are
-  transparent.
+- `(2&+)^:_1` and `(2&*)^:_1` computed the wrong inverse — the bonded
+  number was applied from the left instead of taken off the right, so
+  `(2&+)^:_1 5` answered `¯3` where J answers 3. Everything that undoes a
+  verb (J's `&.`, `^:_1`, `u b. _1` and APL's `⍢`) is corrected by it.
+- APL's `⊥` on an argument of rank 2 or more folded the wrong axis: it is
+  an inner product and folds the LEADING axis of its right argument.
+  Vectors, the common case, were always right.
+- APL's `⍸` (interval index) placed a value exactly equal to a bound in the
+  wrong interval: `1 3 5⍸3` is 2, not 1. J's `I.`, whose interval is open
+  on that side, is unchanged.
+- APL's `⌷` accepts an enclosed vector as an index, so `(⊂1 2)⌷5 6 7 8` is
+  `5 6`.
+- APL's `∊` finds a scalar held in a nested right argument:
+  `1 2 3∊(1 2)(3)` is `0 0 1`.
+- Two rarely-used APL operators (variant, I-beam) that
+  aren't implemented yet are now reported by name as "not supported yet"
+  instead of as an unrecognized character.
+- Fixed APL operator precedence so a parenthesised function binds before
+  an operator to its right, matching the reference implementation —
+  `(+)/1 2 3` now evaluates to 6.
 
 ### Security
 

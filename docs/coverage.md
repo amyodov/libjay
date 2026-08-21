@@ -66,17 +66,17 @@ feature — that is a promise, not a refusal.
 | `r.` | `^ 0j1 * y`: the unit complex at angle y | `x * ^ 0j1 * y`: polar coordinates |
 | `":` | format: the characters that display the argument | not supported yet (format with a specification) |
 | `o.` | pi times y | circle function k (see below) |
-| `{` | not supported yet (catalogue) | from: each atom of x selects an item (negative from the end). A BOXED x is J's index specification: `<A` with a simple A reads A's last axis as one index per leading axis, the axes ahead of it framing the result; `<(c0;c1;…)` gives one component per axis, a scalar component dropping its axis and a boxed one meaning the complement — which is how `a:` selects a whole axis |
+| `{` | catalogue: one element from each item of y, in every combination — the shapes of the items make the result's shape and each element of it is one choice, boxed | from: each atom of x selects an item (negative from the end). A BOXED x is J's index specification: `<A` with a simple A reads A's last axis as one index per leading axis, the axes ahead of it framing the result; `<(c0;c1;…)` gives one component per axis, a scalar component dropping its axis and a boxed one meaning the complement — which is how `a:` selects a whole axis |
 | `{.` | head | take (negative = from end; overtake fills) |
 | `}.` | behead | drop |
 | `{:` | tail (fill cell when there are no items) | — |
 | `}:` | curtail | — |
 | `\|.` | reverse the items | rotate axis k by `x[k]`, cyclically |
-| `\|:` | transpose (reverse axes) | not supported yet (dyadic transpose) |
+| `\|:` | transpose (reverse axes) | dyadic transpose: the axes x names move to the END in that order and the rest keep their order in front; a BOXED x groups axes, and the axes of one group are run together, which is the diagonal. An axis named twice is an index error, as it is in the reference |
 | `i.` | integers (negative axis = reversed) | index of (absent gives the item count) |
 | `i:` | steps: `-y` to `y` one apart, `1 + <. 2 * \| y` of them; a negative y counts down | index of the LAST occurrence (absent gives the item count) |
 | `I.` | indices: index `i` repeated `y[i]` times (rank 1, so a table frames the rows) | interval index: how many items of the ascending x are strictly below each cell |
-| `e.` | not supported yet (raze-in) | member: cells of x shaped like items of y |
+| `e.` | raze-in: for every element of y, which items of `; y` it holds — the answer is shaped `($y), #items of the raze` | member: cells of x shaped like items of y |
 | `E.` | — | find: 1 at each position of y where a copy of x begins, shaped like y's items; a pattern longer than y matches nowhere |
 | `A.` | anagram index: where the permutation y's items RANK as stands among the permutations of that length, lexicographically | the x-th permutation of y's items; a negative x counts back from the last. Characters have no anagram index monadically, as in J |
 | `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation, and one shorter than y applies to y's leading items with the rest brought round to the front (`0 1 C. 'abcde'` is `cdeab`). An atom left argument is a named gap |
@@ -175,7 +175,10 @@ sizes, or two rows of origins and sizes, and a negative size reverses that
 axis; `x u;.3 y` and `x u;._3 y` tessellate: x is the block size, or two
 rows of movement and size, and u runs on every block — `;.3` keeps the short
 blocks at the far edge, `;._3` takes only the whole ones. A negative block
-size in a tessellation is a named gap); `!.` (fit: on the verbs whose
+size reverses its axis there too, but only where the movement row is
+written out: given a bare vector of sizes the reference answers with
+something its magnitude plays no part in, so libjay names that gap rather
+than guessing at it); `!.` (fit: on the verbs whose
 meaning uses the comparison tolerance it replaces that tolerance, so `=!.0`
 compares exactly; on `|.` it gives the FILL instead — `x |.!.f y` shifts
 rather than rotates, an item moved past an end is dropped and the place it
@@ -196,13 +199,34 @@ has already reached its level is held while the other descends, so `1 ,L:0
 (3;4)` reaches every leaf with the same left argument. Two sides that both
 still have boxes must agree in shape.
 
-A gerund is the verbs `` ` `` ties together. J spells one as a boxed noun;
-here it is a fragment of the parse, and `@.` is the only thing that reads
-one — `m@.n` picks a verb by a literal index, and `m@.v` runs v on the
-arguments and picks by its value, so `(<.`>.)@.(2&<)` floors below 2 and
-ceilings above. `` `: `` (evoke gerund) is named as a gap; representing a
-gerund as a real boxed noun is what that needs, and nothing else asks for
-it yet.
+A gerund is boxed data: `` u`v `` is one box per tied entity, each holding
+that entity's ATOMIC REPRESENTATION. A primitive is its own spelling as a
+character vector, a noun is the pair `('0'; <value)`, a train is
+`('2'; <parts)` or `('3'; <parts)`, and anything a modifier derived is
+`(spelling; <operands)` — so `` +`- `` displays as two boxes holding `+`
+and `-`, and `` +/`- `` as the box tree for `('/'; <,<'+')` beside `-`.
+Being data is the whole point: a gerund can be named, catenated onto,
+computed and displayed like any other noun, and tying two nouns is just
+catenating them (`` 0`1 `` is `0 1`).
+
+Two conjunctions read it. `m@.n` picks a verb by a literal index and `m@.v`
+runs v on the arguments and picks by its value, so `` (<.`>.)@.(2&<) ``
+floors below 2 and ceilings above. `` m`:n `` is evoke, in the three forms
+J gives it: `` `:0 `` applies every verb to the arguments and frames the
+answers (`` ((+`-)`:0) 5 `` is `5 _5`), `` `:3 `` inserts the verbs between
+the items of y, taking them left to right and cycling, and folding right to
+left as insert does (`` ((+`*)`:3) 1 2 3 4 `` is `1 + 2 * 3 + 4`), and
+`` `:6 `` is the TRAIN the gerund spells — a hook of two, a fork of three,
+and longer ones grouped from the right. Any other number is a domain error,
+as it is in the reference, and `` `: `` reads data and not a verb.
+
+The representation is reconstructed from the verb tree rather than kept
+from the source, so the spellings that differ only by the rank they set are
+recovered by matching that rank: `u@v` is `u@:v` at v's ranks, `u&v` and
+`u&.v` likewise. Two do not survive the trip and are named rather than
+guessed at: a capped fork (`[: f g` is an atop by the time the tree has it,
+so it writes itself out as `@:`) and any verb libjay has no J spelling for,
+which reports "the atomic representation of … is not supported yet".
 
 ### The obverse table
 
@@ -213,15 +237,19 @@ already write down:
 
 - self-inverse: `+` `-` `%` `-.` `|.` `|:`
 - paired: `^`/`^.`, `*:`/`%:`, `+:`/`-:`, `>:`/`<:`, `<`/`>`, `#.`/`#:`
-- bonded arithmetic: `n&+`/`-&n`, `n&*`/`%&n`, `^&n` (the n-th root),
-  `n&^` (the base-n logarithm), and `n&-` and `n&%`, which undo themselves
+- bonded arithmetic: `n&+` and `+&n` are both undone by `-&n`, `n&*` and
+  `*&n` by `%&n` — the noun comes off the RIGHT whichever side it was bonded
+  to — plus `^&n` (the n-th root), `n&^` (the base-n logarithm), and `n&-`
+  and `n&%`, which undo themselves
 
 Everything built out of those inverts by inverting its parts: `u@:v` and
 `u&:v` invert in the other order, `u"r` and `u!.n` keep their modifier,
 `u^:n` becomes the obverse applied n times, and `u :. v` supplies an answer
 where the table has none. A verb the table does not reach says so by name —
 "the obverse of (+/ % #) is not supported yet" — rather than guessing at a
-numerical inverse.
+numerical inverse. Three things read the table besides `&.`: J's `u b. _1`,
+which answers with the obverse's SPELLING rather than the verb, APL's `⍢`
+(under), and `⍣¯1`.
 
 `". y` (do) compiles the characters of y as a J program and runs it in the
 sentence's own scope: the names it can see are the names the sentence can
@@ -261,9 +289,16 @@ definitions themselves — `3 : '...'`, `4 : '...'`, `{{ }}` — work; see
 The reference is GNU APL 2.0, which embodies the APL2/ISO line; the
 semantics libjay implements are that line, verified differentially against
 it (`crates/libjay/tests/oracle_apl.rs`, corpus in
-`crates/libjay/tests/corpus/apl/`). Dyalog is not an oracle and has never
-been run: every Dyalog-side cell below comes from its published
-documentation, not from a live comparison.
+`crates/libjay/tests/corpus/apl/`). Every Dyalog-side cell below was written
+from Dyalog's published documentation, not from a live comparison.
+
+Dyalog IS recorded now, in its own `dyalog:` column of the same snapshots
+(docs/testing.md), on the recording machine only. Those recordings gate
+nothing: a difference from Dyalog is the backlog a future Dyalog dialect
+would have to work through, and `jay-corpus stats apl --dialect-diff` is
+what measures it. `corpus/apl/dyalog-probe.txt` is the theme aimed at the
+table below. Where a recording ever contradicts a cell here, the recording
+wins and the cell changes.
 
 Every place the two lines are known to diverge, and which one libjay
 follows today. Rows marked "verified against the oracle" were re-checked
@@ -300,7 +335,8 @@ Dyalog-only features libjay already ships as extensions, implemented from
 published documentation with no oracle to check them against — hand-tested
 instead, and marked 🟡 "no oracle" in [status.md](status.md): `⊆` (monadic
 nest, dyadic partition — see above), `∘` (beside), `⍥` (over), `⍛`
-(before), `f⍤g` (atop with a function operand — the rank-specification form
+(before), `⍢` (under), `⌺` (stencil), `f⍤g` (atop with a function operand —
+the rank-specification form
 of `⍤` does have an oracle), `⌸` (key), dfn guards (`cond:expr`), `∇`
 self-reference, dfn operators (`⍺⍺`/`⍵⍵`), and the tradfn control
 structures (`:If :While :Repeat :For :Select`, `:Return :Leave :Continue`),
@@ -366,7 +402,7 @@ that second column looks like once one row is filled in.
 | `~` | not (the argument must be 0 or 1) | without: x's items that y has not |
 | `⍴` | shape of | reshape: x lays out y's ELEMENTS, cyclically, which is where APL and J part company above rank 1. An empty y fills with the type's fill |
 | `⍳` | index generator (respects `⎕IO`): one length gives the counting vector, two or more give an array of that shape whose elements are the boxed coordinate vectors | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`) |
-| `⍉` | transpose | not supported yet (dyadic transpose) |
+| `⍉` | transpose | dyadic transpose: x says, for each axis of y in turn, which axis of the RESULT it becomes; a destination two axes share runs them together, which is the diagonal, and every axis of the result must be named |
 | `↓` | split: the vectors along the LAST axis, each enclosed, laid out in the remaining axes' shape (no oracle — see "Which APL" above) | drop |
 | `,` | ravel | catenate along the LAST axis. Axes other than that one must conform: APL refuses the ragged case that J fills, which is where the two rules part company |
 | `⍪` | table: one row per item, holding that item's elements (a scalar gives 1×1, a vector n×1) | catenate along the LEADING axis |
@@ -379,8 +415,8 @@ that second column looks like once one row is filled in.
 | `≢` | tally | not match |
 | `∊` | enlist: every leaf element, in ravel order, as a vector | membership, element by element (an element of a nested array is a whole array) |
 | `⊂` | enclose — except that a simple scalar is its own enclosure, so `⊂5` is `5` | partitioned enclose: a partition opens where x rises (`x[i] > x[i-1]`, reading `x[¯1]` as 0) and an item flagged 0 is dropped. Rank 2 and above partitions the LAST axis, once per cross section, and the axes ahead of it frame the answer |
-| `⍸` | where: index `i` repeated `y[i]` times, from `⎕IO`; a rank-2 or higher argument gives one boxed coordinate vector per occurrence | interval index: how many items of the ascending x are strictly below each cell, plus `⎕IO - 1` |
-| `⌷` | materialise: the argument itself (no oracle — see "Which APL" above) | index: one scalar index per axis of y, and the count must equal the rank |
+| `⍸` | where: index `i` repeated `y[i]` times, from `⎕IO`; a rank-2 or higher argument gives one boxed coordinate vector per occurrence | interval index: how many items of the ascending x are at or below each cell, plus `⎕IO - 1`. The interval is closed on the left here and open in J's `I.`: `1 3 5⍸3` is 2 where `1 3 5 I. 3` is 1 |
+| `⌷` | materialise: the argument itself (no oracle — see "Which APL" above) | index: one item of x per axis of y, and the count must equal the rank. An item is a scalar, which drops its axis, or an ENCLOSED vector, which keeps it and selects that many — `(⊂1 2)⌷5 6 7 8` is `5 6` |
 | `⌹` | matrix inverse — the pseudo-inverse of a taller matrix; wider is refused, singular is a domain error | matrix divide: the least-squares solution of `y a = x` |
 | `?` | roll: a random value in `⎕IO .. ⎕IO+y-1` (`?0` is a domain error) | deal: x distinct values from that range |
 | `⊃` | disclose: the items mixed into one array, filled where their shapes differ | pick: each item of x is one step of a path — a simple step indexes the items, a boxed one is a whole coordinate vector |
@@ -393,7 +429,7 @@ that second column looks like once one row is filled in.
 | `⍎` | execute: the characters are compiled as an APL program and run HERE, over the names the sentence itself can see | — |
 | `⎕UCS` | codepoints become characters, characters become their codepoints | — |
 | `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill |
-| `⍋` `⍒` | grade up / down (stable; respects `⎕IO`) | not supported yet (collation) |
+| `⍋` `⍒` | grade up / down (stable; respects `⎕IO`) | collating grade: every character of y is keyed by where it FIRST occurs in the collating array x — the coordinate read with the last axis most significant, and one past the end for a character x does not hold — and the items of y are ordered by those keys read left to right |
 | `⊢` `⊣` | same | right / left |
 | `○` | pi times y | circle function k (see below) |
 | `/` `⌿` | — | replicate, after an operand: `/` counts the LAST axis, `⌿` the leading one |
@@ -401,12 +437,11 @@ that second column looks like once one row is filled in.
 `⊥` and `⊤` have no monadic meaning in APL at all; J spells those `#.` and
 `#:`. `x ⊤ y` takes its right argument whole, so the digits become the
 LEADING axis and the result has shape `(⍴x),(⍴y)` — the transpose of what
-J's `x #: y` produces, which frames the digits per atom of y. `⊥` has not
-had the matching treatment yet: an APL decode is an inner product and folds
-the LEADING axis of its right argument, while libjay folds the last one,
-which is J's `#.` at rank 1. Vectors — the whole of the common case — agree;
-rank 2 and above do not, and the fix waits on the axis-moving transpose that
-dyadic `⍉` needs anyway.
+J's `x #: y` produces, which frames the digits per atom of y; where x has
+rank 2 or more its LEADING axis is the digits and its remaining axes frame
+the answer along with y's. `⊥` is the matching inner product `+.×`: it
+folds x's LAST axis against y's LEADING one, so `(2 2⍴2)⊥2 3⍴⍳6` is a 2-by-3
+answer and the two axes have to agree in length.
 
 Vector notation is real: juxtaposed operands are the items of one vector,
 and the whole strand is a single operand. Every primary contributes one
@@ -445,8 +480,16 @@ monadically `f g y`, dyadically `f (x g y)` — while a value on the right is
 still the rank specification. `f⌸` is the key: the distinct major cells of
 the left argument, in first-occurrence order, each handed to f with what
 shares it — the positions it occupies monadically, the right argument's
-items there dyadically; an operand with no `⍺` gets the group alone. None of
-these four operators is in GNU APL — see "Which APL" above.
+items there dyadically; an operand with no `⍺` gets the group alone. `f⍢g`
+is under, which is over UNDONE: the published definition is
+`g⍣¯1 ⊢ (g x) f (g y)`, so it prepares both arguments with g, applies f,
+and puts the answer back through g's obverse — the same table J's `&.:`
+reads, and a g outside it says so by name. `f⌺w` is the stencil: f applies
+to the window of `w` cells CENTRED on each cell of the argument, one size
+per leading axis, the edges filled with 0 or a blank, so `(+/⌺3)1 2 3 4 5`
+is `3 6 9 12 9`; Dyalog's two-row form, which also gives the movement, is
+a named gap. None of these six operators is in GNU APL — see "Which APL"
+above.
 
 A dfn that names `⍺⍺` or `⍵⍵` is an OPERATOR rather than a function: it
 takes the function on its left, and one on its right where it named `⍵⍵`.
@@ -571,7 +614,33 @@ Host data enters through the first protocol the object offers:
 |---|---|---|
 | `__arrow_c_array__` | PyArrow arrays | one column, shape [M] |
 | `__arrow_c_stream__` | Polars/pandas DataFrames and Series, PyArrow tables and chunked arrays | N columns × M rows → shape [M, N], rows leading; N = 1 → shape [M] |
-| `__array_interface__` | numpy | any rank, C-contiguous only |
+| `__array_interface__` | numpy | any rank, contiguous in either order (C or Fortran) |
+
+### Which layout crosses
+
+A block that is contiguous is read where it lies, in whichever of the two
+orders it lies in. The SHAPE is always the logical one — rows leading, so a
+table of N columns and M rows is `[M, N]` whatever its buffer does — and the
+layout is carried alongside it:
+
+- a C-contiguous numpy block, and every result libjay computes for itself,
+  is row-major;
+- a Fortran-contiguous numpy block (`np.asfortranarray`, and the `.T` of a
+  C-contiguous one) is column-major, and crosses borrowed rather than
+  refused;
+- a table of two or more columns is column-major by construction: the
+  columns cross borrowed, one buffer each, and are never woven at the
+  boundary.
+
+A verb that reads the columns where they lie — the leading-axis fold `+/`,
+the row fold `+/"1`, every elementwise verb, `$`, `#`, `|:` — answers from
+the buffer as it is. Any other verb is given the rows, materialised once at
+the point it is applied. Either way the answer is the answer the same data
+in the other layout gives, which `tests/layout.rs` holds the whole
+primitive table to.
+
+`|:` (APL `⍉`) reverses the axes by flipping that flag, so a transpose
+moves no elements at all.
 
 A Python list whose items do not share one shape and element type — a list
 of strings, a ragged list of lists — becomes a BOXED vector: each item is
@@ -646,21 +715,29 @@ object alive for as long as it holds the data):
   `Timestamp` (any unit), `Date64`, `Duration`, `Time64`. Reinterpretation is
   reading, not converting: a timestamp difference is plain integer
   arithmetic, in the column's own unit, with no type restored on the way out.
-- numpy C-contiguous `int64` and `float64` of any rank.
+- numpy C-contiguous `int64` and `float64` of any rank, and the same types
+  Fortran-contiguous, which cross as column-major.
+- A table of two or more Arrow columns that agree on type: the columns are
+  borrowed where they are, and the value libjay works on is those columns
+  end to end. Nothing is woven unless a verb asks for the rows.
 - Every rank-1 `integer`/`float` result on the way out.
 
 Copied (widened or unpacked, once): Arrow `Int8/16/32`, `UInt8/16/32`,
 `Date32`, `Time32`, `Float32`, `Boolean` (bit-packed at the source);
-`UInt64` when every value fits i64; the same numpy dtypes; boolean results on
-the way out; any table of two or more columns, which must be woven from
-column-major into row-major.
+`UInt64` when every value fits i64; the same numpy dtypes; boolean results
+on the way out. A column-major value is copied once more if — and only if —
+a verb that reads rows is applied to it, or it is handed back to Python,
+printed, or exported.
 
 Refused, with the column named and an action suggested:
 
 - any column holding nulls — J has no missing value;
 - columns of a table that do not agree on one element type (int64 beside
   float64), because promoting silently damages values above 2⁵³;
-- a numpy view that is not C-contiguous (transposed or strided);
+- a numpy view that is contiguous in neither order: a strided or reversed
+  slice (`a[::2]`, `a[::-1]`), a sub-block (`a[:, :2]`), or a permutation of
+  axes that is neither the original nor its full reversal
+  (`a.transpose(1, 0, 2)`);
 - `UInt64` values above `2⁶³-1`.
 
 Not supported yet as an input carrier (a promise, not a refusal):
@@ -1027,11 +1104,15 @@ reaches the filesystem, which is outside the program".
 
 **Neither.** A foreign that only computes is an ordinary queue position and
 says "not supported yet" with its number: `9!:18` (the settings), `3!:1`
-and the rest of the conversions, `4!:` (names), `5!:` (representation).
+and the rest of the conversions, `4!:` (names), and the rest of `5!:`
+(representation).
 `3!:0` is implemented — it is the type code J reports for an element type
 (boolean 1, character 2, integer 4, float 8, complex 16, box 32, extended
 64, rational 128), which is cheap and useful for a test that wants to name
-a type.
+a type. `5!:1` is too: `5!:1 <'name'` answers with the ATOMIC
+REPRESENTATION of whatever the name stands for, boxed — the same data a
+gerund is made of, so a verb gives its spelling or its box tree and a value
+gives the noun pair `('0'; <value)`.
 
 Executing a string (`". y`, `⍎ y`) is inside the sandbox rather than a hole
 in it: the nested program reaches exactly what the caller reaches, and `⎕`
@@ -1140,9 +1221,9 @@ libjay is more permissive:
 - `∪` is nub over ITEMS, so a matrix is legal; GNU APL's monad takes vectors
   only. `∩`, `~` and `∪` dyadically work over items here for the same
   reason.
-- monadic `↓`, monadic `⌷`, `⎕A`, `⎕D`, `∘` and `⍥` are not in GNU APL at
-  all — no oracle, tested against hand-written expectations in
-  tests/wave4.rs instead; see "Which APL" above.
+- monadic `↓`, monadic `⌷`, `⎕A`, `⎕D`, `∘`, `⍥`, `⍢` and `⌺` are not in
+  GNU APL at all — no oracle, tested against hand-written expectations in
+  tests/wave4.rs and tests/wave7.rs instead; see "Which APL" above.
 - dyadic `⊖` reads a vector left argument per axis, GNU APL per column
   (already listed above).
 - `⍺←v` inside a dfn, and what a dfn's return value is — both in "Which
@@ -1172,8 +1253,6 @@ libjay is stricter, or simply elsewhere:
 - complex equality. libjay compares the magnitude of the difference against
   `⎕CT`, as its real comparison does; GNU APL's complex comparison is looser
   by roughly the square root of `⎕CT`, so `1J1=1.0000000001J1` is 1 there.
-- `⊥` folds the last axis of a rank ≥ 2 argument, APL the leading one (see
-  the `⊥`/`⊤` note above).
 - a sequence yields its last sentence and prints nothing on the way, so
   `1 2 3⋄4 5` is `4 5`; GNU APL prints the value of every statement.
 
@@ -1210,19 +1289,20 @@ sections above is also collected here.
   works as it does anywhere else. `13 : '…'` and `{{)n` are gaps too.
 - Named on their own, beyond what
   the tables above already mark "not supported yet": J's dyad of `;:` (the
-  sequential machine), `s:` (symbols), `$.` (sparse), `` `: `` (evoke
-  gerund), `t.` and `t:` (the Taylor series), `..`
-  and `.:` (even and odd), a NEGATIVE block size in a tessellation,
-  a characteristic of `b.` other than `0`, and `!.` as
-  a fill on any verb but `|.`; APL's `⍢` (under), `⌺` (stencil), `⍠`
-  (variant), `⌶` (I-beam), a nested argument to
-  dyadic `⍕`, and a label sharing a definition with a control structure.
-  The four APL glyphs are reported by NAME rather than as unknown
+  sequential machine), `s:` (symbols), `$.` (sparse), the inner product
+  `u . v`, a NEGATIVE block size in a tessellation with the movement row
+  left implicit, the atomic representation of a capped fork or an explicit
+  definition, and `!.` as a fill on any verb but `|.`; APL's `⍠` (variant),
+  `⌶` (I-beam), `&` (spawn), a nested argument to dyadic `⍕`, a stencil
+  with a movement row, and a label sharing a definition with a control
+  structure.
+  The APL glyphs are reported by NAME rather than as unknown
   characters: a glyph the language has and libjay has not reached is a
-  queue position, and the diagnostic says which one. `T.` is not a queue position: it
-  starts J's own threads, which the sandbox does not open (see "Sandbox"
-  above), and `d.` `D.` `D:` are not in the language the reference
-  implements at all.
+  queue position, and the diagnostic says which one. `T.` and `t.` are not
+  queue positions: both run a verb in J's own threads, which the sandbox
+  does not open (see "Sandbox" above), and `d.` `D.` `D:` `t:` `..` `.:`
+  are not in the language the reference implements at all — it rejects
+  every one of those spellings as an invalid inflection.
   J's map `{::`, the index specifications of `{` and `}`, amend with a verb
   operand `u}`, the tessellations `;.3` and `;._3`, the rectangle cut
   `x u;.0 y`, the fill shift `|.!.f`, `f.` (fix), `M.` (memo), `L:` and
@@ -1231,8 +1311,9 @@ sections above is also collected here.
   bitwise functions) and the explicit modifiers `1 :`, `2 :` and the
   `{{ }}` that names an operand all work, as do APL's `⍳` on a shape, mixed simple
   arrays, prototype fills, partitioned enclose at any rank, dyadic `⍕`,
-  `⊆`, `⍛`, `f⍤g`, `⌸`, trains, function assignment, the branch `→` and the
-  niladic `∇`. Boxes and
+  `⊆`, `⍛`, `⍢`, `⌺`, `f⍤g`, `⌸`, trains, function assignment, the branch
+  `→` and the niladic `∇`. J's gerunds are boxed data now, so `` ` ``,
+  `@.` and `` `: `` all read the same atomic representations. Boxes and
   complex numbers are both implemented; bigints and rationals (the exact
   types) are too — see "The numeric tower and the exact types" above.
 - Complex numbers reach every scalar verb, the reductions, the scans and

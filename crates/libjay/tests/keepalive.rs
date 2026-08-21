@@ -233,7 +233,7 @@ fn an_uploaded_array_outlives_the_program_that_ran_on_it() {
     {
         let prog = compile(Lang::J, "+/ {x} * {x}", &Dialect::default()).expect("compile");
         let out = prog
-            .run_on(&device, &[resident.clone()], &mut |_| {})
+            .run_on(&device, std::slice::from_ref(&resident), &mut |_| {})
             .expect("run")
             .expect("a value");
         assert!(out.count() == 1);

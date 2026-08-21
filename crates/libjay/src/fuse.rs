@@ -21,7 +21,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::array::{Array, Data};
+use crate::array::{Array, Data, Layout};
 use crate::dtype::DType;
 use crate::error::Span;
 use crate::ir::{Expr, Program, Scope};
@@ -538,15 +538,13 @@ fn kernel_at<'a>(
     tol: Tol,
 ) -> Option<(FusedKernel, Vec<&'a Expr>, &'a Expr)> {
     if let Expr::Monad { verb, y, .. } = e {
-        if is_tally(verb) {
-            if let Some((k, l)) = build(y, Yield::Tally, 1, sub, tol) {
-                return Some((k, l, e));
-            }
+        if is_tally(verb) && let Some((k, l)) = build(y, Yield::Tally, 1, sub, tol) {
+            return Some((k, l, e));
         }
-        if let Some(op) = absorbable_reduce(verb) {
-            if let Some((k, l)) = build(y, Yield::Reduce(op), 1, sub, tol) {
-                return Some((k, l, e));
-            }
+        if let Some(op) = absorbable_reduce(verb)
+            && let Some((k, l)) = build(y, Yield::Reduce(op), 1, sub, tol)
+        {
+            return Some((k, l, e));
         }
     }
     let (k, l) = build(e, Yield::Values, 2, sub, tol)?;
@@ -1232,10 +1230,8 @@ where
 /// Give a block buffer back, unless a let is holding it for the rest of
 /// the block.
 fn release(free: &mut Vec<usize>, lets: &[usize], s: Slot) {
-    if let Slot::Block(i) = s {
-        if !lets.contains(&i) {
-            free.push(i);
-        }
+    if let Slot::Block(i) = s && !lets.contains(&i) {
+        free.push(i);
     }
 }
 
@@ -2020,17 +2016,50 @@ pub(crate) fn eval_on(
 ) -> (Option<Array>, crate::device::Placement) {
     use crate::device::Placement;
     let mut placement = Placement::Default;
-    if let Some(d) = device.filter(|d| d.is_gpu()) {
+    // A block kernel reads every input and writes every slot at the same
+    // index, so the order the buffers are laid out in cannot reach the
+    // result — as long as every non-scalar input is laid out the same way.
+    // Then the answer is laid out that way too, and no transpose is made.
+    let materialised: Vec<Array>;
+    let (inputs, layout) = match kernel_layout(inputs) {
+        Some(l) => (inputs, l),
+        None => {
+            materialised = inputs.iter().map(Array::to_row_major).collect();
+            (&materialised[..], Layout::RowMajor)
+        }
+    };
+    // The device is offered row-major work only: uploading a matrix that is
+    // faster to fold where it lies would be the wrong trade anyway.
+    if layout == Layout::RowMajor && let Some(d) = device.filter(|d| d.is_gpu()) {
         match crate::device::try_run(d, k, inputs) {
             Ok(a) => return (Some(a), Placement::Gpu),
             Err(why) => placement = Placement::Cpu(why),
         }
     }
-    let r = run(k, inputs);
+    let r = run(k, inputs).map(|a| a.with_layout(layout));
     if r.is_none() {
         note_fallback();
     }
     (r, placement)
+}
+
+/// The layout a fused kernel's answer keeps, or None when its inputs
+/// disagree and the caller must materialise the rows of each.
+fn kernel_layout(inputs: &[Array]) -> Option<Layout> {
+    let mut found: Option<Layout> = None;
+    for a in inputs {
+        // A scalar is one value repeated into every block: it has no layout
+        // to agree or disagree with.
+        if a.rank() == 0 {
+            continue;
+        }
+        match found {
+            None => found = Some(a.layout()),
+            Some(l) if l == a.layout() => {}
+            Some(_) => return None,
+        }
+    }
+    Some(found.unwrap_or_default())
 }
 
 #[cfg(test)]

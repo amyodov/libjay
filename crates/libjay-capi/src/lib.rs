@@ -213,6 +213,9 @@ fn value_to_array(v: &jay_value, index: usize) -> Result<Array, Error> {
 
 impl jay_result {
     fn new(value: Option<Array>, fmt: FmtOpts) -> jay_result {
+        // C reads the buffer as one row-major block, so a value computed
+        // column-major is laid out once, here.
+        let value = value.map(|a| if a.is_row_major() { a } else { a.to_row_major() });
         let shape = value
             .as_ref()
             .map(|a| a.shape.iter().map(|&d| d as u64).collect())

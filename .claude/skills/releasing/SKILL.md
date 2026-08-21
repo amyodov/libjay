@@ -23,6 +23,11 @@ loudly at the first failure rather than improvising past it.
 ## 1. Preconditions
 
 - Working tree clean, on `main`, in sync with `origin/main` (`git status -sb`).
+- The pinned toolchain is the one running. `rust-toolchain.toml` names it and
+  the workspace `rust-version` (the MSRV) is the same number, as are the
+  `toolchain:` pins in the CI and publish workflows; `rustc --version` inside
+  the repository must agree. A release built on some other compiler is not
+  the tree CI vouched for.
 - `$1` is not already released: absent from `git tag`, from
   `https://pypi.org/pypi/libjay/json`, and from
   `https://crates.io/api/v1/crates/libjay` (send a User-Agent or it 403s).

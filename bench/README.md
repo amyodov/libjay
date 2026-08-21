@@ -379,8 +379,8 @@ Nothing here is hand-written SIMD.
 
 `LIBJAY_CPU_LEVEL` overrides the pick, so the levels can be measured against
 each other on one machine: `baseline`, `v2` (SSE4.2 and its neighbours),
-`v3` (AVX2 and FMA), or `native` for the highest the CPU can run, which is
-also what an unset variable means. A level the CPU cannot run is clamped
+`v3` (AVX2 and FMA), `v4` (AVX-512), or `native` for the highest the CPU can
+run, which is also what an unset variable means. A level the CPU cannot run is clamped
 down to one it can, so a pinned level always names code that really
 executes. It is read once per process, like `LIBJAY_THREADS`, so every
 figure below comes from a subprocess of its own.
@@ -399,7 +399,12 @@ method    best of 5 calls after one warmup, best of 2 passes over the table
 ```
 
 Re-measured 2026-08-21, after the lanes of "Reductions, cells and the
-boundary" gave the folds a shape a vector clone can widen:
+boundary" gave the folds a shape a vector clone can widen. The compiler is a
+variable in this table and these cells were taken on rustc 1.85; a re-run on
+1.89, the version the repository now pins, moved individual cells in both
+directions and nothing in one direction — but it was taken while the machine
+had other work on it, so it is not a replacement, and the table stands as it
+was until it can be re-taken on a quiet one:
 
 | scenario | threads | baseline | v2 | native (v3) | speedup |
 |---|---|---:|---:|---:|---:|
@@ -469,9 +474,18 @@ no such limit, since its lanes are as long as the argument.
 Two platforms are built and not measured here. aarch64 gets an explicit
 NEON clone, which the arm64 wheel job exercises for correctness through the
 same suite; NEON is also in the aarch64 baseline, so the two rungs there are
-expected to be the same code. AVX-512 has no rung at all — `avx512*` has no
-stable `target_feature` name on the toolchain libjay pins — and this laptop
-has no AVX-512 to measure it with either way.
+expected to be the same code. x86-64-v4 — AVX-512 — is the other: since the
+MSRV moved to 1.89, where `avx512f` and its neighbours became stable target
+features, every x86-64 artifact carries a v4 clone of every annotated loop,
+and this laptop's i7-7920HQ has no AVX-512 to run one with. What can be
+checked without the hardware has been: `nm` on the shipped extension finds
+83 `…avx512bw_avx512cd_avx512dq_avx512f_avx512vl…` clones, exactly as many
+as the AVX2 ones, and the disassembly of the release build is full of `zmm`
+operands, so the clones are 512-bit code and not v3 recompiled. What has
+NOT been checked is whether they are *faster*; no number in this file is a
+v4 number. tests/simd.rs prints which levels the machine it runs on can
+compare, and CI runs it with `--nocapture`, so the first runner with AVX-512
+both says so and puts the clone through the equivalence battery for real.
 
 The baseline column really is the baseline. There is no `.cargo/config.toml`
 and no `RUSTFLAGS` anywhere in the repository or the wheel jobs, so the build
@@ -479,9 +493,9 @@ takes the target's default CPU: for `x86_64-apple-darwin` that is Penryn
 (SSE up to 4.1) and for `x86_64-unknown-linux-gnu` plain x86-64, which is
 why `v2` — SSE4.2 and popcount on top of that — is worth almost nothing on
 this machine and the real step is `v3`. The shipped extension carries 12
-`multiversioned!` dispatchers and 70 AVX2 clones of their bodies; had `-C
-target-cpu` leaked in above `v3` the dispatchers would have been elided and
-there would be none.
+`multiversioned!` dispatchers, 83 AVX2 clones of their bodies and 83 AVX-512
+ones; had `-C target-cpu` leaked in above `v3` the dispatchers would have
+been elided and there would be none.
 
 ## GPU placement
 
@@ -638,6 +652,58 @@ sequential and does not vectorise, and which — since the answer is almost
 always no — read the whole buffer anyway. It is now one branch-free pass
 that the pool splits: 61.9 ms to 54.6 for `%: {x}` at 20M.
 
+## Layout
+
+Measured 2026-08-21. A table used to be woven into one rows-leading block at
+the boundary; it now crosses as its columns and is folded where it lies.
+The figures come from `bench/layout.py`, run against two builds of libjay —
+the commit these changes sit on, and that commit with them applied, both
+compiled by the pinned toolchain — with the passes alternating, so a laptop
+that gets busy halfway through moves both columns and not one. Each figure
+is the best of five calls after a warmup, and each is the best of two
+alternating passes. The table is 2,500,000 x 8 f64 in a polars DataFrame,
+and the bind is inside the timed call: the boundary is part of what is
+measured, because for a DataFrame it used to be most of it.
+
+| program | before, 1 thread | after | before, 8 threads | after | |
+|---|---:|---:|---:|---:|---:|
+| `$ {df}` — the boundary alone | 99.7 | 0.0 | 59.8 | 0.0 | — |
+| `+/ {df}` — column sums | 116.9 | 8.9 | 64.3 | 6.2 | 10-13x |
+| `+/"1 {df}` — row sums | 114.3 | 22.0 | 69.0 | 12.5 | 5.2-5.5x |
+| `+/"1 \|: {df}` — transposed, then row sums | 516.1 | 128.2 | 475.5 | 67.7 | 4.0-7.0x |
+| `+/ ({df} * {df}) + 1` — a fused chain | 309.6 | 308.2 | 186.3 | 184.5 | 1.00x |
+| `+/ , {df}` — a verb that wants the rows | 108.9 | 107.5 | 65.7 | 63.1 | 1.02x |
+| Bollinger over one column of the frame | 53.9 | 48.0 | 34.9 | 34.1 | 1.02x |
+
+**The boundary is gone, not faster.** `$ {df}` reads no element and now
+costs nothing at all: the columns cross borrowed, one Arrow buffer each,
+and the value libjay works on is those buffers end to end with a flag
+saying so. The weave that used to run there — 100 ms on one thread, 60 on
+eight, for every call — runs only when a verb asks for the rows.
+
+**The two folds a table is asked for read the columns where they lie.**
+`+/ {df}` folds each column, which is contiguous, so it is a flat fold per
+column and nothing is transposed: 13x on one thread, 10x on eight. `+/"1
+{df}` folds the rows in one pass that reads the eight columns side by side,
+right to left — the insert's own order, no regrouping — for 5.2x and 5.5x.
+Both are now doing the arithmetic and nothing else: 6.2 ms is 160 MB read
+at 26 GB/s, which is the bus.
+
+**A transpose moves no elements.** `|:` reverses the shape and flips the
+flag, so `+/"1 |: {df}` — which used to weave the table, transpose the
+result and then fold rows — is now the column fold under another name.
+
+**The rows still cost what they cost.** `+/ , {df}` ravels, which reads the
+elements in row-major order, so the weave happens: the same 100 ms it used
+to cost, moved from the boundary to the verb that needs it. A fused chain
+is the same story for a different reason — the block kernel reads one flat
+block, so it joins the columns once — and both rows come out level. What
+changed is that a program which needs neither pays for neither.
+
+**A single column never went through the weave** and does not move:
+Bollinger over `df["c0"]` is the same measurement it was, which is the
+control this table needs.
+
 ## Where the bandwidth is
 
 The weighted sum has been within a millisecond or two of `numba prange` for
@@ -711,9 +777,10 @@ And end to end, milliseconds, 2,500,000 rows:
 
 Row sums over a numpy matrix are now four times faster than numpy's own,
 and a 2M-element sum is twice as fast as numpy's for floats and 1.4 times
-for complex. The DataFrame rows still carry the weave — 68 of those 72.5 ms
-are the boundary copy, not the arithmetic — which is the layout question
-under "Next".
+for complex. The DataFrame rows carried the weave when this table was taken
+— 68 of those 72.5 ms were the boundary copy, not the arithmetic — which
+was the layout question under "Next". It has since been answered: the same
+two programs are 12.5 and 6.2 ms under "Layout" above.
 
 ## Next
 
@@ -743,16 +810,11 @@ In the order the measurements rank them:
 
 What is left, in the order the measurements rank it:
 
-1. **A column-major layout flag on `Array`.** 68 of the 72.5 ms a row-wise
-   reduction over a 2.5M x 8 DataFrame costs are the weave at the boundary,
-   and the weave exists only because every path in the runtime assumes
-   rows-leading. Making the parallel weave four times faster, which is what
-   this pass did, does not change that it is there. A flag honoured by the
-   reduce and elementwise paths would remove the copy for the table shapes
-   that matter — and it is not a contained change: the flag has to be
-   honoured or explicitly refused by every verb that indexes a buffer, and
-   the ones that quietly assume the layout are the bugs it would introduce.
-   Worth a design of its own, not a hot-path pass.
+1. ~~**A column-major layout flag on `Array`.**~~ Done, as a design of its
+   own: `Array` carries a `Layout`, a table crosses as its columns without
+   a copy, and the folds read them where they lie. What it is worth is the
+   "Layout" section above; what the flag had to be honoured or refused by,
+   and how that was enforced, is in docs/decisions.md.
 2. **Windows inside the fused kernel.** The Bollinger kernel is still four
    passes over 160 MB that fusion cannot join, because a window verb reads
    `x[i .. i+k]` and the kernel's whole invariant is that every input and

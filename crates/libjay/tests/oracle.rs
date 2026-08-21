@@ -9,6 +9,9 @@
 //! reference: `cargo run -p libjay-devtools -- record j` (docs/testing.md).
 //! jconsole is a black-box oracle there — never linked, never read.
 //!
+//! A record holds one answer per implementation, under its key; J has the
+//! one, `j:`.
+//!
 //! One test case per corpus file, so a failure names the theme; every
 //! mismatch inside the file is reported at once.
 

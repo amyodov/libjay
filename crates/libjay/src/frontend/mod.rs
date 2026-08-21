@@ -179,14 +179,12 @@ impl Dialect {
             )
             .note("libjay implements the APL2/ISO line, which is the one its oracle verifies")
         };
-        if let Some(ct) = self.comparison_tolerance {
-            if !(ct.is_finite() && ct >= 0.0) {
-                return Err(Error::new(
-                    ErrorKind::Domain,
-                    "the comparison tolerance must be a finite value at or above zero",
-                    None,
-                ));
-            }
+        if let Some(ct) = self.comparison_tolerance && !(ct.is_finite() && ct >= 0.0) {
+            return Err(Error::new(
+                ErrorKind::Domain,
+                "the comparison tolerance must be a finite value at or above zero",
+                None,
+            ));
         }
         match self.nested_model {
             NestedModel::Floating => {}

@@ -18,10 +18,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 138 green / 25 partial / 16 red / 1 absent by design, of 180 valences
+**J: 144 green / 24 partial / 7 red / 2 absent by design, of 177 valences
 in the inventory.**
 
-**APL: 81 green / 25 partial / 9 red of 115 valences in the inventory.**
+**APL: 85 green / 26 partial / 4 red of 115 valences in the inventory.**
 
 ## J — verbs
 
@@ -83,7 +83,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `,.` | 🟢 ravel items | 🟢 stitch |
 | `,:` | 🟢 itemize | 🟢 laminate |
 | `\|.` | 🟢 reverse | 🟢 rotate |
-| `\|:` | 🟢 transpose | 🔴 dyadic transpose |
+| `\|:` | 🟢 transpose | 🟢 dyadic transpose; the named axes move to the end, a boxed x groups them into a diagonal |
 | `{.` | 🟢 head | 🟢 take |
 | `}.` | 🟢 behead | 🟢 drop |
 | `{:` | 🟢 tail | — |
@@ -95,12 +95,12 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 
 | Spelling | Monad | Dyad |
 |---|---|---|
-| `{` | 🔴 catalogue | 🟢 from; atom indices and boxed index specifications, complements included |
+| `{` | 🟢 catalogue | 🟢 from; atom indices and boxed index specifications, complements included |
 | `{::` | 🟢 map | 🟢 fetch |
 | `i.` | 🟢 integers | 🟢 index of |
 | `i:` | 🟢 steps | 🟢 index of last |
 | `I.` | 🟢 indices | 🟢 interval index |
-| `e.` | 🔴 raze in | 🟢 member of |
+| `e.` | 🟢 raze in | 🟢 member of |
 | `E.` | — | 🟢 member of interval |
 | `/:` | 🟡 grade up; boxes need total ordering | 🟢 sort |
 | `\:` | 🟡 grade down; boxes need total ordering | 🟢 sort |
@@ -129,7 +129,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `a.` alphabet | 🟢 |
 | `a:` ace (boxed empty) | 🟢 |
 | `_` `__` infinities | 🟢 |
-| `_.` indeterminate | 🔴 |
+| `_.` indeterminate | 🟢 a NaN, which prints as itself |
 | `_9:` … `9:`, `_:` constant verbs | 🟢 |
 
 ## J — adverbs
@@ -154,14 +154,14 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `&:` appose | 🟢 |
 | `&.` under | 🟢 `v^:_1 @: u &: v`, over the obverse table |
 | `&.:` under | 🟢 the same on whole arguments |
-| `^:` power | 🟡 literal count, `_`, a verb count, and negatives (the obverse); a computed count not yet |
+| `^:` power | 🟡 a literal count, a list of them, `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives (the obverse); a computed count not yet |
 | `.` dot product | 🔴 |
 | `:` explicit definition | 🟡 `1 :`, `2 :`, `3 :`, `4 :`, and the `m : 0` body on the lines below; `13 :` not yet |
-| `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`; a negative block size in a tessellation is named |
+| `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named |
 | `!.` fit | 🟡 the tolerance meaning, and the fill for `\|.` (the shift); a fill on any other verb is named |
-| `!:` foreign | 🟡 `1!:1` (read a line from stdin), `1!:2` (write a line to stdout) and `3!:0` (type code); the ones that reach a file, a script, the host, the clock or a shared library are ⚪ closed by the sandbox, and the ones that only compute are 🔴 named |
-| `` ` `` tie (gerund) | 🟡 a gerund of verbs; only `@.` reads one |
-| `` `: `` evoke gerund | 🔴 needs gerunds as boxed nouns — see [decisions.md](decisions.md) |
+| `!:` foreign | 🟡 `1!:1` (read a line from stdin), `1!:2` (write a line to stdout), `3!:0` (type code) and `5!:1` (the atomic representation of a name); the ones that reach a file, a script, the host, the clock or a shared library are ⚪ closed by the sandbox, and the ones that only compute are 🔴 named |
+| `` ` `` tie (gerund) | 🟡 the gerund is boxed data — one atomic representation per box, so it can be named, computed and displayed; a verb the representation cannot spell (a capped fork, an explicit definition) is named |
+| `` `: `` evoke gerund | 🟢 the three forms J gives it: `0` applies each verb, `3` inserts them, `6` is the train |
 | `@.` agenda | 🟢 |
 | `[:` cap | 🟢 |
 | `::` adverse | 🟢 |
@@ -176,13 +176,13 @@ conjunctions above:
 | `M.` memo | 🟢 the cache belongs to the derived verb and lives as long as the program |
 | `L:` level | 🟢 both valences; the dyad descends both arguments together |
 | `S:` spread | 🟢 both valences, as `L:` |
-| `b.` boolean / characteristics | 🟡 `m b.` (the 32 boolean and bitwise functions) and `u b. 0` (the ranks); the other characteristics are named |
+| `b.` boolean / characteristics | 🟢 `m b.` (the 32 boolean and bitwise functions) and all three characteristics: `0` the ranks, `1` the identity function, `_1` the obverse |
 | `$.` sparse | 🔴 |
 | `H.` hypergeometric | 🟢 the series, with the shared parameters cancelled; a series that neither converges nor overflows is refused by name |
-| `t.` Taylor series | 🔴 |
-| `t:` weighted Taylor | 🔴 |
-| `..` even | 🔴 |
-| `.:` odd | 🔴 |
+| `t.` task | ⚪ the reference spells `t.` the TASK conjunction — it runs a verb in one of J's thread pools and answers with a pyx. The sandbox does not open those threads, as it does not for `T.` |
+| `t:` | — the reference rejects the spelling as an invalid inflection, as it does `d.`, `D.` and `D:` |
+| `..` even | — the reference rejects the spelling as an invalid inflection |
+| `.:` odd | — the same |
 | `T.` threads | ⚪ starts J's own threads, which the sandbox does not open — `ErrorKind::Sandbox` |
 | `d.` `D.` `D:` derivative | — the reference J rejects all three as invalid inflections |
 
@@ -277,14 +277,14 @@ conjunctions above:
 | `⍪` | 🟢 table | 🟢 catenate (leading axis); same |
 | `⌽` | 🟢 reverse | 🟢 rotate |
 | `⊖` | 🟢 reverse first | 🟡 rotate first; a vector left argument reads per axis |
-| `⍉` | 🟢 transpose | 🔴 dyadic transpose |
+| `⍉` | 🟢 transpose | 🟢 dyadic transpose; x says which axis of the result each axis of y becomes, and a repeated destination runs those axes together |
 | `↑` | 🟢 first | 🟢 take; overtaking a nested array fills with the first item's prototype |
 | `↓` | 🟡 no oracle: GNU APL has no monadic `↓`; Dyalog's split | 🟢 drop |
 | `⊂` | 🟢 enclose | 🟢 partitioned enclose; rank 2 and above partitions the last axis |
 | `⊃` | 🟢 disclose / mix | 🟢 pick |
 | `⊆` | 🟡 no oracle: not in GNU APL's character set; Dyalog's nest | 🟡 no oracle; Dyalog's partition, which is GNU APL's dyadic `⊂` |
-| `⌷` | 🟡 no oracle: materialise, which Dyalog makes the identity | 🟢 index (APL2: one scalar per axis) |
-| `⊥` | — | 🟡 decode; folds the last axis, not the leading one |
+| `⌷` | 🟡 no oracle: materialise, which Dyalog makes the identity | 🟢 index (APL2: one item of x per axis, a scalar or an enclosed vector) |
+| `⊥` | — | 🟢 decode; the inner product `+.×` over x's last axis and y's leading one |
 | `⊤` | — | 🟢 encode |
 
 ### Selection, search, sort
@@ -297,8 +297,8 @@ conjunctions above:
 | `⍷` | — | 🟢 find |
 | `∪` | 🟢 unique | 🟢 union |
 | `∩` | — | 🟢 intersection |
-| `⍋` | 🟡 grade up; nested needs total ordering | 🔴 collating grade |
-| `⍒` | 🟡 grade down; nested needs total ordering | 🔴 collating grade |
+| `⍋` | 🟡 grade up; nested needs total ordering | 🟢 collating grade |
+| `⍒` | 🟡 grade down; nested needs total ordering | 🟢 collating grade |
 
 ### Format, I/O, identity
 
@@ -332,11 +332,11 @@ conjunctions above:
 | `∘` beside | 🟡 no oracle: GNU APL has no `∘` operator; Dyalog's `f∘g`, function operands only |
 | `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🟡 no oracle: GNU APL rejects it; Dyalog's `f⍛g` |
-| `⍢` under | 🔴 named |
+| `⍢` under | 🟡 no oracle: GNU APL rejects it; Dyalog's `g⍣¯1 ⊢ (g x) f (g y)`, over the same obverse table J's `&.:` uses |
 | `⌸` key | 🟡 no oracle: GNU APL rejects it; Dyalog's, with the operand taking the key and its group |
-| `⌺` stencil | 🔴 named |
+| `⌺` stencil | 🟡 no oracle: GNU APL rejects it; Dyalog's monadic-window form — one size per leading axis, the windows centred and the edges filled. The two-row form that also gives the movement is named |
 | `⍠` variant | 🔴 named |
-| `&` spawn | 🔴 |
+| `&` spawn | 🔴 named |
 
 ## APL — syntax and features
 
@@ -381,14 +381,15 @@ conjunctions above:
 | Arrow string, binary, list, dictionary columns | 🔴 |
 | Nulls | ⚪ neither language has a missing value; the column is named and refused |
 | Mixed-type table columns | ⚪ silent promotion would damage values above 2⁵³ |
-| Non-contiguous numpy views | ⚪ refused rather than silently copied |
+| Fortran-ordered numpy blocks | 🟢 read where they lie, as a column-major array |
+| numpy views contiguous in neither order | ⚪ refused rather than silently copied |
 | Arrow zero-copy in (i64, f64, i64-physical temporal) | 🟢 |
-| DataFrame M×N → matrix, rows leading | 🟡 two or more columns are rewoven row-major, one copy |
+| DataFrame M×N → matrix, rows leading | 🟢 the columns cross borrowed and are folded where they lie; the shape is the logical one. A verb that reads elements in row order lays them out once, when it is applied |
 | Zero-copy out | 🟡 rank-1 machine-numeric only; rank ≥ 2, chars, boxes and the exact types go via `.tolist()` |
 | Arrow carrier for the exact types | 🔴 Arrow has none; `.tolist()` gives exact Python objects, `_1 x:` machine numbers |
 | Parallel execution (own pool, `LIBJAY_THREADS`) | 🟢 |
 | Expression fusion (blockwise kernels) | 🟢 |
-| SIMD dispatch | 🟢 hot loops (arithmetic, reductions, fused kernels); x86-64 baseline/v2/v3 and NEON, runtime-detected; no AVX-512 rung — no stable `target_feature` name on rustc 1.85 |
+| SIMD dispatch | 🟢 hot loops (arithmetic, reductions, fused kernels); x86-64 baseline/v2/v3/v4 and NEON, runtime-detected. The v4 (AVX-512) clone is compiled into every x86-64 artifact but not yet measured: no machine here has the features, so it is built, symbol-checked and unbenchmarked |
 | GPU / device backend | 🟡 fused kernels only, via wgpu (Metal/Vulkan/DX12), compiled into the one artifact and dormant without an adapter. f64 needs `SHADER_F64`, which Metal has not; on such an adapter an f64 chain stays on the CPU unless the caller asks for `precision="f32"`. Integer chains, non-float results and `^` in f64 stay on the CPU. The f64 path is generated and validated but has not been executed anywhere yet — see [decisions.md](decisions.md) |
 | Device placement API (`deploy`, `upload`, `DeviceArray`) | 🟡 `jay.j(...)` has no device by design; a result kept on the device is still materialised on the host once |
 | C ABI: compile, bind, execute, errors, spans | 🟢 |

@@ -236,10 +236,8 @@ pub fn ratio_to_f64(num: &BigInt, den: &BigInt) -> f64 {
             Sign::Plus => f64::INFINITY,
         };
     }
-    if let (Some(a), Some(b)) = (num.to_f64(), den.to_f64()) {
-        if a.is_finite() && b.is_finite() {
-            return a / b;
-        }
+    if let (Some(a), Some(b)) = (num.to_f64(), den.to_f64()) && a.is_finite() && b.is_finite() {
+        return a / b;
     }
     // Shift both halves down until they fit, keeping the quotient's value:
     // the same shift on both leaves the ratio unchanged.

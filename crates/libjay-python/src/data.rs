@@ -5,7 +5,7 @@
 //! that names the offending column and the fix. Nothing is guessed: nulls
 //! and disagreeing column types stop the call.
 
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr};
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -55,6 +55,11 @@ pub fn try_import(obj: &Bound<'_, PyAny>) -> Option<PyResult<Array>> {
     import_numpy(obj)
 }
 
+/// The names the Arrow PyCapsule interface gives its capsules.
+const ARROW_SCHEMA: &CStr = c"arrow_schema";
+const ARROW_ARRAY: &CStr = c"arrow_array";
+const ARROW_STREAM: &CStr = c"arrow_array_stream";
+
 /// Refuse a capsule that is not the one the Arrow PyCapsule interface says
 /// it should be.
 ///
@@ -62,16 +67,28 @@ pub fn try_import(obj: &Bound<'_, PyAny>) -> Option<PyResult<Array>> {
 /// and what happens next is to move a struct out of it. A producer that
 /// hands back the pair in the wrong order, or a capsule from some other
 /// library, must be an error here and not a write through the wrong type.
-fn check_capsule(capsule: &Bound<'_, PyCapsule>, expected: &str) -> PyResult<()> {
-    let name = capsule.name()?;
-    let got = name.as_ref().map(|n| n.to_string_lossy().into_owned());
-    if got.as_deref() == Some(expected) {
+fn check_capsule(capsule: &Bound<'_, PyCapsule>, expected: &CStr) -> PyResult<()> {
+    // SAFETY: the name is copied out of the capsule here and now. Nothing
+    // between the read and the copy runs Python code, which is the only
+    // thing that could rename the capsule out from under it.
+    let got = capsule.name()?.map(|n| unsafe { n.as_cstr() }.to_string_lossy().into_owned());
+    let want = expected.to_string_lossy();
+    if got.as_deref() == Some(want.as_ref()) {
         return Ok(());
     }
     Err(JayError::new_err(match got {
-        Some(n) => format!("expected an Arrow '{expected}' capsule, got '{n}'"),
-        None => format!("expected an Arrow '{expected}' capsule, got an unnamed one"),
+        Some(n) => format!("expected an Arrow '{want}' capsule, got '{n}'"),
+        None => format!("expected an Arrow '{want}' capsule, got an unnamed one"),
     }))
+}
+
+/// The pointer a checked capsule holds, or null.
+///
+/// `pointer_checked` reports a capsule with nothing in it as a Python
+/// exception; the callers here name the method that produced the capsule
+/// instead, so they take the null and say so themselves.
+fn capsule_pointer(capsule: &Bound<'_, PyCapsule>, name: &CStr) -> *mut c_void {
+    capsule.pointer_checked(Some(name)).map_or(std::ptr::null_mut(), |p| p.as_ptr())
 }
 
 /// A single Arrow value through the PyCapsule array interface.
@@ -79,10 +96,10 @@ fn import_arrow_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     let pair = obj.call_method0("__arrow_c_array__")?;
     let (schema_capsule, array_capsule) =
         pair.extract::<(Bound<'_, PyCapsule>, Bound<'_, PyCapsule>)>()?;
-    check_capsule(&schema_capsule, "arrow_schema")?;
-    check_capsule(&array_capsule, "arrow_array")?;
-    let schema_ptr = schema_capsule.pointer() as *mut FFI_ArrowSchema;
-    let array_ptr = array_capsule.pointer() as *mut FFI_ArrowArray;
+    check_capsule(&schema_capsule, ARROW_SCHEMA)?;
+    check_capsule(&array_capsule, ARROW_ARRAY)?;
+    let schema_ptr = capsule_pointer(&schema_capsule, ARROW_SCHEMA) as *mut FFI_ArrowSchema;
+    let array_ptr = capsule_pointer(&array_capsule, ARROW_ARRAY) as *mut FFI_ArrowArray;
     if schema_ptr.is_null() || array_ptr.is_null() {
         return Err(JayError::new_err("__arrow_c_array__ returned empty capsules"));
     }
@@ -107,8 +124,8 @@ fn import_arrow_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
 /// interface.
 fn import_arrow_stream(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     let capsule = obj.call_method0("__arrow_c_stream__")?.extract::<Bound<'_, PyCapsule>>()?;
-    check_capsule(&capsule, "arrow_array_stream")?;
-    let stream_ptr = capsule.pointer() as *mut FFI_ArrowArrayStream;
+    check_capsule(&capsule, ARROW_STREAM)?;
+    let stream_ptr = capsule_pointer(&capsule, ARROW_STREAM) as *mut FFI_ArrowArrayStream;
     if stream_ptr.is_null() {
         return Err(JayError::new_err("__arrow_c_stream__ returned an empty capsule"));
     }
@@ -233,12 +250,13 @@ fn assemble(obj: &Bound<'_, PyAny>, field: &Field, chunks: Vec<ArrayRef>) -> PyR
     }
     let cols = columns.len();
     let datas: Vec<Data> = columns.into_iter().map(|c| c.data).collect();
-    // Rows-leading output from column-major sources costs one interleaving
-    // copy; columnar execution arrives with the parallel runtime. The weave
-    // itself is libjay's, so it takes the thread pool.
-    let woven = Data::interleave(&datas, rows)
+    // The table crosses as it lies: shape [rows, cols] rows-leading, which
+    // is the contract, over a buffer that is the columns end to end, which
+    // is what Arrow handed us. Nothing is copied and nothing is woven —
+    // the runtime knows this layout and folds it where it lies.
+    let joined = Data::join(&datas, rows)
         .ok_or_else(|| JayError::new_err("columns disagree on type or length"))?;
-    Ok(Array::new(vec![rows, cols], woven))
+    Ok(Array::col_major(vec![rows, cols], joined))
 }
 
 /// Exactly two `Float64` children named `re` and `im`, in that order.
@@ -571,11 +589,19 @@ fn read_array_interface(obj: &Bound<'_, PyAny>, iface: &Bound<'_, PyAny>) -> PyR
     let count: usize = shape.iter().product();
 
     let (kind, width) = parse_typestr(&typestr)?;
+    let mut column_major = false;
     let strides = iface.get_item("strides").ok().filter(|s| !s.is_none());
     if let Some(strides) = strides {
         let strides: Vec<isize> = strides.extract()?;
+        // A Fortran-ordered block — numpy's `.T` of a C-ordered one, and
+        // what a column store produces — is contiguous too, in the other
+        // order. libjay carries that order rather than refusing it.
         if strides != c_strides(&shape, width) {
-            return Err(not_contiguous());
+            if strides == f_strides(&shape, width) && shape.len() > 1 {
+                column_major = true;
+            } else {
+                return Err(not_contiguous());
+            }
         }
     }
 
@@ -651,7 +677,7 @@ fn read_array_interface(obj: &Bound<'_, PyAny>, iface: &Bound<'_, PyAny>) -> PyR
             )));
         }
     };
-    Ok(Array::new(shape, data))
+    Ok(if column_major { Array::col_major(shape, data) } else { Array::new(shape, data) })
 }
 
 fn not_contiguous() -> PyErr {
@@ -668,6 +694,17 @@ fn c_strides(shape: &[usize], width: usize) -> Vec<isize> {
     for i in (0..shape.len()).rev() {
         out[i] = step;
         step *= shape[i] as isize;
+    }
+    out
+}
+
+/// Byte strides a Fortran-contiguous array of this shape would have.
+fn f_strides(shape: &[usize], width: usize) -> Vec<isize> {
+    let mut out = vec![0isize; shape.len()];
+    let mut step = width as isize;
+    for (slot, &len) in out.iter_mut().zip(shape) {
+        *slot = step;
+        step *= len as isize;
     }
     out
 }
@@ -745,7 +782,7 @@ struct Exported<T>(#[allow(dead_code)] Buf<T>);
 impl<T> std::panic::RefUnwindSafe for Exported<T> {}
 
 /// Hand a libjay buffer to Arrow without copying it.
-fn export_buffer<T: Send + Sync + 'static>(buf: Buf<T>) -> Buffer {
+fn export_buffer<T: Clone + Send + Sync + 'static>(buf: Buf<T>) -> Buffer {
     let bytes = std::mem::size_of_val(&buf[..]);
     if bytes == 0 {
         return Buffer::from(Vec::<u8>::new());
@@ -812,9 +849,7 @@ pub fn export_capsules<'py>(
         }
     };
     let (ffi_array, ffi_schema) = to_ffi(&arrow.to_data()).map_err(arrow_err)?;
-    let schema_capsule =
-        PyCapsule::new(py, ffi_schema, Some(CString::new("arrow_schema").expect("literal")))?;
-    let array_capsule =
-        PyCapsule::new(py, ffi_array, Some(CString::new("arrow_array").expect("literal")))?;
+    let schema_capsule = PyCapsule::new_with_value(py, ffi_schema, ARROW_SCHEMA)?;
+    let array_capsule = PyCapsule::new_with_value(py, ffi_array, ARROW_ARRAY)?;
     Ok((schema_capsule, array_capsule))
 }

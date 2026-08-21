@@ -8,9 +8,9 @@
 //! intrinsics, and nothing may start: vectorisation is the backend's job.
 //!
 //! Which clone runs is decided once per process. `LIBJAY_CPU_LEVEL` pins it
-//! — `baseline`, `v2`, `v3`, or `native` for what the machine offers — and a
-//! level the CPU cannot run is clamped down to the one it can, so a pinned
-//! level is always a level that actually executes.
+//! — `baseline`, `v2`, `v3`, `v4`, or `native` for what the machine offers
+//! — and a level the CPU cannot run is clamped down to the one it can, so a
+//! pinned level is always a level that actually executes.
 //!
 //! A covered loop may still decline the vector clone: where the loop that
 //! would widen is only a few elements long, entering a vector body costs
@@ -28,19 +28,18 @@ use std::sync::atomic::{AtomicU8, Ordering};
 /// A set of CPU features the hot loops are compiled for.
 ///
 /// The names are the x86-64 microarchitecture levels: `V2` is SSE4.2 and
-/// its neighbours, `V3` adds AVX2 and FMA. On aarch64 the ladder has two
-/// rungs — `Baseline` and `V3`, which stands for NEON. NEON is also in the
-/// aarch64 baseline, so those two compile to the same code and exist to
-/// keep the dispatch the same shape on both architectures.
-///
-/// There is no `V4`: AVX-512 has no stable `target_feature` name on the
-/// toolchain libjay is built with, so no clone can ask for it. Adding the
-/// rung is a target string and a detection arm once it does.
+/// its neighbours, `V3` adds AVX2 and FMA, `V4` adds the AVX-512 subsets
+/// the level names (`f`, `bw`, `cd`, `dq`, `vl`). On aarch64 the ladder has
+/// two rungs — `Baseline` and `V3`, which stands for NEON. NEON is also in
+/// the aarch64 baseline, so those two compile to the same code and exist to
+/// keep the dispatch the same shape on both architectures; `V4` is x86-64
+/// only and is never detected elsewhere.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Level {
     Baseline = 0,
     V2 = 1,
     V3 = 2,
+    V4 = 3,
 }
 
 impl Level {
@@ -50,6 +49,7 @@ impl Level {
             Level::Baseline => "baseline",
             Level::V2 => "v2",
             Level::V3 => "v3",
+            Level::V4 => "v4",
         }
     }
 
@@ -57,6 +57,7 @@ impl Level {
         match v {
             1 => Level::V2,
             2 => Level::V3,
+            3 => Level::V4,
             _ => Level::Baseline,
         }
     }
@@ -68,6 +69,7 @@ impl Level {
             "baseline" | "v1" | "none" => Some(Level::Baseline),
             "v2" => Some(Level::V2),
             "v3" => Some(Level::V3),
+            "v4" => Some(Level::V4),
             "native" | "auto" | "max" => Some(detected()),
             _ => None,
         }
@@ -75,17 +77,31 @@ impl Level {
 }
 
 /// The highest level this machine can run.
+///
+/// The levels nest, so each test includes the one below it: a machine that
+/// reports V4 is a machine every clone below V4 also runs, which is what
+/// lets [`available`] hand a test the whole ladder up to this point.
 #[cfg(target_arch = "x86_64")]
 pub fn detected() -> Level {
-    if is_x86_feature_detected!("avx2")
+    let v2 = is_x86_feature_detected!("sse4.2") && is_x86_feature_detected!("popcnt");
+    let v3 = v2
+        && is_x86_feature_detected!("avx2")
         && is_x86_feature_detected!("fma")
         && is_x86_feature_detected!("bmi1")
         && is_x86_feature_detected!("bmi2")
         && is_x86_feature_detected!("f16c")
-        && is_x86_feature_detected!("lzcnt")
-    {
+        && is_x86_feature_detected!("lzcnt");
+    let v4 = v3
+        && is_x86_feature_detected!("avx512f")
+        && is_x86_feature_detected!("avx512bw")
+        && is_x86_feature_detected!("avx512cd")
+        && is_x86_feature_detected!("avx512dq")
+        && is_x86_feature_detected!("avx512vl");
+    if v4 {
+        Level::V4
+    } else if v3 {
         Level::V3
-    } else if is_x86_feature_detected!("sse4.2") && is_x86_feature_detected!("popcnt") {
+    } else if v2 {
         Level::V2
     } else {
         Level::Baseline
@@ -111,7 +127,7 @@ pub fn detected() -> Level {
 /// that is not in it would only get the highest one that is.
 pub fn available() -> Vec<Level> {
     let top = detected();
-    [Level::Baseline, Level::V2, Level::V3].into_iter().filter(|&l| l <= top).collect()
+    [Level::Baseline, Level::V2, Level::V3, Level::V4].into_iter().filter(|&l| l <= top).collect()
 }
 
 /// Not yet resolved: no level has this value.
@@ -201,6 +217,16 @@ macro_rules! multiversioned {
             pub(super) fn v3 $(<$($gen)*>)? ($($arg: $ty),*) -> $ret {
                 $body($($arg),*)
             }
+
+            // x86-64 only: no other architecture has a rung above v3, and
+            // on those this clone is the unversioned body, never dispatched
+            // to because `detected` cannot return V4 there.
+            #[::multiversion::multiversion(targets(
+                "x86_64+avx512f+avx512bw+avx512cd+avx512dq+avx512vl",
+            ))]
+            pub(super) fn v4 $(<$($gen)*>)? ($($arg: $ty),*) -> $ret {
+                $body($($arg),*)
+            }
         }
 
         $(#[$attr])*
@@ -210,6 +236,7 @@ macro_rules! multiversioned {
                 $crate::simd::Level::Baseline => $name::baseline($($arg),*),
                 $crate::simd::Level::V2 => $name::v2($($arg),*),
                 $crate::simd::Level::V3 => $name::v3($($arg),*),
+                $crate::simd::Level::V4 => $name::v4($($arg),*),
             }
         }
     };
@@ -230,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_level_the_machine_lacks_clamps_to_one_it_has() {
-        assert!(set_level(Level::V3) <= detected());
+        assert!(set_level(Level::V4) <= detected());
         assert_eq!(set_level(Level::Baseline), Level::Baseline);
         assert_eq!(level(), Level::Baseline);
         set_level(detected());
@@ -238,7 +265,7 @@ mod tests {
 
     #[test]
     fn every_level_has_a_name_and_reads_back() {
-        for l in [Level::Baseline, Level::V2, Level::V3] {
+        for l in [Level::Baseline, Level::V2, Level::V3, Level::V4] {
             assert_eq!(Level::from_name(l.name()), Some(l));
         }
         assert_eq!(Level::from_name("nonsense"), None);

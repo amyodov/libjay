@@ -261,10 +261,8 @@ fn agenda_picks_one_verb_of_a_gerund() {
     let e = err(Lang::J, "(+`-)@.(2:) 5");
     assert_eq!(e.kind, ErrorKind::Domain);
     assert!(e.msg.contains("2 verbs"), "{}", e.msg);
-    // The other gerund conjunction is named, not silently ignored.
-    let e = err(Lang::J, "(+`-) `: 6 ] 5");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("evoke gerund"), "{}", e.msg);
+    // The other gerund conjunction reads the same data (see wave7.rs).
+    assert_eq!(val(Lang::J, "((+`-) `: 6) 5"), Array::scalar_i64(0));
 }
 
 #[test]
@@ -272,7 +270,7 @@ fn the_adverse_answers_a_refusal_with_the_other_verb() {
     assert_eq!(val(Lang::J, "(+/ :: 0) 'abc'"), Array::scalar_i64(0));
     assert_eq!(val(Lang::J, "(+/ :: 0) 1 2 3"), Array::scalar_i64(6));
     // A gap in libjay is a promise, not an error the program may handle.
-    let e = err(Lang::J, "(e. :: 0) 1 2");
+    let e = err(Lang::J, "(2&;: :: 0) 'a b'");
     assert_eq!(e.kind, ErrorKind::NotYet);
 }
 

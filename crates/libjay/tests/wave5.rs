@@ -161,10 +161,11 @@ fn tessellation_moves_a_block_over_the_argument() {
     assert_eq!(val(Lang::J, "2 2 (+/@,);._3 i.3 3"), i64s(&[2, 2], &[8, 12, 20, 24]));
     // Only the axes the sizes cover are cut.
     assert_eq!(val(Lang::J, "$ 2 2 <;.3 i.3 4 5"), i64s(&[2], &[3, 4]));
-    // A negative size is a named gap here, and a positive step is required.
+    // A negative size needs the movement written out (see wave7.rs), and a
+    // positive step is required.
     let e = err(Lang::J, "_2 <;.3 i.5");
     assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("negative size"), "{}", e.msg);
+    assert!(e.msg.contains("movement row"), "{}", e.msg);
     assert_eq!(err(Lang::J, "(0 0,:2 2) <;.3 i.4 4").kind, ErrorKind::Domain);
 }
 
@@ -301,7 +302,7 @@ fn the_boolean_functions_are_numbered_by_their_truth_table() {
         val(Lang::J, "(+/) b. 0"),
         f64s(&[3], &[f64::INFINITY, f64::INFINITY, f64::INFINITY])
     );
-    let e = err(Lang::J, "+ b. 1");
+    let e = err(Lang::J, "+ b. 2");
     assert_eq!(e.kind, ErrorKind::NotYet);
     assert!(e.msg.contains("characteristic"), "{}", e.msg);
 }
@@ -465,15 +466,10 @@ fn format_by_specification_lays_out_columns() {
 #[test]
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
-        (Lang::J, "(+:`-: `:0) 5", "evoke gerund"),
         (Lang::J, "s: <'abc'", "symbols"),
         (Lang::J, "$. 1 2", "sparse"),
-        (Lang::J, "(^ t. 3) 0", "Taylor"),
-        (Lang::J, "(^ t: 3) 0", "Taylor"),
-        (Lang::J, "e. 1 2", "raze-in"),
-        (Lang::J, "{ 1 2", "catalogue"),
         (Lang::J, "2 \": 1.5", "format with a specification"),
-        (Lang::Apl, "1 2⍋3 1 2", "collation"),
+        (Lang::Apl, "1(+⍠2)2", "variant"),
     ];
     for (lang, src, what) in cases {
         let e = err(*lang, src);

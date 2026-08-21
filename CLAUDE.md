@@ -91,7 +91,8 @@ commits. Decisions with reasoning go to docs/decisions.md, not here.
 - Venvs: `.venv` (3.14, dev), `.venv-bench` (3.12, `'.[bench]'`). Both share
   python/jay/_jay.abi3.so — rebuild `maturin develop --release` before
   benchmarking. LIBJAY_THREADS caps the pool; LIBJAY_CPU_LEVEL pins the CPU
-  feature level (`baseline`, `v2`, `v3`, `native`), read once per process.
+  feature level (`baseline`, `v2`, `v3`, `v4`, `native`), read once per
+  process. Toolchain: rust-toolchain.toml pins 1.89, which is the MSRV.
 - Phases (original roadmap): 1–6 done (frontends, IR, Arrow, parallelism,
   time series, SIMD dispatch) + C ABI, fusion, dual oracles, boxes,
   explicit definitions and control structures, complex numbers, bigints

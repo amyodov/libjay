@@ -155,6 +155,28 @@ fn every_level_computes_the_same_values() {
     set_level(detected());
 }
 
+/// Which levels this machine can compare, said out loud.
+///
+/// The battery above covers every level [`available`] reports, so the x86-64
+/// rung a CPU lacks is simply absent from it. `v4` is the rung that is
+/// usually absent: the AVX-512 clone is compiled into every x86-64 artifact,
+/// but only a machine with the features can run it, and a machine without
+/// them would otherwise pass this suite without saying that it never
+/// compared the clone at all. Run with `--nocapture` — CI does — and the
+/// machine names its own case.
+#[test]
+fn the_levels_this_machine_can_compare() {
+    let all = available();
+    let names: Vec<&str> = all.iter().map(|l| l.name()).collect();
+    eprintln!("libjay: CPU level {}, comparing [{}]", detected().name(), names.join(", "));
+    if !all.contains(&Level::V4) {
+        eprintln!(
+            "libjay: v4 not compared here: this CPU reports no AVX-512 \
+             (avx512f/bw/cd/dq/vl), so the clone is built but unrunnable on it"
+        );
+    }
+}
+
 #[test]
 fn the_baseline_is_always_available_and_the_machines_level_is_the_last() {
     let all = available();

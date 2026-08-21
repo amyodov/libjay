@@ -1,273 +1,278 @@
-# libjay reference snapshot: J (jconsole) — corpus/j/arithmetic.txt.
+# libjay reference snapshot: J — corpus/j/arithmetic.txt.
 # Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
-# the live reference interpreter. Do not edit by hand; the workflow is in
+# the live reference interpreters. Do not edit by hand; the workflow is in
 # docs/testing.md.
 #
 # One record per expression, in corpus order:
-#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
-#   `> TEXT`  one line of the reference's answer.
-#   `< TEXT`  one line of libjay's answer (divergence records only).
-#   `? TEXT`  why the two are expected to differ (divergence records only).
-#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
-#   `# TEXT`  a comment.
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
 # A side whose single line is `<error>` refused the sentence. An empty answer
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
 = 2 + 2
-> 4
+> j: 4
 = 1 2 3 * 10
-> 10 20 30
+> j: 10 20 30
 = 10 % 4
-> 2.5
+> j: 2.5
 = 0 % 0
-> 0
+> j: 0
 = 5 % 0
-> _
+> j: _
 = _5 % 0
-> __
+> j: __
 = % 0 2 4
-> _ 0.5 0.25
+> j: _ 0.5 0.25
 = - 1 _2 3
-> _1 2 _3
+> j: _1 2 _3
 = * _5 0 5
-> _1 0 1
+> j: _1 0 1
 = 2 ^ 10
-> 1024
+> j: 1024
 = 2 ^ 0.5
-> 1.41421
+> j: 1.41421
 = %: 2 4 9
-> 1.41421 2 3
+> j: 1.41421 2 3
 = | _3 3 _0.5
-> 3 3 0.5
+> j: 3 3 0.5
 = 3 | 1 2 3 4 5 6
-> 1 2 0 1 2 0
+> j: 1 2 0 1 2 0
 = _3 | 1 2 3 4 5 6
-> _2 _1 0 _2 _1 0
+> j: _2 _1 0 _2 _1 0
 = 0 | 7 _7
-> 7 _7
+> j: 7 _7
 = 2 <. 1 3
-> 1 2
+> j: 1 2
 = 2 >. 1 3
-> 2 3
+> j: 2 3
 = <. 1.5 _1.5
-> 1 _2
+> j: 1 _2
 = >. 1.5 _1.5
-> 2 _1
+> j: 2 _1
 = 1 2 3 = 1 5 3
-> 1 0 1
+> j: 1 0 1
 = 1 2 3 < 2 2 2
-> 1 0 0
+> j: 1 0 0
 = 1 2 3 > 2 2 2
-> 0 0 1
+> j: 0 0 1
 = 1 2 3 <: 2 2 2
-> 1 1 0
+> j: 1 1 0
 = 1 2 3 >: 2 2 2
-> 0 1 1
+> j: 0 1 1
 = +/ 1 2 3
-> 6
+> j: 6
 = -/ 1 2 3 4
-> _2
+> j: _2
 = */ 1 2 3 4
-> 24
+> j: 24
 = +/ i. 2 3
-> 3 5 7
+> j: 3 5 7
 = +/ i. 3 2
-> 6 9
+> j: 6 9
 = +/"1 i. 2 3
-> 3 12
+> j: 3 12
 = +/"2 i. 2 3 4
-> 12 15 18 21
-> 48 51 54 57
+> j: 12 15 18 21
+> j: 48 51 54 57
 = <./ 3 1 4
-> 1
+> j: 1
 = >./ 3 1 4
-> 4
+> j: 4
 = +/ i. 0
-> 0
+> j: 0
 = */ i. 0
-> 1
+> j: 1
 = -/ i. 0
-> 0
+> j: 0
 = %/ i. 0
-> 1
+> j: 1
 = ^/ i. 0
-> 1
+> j: 1
 = %:/ i. 0
-> 1
+> j: 1
 = |/ i. 0
-> 0
+> j: 0
 = !/ i. 0
-> 1
+> j: 1
 = =/ i. 0
-> 1
+> j: 1
 = ~:/ i. 0
-> 0
+> j: 0
 = </ i. 0
-> 0
+> j: 0
 = <:/ i. 0
-> 1
+> j: 1
 = >/ i. 0
-> 0
+> j: 0
 = >:/ i. 0
-> 1
+> j: 1
 = ^./ i. 0
-> <error>
+> j: <error>
 = o./ i. 0
-> <error>
+> j: <error>
 = 4 *. 6
-> 12
+> j: 12
 = 12 +. 18
-> 6
+> j: 6
 = _4 *. 6
-> _12
+> j: _12
 = _4 +. 6
-> 2
+> j: 2
 = 0 +. 0
-> 0
+> j: 0
 = 0 *. 5
-> 0
+> j: 0
 = *./ 4 6 8
-> 24
+> j: 24
 = +./ 12 18 24
-> 6
+> j: 6
 = *./ i. 0
-> 1
+> j: 1
 = +./ i. 0
-> 0
+> j: 0
 = 3 %: 27
-> 3
+> j: 3
 = 2 %: 9
-> 3
+> j: 3
 = 2 ^. 8
-> 3
+> j: 3
 = ^. 1 2
-> 0 0.693147
+> j: 0 0.693147
 = ^. 0
-> __
+> j: __
 = 10 ^. 100
-> 2
+> j: 2
 = <: 5
-> 4
+> j: 4
 = >: 5
-> 6
+> j: 6
 = +: 5
-> 10
+> j: 10
 = *: 5
-> 25
+> j: 25
 = -. 0 1
-> 1 0
+> j: 1 0
 = -. 0.25
-> 0.75
+> j: 0.75
 = <: 2.5
-> 1.5
+> j: 1.5
 = +: 1 2 3
-> 2 4 6
+> j: 2 4 6
 = *: _3
-> 9
+> j: 9
 = o. 1
-> 3.14159
+> j: 3.14159
 = o. 0 1 2
-> 0 3.14159 6.28319
+> j: 0 3.14159 6.28319
 = 0 o. 0.5
-> 0.866025
+> j: 0.866025
 = 1 o. 0.5
-> 0.479426
+> j: 0.479426
 = 2 o. 0.5
-> 0.877583
+> j: 0.877583
 = 3 o. 0.5
-> 0.546302
+> j: 0.546302
 = 4 o. 0.5
-> 1.11803
+> j: 1.11803
 = 5 o. 0.5
-> 0.521095
+> j: 0.521095
 = 6 o. 0.5
-> 1.12763
+> j: 1.12763
 = 7 o. 0.5
-> 0.462117
+> j: 0.462117
 = _1 o. 0.5
-> 0.523599
+> j: 0.523599
 = _2 o. 0.5
-> 1.0472
+> j: 1.0472
 = _3 o. 0.5
-> 0.463648
+> j: 0.463648
 = _4 o. 2
-> 1.73205
+> j: 1.73205
 = _4 o. _2
-> _1.73205
+> j: _1.73205
 = _5 o. 0.5
-> 0.481212
+> j: 0.481212
 = _6 o. 2
-> 1.31696
+> j: 1.31696
 = _7 o. 0.5
-> 0.549306
+> j: 0.549306
 = _7 o. 1
-> _
+> j: _
 = 1 o. 0
-> 0
+> j: 0
 = 1 2 3 o. 1
-> 0.841471 0.540302 1.55741
+> j: 0.841471 0.540302 1.55741
 = 2 o. o. 1
-> _1
+> j: _1
 = ! 0 1 2 3 4 5
-> 1 1 2 6 24 120
+> j: 1 1 2 6 24 120
 = ! 10
-> 3.6288e6
+> j: 3.6288e6
 = ! 20
-> 2.4329e18
+> j: 2.4329e18
 = ! 0.5
-> 0.886227
+> j: 0.886227
 = ! 2.5
-> 3.32335
+> j: 3.32335
 = ! _0.5
-> 1.77245
+> j: 1.77245
 = ! _1
-> _
+> j: _
 = ! _2
-> __
+> j: __
 = ! _3
-> _
+> j: _
 = ! i. 2 3
-> 1  1   2
-> 6 24 120
+> j: 1  1   2
+> j: 6 24 120
 = 2 ! 5
-> 10
+> j: 10
 = 0 ! 5
-> 1
+> j: 1
 = 5 ! 5
-> 1
+> j: 1
 = 6 ! 5
-> 0
+> j: 0
 = _1 ! 5
-> 0
+> j: 0
 = 2 ! _5
-> 15
+> j: 15
 = _3 ! _2
-> _2
+> j: _2
 = _5 ! _3
-> 6
+> j: 6
 = _2 ! _5
-> 0
+> j: 0
 = 2 ! 5.5
-> 12.375
+> j: 12.375
 = 0.5 ! 2
-> 1.69765
+> j: 1.69765
 = 2.5 ! 5
-> 10.865
+> j: 10.865
 = 1.5 ! 4.5
-> 6.5625
+> j: 6.5625
 = _1.5 ! 2
-> _0.0485044
+> j: _0.0485044
 = 2 ! 5 6 7
-> 10 15 21
+> j: 10 15 21
 = 1 2 3 ! 5
-> 5 10 10
+> j: 5 10 10
 = 2 ! i. 2 3
-> 0 0  1
-> 3 6 10
+> j: 0 0  1
+> j: 3 6 10
 = 3 ! 100
-> 161700
+> j: 161700
 = 10 ! 100
-> 17310309456440
+> j: 17310309456440
 = 3 ! 3.0
-> 1
+> j: 1

@@ -43,7 +43,8 @@ uvx libjay -e "⎕←'Hello, world!'" --lang apl            # APL
 uv add libjay                                           # or: pip install libjay
 ```
 
-From a checkout (Rust toolchain required):
+From a checkout (Rust toolchain required; `rust-toolchain.toml` names the
+version, and rustup installs it on the first build):
 
 ```sh
 uv venv && uv pip install maturin

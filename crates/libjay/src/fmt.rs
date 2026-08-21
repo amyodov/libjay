@@ -40,6 +40,12 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
     if a.shape.contains(&0) {
         return String::new();
     }
+    // The planes are laid out by reading the buffer in order, so a
+    // column-major one is materialised first. Printing already costs more
+    // than the copy does.
+    if !a.is_row_major() {
+        return format_array(&a.to_row_major(), opts);
+    }
     if a.dtype() == DType::Box {
         // A boxed array whose every element is a simple scalar is APL's
         // MIXED SIMPLE array: depth 1, and drawn the way a plain array is

@@ -55,22 +55,22 @@ fn parse_statement(
     let sentence = fold_dfns(sentence, d, verbs)?;
     // `F←{⍵×2}` names a function: the sentence does no work at run time, and
     // later sentences read `F` as the function itself.
-    if let [name, assign, func] = &sentence[..] {
-        if let (Tok::Name(n), Tok::Assign) = (&name.kind, &assign.kind) {
-            // A dfn that mentions `⍺⍺` or `⍵⍵` is an operator; naming it
-            // keeps it one, waiting for the operands.
-            let named = match &func.kind {
-                Tok::Func(v) => Some(v.clone()),
-                Tok::UserOp { def, omega } => Some(unapplied_op(def.clone(), *omega)),
-                _ => None,
-            };
-            if let Some(v) = named {
-                let span = Span::merge(name.span, func.span);
-                if !in_def {
-                    verbs.insert(n.clone(), v.clone());
-                }
-                return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
+    if let [name, assign, func] = &sentence[..]
+        && let (Tok::Name(n), Tok::Assign) = (&name.kind, &assign.kind)
+    {
+        // A dfn that mentions `⍺⍺` or `⍵⍵` is an operator; naming it
+        // keeps it one, waiting for the operands.
+        let named = match &func.kind {
+            Tok::Func(v) => Some(v.clone()),
+            Tok::UserOp { def, omega } => Some(unapplied_op(def.clone(), *omega)),
+            _ => None,
+        };
+        if let Some(v) = named {
+            let span = Span::merge(name.span, func.span);
+            if !in_def {
+                verbs.insert(n.clone(), v.clone());
             }
+            return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
         }
     }
     let toks = fold_axes(fold_operators(unwrap_lone_operators(sentence), d)?, d)?;
@@ -80,16 +80,15 @@ fn parse_statement(
     // `F←+/` and `F←+/÷≢` name a function, derived or tacit. Like the dfn
     // above, the sentence does no work at run time and later sentences read
     // the name as the function itself.
-    if let [name, assign, rest @ ..] = &toks[..] {
-        if let (Tok::Name(n), Tok::Assign) = (&name.kind, &assign.kind) {
-            if let Some(v) = tine_run(rest, d)? {
-                let span = Span::merge(name.span, toks[toks.len() - 1].span);
-                if !in_def {
-                    verbs.insert(n.clone(), v.clone());
-                }
-                return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
-            }
+    if let [name, assign, rest @ ..] = &toks[..]
+        && let (Tok::Name(n), Tok::Assign) = (&name.kind, &assign.kind)
+        && let Some(v) = tine_run(rest, d)?
+    {
+        let span = Span::merge(name.span, toks[toks.len() - 1].span);
+        if !in_def {
+            verbs.insert(n.clone(), v.clone());
         }
+        return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
     }
     if let Some(t) = toks.iter().find(|t| matches!(t.kind, Tok::Control(_))) {
         return Err(Error::parse(
@@ -157,6 +156,10 @@ enum OpGlyph {
     JotDot,
     /// `⍥` over: `f⍥g` prepares both arguments with g, then applies f.
     Over,
+    /// `⍢` under (Dyalog): `f⍢g` is `g⁻¹ (g x) f (g y)` — over, undone.
+    Under,
+    /// `⌺` stencil (Dyalog): f over the window centred on each cell.
+    Stencil,
     /// `∘` on its own — Dyalog's `f∘g`, which libjay does not have yet.
     Jot,
     /// `¨` — each.
@@ -179,6 +182,8 @@ impl OpGlyph {
             OpGlyph::Power => '⍣',
             OpGlyph::JotDot | OpGlyph::Jot => '∘',
             OpGlyph::Over => '⍥',
+            OpGlyph::Under => '⍢',
+            OpGlyph::Stencil => '⌺',
             OpGlyph::Each => '¨',
             OpGlyph::Before => '⍛',
             OpGlyph::Key => '⌸',
@@ -437,13 +442,13 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
         '⍋' => Prim {
             name: "⍋",
             monad: M::GradeUp { origin },
-            dyad: D::NotYet("dyadic grade (collation)"),
+            dyad: D::CollateGrade { down: false, origin },
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '⍒' => Prim {
             name: "⍒",
             monad: M::GradeDown { origin },
-            dyad: D::NotYet("dyadic grade (collation)"),
+            dyad: D::CollateGrade { down: true, origin },
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         // `⊖` works on the leading axis; `⌽` is the same primitive applied to
@@ -473,25 +478,27 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
             ranks: [RANK_INF, 1, RANK_INF],
         },
         // `⊥` and `⊤` have no monadic meaning in APL; J spells those `#.`
-        // and `#:`. `⊤` takes its right argument whole, so the digit axis
-        // leads and the result has shape (⍴x),(⍴y).
+        // and `#:`. Both take their arguments whole: `⊥` is the inner
+        // product `+.×` over x's last axis and y's leading one, and `⊤`
+        // makes x's leading axis the digits, so the result of either is
+        // shaped by what is left of both arguments.
         '⊥' => Prim {
             name: "⊥",
             monad: M::None,
-            dyad: D::Decode,
-            ranks: [RANK_INF, 1, 1],
+            dyad: D::DecodeApl,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '⊤' => Prim {
             name: "⊤",
             monad: M::None,
-            dyad: D::Encode,
-            ranks: [RANK_INF, 1, RANK_INF],
+            dyad: D::EncodeApl,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '⍉' => Prim {
             name: "⍉",
             monad: M::TransposeAxes,
-            dyad: D::NotYet("dyadic transpose"),
-            ranks: [RANK_INF, 1, RANK_INF],
+            dyad: D::TransposeApl,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         // `↑` and `⊃` are the lineages' clearest divergence, so the
         // dialect names which reading applies; the dyads agree.
@@ -528,7 +535,7 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
         '⍸' => Prim {
             name: "⍸",
             monad: M::Indices { origin, boxed_coords: true },
-            dyad: D::IntervalIndex { offset: origin - 1 },
+            dyad: D::IntervalIndex { offset: origin - 1, closed: true },
             ranks: [RANK_INF, 1, RANK_INF],
         },
         // `⌷` indexes with one scalar per axis and has no monadic case in
@@ -660,10 +667,12 @@ fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
 /// it under. These are queue positions, not unknown characters.
 fn queued_glyph(ch: char) -> Option<&'static str> {
     Some(match ch {
-        '⍢' => "the under operator (f⍢g)",
-        '⌺' => "the stencil operator (f⌺w)",
         '⍠' => "the variant operator (f⍠v)",
         '⌶' => "I-beam (⌶)",
+        // Dyalog's spawn. Named as a queue position rather than reported as
+        // an unknown character; whether libjay's sandbox opens APL's
+        // threads is the decision that has not been made, not the parsing.
+        '&' => "the spawn operator (f&y)",
         _ => return None,
     })
 }
@@ -679,6 +688,8 @@ fn op_for(ch: char) -> Option<OpGlyph> {
         '⍣' => Some(OpGlyph::Power),
         '∘' => Some(OpGlyph::Jot),
         '⍥' => Some(OpGlyph::Over),
+        '⍢' => Some(OpGlyph::Under),
+        '⌺' => Some(OpGlyph::Stencil),
         '¨' => Some(OpGlyph::Each),
         '⍛' => Some(OpGlyph::Before),
         '⌸' => Some(OpGlyph::Key),
@@ -1084,18 +1095,16 @@ fn lex_number(text: &str, start: usize, offset: usize) -> Result<(f64, bool, usi
         i += 1;
         i = take_digits(text, i, &mut buf);
     }
-    if let Some(c) = text[i..].chars().next() {
-        if c == 'e' || c == 'E' {
-            let after = i + 1;
-            let neg = text[after..].starts_with('¯');
-            let digits_at = if neg { after + '¯'.len_utf8() } else { after };
-            if text[digits_at..].chars().next().is_some_and(|d| d.is_ascii_digit()) {
-                buf.push('e');
-                if neg {
-                    buf.push('-');
-                }
-                i = take_digits(text, digits_at, &mut buf);
+    if let Some(c) = text[i..].chars().next() && (c == 'e' || c == 'E') {
+        let after = i + 1;
+        let neg = text[after..].starts_with('¯');
+        let digits_at = if neg { after + '¯'.len_utf8() } else { after };
+        if text[digits_at..].chars().next().is_some_and(|d| d.is_ascii_digit()) {
+            buf.push('e');
+            if neg {
+                buf.push('-');
             }
+            i = take_digits(text, digits_at, &mut buf);
         }
     }
     let v: f64 = buf.parse().map_err(|_| {
@@ -1243,7 +1252,7 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         }
         // `f∘g` and `f⍥g` need a function on both sides; the right one is
         // taken here so the ordinary "operand to the left" path can run.
-        if matches!(op, OpGlyph::Jot | OpGlyph::Over | OpGlyph::Before) {
+        if matches!(op, OpGlyph::Jot | OpGlyph::Over | OpGlyph::Before | OpGlyph::Under) {
             let Some(gtok) = it.peek().filter(|x| matches!(x.kind, Tok::Func(_))) else {
                 return Err(Error::not_yet(
                     format!("{} with a value operand", op.glyph()),
@@ -1266,6 +1275,19 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             let derived = match op {
                 OpGlyph::Jot => Verb::Beside(Box::new(f), Box::new(g)),
                 OpGlyph::Before => Verb::Before(Box::new(f), Box::new(g)),
+                // Under is over, undone: the published definition is
+                // `g⍣¯1 ⊢ (g x) f (g y)`, on the arguments whole, so it is
+                // J's `&.:` over the same obverse table.
+                OpGlyph::Under => {
+                    let back = crate::verb::obverse(&g).ok_or_else(|| {
+                        Error::not_yet(
+                            format!("the obverse of {} (no inverse is known)", g.name()),
+                            gspan,
+                        )
+                    })?;
+                    let composed = Verb::Compose(Box::new(f), Box::new(g));
+                    Verb::Atop(Box::new(back), Box::new(composed))
+                }
                 _ => Verb::Compose(Box::new(f), Box::new(g)),
             };
             out.push(Token { kind: Tok::Func(derived), span });
@@ -1289,6 +1311,8 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     | OpGlyph::JotDot
                     | OpGlyph::Jot
                     | OpGlyph::Over
+                    | OpGlyph::Under
+                    | OpGlyph::Stencil
                     | OpGlyph::Before
                     | OpGlyph::Key
                     | OpGlyph::Each => {
@@ -1380,6 +1404,32 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                 out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
                 continue;
             }
+            // `f⌺w`: the window sizes are a value on the right, one per
+            // leading axis. Dyalog also takes a two-row form giving the
+            // movement; that is a named gap.
+            OpGlyph::Stencil => {
+                let Some(spec) = it.peek().filter(|t| literal(&t.kind).is_some()) else {
+                    return Err(Error::parse(
+                        "⌺ needs a window specification on its right",
+                        t.span,
+                    ));
+                };
+                let sspan = spec.span;
+                let spec = it.next().expect("peeked a literal");
+                let arr = literal(&spec.kind).expect("checked above");
+                if arr.rank() > 1 {
+                    return Err(Error::not_yet(
+                        "a stencil with a movement row (f⌺(m⍪w))",
+                        sspan,
+                    ));
+                }
+                let sizes = arr
+                    .to_i64_vec()
+                    .ok_or_else(|| Error::domain("a stencil window is whole numbers", sspan))?;
+                let v = Verb::Stencil(Box::new(f), sizes);
+                out.push(Token { kind: Tok::Func(v), span: Span::merge(span, sspan) });
+                continue;
+            }
             OpGlyph::Rank => {
                 let spec = match it.peek() {
                     // `f⍤g` with a function on the right is Dyalog's atop:
@@ -1409,7 +1459,11 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                 continue;
             }
             // These are answered before the left operand is taken.
-            OpGlyph::JotDot | OpGlyph::Jot | OpGlyph::Over | OpGlyph::Before => {
+            OpGlyph::JotDot
+            | OpGlyph::Jot
+            | OpGlyph::Over
+            | OpGlyph::Under
+            | OpGlyph::Before => {
                 unreachable!("handled above")
             }
         };
@@ -1783,14 +1837,12 @@ fn parse_operand(
 
 /// The items one primary contributes to a strand, appended right to left.
 fn push_items(items: &mut Vec<Expr>, e: Expr, tok: &Token) {
-    if let Tok::Nums(a) = &tok.kind {
-        if a.rank() > 0 {
-            for i in (0..a.count()).rev() {
-                let atom = Array { shape: Vec::new(), data: a.data.slice(i, i + 1) };
-                items.push(Expr::Const(atom, tok.span));
-            }
-            return;
+    if let Tok::Nums(a) = &tok.kind && a.rank() > 0 {
+        for i in (0..a.count()).rev() {
+            let atom = Array::new(Vec::new(), a.data.slice(i, i + 1));
+            items.push(Expr::Const(atom, tok.span));
         }
+        return;
     }
     items.push(e);
 }
@@ -2991,13 +3043,13 @@ mod tests {
     #[case('>', MonadOp::None, DyadOp::Scalar(ScalarDyad::Gt))]
     #[case('≥', MonadOp::None, DyadOp::Scalar(ScalarDyad::Ge))]
     #[case('⍴', MonadOp::ShapeOf, DyadOp::Reshape)]
-    #[case('⍉', MonadOp::TransposeAxes, DyadOp::NotYet("dyadic transpose"))]
+    #[case('⍉', MonadOp::TransposeAxes, DyadOp::TransposeApl)]
     #[case(',', MonadOp::Ravel, DyadOp::AppendLast)]
     #[case('⍪', MonadOp::TableOf, DyadOp::AppendLeading)]
     #[case('!', MonadOp::Scalar(ScalarMonad::Factorial), DyadOp::Scalar(ScalarDyad::Binomial))]
     #[case('⍕', MonadOp::Format, DyadOp::FormatSpec)]
-    #[case('⊥', MonadOp::None, DyadOp::Decode)]
-    #[case('⊤', MonadOp::None, DyadOp::Encode)]
+    #[case('⊥', MonadOp::None, DyadOp::DecodeApl)]
+    #[case('⊤', MonadOp::None, DyadOp::EncodeApl)]
     #[case('≢', MonadOp::Tally, DyadOp::NotMatch)]
     #[case('≡', MonadOp::Depth, DyadOp::Match)]
     #[case('∊', MonadOp::Enlist, DyadOp::MemberApl)]
@@ -3007,8 +3059,8 @@ mod tests {
     #[case('⍟', MonadOp::Scalar(ScalarMonad::Ln), DyadOp::Scalar(ScalarDyad::Log))]
     #[case('~', MonadOp::Scalar(ScalarMonad::Not), DyadOp::Less)]
     #[case('⊖', MonadOp::Reverse, DyadOp::Rotate)]
-    #[case('⍋', MonadOp::GradeUp { origin: 1 }, DyadOp::NotYet("dyadic grade (collation)"))]
-    #[case('⍒', MonadOp::GradeDown { origin: 1 }, DyadOp::NotYet("dyadic grade (collation)"))]
+    #[case('⍋', MonadOp::GradeUp { origin: 1 }, DyadOp::CollateGrade { down: false, origin: 1 })]
+    #[case('⍒', MonadOp::GradeDown { origin: 1 }, DyadOp::CollateGrade { down: true, origin: 1 })]
     #[case('⊢', MonadOp::Same, DyadOp::Right)]
     #[case('⊣', MonadOp::Same, DyadOp::Left)]
     #[case('↑', MonadOp::First, DyadOp::Take)]

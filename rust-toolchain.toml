@@ -1,0 +1,8 @@
+[toolchain]
+# The compiler every contributor and every CI job uses. Pinned rather than
+# `stable` so a clippy finding is the same finding everywhere, and equal to
+# the workspace `rust-version`: what libjay requires is what libjay is built
+# with. 1.89 is the first stable release with `avx512*` target features, which
+# the x86-64-v4 dispatch rung needs.
+channel = "1.89"
+components = ["clippy"]

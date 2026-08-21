@@ -1,0 +1,53 @@
+// Wave 7: dyadic transpose, the leading-axis forms of ⊥ and ⊤, the
+// collating grade, and the interval-index and membership corrections.
+
+// Dyadic transpose: x says where each axis of y goes.
+2 1⍉2 3⍴⍳6
+1 2⍉2 3⍴⍳6
+1 1⍉3 3⍴⍳9
+1 1⍉2 3⍴⍳6
+⍴3 1 2⍉2 3 4⍴⍳24
+⍴1 3 2⍉2 3 4⍴⍳24
+1 1 2⍉2 3 4⍴⍳24
+3 1 2⍉2 3 4⍴⍳24
+
+// ⊥ folds the LEADING axis of y against the last of x.
+2⊥2 3⍴⍳6
+(2 2⍴2)⊥2 3⍴⍳6
+⍴(2 2⍴2)⊥2 3⍴⍳6
+(3 3⍴1 0 0 0 1 0 0 0 1)⊥3 2⍴⍳6
+2⊥1 1 1
+2 2 2⊥1 0 1
+
+// ⊤ makes x's leading axis the digits.
+2 2 2⊤2 3⍴⍳6
+⍴2 2 2⊤2 3⍴⍳6
+(2 3⍴2)⊤5
+⍴(2 3⍴2)⊤5
+2 2 2⊤5
+
+// Collating grade.
+'abc'⍋'cab'
+'abc'⍋'cba'
+'abc'⍒'cab'
+'ab'⍋'aabb'
+'ab'⍋'abc'
+'abc'⍋2 3⍴'cabbac'
+'abc'⍒2 3⍴'cabbac'
+(2 3⍴'abcdef')⍋'fad'
+(2 3⍴'abcabd')⍋'abd'
+
+// Interval index closes on the left.
+1 3 5⍸2 3 4
+1 3 5⍸1 5 6
+1 3 5⍸0
+
+// An enclosed index selects several elements of one axis.
+(⊂1 2)⌷5 6 7 8
+(1 2)⌷2 3⍴⍳6
+(⊂1 2 3)⌷5 6 7 8
+
+// A box holding a simple scalar IS that scalar, so membership finds it.
+1 2 3∊(1 2)(3)
+3∊(1 2)(3)
+(⊂2 3)∊(1 2)(3)

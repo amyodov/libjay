@@ -5,6 +5,12 @@
 //! into `tests/snapshots/apl/*.snap`. This is a replay: no subprocess, no
 //! external binary, nothing outside the repository.
 //!
+//! A record holds one answer per implementation. libjay is held to `gnu:`,
+//! the line its shipped dialect follows; a `dyalog:` answer is recorded
+//! data for a future Dyalog dialect, and the battery COUNTS the expressions
+//! where it differs rather than failing on them —
+//! `jay-corpus stats apl --dialect-diff` lists them.
+//!
 //! Recording is the other activity, and the only one that runs the
 //! reference: `cargo run -p libjay-devtools -- record apl`
 //! (docs/testing.md). GNU APL is a black-box oracle there — never linked,

@@ -78,6 +78,11 @@ struct Names {
     /// diagnostics need this: a name that is neither a verb nor a value is
     /// an undefined name, not a sentence the parser has yet to learn.
     nouns: HashSet<String>,
+    /// The value of a name given a literal, for the operands that have to
+    /// be known while the sentence is read. A gerund is data, so
+    /// `` g =. +`- `` and then `g@.1` needs what g holds; an assignment
+    /// whose value is not settled at parse time takes the name back out.
+    consts: HashMap<String, Array>,
 }
 
 impl Names {
@@ -118,10 +123,26 @@ impl Names {
                 for name in assigned {
                     self.verbs.remove(&name);
                     self.mods.remove(&name);
-                    self.nouns.insert(name);
+                    self.nouns.insert(name.clone());
+                    match literal_assigned(other, &name) {
+                        Some(a) => self.consts.insert(name, a),
+                        None => self.consts.remove(&name),
+                    };
                 }
             }
         }
+    }
+}
+
+/// The literal a sentence gave a name, where the whole sentence is that one
+/// assignment and its value is settled already.
+fn literal_assigned(stmt: &Expr, name: &str) -> Option<Array> {
+    match stmt {
+        Expr::Assign { name: n, value, .. } if n == name => match &**value {
+            Expr::Const(a, _) => Some(a.clone()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -209,15 +230,14 @@ fn collect_definitions(
                 // Every definition on the line is now one verb fragment, so
                 // a control word still standing is one nothing encloses.
                 None => {
-                    if top_level {
-                        if let Some(Frag::Control(_, _, span)) =
+                    if top_level
+                        && let Some(Frag::Control(_, _, span)) =
                             sentence.iter().find(|f| matches!(f, Frag::Control(..)))
-                        {
-                            return Err(Error::parse(
-                                "control words are only meaningful inside an explicit definition",
-                                *span,
-                            ));
-                        }
+                    {
+                        return Err(Error::parse(
+                            "control words are only meaningful inside an explicit definition",
+                            *span,
+                        ));
                     }
                     return Ok(sentence);
                 }
@@ -443,12 +463,15 @@ fn build_definition(
     let mut inner = scope.clone();
     inner.nouns.insert("y".to_string());
     inner.verbs.remove("y");
+    inner.consts.remove("y");
     if dyadic {
         inner.nouns.insert("x".to_string());
         inner.verbs.remove("x");
+        inner.consts.remove("x");
     }
     if let Some(n) = self_name {
         inner.nouns.remove(n);
+        inner.consts.remove(n);
         inner.verbs.insert(n.to_string(), Verb::Named(n.to_string()));
     }
     // A body may hold definitions of its own, and one of them may run past
@@ -594,6 +617,7 @@ fn derive_explicit(
     if let Some(n) = &src.self_name {
         inner.verbs.remove(n);
         inner.nouns.remove(n);
+        inner.consts.remove(n);
         inner.mods.insert(n.clone(), (src.conjunction, Modifier::Explicit(Arc::clone(src))));
     }
     if src.deferred {
@@ -633,7 +657,6 @@ fn part_of_speech(f: &Frag) -> &'static str {
     match f {
         Frag::Adverb(..) => "an adverb",
         Frag::Conj(..) => "a conjunction",
-        Frag::Gerund(..) => "a gerund",
         _ => "no value",
     }
 }
@@ -802,6 +825,7 @@ fn parse_control(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Expr> {
                 scope.nouns.insert(name.clone());
                 scope.nouns.insert(format!("{name}_index"));
                 scope.verbs.remove(name);
+                scope.consts.remove(name);
             }
             let source = parse_block(cur, scope, &["do."])?;
             cur.expect("do.")?;
@@ -869,10 +893,8 @@ fn parse_if(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Control> {
     }
     // `elseif. do.` with no test is the reference's other spelling of
     // `else.`: a final arm that always runs.
-    if let Some(last) = arms.last_mut() {
-        if last.test.as_ref().is_some_and(Vec::is_empty) {
-            last.test = None;
-        }
+    if let Some(last) = arms.last_mut() && last.test.as_ref().is_some_and(Vec::is_empty) {
+        last.test = None;
     }
     Ok(Control::If { arms, otherwise })
 }
@@ -987,10 +1009,6 @@ enum Frag {
     /// carries the letter of a `{{)a` marker where the source wrote one.
     DdOpen(Option<char>, Span),
     DdClose(Span),
-    /// A gerund: the verbs `` ` `` has tied together. J spells one as a
-    /// boxed noun; here it is a fragment of its own, and `@.` is what reads
-    /// it.
-    Gerund(Vec<Verb>, Span),
 }
 
 /// `[:` has the verb category but no verb of its own: it is only meaningful
@@ -1019,7 +1037,6 @@ impl Frag {
             | Frag::ModDef(_, _, _, s) => *s,
             Frag::DdOpen(_, s) => *s,
             Frag::Control(_, _, s) => *s,
-            Frag::Gerund(_, s) => *s,
         }
     }
 
@@ -1050,12 +1067,8 @@ impl Frag {
         matches!(self, Frag::Conj(..))
     }
 
-    fn is_gerund(&self) -> bool {
-        matches!(self, Frag::Gerund(..))
-    }
-
     fn is_avn(&self) -> bool {
-        self.is_adverb() || self.is_verb() || self.is_noun() || self.is_gerund()
+        self.is_adverb() || self.is_verb() || self.is_noun()
     }
 
     fn is_cavn(&self) -> bool {
@@ -1123,19 +1136,19 @@ fn primitive(word: &str) -> Option<Prim> {
         "o." => prim("o.", M::Scalar(SM::Pi), D::Scalar(SD::Circle), [0, 0, 0]),
         "j." => prim("j.", M::Scalar(SM::Imaginary), D::Scalar(SD::MakeComplex), [0, 0, 0]),
         "r." => prim("r.", M::Scalar(SM::Polar), D::Scalar(SD::PolarBy), [0, 0, 0]),
-        "{" => prim("{", M::NotYet("catalogue (monadic {)"), D::From, [INF, 0, INF]),
+        "{" => prim("{", M::Catalogue, D::From, [INF, 0, INF]),
         "{." => prim("{.", M::Head, D::Take, [INF, 1, INF]),
         "}." => prim("}.", M::Behead, D::Drop, [INF, 1, INF]),
         "{:" => prim("{:", M::Tail, D::None, [INF, INF, INF]),
         "}:" => prim("}:", M::Curtail, D::None, [INF, INF, INF]),
         "|." => prim("|.", M::Reverse, D::Rotate, [INF, 1, INF]),
-        "|:" => prim("|:", M::TransposeAxes, D::NotYet("dyadic transpose"), [INF, 1, INF]),
+        "|:" => prim("|:", M::TransposeAxes, D::TransposeJ, [INF, 1, INF]),
         "i." => prim("i.", M::IotaJ, D::IndexOf { origin: 0 }, [1, INF, INF]),
         "i:" => prim("i:", M::Steps, D::IndexOfLast { origin: 0 }, [0, INF, INF]),
         "I." => prim(
             "I.",
             M::Indices { origin: 0, boxed_coords: false },
-            D::IntervalIndex { offset: 0 },
+            D::IntervalIndex { offset: 0, closed: false },
             [1, 1, INF],
         ),
         // The dyad reads the whole argument: `2 x: y` gives every value a
@@ -1169,7 +1182,7 @@ fn primitive(word: &str) -> Option<Prim> {
             [INF, 0, 0],
         ),
         "{::" => prim("{::", M::MapPaths, D::Fetch, [INF, INF, INF]),
-        "e." => prim("e.", M::NotYet("raze-in (monadic e.)"), D::MemberJ, [INF, INF, INF]),
+        "e." => prim("e.", M::RazeIn, D::MemberJ, [INF, INF, INF]),
         "/:" => prim(
             "/:",
             M::GradeUp { origin: 0 },
@@ -1215,13 +1228,15 @@ fn primitive(word: &str) -> Option<Prim> {
 
 /// The constant nouns J spells as inflected words. `a.` is the 256
 /// characters of J's alphabet in codepoint order; `a:` is the ace, the box
-/// holding an empty numeric list.
+/// holding an empty numeric list; `_.` is the indeterminate value, which is
+/// a NaN and prints as itself.
 fn noun_word(word: &str) -> Option<Array> {
     match word {
         "a." => Some(Array::from_chars(
             (0u32..256).map(|c| char::from_u32(c).expect("a Latin-1 codepoint")).collect(),
         )),
         "a:" => Some(Array::boxed(Array::empty(crate::dtype::DType::I64))),
+        "_." => Some(Array::scalar_f64(f64::NAN)),
         _ => None,
     }
 }
@@ -1567,6 +1582,10 @@ fn starts_number(cs: &[(usize, char)], i: usize) -> bool {
 }
 
 fn parse_number(word: &str, span: Span) -> Result<Num> {
+    // `_.` is the indeterminate value, not a number with a decimal point.
+    if word == "_." {
+        return Ok(Num::F(f64::NAN));
+    }
     // `1x` is an extended-precision integer; `1x1` is a multiple of e, and
     // `1p1` a multiple of π. The letter is the separator in both, and it
     // binds LOOSEST: `1ar1p1` is the polar value `1ar1` scaled by π.
@@ -1588,33 +1607,27 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
     }
     // `3j4` is the rectangular form. A `b` earlier in the word makes the
     // `j` a base-literal digit instead (`36bj` is 19).
-    if let Some(k) = word.find('j') {
-        if !word[..k].contains('b') {
-            let re = as_f64(plain_number(&word[..k], word, span)?);
-            let im = as_f64(plain_number(&word[k + 1..], word, span)?);
-            return Ok(Num::C([re, im]));
-        }
+    if let Some(k) = word.find('j') && !word[..k].contains('b') {
+        let re = as_f64(plain_number(&word[..k], word, span)?);
+        let im = as_f64(plain_number(&word[k + 1..], word, span)?);
+        return Ok(Num::C([re, im]));
     }
     // `1ad45` and `1ar1` are the polar forms: a magnitude, then the angle
     // in degrees or in radians.
-    if let Some(k) = word.find("ad").or_else(|| word.find("ar")) {
-        if !word[..k].contains('b') {
-            let magnitude = as_f64(plain_number(&word[..k], word, span)?);
-            let angle = as_f64(plain_number(&word[k + 2..], word, span)?);
-            return Ok(Num::C(if word.as_bytes()[k + 1] == b'd' {
-                crate::complex::from_degrees(magnitude, angle)
-            } else {
-                crate::complex::from_radians(magnitude, angle)
-            }));
-        }
+    if let Some(k) = word.find("ad").or_else(|| word.find("ar")) && !word[..k].contains('b') {
+        let magnitude = as_f64(plain_number(&word[..k], word, span)?);
+        let angle = as_f64(plain_number(&word[k + 2..], word, span)?);
+        return Ok(Num::C(if word.as_bytes()[k + 1] == b'd' {
+            crate::complex::from_degrees(magnitude, angle)
+        } else {
+            crate::complex::from_radians(magnitude, angle)
+        }));
     }
     // `3r4` is a rational, and `1r_2` spells its negative denominator with
     // J's own negative sign. A `b` earlier in the word makes the `r` a
     // base-literal digit instead.
-    if let Some(k) = word.find('r') {
-        if !word[..k].contains('b') {
-            return rational_literal(&word[..k], &word[k + 1..], word, span);
-        }
+    if let Some(k) = word.find('r') && !word[..k].contains('b') {
+        return rational_literal(&word[..k], &word[k + 1..], word, span);
     }
     if let Some(k) = word.find('b') {
         return base_literal(&word[..k], &word[k + 1..], word, span);
@@ -1913,7 +1926,7 @@ fn match_rule(s: &[Frag]) -> Option<Rule> {
     // reduction from reaching further left than it should.
     let ctx = |i: usize| s.get(i).is_some_and(|f| f.is_edge() || f.is_avn());
     let verb_or_noun =
-        |i: usize| s.get(i).is_some_and(|f| f.is_real_verb() || f.is_noun() || f.is_gerund());
+        |i: usize| s.get(i).is_some_and(|f| f.is_real_verb() || f.is_noun());
     if is(0, Frag::is_edge) && is(1, Frag::is_real_verb) && is(2, Frag::is_noun) {
         return Some(Rule::Monad1);
     }
@@ -1968,7 +1981,6 @@ fn respan(f: Frag, to: Span) -> Frag {
         Frag::Verb(v, _) => Frag::Verb(v, to),
         Frag::Adverb(a, _) => Frag::Adverb(a, to),
         Frag::Conj(c, _) => Frag::Conj(c, to),
-        Frag::Gerund(vs, _) => Frag::Gerund(vs, to),
         other => other,
     }
 }
@@ -2239,7 +2251,15 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             }
             // A negative power runs the obverse that many times, which is
             // what makes `u^:_1` the inverse.
-            let negative = as_const(&v).and_then(Array::to_f64_vec).is_some_and(|n| n[0] < 0.0);
+            // A negative count runs the obverse that many times, whether it
+            // was written plainly or in a box (`u^:(<_3)`).
+            let negative = noun_value(&v).is_some_and(|a| {
+                let inner = match a.as_boxes() {
+                    Some([b]) => b.clone(),
+                    _ => a,
+                };
+                inner.to_f64_vec().is_some_and(|n| n.len() == 1 && n[0] < 0.0)
+            });
             let p = power_spec(&v, span)?;
             let f = if negative { obverse_of(&f, span)? } else { f };
             Ok(Frag::Verb(VerbFrag::V(Verb::PowerN(Box::new(f), p)), span))
@@ -2294,7 +2314,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         // `u@.v` picks one verb of the gerund u by v's value at the
         // arguments; a noun on the right picks one now and for good.
         "@." => {
-            let vs = gerund_verbs(&u, span)?;
+            let vs = gerund_verbs(&u, scope, span)?;
             if v.is_verb() {
                 let w = verb_operand(v, span)?;
                 return Ok(Frag::Verb(VerbFrag::V(Verb::Agenda(vs, Box::new(w))), span));
@@ -2306,11 +2326,13 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             let picked = crate::verb::pick_gerund(&vs, at as i64, span)?;
             Ok(Frag::Verb(VerbFrag::V(picked), span))
         }
-        // `u`v` ties verbs into a gerund, which only `@.` reads so far.
+        // `u`v` ties two entities into a gerund, which is ordinary boxed
+        // data: one box per atomic representation, catenated.
         "`" => {
-            let mut vs = gerund_verbs(&u, span)?;
-            vs.extend(gerund_verbs(&v, span)?);
-            Ok(Frag::Gerund(vs, span))
+            let left = tie_side(&u, scope, span)?;
+            let right = tie_side(&v, scope, span)?;
+            let tied = crate::verb::catenate(&left, &right, true, true, span)?;
+            Ok(Frag::Noun(Expr::Const(tied, span)))
         }
         // `u :: v` answers a refusal of u by running v instead. A noun on
         // the right is the constant verb yielding it, as J reads it.
@@ -2339,7 +2361,32 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             };
             Ok(Frag::Verb(VerbFrag::V(level), span))
         }
-        "`:" => Err(Error::not_yet("evoke gerund (`:)", span)),
+        // `` m`:n ``: 0 applies every verb of the gerund to the arguments
+        // and frames the answers, 3 inserts them between the items of y,
+        // and 6 is the train the gerund spells, which is built here.
+        "`:" => {
+            if u.is_verb() {
+                return Err(Error::domain(
+                    "`: reads a gerund, which is boxed data, not a verb",
+                    span,
+                ));
+            }
+            let vs = gerund_verbs(&u, scope, span)?;
+            let n = one_atom(&v, "evoke gerund", span)?;
+            if vs.is_empty() {
+                return Err(Error::domain("an evoked gerund is empty", span));
+            }
+            match n {
+                0.0 | 3.0 => {
+                    Ok(Frag::Verb(VerbFrag::V(Verb::Evoke(vs, n as i64)), span))
+                }
+                6.0 => train_of(vs, span),
+                _ => Err(Error::domain(
+                    format!("`:{n} is not one of the evoke forms 0, 3 and 6"),
+                    span,
+                )),
+            }
+        }
         // `m H. n`: the generalised hypergeometric function, m the
         // numerator parameters and n the denominator ones. Both are nouns,
         // and an empty list on either side is the ordinary case of none.
@@ -2355,8 +2402,20 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             "T. starts J's own threads, which libjay does not open",
             span,
         )),
-        "t." => Err(Error::not_yet("the Taylor series (u t. n)", span)),
-        "t:" => Err(Error::not_yet("the weighted Taylor series (u t: n)", span)),
+        // `u t. n` schedules u in one of J's thread pools and answers with
+        // a pyx — a task, not a value. The sandbox does not open those
+        // threads, which is libjay's own policy and not a queue position.
+        // The reference rejects `t:` outright — an invalid inflection, as
+        // it does `d.`, `D.` and `D:`. There is nothing here to implement.
+        "t:" => Err(Error::new(
+            ErrorKind::Language,
+            "t: is not a J inflection; the reference rejects the spelling",
+            Some(span),
+        )),
+        "t." => Err(Error::sandbox(
+            "t. runs a verb in one of J's thread pools, which libjay does not open",
+            span,
+        )),
         "." => Err(Error::not_yet("the inner product (u . v)", span)),
         "!:" => foreign(&u, &v, span),
         // `u : v` is J's monad/dyad conjunction. The explicit definitions
@@ -2451,6 +2510,9 @@ fn foreign(u: &Frag, v: &Frag, span: Span) -> Result<Frag> {
         (1, 1) => prim("1!:1", MonadOp::ReadStream, DyadOp::None),
         (1, 2) => prim("1!:2", MonadOp::None, DyadOp::WriteStream),
         (3, 0) => prim("3!:0", MonadOp::TypeCode, DyadOp::None),
+        // `5!:1 <'name'` is the atomic representation of what the name
+        // stands for — the same boxed data a gerund is made of.
+        (5, 1) => prim("5!:1", MonadOp::AtomicRep, DyadOp::None),
         (0, _) => closed("runs a script file"),
         // The rest of the file family: stdin and stdout are the streams the
         // sandbox opens, and every other member of it is the filesystem.
@@ -2544,12 +2606,50 @@ fn rank_spec(f: &Frag, span: Span) -> Result<[i64; 3]> {
 /// `u^:n`: one nonnegative integer atom, or `_` for "iterate until the
 /// result stops changing".
 fn power_spec(f: &Frag, span: Span) -> Result<Power> {
-    let Some(arr) = as_const(f) else {
+    let Some(arr) = noun_value(f) else {
         return Err(Error::not_yet("computed power (u^:n)", span));
     };
+    let arr = &arr;
+    // A boxed count traces the applications rather than taking one of
+    // them: `u^:(<n)` is `u^:(i.n)`, and `u^:a:` traces to convergence.
+    if let Some(boxes) = arr.as_boxes() {
+        let [inner] = boxes else {
+            return Err(Error::parse("a boxed power takes one box", span));
+        };
+        if inner.count() == 0 {
+            return Ok(Power::ConvergeTrace);
+        }
+        let Some(vals) = inner.to_f64_vec() else {
+            return Err(Error::parse("power must be numeric", span));
+        };
+        let [n] = vals[..] else {
+            return Err(Error::not_yet("a boxed list of power counts (u^:(<n))", span));
+        };
+        if n.fract() != 0.0 || n.abs() > 1e6 {
+            return Err(Error::parse("a boxed power must be a whole count", span));
+        }
+        // `u^:(<n)` is `u^:(i.n)`: n counts, downwards where n is negative.
+        if n == 0.0 {
+            return Err(Error::domain("a boxed power traces at least one application", span));
+        }
+        // A negative n counts the same way with the obverse, which the
+        // caller has already put in the verb's place.
+        return Ok(Power::Each((0..n.abs() as u64).collect()));
+    }
     let Some(vals) = arr.to_f64_vec() else {
         return Err(Error::parse("power must be numeric", span));
     };
+    if vals.len() > 1 {
+        // A list of counts gives one answer each, framed.
+        let mut counts = Vec::with_capacity(vals.len());
+        for n in &vals {
+            if n.fract() != 0.0 || *n < 0.0 || *n > 1e6 {
+                return Err(Error::not_yet("a power count outside 0 … 1e6", span));
+            }
+            counts.push(*n as u64);
+        }
+        return Ok(Power::Each(counts));
+    }
     let [n] = vals[..] else {
         return Err(Error::not_yet("power over a list of counts (u^:n)", span));
     };
@@ -2568,19 +2668,150 @@ fn power_spec(f: &Frag, span: Span) -> Result<Power> {
 }
 
 /// The obverse of a verb, or the diagnostic naming the verb that has none.
-fn obverse_of(v: &Verb, span: Span) -> Result<Verb> {
+pub(crate) fn obverse_of(v: &Verb, span: Span) -> Result<Verb> {
     crate::verb::obverse(v).ok_or_else(|| {
         Error::not_yet(format!("the obverse of {} (no inverse is known)", v.name()), span)
     })
 }
 
-/// The verbs a gerund fragment holds. A lone verb is a gerund of one, which
-/// is what makes `u`v`w` build up left to right.
-fn gerund_verbs(f: &Frag, span: Span) -> Result<Vec<Verb>> {
-    match f {
-        Frag::Gerund(vs, _) => Ok(vs.clone()),
-        Frag::Verb(VerbFrag::V(v), _) => Ok(vec![v.clone()]),
-        _ => Err(Error::not_yet("a gerund of anything but verbs", span)),
+/// One side of `` u`v ``: a verb becomes the box holding its atomic
+/// representation, a noun stands for itself. Catenating the two is the tie,
+/// which is why `` u`v`w `` builds up left to right with no special case.
+fn tie_side(f: &Frag, scope: &Names, span: Span) -> Result<Array> {
+    if f.is_real_verb() {
+        let (v, _) = as_verb(f.clone())?;
+        return Ok(Array::boxed(verb_ar(&v, span)?.to_array()));
+    }
+    noun_in_scope(f, scope)
+        .ok_or_else(|| Error::not_yet("a tie over a computed noun", span))
+}
+
+/// A verb's atomic representation, with the diagnostic for the verbs libjay
+/// has no J spelling to give.
+fn verb_ar(v: &Verb, span: Span) -> Result<crate::gerund::Ar> {
+    crate::gerund::verb_ar(v).ok_or_else(|| {
+        Error::not_yet(format!("the atomic representation of {}", v.name()), span)
+    })
+}
+
+/// A noun fragment's value, a name that holds a literal included. A gerund
+/// is data, so `` g =. +`- `` and then `g@.1` has to find what g holds.
+fn noun_in_scope(f: &Frag, scope: &Names) -> Option<Array> {
+    if let Frag::Name(n, _) = f {
+        return scope.consts.get(n).cloned();
+    }
+    noun_value(f)
+}
+
+/// The verbs a gerund holds. A lone verb is a gerund of one, and boxed data
+/// is read as the atomic representations it is.
+fn gerund_verbs(f: &Frag, scope: &Names, span: Span) -> Result<Vec<Verb>> {
+    if f.is_real_verb() {
+        return Ok(vec![as_verb(f.clone())?.0]);
+    }
+    let arr = noun_in_scope(f, scope)
+        .ok_or_else(|| Error::not_yet("a gerund computed at run time", span))?;
+    let Some(items) = arr.as_boxes() else {
+        return Err(Error::domain("a gerund is boxed data", span));
+    };
+    items.iter().map(|a| ar_verb(a, scope, span)).collect()
+}
+
+/// One atomic representation as the verb it stands for.
+fn ar_verb(a: &Array, scope: &Names, span: Span) -> Result<Verb> {
+    let ar = crate::gerund::Ar::from_array(a)
+        .ok_or_else(|| Error::domain("this is not an atomic representation", span))?;
+    let (v, _) = as_verb(ar_frag(&ar, scope, span)?)?;
+    Ok(v)
+}
+
+/// One atomic representation as the fragment it stands for: a verb, or the
+/// noun a modifier takes as an operand.
+fn ar_frag(ar: &crate::gerund::Ar, scope: &Names, span: Span) -> Result<Frag> {
+    use crate::gerund::Ar;
+    match ar {
+        Ar::Noun(a) => Ok(Frag::Noun(Expr::Const(a.clone(), span))),
+        Ar::Prim(word) => {
+            if word == "[:" {
+                return Ok(Frag::Verb(VerbFrag::Cap, span));
+            }
+            match verb_for(word) {
+                Some(v) => Ok(Frag::Verb(VerbFrag::V(v), span)),
+                None => Err(Error::domain(
+                    format!("`{word}` is not a verb an atomic representation may name"),
+                    span,
+                )),
+            }
+        }
+        Ar::Train(parts) => {
+            let frags: Result<Vec<Frag>> =
+                parts.iter().map(|p| ar_frag(p, scope, span)).collect();
+            let mut frags = frags?;
+            match frags.len() {
+                2 => {
+                    let b = frags.pop().expect("two parts");
+                    let a = frags.pop().expect("two parts");
+                    apply_bident(a, b, &scope.nouns)
+                }
+                3 => {
+                    let h = frags.pop().expect("three parts");
+                    let g = frags.pop().expect("three parts");
+                    let f = frags.pop().expect("three parts");
+                    apply_fork(f, g, h)
+                }
+                _ => Err(Error::domain("a train is two or three parts", span)),
+            }
+        }
+        Ar::Derived(word, ops) => {
+            let frags: Result<Vec<Frag>> = ops.iter().map(|p| ar_frag(p, scope, span)).collect();
+            let mut frags = frags?;
+            if let Some(glyph) = adverb(word) {
+                if frags.len() != 1 {
+                    return Err(Error::domain(format!("{glyph} takes one operand"), span));
+                }
+                let u = frags.pop().expect("one operand");
+                return apply_adverb(u, Frag::Adverb(Modifier::Prim(glyph), span), scope);
+            }
+            if let Some(glyph) = conjunction(word) {
+                if frags.len() != 2 {
+                    return Err(Error::domain(format!("{glyph} takes two operands"), span));
+                }
+                let v = frags.pop().expect("two operands");
+                let u = frags.pop().expect("two operands");
+                return apply_conj(u, Frag::Conj(Modifier::Prim(glyph), span), v, scope);
+            }
+            Err(Error::domain(
+                format!("`{word}` is not a modifier an atomic representation may name"),
+                span,
+            ))
+        }
+    }
+}
+
+/// The train a gerund spells: `` `:6 `` groups the verbs from the right,
+/// three at a time, which is how J reads a train written out.
+fn train_of(vs: Vec<Verb>, span: Span) -> Result<Frag> {
+    let mut frags: Vec<Frag> =
+        vs.into_iter().map(|v| Frag::Verb(VerbFrag::V(v), span)).collect();
+    while frags.len() > 3 {
+        let h = frags.pop().expect("three or more");
+        let g = frags.pop().expect("three or more");
+        let f = frags.pop().expect("three or more");
+        frags.push(apply_fork(f, g, h)?);
+    }
+    match frags.len() {
+        1 => Ok(frags.pop().expect("one")),
+        2 => {
+            let b = frags.pop().expect("two");
+            let a = frags.pop().expect("two");
+            apply_bident(a, b, &HashSet::new())
+        }
+        _ => {
+            let h = frags.pop().expect("three");
+            let g = frags.pop().expect("three");
+            let f = frags.pop().expect("three");
+            apply_fork(f, g, h)
+        }
     }
 }
 
@@ -2614,14 +2845,12 @@ fn apply_bident(a: Frag, b: Frag, nouns: &HashSet<String>) -> Result<Frag> {
     // A name here is not a verb, or it would have been substituted; if it
     // is not a value either, that is what is wrong with the sentence, and
     // it is what the reference reports.
-    if let Frag::Name(n, nspan) = &a {
-        if !nouns.contains(n) {
-            return Err(Error::new(
-                ErrorKind::Value,
-                format!("undefined name: {n}"),
-                Some(*nspan),
-            ));
-        }
+    if let Frag::Name(n, nspan) = &a && !nouns.contains(n) {
+        return Err(Error::new(
+            ErrorKind::Value,
+            format!("undefined name: {n}"),
+            Some(*nspan),
+        ));
     }
     if a.is_real_verb() && b.is_real_verb() {
         let (f, _) = as_verb(a)?;
@@ -2657,7 +2886,7 @@ fn apply_assign(target: Frag, value: Frag, scope: Scope) -> Result<Frag> {
                 let value = as_noun(v)?;
                 Ok(Frag::Noun(Expr::Assign { name, value: Box::new(value), scope, span }))
             }
-            _ => Err(Error::not_yet("assigning a gerund", span)),
+            other => Err(Error::internal(format!("cannot assign {other:?}"))),
         },
         Frag::Noun(_) => Err(Error::not_yet("multiple assignment", span)),
         other => Err(Error::internal(format!("expected an assignment target, got {other:?}"))),
@@ -2996,8 +3225,8 @@ mod tests {
     fn unimplemented_meanings_reach_the_verb_not_the_parser() {
         let (v, _, _) = dyad_of(&one("2 ;: 'a b'"));
         assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("sequential machine (dyadic ;:)"));
-        let (v, _) = monad_of(&one("e. 1 2"));
-        assert_eq!(prim_of(&v).monad, MonadOp::NotYet("raze-in (monadic e.)"));
+        let (v, _) = monad_of(&one("\": 1 2"));
+        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("format with a specification"));
     }
 
     #[test]
@@ -3090,8 +3319,7 @@ mod tests {
     #[case("(+/ % #) ^: _1 y", "the obverse of")]
     #[case("(+/ % #) &. , y", "the obverse of")]
     #[case("(1 + 2) & , y", "bonds over a non-literal noun")]
-    #[case("+ `: 6 y", "evoke gerund")]
-    fn other_conjunctions_are_not_supported_yet(#[case] src: &str, #[case] msg: &str) {
+        fn other_conjunctions_are_not_supported_yet(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);
         assert!(e.msg.contains(msg), "{}", e.msg);

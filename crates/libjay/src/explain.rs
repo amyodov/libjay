@@ -297,7 +297,13 @@ fn control_lines(c: &Control, depth: usize, p: &Program, tr: &Trace, out: &mut S
 fn note(e: &Expr, tr: &Trace) -> String {
     match tr.get(&key(e)) {
         None => String::new(),
-        Some(n) => format!("  → {}", shape_dtype(&n.shape, n.dtype)),
+        Some(n) => {
+            let laid = match n.layout {
+                crate::array::Layout::RowMajor => "",
+                crate::array::Layout::ColMajor => ", column-major",
+            };
+            format!("  → {}{laid}", shape_dtype(&n.shape, n.dtype))
+        }
     }
 }
 
@@ -481,6 +487,18 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             }
             verb_lines(w, depth + 1, p, tr, out);
         }
+        Verb::Stencil(u, w) => {
+            let sizes: Vec<String> = w.iter().map(i64::to_string).collect();
+            head(out, &format!("stencil ⌺ over windows of {}", sizes.join(" ")));
+            verb_lines(u, depth + 1, p, tr, out);
+        }
+        Verb::Evoke(vs, n) => {
+            let what = if *n == 0 { "applied to the arguments" } else { "inserted between items" };
+            head(out, &format!("evoke `:{n} — {} verbs {what}", vs.len()));
+            for u in vs {
+                verb_lines(u, depth + 1, p, tr, out);
+            }
+        }
         Verb::Windowed(u, kind) => {
             head(
                 out,
@@ -501,7 +519,9 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
                 out,
                 &match n {
                     Power::Converge => "power (to convergence)".to_string(),
+                    Power::ConvergeTrace => "power (every result to convergence)".to_string(),
                     Power::Times(k) => format!("power ({k} times)"),
+                    Power::Each(ks) => format!("power ({} counts, framed)", ks.len()),
                 },
             );
             verb_lines(u, depth + 1, p, tr, out);

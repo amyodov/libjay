@@ -41,10 +41,19 @@ class TestNumpy:
         a[0] = 99
         assert v.tolist()[0] == 99
 
-    def test_transposed_view_is_refused(self):
+    def test_transposed_view_is_read_where_it_lies(self):
+        # A transposed view is contiguous in the other order, which libjay
+        # carries rather than refusing: the answer is the same and no copy
+        # is made of the block.
         a = self.np.arange(6, dtype=self.np.int64).reshape(2, 3)
+        assert j("$ {x}", {"x": a.T}).tolist() == [3, 2]
+        assert j("+/ {x}", {"x": a.T}).tolist() == [3, 12]
+        assert j("] {x}", {"x": a.T}).tolist() == [[0, 3], [1, 4], [2, 5]]
+
+    def test_a_view_that_is_neither_order_is_refused(self):
+        a = self.np.arange(24, dtype=self.np.int64).reshape(2, 3, 4)
         with pytest.raises(JayError) as e:
-            j("+/ {x}", {"x": a.T})
+            j("+/ {x}", {"x": a.transpose(1, 0, 2)})
         assert "not contiguous" in str(e.value)
         assert ".copy()" in str(e.value)
 
@@ -236,6 +245,31 @@ class TestPolars:
         )
         # Polars stores microseconds; the difference is integer arithmetic.
         assert j("-/ {x}", {"x": column}) == -int(day.total_seconds() * 1_000_000)
+
+    def test_a_dataframe_crosses_without_a_copy(self):
+        # The columns are borrowed where Arrow put them and folded there:
+        # a column sum, a row sum and the shape all answer without joining
+        # the table into one block.
+        df = self.pl.DataFrame(
+            {"a": [1.0, 2.0, 3.0], "b": [10.0, 20.0, 30.0], "c": [4.0, 5.0, 6.0]}
+        )
+        before = jay._jay.joins_made()
+        assert j("$ {df}", {"df": df}).tolist() == [3, 3]
+        assert j("# {df}", {"df": df}) == 3
+        assert j("+/ {df}", {"df": df}).tolist() == [6.0, 60.0, 15.0]
+        assert j('+/"1 {df}', {"df": df}).tolist() == [15.0, 27.0, 39.0]
+        assert j("+/ +/ {df}", {"df": df}) == 81.0
+        assert jay._jay.joins_made() == before, "the table was copied"
+
+    def test_a_verb_that_wants_rows_gets_them_once(self):
+        # The counterpart: `,` reads the elements in row-major order, so the
+        # table is laid out — once, and only for the verbs that need it.
+        df = self.pl.DataFrame({"a": [1.0, 2.0], "b": [10.0, 20.0]})
+        before = jay._jay.layouts_made()
+        assert j("+/ {df}", {"df": df}).tolist() == [3.0, 30.0]
+        assert jay._jay.layouts_made() == before, "the fold laid out the rows"
+        assert j(", {df}", {"df": df}).tolist() == [1.0, 10.0, 2.0, 20.0]
+        assert jay._jay.layouts_made() > before
 
     def test_column_sums_match_polars(self):
         df = self.pl.DataFrame(

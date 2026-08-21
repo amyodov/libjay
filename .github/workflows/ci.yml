@@ -9,13 +9,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Pinned to the local dev toolchain so clippy findings are reproducible.
+      # Pinned to the local dev toolchain so clippy findings are reproducible;
+      # the same version rust-toolchain.toml names.
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.85"
+          toolchain: "1.89"
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p libjay
+      # Which CPU feature levels this runner can actually compare. The
+      # x86-64-v4 clone is built into every artifact, but only a machine with
+      # AVX-512 runs it, and the equivalence battery above covers it only
+      # there. The test says which kind of machine this was.
+      - run: cargo test -p libjay --test simd the_levels_this_machine_can_compare -- --nocapture
       - run: cargo build -p libjay-capi && cargo test -p libjay-capi
       - run: cargo clippy -p libjay -p libjay-capi -p libjay-testkit -p libjay-devtools --all-targets -- -D warnings
       # Cheap packaging check: catches drift like a missing LICENSE or a
@@ -28,7 +34,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.85"
+          toolchain: "1.89"
       - uses: Swatinem/rust-cache@v2
       # docs.rs builds with warnings denied; a broken intra-doc link fails
       # here instead of showing up as a broken page on docs.rs after publish.
@@ -41,10 +47,10 @@ jobs:
         python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@v7
-      # Pinned to the local dev toolchain so clippy findings are reproducible.
+      # Pinned to the local dev toolchain, the version rust-toolchain.toml names.
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.85"
+          toolchain: "1.89"
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v7
         with:

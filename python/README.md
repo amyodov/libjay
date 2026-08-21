@@ -78,6 +78,36 @@ length error: arguments do not agree: left shape 2, right shape 3
 note: frames first differ at axis 0: 2 vs 3
 ```
 
+## APL trains and tacit functions
+
+A run of bare functions is a train: `(f g h)` is a fork — `f` and `h` apply
+to the argument, `g` combines what they return — and `(g h)` is an atop.
+`F←+/÷≢` names the whole train, so it applies like any other function:
+
+```python
+jay.apl("(+/÷≢) 3 1 4 1 5")        # 2.8 — a fork: sum ÷ count, unnamed
+jay.apl("M←+/÷≢ ⋄ M 3 1 4 1 5")    # 2.8 — the same fork, named M
+```
+
+This is an extension GNU APL has neither spelling of, on by default;
+`APL.Dialect(trains=False)` restores GNU APL's reading, where both are a
+syntax error — see
+[docs/coverage.md](https://github.com/amyodov/libjay/blob/main/docs/coverage.md#which-apl).
+
+## Explicit definitions and modifiers
+
+J writes an adverb as `1 : '…'` and a conjunction as `2 : '…'`; `{{ … }}`
+reads which from the operand name its body uses — `u`/`m` for an adverb,
+`v`/`n` for a conjunction:
+
+```python
+jay.j.compile("twice =. 1 : 'u u y'\n*: twice 2")()   # 16 — applies *: twice
+jay.j.compile("dbl =. {{u+u}}\n*: dbl 3")()            # 18 — u+u: u plus u
+```
+
+Full details, including `3 :`/`4 :` explicit verbs, are in
+[docs/coverage.md](https://github.com/amyodov/libjay/blob/main/docs/coverage.md#explicit-adverbs-and-conjunctions).
+
 ## Real data, zero-copy
 
 Polars, pandas 2, PyArrow and numpy work natively — no dependency on any of

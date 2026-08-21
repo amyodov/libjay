@@ -229,9 +229,9 @@ fn j_undefined_name() {
 
 #[test]
 fn j_not_yet_is_a_promise_not_a_wall() {
-    let e = err(Lang::J, "e. 1 2");
+    let e = err(Lang::J, "2 ;: 'a b'");
     assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("raze-in"));
+    assert!(e.msg.contains("sequential machine"));
 }
 
 #[test]

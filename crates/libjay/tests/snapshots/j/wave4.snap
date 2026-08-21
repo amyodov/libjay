@@ -1,328 +1,333 @@
-# libjay reference snapshot: J (jconsole) — corpus/j/wave4.txt.
+# libjay reference snapshot: J — corpus/j/wave4.txt.
 # Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
-# the live reference interpreter. Do not edit by hand; the workflow is in
+# the live reference interpreters. Do not edit by hand; the workflow is in
 # docs/testing.md.
 #
 # One record per expression, in corpus order:
-#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
-#   `> TEXT`  one line of the reference's answer.
-#   `< TEXT`  one line of libjay's answer (divergence records only).
-#   `? TEXT`  why the two are expected to differ (divergence records only).
-#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
-#   `# TEXT`  a comment.
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
 # A side whose single line is `<error>` refused the sentence. An empty answer
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
 = = 1 2 1 3
-> 1 0 1 0
-> 0 1 0 0
-> 0 0 0 1
+> j: 1 0 1 0
+> j: 0 1 0 0
+> j: 0 0 0 1
 = = 'aba'
-> 1 0 1
-> 0 1 0
+> j: 1 0 1
+> j: 0 1 0
 = = 5
-> 1
+> j: 1
 = ~: 1 2 1 3
-> 1 1 0 1
+> j: 1 1 0 1
 = ~: 'abca'
-> 1 1 1 0
+> j: 1 1 1 0
 = 1 0 1 +: 0 1 1
-> 0 0 0
+> j: 0 0 0
 = 1 0 1 *: 0 1 1
-> 1 1 0
+> j: 1 1 0
 = 1 2 3 4 -. 2 4
-> 1 3
+> j: 1 3
 = 'hello' -. 'l'
-> heo
+> j: heo
 = 1 2 3 -. 4 5
-> 1 2 3
+> j: 1 2 3
 = 1 0 1 -. 0 1 1
->
+> j:
 = ,. i. 3
-> 0
-> 1
-> 2
+> j: 0
+> j: 1
+> j: 2
 = ,. i. 2 3
-> 0 1 2
-> 3 4 5
+> j: 0 1 2
+> j: 3 4 5
 = ,. 'abc'
-> a
-> b
-> c
+> j: a
+> j: b
+> j: c
 = $ ,. i. 2 3 4
-> 2 12
+> j: 2 12
 = $ a.
-> 256
+> j: 256
 = 65 { a.
-> A
+> j: A
 = a. i. 'A'
-> 65
+> j: 65
 = $ a:
->
+> j:
 = # a:
-> 1
+> j: 1
 = _: 5
-> _
+> j: _
 = 3: 5
-> 3
+> j: 3
 = _9: 5
-> _9
+> j: _9
 = 2 3: 4
-> 3
+> j: 3
 = 0: i. 2 3
-> 0
+> j: 0
 = A. 2 0 1
-> 4
+> j: 4
 = A. 0 1 2
-> 0
+> j: 0
 = A. 1 0 2
-> 2
+> j: 2
 = A. i. 4
-> 0
+> j: 0
 = A. 3 1 2
-> 4
+> j: 4
 = 1 A. 0 1 2
-> 0 2 1
+> j: 0 2 1
 = 3 A. i. 3
-> 1 2 0
+> j: 1 2 0
 = 0 A. 'abc'
-> abc
+> j: abc
 = 5 A. 'abcd'
-> adcb
+> j: adcb
 = 23 A. i. 4
-> 3 2 1 0
+> j: 3 2 1 0
 = _1 A. i. 4
-> 3 2 1 0
+> j: 3 2 1 0
 = C. 2 0 1
-> +-----+
-> |2 1 0|
-> +-----+
+> j: +-----+
+> j: |2 1 0|
+> j: +-----+
 = C. 0 1 2
-> +-+-+-+
-> |0|1|2|
-> +-+-+-+
+> j: +-+-+-+
+> j: |0|1|2|
+> j: +-+-+-+
 = C. 1 0 3 2
-> +---+---+
-> |1 0|3 2|
-> +---+---+
+> j: +---+---+
+> j: |1 0|3 2|
+> j: +---+---+
 = C. 0 2 1
-> +-+---+
-> |0|2 1|
-> +-+---+
+> j: +-+---+
+> j: |0|2 1|
+> j: +-+---+
 = C. 2 0 1 3
-> +-----+-+
-> |2 1 0|3|
-> +-----+-+
+> j: +-----+-+
+> j: |2 1 0|3|
+> j: +-----+-+
 = C. <0 1 2
-> 1 2 0
+> j: 1 2 0
 = C. (0 1);(2 3)
-> 1 0 3 2
+> j: 1 0 3 2
 = 1 0 2 C. 'abcd'
-> dbac
+> j: dbac
 = 1 0 2 C. 'abcde'
-> debac
+> j: debac
 = 2 0 1 C. 'abcd'
-> dcab
+> j: dcab
 = 2 0 1 3 C. 'abcd'
-> cabd
+> j: cabd
 = 0 1 C. 'abcde'
-> cdeab
+> j: cdeab
 = 0 2 1 C. 'abcde'
-> deacb
+> j: deacb
 = 3 0 1 2 C. 'abcde'
-> edabc
+> j: edabc
 = (<0 1) C. 'abcd'
-> bacd
+> j: bacd
 = (<0 1 2) C. 'abcd'
-> bcad
+> j: bcad
 = ((0 1);(2 3)) C. 'abcde'
-> badce
+> j: badce
 = 'ab' E. 'abcabc'
-> 1 0 0 1 0 0
+> j: 1 0 0 1 0 0
 = 1 2 E. 1 2 3 1 2
-> 1 0 0 1 0
+> j: 1 0 0 1 0
 = 'xy' E. 'abc'
-> 0 0 0
+> j: 0 0 0
 = 'abcd' E. 'ab'
-> 0 0
+> j: 0 0
 = u: 65
-> A
+> j: A
 = u: 65 66 67
-> ABC
+> j: ABC
 = u: 'abc'
-> abc
+> j: abc
 = 3 u: 'abc'
-> 97 98 99
+> j: 97 98 99
 = 10 u: 97
-> a
+> j: a
 = 10 u: 955
-> λ
+> j: λ
 = L. 3
-> 0
+> j: 0
 = L. <3
-> 1
+> j: 1
 = L. <<3
-> 2
+> j: 2
 = L. (1;(<<2))
-> 2
+> j: 2
 = L. 1 2 3
-> 0
+> j: 0
 = L. 'abc'
-> 0
+> j: 0
 = ;: 'a + b * 3'
-> +-+-+-+-+-+
-> |a|+|b|*|3|
-> +-+-+-+-+-+
+> j: +-+-+-+-+-+
+> j: |a|+|b|*|3|
+> j: +-+-+-+-+-+
 = ;: 'i.5 + _3'
-> +--+-+-+--+
-> |i.|5|+|_3|
-> +--+-+-+--+
+> j: +--+-+-+--+
+> j: |i.|5|+|_3|
+> j: +--+-+-+--+
 = ;: '2 + 2 NB. hi'
-> +-+-+-+------+
-> |2|+|2|NB. hi|
-> +-+-+-+------+
+> j: +-+-+-+------+
+> j: |2|+|2|NB. hi|
+> j: +-+-+-+------+
 = ;: 'foo=.3'
-> +---+--+-+
-> |foo|=.|3|
-> +---+--+-+
+> j: +---+--+-+
+> j: |foo|=.|3|
+> j: +---+--+-+
 = ;: '1 2 3'
-> +-----+
-> |1 2 3|
-> +-----+
+> j: +-----+
+> j: |1 2 3|
+> j: +-----+
 = ;: 'a1 b_2 c.'
-> +--+---+--+
-> |a1|b_2|c.|
-> +--+---+--+
+> j: +--+---+--+
+> j: |a1|b_2|c.|
+> j: +--+---+--+
 = ;: 'if. x do. end.'
-> +---+-+---+----+
-> |if.|x|do.|end.|
-> +---+-+---+----+
+> j: +---+-+---+----+
+> j: |if.|x|do.|end.|
+> j: +---+-+---+----+
 = # ;: 'a b c'
-> 3
+> j: 3
 = ;: '''ab'' + x'
-> +----+-+-+
-> |'ab'|+|x|
-> +----+-+-+
+> j: +----+-+-+
+> j: |'ab'|+|x|
+> j: +----+-+-+
 = _1 p: 7
-> 3
+> j: 3
 = _1 p: 30
-> 10
+> j: 10
 = 0 p: 7
-> 0
+> j: 0
 = 0 p: 8
-> 1
+> j: 1
 = 1 p: 7
-> 1
+> j: 1
 = 1 p: 8
-> 0
+> j: 0
 = 2 p: 10
-> 2 5
-> 1 1
+> j: 2 5
+> j: 1 1
 = 3 p: 10
-> 2 5
+> j: 2 5
 = 4 p: 10
-> 11
+> j: 11
 = _4 p: 100
-> 97
+> j: 97
 = 1 q: 12
-> 2
+> j: 2
 = 2 q: 12
-> 2 1
+> j: 2 1
 = 3 q: 12
-> 2 1 0
+> j: 2 1 0
 = 0 q: 12
->
+> j:
 = __ q: 12
-> 2 3
-> 2 1
+> j: 2 3
+> j: 2 1
 = __ q: 60
-> 2 3 5
-> 2 1 1
+> j: 2 3 5
+> j: 2 1 1
 = +/&.:*: 3 4
-> 5
+> j: 5
 = 2 +&.*: 3
-> 3.60555
+> j: 3.60555
 = -&.- 5
-> _5
+> j: _5
 = %&.% 4
-> 0.25
+> j: 0.25
 = 2 +&.^. 3
-> 6
+> j: 6
 = |.&.|. 1 2 3
-> 3 2 1
+> j: 3 2 1
 = +/&.|. 1 2 3
-> 6
+> j: 6
 = 2 %&.^. 8
-> 1.39561
+> j: 1.39561
 = 2 +&.>: 3
-> 6
+> j: 6
 = 'ab' ,&.|. 'cd'
-> cdab
+> j: cdab
 = +/&.:>: 1 2 3
-> 8
+> j: 8
 = - ^:_1 ] 5
-> _5
+> j: _5
 = +&2 ^:_1 ] 5
-> 3
+> j: 3
 = *&3 ^:_1 ] 12
-> 4
+> j: 4
 = ^&2 ^:_1 ] 9
-> 3
+> j: 3
 = ^.^:_1 ] 2
-> 7.38906
+> j: 7.38906
 = |.^:_1 ] 1 2 3
-> 3 2 1
+> j: 3 2 1
 = +:^:_1 ] 8
-> 4
+> j: 4
 = (*:@:>:)^:_1 ] 9
-> 2
+> j: 2
 = >:^:_2 ] 5
-> 3
+> j: 3
 = 1 (+`-`*)@.(0) 2
-> 3
+> j: 3
 = 1 (+`-`*)@.(1) 2
-> _1
+> j: _1
 = 1 (+`-`*)@.(2) 2
-> 2
+> j: 2
 = (<.`>.)@.(2&<) 5
-> 5
+> j: 5
 = (<.`>.)@.(2&<) 1.5
-> 1
+> j: 1
 = (+/ :: 0) 'abc'
-> 0
+> j: 0
 = (+/ :: _1:) 1 2 3
-> 6
+> j: 6
 = ". '2+2'
-> 4
+> j: 4
 = ". 'i. 3'
-> 0 1 2
+> j: 0 1 2
 = ". '1 2 3'
-> 1 2 3
+> j: 1 2 3
 = a =. 3\n". 'a + 1'
-> 4
+> j: 4
 = z =. ". 'b =. 7'\nb * 2
-> 14
+> j: 14
 = c =. 10\nz =. ". 'c =. c + 5'\nc
-> 15
+> j: 15
 = 2 +/\\. i. 5
-> 9 7 5 3
+> j: 9 7 5 3
 = 3 -/\\. i. 5
-> _1 _4 _1
+> j: _1 _4 _1
 = 2 +/\\. 1 2 3
-> 3 1
+> j: 3 1
 = 1 +/\\. 1 2 3
-> 5 4 3
+> j: 5 4 3
 = 1 2 3 , i. 2 2
-> 1 2 3
-> 0 1 0
-> 2 3 0
+> j: 1 2 3
+> j: 0 1 0
+> j: 2 3 0
 = (i. 2 2) , 1 2 3
-> 0 1 0
-> 2 3 0
-> 1 2 3
+> j: 0 1 0
+> j: 2 3 0
+> j: 1 2 3
 = (i.2 3) , (i. 2 2)
-> 0 1 2
-> 3 4 5
-> 0 1 0
-> 2 3 0
+> j: 0 1 2
+> j: 3 4 5
+> j: 0 1 0
+> j: 2 3 0

@@ -1007,3 +1007,250 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   silent truncation of a long line — a return above the capacity means
   libjay grows its buffer and asks again. NULL for `read` is the process's
   own stdin, mirroring NULL for `write` being its stdout.
+- 2026-08-21 — MSRV raised 1.85 → 1.89 and pinned in the repository: a
+  `rust-toolchain.toml` names 1.89, the workspace `rust-version` says 1.89,
+  and the CI/publish jobs pin the same number, so the compiler that reports
+  a clippy finding is the compiler every contributor has. What forced it is
+  AVX-512: `avx512f` and its neighbours became stable `target_feature`
+  names in 1.89, and the "no v4 rung" note from the SIMD entry above is
+  spent. Raising the floor rather than feature-gating the rung keeps the
+  one-artifact rule — every x86-64 build carries the same set of clones.
+- 2026-08-21 — SIMD gained the x86-64-v4 rung: `Level::V4`
+  (avx512f+bw+cd+dq+vl), `LIBJAY_CPU_LEVEL=v4`, and one more
+  `multiversion` clone of every annotated loop, x86-64 only — no other
+  architecture has a rung above v3, and `detected` cannot return V4 there.
+  Detection and clamping are the rules the ladder already had: a machine
+  without the features reports v3 and a pinned v4 clamps to it, so `v4` is
+  either a level that runs or a level that quietly is not one. What is NOT
+  claimed is a measurement. No machine on hand has AVX-512, so the clone is
+  proven only to exist — `nm` finds the `_avx512…` symbols in the built
+  artifact — and bench/README.md says built-but-unmeasured rather than
+  quoting a number. tests/simd.rs covers v4 through `available()`, which
+  includes it exactly where it can run, and prints which case the machine
+  is; CI runs that test with `--nocapture` so a runner with AVX-512 reports
+  itself and compares the clone for real.
+- 2026-08-21 — Dependencies bumped for 0.2.0, by hand on main rather than by
+  merging Dependabot PR #1, which the bumps supersede: wgpu and naga 26 → 30, pollster 0.4 → 1.0, rstest 0.25 → 0.26,
+  pyo3 0.25 → 0.29. wgpu 30 moved the device backend in four places: the
+  instance descriptor is built by `new_without_display_handle_from_env`
+  (libjay never presents), `enumerate_adapters` became a future,
+  `RequestAdapterOptions` gained `apply_limit_buckets` — left false,
+  because bucketing rounds the reported limits down to hide the adapter and
+  libjay wants the real ones — and `push_error_scope` now returns a guard
+  that is popped rather than a device method. The one that reached beyond
+  the backend: a mapped buffer is written through a write-only reference
+  now (mapped memory can be write-combining, where a spurious read is not
+  free), so `codegen::write_bytes` became `codegen::byte_iter` and the
+  upload feeds `WriteOnly::write_iter` — still no intermediate `Vec`, which
+  was the point of the original.
+- 2026-08-21 — A snapshot record became a MAP keyed by implementation:
+  `= EXPR` then a `> IMPL: TEXT` group per implementation (`j`, `gnu`,
+  `dyalog`, and whatever a later one is called — an unknown key is read and
+  rewritten rather than dropped). Every existing snapshot was migrated
+  mechanically, J's answers to `j` and APL's to `gnu`, with the answer text
+  untouched; a full live re-recording of both languages then reproduced the
+  migrated files byte for byte. The replay holds libjay to the key its
+  dialect FOLLOWS (`j`, and `gnu` while `Dialect::default()` is the
+  APL2/ISO line), so nothing about the battery's semantics changed. What
+  the map buys is the second APL: one file can now say what GNU APL and
+  Dyalog each answered to the same sentence, and a future Dyalog dialect
+  reads the same file by switching the key rather than by recording
+  everything again.
+- 2026-08-21 — Dyalog is an oracle, and its recordings are BACKLOG rather
+  than a gate. `record apl --impl dyalog` writes the `dyalog:` key and no
+  other; the replay counts how many recorded Dyalog answers differ from
+  libjay and prints the count, `stats apl --dialect-diff` lists them, and
+  `--check --impl dyalog` reports agreement and fails on nothing, while
+  `--check` on GNU APL fails on drift exactly as before. That asymmetry is
+  the point: libjay implements one APL, and measuring the distance to the
+  other one is not the same act as defending the one it implements.
+  `corpus/apl/dyalog-probe.txt` is 71 expressions aimed at the "Which APL"
+  table — `↑`/`⊃`, `⌷`, partitioned enclose, `⎕CT`, replicate, `⍸`, `⍤`,
+  the printers, `⎕IO←0` — every one of which libjay and GNU APL agree on,
+  so the first Dyalog run quantifies the gap without the file being a
+  divergence file. The rows where libjay already differs from GNU APL live
+  in divergences.txt and carry the same column.
+- 2026-08-21 — The Dyalog runner was written blind, against the published
+  documentation, on a machine with no Dyalog: `mapl -script FILE`, the
+  sentence bracketed by two printed markers under pinned `⎕PW ⎕PP ⎕ML ⎕IO`
+  and ended by `⎕OFF`, and only what is printed between the markers is
+  kept — so a banner is dropped without being parsed and a missing closing
+  marker IS the error signal, an abandoned script. Every assumption is
+  listed at the top of `crates/libjay-devtools/src/dyalog.rs`, a `verify`
+  step runs `2+2` before any recording and reports which assumption broke,
+  and `LIBJAY_ORACLE_DYALOG_FLAGS` / `LIBJAY_ORACLE_DYALOG_STDIN` correct
+  the two likeliest mistakes without a rebuild. An interpreter that is not
+  installed is a skip; one that is installed and misbehaves is a failure,
+  because those are different facts.
+- 2026-08-21 — **Coverage wave 7.** A gerund is a boxed noun now, which is
+  the representation change waves 4 and 5 kept deferring, and the rest of
+  this wave falls out of it or out of one more careful oracle pass.
+
+  **A gerund IS data: one box per atomic representation.** J does not have
+  a parse-time gerund object at all. `` u`v `` is a boxed noun whose items
+  are ATOMIC REPRESENTATIONS: a primitive is its own spelling as a
+  character vector, a noun is the pair `('0'; <value)`, a train is
+  `('2'; <parts)` or `('3'; <parts)`, and anything a modifier derived is
+  `(spelling; <operands)`. `` +`- `` is two boxes holding `+` and `-`;
+  `` +/`- `` is the box tree for `('/'; <,<'+')` beside `-`. The reference
+  was probed for every one of those shapes before a line was written, and
+  the display, `$`, `#`, `L.` and `3!:0` of each now match it.
+
+  Waves 4 and 5 said this needed "`Array` able to carry a `Verb`". It does
+  not, and that was the mistake: the representation is CHARACTERS, so
+  nothing about the data model changes — no new `Data` variant, no new
+  dtype, no change to the buffers, and the whole feature lives in one new
+  module (`gerund.rs`) plus the frontend that reads it. Everything else
+  follows for free: a gerund can be named (`` g =. +`- ``), catenated onto
+  (`` g`* ``), written by hand (`('+';'-')@.1`), displayed, and tied with a
+  noun on either side, because tying is nothing but catenating.
+
+  Two costs are named rather than hidden. The representation is
+  reconstructed from the verb tree, not kept from the source, so the
+  spellings that differ only by the rank they set are recovered by matching
+  that rank (`u@v` is `u@:v` at v's ranks; `u&v` and `u&.v` likewise) — and
+  the two that leave no trace at all are refused rather than guessed at: a
+  capped fork, which is an atop by the time the tree has it, and any verb
+  libjay has no J spelling for. The second cost is that a gerund computed
+  at RUN time still cannot be read, because `@.` and `` `: `` want their
+  verbs while the sentence is parsed; a name holding a literal is looked up
+  in the parser's own table, which covers the idiom that matters.
+
+  **`` `:6 `` is the train and `` `:3 `` is the insert, not the other way
+  round.** Both were guessed at in wave 5 and both guesses were wrong. The
+  reference settles it: `` (+`-)`:6 `` DISPLAYS as `+ -`, and
+  `` ((+`%`#)`:3) 1 2 3 `` is `1 + (2 % 3)` — the verbs are laid into the
+  gaps between the items left to right, cycling, and folded right to left
+  as insert does. `` `:0 `` applies every verb and frames the answers, and
+  every other number is a domain error there too.
+
+  **`t.` is not the Taylor series any more, and `t:`, `..` and `.:` are not
+  J.** The status matrix carried four reds from the published vocabulary
+  that the reference no longer honours. `^ t. 3` in J 9.6 answers with a
+  BOX and ignores its right operand: `t.` is the TASK conjunction now, it
+  runs a verb in one of J's thread pools and gives back a pyx. That is
+  `T.`'s situation exactly, so it takes `T.`'s answer — closed by the
+  sandbox, which is libjay's policy and not a queue position. `t:`, `..`
+  and `.:` are rejected outright as invalid inflections, like `d.`, `D.`
+  and `D:` before them, so they are `—` rather than 🔴: there is nothing
+  there to promise. Four reds gone by measurement rather than by work,
+  which is what an oracle is for.
+
+  **A negative block size needs the movement written out.** `x u;.3 y` with
+  a negative size reverses that axis, and with the movement row given
+  (`(1 ,: _2) <;.3 i.5`) the reference agrees with the obvious reading
+  exactly. Given a BARE vector of sizes it does something else: `_2`, `_3`,
+  `_5` and `_8` all answer identically, the magnitude playing no part —
+  every reversed prefix of the argument. libjay implements the form that is
+  well defined and names the other rather than pinning a degenerate answer
+  into the corpus.
+
+  **One axis-permutation primitive serves both dyadic transposes.** J's
+  `x |: y` moves the axes x names to the END, in that order, with the rest
+  keeping their order in front; APL's `x ⍉ y` says, for each axis of y in
+  turn, which axis of the RESULT it becomes. Both are a map from source
+  axes to destination axes where several sources may share a destination —
+  which is the diagonal, taken as short as the shortest of them. So
+  `transpose_to` takes that map and the two frontends compute it; the
+  diagonal, `(<0 1)|:` in J and `1 1⍉` in APL, needed no separate code, and
+  J's refusal of a repeated axis in the unboxed form is the frontend's rule
+  rather than the primitive's.
+
+  **`⊥` is an inner product and `⍸` closes its interval on the left.** Two
+  oracle corrections that had been recorded as gaps. APL's decode folds the
+  LEADING axis of its right argument against the LAST axis of its left, so
+  it is `+.×` and its answer is shaped `(¯1↓⍴x),(1↓⍴y)`; that retires the
+  two pinned `⊥` divergences. And `1 3 5⍸3` is 2 where `1 3 5 I. 3` is 1 —
+  APL counts a bound EQUAL to the value, J does not — so the shared
+  operation carries a flag rather than the two languages sharing a bug.
+
+  **`u b. _1` answers with a spelling, not a verb.** `+ b. _1` displays as
+  `+`, which looks like the obverse until it is assigned: `obv =. + b. _1`
+  and then `obv 5` is a syntax error, because what came back is the
+  character vector `,'+'`. `u b. 1` is the same — `+ b. 1` is the nine
+  characters `0 $~ }.@$` — so both are rendered from the obverse table and
+  the identity-element table libjay already had, and neither needs a verb
+  to survive a round trip through data.
+
+  **`n&+` is undone from the right.** Probing `b. _1` found a real bug in
+  the obverse table underneath it: `(2&+)^:_1 5` answered `_3` where the
+  reference answers 3, because the inverse of `2 + y` was built as `2 - y`
+  rather than `y - 2`. Adding and multiplying are commutative, so the noun
+  can be bonded to either side, but the INVERSE always takes it off the
+  right. `&.`, `⍢`, `^:_1` and `b. _1` all read the same table, so one line
+  fixed four spellings.
+- 2026-08-21 — **An array carries its layout, and a table crosses as its
+  columns.** The item bench/README.md's "Next" list had at the top, taken as
+  a design rather than a hot-path pass: 68 of the 72.5 ms a row-wise
+  reduction over a 2.5M x 8 DataFrame cost were the weave at the boundary,
+  and the weave existed only because every path in the runtime assumed
+  rows-leading. Numbers in bench/README.md, section "Layout".
+  - **The shape stays logical; a flag says how it indexes the buffer.**
+    `Array` gained a private `layout: Layout` — `RowMajor` or `ColMajor`,
+    two cases, no general strided arrays — and `shape` is unchanged: rows
+    leading, `[M, N]` for an M-row table, whatever the buffer does. Rank 0
+    and rank 1 have one possible layout and always carry `RowMajor`.
+    `ColMajor` means the FIRST axis varies fastest, which at rank 2 is
+    "each column is contiguous" and at any rank is "the full transpose of
+    the row-major order" — one definition, so `|:` is exactly the flag.
+    The field is private and `Array::new` still means row-major, so every
+    construction site in the tree kept working and the ones that produce
+    the other layout had to say so.
+  - **Every consumer is one of three things, and the compiler and the
+    debug build keep them apart.** A verb that reads a column-major buffer
+    natively (the folds, the elementwise passes, the shape verbs); a verb
+    that is indifferent because it reads every element at its own index and
+    writes it back there (which is why `scalar_monad`, `Array::cast` and
+    the fused block kernel simply propagate the flag); or a verb that is
+    handed `Array::to_row_major()`, materialised once. The seam is
+    `Verb::monad`/`Verb::dyad`: a column-major argument reaches
+    `monad_columns` (five arms, each with an argument for why the order
+    cannot reach the answer) or `to_row_major` and nothing else.
+    `Array::cells`, `cell_at` and `atom` debug-assert the layout, so a verb
+    that quietly indexed the buffer fails in the test suite rather than
+    answering nonsense, and tests/layout.rs runs the whole primitive table
+    over both layouts and compares.
+  - **The columns are joined lazily, never eagerly.** `Buf` gained a fourth
+    shape, `Cols`: several buffers end to end, each still borrowing its own
+    Arrow memory, with the join made only if some reader asks for the flat
+    slice — once, behind a `OnceLock` shared by every clone, and on the
+    thread pool for the plain element types. A reader that can work column
+    by column takes `Buf::parts` and the join is never made at all;
+    `Buf::slice` inside one part is that part's own slice, so taking a
+    column out of a table is free. This is what makes the import zero-copy
+    rather than one-copy-per-column: the alternative, concatenating the
+    columns into one owned block at the boundary, was rejected because the
+    copy it costs is exactly the copy this pass exists to remove.
+  - **What reads columns natively.** `u/ y` folds each column where it lies
+    (a flat fold per column when a column is long enough to split, the run
+    fold across columns when it is not); `u/"1 y` folds the rows in one
+    pass that reads the columns side by side, right to left, which is the
+    insert's own order and regroups nothing; every scalar monad and every
+    scalar dyad over a scalar or over an argument of the same shape and
+    layout keeps the flag; `$`, `#` and `|:` answer from the shape.
+    Everything else — ravel, take, drop, indexing, grade, catenation,
+    windows, scans, boxing, formatting, the C ABI, the Python conversions,
+    a device upload — takes the rows, materialised by the same parallel
+    weave that used to run at the boundary. The cost did not go up; it
+    moved to the verbs that need it, and most programs over a table need
+    none of them.
+  - **`|:` moves no elements.** Reversing every axis is reading the same
+    buffer in the other layout, so the transpose is a reversed shape, the
+    same buffer and a flipped flag — at any rank, in both directions, in
+    both languages. `+/"1 |: {df}` over 2.5M x 8 went from 480 to 76 ms.
+  - **numpy Fortran order is accepted rather than refused.** A block that
+    is contiguous in the other order is still contiguous, and now that the
+    runtime carries that order there is no reason to ask for `.copy()`.
+    `a.T` of a C-contiguous array, and `np.asfortranarray(a)`, cross
+    borrowed; a view contiguous in neither order (strided, sub-block, a
+    partial axis permutation) is refused exactly as before. Two tests that
+    pinned the old refusal now pin the new reading.
+  - **What stays a copy, deliberately.** A fused chain over a table reads
+    one flat block, so it makes the join — the same 160 MB the boundary
+    used to weave, now paid only by chains and now paid in parallel; giving
+    the block kernel a part-by-part loader is a change to its invariant and
+    is not worth it for one memcpy. A rank-2 result still leaves through
+    `.tolist()` rather than as an Arrow table, so the reverse zero-copy
+    path (a column-major result exported as one Arrow buffer per column)
+    is written down here and not built: it wants a decision about column
+    NAMES, which is an open question of its own.

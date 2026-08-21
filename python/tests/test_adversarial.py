@@ -49,10 +49,8 @@ class TestNumpyLayout:
             lambda np: np.arange(10, dtype=np.int64)[::2],
             lambda np: np.arange(10, dtype=np.int64)[::-1],
             lambda np: np.arange(10, dtype=np.int64)[1:8:3],
-            lambda np: np.arange(6, dtype=np.int64).reshape(2, 3).T,
             lambda np: np.arange(6, dtype=np.int64).reshape(2, 3)[:, :2],
             lambda np: np.arange(24, dtype=np.float64).reshape(2, 3, 4).transpose(1, 0, 2),
-            lambda np: np.asfortranarray(np.arange(6, dtype=np.int64).reshape(2, 3)),
         ],
     )
     def test_a_non_contiguous_view_is_refused(self, view):
@@ -64,14 +62,34 @@ class TestNumpyLayout:
         assert ".copy()" in message
 
     @pytest.mark.parametrize(
+        "view,shape,sums",
+        [
+            (lambda np: np.arange(6, dtype=np.int64).reshape(2, 3).T, [3, 2], [3, 12]),
+            (
+                lambda np: np.asfortranarray(np.arange(6, dtype=np.int64).reshape(2, 3)),
+                [2, 3],
+                [3, 5, 7],
+            ),
+            (
+                lambda np: np.arange(24, dtype=np.float64).reshape(2, 3, 4).T,
+                [4, 3, 2],
+                None,
+            ),
+        ],
+    )
+    def test_a_fortran_ordered_block_is_read_where_it_lies(self, view, shape, sums):
+        # Contiguous in the other order is still contiguous: libjay carries
+        # the layout instead of asking for a copy.
+        a = view(self.np)
+        assert j("$ {x}", {"x": a}).tolist() == shape
+        if sums is not None:
+            assert j("+/ {x}", {"x": a}).tolist() == sums
+        assert j("] {x}", {"x": a}).tolist() == a.tolist()
+
+    @pytest.mark.parametrize(
         "view,expected",
         [
             (lambda np: np.arange(10, dtype=np.int64)[::2], 20),
-            (lambda np: np.arange(6, dtype=np.int64).reshape(2, 3).T, 15),
-            (
-                lambda np: np.asfortranarray(np.arange(6, dtype=np.int64).reshape(2, 3)),
-                15,
-            ),
         ],
     )
     def test_a_copy_of_the_refused_view_is_read(self, view, expected):
@@ -551,7 +569,7 @@ class TestExplainPaths:
     def test_a_value_that_cannot_be_read_stops_explain_the_way_it_stops_a_call(self):
         np = pytest.importorskip("numpy")
         kernel = jay.j.compile("+/ {x}")
-        bad = np.arange(6, dtype=np.int64).reshape(2, 3).T
+        bad = np.arange(24, dtype=np.int64).reshape(2, 3, 4).transpose(1, 0, 2)
         with pytest.raises(JayError, match="not contiguous"):
             kernel.explain({"x": bad})
         with pytest.raises(JayError, match="not contiguous"):
