@@ -1399,3 +1399,9 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
     so there is one place where the ordering is written down. The verbs
     that compare boxes by MATCH — `~.`, `e.`, `i.` — were left alone: they
     are tolerant, as both references have them, and match is not order.
+- 2026-08-21 — v0.2.0 released from tag `f794936`: GitHub release (10 assets),
+  PyPI (five abi3 wheels + sdist, cold-verified with `uvx`), and crates.io
+  through OIDC trusted publishing for the first time — the `crates` job
+  failed once ("no Trusted Publishing config") until the owner registered
+  the publisher on crates.io, then succeeded on a `--failed` rerun with no
+  rebuild. From here every release reaches all three targets unattended.

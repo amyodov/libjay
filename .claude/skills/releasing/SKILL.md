@@ -142,17 +142,10 @@ the first that passes:
 Steady state (from 0.1.1 on): the `crates` job in publish.yml publishes the
 core crate with the same version, via crates.io trusted publishing (OIDC —
 no token stored anywhere), in the `crates` GitHub environment, after PyPI
-succeeds. It runs by itself; nothing in this step is a manual action anymore
-except the one-time item below. Gated on the repo variable
-`CRATES_PUBLISH == "true"`, which is already set.
-
-- [ ] **One-time owner action, not yet confirmed done**: register the
-  trusted publisher on crates.io — Settings → Trusted Publishing → GitHub
-  `amyodov/libjay`, workflow `publish.yml`, environment `crates`. Until this
-  is confirmed, treat the `crates` job as unverified even though it will
-  run: check its result after this release, and once a real OIDC publish has
-  succeeded, delete this checklist line and the paragraph above it that
-  hedges on it.
+succeeds. It runs by itself; nothing in this step is a manual action. Gated
+on the repo variable `CRATES_PUBLISH == "true"`, which is set. The trusted
+publisher is registered on crates.io (GitHub `amyodov/libjay`, workflow
+`publish.yml`, environment `crates`) — first OIDC publish succeeded for 0.2.0.
 
 Bootstrap (already done, 0.1.0 only, kept here as history): crates.io cannot
 attach a trusted publisher to a crate that does not exist, so the very first
