@@ -64,6 +64,7 @@ uv run libjay examples/hello.apl                        # or run a file
 | What's implemented, feature by feature (🟢🟡🔴) | [docs/status.md](docs/status.md) |
 | What each language covers, and the data boundary | [docs/coverage.md](docs/coverage.md) |
 | Honest numbers against Polars, numba and numpy | [bench/README.md](bench/README.md) |
+| Whole workloads — RSI, VWAP, drawdown, RMS — four ways | [bench/workloads.md](bench/workloads.md) |
 
 ## Status
 
