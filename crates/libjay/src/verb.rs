@@ -142,8 +142,9 @@ impl Tol {
 }
 
 /// The effect-free half of the execution context. Copyable, so a path that
-/// runs cells on other threads can carry it there; the output sink cannot
-/// go along, which is what keeps those paths pure by construction.
+/// runs cells on other threads can carry it there; neither the output sink
+/// nor the input source can go along, which is what keeps those paths pure
+/// by construction.
 #[derive(Clone, Copy, Debug)]
 pub struct EvalCfg {
     pub agreement: Agreement,
@@ -164,7 +165,7 @@ impl EvalCfg {
     pub(crate) fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let mut sink = |_: &str| debug_assert!(false, "a pure verb wrote to the output sink");
         let mut env = Env::new(Vec::new());
-        f(&mut Ctx { cfg: self, out: &mut sink, env: &mut env, device: None })
+        f(&mut Ctx { cfg: self, out: &mut sink, inp: None, env: &mut env, device: None })
     }
 }
 
@@ -277,12 +278,35 @@ impl Env {
     }
 }
 
+/// A run's source of input: one line per call, with no line terminator,
+/// and `None` once the input has ended.
+///
+/// `None` in place of the closure is a run the host attached no input to at
+/// all, which is a different thing from a source that has run out: the
+/// first is a wiring mistake in the embedding, the second is the program
+/// asking for more than it was given, and the two say so differently.
+pub type InputFn<'a> = Option<&'a mut dyn FnMut() -> Option<String>>;
+
+/// Lend an input source to a shorter-lived context. A `&mut` inside an
+/// `Option` does not reborrow on its own, so the borrow is taken apart and
+/// put back.
+pub fn reborrow_input<'s, 'a: 's>(inp: &'s mut InputFn<'a>) -> InputFn<'s> {
+    match inp {
+        Some(f) => Some(&mut **f),
+        None => None,
+    }
+}
+
 /// Execution context threaded through evaluation.
 pub struct Ctx<'a> {
     pub cfg: EvalCfg,
-    /// Sink for explicit output (`echo`, `⎕←`). stdout by default per the
-    /// sandbox contract; the host may redirect.
+    /// Sink for explicit output (`echo`, `⎕←`, `⍞←`). stdout by default per
+    /// the sandbox contract; the host may redirect.
     pub out: &'a mut dyn FnMut(&str),
+    /// Source for explicit input (`⍞`, `⎕`, J's `1!:1 ]1`). stdin by
+    /// default per the sandbox contract; the host may redirect, and a host
+    /// that attaches none makes every read a diagnostic.
+    pub inp: InputFn<'a>,
     /// The names the program has bound so far.
     pub env: &'a mut Env,
     /// Where the run was placed. None is the CPU, which is also what every
@@ -349,7 +373,32 @@ impl Ctx<'_> {
     /// Run `f` in this context with the comparison tolerance replaced.
     fn with_tol<R>(&mut self, tol: Tol, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let cfg = EvalCfg { tol, ..self.cfg };
-        f(&mut Ctx { cfg, out: &mut *self.out, env: &mut *self.env, device: self.device })
+        f(&mut Ctx {
+            cfg,
+            out: &mut *self.out,
+            inp: reborrow_input(&mut self.inp),
+            env: &mut *self.env,
+            device: self.device,
+        })
+    }
+
+    /// One line of input, without its terminator.
+    ///
+    /// Both ways of having no line are errors rather than empty strings: a
+    /// program that asks for input reaches for something the host has to
+    /// have supplied, and an empty line is a line.
+    pub(crate) fn read_line(&mut self, span: Span) -> Result<String> {
+        let Some(read) = self.inp.as_deref_mut() else {
+            return Err(Error::new(
+                ErrorKind::Value,
+                "this expression reads input, and this run has no input source attached",
+                Some(span),
+            )
+            .note("attach one with Program::run_io (Rust), input= (Python), or jay_run_io (C)"));
+        };
+        read().ok_or_else(|| {
+            Error::new(ErrorKind::Value, "the input has ended: there is no line to read", Some(span))
+        })
     }
 }
 
@@ -478,6 +527,12 @@ pub enum MonadOp {
     IotaApl { origin: i64 },
     /// Print the formatted argument, yield an empty array (J `echo`).
     Echo,
+    /// J `1!:1 y`: one line from the input source as a character vector,
+    /// the terminator dropped. `y` names the stream: 1 is stdin, which the
+    /// sandbox opens, and everything else is a file, which it does not.
+    ReadStream,
+    /// J `3!:0 y`: the code J gives the argument's element type.
+    TypeCode,
     /// The argument itself (APL `⊢`).
     Same,
     /// J `":` / APL `⍕`: the argument as the characters that display it.
@@ -708,6 +763,10 @@ pub enum DyadOp {
     /// APL `x \ y` and `x ⍀ y`: expand — a 1 in x takes the next item of y,
     /// a 0 puts a fill in its place.
     Expand,
+    /// J `x 1!:2 y`: write x, formatted as it displays and followed by a
+    /// newline, to the stream y; the value is x. Stream 2 is stdout, which
+    /// the sandbox opens, and everything else is a file, which it does not.
+    WriteStream,
     NotYet(&'static str),
     None,
 }
@@ -1053,8 +1112,10 @@ impl Verb {
             // Output and the random source are the two effects a verb can
             // have; both fix the order its cells must run in.
             Verb::Prim(p) => {
-                !matches!(p.monad, MonadOp::Echo | MonadOp::Roll { .. })
-                    && !matches!(p.dyad, DyadOp::Deal { .. })
+                !matches!(
+                    p.monad,
+                    MonadOp::Echo | MonadOp::Roll { .. } | MonadOp::ReadStream
+                ) && !matches!(p.dyad, DyadOp::Deal { .. } | DyadOp::WriteStream)
             }
             Verb::Rank(v, _)
             | Verb::Reduce(v)
@@ -1369,6 +1430,13 @@ impl Verb {
     /// The meaning applied to one pair of cells by `dyad_ranked`.
     fn dyad_cell(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         match self {
+            // The one dyad that writes: it needs the sink, and the
+            // dispatcher below it is the pure half of the evaluator.
+            Verb::Prim(p) if p.dyad == DyadOp::WriteStream => {
+                stream_number(y, 2, "1!:2 writes", span)?;
+                (ctx.out)(&format!("{}\n", crate::fmt::format_array(x, &ctx.cfg.fmt)));
+                Ok(x.clone())
+            }
             Verb::Prim(p) => dyad_op(p, x, y, ctx.cfg, span),
             Verb::Rank(v, _) => v.dyad(x, y, ctx, span),
             Verb::Windowed(v, _) => infix(v, x, y, ctx, span),
@@ -4615,6 +4683,12 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             (ctx.out)(&format!("{}\n", crate::fmt::format_array(y, &ctx.cfg.fmt)));
             Ok(Array::empty(DType::I64))
         }
+        MonadOp::ReadStream => {
+            stream_number(y, 1, "1!:1 reads", span)?;
+            let line = ctx.read_line(span)?;
+            Ok(Array::from_chars(line.chars().collect()))
+        }
+        MonadOp::TypeCode => Ok(Array::scalar_i64(type_code(y))),
         MonadOp::Same => Ok(y.clone()),
         MonadOp::Format => Ok(format_chars(y, &ctx.cfg.fmt)),
         MonadOp::DecodeBits => decode(None, y, span).map(|r| carry_exact(r, y)),
@@ -4939,6 +5013,9 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::PrimeExponents => prime_exponents(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Pick { origin } => pick(x, y, origin, span),
         DyadOp::Expand => expand(x, y, span),
+        // Writing needs the output sink, which this dispatcher does not
+        // carry; `dyad_cell` takes it before the call gets here.
+        DyadOp::WriteStream => Err(Error::internal("1!:2 reached the pure dyad dispatcher")),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -9194,11 +9271,22 @@ fn execute(y: &Array, apl: bool, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         return Err(Error::domain("execute reads a character list", span));
     };
     let src: String = v.iter().collect();
+    execute_source(&src, apl, ctx, span)
+}
+
+/// [`execute`] over source that is already text: APL's `⎕` reads a line and
+/// runs it, which is execute over a string nobody boxed into an array.
+pub(crate) fn execute_source(
+    src: &str,
+    apl: bool,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
     let lang = if apl { crate::Lang::Apl } else { crate::Lang::J };
     // The nested program runs under the dialect the caller was compiled
     // with — every setting of it, not the index origin alone.
     let dialect = ctx.cfg.rules.dialect();
-    let nested = crate::compile(lang, &src, &dialect).map_err(|e| nested_error(e, &src, span))?;
+    let nested = crate::compile(lang, src, &dialect).map_err(|e| nested_error(e, src, span))?;
     if !nested.params.is_empty() {
         return Err(Error::domain(
             "an executed string cannot take host data: `{name}` has nothing to bind to",
@@ -9207,8 +9295,46 @@ fn execute(y: &Array, apl: bool, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
     }
     let mut rec = None;
     let (value, _) = crate::ir::run_block(&nested.stmts, None, ctx, &mut rec)
-        .map_err(|e| nested_error(e, &src, span))?;
+        .map_err(|e| nested_error(e, src, span))?;
     value.ok_or_else(|| Error::domain("the executed string yielded no value", span))
+}
+
+/// The stream number a J file foreign was given, checked against the one
+/// the sandbox opens for that direction.
+///
+/// J numbers its streams and its open files alike, so a number that is not
+/// the standard one is a file handle; a boxed argument is a file NAME. Both
+/// are the filesystem, which the sandbox closes.
+fn stream_number(y: &Array, open: i64, what: &str, span: Span) -> Result<()> {
+    let closed = || {
+        Err(Error::sandbox(
+            format!("{what} the standard stream {open} only; a file is outside the program"),
+            span,
+        ))
+    };
+    if matches!(y.data, Data::Box(_)) {
+        return closed();
+    }
+    match y.to_i64_vec().as_deref() {
+        Some([n]) if *n == open => Ok(()),
+        Some([_]) => closed(),
+        _ => Err(Error::domain(format!("{what} one stream number"), span)),
+    }
+}
+
+/// `3!:0 y`: the code J gives y's element type. The numbers are J's own,
+/// and libjay's element types line up with them one for one.
+fn type_code(y: &Array) -> i64 {
+    match y.dtype() {
+        DType::Bool => 1,
+        DType::Char => 2,
+        DType::I64 => 4,
+        DType::F64 => 8,
+        DType::Complex => 16,
+        DType::Box => 32,
+        DType::Ext => 64,
+        DType::Rat => 128,
+    }
 }
 
 /// An error from an executed string, re-pointed at the sentence that ran it.
@@ -9328,6 +9454,7 @@ mod tests {
                         .expect("the shipped dialect is implemented"),
                 },
                 out: &mut sink,
+                inp: None,
                 env: &mut env,
                 device: None,
             };
@@ -10390,6 +10517,7 @@ mod tests {
                 rules: Rules::default(),
             },
             out: &mut sink,
+            inp: None,
             env: &mut env,
             device: None,
         };

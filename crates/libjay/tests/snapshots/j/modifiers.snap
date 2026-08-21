@@ -1,0 +1,134 @@
+# libjay reference snapshot: J (jconsole) — corpus/j/modifiers.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreter. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> TEXT`  one line of the reference's answer.
+#   `< TEXT`  one line of libjay's answer (divergence records only).
+#   `? TEXT`  why the two are expected to differ (divergence records only).
+#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`  a comment.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= twice =. 1 : 'u u y'\n+: twice 3
+> 12
+= twice =. 1 : 'u u y'\n>: twice 5
+> 7
+= twice =. 1 : 'u u y'\n*: twice 3
+> 81
+= twice =. 1 : 'u u y'\n+: twice i. 4
+> 0 4 8 12
+= +: (1 : 'u u y') 3
+> 12
+= sum =. 1 : 'u/ y'\n+ sum 1 2 3 4
+> 10
+= under =. 1 : 'u y'\n- under 7
+> _7
+= selfd =. 1 : 'y u y'\n+ selfd 6
+> 12
+= addy =. 1 : 'x u y'\n3 (+ addy) 4
+> 7
+= addy =. 1 : 'x u y'\n2 (* addy) 5
+> 10
+= twice =. 1 : 'u u y'\n3 (+: twice) 4
+> <error>
+= addy =. 1 : 'x u y'\n(+ addy) 4
+> <error>
+= pair =. 2 : 'u v y'\n(+: pair *:) 3
+> 18
+= pair =. 2 : 'u v y'\n(- pair >:) 4
+> _5
+= both =. 2 : 'x u v y'\n3 (+ both *:) 4
+> 19
+= both =. 2 : 'x u v y'\n10 (- both -:) 4
+> 8
+= addm =. 1 : 'm + y'\n5 addm 3
+> 8
+= addm =. 1 : 'm + y'\n2 addm i. 4
+> 2 3 4 5
+= joinn =. 2 : 'm , y , n'\n(2 joinn 3) 9
+> 2 9 3
+= f =. 1 : 'u y'\n5 f 3
+> <error>
+= f =. 1 : 'm + y'\n+: f 3
+> <error>
+= sq =. 1 : 'u @ u'\n+: sq 3
+> 12
+= sq =. 1 : 'u @ u'\n+: sq i. 4
+> 0 4 8 12
+= sq =. 1 : 'u @ u'\nd =. +: sq\nd 5
+> 20
+= half =. 1 : 'u & 2'\n% half 8
+> 4
+= comp =. 2 : 'u @: v'\n(+: comp *:) 3
+> 18
+= lit =. 1 : '3 + 4'\n+: lit
+> 7
+= tw =. {{ u u y }}\n+: tw 3
+> 12
+= tw =. {{ u u y }}\n>: tw 5
+> 7
+= cj =. {{ u v y }}\n(+: cj *:) 3
+> 18
+= cj =. {{ x u v y }}\n3 (+ cj *:) 4
+> 19
+= nm =. {{ m + y }}\n5 nm 3
+> 8
+= nn =. {{ m , y , n }}\n(1 nn 9) 5
+> 1 5 9
+= +: ({{ u u y }}) 3
+> 12
+= mk =. {{)a\nu u y\n}}\n+: mk 3
+> 12
+= mk =. {{)c\nu v y\n}}\n(+: mk *:) 3
+> 18
+= mk =. {{)v\ny + 1\n}}\nmk 4
+> 5
+= mk =. {{)d\nx + y\n}}\n3 mk 4
+> 7
+= mk =. {{)m\n- y\n}}\nmk 4
+> _4
+= tw =. 1 : 0\nu u y\n)\n+: tw 3
+> 12
+= cj =. 2 : 0\nx u v y\n)\n3 (+ cj *:) 4
+> 19
+= ml =. 1 : 0\nz =. u y\nz + z\n)\n+: ml 3
+> 12
+= ml =. 2 : 0\nif. x > 0 do. u y else. v y end.\n)\n1 (+: ml *:) 5
+> 10
+= ml =. 2 : 0\nif. x > 0 do. u y else. v y end.\n)\n0 (+: ml *:) 5
+> 25
+= tw =. 1 : 'u u y'\n(+: tw)"0 i. 3
+> 0 4 8
+= tw =. 1 : 'u u y'\n(+:"0 tw) i. 3
+> 0 4 8
+= tw =. 1 : 'u u y'\n(>: @ (+: tw)) 3
+> 13
+= tw =. 1 : 'u u y'\nh =. +: tw\n(h , h) 3
+> 12 12
+= ins =. 1 : 'u/ y'\nmean =. (+ ins) % #\nmean 1 2 3 4
+> 2.5
+= tw =. 1 : 'u u y'\nq =. 1 : '(u tw) tw'\n+: q 1
+> 16
+= tw =. 1 : 'u u y'\ng =. 2 : 'u tw v y'\n(+: g *:) 3
+> 36
+= tw =. 1 : 'u u y'\n+: tw +: tw 1
+> 16
+= tw =. 1 : 'u u y'\n(+: tw) tw 1
+> 16
+= q =. 10\nf =. 1 : 'q + u y'\n+: f 3
+> 16
+= f =. 1 : 'u^:2 y'\n>: f 3
+> 5
+= f =. {{ u&2 y }}\n^ f 3
+> 9
+= f =. 2 : 'x u v y'\n1 2 3 (+ f *:) 4
+> 17 18 19
+= twice =. 1 : 'u u y'\nthrice =. 1 : 'u u u y'\n+: thrice twice 1
+> 64
+= f =. 1 : 'u y'\ng =. f\n+: g 3
+> 6

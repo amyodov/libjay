@@ -99,9 +99,12 @@ impl Kernel {
     }
 
     /// Run with positional values (one per parameter). `out` receives
-    /// explicit output (echo / ⎕←). Returns (result, display) where
-    /// `display` is the formatted last value when `want_display` is set.
-    #[pyo3(signature = (values, out, want_display, keep_on_device=false))]
+    /// explicit output (echo / ⎕←); `inp` answers what the program reads
+    /// (⍞, ⎕, 1!:1) with one line per call, or None at the end of the
+    /// input. `inp` None is a run with no input source at all. Returns
+    /// (result, display) where `display` is the formatted last value when
+    /// `want_display` is set.
+    #[pyo3(signature = (values, out, want_display, keep_on_device=false, inp=None))]
     fn run(
         &self,
         py: Python<'_>,
@@ -109,6 +112,7 @@ impl Kernel {
         out: Bound<'_, PyAny>,
         want_display: bool,
         keep_on_device: bool,
+        inp: Option<Bound<'_, PyAny>>,
     ) -> PyResult<(PyObject, Option<String>)> {
         let args: Vec<Array> =
             values.iter().map(py_to_array).collect::<PyResult<_>>()?;
@@ -120,10 +124,39 @@ impl Kernel {
                 }
             }
         };
-        let result = match &self.device {
-            None => self.program.run(&args, &mut sink),
-            Some(d) => self.program.run_on(d, &args, &mut sink),
+        // The reader's own failure is not the end of the input: it is held
+        // here and raised in place of whatever the program made of it.
+        let mut read_err: Option<PyErr> = None;
+        let has_input = inp.is_some();
+        let mut source = || -> Option<String> {
+            let f = inp.as_ref()?;
+            if read_err.is_some() {
+                return None;
+            }
+            match f.call0() {
+                Ok(v) if v.is_none() => None,
+                Ok(v) => match v.extract::<String>() {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        read_err = Some(e);
+                        None
+                    }
+                },
+                Err(e) => {
+                    read_err = Some(e);
+                    None
+                }
+            }
         };
+        let result = match (&self.device, has_input) {
+            (None, false) => self.program.run(&args, &mut sink),
+            (None, true) => self.program.run_io(&args, &mut sink, &mut source),
+            (Some(d), false) => self.program.run_on(d, &args, &mut sink),
+            (Some(d), true) => self.program.run_on_io(d, &args, &mut sink, &mut source),
+        };
+        if let Some(e) = read_err {
+            return Err(e);
+        }
         if let Some(e) = write_err {
             return Err(e);
         }

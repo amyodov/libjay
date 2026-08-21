@@ -60,6 +60,16 @@ typedef struct {
  * not NUL-terminated: len is authoritative. */
 typedef void (*jay_write_fn)(const char *text_utf8, size_t len, void *userdata);
 
+/* Source for a program's input (APL `⍞` and `⎕`, J `1!:1 ]1`): one line per
+ * call, UTF-8, with no line terminator and no NUL.
+ *
+ * The return follows snprintf. 0..cap bytes were written into buf and are
+ * the line. A value ABOVE cap means nothing was written and the line needs
+ * that many bytes: libjay grows its buffer and calls again, so a source
+ * answering this way must not have consumed the line yet. Negative is the
+ * end of the input. */
+typedef int (*jay_read_fn)(char *buf, size_t cap, void *userdata);
+
 /* Compile source_utf8 in lang ("j" or "apl"); index_origin sets APL's ⎕IO,
  * or -1 for the language default. NULL on failure, with *err set. */
 jay_program *jay_compile(const char *source_utf8, const char *lang, int32_t index_origin,
@@ -76,9 +86,19 @@ const char *jay_program_param_name(const jay_program *program, size_t i);
 
 /* Execute a program: args holds nargs values, one per parameter, in order.
  * write NULL sends output to stdout; out NULL discards the result.
- * Returns 0 on success, nonzero on failure with *err set. */
+ * Returns 0 on success, nonzero on failure with *err set.
+ *
+ * The run has no input source: an expression that reads one says so rather
+ * than reading anything. Use jay_run_io to attach one. */
 int jay_run(const jay_program *program, const jay_value *args, size_t nargs, jay_write_fn write,
             void *write_userdata, jay_result **out, jay_error **err);
+
+/* jay_run with both halves of stdio wired. write NULL sends output to this
+ * process's stdout and read NULL takes input from its stdin, which is the
+ * sandbox's default on both sides. Everything else is as jay_run. */
+int jay_run_io(const jay_program *program, const jay_value *args, size_t nargs, jay_write_fn write,
+               void *write_userdata, jay_read_fn read, void *read_userdata, jay_result **out,
+               jay_error **err);
 
 /* 1 when the program yielded no value (its last sentence was an assignment
  * or ⎕←), 0 otherwise. */

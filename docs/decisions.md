@@ -940,3 +940,70 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   complex NaN. A series that neither converges nor overflows within 2¹⁶
   terms is refused by name; the reference loops forever on the same
   sentence, which is one place a cap is better than fidelity.
+- 2026-08-21 — J's explicit modifiers (`1 : '…'`, `2 : '…'`, their `: 0`
+  bodies, and the `{{ }}` that names an operand), and the TWO PHASES the
+  oracle confirms they have. A body that mentions `x` or `y` is the body of
+  the derived VERB and runs when that verb is applied; a body that mentions
+  neither runs when the modifier meets its OPERANDS, and its value — a
+  tacit verb for `1 : 'u @ u'`, a noun for `1 : '3 + 4'` — is what the
+  derivation produced. The part of speech of a `{{ }}` is read off the
+  operand names its body uses: `v` or `n` makes a conjunction, `u` or `m`
+  an adverb, neither a verb; a `{{)a` / `{{)c` / `{{)v` / `{{)d` / `{{)m`
+  marker states it instead, and the reference takes a marker only where
+  nothing else stands on its line.
+  Both phases are done at PARSE time, by substituting the operand
+  fragments into a copy of the body's words and parsing the result — which
+  is J's own substitution rule, and the only way the derivation phase can
+  produce a verb at all, since the IR has no verb-valued expression. It
+  also keeps the frontend's one model of a modifier: `Names` already
+  resolved a modifier name while the sentence holding it was parsed, and
+  `Frag::Adverb`/`Frag::Conj` now carry a `Modifier` that is either a
+  primitive spelling or an explicit body, so a written modifier composes
+  with rank, trains, assignment and other modifiers with no new rule.
+  A runtime `Verb::DerivedExplicit` was the alternative, and APL's
+  `Verb::UserDerived` shows it works for verb operands; it cannot give the
+  derivation phase, and would need noun-valued and verb-valued operand
+  names in the evaluator's environment for no gain. The price is that a
+  body which derives its OWN modifier — J's spelling of a recursive
+  modifier — would parse for ever; libjay detects the re-entry and names it
+  as a gap. `13 :`, the tacit translator, stays a named gap.
+- 2026-08-21 — The input half of the sandbox, and the sandbox as an error
+  class of its own. `Ctx` gained `inp` beside `out`, so a run has two
+  halves of stdio and neither is a global; `Program::run_io` is the
+  spelling that attaches one, and `Program::run` stays what it was — a run
+  with NO input source, which is a different thing from a source that has
+  ended and says so differently ("this run has no input source attached"
+  against "the input has ended"). That distinction is why `inp` is an
+  `Option<&mut dyn FnMut() -> Option<String>>` rather than a bare closure
+  that yields None: one closure cannot tell a wiring mistake in the
+  embedding from a program asking for one line more than it was given, and
+  both diagnostics are owed to different people.
+- 2026-08-21 — `ErrorKind::Sandbox`, labelled "closed by the sandbox". A
+  feature libjay closes is not a property of J or of APL, so `Language`
+  ("absent from the language itself") was the wrong class for it, and
+  `NotYet` would be a promise nobody intends to keep. Three classes now
+  answer three different questions: is it in the language, is it in libjay
+  yet, and does the host let it out. `⎕TS`/`⎕AI`/`⎕FIO` and their
+  relatives, `T.`, and the file, script, host, clock and shared-library
+  foreigns all moved onto it; their messages dropped the words the label
+  now carries and say instead what the feature would have reached.
+- 2026-08-21 — J's `!:` as a dispatcher over the two literal numbers, not a
+  general foreign mechanism. `1!:1 ]1` reads a line, `x 1!:2 ]2` writes one
+  (the oracle: the left argument formatted as it displays, plus a newline,
+  and the value is the left argument), and `3!:0` is J's type code — cheap,
+  pure, and the thing a test reaches for when it wants to name a type. A
+  stream number that is not the open one, and a boxed file NAME, are the
+  same refusal, because J numbers its open files alongside its streams.
+  Everything else divides at compile time into closed (0, 1, 2, 6, 15) and
+  not yet (by number), which is the division `ErrorKind::Sandbox` exists to
+  draw. Refusing a file foreign at COMPILE time rather than when it runs
+  follows `T.`: the diagnostic points at the source, which is worth more
+  than being catchable by `try.`.
+- 2026-08-21 — The C ABI grew `jay_run_io` rather than a parameter on
+  `jay_run`: the old signature is the published contract and stays
+  byte-for-byte what it was, and "no input source" is exactly what it
+  should mean. `jay_read_fn` takes a caller-owned buffer and returns the
+  snprintf count, so there is no allocation ownership to document and no
+  silent truncation of a long line — a return above the capacity means
+  libjay grows its buffer and asks again. NULL for `read` is the process's
+  own stdin, mirroring NULL for `write` being its stdout.

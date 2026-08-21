@@ -217,11 +217,31 @@ The one-call shortcut `jay.j("...")` has no device: there is nowhere in one
 call to say where, and uploading data for a single run rarely pays for
 itself.
 
+## Standard input and output
+
+An expression can write (J `echo`, APL `⎕←` and `⍞←`) and read (APL `⍞` for
+a line of characters, `⎕` for a line evaluated as APL, J `1!:1 ]1`).
+Standard input and output are the only I/O libjay opens; a file, the host
+or the clock is refused with "closed by the sandbox".
+
+```python
+jay.apl("⍞")                       # reads a line from this process's stdin
+jay.apl("⎕", input=lambda: "2+2")  # 4 — the line is run as APL
+lines = iter(["a", "b"])
+jay.apl("⍞,⍞", input=lambda: next(lines, None))  # any callable will do
+```
+
+`input=` takes a callable returning one line per call and None at the end of
+the input; it defaults to this process's standard input, terminal or pipe
+alike. `input=None` attaches no source at all, and an expression that reads
+one says so instead of reading anything.
+
 ## The CLI
 
 ```sh
 libjay -e '(+/ % #) 3 1 4 1 5'                   # 2.8
 libjay -e "⎕←'Hello, world!'" --lang apl         # APL
+echo 'hello' | libjay -e '⍞' --lang apl          # reads the process's stdin
 libjay examples/hello.apl                        # a file; the extension
                                                  # picks the language
 libjay --explain -e '+/ {w} * {x}'               # the structure, not a result

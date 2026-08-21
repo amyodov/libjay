@@ -103,10 +103,7 @@ fn runaway_recursion_is_stopped_with_a_diagnostic() {
 }
 
 #[rstest]
-#[case("f =. 1 : 'y'", "explicit adverbs and conjunctions")]
-#[case("f =. 2 : 'y'", "explicit adverbs and conjunctions")]
 #[case("f =. 13 : 'y + 1'", "tacit definitions")]
-#[case("f =. {{ m + y }}", "direct definitions of adverbs and conjunctions")]
 #[case("f =. 3 : 0\ny\n", "no closing `)`")]
 #[case("f =. {{ y", "no closing `}}`")]
 fn definition_forms_libjay_has_not_are_named(#[case] src: &str, #[case] msg: &str) {

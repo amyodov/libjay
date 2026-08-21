@@ -364,8 +364,9 @@ fn apl_system_names_are_read_only_and_pure() {
     // The ones that would reach a clock or a filesystem are closed.
     for src in ["⎕TS", "⎕AI", "⎕FIO"] {
         let e = err(Lang::Apl, src);
-        assert_eq!(e.kind, ErrorKind::Language, "{src}");
-        assert!(e.msg.contains("closed by the sandbox"), "{src}: {}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Sandbox, "{src}");
+        assert_eq!(e.kind.label(), "closed by the sandbox");
+        assert!(e.msg.contains("outside the program"), "{src}: {}", e.msg);
     }
     // An unknown one is named rather than guessed at.
     let e = err(Lang::Apl, "⎕ZZ");

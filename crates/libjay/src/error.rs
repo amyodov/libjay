@@ -34,6 +34,9 @@ pub enum ErrorKind {
     NotYet,
     /// Absent from the language itself; will never exist.
     Language,
+    /// Present in the language and closed by libjay's sandbox: the host
+    /// policy, not a property of J or APL, and not a queue position.
+    Sandbox,
     /// Larger than libjay will allocate.
     Limit,
     Internal,
@@ -51,6 +54,7 @@ impl ErrorKind {
             ErrorKind::Value => "value error",
             ErrorKind::NotYet => "not supported yet",
             ErrorKind::Language => "not in the language",
+            ErrorKind::Sandbox => "closed by the sandbox",
             ErrorKind::Limit => "limit error",
             ErrorKind::Internal => "internal error",
         }
@@ -82,6 +86,13 @@ impl Error {
 
     pub fn language(msg: impl Into<String>, span: Span) -> Self {
         Self::new(ErrorKind::Language, msg, Some(span))
+    }
+
+    /// A feature the language has and libjay's sandbox does not open. The
+    /// message says what the feature would reach; the kind's label says who
+    /// closed it.
+    pub fn sandbox(msg: impl Into<String>, span: Span) -> Self {
+        Self::new(ErrorKind::Sandbox, msg, Some(span))
     }
 
     pub fn domain(msg: impl Into<String>, span: Span) -> Self {

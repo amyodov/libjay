@@ -197,7 +197,7 @@ const J_PROMISES: &[Case] = &[
     j("1 2 |: i. 2 3", ErrorKind::NotYet, "1 2 |: i. 2 3", &["dyadic transpose"]),
     j("1 \". '2'", ErrorKind::NotYet, "1 \". '2'", &["numbers from text"]),
     j("+ . * i. 2 2", ErrorKind::NotYet, "+ . *", &["inner product"]),
-    j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign conjunction"]),
+    j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign 9!:18"]),
     j("m =. /\nm", ErrorKind::NotYet, "m", &["displaying a modifier"]),
     j("s: 'a'", ErrorKind::NotYet, "s: 'a'", &["symbols"]),
     j("'a' ;: 'b'", ErrorKind::NotYet, "'a' ;: 'b'", &["sequential machine"]),
@@ -213,8 +213,14 @@ fn j_gaps_are_promises_and_name_the_feature() {
 const J_PERMANENT: &[Case] = &[
     // Threads reach outside the expression. The sandbox is libjay's, and
     // no release will open it, so this must not read as a queue position.
-    j("+ T. 1", ErrorKind::Language, "+ T. 1", &["sandbox", "T."]),
-    j("1 2 T. 3", ErrorKind::Language, "1 2 T. 3", &["sandbox", "T."]),
+    j("+ T. 1", ErrorKind::Sandbox, "+ T. 1", &["closed by the sandbox", "T."]),
+    j("1 2 T. 3", ErrorKind::Sandbox, "1 2 T. 3", &["closed by the sandbox", "T."]),
+    // The foreigns that reach a file, a directory, the host or a script.
+    j("1!:1 <'x'", ErrorKind::Sandbox, "1!:1 <'x'", &["closed by the sandbox", "a file"]),
+    j("1!:21 <'x'", ErrorKind::Sandbox, "1!:21", &["closed by the sandbox", "filesystem"]),
+    j("2!:5 <'HOME'", ErrorKind::Sandbox, "2!:5", &["closed by the sandbox", "host"]),
+    j("0!:0 <'x'", ErrorKind::Sandbox, "0!:0", &["closed by the sandbox", "script"]),
+    j("6!:2 'i.5'", ErrorKind::Sandbox, "6!:2", &["closed by the sandbox", "clock"]),
 ];
 
 #[test]
@@ -396,10 +402,10 @@ fn apl_gaps_are_promises_and_name_the_feature() {
 
 const APL_PERMANENT: &[Case] = &[
     // The sandbox is a property of libjay, not a queue position.
-    apl("⎕TS", ErrorKind::Language, "⎕TS", &["closed by the sandbox"]),
-    apl("⎕FIO", ErrorKind::Language, "⎕FIO", &["closed by the sandbox"]),
-    apl("⎕AI", ErrorKind::Language, "⎕AI", &["closed by the sandbox"]),
-    apl("⎕TS←1", ErrorKind::Language, "⎕TS", &["closed by the sandbox"]),
+    apl("⎕TS", ErrorKind::Sandbox, "⎕TS", &["closed by the sandbox"]),
+    apl("⎕FIO", ErrorKind::Sandbox, "⎕FIO", &["closed by the sandbox"]),
+    apl("⎕AI", ErrorKind::Sandbox, "⎕AI", &["closed by the sandbox"]),
+    apl("⎕TS←1", ErrorKind::Sandbox, "⎕TS", &["closed by the sandbox"]),
     // The dialect fixed these before the program was compiled, which is a
     // decision and not a queue position either.
     apl("⎕IO←0", ErrorKind::Language, "⎕IO", &["⎕IO", "read-only"]),

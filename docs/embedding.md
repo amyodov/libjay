@@ -95,10 +95,50 @@ program whose last sentence is an assignment (or `⎕←`) yields no value:
 
 ### Output
 
-`echo` and `⎕←` go to the `jay_write_fn` callback passed to `jay_run`,
+`echo`, `⎕←` and `⍞←` go to the `jay_write_fn` callback passed to `jay_run`,
 together with its `userdata`. The text is UTF-8 and is **not**
 NUL-terminated — the length argument is authoritative. Passing NULL routes
 output to stdout, which is the sandbox default; no other I/O is open.
+
+### Input
+
+The other half of stdio has its own entry point. `jay_run` has no input
+source at all: an expression that reads one (APL `⍞` and `⎕`, J `1!:1 ]1`)
+reports that rather than reading anything, which is what keeps the
+published `jay_run` signature exactly what it was. `jay_run_io` is the same
+call with two arguments more:
+
+```c
+int rc = jay_run_io(program, args, nargs,
+                    write, write_userdata,
+                    read, read_userdata,
+                    &result, &err);
+```
+
+`jay_read_fn` is handed a buffer libjay owns and answers one line per call:
+
+```c
+static int read_line(char *buf, size_t cap, void *userdata) {
+  FILE *f = (FILE *)userdata;
+  static char *line = NULL;
+  static size_t n = 0;
+  if (line == NULL && getline(&line, &n, f) < 0) return -1;   /* end of input */
+  size_t len = strcspn(line, "\n");
+  if (len > cap) return (int)len;         /* ask again with a bigger buffer */
+  memcpy(buf, line, len);
+  free(line); line = NULL; n = 0;
+  return (int)len;
+}
+```
+
+The return follows `snprintf`: `0..cap` bytes were written into `buf` and
+are the line, a count **above** `cap` means nothing was written and libjay
+should grow its buffer and ask for the same line again, and a negative
+value is the end of the input. The text is UTF-8, without a terminator and
+without a NUL. A NULL `read` takes input from this process's stdin, as a
+NULL `write` sends output to its stdout — the sandbox's default on both
+sides. Reading past the end of the input is a reported error, never an
+empty line.
 
 ### Errors
 

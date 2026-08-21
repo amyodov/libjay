@@ -483,6 +483,6 @@ fn the_gaps_this_wave_leaves_name_themselves() {
     // A gap the sandbox holds open permanently is not a promise: `T.`
     // starts J's own threads, which libjay will not open.
     let threads = err(Lang::J, "(+ T. 0) 1");
-    assert_eq!(threads.kind, ErrorKind::Language);
+    assert_eq!(threads.kind, ErrorKind::Sandbox);
     assert!(threads.msg.contains("T. starts J's own threads"), "{}", threads.msg);
 }

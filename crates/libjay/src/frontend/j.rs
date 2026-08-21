@@ -39,11 +39,28 @@ pub fn parse(src: &SourceParts) -> Result<Vec<Expr>> {
         if sentence.is_empty() {
             continue;
         }
-        let stmt = scope.parse_sentence(sentence)?;
-        scope.record(&stmt);
-        out.push(stmt);
+        out.push(scope.parse_sentence(sentence)?);
     }
     Ok(out)
+}
+
+/// What a name of modifier class stands for.
+#[derive(Clone, Debug)]
+enum Modifier {
+    /// A primitive modifier, by the spelling it is written with.
+    Prim(&'static str),
+    /// An explicit adverb or conjunction, by the body it was written with.
+    Explicit(Arc<ModSource>),
+}
+
+impl Modifier {
+    /// How the modifier names itself in `explain` and in diagnostics.
+    fn spelling(&self) -> String {
+        match self {
+            Modifier::Prim(g) => (*g).to_string(),
+            Modifier::Explicit(src) => src.name.clone(),
+        }
+    }
 }
 
 /// The parts of speech a sentence is read against. A name's part of speech
@@ -52,11 +69,11 @@ pub fn parse(src: &SourceParts) -> Result<Vec<Expr>> {
 #[derive(Clone, Default)]
 struct Names {
     verbs: HashMap<String, Verb>,
-    /// Names given an adverb or a conjunction (`m =. /`), by the spelling
-    /// they stand for and whether it is a conjunction. A modifier is
-    /// applied when a sentence is parsed, so the name has to be resolved
-    /// then too, exactly as a verb name is.
-    mods: HashMap<String, (bool, &'static str)>,
+    /// Names given an adverb or a conjunction (`m =. /`), by what they
+    /// stand for and whether it is a conjunction. A modifier is applied
+    /// when a sentence is parsed, so the name has to be resolved then too,
+    /// exactly as a verb name is.
+    mods: HashMap<String, (bool, Modifier)>,
     /// Names that hold a value by the time a sentence is read. Only the
     /// diagnostics need this: a name that is neither a verb nor a value is
     /// an undefined name, not a sentence the parser has yet to learn.
@@ -64,9 +81,25 @@ struct Names {
 }
 
 impl Names {
-    fn parse_sentence(&self, mut sentence: Vec<Frag>) -> Result<Expr> {
+    /// Parse one sentence against the table and note what it did to the
+    /// names it mentions.
+    fn parse_sentence(&mut self, mut sentence: Vec<Frag>) -> Result<Expr> {
         substitute_names(&mut sentence, &self.verbs, &self.mods);
-        parse_sentence(sentence, &self.nouns)
+        let whole = sentence_span(&sentence);
+        let frag = reduce_to_fragment(sentence, self)?;
+        // A sentence that names a modifier is settled here rather than in
+        // the IR: what the name stands for is a parser object, and the
+        // node the sentence lowers to carries only its spelling.
+        if let Some(Frag::ModDef(name, conj, m, span)) = frag {
+            let spelling = m.spelling();
+            self.mods.insert(name.clone(), (conj, m));
+            self.verbs.remove(&name);
+            self.nouns.remove(&name);
+            return Ok(Expr::ModDef { name, spelling, conjunction: conj, span });
+        }
+        let stmt = lower_sentence(frag, whole)?;
+        self.record(&stmt);
+        Ok(stmt)
     }
 
     /// Note what a parsed sentence did to the names it mentions.
@@ -75,13 +108,6 @@ impl Names {
             Expr::VerbDef { name, verb, .. } => {
                 self.verbs.insert(name.clone(), verb.clone());
                 self.mods.remove(name);
-                self.nouns.remove(name);
-            }
-            Expr::ModDef { name, spelling, conjunction: is_conj, .. } => {
-                let glyph = if *is_conj { conjunction(spelling) } else { adverb(spelling) };
-                let glyph = glyph.expect("the spelling came from the modifier tables");
-                self.mods.insert(name.clone(), (*is_conj, glyph));
-                self.verbs.remove(name);
                 self.nouns.remove(name);
             }
             // A name given a noun stops being a verb, at any depth: J lets
@@ -174,7 +200,7 @@ fn collect_definitions(
         _ => None,
     };
     loop {
-        let Some(open) = sentence.iter().position(|f| matches!(f, Frag::DdOpen(_))) else {
+        let Some(open) = sentence.iter().position(|f| matches!(f, Frag::DdOpen(..))) else {
             match find_colon_definition(&sentence) {
                 Some(at) => {
                     take_colon_definition(&mut sentence, at, lines, i, scope, self_name.as_deref())?;
@@ -204,7 +230,7 @@ fn collect_definitions(
 /// The index of the `:` of a `m : n` definition, if the line has one.
 fn find_colon_definition(sentence: &[Frag]) -> Option<usize> {
     (1..sentence.len().saturating_sub(1)).find(|&k| {
-        matches!(&sentence[k], Frag::Conj(":", _))
+        matches!(&sentence[k], Frag::Conj(Modifier::Prim(":"), _))
             && as_const(&sentence[k - 1]).is_some_and(|a| a.rank() == 0)
             && matches!(&sentence[k + 1], Frag::Noun(Expr::Const(..)))
     })
@@ -227,12 +253,11 @@ fn take_colon_definition(
         .ok_or_else(|| Error::parse("an explicit definition starts with a number", span))?;
     let body_arr = as_const(&sentence[at + 1]).cloned().expect("checked by the finder");
     let body_span = sentence[at + 1].span();
-    let dyadic = match valence {
-        3.0 => false,
-        4.0 => true,
-        1.0 | 2.0 => {
-            return Err(Error::not_yet("explicit adverbs and conjunctions (1 : and 2 :)", span));
-        }
+    let (dyadic, modifier) = match valence {
+        3.0 => (false, None),
+        4.0 => (true, None),
+        1.0 => (false, Some(false)),
+        2.0 => (false, Some(true)),
         13.0 => return Err(Error::not_yet("tacit definitions (13 : '...')", span)),
         v => return Err(Error::domain(format!("{v} is not an explicit definition"), span)),
     };
@@ -261,6 +286,17 @@ fn take_colon_definition(
             return Err(Error::parse("an explicit definition takes 0 or a string", body_span))
         }
     };
+    if let Some(conjunction) = modifier {
+        let name = if conjunction { "2 : '...'" } else { "1 : '...'" };
+        let src = mod_source(name, conjunction, body, self_name);
+        let frag = if conjunction {
+            Frag::Conj(Modifier::Explicit(Arc::new(src)), span)
+        } else {
+            Frag::Adverb(Modifier::Explicit(Arc::new(src)), span)
+        };
+        sentence.splice(at - 1..at + 2, [frag]);
+        return Ok(());
+    }
     let name = if dyadic { "4 : '...'" } else { "3 : '...'" };
     let verb = build_definition(body, dyadic, name, scope, self_name)?;
     sentence.splice(at - 1..at + 2, [Frag::Verb(VerbFrag::V(verb), span)]);
@@ -297,6 +333,9 @@ fn take_direct_definition(
     self_name: Option<&str>,
 ) -> Result<()> {
     let open_span = sentence[open].span();
+    let Frag::DdOpen(marker, _) = sentence[open] else {
+        return Err(Error::internal("expected a direct definition's opening brackets"));
+    };
     let mut depth = 1usize;
     let mut body: Vec<Vec<Frag>> = Vec::new();
     let mut tail: Vec<Frag> = Vec::new();
@@ -307,7 +346,7 @@ fn take_direct_definition(
         let mut closed = false;
         for (k, f) in line.iter().enumerate() {
             match f {
-                Frag::DdOpen(_) => {
+                Frag::DdOpen(..) => {
                     depth += 1;
                     cur.push(f.clone());
                 }
@@ -337,28 +376,58 @@ fn take_direct_definition(
         line = next.clone();
     }
     let span = Span::merge(open_span, close_span);
-    // The body's own words decide the valence, as they do in the reference.
-    for l in &body {
-        for f in l {
-            if let Frag::Name(n, s) = f {
-                if matches!(n.as_str(), "u" | "v" | "m" | "n") {
-                    return Err(Error::not_yet(
-                        "direct definitions of adverbs and conjunctions ({{ with u v m n }})",
-                        *s,
-                    ));
-                }
+    // The body's own words decide the part of speech, as they do in the
+    // reference: an operand name of the second position makes a
+    // conjunction, one of the first an adverb, and neither a verb. A
+    // `{{)a` marker says it outright instead.
+    let part = match marker {
+        None => {
+            if mentions(&body, "v") || mentions(&body, "n") {
+                Some(true)
+            } else if mentions(&body, "u") || mentions(&body, "m") {
+                Some(false)
+            } else {
+                None
             }
         }
-    }
-    let dyadic = body
-        .iter()
-        .any(|l| l.iter().any(|f| matches!(f, Frag::Name(n, _) if n == "x")));
-    let verb = build_definition(body, dyadic, "{{ ... }}", scope, self_name)?;
+        Some('a') => Some(false),
+        Some('c') => Some(true),
+        Some('v' | 'm' | 'd') => None,
+        Some(other) => {
+            return Err(Error::not_yet(
+                format!("a direct definition marked `){other}`"),
+                open_span,
+            ))
+        }
+    };
+    let frag = match part {
+        Some(conjunction) => {
+            let src = mod_source("{{ ... }}", conjunction, body, self_name);
+            let m = Modifier::Explicit(Arc::new(src));
+            if conjunction { Frag::Conj(m, span) } else { Frag::Adverb(m, span) }
+        }
+        None => {
+            // `)d` and `)m` fix the valence; otherwise a body that names
+            // `x` is a dyad and nothing else.
+            let dyadic = match marker {
+                Some('d') => true,
+                Some('m') => false,
+                _ => mentions(&body, "x"),
+            };
+            let verb = build_definition(body, dyadic, "{{ ... }}", scope, self_name)?;
+            Frag::Verb(VerbFrag::V(verb), span)
+        }
+    };
     let mut head: Vec<Frag> = sentence[..open].to_vec();
-    head.push(Frag::Verb(VerbFrag::V(verb), span));
+    head.push(frag);
     head.extend(tail);
     *sentence = head;
     Ok(())
+}
+
+/// True where a definition's words include this name.
+fn mentions(body: &[Vec<Frag>], name: &str) -> bool {
+    body.iter().any(|l| l.iter().any(|f| matches!(f, Frag::Name(n, _) if n == name)))
 }
 
 /// Parse a definition's body and wrap it in a verb.
@@ -418,6 +487,177 @@ fn build_definition(
         empty: Some(crate::ir::empty_result()),
         pure,
     })))
+}
+
+// ------------------------------------------------------- explicit modifiers
+
+/// An explicit adverb or conjunction: `1 : '…'`, `2 : '…'` and the `{{ … }}`
+/// whose body names an operand.
+///
+/// The body is kept as words rather than as a parsed tree. Applying the
+/// modifier substitutes the operands into those words and parses them
+/// afresh, which is what J's own substitution rule says happens, and what
+/// lets a body that mentions no argument yield a verb of its own.
+#[derive(Debug)]
+struct ModSource {
+    /// How the definition names itself in diagnostics.
+    name: String,
+    /// Two operands rather than one.
+    conjunction: bool,
+    body: Vec<Vec<Frag>>,
+    /// The body names `x` or `y`, so it is the body of the derived VERB and
+    /// runs when that verb is applied. A body that names neither runs at
+    /// derivation instead, and what it makes is what the modifier produced.
+    deferred: bool,
+    /// The body names `x`: the derived verb is a dyad only.
+    dyadic: bool,
+    /// The name this definition is being given, so that its body can
+    /// mention it.
+    self_name: Option<String>,
+}
+
+fn mod_source(
+    name: &str,
+    conjunction: bool,
+    body: Vec<Vec<Frag>>,
+    self_name: Option<&str>,
+) -> ModSource {
+    let dyadic = mentions(&body, "x");
+    ModSource {
+        name: name.to_string(),
+        conjunction,
+        deferred: dyadic || mentions(&body, "y"),
+        dyadic,
+        self_name: self_name.map(str::to_string),
+        body,
+    }
+}
+
+thread_local! {
+    /// The explicit modifiers whose bodies are being parsed right now, by
+    /// address. A body that derives the modifier it belongs to would parse
+    /// for ever, so the nesting is what catches it.
+    static DERIVING: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Removes the innermost derivation from the in-progress list however it
+/// ends.
+struct Deriving;
+
+impl Drop for Deriving {
+    fn drop(&mut self) {
+        DERIVING.with(|d| {
+            d.borrow_mut().pop();
+        });
+    }
+}
+
+/// Apply an explicit modifier to its operands.
+///
+/// The operands are substituted into the body under the names J gives them
+/// — `u` and `v` for verbs, `m` and `n` for nouns — and the body is parsed
+/// with those substitutions in place. A body that names an argument becomes
+/// the derived verb's body; one that does not is a sentence, and its value
+/// (usually a tacit verb) is what the derivation produced.
+fn derive_explicit(
+    src: &Arc<ModSource>,
+    u: Frag,
+    v: Option<Frag>,
+    scope: &Names,
+    span: Span,
+) -> Result<Frag> {
+    let addr = Arc::as_ptr(src) as usize;
+    let recursive = DERIVING.with(|d| {
+        let mut d = d.borrow_mut();
+        if d.contains(&addr) {
+            return true;
+        }
+        d.push(addr);
+        false
+    });
+    if recursive {
+        return Err(Error::not_yet(
+            "an explicit modifier whose body derives the modifier itself",
+            span,
+        ));
+    }
+    let _guard = Deriving;
+    let mut body = src.body.clone();
+    bind_operand(&mut body, "u", "m", &u);
+    if let Some(v) = &v {
+        bind_operand(&mut body, "v", "n", v);
+    }
+    // The body reads the names the program has given so far; the name this
+    // definition is being given is one of them, and it stands for the
+    // modifier rather than for a verb.
+    let mut inner = scope.clone();
+    if let Some(n) = &src.self_name {
+        inner.verbs.remove(n);
+        inner.nouns.remove(n);
+        inner.mods.insert(n.clone(), (src.conjunction, Modifier::Explicit(Arc::clone(src))));
+    }
+    if src.deferred {
+        let verb = build_definition(body, src.dyadic, &src.name, &inner, None)?;
+        return Ok(Frag::Verb(VerbFrag::V(verb), span));
+    }
+    // The derivation-time phase: the body is a sentence, parsed here and
+    // now, and what it reduces to is what the modifier made.
+    let mut lines: Vec<Vec<Frag>> = Vec::new();
+    let mut k = 0usize;
+    while k < body.len() {
+        let line = collect_definitions(&body, &mut k, &mut inner, false)?;
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    if lines.len() != 1 {
+        return Err(Error::not_yet(
+            "an explicit modifier that names no argument and is more than one sentence",
+            span,
+        ));
+    }
+    let mut sentence = lines.pop().expect("checked length");
+    substitute_names(&mut sentence, &inner.verbs, &inner.mods);
+    match reduce_to_fragment(sentence, &inner)? {
+        Some(f) if f.is_real_verb() || f.is_noun() => Ok(respan(f, span)),
+        Some(f) => Err(Error::not_yet(
+            format!("an explicit modifier that produces {}", part_of_speech(&f)),
+            span,
+        )),
+        None => Err(Error::parse("syntax error", span)),
+    }
+}
+
+/// What part of speech a fragment belongs to, for a diagnostic.
+fn part_of_speech(f: &Frag) -> &'static str {
+    match f {
+        Frag::Adverb(..) => "an adverb",
+        Frag::Conj(..) => "a conjunction",
+        Frag::Gerund(..) => "a gerund",
+        _ => "no value",
+    }
+}
+
+/// Put an operand in the place of the name it arrives under. A verb operand
+/// answers to `u` (or `v`), a noun one to `m` (or `n`); the other name is
+/// left alone, so a body that reaches for it reports an undefined name, as
+/// the reference does.
+fn bind_operand(body: &mut [Vec<Frag>], verb_name: &str, noun_name: &str, operand: &Frag) {
+    let wanted = if operand.is_real_verb() { verb_name } else { noun_name };
+    for line in body.iter_mut() {
+        for i in 0..line.len() {
+            let Frag::Name(n, span) = &line[i] else { continue };
+            if n != wanted {
+                continue;
+            }
+            let span = *span;
+            // An assignment to the name is a definition of it, not a use.
+            if line.get(i + 1).is_some_and(Frag::is_assign) {
+                continue;
+            }
+            line[i] = respan(operand.clone(), span);
+        }
+    }
 }
 
 /// True when nothing in this sentence can have an effect beyond its value.
@@ -535,9 +775,7 @@ fn parse_block(cur: &mut Cursor<'_>, scope: &mut Names, stop: &[&str]) -> Result
             Some(Item::Word { word, .. }) if stop.contains(word) => return Ok(out),
             Some(Item::Sentence(frags)) => {
                 cur.at += 1;
-                let stmt = scope.parse_sentence(frags.clone())?;
-                scope.record(&stmt);
-                out.push(stmt);
+                out.push(scope.parse_sentence(frags.clone())?);
             }
             Some(Item::Word { .. }) => out.push(parse_control(cur, scope)?),
         }
@@ -679,7 +917,7 @@ fn one_expr(mut stmts: Vec<Expr>, span: Span) -> Result<Expr> {
 fn substitute_names(
     sentence: &mut [Frag],
     verbs: &HashMap<String, Verb>,
-    mods: &HashMap<String, (bool, &'static str)>,
+    mods: &HashMap<String, (bool, Modifier)>,
 ) {
     for i in 0..sentence.len() {
         let Frag::Name(name, span) = &sentence[i] else { continue };
@@ -689,9 +927,12 @@ fn substitute_names(
         }
         if let Some(v) = verbs.get(&name) {
             sentence[i] = Frag::Verb(VerbFrag::V(v.clone()), span);
-        } else if let Some(&(conj, glyph)) = mods.get(&name) {
-            sentence[i] =
-                if conj { Frag::Conj(glyph, span) } else { Frag::Adverb(glyph, span) };
+        } else if let Some((conj, m)) = mods.get(&name) {
+            sentence[i] = if *conj {
+                Frag::Conj(m.clone(), span)
+            } else {
+                Frag::Adverb(m.clone(), span)
+            };
         }
     }
 }
@@ -726,8 +967,8 @@ enum Frag {
     /// A name used as a value, or an assignment target.
     Name(String, Span),
     Verb(VerbFrag, Span),
-    Adverb(&'static str, Span),
-    Conj(&'static str, Span),
+    Adverb(Modifier, Span),
+    Conj(Modifier, Span),
     LParen(Span),
     RParen(Span),
     AssignLocal(Span),
@@ -737,13 +978,14 @@ enum Frag {
     VerbDef(String, Verb, Span),
     /// A finished modifier definition: `m =. /`. Like `VerbDef`, it belongs
     /// to no part of speech and can only end a sentence. The flag says
-    /// whether the spelling is a conjunction.
-    ModDef(String, bool, &'static str, Span),
+    /// whether it is a conjunction.
+    ModDef(String, bool, Modifier, Span),
     /// A control word, with the name `for_i.` binds when it has one. Only a
     /// definition's body may hold one.
     Control(&'static str, Option<String>, Span),
-    /// `{{` and `}}`, the direct definition's brackets.
-    DdOpen(Span),
+    /// `{{` and `}}`, the direct definition's brackets. The opening one
+    /// carries the letter of a `{{)a` marker where the source wrote one.
+    DdOpen(Option<char>, Span),
     DdClose(Span),
     /// A gerund: the verbs `` ` `` has tied together. J spells one as a
     /// boxed noun; here it is a fragment of its own, and `@.` is what reads
@@ -772,10 +1014,10 @@ impl Frag {
             | Frag::RParen(s)
             | Frag::AssignLocal(s)
             | Frag::AssignGlobal(s)
-            | Frag::DdOpen(s)
             | Frag::DdClose(s)
             | Frag::VerbDef(_, _, s)
             | Frag::ModDef(_, _, _, s) => *s,
+            Frag::DdOpen(_, s) => *s,
             Frag::Control(_, _, s) => *s,
             Frag::Gerund(_, s) => *s,
         }
@@ -1202,9 +1444,9 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
                     } else if let Some(value) = noun_word(word) {
                         Frag::Noun(Expr::Const(value, sp))
                     } else if let Some(g) = adverb(word) {
-                        Frag::Adverb(g, sp)
+                        Frag::Adverb(Modifier::Prim(g), sp)
                     } else if let Some(g) = conjunction(word) {
-                        Frag::Conj(g, sp)
+                        Frag::Conj(Modifier::Prim(g), sp)
                     } else if let Some((cw, suffix)) = control_word(word) {
                         Frag::Control(cw, suffix, sp)
                     } else {
@@ -1228,7 +1470,27 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
         }
         // `{{` and `}}` bracket J's direct definition; neither is two words.
         if c == '{' && at(i + 1) == Some('{') {
-            out.push(Frag::DdOpen(span(i, i + 2)));
+            // `{{)a` and its relatives state the definition's part of
+            // speech instead of leaving it to the words of the body. The
+            // reference takes the marker only where nothing follows it on
+            // the line, and reads `{{)a u y }}` as a domain error.
+            let marker = match (at(i + 2), at(i + 3)) {
+                (Some(')'), Some(m)) if m.is_ascii_alphabetic() => Some(m),
+                _ => None,
+            };
+            if let Some(m) = marker {
+                if cs[i + 4..].iter().any(|&(_, c)| !c.is_whitespace()) {
+                    return Err(Error::parse(
+                        format!("`)`{m} names the part of speech of a direct definition, \
+                                 and has to be the last thing on its line"),
+                        span(i, i + 4),
+                    ));
+                }
+                out.push(Frag::DdOpen(Some(m), span(i, i + 4)));
+                i += 4;
+                continue;
+            }
+            out.push(Frag::DdOpen(None, span(i, i + 2)));
             i += 2;
             continue;
         }
@@ -1280,9 +1542,9 @@ fn symbol_frag(word: &str, span: Span) -> Option<Frag> {
             if let Some(v) = verb_for(word) {
                 Frag::Verb(VerbFrag::V(v), span)
             } else if let Some(g) = adverb(word) {
-                Frag::Adverb(g, span)
+                Frag::Adverb(Modifier::Prim(g), span)
             } else {
-                Frag::Conj(conjunction(word)?, span)
+                Frag::Conj(Modifier::Prim(conjunction(word)?), span)
             }
         }
     })
@@ -1570,44 +1832,42 @@ enum Rule {
     Paren9,
 }
 
-fn parse_sentence(tokens: Vec<Frag>, nouns: &HashSet<String>) -> Result<Expr> {
-    let sentence = sentence_span(&tokens);
+/// Run the parse table over a sentence's words. The result is the one
+/// fragment left standing, or None where the sentence did not reduce to
+/// one — which is the reference's syntax error.
+fn reduce_to_fragment(tokens: Vec<Frag>, scope: &Names) -> Result<Option<Frag>> {
     check_parens(&tokens)?;
     let mut stack: Vec<Frag> = Vec::new();
     for frag in tokens.into_iter().rev() {
         stack.insert(0, frag);
-        reduce(&mut stack, nouns)?;
+        reduce(&mut stack, scope)?;
     }
     stack.insert(0, Frag::Mark);
-    reduce(&mut stack, nouns)?;
+    reduce(&mut stack, scope)?;
     if stack.len() == 2 {
-        match stack.pop().expect("checked length") {
-            f @ (Frag::Noun(_) | Frag::Name(..)) => return as_noun(f),
-            Frag::VerbDef(name, verb, span) => return Ok(Expr::VerbDef { name, verb, span }),
-            Frag::ModDef(name, conjunction, spelling, span) => {
-                return Ok(Expr::ModDef {
-                    name,
-                    spelling: spelling.to_string(),
-                    conjunction,
-                    span,
-                })
-            }
-            Frag::Verb(VerbFrag::V(_), span) => {
-                return Err(Error::not_yet(
-                    "tacit verb definitions (a sentence that is a verb)",
-                    span,
-                ));
-            }
-            Frag::Adverb(_, span) | Frag::Conj(_, span) => {
-                return Err(Error::not_yet(
-                    "displaying a modifier (a sentence that is an adverb or a conjunction)",
-                    span,
-                ));
-            }
-            _ => {}
-        }
+        return Ok(Some(stack.pop().expect("checked length")));
     }
-    Err(Error::parse("syntax error", sentence))
+    Ok(None)
+}
+
+/// The IR statement a finished sentence stands for. `whole` is the span of
+/// the sentence, for the complaint that it has no reading at all.
+fn lower_sentence(frag: Option<Frag>, whole: Span) -> Result<Expr> {
+    match frag {
+        Some(f @ (Frag::Noun(_) | Frag::Name(..))) => as_noun(f),
+        Some(Frag::VerbDef(name, verb, span)) => Ok(Expr::VerbDef { name, verb, span }),
+        Some(Frag::ModDef(name, conjunction, m, span)) => {
+            Ok(Expr::ModDef { name, spelling: m.spelling(), conjunction, span })
+        }
+        Some(Frag::Verb(VerbFrag::V(_), span)) => {
+            Err(Error::not_yet("tacit verb definitions (a sentence that is a verb)", span))
+        }
+        Some(Frag::Adverb(_, span) | Frag::Conj(_, span)) => Err(Error::not_yet(
+            "displaying a modifier (a sentence that is an adverb or a conjunction)",
+            span,
+        )),
+        _ => Err(Error::parse("syntax error", whole)),
+    }
 }
 
 /// Report an unbalanced parenthesis at the parenthesis itself, before the
@@ -1640,8 +1900,8 @@ fn sentence_span(tokens: &[Frag]) -> Span {
         .unwrap_or_else(|| Span::new(0, 0))
 }
 
-fn reduce(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<()> {
-    while apply(stack, nouns)? {}
+fn reduce(stack: &mut Vec<Frag>, scope: &Names) -> Result<()> {
+    while apply(stack, scope)? {}
     Ok(())
 }
 
@@ -1713,7 +1973,7 @@ fn respan(f: Frag, to: Span) -> Frag {
     }
 }
 
-fn apply(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<bool> {
+fn apply(stack: &mut Vec<Frag>, scope: &Names) -> Result<bool> {
     let Some(rule) = match_rule(stack) else {
         return Ok(false);
     };
@@ -1744,7 +2004,7 @@ fn apply(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<bool> {
             let mut t = take(stack, 1..3);
             let a = t.pop().expect("two slots");
             let u = t.pop().expect("two slots");
-            let frag = apply_adverb(u, a)?;
+            let frag = apply_adverb(u, a, scope)?;
             stack.insert(1, frag);
         }
         Rule::Conj5 => {
@@ -1752,7 +2012,7 @@ fn apply(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<bool> {
             let v = t.pop().expect("three slots");
             let c = t.pop().expect("three slots");
             let u = t.pop().expect("three slots");
-            let frag = apply_conj(u, c, v)?;
+            let frag = apply_conj(u, c, v, scope)?;
             stack.insert(1, frag);
         }
         Rule::Fork6 => {
@@ -1767,7 +2027,7 @@ fn apply(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<bool> {
             let mut t = take(stack, 1..3);
             let b = t.pop().expect("two slots");
             let a = t.pop().expect("two slots");
-            let frag = apply_bident(a, b, nouns)?;
+            let frag = apply_bident(a, b, &scope.nouns)?;
             stack.insert(1, frag);
         }
         Rule::Assign8 => {
@@ -1853,11 +2113,15 @@ fn dyad(x: Frag, v: Frag, y: Frag) -> Result<Frag> {
     Ok(Frag::Noun(Expr::Dyad { verb, x: Box::new(x), y: Box::new(y), span }))
 }
 
-fn apply_adverb(u: Frag, a: Frag) -> Result<Frag> {
-    let Frag::Adverb(glyph, aspan) = a else {
+fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
+    let Frag::Adverb(m, aspan) = a else {
         return Err(Error::internal("expected an adverb fragment"));
     };
     let span = Span::merge(u.span(), aspan);
+    let glyph = match m {
+        Modifier::Prim(g) => g,
+        Modifier::Explicit(src) => return derive_explicit(&src, u, None, scope, span),
+    };
     // `}` takes either operand: `m}` amends at the indices m, and `u}`
     // computes them from the arguments instead.
     if glyph == "}" {
@@ -1907,11 +2171,15 @@ fn apply_adverb(u: Frag, a: Frag) -> Result<Frag> {
     Ok(Frag::Verb(VerbFrag::V(derived), span))
 }
 
-fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
-    let Frag::Conj(glyph, cspan) = c else {
+fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
+    let Frag::Conj(m, cspan) = c else {
         return Err(Error::internal("expected a conjunction fragment"));
     };
     let span = Span::merge(Span::merge(u.span(), cspan), v.span());
+    let glyph = match m {
+        Modifier::Prim(g) => g,
+        Modifier::Explicit(src) => return derive_explicit(&src, u, Some(v), scope, span),
+    };
     match glyph {
         "\"" => {
             let f = verb_operand(u, span)?;
@@ -2083,14 +2351,14 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
         // Threads reach outside the expression, which the sandbox closes;
         // libjay's own parallelism is not something a sentence asks for.
         // That is a property of libjay, not a queue position.
-        "T." => Err(Error::language(
-            "T. starts J's own threads, which libjay's sandbox does not open",
+        "T." => Err(Error::sandbox(
+            "T. starts J's own threads, which libjay does not open",
             span,
         )),
         "t." => Err(Error::not_yet("the Taylor series (u t. n)", span)),
         "t:" => Err(Error::not_yet("the weighted Taylor series (u t: n)", span)),
         "." => Err(Error::not_yet("the inner product (u . v)", span)),
-        "!:" => Err(Error::not_yet("the foreign conjunction (m !: n)", span)),
+        "!:" => foreign(&u, &v, span),
         // `u : v` is J's monad/dyad conjunction. The explicit definitions
         // spelled `3 : '…'` and `4 : '…'` are read by the lexer and never
         // reach here.
@@ -2153,6 +2421,59 @@ fn series_parameters(f: &Frag, span: Span) -> Result<Vec<crate::complex::Cx>> {
     match arr.data.cast(crate::dtype::DType::Complex) {
         Some(Data::Complex(v)) => Ok(v.as_slice().to_vec()),
         _ => Err(Error::parse("hypergeometric parameters are numbers", span)),
+    }
+}
+
+/// `m !: n`: J's foreigns, the family that reaches outside the language.
+///
+/// Three of them are libjay's. `1!:1` reads a line from the input source
+/// and `1!:2` writes one to the output sink — the two halves of the stdio
+/// the sandbox opens — and `3!:0` names an element type, which computes
+/// and touches nothing.
+///
+/// The rest divide in two, and the division is the whole point of the
+/// dispatcher. A foreign that would reach a file, a directory, the host or
+/// a script is closed by the sandbox and no release will open it; one that
+/// only computes is a queue position, and names itself as one.
+fn foreign(u: &Frag, v: &Frag, span: Span) -> Result<Frag> {
+    let family = foreign_number(u, span)?;
+    let member = foreign_number(v, span)?;
+    let prim = |name, monad, dyad| {
+        Ok(Frag::Verb(
+            VerbFrag::V(Verb::Prim(Prim { name, monad, dyad, ranks: [RANK_INF; 3] })),
+            span,
+        ))
+    };
+    let closed = |what: &str| {
+        Err(Error::sandbox(format!("{family}!:{member} {what}, which is outside the program"), span))
+    };
+    match (family, member) {
+        (1, 1) => prim("1!:1", MonadOp::ReadStream, DyadOp::None),
+        (1, 2) => prim("1!:2", MonadOp::None, DyadOp::WriteStream),
+        (3, 0) => prim("3!:0", MonadOp::TypeCode, DyadOp::None),
+        (0, _) => closed("runs a script file"),
+        // The rest of the file family: stdin and stdout are the streams the
+        // sandbox opens, and every other member of it is the filesystem.
+        (1, _) => closed("reaches the filesystem"),
+        (2, _) => closed("reaches the host — its environment, its shell, its processes"),
+        (6, _) => closed("reads the clock"),
+        (15, _) => closed("calls into a shared library"),
+        _ => Err(Error::not_yet(format!("the foreign {family}!:{member}"), span)),
+    }
+}
+
+/// One side of `m !: n`: a whole number, known now. A foreign is chosen by
+/// its two numbers, so neither may be computed.
+fn foreign_number(f: &Frag, span: Span) -> Result<i64> {
+    if f.is_verb() {
+        return Err(Error::parse("a foreign is spelled m!:n, with two numbers", span));
+    }
+    let Some(arr) = as_const(f) else {
+        return Err(Error::not_yet("a computed foreign number (m!:n)", span));
+    };
+    match arr.to_i64_vec().as_deref() {
+        Some([n]) if *n >= 0 => Ok(*n),
+        _ => Err(Error::parse("a foreign is spelled m!:n, with two whole numbers", span)),
     }
 }
 
@@ -2330,8 +2651,8 @@ fn apply_assign(target: Frag, value: Frag, scope: Scope) -> Result<Frag> {
             Frag::Verb(VerbFrag::Cap, _) => Err(Error::not_yet("assigning [: on its own", span)),
             // Naming a modifier is settled at parse time too: the name
             // stands for the spelling wherever a later sentence writes it.
-            Frag::Adverb(g, _) => Ok(Frag::ModDef(name, false, g, span)),
-            Frag::Conj(g, _) => Ok(Frag::ModDef(name, true, g, span)),
+            Frag::Adverb(m, _) => Ok(Frag::ModDef(name, false, m, span)),
+            Frag::Conj(m, _) => Ok(Frag::ModDef(name, true, m, span)),
             v if v.is_noun() => {
                 let value = as_noun(v)?;
                 Ok(Frag::Noun(Expr::Assign { name, value: Box::new(value), scope, span }))
@@ -3144,13 +3465,37 @@ mod tests {
     }
 
     #[rstest]
-    #[case("f =. 1 : 'y + 1'", "explicit adverbs and conjunctions")]
     #[case("f =. 13 : 'y + 1'", "tacit definitions")]
-    #[case("f =. {{ u y }}", "direct definitions of adverbs and conjunctions")]
     fn definition_forms_libjay_has_not_are_named(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);
         assert!(e.msg.contains(msg), "{}", e.msg);
+    }
+
+    /// `1 :` and `2 :` say the part of speech; a `{{ }}` leaves it to the
+    /// operand names its body uses.
+    #[rstest]
+    #[case("f =. 1 : 'y + 1'", Some(false))]
+    #[case("f =. 2 : 'u v y'", Some(true))]
+    #[case("f =. {{ y + 1 }}", None)]
+    #[case("f =. {{ u y }}", Some(false))]
+    #[case("f =. {{ m + y }}", Some(false))]
+    #[case("f =. {{ u v y }}", Some(true))]
+    #[case("f =. {{ v y }}", Some(true))]
+    #[case("f =. {{ n + y }}", Some(true))]
+    #[case("f =. {{ u n y }}", Some(true))]
+    #[case("f =. {{)a\nu y\n}}", Some(false))]
+    #[case("f =. {{)c\nu v y\n}}", Some(true))]
+    #[case("f =. {{)v\ny\n}}", None)]
+    fn an_explicit_definitions_part_of_speech(#[case] src: &str, #[case] want: Option<bool>) {
+        match (one(src), want) {
+            (Expr::ModDef { name, conjunction, .. }, Some(conj)) => {
+                assert_eq!(name, "f");
+                assert_eq!(conjunction, conj, "{src:?}");
+            }
+            (Expr::VerbDef { name, .. }, None) => assert_eq!(name, "f"),
+            (other, _) => panic!("expected {want:?} for {src:?}, got {other:?}"),
+        }
     }
 
     #[test]

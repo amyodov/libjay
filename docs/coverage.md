@@ -460,8 +460,9 @@ compiler was given, and `⎕UCS` converts between characters and codepoints.
 Assigning any of them is refused — the dialect fixed them before the
 program ran. The ones that would read a clock, a workspace or a filesystem
 (`⎕TS`, `⎕AI`, `⎕FIO` and their relatives) are refused with "closed by the
-sandbox", which is the sandbox contract speaking rather than a queue
-position.
+sandbox", which is the sandbox speaking rather than a queue position — see
+"Sandbox" below. `⎕` and `⍞` on their own are input rather than names: see
+the same section.
 
 An axis specification `f[k]` is supported for the four spellings where an
 explicit axis is the whole point: `f/[k]` and `f⌿[k]` both reduce axis k,
@@ -784,9 +785,41 @@ J writes it four ways. `3 : '…'` is a monad whose argument arrives as `y`;
 `4 : '…'` is a dyad with `x` and `y` as well. Either with `0` in place of
 the string takes its body from the lines below, ending at a line that is a
 lone `)`. `{{ … }}` is the direct form, on one line or over several, and its
-own words decide its valence: a body that mentions `x` is a dyad. A body
-that mentions `u`, `v`, `m` or `n` is a modifier in J, and libjay says so by
-name rather than guessing — as it does for `1 :`, `2 :` and `13 :`.
+own words decide its valence: a body that mentions `x` is a dyad. `13 : '…'`,
+which reads an explicit body and writes the tacit verb that matches it, is
+named as a gap.
+
+### Explicit adverbs and conjunctions
+
+`1 : '…'` is an adverb and `2 : '…'` a conjunction; `1 : 0` and `2 : 0` take
+the body from the lines below in the same way, and a `{{ … }}` whose body
+mentions an operand name is one too. The operands arrive as `u` and `v` when
+they are verbs and as `m` and `n` when they are nouns — the same operand
+under two names, and reaching for the one the operand is not gives an
+undefined name, as the reference does.
+
+A `{{ … }}` is read for its part of speech rather than told: a body that
+mentions `v` or `n` is a conjunction, one that mentions `u` or `m` is an
+adverb, and one that mentions neither is a verb. A marker line — `{{)a`,
+`{{)c`, `{{)v`, `{{)d`, `{{)m` — states it outright instead, and the
+reference takes a marker only where nothing else stands on its line.
+`{{)n`, which makes a noun of the body's text, is named as a gap.
+
+The body runs at one of two moments, and which one it is depends on whether
+it mentions an argument. A body that mentions `x` or `y` becomes the body of
+the DERIVED VERB, run when that verb is applied to its arguments; its valence
+follows the same rule an explicit verb's does, so `1 : 'x u y'` derives a
+dyad and nothing else and `1 : 'u u y'` a monad and nothing else. A body
+that mentions neither runs at DERIVATION, when the modifier meets its
+operands, and what it produces is what the modifier produced: `1 : 'u @ u'`
+applied to `+:` is the tacit verb `+:@+:`, and `1 : '3 + 4'` is the noun 7.
+
+libjay derives at parse time, so both phases are settled before the program
+runs: the operands are substituted into the body's words and the body is
+parsed with them in place, which is what J's substitution rule describes.
+The consequence is that a body which derives its own modifier — J's way of
+writing a recursive one — would parse for ever, and libjay names it as a gap
+rather than looping.
 
 APL writes it two ways. `{…}` is a dfn: `⍵` is the right argument, `⍺` the
 left, `⋄` and a line break separate its statements, and it nests. `∇ Z←L F R;a`
@@ -961,6 +994,50 @@ compiled at build time: WGSL is generated and handed to the driver when a
 program first runs on a device, and the compiled pipelines are cached per
 kernel and entry point.
 
+## Sandbox
+
+libjay runs an expression, not a program on a machine. Standard input,
+standard output and standard error are open; nothing else is. That is one
+policy over two surfaces — the Rust library, the Python module and the C
+ABI all get the same one — and it is libjay's own, not a property of J or
+of APL. So a refusal it makes carries its own error class, `Sandbox`,
+labelled **closed by the sandbox**, and it reads as neither of the other
+two: not "not in the language" (the feature is in the language) and not
+"not supported yet" (no release will open it).
+
+**Open.** Output: J's `echo`, APL's `⎕←` and `⍞←`, and J's `x 1!:2 ]2`,
+which writes its left argument as it displays plus a newline and yields it.
+Input: APL's `⍞` (one line, as a character vector, with no terminator),
+APL's `⎕` (one line, evaluated as APL in the program's own dialect and over
+its own names, through the same machinery `⍎` uses), and J's `1!:1 ]1` (one
+line, as a character vector). The host decides what those are attached to:
+the process's stdin and stdout by default, a callable or a callback where
+the embedding says so, and nothing at all for `Program::run` and `jay_run`,
+where an expression that reads reports that it has no input source rather
+than reading something. An empty line is a line; the end of the input is a
+diagnostic, never an empty result.
+
+**Closed.** Files and directories (J's `1!:` family beyond the two stream
+forms — a boxed file name and any stream number but 1 and 2 alike), scripts
+(`0!:`), the host and its environment (`2!:`), the clock and sleeping
+(`6!:`), shared libraries (`15!:`), J's own threads (`T.`), and the
+`⎕`-names that read a clock, a workspace or a filesystem (`⎕TS`, `⎕AI`,
+`⎕FIO` and their relatives). Each names what it would have reached: "1!:21
+reaches the filesystem, which is outside the program".
+
+**Neither.** A foreign that only computes is an ordinary queue position and
+says "not supported yet" with its number: `9!:18` (the settings), `3!:1`
+and the rest of the conversions, `4!:` (names), `5!:` (representation).
+`3!:0` is implemented — it is the type code J reports for an element type
+(boolean 1, character 2, integer 4, float 8, complex 16, box 32, extended
+64, rational 128), which is cheap and useful for a test that wants to name
+a type.
+
+Executing a string (`". y`, `⍎ y`) is inside the sandbox rather than a hole
+in it: the nested program reaches exactly what the caller reaches, and `⎕`
+is that same machinery over a line that was read rather than a string that
+was written.
+
 ## The reference oracles
 
 Two interpreters are run as black-box subprocesses — fed an expression on
@@ -1016,6 +1093,21 @@ oracle directly, one entry per line of
   `6686425096436r2128355211423` there). Both are within tolerance of the
   argument, and every value with a nice rational nearby — `0.1`, `1.5`,
   `2.5` — agrees exactly.
+- `3!:0` reports the storage a value actually has, and libjay's storage of
+  a J LITERAL is not always J's: jconsole narrows one whose atoms are all 0
+  or 1 to boolean and answers 1, where libjay keeps `1` and `1 0 1` as
+  integers and answers 4. Everything computed agrees — `3!:0 (1=1)` is 1 on
+  both sides, `3!:0 (i.5)` is 4 on both — and every other type code matches
+  exactly.
+- Neither `⍞` nor `⎕` is in the APL corpus: `jay-corpus` runs one process
+  per sentence with nowhere to put a line of input for it. Two things they
+  would pin if it could. GNU APL prints a `⎕:` prompt before reading an
+  evaluated line and libjay prints nothing — a prompt belongs to a REPL,
+  and libjay is not one. And GNU APL ends the output line when the input
+  line that wrote it ends, so a bare `⍞←'ab'` there looks as though it
+  ended the line; libjay writes exactly the characters, which is what makes
+  `⍞←'ab' ⋄ ⍞←'cd'` one `abcd` on both sides. tests/input.rs holds libjay
+  to both.
 - Catenating a boxed array to an unboxed one is a type error in both
   languages. J agrees; APL2 encloses the simple items instead.
 - J's `$:` inside an explicit definition names that definition, which is
@@ -1112,28 +1204,32 @@ sections above is also collected here.
   (real, imaginary), which is what J's `/:` answers; the ordering verbs
   still refuse complex operands, because a permutation is not a claim about
   size.
-- Adverb and conjunction DEFINITIONS are still to come — J's `1 :` and
-  `2 :`, that is; naming an existing one (`m =. /`) works, and APL's dfn
-  operators (`⍺⍺`, `⍵⍵`) do. Named on their own, beyond what
+- An explicit modifier whose body derives the modifier itself is refused:
+  libjay derives at parse time, so the body would be parsed for ever.
+  Recursion inside the derived verb's own body, by `$:` or by a verb's name,
+  works as it does anywhere else. `13 : '…'` and `{{)n` are gaps too.
+- Named on their own, beyond what
   the tables above already mark "not supported yet": J's dyad of `;:` (the
   sequential machine), `s:` (symbols), `$.` (sparse), `` `: `` (evoke
   gerund), `t.` and `t:` (the Taylor series), `..`
   and `.:` (even and odd), a NEGATIVE block size in a tessellation,
   a characteristic of `b.` other than `0`, and `!.` as
   a fill on any verb but `|.`; APL's `⍢` (under), `⌺` (stencil), `⍠`
-  (variant), `⌶` (I-beam), `⍞` (character I/O), a nested argument to
+  (variant), `⌶` (I-beam), a nested argument to
   dyadic `⍕`, and a label sharing a definition with a control structure.
-  The five APL glyphs are reported by NAME rather than as unknown
+  The four APL glyphs are reported by NAME rather than as unknown
   characters: a glyph the language has and libjay has not reached is a
   queue position, and the diagnostic says which one. `T.` is not a queue position: it
-  starts J's own threads, which the sandbox does not open, and `d.` `D.`
-  `D:` are not in the language the reference implements at all.
+  starts J's own threads, which the sandbox does not open (see "Sandbox"
+  above), and `d.` `D.` `D:` are not in the language the reference
+  implements at all.
   J's map `{::`, the index specifications of `{` and `}`, amend with a verb
   operand `u}`, the tessellations `;.3` and `;._3`, the rectangle cut
   `x u;.0 y`, the fill shift `|.!.f`, `f.` (fix), `M.` (memo), `L:` and
   `S:` in both valences, `H.` (the hypergeometric series),
-  `p.` and `p..` (the polynomial verbs) and `m b.` (the boolean and
-  bitwise functions) all work, as do APL's `⍳` on a shape, mixed simple
+  `p.` and `p..` (the polynomial verbs), `m b.` (the boolean and
+  bitwise functions) and the explicit modifiers `1 :`, `2 :` and the
+  `{{ }}` that names an operand all work, as do APL's `⍳` on a shape, mixed simple
   arrays, prototype fills, partitioned enclose at any rank, dyadic `⍕`,
   `⊆`, `⍛`, `f⍤g`, `⌸`, trains, function assignment, the branch `→` and the
   niladic `∇`. Boxes and

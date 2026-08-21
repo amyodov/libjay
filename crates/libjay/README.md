@@ -27,8 +27,12 @@ let value = program.run(&[x], &mut |s| print!("{s}"))?;   // Some(2.8) — the m
 `{name}` holes become parameters. `program.params` reports them in the order
 `run` expects; arguments are positional. `run` returns `Option<Array>` —
 `None` when the last sentence yields no value (an assignment, or `echo`/`⎕←`).
-The closure is the output sink for `echo` and `⎕←`; stdout is the sandbox
-default and no other I/O is open.
+The closure is the output sink for `echo`, `⎕←` and `⍞←`; stdout is the
+sandbox default and no other I/O is open. `run_io` is the same call with an
+input source too — a closure answering one line per call and `None` at the
+end — which is what APL's `⍞` and `⎕` and J's `1!:1 ]1` read; `run` itself
+has none, and an expression that reads says so rather than reading
+anything.
 
 `Dialect` carries the host's settings — today APL's `⎕IO`
 (`Dialect { index_origin: Some(0) }`); J's index origin is 0 and is not

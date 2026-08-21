@@ -144,9 +144,14 @@ fn expr_lines(e: &Expr, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             let _ = writeln!(out, "{pad}  y:");
             expr_lines(y, depth + 2, p, tr, out);
         }
-        Expr::PrintPass { value, .. } => {
-            let _ = writeln!(out, "{pad}print and pass on{}", note(e, tr));
+        Expr::PrintPass { value, bare, .. } => {
+            let end = if *bare { " (no line break)" } else { "" };
+            let _ = writeln!(out, "{pad}print and pass on{end}{}", note(e, tr));
             expr_lines(value, depth + 1, p, tr, out);
+        }
+        Expr::Input { eval, .. } => {
+            let what = if *eval { "reads stdin and runs the line" } else { "reads stdin" };
+            let _ = writeln!(out, "{pad}{what}{}", note(e, tr));
         }
         Expr::Fused { kernel, inputs, orig, .. } => {
             let _ = writeln!(
@@ -372,7 +377,10 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
         let _ = writeln!(out, "{pad}{what}  ranks {}", ranks(v.ranks()));
     };
     match v {
-        Verb::Prim(p) => head(out, &format!("{} primitive", p.name)),
+        Verb::Prim(p) => {
+            let reads = if p.monad == crate::verb::MonadOp::ReadStream { " (reads stdin)" } else { "" };
+            head(out, &format!("{} primitive{reads}", p.name))
+        }
         Verb::Rank(u, r) => {
             head(out, &format!("rank \"{}", ranks(*r)));
             verb_lines(u, depth + 1, p, tr, out);

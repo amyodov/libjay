@@ -247,10 +247,9 @@ fn the_hypergeometric_series_sums_its_parameters() {
 #[test]
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
-        // Explicit modifier definitions and the tacit translator: naming a
-        // PRIMITIVE modifier landed, writing a new one has not.
-        (Lang::J, "adv =. 1 : 'u u y'", "explicit adverbs and conjunctions"),
-        (Lang::J, "con =. 2 : 'u v y'", "explicit adverbs and conjunctions"),
+        // The tacit translator: naming a primitive modifier and writing a
+        // new one both landed, reading an explicit body back as a tacit
+        // verb has not.
         (Lang::J, "f =. 13 : 'y + 1'", "tacit definitions"),
         (Lang::J, "m =. /\nm", "displaying a modifier"),
         (Lang::J, "(^ t. 3) 0", "Taylor"),
@@ -261,7 +260,6 @@ fn the_gaps_this_wave_leaves_name_themselves() {
         (Lang::Apl, "(3 3⍴1)⌺⊢2 3⍴⍳6", "stencil"),
         (Lang::Apl, "1⍠2", "variant"),
         (Lang::Apl, "+⍢-3", "under"),
-        (Lang::Apl, "⍞", "character input"),
         (Lang::Apl, "⌶3", "I-beam"),
     ];
     for (lang, src, what) in cases {

@@ -94,6 +94,18 @@ def _write_stdout(text: str) -> None:
     sys.stdout.write(text)
 
 
+def _read_stdin() -> str | None:
+    """One line of this process's standard input, or None at its end.
+
+    The sandbox opens stdin as it opens stdout, so this is the default for
+    every call; whether stdin is a terminal or a pipe makes no difference.
+    """
+    try:
+        return input()
+    except EOFError:
+        return None
+
+
 class Kernel:
     """A compiled program together with default values for its parameters.
 
@@ -155,9 +167,21 @@ class Kernel:
         """
         return self._inner.upload(value)
 
-    def __call__(self, data: dict | None = None, *, keep_on_device: bool = False):
+    def __call__(
+        self,
+        data: dict | None = None,
+        *,
+        keep_on_device: bool = False,
+        input=_read_stdin,
+    ):
         """Execute; call-time values override bound ones. Returns the value
         of the last sentence, or None when it yields no value.
+
+        `input` is what an expression that reads (APL `⍞` and `⎕`, J
+        `1!:1 ]1`) is answered with: a callable returning one line per call
+        and None at the end of the input. The default reads this process's
+        standard input; None attaches no source at all, and an expression
+        that reads one then says so.
 
         `keep_on_device` returns the value as a :class:`DeviceArray` left
         resident on this kernel's device, so the next call that reads it
@@ -173,7 +197,7 @@ class Kernel:
             raise JayError(
                 "missing value(s) for parameter(s): " + ", ".join(missing)
             ) from None
-        result, _ = self._inner.run(ordered, _write_stdout, False, keep_on_device)
+        result, _ = self._inner.run(ordered, _write_stdout, False, keep_on_device, input)
         return result
 
     def explain(self, data: dict | None = None) -> str:
@@ -191,12 +215,12 @@ class Kernel:
             return self._inner.explain(None)
         return self._inner.explain([values[p] for p in self._params])
 
-    def run_display(self, data: dict | None = None) -> str | None:
+    def run_display(self, data: dict | None = None, *, input=_read_stdin) -> str | None:
         """Execute like __call__, but return the last value formatted for
         display (None when there is no value). Used by the CLI."""
         values = self._defaults if not data else {**self._defaults, **self._check_names(data)}
         ordered = [values[p] for p in self._params]
-        _, display = self._inner.run(ordered, _write_stdout, True)
+        _, display = self._inner.run(ordered, _write_stdout, True, False, input)
         return display
 
     def _check_names(self, data: dict) -> dict:
@@ -257,15 +281,17 @@ class _Lang:
         kernel = Kernel(inner, defaults)
         return kernel.bind(data) if data else kernel
 
-    def __call__(self, source, data: dict | None = None, **opts):
+    def __call__(self, source, data: dict | None = None, *, input=_read_stdin, **opts):
         """Compile, bind and execute in one call; returns the value.
+
+        `input` is the run's input source, as on :meth:`Kernel.__call__`.
 
         The shortcut runs on the CPU and has no device placement: there is
         nowhere in one call to say where, and uploading data for a single
         run would rarely pay for itself. Compile a kernel and
         :meth:`Kernel.deploy` it to use a device.
         """
-        return self.compile(source, data, **opts)()
+        return self.compile(source, data, **opts)(input=input)
 
 
 def _is_template(obj) -> bool:

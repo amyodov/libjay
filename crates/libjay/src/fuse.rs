@@ -394,6 +394,7 @@ fn replayable(e: &Expr) -> bool {
         Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => true,
         Expr::Assign { .. }
         | Expr::PrintPass { .. }
+        | Expr::Input { .. }
         | Expr::Elided { .. }
         | Expr::Control(..)
         | Expr::AmendIndex { .. }
@@ -494,8 +495,8 @@ fn fuse_expr(e: Expr, tol: Tol) -> Expr {
             y: Box::new(fuse_expr(*y, tol)),
             span,
         },
-        Expr::PrintPass { value, span } => {
-            Expr::PrintPass { value: Box::new(fuse_expr(*value, tol)), span }
+        Expr::PrintPass { value, bare, span } => {
+            Expr::PrintPass { value: Box::new(fuse_expr(*value, tol)), bare, span }
         }
         other => other,
     }
@@ -715,6 +716,7 @@ fn uses_land(e: &Expr, name: &str, def: &Expr, tol: Tol) -> Option<usize> {
         Expr::Dyad { x, y, .. } => Some(uses_land(x, name, def, tol)? + uses_land(y, name, def, tol)?),
         Expr::Fused { .. }
         | Expr::Elided { .. }
+        | Expr::Input { .. }
         | Expr::Control(..)
         | Expr::AmendIndex { .. }
         | Expr::VerbDef { .. }
@@ -811,8 +813,9 @@ fn replace_name(e: &Expr, name: &str, def: &Expr) -> Expr {
             value: Box::new(replace_name(value, name, def)),
             span: *span,
         },
-        Expr::PrintPass { value, span } => Expr::PrintPass {
+        Expr::PrintPass { value, bare, span } => Expr::PrintPass {
             value: Box::new(replace_name(value, name, def)),
+            bare: *bare,
             span: *span,
         },
         Expr::Monad { verb, y, span } => Expr::Monad {
@@ -850,6 +853,7 @@ fn free_names(e: &Expr, out: &mut Vec<String>) {
         Expr::Const(..)
         | Expr::Param(..)
         | Expr::Elided { .. }
+        | Expr::Input { .. }
         | Expr::Control(..)
         | Expr::AmendIndex { .. }
         | Expr::VerbDef { .. }
@@ -871,6 +875,7 @@ fn assigns_any(e: &Expr, names: &[String]) -> bool {
         | Expr::Param(..)
         | Expr::Name(..)
         | Expr::Elided { .. }
+        | Expr::Input { .. }
         | Expr::Control(..)
         | Expr::AmendIndex { .. }
         | Expr::VerbDef { .. }
@@ -887,10 +892,11 @@ pub fn is_fused(p: &Program) -> bool {
             | Expr::Param(..)
             | Expr::Name(..)
             | Expr::Elided { .. }
+            | Expr::Input { .. }
             | Expr::Control(..)
             | Expr::AmendIndex { .. }
             | Expr::VerbDef { .. }
-        | Expr::ModDef { .. } => false,
+            | Expr::ModDef { .. } => false,
             Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => any(value),
             Expr::Monad { y, .. } => any(y),
             Expr::Dyad { x, y, .. } => any(x) || any(y),
@@ -919,8 +925,8 @@ pub fn unfused(p: &Program) -> Program {
                     span: *span,
                 }
             }
-            Expr::PrintPass { value, span } => {
-                Expr::PrintPass { value: Box::new(strip(value)), span: *span }
+            Expr::PrintPass { value, bare, span } => {
+                Expr::PrintPass { value: Box::new(strip(value)), bare: *bare, span: *span }
             }
             Expr::Monad { verb, y, span } => {
                 Expr::Monad { verb: verb.clone(), y: Box::new(strip(y)), span: *span }

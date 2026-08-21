@@ -220,6 +220,96 @@ class TestOutput:
         assert apl("⎕←2+2") is None
         assert capsys.readouterr().out == "4\n"
 
+    def test_quote_quad_write_does_not_end_the_line(self, capsys):
+        assert apl("⍞←'ab' ⋄ ⍞←'cd'") is None
+        assert capsys.readouterr().out == "abcd"
+
+    def test_j_write_foreign(self, capsys):
+        assert j("'abc' 1!:2 ]2") == "abc"
+        assert capsys.readouterr().out == "abc\n"
+
+
+def _lines(*lines):
+    """An input source that hands out these lines and then ends."""
+    it = iter(lines)
+    return lambda: next(it, None)
+
+
+class TestInput:
+    def test_character_input(self):
+        assert apl("⍞", input=_lines("hello")) == "hello"
+
+    def test_each_read_takes_the_next_line(self):
+        assert apl("a←⍞ ⋄ b←⍞ ⋄ a,b", input=_lines("one", "two")) == "onetwo"
+
+    def test_evaluated_input(self):
+        assert apl("⎕", input=_lines("2+2")) == 4
+        assert apl("1+⎕", input=_lines("⍳3")).tolist() == [2, 3, 4]
+
+    def test_evaluated_input_sees_the_programs_names(self):
+        assert apl("x←10 ⋄ ⎕", input=_lines("x×2")) == 20
+
+    def test_j_read_foreign(self):
+        assert j("1!:1 ]1", input=_lines("a line")) == "a line"
+        assert j("1!:1 [1", input=_lines("a line")) == "a line"
+
+    def test_end_of_input_is_an_error(self):
+        with pytest.raises(JayError, match="the input has ended"):
+            apl("⍞", input=_lines())
+        with pytest.raises(JayError, match="the input has ended"):
+            apl("a←⍞ ⋄ ⍞", input=_lines("only"))
+
+    def test_no_input_source_is_a_different_error(self):
+        with pytest.raises(JayError, match="no input source attached"):
+            apl("⍞", input=None)
+
+    def test_a_kernel_takes_input_per_call(self):
+        k = apl.compile("⍞")
+        assert k(input=_lines("first")) == "first"
+        assert k(input=_lines("second")) == "second"
+
+    def test_the_readers_own_failure_is_raised(self):
+        def broken():
+            raise RuntimeError("no reading today")
+
+        with pytest.raises(RuntimeError, match="no reading today"):
+            apl("⍞", input=broken)
+
+    def test_stdin_is_the_default(self, monkeypatch):
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO("piped line\n"))
+        assert apl("⍞") == "piped line"
+
+    def test_reading_and_writing_meet(self, capsys):
+        assert j("(1!:1 ]1) 1!:2 ]2", input=_lines("through")) == "through"
+        assert capsys.readouterr().out == "through\n"
+
+
+class TestSandbox:
+    def test_file_foreigns_are_closed(self):
+        for src in ["1!:1 <'/etc/hosts'", "1!:21 <'f'", "2!:5 <'HOME'", "6!:0 ''"]:
+            with pytest.raises(JayError, match="closed by the sandbox"):
+                j(src)
+
+    def test_system_names_that_reach_outside_are_closed(self):
+        for src in ["⎕TS", "⎕AI", "⎕FIO"]:
+            with pytest.raises(JayError, match="closed by the sandbox"):
+                apl(src)
+
+    def test_threads_are_closed(self):
+        with pytest.raises(JayError, match="closed by the sandbox"):
+            j("+ T. 1")
+
+    def test_a_foreign_that_only_computes_is_a_promise(self):
+        with pytest.raises(JayError, match="not supported yet"):
+            j("9!:18 ''")
+
+    def test_the_type_foreign(self):
+        assert j("3!:0 (1.5)") == 8
+        assert j("3!:0 'a'") == 2
+        assert j("3!:0 (i.5)") == 4
+
 
 class TestDialect:
     def test_index_origin(self):
@@ -373,3 +463,12 @@ class TestCli:
 
         assert main(["-e", "(+/ % #) 1 2 3 4"]) == 0
         assert capsys.readouterr().out.strip() == "2.5"
+
+    def test_an_expression_reads_the_process_stdin(self, capsys, monkeypatch):
+        import io
+
+        from jay._cli import main
+
+        monkeypatch.setattr("sys.stdin", io.StringIO("typed in\n"))
+        assert main(["-e", "⍞", "--lang", "apl"]) == 0
+        assert capsys.readouterr().out.strip() == "typed in"

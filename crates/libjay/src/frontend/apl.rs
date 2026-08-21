@@ -202,7 +202,9 @@ enum Tok {
     /// An operator glyph; gone after `fold_operators`.
     Op(OpGlyph),
     Assign,
-    Quad,
+    /// `⎕` or `⍞` standing alone: input where a value belongs, output
+    /// where `←` follows it. `quote` is the `⍞` form.
+    Quad { quote: bool },
     LParen,
     RParen,
     LBracket,
@@ -248,6 +250,11 @@ fn is_operand_end(k: &Tok) -> bool {
             | Tok::Param(_)
             | Tok::Name(_)
             | Tok::Niladic(_)
+            // `⍞` and `⎕` are values where nothing assigns to them, so an
+            // operand ends at one: `⍞,⍞` is a dyad and `⍞[1]` indexes the
+            // line. The `⍞←` form never reaches here — the parser reads
+            // the assignment arrow before it looks left.
+            | Tok::Quad { .. }
             | Tok::RParen
             | Tok::RBracket
     )
@@ -639,13 +646,12 @@ fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         })),
         // The ones that would read a clock, a workspace or a file. The
-        // sandbox is a property of libjay, not a queue position, so this
+        // sandbox is libjay's own policy, not a queue position, so this
         // is a refusal and not a promise.
         "TS" | "AI" | "TC" | "WA" | "SI" | "LC" | "NL" | "EX" | "FIO" | "NA" | "SH" | "CMD"
-        | "MAP" | "SVO" | "SVQ" | "TZ" | "DL" => Err(Error::language(
-            format!("⎕{name} is closed by the sandbox: it reads outside the program"),
-            span,
-        ))?,
+        | "MAP" | "SVO" | "SVQ" | "TZ" | "DL" => {
+            Err(Error::sandbox(format!("⎕{name} reads outside the program"), span))?
+        }
         other => Err(Error::not_yet(format!("the system name ⎕{other}"), span))?,
     })
 }
@@ -658,7 +664,6 @@ fn queued_glyph(ch: char) -> Option<&'static str> {
         '⌺' => "the stencil operator (f⌺w)",
         '⍠' => "the variant operator (f⍠v)",
         '⌶' => "I-beam (⌶)",
-        '⍞' => "character input and output (⍞)",
         _ => return None,
     })
 }
@@ -888,6 +893,14 @@ fn lex_text(
                 });
                 i += clen;
             }
+            // `⍞` has no system-name form: it is always the whole token.
+            '⍞' => {
+                cur.push(Token {
+                    kind: Tok::Quad { quote: true },
+                    span: Span::new(offset + i, offset + i + clen),
+                });
+                i += clen;
+            }
             '⎕' => {
                 let after = i + clen;
                 let mut j = after;
@@ -920,7 +933,10 @@ fn lex_text(
                     i = j;
                     continue;
                 }
-                cur.push(Token { kind: Tok::Quad, span: Span::new(offset + i, offset + after) });
+                cur.push(Token {
+                    kind: Tok::Quad { quote: false },
+                    span: Span::new(offset + i, offset + after),
+                });
                 i = after;
             }
             _ if num_start(text, i) => {
@@ -1697,8 +1713,8 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, d: Rules) -> Re
                             span,
                         };
                     }
-                    Tok::Quad => {
-                        acc = Expr::PrintPass { value: Box::new(acc), span };
+                    Tok::Quad { quote } => {
+                        acc = Expr::PrintPass { value: Box::new(acc), bare: *quote, span };
                     }
                     _ => {
                         return Err(Error::parse(
@@ -1846,7 +1862,8 @@ fn parse_primary(
         }
         Tok::Func(_) => Err(Error::parse("missing right argument", t.span)),
         Tok::Assign => Err(Error::parse("← needs a value on its right", t.span)),
-        Tok::Quad => Err(Error::parse("⎕ is only supported as ⎕← (print)", t.span)),
+        // `⍞` is the line itself, `⎕` the value the line evaluates to.
+        Tok::Quad { quote } => Ok((Expr::Input { eval: !*quote, span: t.span }, hi - 1)),
         Tok::LParen => Err(Error::parse("unmatched (", t.span)),
         Tok::LBracket => Err(Error::parse("unmatched [", t.span)),
         Tok::Semi => Err(Error::parse("; is only meaningful inside index brackets", t.span)),
@@ -2696,6 +2713,7 @@ fn set_scopes(e: &mut Expr, own: &[String]) {
             set_scopes(y, own);
         }
         Expr::PrintPass { value, .. } => set_scopes(value, own),
+        Expr::Input { .. } => {}
         Expr::Control(c, _) => {
             let walk = |b: &mut Vec<Expr>| b.iter_mut().for_each(|s| set_scopes(s, own));
             match &mut **c {
@@ -2952,8 +2970,8 @@ mod tests {
         // The ones that would reach outside the program are refused by
         // name, whether they are read or written.
         let e = err("⎕TS");
-        assert_eq!(e.kind, ErrorKind::Language);
-        assert!(e.msg.contains("closed by the sandbox"), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Sandbox);
+        assert!(e.msg.contains("outside the program"), "{}", e.msg);
     }
 
     // --- the primitive table -------------------------------------------
@@ -3407,8 +3425,7 @@ mod tests {
     #[case("(2+3", "syntax error")]
     #[case("2+3)", "unmatched )")]
     #[case("()", "empty parentheses")]
-    #[case("⎕", "⎕ is only supported")]
-    #[case("/2 3", "needs a function to its left")]
+        #[case("/2 3", "needs a function to its left")]
     fn syntax_errors(#[case] src: &str, #[case] fragment: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::Parse);

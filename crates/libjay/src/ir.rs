@@ -52,8 +52,14 @@ pub enum Expr {
     Control(Box<Control>, Span),
     Monad { verb: Verb, y: Box<Expr>, span: Span },
     Dyad { verb: Verb, x: Box<Expr>, y: Box<Expr>, span: Span },
-    /// APL `⎕← expr`: print, pass the value through.
-    PrintPass { value: Box<Expr>, span: Span },
+    /// APL `⎕← expr` and `⍞← expr`: print, pass the value through. `bare`
+    /// is the `⍞←` form, which writes the characters and nothing else;
+    /// `⎕←` ends the line.
+    PrintPass { value: Box<Expr>, bare: bool, span: Span },
+    /// APL `⍞` and `⎕` standing where a value belongs: one line of input.
+    /// `eval` is the `⎕` form, which runs the line as APL rather than
+    /// taking its characters.
+    Input { eval: bool, span: Span },
     /// A chain of elementwise verbs evaluated in one blockwise pass (see
     /// [`crate::fuse`]). `inputs` are the subtrees the chain reads; `orig`
     /// is the chain itself, which runs whenever the kernel declines.
@@ -167,6 +173,7 @@ impl Expr {
                 | Expr::Name(..)
                 | Expr::Control(..)
                 | Expr::VerbDef { .. }
+                | Expr::Input { .. }
                 | Expr::ModDef { .. } => Vec::new(),
                 Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => vec![value],
                 Expr::AmendIndex { slots, value, .. } => {
@@ -188,7 +195,7 @@ impl Expr {
         match self {
             Expr::Const(_, s) | Expr::Param(_, s) | Expr::Name(_, s) => *s,
             Expr::Control(_, s) => *s,
-            Expr::AmendIndex { span, .. } => *span,
+            Expr::AmendIndex { span, .. } | Expr::Input { span, .. } => *span,
             Expr::Assign { span, .. }
             | Expr::Monad { span, .. }
             | Expr::Dyad { span, .. }
@@ -207,7 +214,7 @@ impl Expr {
         match self {
             Expr::Const(_, s) | Expr::Param(_, s) | Expr::Name(_, s) => *s = to,
             Expr::Control(_, s) => *s = to,
-            Expr::AmendIndex { span, .. } => *span = to,
+            Expr::AmendIndex { span, .. } | Expr::Input { span, .. } => *span = to,
             Expr::Assign { span, .. }
             | Expr::Monad { span, .. }
             | Expr::Dyad { span, .. }
@@ -280,8 +287,35 @@ pub(crate) fn key(e: &Expr) -> usize {
 impl Program {
     /// Execute with one value per parameter, in `params` order.
     /// Returns None when the last sentence yields no value.
+    ///
+    /// The run has no input source: an expression that reads one — APL's
+    /// `⍞` and `⎕`, J's `1!:1` — says so rather than reading anything.
+    /// [`Program::run_io`] is the same run with a source attached.
     pub fn run(&self, args: &[Array], out: &mut dyn FnMut(&str)) -> Result<Option<Array>> {
-        self.exec(args, out, &mut None, None)
+        self.exec(args, out, None, &mut None, None)
+    }
+
+    /// Execute with both halves of the sandbox's stdio wired: `out` takes
+    /// the program's output, `inp` answers its reads with one line at a
+    /// time (no terminator) and None once the input has ended.
+    pub fn run_io(
+        &self,
+        args: &[Array],
+        out: &mut dyn FnMut(&str),
+        inp: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<Option<Array>> {
+        self.exec(args, out, Some(inp), &mut None, None)
+    }
+
+    /// [`Program::run_io`] with the fused kernels placed on `device`.
+    pub fn run_on_io(
+        &self,
+        device: &crate::device::Device,
+        args: &[Array],
+        out: &mut dyn FnMut(&str),
+        inp: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<Option<Array>> {
+        self.exec(args, out, Some(inp), &mut None, Some(device))
     }
 
     /// Execute with the fused kernels placed on `device`.
@@ -295,7 +329,7 @@ impl Program {
         args: &[Array],
         out: &mut dyn FnMut(&str),
     ) -> Result<Option<Array>> {
-        self.exec(args, out, &mut None, Some(device))
+        self.exec(args, out, None, &mut None, Some(device))
     }
 
     /// Execute and record every node's result shape and dtype. The trace is
@@ -308,7 +342,7 @@ impl Program {
         device: Option<&crate::device::Device>,
     ) -> (Result<Option<Array>>, Trace) {
         let mut rec = Some(Trace::new());
-        let r = self.exec(args, out, &mut rec, device);
+        let r = self.exec(args, out, None, &mut rec, device);
         (r, rec.expect("the recorder stays in place"))
     }
 
@@ -316,6 +350,7 @@ impl Program {
         &self,
         args: &[Array],
         out: &mut dyn FnMut(&str),
+        inp: crate::verb::InputFn<'_>,
         rec: &mut Option<Trace>,
         device: Option<&crate::device::Device>,
     ) -> Result<Option<Array>> {
@@ -339,7 +374,9 @@ impl Program {
             rules: self.rules,
         };
         let mut env = Env::new(args.to_vec());
-        let mut ctx = Ctx { cfg, out, env: &mut env, device };
+        let mut inp = inp;
+        let inp = crate::verb::reborrow_input(&mut inp);
+        let mut ctx = Ctx { cfg, out, inp, env: &mut env, device };
         let mut last = None;
         for stmt in &self.stmts {
             // A control word cannot reach the top level in either language,
@@ -811,12 +848,25 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
             let vx = eval(x, ctx, rec)?;
             verb.dyad(&vx, &vy, ctx, *span)
         }
-        Expr::PrintPass { value, .. } => {
+        Expr::PrintPass { value, bare, .. } => {
             let v = eval(value, ctx, rec)?;
             let text = format_array(&v, &ctx.cfg.fmt);
             (ctx.out)(&text);
-            (ctx.out)("\n");
+            // `⍞←` writes the characters and nothing else, so that several
+            // of them build one line; `⎕←` ends the line it wrote.
+            if !bare {
+                (ctx.out)("\n");
+            }
             Ok(v)
+        }
+        // `⍞` takes the line as characters; `⎕` runs it as APL, through the
+        // same machinery `⍎` uses, over the names the program already has.
+        Expr::Input { eval: run_it, span } => {
+            let line = ctx.read_line(*span)?;
+            if !run_it {
+                return Ok(Array::from_chars(line.chars().collect()));
+            }
+            crate::verb::execute_source(&line, true, ctx, *span)
         }
         Expr::Fused { kernel, inputs, orig, .. } => {
             let mut vals = Vec::with_capacity(inputs.len());

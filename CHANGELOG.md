@@ -17,12 +17,46 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   GNU APL's reading, where both are a syntax error.
 - J names adverbs and conjunctions: `m =. /`, `c =. @`. The name is that
   modifier from the next sentence on.
+- J writes adverbs and conjunctions: `1 : '…'`, `2 : '…'`, the `1 : 0` and
+  `2 : 0` bodies on the lines below, and the `{{ … }}` whose body names an
+  operand. Operands arrive as `u` and `v` when they are verbs and as `m`
+  and `n` when they are nouns. A body that names `x` or `y` becomes the
+  derived verb's body; one that names neither runs when the modifier meets
+  its operands, so `1 : 'u @ u'` derives a tacit verb and `1 : '3 + 4'` a
+  noun. A `{{ }}`'s part of speech follows the operand names its body uses,
+  and the `{{)a` `{{)c` `{{)v` `{{)d` `{{)m` markers state it outright.
 - J `L:` and `S:` gained their dyads: both arguments are descended together
   and a side that has reached its level is held while the other descends.
 - J `H.`, the generalised hypergeometric series, with the parameters the
   two lists share cancelled first.
+- The input half of the sandbox. APL `⍞` is one line of input as a
+  character vector and `⎕` is one line evaluated as APL over the program's
+  own names; `⍞←` writes its argument's characters and nothing else, where
+  `⎕←` ends the line. J's `1!:1 ]1` reads a line and `x 1!:2 ]2` writes
+  one. Reading past the end of the input is a reported error, never an
+  empty line.
+- J's `!:` foreign conjunction, as a dispatcher over its two numbers:
+  `1!:1`, `1!:2` and `3!:0` (J's type code for an element type) are
+  implemented, the foreigns that reach a file, a script, the host, the
+  clock or a shared library are closed by the sandbox, and the ones that
+  only compute name themselves as gaps.
+- `Program::run_io` and `Program::run_on_io` attach an input source to a
+  run; `Program::run` and `Program::run_on` are unchanged and have none.
+  In Python, `Kernel.__call__`, `Kernel.run_display` and the one-shot take
+  `input=`, a callable answering one line per call and None at the end; it
+  defaults to this process's standard input, so `libjay -e '⍞' --lang apl`
+  reads what is piped or typed. In C, `jay_run_io` takes a `jay_read_fn`
+  beside the write callback; `jay_run` keeps its signature and its meaning.
+- `ErrorKind::Sandbox`, labelled "closed by the sandbox": a feature the
+  host closes, which is neither "not in the language" nor a promise to
+  implement it later.
 
 ### Changed
+
+- The refusals that were the sandbox speaking now carry
+  `ErrorKind::Sandbox` rather than `ErrorKind::Language`: APL's `⎕TS`,
+  `⎕AI`, `⎕FIO` and their relatives, and J's `T.`. The rendered text still
+  says "closed by the sandbox", now as the error's label.
 
 ### Deprecated
 

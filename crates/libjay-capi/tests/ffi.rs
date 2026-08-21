@@ -442,3 +442,128 @@ fn a_real_argument_can_produce_a_complex_result() {
         jay_program_free(prog);
     }
 }
+
+// --- the input half of stdio ----------------------------------------------
+
+/// A list of lines behind `userdata`, handed out one per call under the
+/// protocol on `jay_read_fn`: the length when the buffer is too small,
+/// otherwise the bytes; negative at the end.
+unsafe extern "C" fn feed(buf: *mut c_char, cap: usize, userdata: *mut c_void) -> i32 {
+    let lines = unsafe { &mut *(userdata as *mut Vec<String>) };
+    if lines.is_empty() {
+        return -1;
+    }
+    let bytes = lines[0].clone().into_bytes();
+    if bytes.len() > cap {
+        // The line stays where it is: libjay will grow its buffer and ask
+        // for the same line again.
+        return bytes.len() as i32;
+    }
+    lines.remove(0);
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, bytes.len()) };
+    bytes.len() as i32
+}
+
+fn run_io_ok(prog: *mut jay_program, lines: &[&str]) -> (*mut jay_result, String) {
+    let mut lines: Vec<String> = lines.iter().map(|s| (*s).to_string()).collect();
+    let mut sink = String::new();
+    let mut out: *mut jay_result = ptr::null_mut();
+    let mut err: *mut jay_error = ptr::null_mut();
+    let rc = unsafe {
+        jay_run_io(
+            prog,
+            ptr::null(),
+            0,
+            Some(collect),
+            &mut sink as *mut String as *mut c_void,
+            Some(feed),
+            &mut lines as *mut Vec<String> as *mut c_void,
+            &mut out,
+            &mut err,
+        )
+    };
+    assert_eq!(rc, 0, "{}", take_message(err));
+    (out, sink)
+}
+
+#[test]
+fn a_read_callback_answers_what_the_program_reads() {
+    let prog = compile_ok("⍞", "apl");
+    let (r, _) = run_io_ok(prog, &["hello"]);
+    assert_eq!(formatted(r), "hello");
+    unsafe {
+        jay_result_free(r);
+        jay_program_free(prog);
+    }
+
+    // The evaluated form runs the line it read.
+    let prog = compile_ok("⎕", "apl");
+    let (r, _) = run_io_ok(prog, &["2+2"]);
+    assert_eq!(result_i64(r), vec![4]);
+    unsafe {
+        jay_result_free(r);
+        jay_program_free(prog);
+    }
+
+    // J reads through the same source, and writes through the sink.
+    let prog = compile_ok("(1!:1 ]1) 1!:2 ]2", "j");
+    let (r, written) = run_io_ok(prog, &["through"]);
+    assert_eq!(formatted(r), "through");
+    assert_eq!(written, "through\n");
+    unsafe {
+        jay_result_free(r);
+        jay_program_free(prog);
+    }
+}
+
+#[test]
+fn a_line_longer_than_the_buffer_arrives_whole() {
+    let long = "x".repeat(9000);
+    let prog = compile_ok("≢⍞", "apl");
+    let (r, _) = run_io_ok(prog, &[&long]);
+    assert_eq!(result_i64(r), vec![9000]);
+    unsafe {
+        jay_result_free(r);
+        jay_program_free(prog);
+    }
+}
+
+#[test]
+fn the_end_of_the_input_is_reported_not_guessed() {
+    let prog = compile_ok("⍞", "apl");
+    let mut lines: Vec<String> = Vec::new();
+    let mut out: *mut jay_result = ptr::null_mut();
+    let mut err: *mut jay_error = ptr::null_mut();
+    let rc = unsafe {
+        jay_run_io(
+            prog,
+            ptr::null(),
+            0,
+            None,
+            ptr::null_mut(),
+            Some(feed),
+            &mut lines as *mut Vec<String> as *mut c_void,
+            &mut out,
+            &mut err,
+        )
+    };
+    assert_ne!(rc, 0);
+    assert!(take_message(err).contains("the input has ended"));
+    unsafe { jay_program_free(prog) };
+}
+
+/// `jay_run` is the signature that was always there, and it stays the run
+/// with no input source at all — a different diagnostic from an exhausted
+/// one, and the reason the new spelling is a new function.
+#[test]
+fn the_old_run_has_no_input_source() {
+    let prog = compile_ok("⍞", "apl");
+    let mut out: *mut jay_result = ptr::null_mut();
+    let mut err: *mut jay_error = ptr::null_mut();
+    let rc = unsafe {
+        jay_run(prog, ptr::null(), 0, None, ptr::null_mut(), &mut out, &mut err)
+    };
+    assert_ne!(rc, 0);
+    assert!(take_message(err).contains("no input source attached"));
+    unsafe { jay_program_free(prog) };
+}

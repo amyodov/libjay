@@ -81,6 +81,18 @@ pub struct jay_value {
 pub type jay_write_fn =
     Option<unsafe extern "C" fn(text_utf8: *const c_char, len: usize, userdata: *mut c_void)>;
 
+/// Input source for `⍞`, `⎕` and J's `1!:1`: one line per call, UTF-8, with
+/// no line terminator and no NUL.
+///
+/// The return is the snprintf one. `0 .. cap` bytes were written to `buf`
+/// and are the line. A value ABOVE `cap` means nothing was written and the
+/// line needs that many bytes: libjay grows the buffer and asks again, so a
+/// source that answers this way must not have consumed the line yet.
+/// Negative is the end of the input.
+#[allow(non_camel_case_types)]
+pub type jay_read_fn =
+    Option<unsafe extern "C" fn(buf: *mut c_char, cap: usize, userdata: *mut c_void) -> c_int>;
+
 // ---------------------------------------------------------------------------
 // internals
 // ---------------------------------------------------------------------------
@@ -346,6 +358,10 @@ pub unsafe extern "C" fn jay_program_param_name(program: *const jay_program, i: 
 /// `write` NULL sends echo output to stdout; `out` NULL discards the result.
 /// Returns 0 on success, nonzero with `*err` set on failure.
 ///
+/// The run has no input source: an expression that reads one reports that
+/// rather than reading anything. [`jay_run_io`] is the same run with a
+/// source attached, and is the only difference between the two.
+///
 /// # Safety
 ///
 /// `program` must be NULL or a live handle from `jay_compile`; `args`
@@ -360,6 +376,61 @@ pub unsafe extern "C" fn jay_run(
     nargs: usize,
     write: jay_write_fn,
     write_userdata: *mut c_void,
+    out: *mut *mut jay_result,
+    err: *mut *mut jay_error,
+) -> c_int {
+    // SAFETY: the caller's promises about every pointer are unchanged; the
+    // input source is the one thing this spelling does not have.
+    unsafe {
+        run_impl(program, args, nargs, write, write_userdata, None, ptr::null_mut(), false, out, err)
+    }
+}
+
+/// [`jay_run`] with both halves of the sandbox's stdio wired: `read`
+/// answers what the program reads, one line per call.
+///
+/// `write` NULL sends output to the process's stdout and `read` NULL takes
+/// input from its stdin, which is the sandbox's default on both sides.
+///
+/// # Safety
+///
+/// As [`jay_run`], and `read` must be NULL or callable with `read_userdata`
+/// under the protocol on [`jay_read_fn`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jay_run_io(
+    program: *const jay_program,
+    args: *const jay_value,
+    nargs: usize,
+    write: jay_write_fn,
+    write_userdata: *mut c_void,
+    read: jay_read_fn,
+    read_userdata: *mut c_void,
+    out: *mut *mut jay_result,
+    err: *mut *mut jay_error,
+) -> c_int {
+    // SAFETY: as `jay_run`, plus the caller's promise about `read`.
+    unsafe {
+        run_impl(program, args, nargs, write, write_userdata, read, read_userdata, true, out, err)
+    }
+}
+
+/// The body both run functions share. `attach_input` is what separates
+/// them: without it the program has no input source at all, and with it a
+/// NULL `read` still means the process's own stdin.
+///
+/// # Safety
+///
+/// As [`jay_run_io`].
+#[allow(clippy::too_many_arguments)]
+unsafe fn run_impl(
+    program: *const jay_program,
+    args: *const jay_value,
+    nargs: usize,
+    write: jay_write_fn,
+    write_userdata: *mut c_void,
+    read: jay_read_fn,
+    read_userdata: *mut c_void,
+    attach_input: bool,
     out: *mut *mut jay_result,
     err: *mut *mut jay_error,
 ) -> c_int {
@@ -417,7 +488,53 @@ pub unsafe extern "C" fn jay_run(
                 let _ = stdout.flush();
             }
         };
-        match program.prog.run(&arrays, &mut sink) {
+        // The read side, as the ABI describes it: a buffer libjay owns,
+        // grown and asked again when the source says the line is longer.
+        let mut buf = vec![0u8; 4096];
+        let source = |buf: &mut Vec<u8>| -> Option<String> {
+            let f = match read {
+                Some(f) => f,
+                // No callback: the process's own stdin, which is what the
+                // sandbox opens by default.
+                None => {
+                    let mut line = String::new();
+                    // SAFETY-free path: a read error and a real end of
+                    // input are the same thing to a program.
+                    return match std::io::stdin().read_line(&mut line) {
+                        Ok(0) | Err(_) => None,
+                        Ok(_) => {
+                            while line.ends_with('\n') || line.ends_with('\r') {
+                                line.pop();
+                            }
+                            Some(line)
+                        }
+                    };
+                }
+            };
+            loop {
+                // SAFETY: the caller promises a callable matching
+                // `jay_read_fn`; the buffer is writable for its capacity.
+                let n = unsafe { f(buf.as_mut_ptr() as *mut c_char, buf.len(), read_userdata) };
+                if n < 0 {
+                    return None;
+                }
+                let n = n as usize;
+                if n > buf.len() {
+                    buf.resize(n, 0);
+                    continue;
+                }
+                // A line that is not UTF-8 ends the input rather than
+                // becoming replacement characters nobody asked for.
+                return String::from_utf8(buf[..n].to_vec()).ok();
+            }
+        };
+        let mut inp = || source(&mut buf);
+        let result = if attach_input {
+            program.prog.run_io(&arrays, &mut sink, &mut inp)
+        } else {
+            program.prog.run(&arrays, &mut sink)
+        };
+        match result {
             Ok(value) => {
                 // Boxed and exact results have no descriptor in this ABI
                 // yet: their elements are arrays and bignums, not numbers.

@@ -18,10 +18,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 138 green / 24 partial / 17 red / 1 absent by design, of 180 valences
+**J: 138 green / 25 partial / 16 red / 1 absent by design, of 180 valences
 in the inventory.**
 
-**APL: 79 green / 25 partial / 11 red of 115 valences in the inventory.**
+**APL: 81 green / 25 partial / 9 red of 115 valences in the inventory.**
 
 ## J — verbs
 
@@ -156,10 +156,10 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `&.:` under | 🟢 the same on whole arguments |
 | `^:` power | 🟡 literal count, `_`, a verb count, and negatives (the obverse); a computed count not yet |
 | `.` dot product | 🔴 |
-| `:` explicit definition | 🟡 `3 :` and `4 :`; `1 :`, `2 :`, `13 :` not yet |
+| `:` explicit definition | 🟡 `1 :`, `2 :`, `3 :`, `4 :`, and the `m : 0` body on the lines below; `13 :` not yet |
 | `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`; a negative block size in a tessellation is named |
 | `!.` fit | 🟡 the tolerance meaning, and the fill for `\|.` (the shift); a fill on any other verb is named |
-| `!:` foreign | 🔴 sandboxed design needed |
+| `!:` foreign | 🟡 `1!:1` (read a line from stdin), `1!:2` (write a line to stdout) and `3!:0` (type code); the ones that reach a file, a script, the host, the clock or a shared library are ⚪ closed by the sandbox, and the ones that only compute are 🔴 named |
 | `` ` `` tie (gerund) | 🟡 a gerund of verbs; only `@.` reads one |
 | `` `: `` evoke gerund | 🔴 needs gerunds as boxed nouns — see [decisions.md](decisions.md) |
 | `@.` agenda | 🟢 |
@@ -183,7 +183,7 @@ conjunctions above:
 | `t:` weighted Taylor | 🔴 |
 | `..` even | 🔴 |
 | `.:` odd | 🔴 |
-| `T.` threads | ⚪ starts J's own threads, which the sandbox does not open |
+| `T.` threads | ⚪ starts J's own threads, which the sandbox does not open — `ErrorKind::Sandbox` |
 | `d.` `D.` `D:` derivative | — the reference J rejects all three as invalid inflections |
 
 ## J — syntax and features
@@ -202,8 +202,15 @@ conjunctions above:
 | Adverb and conjunction assignment `m =. /` | 🟢 the name is that modifier from the next sentence on |
 | Multiple assignment `'a b' =. …` | 🔴 |
 | `=.` vs `=:` scoping | 🟢 a definition has its own frame; `=:` names a global |
-| Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🟢 verbs; `{{ }}` modifier forms named |
+| Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🟢 |
 | Multi-line definition body `3 : 0` … `)` | 🟢 |
+| Explicit adverb `1 : '…'` and conjunction `2 : '…'` | 🟢 both phases; operands as `u`/`v` or `m`/`n` |
+| Multi-line modifier body `1 : 0` / `2 : 0` … `)` | 🟢 |
+| `{{ }}` modifier forms | 🟢 the part of speech is read off the operand names the body uses |
+| `{{)a` `{{)c` `{{)v` `{{)d` `{{)m` markers | 🟢 the marker line states the part of speech |
+| `{{)n` noun direct definition | 🔴 named |
+| A modifier body that derives the modifier itself | 🔴 named; the derivation happens at parse time |
+| Tacit definition `13 : '…'` | 🔴 named |
 | Control words `if. while. for. select. try.` | 🟢 `whilst.`, `for_i.`, `fcase.`, `elseif.` included |
 | Control words `throw. catcht. goto_x. label_x.` | 🔴 named |
 | Locales and `18!:` | 🔴 |
@@ -301,8 +308,9 @@ conjunctions above:
 | `⍎` | 🟢 execute; the string runs over the names around it | — |
 | `⊢` | 🟢 same | 🟢 right |
 | `⊣` | 🟢 same | 🟢 left |
-| `⎕←` output | 🟢 | — |
-| `⍞` character I/O | 🔴 named | 🔴 named |
+| `⎕←` / `⍞←` output | 🟢 `⎕←` ends the line; `⍞←` writes the characters and nothing else | — |
+| `⍞` character input | 🟢 one line from the input source, terminator dropped | — |
+| `⎕` evaluated input | 🟢 one line, run as APL over the program's own names | — |
 | `→` branch | 🟡 inside a `∇` definition: labels, `→0`, `→(cond)/L`, `→⍬`; a label and a control structure in one definition is named | — |
 | `⍬` zilde | 🟢 | — |
 | `⌶` I-beam | 🔴 named | 🔴 named |
@@ -349,7 +357,7 @@ conjunctions above:
 | Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`; the rest named |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
 | Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟡 one preset — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default; every point where the lineages diverge is a setting on it (nested model, `↑`/`⊃`, `⌷`, dfn result, `⍺←`, complex order, trains) and asking for the other reading is refused as not implemented yet. `trains` is the one setting whose two readings are both implemented, so turning it off gives the strict GNU sentence back |
-| `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS`), read-only; the ones that read a clock or a filesystem are closed by the sandbox |
+| `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS`), read-only; the ones that read a clock or a filesystem are ⚪ closed by the sandbox (`ErrorKind::Sandbox`) |
 | Control structures `:If :While :Repeat :For :Select` | 🟡 no oracle: GNU APL rejects them |
 | `:Return` `:Leave` `:Continue` | 🟡 no oracle, as above |
 | Exact-or-scalar conformability | 🟢 |
