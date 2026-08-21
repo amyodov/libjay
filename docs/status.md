@@ -18,10 +18,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 144 green / 24 partial / 7 red / 2 absent by design, of 177 valences
+**J: 146 green / 22 partial / 7 red / 2 absent by design, of 177 valences
 in the inventory.**
 
-**APL: 85 green / 26 partial / 4 red of 115 valences in the inventory.**
+**APL: 87 green / 24 partial / 4 red of 115 valences in the inventory.**
 
 ## J — verbs
 
@@ -45,8 +45,8 @@ in the inventory.**
 | `*:` | 🟢 square | 🟢 nand; same |
 | `-:` | 🟢 halve | 🟢 match |
 | `-.` | 🟢 not (`1-y`) | 🟢 less (the items of x that y has not) |
-| `+.` | 🟢 real/imaginary | 🟡 GCD; integral reals, or Gaussian integers |
-| `*.` | 🟢 length/angle | 🟡 LCM; integral reals, or Gaussian integers |
+| `+.` | 🟢 real/imaginary | 🟢 GCD (reals and Gaussian integers) |
+| `*.` | 🟢 length/angle | 🟢 LCM (reals and Gaussian integers) |
 | `!` | 🟡 factorial; a complex argument is a named gap | 🟡 out of; same |
 | `o.` | 🟢 pi times | 🟢 circle; `_12` to `12`, real and complex |
 | `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
@@ -262,8 +262,8 @@ conjunctions above:
 | `≥` | — | 🟢 greater or equal |
 | `≡` | 🟢 depth | 🟢 match |
 | `≢` | 🟢 tally | 🟢 not match |
-| `∧` | — | 🟡 LCM/and; integral values only |
-| `∨` | — | 🟡 GCD/or; integral values only |
+| `∧` | — | 🟢 LCM / and |
+| `∨` | — | 🟢 GCD / or |
 | `⍲` | — | 🟢 nand |
 | `⍱` | — | 🟢 nor |
 | `~` | 🟢 not | 🟢 without |

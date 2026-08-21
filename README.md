@@ -69,8 +69,8 @@ uv run libjay examples/hello.apl                        # or run a file
 
 Early — 0.1.0 is the first release; what has landed since is in
 [CHANGELOG.md](CHANGELOG.md). What's implemented, feature by feature, is the
-[status matrix](docs/status.md): 144 green / 24 partial / 7 red / 2 absent by
-design of 177 J valences, 85 green / 26 partial / 4 red of 115 APL valences.
+[status matrix](docs/status.md): 146 green / 22 partial / 7 red / 2 absent by
+design of 177 J valences, 87 green / 24 partial / 4 red of 115 APL valences.
 Both primitive sets are differential-tested against the reference
 implementations: 4028 J and 1155 APL expressions, recorded as snapshots from
 black-box runs of the reference interpreters and replayed on every test run.
