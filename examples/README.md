@@ -3,19 +3,20 @@
 Every example is runnable as-is — no APL keyboard needed, the glyphs are
 already in the files.
 
-From a checkout (after `maturin develop`, or via `uvx --from . libjay`):
+No install needed — `uvx libjay` fetches the prebuilt wheel; from a checkout,
+`uv run libjay` (after `maturin develop`) works the same way:
 
 ```sh
-libjay hello.ijs              # J:   Hello, world!
-libjay hello.apl              # APL: Hello, world!
-libjay stats.ijs              # mean and range of a series
-libjay reduce_axis.ijs        # J:   +/ sums along the LEADING axis
-libjay reduce_axis.apl        # APL: +/ trailing axis, +⌿ leading
-libjay timeseries.ijs         # a moving-window Bollinger z-score
-libjay boxes.ijs              # a boxed list of strings, opened and razed
-libjay defs.ijs               # an explicit verb, recursive, with if.
-libjay dfn.apl                # a dfn, with the ⍺← default-argument idiom
-python quickstart.py          # the Python API end to end
+uvx libjay hello.ijs              # J:   Hello, world!
+uvx libjay hello.apl              # APL: Hello, world!
+uvx libjay stats.ijs              # mean and range of a series
+uvx libjay reduce_axis.ijs        # J:   +/ sums along the LEADING axis
+uvx libjay reduce_axis.apl        # APL: +/ trailing axis, +⌿ leading
+uvx libjay timeseries.ijs         # a moving-window Bollinger z-score
+uvx libjay boxes.ijs              # a boxed list of strings, opened and razed
+uvx libjay defs.ijs               # an explicit verb, recursive, with if.
+uvx libjay dfn.apl                # a dfn, with the ⍺← default-argument idiom
+uv run --with libjay --no-project python quickstart.py          # the Python API end to end
 ```
 
 ## Output

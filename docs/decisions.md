@@ -860,3 +860,11 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   `APL.Dialect` grew the same fields with the same defaults and an
   `APL.Dialect.gnu` preset; the C ABI keeps `index_origin` and gains
   nothing, the stable surface staying stable.
+- 2026-08-21 — v0.1.0 released from tag `1f2fa37`: GitHub release with
+  wheels/sdist/C bundles as assets, PyPI via trusted publishing (five abi3
+  wheels + sdist, cold-verified by the publish job and again by hand with
+  `uvx libjay`), crates.io via a one-time manual `cargo publish` with the
+  owner's token (the bootstrap crates.io requires); the token was then
+  removed locally and `CRATES_PUBLISH=true` set, so from 0.1.1 the crate
+  publishes through OIDC in the same run as PyPI once the owner registers
+  the trusted publisher on crates.io.
