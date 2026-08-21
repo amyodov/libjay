@@ -1031,8 +1031,10 @@ of the CPU kernel.
 
 **A chain stays on the CPU when** its working type is i64 (WGSL has no
 64-bit integer arithmetic on most adapters); its result is not a float array
-(a comparison at the root, a tally); it holds `^` and the device computes in
-f64 (the exponential is a 32-bit builtin in both SPIR-V and MSL); the data
+(a comparison at the root, a tally); it holds a moving window or a running
+fold, which read items the shader's own element does not; it holds `^` and
+the device computes in f64 (the exponential is a 32-bit builtin in both
+SPIR-V and MSL); the data
 is smaller than half a million elements, below which the dispatch and
 readback cost more than the whole pass; or the fused kernel would have
 declined it anyway. Each of these is reported by `explain`, in the same

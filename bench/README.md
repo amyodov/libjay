@@ -27,6 +27,7 @@ VIRTUAL_ENV=$PWD/.venv-bench .venv-bench/bin/maturin develop --release
 .venv-bench/bin/python bench/bench.py            # the phase-4 table
 .venv-bench/bin/python bench/sweep.py            # the threshold sweep
 .venv-bench/bin/python bench/timeseries.py       # the phase-5 gate
+.venv-bench/bin/python bench/windows.py          # the windowed sentences
 ```
 
 Both virtualenvs install the extension in place, at `python/jay/_jay.abi3.so`,
@@ -319,15 +320,18 @@ Without fusion, in the same session: 1288.3 / 675.5 ms, which is the
 phase-5 measurement (1307.3 / 687.2) repeated within 2%.
 
 The `s` of this kernel is a named value read twice, which is the shape the
-standard deviation above has — and the pass leaves it exactly where it is,
-because `+/\` is a window verb and no window verb joins a kernel. `s` is
-therefore not a chain a block can recompute: moving it would fold every
-window twice instead of once. The compiled program is unchanged — a test
-holds it to that — and a repeat of the row measured 787.5 / 415.6 ms, the
-same work on a quieter laptop.
+standard deviation above has — and the pass left it exactly where it was,
+because `+/\` was a window verb and no window verb could join a kernel. `s`
+was therefore not a chain a block could recompute: moving it would fold
+every window twice instead of once. The compiled program was unchanged — a
+test held it to that — and a repeat of the row measured 787.5 / 415.6 ms,
+the same work on a quieter laptop. Both of those statements stopped being
+true when a window became a step of the kernel; see "Windows in the kernel"
+below for what `s` does now and what it is worth.
 
 **The gate is met with room to spare**: 404 ms against Polars' 755, where
-before fusion it was 675 against 748. The two still agree to 8.7e-10
+before fusion it was 675 against 748, and 231 against 787 once the windows
+joined the kernel. The two still agree to 8.7e-10
 relative over all 20M rows — the harness fails outright if they do not, and
 the printed differences below are unchanged to the last digit, because a
 fused map does the same arithmetic in the same order per element. Four
@@ -347,8 +351,9 @@ That is where the 238 ms went.
 
 The `%:` that fusion cannot absorb has since got its negative-argument check
 off the sequential path, which is what the last 25 ms of this row are. What
-is left is four unfused passes over 160 MB, and closing that means putting a
-window verb inside a kernel — see "Next".
+was left after that was four unfused passes over 160 MB, and closing it
+meant putting a window verb inside a kernel: that is what "Windows in the
+kernel" below did, and this row is 231 ms there.
 
 **Precision is the reason the window fold costs two passes.** A moving sum
 is usually written as one accumulator slid along the series, or as a
@@ -711,6 +716,105 @@ changed is that a program which needs neither pays for neither.
 Bollinger over `df["c0"]` is the same measurement it was, which is the
 control this table needs.
 
+## Windows in the kernel
+
+The item this file's "Next" list had at the top: `k +/\ y` reads `x[i..i+k]`
+and yields `n-k+1` outputs, against a kernel whose invariant was that every
+input and every slot is read at the same index and has the same length. It
+is now a step of the kernel — one instruction that folds every window of the
+value on the stack, with a running fold (`+/\ y`) beside it — and the
+invariant it broke became two axes instead of one. What that cost in
+machinery, and what decides the alignment, is in docs/decisions.md.
+
+Three windowed sentences, 20M f64 closes, window 20, `bench/windows.py` and
+`bench/timeseries.py --worker`. libjay only: main's build against this
+branch's, alternated three times through in one session and the best of each
+taken, because the machine had a neighbour on it. Times in milliseconds.
+
+| kernel | 1 thread before | after | 8 threads before | after |
+|---|---:|---:|---:|---:|
+| Bollinger z-score | 792.3 | 517.9 | 393.1 | 205.8 |
+| moving range position | 501.3 | 307.6 | 194.1 | 86.2 |
+| running mean | 469.3 | 385.8 | 387.9 | 354.8 |
+
+```j
+NB. Bollinger: the phase-5 gate's kernel, two moving sums
+s =. 20 +/\ {close}
+((20 * 19 }. {close}) - s) % %: (20 * 20 +/\ *: {close}) - s * s
+
+NB. moving range: where the last close sits between the window's ends
+lo =. 20 <./\ {close}
+((19 }. {close}) - lo) % 1e_12 + (20 >./\ {close}) - lo
+
+NB. running mean: a scan and the arithmetic around it
+(+/\ {close}) % 1.0 + i. # {close}
+```
+
+**Every figure the two builds computed is identical to the last bit** — the
+harness prints the sum of each 20M-row result and the two builds print the
+same digits — which is the point of folding the windows in blocks cut from
+the axis rather than from the block boundary. The rounding of a window is
+still the rounding of that window computed on its own.
+
+The moving range gains most (2.25x on eight threads) because everything in
+it fuses: two windows, a drop and five elementwise steps become one pass
+over the column instead of seven. Bollinger gains 1.91x rather than more
+because `%:` can fail on a negative argument and never joins a kernel, so
+what is left is two kernels, the square root, and the leading drop.
+
+The running mean gains least, and it is the interesting one. A running fold
+carries an accumulator from one block to the next, so a kernel holding one
+runs on a single thread — where the unfused program ran a serial scan and
+then a parallel divide. Fusing it therefore trades parallelism for traffic:
+one pass that reads the closes and writes the means, against a pass that
+writes the whole scan to memory and a pass that reads it back. The traffic
+wins, but only by 1.09x on eight threads and 1.22x on one, and on a machine
+with more cores than this one has it could go the other way. It is fused
+because the arithmetic around a scan is usually more than one divide.
+
+Against the rivals, the phase-5 gate's own table, taken with this branch's
+build in one session:
+
+| kernel | libjay 1 thread | libjay 8 threads | speedup | polars | numba | numba prange | numpy |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Bollinger z-score, window 20 | 552.9 | 231.1 | 2.39x | 786.9 | 198.7 | 168.2 | 1373.6 |
+
+| LIBJAY_THREADS | time (ms) | speedup over 1 |
+|---:|---:|---:|
+| 1 | 534.8 | 1.00x |
+| 2 | 331.1 | 1.62x |
+| 4 | 266.9 | 2.00x |
+| 8 | 222.6 | 2.40x |
+
+Polars is where it was and libjay is 3.4 times faster than it; the gap to
+`numba`'s hand-rolled sliding accumulator is 16% and the gap to `numba
+prange`, which recomputes every window from scratch across all eight
+threads, is 37%. The accuracy figures the harness prints are unchanged to
+the last digit — `numba` still loses six digits to its accumulator and
+`numpy` three to its differenced cumulative sum — so what closed is the
+distance to the fastest thing in the table, not the distance to its
+answers. Scaling reaches 4 threads and holds to 8 for the first time on
+this kernel, because the window folds no longer take a pass of their own.
+
+The kernel used to be about ten passes over a 160 MB column. It is now two
+kernels, a square root and a drop — four, of which the two kernels do all
+the window folding as they go.
+
+**Is folding the moving sum twice worth not writing it down?** `s` is now a
+value the pass moves into both kernels that read it, so its windows are
+folded in each. Measured both ways — the pass as it is, against a build
+that refuses to move a value with a window in it — paired in one busy
+session, so read the pairs and not the absolute figures:
+
+| kernel | 1 thread `s` kept | `s` moved | 8 threads `s` kept | `s` moved |
+|---|---:|---:|---:|---:|
+| Bollinger z-score | 1142 | 1219 | 570 | 505 |
+| moving range position | 667 | 508 | 321 | 230 |
+
+Yes on eight threads, by 11% and 28%; no on one thread for Bollinger, by
+6%, where the single core pays for the fold it does twice and there is no
+one else waiting on the bus. The pass keeps one rule for every named value.
+
 ## Where the bandwidth is
 
 The weighted sum has been within a millisecond or two of `numba prange` for
@@ -823,15 +927,13 @@ What is left, in the order the measurements rank it:
    a copy, and the folds read them where they lie. What it is worth is the
    "Layout" section above; what the flag had to be honoured or refused by,
    and how that was enforced, is in docs/decisions.md.
-2. **Windows inside the fused kernel.** The Bollinger kernel is still four
-   passes over 160 MB that fusion cannot join, because a window verb reads
-   `x[i .. i+k]` and the kernel's whole invariant is that every input and
-   every slot is read at the same index and has the same length. Absorbing
-   one would need a haloed block load, a block prefix/suffix stage, a carry
-   between blocks, and an output shorter than the input — which is the
-   invariant, not an addition to it. Worth about 100 ms of the kernel's 378,
-   by the two window passes it would absorb; not worth the invariant without
-   a plan for it.
+2. ~~**Windows inside the fused kernel.**~~ Done, and worth more than the
+   100 ms this entry estimated: the Bollinger row went 393 → 206 ms on eight
+   threads and the moving range 194 → 86. A window step reads a haloed block
+   and folds it where it lies; what it cost the invariant is a second axis,
+   and the alignment between the two is decided by shapes alone. The
+   numbers are under "Windows in the kernel", the design in
+   docs/decisions.md.
 3. **Widening inside the parallel pass.** A complex-plus-float pass widens
    the float argument into a whole buffer and reads it back. Doing it per
    chunk would save two round trips of the working set — about 4 ms of the

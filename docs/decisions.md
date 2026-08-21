@@ -1267,3 +1267,79 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
     path (a column-major result exported as one Arrow buffer per column)
     is written down here and not built: it wants a decision about column
     NAMES, which is an open question of its own.
+- 2026-08-21 — **A moving window is a stage of the fused kernel, and the
+  shapes decide its alignment.** The item bench/README.md's "Next" list had
+  at the top: a window reads `x[i..i+k]` and yields `n-k+1` outputs, against
+  a kernel whose invariant was same index, same length. The Bollinger
+  z-score — two moving sums, a drop and eight elementwise steps — was ten
+  passes over the column because every `20 +/\` broke the chain it stood in.
+  It is now two kernels and a square root: 393 → 206 ms on eight threads
+  over 20M rows, and a moving range 194 → 86. Numbers in bench/README.md,
+  section "Windows in the kernel".
+  - **Two instructions, not a new kind of node.** The postfix program the
+    pass emits gained `Window(op, k)`, which folds every window of k items
+    of the value on the stack into one item, and `Scan(op)`, which replaces
+    it with its running fold. Both are ordinary steps: they take the top of
+    the stack and leave one value there, they are counted in the ops a
+    chain must have to be worth fusing, they can be a let, they can sit
+    under an absorbed reduction, and the device declines them by the same
+    door it declines anything it has no shader for.
+  - **A chain with a window reads two axes.** Everything under a window
+    step stands on the wide axis, everything beside it on the axis the
+    result stands on, which is `k - 1` items shorter. Which axis a leaf is
+    read on is settled where the chain is built, so nothing has to be
+    inferred at run time and no index is ever shifted inside the kernel: an
+    input arrives as the items it holds.
+  - **The alignment rule is a shape rule and nothing else.** The inputs on
+    one axis must agree with each other; the two axes must stand `k - 1`
+    items apart. `19 }. y` beside `20 +/\ y` is a chain because it is
+    nineteen items shorter; `18 }. y` beside it is not, and the sentence
+    runs and raises the length error it was always going to raise. The
+    alternative — recognising `(k-1) }. x` paired with `k f/\ x` as a
+    pattern and aligning the two — was rejected: it decides from spelling
+    what the lengths already decide, and it would have to be extended for
+    every other way of writing the same drop.
+  - **Halo, not stitching.** A block computes the items of the wide axis
+    its own windows need — its own items, plus about three window lengths
+    around them — and folds them where they lie. Carrying a neighbouring
+    block's prefix instead would make the blocks a chain, and the halo is
+    two per cent of a block at the window lengths a time series uses (the
+    kernel declines a window past 1,024 items, where the halo would start
+    to be most of the work). Blocks stay independent, so the pass still
+    splits across threads with nothing shared.
+  - **The windows are grouped exactly as they were.** The wide axis is cut
+    into runs of `k` counted from the axis's own start, and a window is one
+    run's suffix joined to the next run's prefix — the two-pass algorithm
+    `verb.rs` already used, called from the kernel through
+    `verb::windows_into` rather than written a second time. Because the cut
+    is counted from the axis and not from the block, a window is folded
+    from the same items in the same order however the blocks fell, and a
+    fused window is bit-identical to an unfused one. The property that
+    matters is the one that algorithm was chosen for: the float error of a
+    window is the error of that window alone, and no accumulator runs
+    longer than `k` steps.
+  - **A running fold runs on one thread.** Its accumulator is handed from
+    one block to the next, in the order the unfused scan takes them and
+    rounding where that rounds, so a kernel holding one does not split. The
+    unfused scan does not split either; what the kernel saves is the
+    traffic around the scan, not the scan. It is not absorbed under a
+    reduction, whose blocks run backwards.
+  - **A window verb is now a value the pass will move.** `s =. 20 +/\ y`
+    used to be a whole array however often it was read, because no kernel
+    could take it; now every use lands in one and the pass inlines it,
+    which folds the moving sum once per kernel that reads it rather than
+    once for the program. For Bollinger that is three window folds in place
+    of two. Measured both ways, paired, in one session: on eight threads it
+    is the better trade by 11% on Bollinger (570 → 505 ms) and by 28% on the
+    moving range (321 → 230), because what it removes is a 160 MB write and
+    the reads of it; on one thread it costs Bollinger 6% (1142 → 1219),
+    which is the one core paying for the fold it does twice. The rule is
+    left as it is — the same rule for every named value, and the machine
+    that matters has more than one core.
+  - **What declines.** A second window length in one chain, a window
+    inside a window (the outer one is the stage, the inner one is the pass
+    it was), a window longer than the axis, a left argument that is not one
+    integer the compiler knows, an argument that is not a vector, an input
+    read on both axes that is not a scalar, and everything the kernel
+    declined before. Each falls back to the chain it came from, which is
+    the rule the fusion pass has always had.

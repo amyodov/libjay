@@ -56,6 +56,13 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Moving windows and running sums are part of a fused expression now.
+  `k +/\ y`, `k >./\ y`, `k <./\ y` and `+/\ y` used to break the chain
+  they stood in and run as a pass of their own over the whole column; they
+  are steps of the compiled kernel, so a rolling expression reads its
+  argument once instead of once per window and once per arithmetic step.
+  Results are unchanged to the last bit, including the property that a
+  window's rounding error is the error of that window alone.
 - A DataFrame no longer costs a copy to read. Its columns cross the
   boundary borrowed, one Arrow buffer each, and libjay folds them where
   they lie: `+/ df` (column sums) and `+/"1 df` (row sums) over a
