@@ -83,6 +83,19 @@ class TestNumpy:
         with pytest.raises(JayError, match="not supported yet"):
             j("+/ {x}", {"x": a})
 
+    def test_unaligned_block_is_refused(self):
+        # np.frombuffer over an offset buffer is contiguous but not aligned
+        # for its element type, and reading it as a slice would be undefined.
+        raw = bytearray(8 * 5 + 1)
+        raw[1:] = self.np.arange(5, dtype=self.np.int64).tobytes()
+        a = self.np.frombuffer(memoryview(raw)[1:], dtype=self.np.int64)
+        assert not a.flags.aligned
+        with pytest.raises(JayError) as e:
+            j("+/ {x}", {"x": a})
+        assert "not aligned" in str(e.value)
+        assert ".copy()" in str(e.value)
+        assert j("+/ {x}", {"x": a.copy()}) == 10
+
     def test_keepalive_across_deletion(self):
         a = self.np.arange(1000, dtype=self.np.int64)
         kernel = jay.j.compile("+/ {x}", {"x": a})
@@ -125,6 +138,31 @@ class TestPyArrow:
         with pytest.raises(JayError) as e:
             self.pa.array(j("i. 2 3"))
         assert "tolist()" in str(e.value)
+
+    def test_exported_buffer_outlives_the_value(self):
+        # Exporting hands Arrow the elements themselves, so the consumer
+        # keeps them alive: the value they came from can go first.
+        value = j("i. 1000")
+        out = self.pa.array(value)
+        del value
+        gc.collect()
+        assert out.to_pylist()[-1] == 999
+        assert self.pa.compute.sum(out).as_py() == 499500
+
+    def test_capsules_in_the_wrong_order_are_refused(self):
+        # The capsule's name is the only thing that says what the pointer
+        # inside it is; a producer that swaps the pair must be an error and
+        # not a write through the wrong type.
+        source = self.pa.array([1, 2, 3])
+
+        class Swapped:
+            def __arrow_c_array__(self, requested_schema=None):
+                schema, array = source.__arrow_c_array__()
+                return array, schema
+
+        with pytest.raises(JayError, match="capsule"):
+            j("+/ {x}", {"x": Swapped()})
+        assert j("+/ {x}", {"x": source}) == 6
 
     def test_null_is_refused(self):
         with pytest.raises(JayError) as e:

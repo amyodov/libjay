@@ -55,11 +55,32 @@ pub fn try_import(obj: &Bound<'_, PyAny>) -> Option<PyResult<Array>> {
     import_numpy(obj)
 }
 
+/// Refuse a capsule that is not the one the Arrow PyCapsule interface says
+/// it should be.
+///
+/// The name is the only thing that says what the pointer inside points at,
+/// and what happens next is to move a struct out of it. A producer that
+/// hands back the pair in the wrong order, or a capsule from some other
+/// library, must be an error here and not a write through the wrong type.
+fn check_capsule(capsule: &Bound<'_, PyCapsule>, expected: &str) -> PyResult<()> {
+    let name = capsule.name()?;
+    let got = name.as_ref().map(|n| n.to_string_lossy().into_owned());
+    if got.as_deref() == Some(expected) {
+        return Ok(());
+    }
+    Err(JayError::new_err(match got {
+        Some(n) => format!("expected an Arrow '{expected}' capsule, got '{n}'"),
+        None => format!("expected an Arrow '{expected}' capsule, got an unnamed one"),
+    }))
+}
+
 /// A single Arrow value through the PyCapsule array interface.
 fn import_arrow_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     let pair = obj.call_method0("__arrow_c_array__")?;
     let (schema_capsule, array_capsule) =
         pair.extract::<(Bound<'_, PyCapsule>, Bound<'_, PyCapsule>)>()?;
+    check_capsule(&schema_capsule, "arrow_schema")?;
+    check_capsule(&array_capsule, "arrow_array")?;
     let schema_ptr = schema_capsule.pointer() as *mut FFI_ArrowSchema;
     let array_ptr = array_capsule.pointer() as *mut FFI_ArrowArray;
     if schema_ptr.is_null() || array_ptr.is_null() {
@@ -86,6 +107,7 @@ fn import_arrow_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
 /// interface.
 fn import_arrow_stream(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     let capsule = obj.call_method0("__arrow_c_stream__")?.extract::<Bound<'_, PyCapsule>>()?;
+    check_capsule(&capsule, "arrow_array_stream")?;
     let stream_ptr = capsule.pointer() as *mut FFI_ArrowArrayStream;
     if stream_ptr.is_null() {
         return Err(JayError::new_err("__arrow_c_stream__ returned an empty capsule"));
@@ -95,6 +117,11 @@ fn import_arrow_stream(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     let mut stream = unsafe { std::ptr::replace(stream_ptr, FFI_ArrowArrayStream::empty()) };
     if stream.release.is_none() {
         return Err(JayError::new_err("the Arrow stream was already released"));
+    }
+    // A live stream must carry both readers; the interface says so, and the
+    // calls below would otherwise be made through a NULL pointer.
+    if stream.get_schema.is_none() || stream.get_next.is_none() {
+        return Err(JayError::new_err("the Arrow stream has no reader callbacks"));
     }
     let schema = stream_schema(&mut stream)?;
     let field = Field::try_from(&schema).map_err(arrow_err)?;
@@ -207,8 +234,11 @@ fn assemble(obj: &Bound<'_, PyAny>, field: &Field, chunks: Vec<ArrayRef>) -> PyR
     let cols = columns.len();
     let datas: Vec<Data> = columns.into_iter().map(|c| c.data).collect();
     // Rows-leading output from column-major sources costs one interleaving
-    // copy; columnar execution arrives with the parallel runtime.
-    Ok(Array::new(vec![rows, cols], interleave(&datas, rows)))
+    // copy; columnar execution arrives with the parallel runtime. The weave
+    // itself is libjay's, so it takes the thread pool.
+    let woven = Data::interleave(&datas, rows)
+        .ok_or_else(|| JayError::new_err("columns disagree on type or length"))?;
+    Ok(Array::new(vec![rows, cols], woven))
 }
 
 /// Exactly two `Float64` children named `re` and `im`, in that order.
@@ -278,67 +308,6 @@ fn concat_chunks(mut chunks: Vec<Data>, dt: &DataType, name: &str) -> PyResult<D
     Ok(out)
 }
 
-/// Weave column-major data into one row-major block of shape [rows, cols].
-fn interleave(columns: &[Data], rows: usize) -> Data {
-    fn weave<T: Copy>(columns: &[&[T]], rows: usize) -> Vec<T> {
-        let mut out = Vec::with_capacity(rows * columns.len());
-        for i in 0..rows {
-            for c in columns {
-                out.push(c[i]);
-            }
-        }
-        out
-    }
-    match columns[0].dtype() {
-        DType::Bool => {
-            let s: Vec<&[u8]> = columns.iter().map(as_bool).collect();
-            Data::Bool(weave(&s, rows).into())
-        }
-        DType::I64 => {
-            let s: Vec<&[i64]> = columns.iter().map(as_i64).collect();
-            Data::I64(weave(&s, rows).into())
-        }
-        DType::F64 => {
-            let s: Vec<&[f64]> = columns.iter().map(as_f64).collect();
-            Data::F64(weave(&s, rows).into())
-        }
-        DType::Complex => {
-            let s: Vec<&[[f64; 2]]> = columns.iter().map(as_complex).collect();
-            Data::Complex(weave(&s, rows).into())
-        }
-        DType::Ext | DType::Rat | DType::Char | DType::Box => {
-            unreachable!("Arrow carries none of these; import refuses them")
-        }
-    }
-}
-
-fn as_bool(d: &Data) -> &[u8] {
-    match d {
-        Data::Bool(b) => b,
-        _ => unreachable!("checked by check_agreement"),
-    }
-}
-
-fn as_i64(d: &Data) -> &[i64] {
-    match d {
-        Data::I64(b) => b,
-        _ => unreachable!("checked by check_agreement"),
-    }
-}
-
-fn as_f64(d: &Data) -> &[f64] {
-    match d {
-        Data::F64(b) => b,
-        _ => unreachable!("checked by check_agreement"),
-    }
-}
-
-fn as_complex(d: &Data) -> &[[f64; 2]] {
-    match d {
-        Data::Complex(b) => b,
-        _ => unreachable!("checked by check_agreement"),
-    }
-}
 
 /// All columns must land on one element type. Widening one of them behind
 /// the user's back can silently change values, so this refuses instead.
@@ -443,6 +412,16 @@ fn column_data(array: &ArrayRef, name: &str, source: &Bound<'_, PyAny>) -> PyRes
         ),
         DataType::Boolean => {
             Data::Bool(array.as_boolean().values().iter().map(|v| v as u8).collect())
+        }
+        // Arrow's Null type is a column of nothing but nulls, and it
+        // reports no null count of its own: the type is the missing value.
+        DataType::Null => {
+            return Err(JayError::new_err(format!(
+                "{} holds nothing but nulls; J has no representation for \
+                 missing values — fill or filter them first (e.g. \
+                 fill_null/drop_nulls)",
+                describe(name)
+            )));
         }
         DataType::Decimal128(_, _) | DataType::Decimal256(_, _) => {
             return Err(JayError::new_err(format!(
@@ -610,13 +589,30 @@ fn read_array_interface(obj: &Bound<'_, PyAny>, iface: &Bound<'_, PyAny>) -> PyR
     if count > 0 && address == 0 {
         return Err(JayError::new_err("array reports a null data pointer"));
     }
+    // A block need not be aligned for its own element type: `np.frombuffer`
+    // over an offset buffer produces exactly that, and the array interface
+    // reports no strides for it because it really is contiguous. Reading one
+    // as a slice would be undefined, so it is refused here rather than
+    // trusted. Every element type this reads has alignment equal to its
+    // width, except complex128, which is a pair of doubles.
+    let align = match (kind, width) {
+        (b'c', 16) => 8,
+        (b'i' | b'u' | b'f', w @ (2 | 4 | 8)) => w,
+        _ => 1,
+    };
+    if count > 0 && align > 1 && address % align != 0 {
+        return Err(JayError::new_err(
+            "array's memory is not aligned for its element type (a view into \
+             an offset buffer?); make an aligned copy first, e.g. numpy's \
+             .copy()",
+        ));
+    }
 
     // SAFETY (all arms): `address` is the start of `count` contiguous,
     // `width`-byte elements — the array interface's guarantee, with
-    // contiguity checked above. numpy keeps that memory alive for as long as
-    // the object exists, and the object is either held in `owner` (borrowed
-    // arms) or alive for the whole call (copied arms). The pointer is aligned
-    // because the exporter allocated it for this element type.
+    // contiguity and alignment checked above. numpy keeps that memory alive
+    // for as long as the object exists, and the object is either held in
+    // `owner` (borrowed arms) or alive for the whole call (copied arms).
     let data = match (kind, width) {
         (b'i', 8) => Data::I64(unsafe { borrow_block(obj, address as *const i64, count) }),
         (b'f', 8) => Data::F64(unsafe { borrow_block(obj, address as *const f64, count) }),
@@ -680,6 +676,16 @@ fn c_strides(shape: &[usize], width: usize) -> Vec<isize> {
 /// match the host's; `|` means "not applicable" (single-byte types).
 fn parse_typestr(typestr: &str) -> PyResult<(u8, usize)> {
     let b = typestr.as_bytes();
+    // numpy's object dtype is '|O', with no width: the block holds pointers
+    // to Python objects rather than numbers, so there is nothing here to
+    // read as array data.
+    if b.get(1) == Some(&b'O') {
+        return Err(JayError::new_err(
+            "this array's dtype is object: its memory holds pointers to \
+             Python objects, not numbers — convert it to a numeric dtype \
+             first (e.g. numpy's .astype('int64') or .astype('float64'))",
+        ));
+    }
     if b.len() < 3 {
         return Err(JayError::new_err(format!("unreadable dtype '{typestr}'")));
     }

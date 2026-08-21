@@ -263,7 +263,7 @@ fn apl_division_by_zero_follows_apl_rules() {
 #[test]
 fn apl_iota_respects_index_origin() {
     assert_eq!(run(Lang::Apl, "⍳4"), Some(i64s(&[4], &[1, 2, 3, 4])));
-    let zero = Dialect { index_origin: Some(0) };
+    let zero = Dialect { index_origin: Some(0), ..Dialect::default() };
     assert_eq!(run_dialect(Lang::Apl, "⍳4", &zero), Some(i64s(&[4], &[0, 1, 2, 3])));
     assert_eq!(run(Lang::Apl, "⍳0"), Some(Array::empty(jay::DType::I64)));
     // A vector argument asks for an array of index vectors: one nested
@@ -326,13 +326,13 @@ fn divergence_gate_reduction_axis() {
     let apl_sum = run_dialect(
         Lang::Apl,
         "+/2 3⍴⍳6",
-        &Dialect { index_origin: Some(0) },
+        &Dialect { index_origin: Some(0), ..Dialect::default() },
     )
     .unwrap(); // trailing axis
     let apl_sum_leading = run_dialect(
         Lang::Apl,
         "+⌿2 3⍴⍳6",
-        &Dialect { index_origin: Some(0) },
+        &Dialect { index_origin: Some(0), ..Dialect::default() },
     )
     .unwrap();
 
@@ -348,4 +348,23 @@ fn hello_world_both_languages() {
     assert_eq!(out_j, "Hello, world!\n");
     let (_, out_apl) = run_capture(Lang::Apl, "⎕←'Hello, world!'");
     assert_eq!(out_apl, "Hello, world!\n");
+}
+
+#[test]
+fn a_program_nested_past_the_ceiling_is_refused_rather_than_run() {
+    // A string is the interface, so a pathological one has to come back as
+    // a diagnostic: nesting deeply enough used to exhaust the stack and
+    // take the host process with it.
+    for (lang, deep) in [
+        (Lang::J, "<".repeat(2_000) + "1"),
+        (Lang::J, "+/".repeat(2_000) + " 1 2 3"),
+        (Lang::Apl, "⊂".repeat(2_000) + "1"),
+    ] {
+        let e = err(lang, &deep);
+        assert_eq!(e.kind, ErrorKind::Limit, "{}", e.msg);
+        assert!(e.msg.contains("nests"), "{}", e.msg);
+    }
+    // Ordinary depths are untouched.
+    let plain = run_dialect(Lang::J, "> > > < < < 5", &Dialect::default());
+    assert_eq!(plain, Some(Array::scalar_i64(5)));
 }

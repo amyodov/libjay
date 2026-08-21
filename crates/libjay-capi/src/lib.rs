@@ -269,8 +269,11 @@ pub unsafe extern "C" fn jay_compile(
                     src.to_string(),
                 )
             })?;
+            // The C ABI is stable: it names the index origin and nothing
+            // else, so every other dialect setting is the shipped default.
             let dialect = Dialect {
                 index_origin: if index_origin < 0 { None } else { Some(index_origin as i64) },
+                ..Dialect::default()
             };
             let prog = compile(lang, src, &dialect).map_err(|e| (e, src.to_string()))?;
             let names = prog

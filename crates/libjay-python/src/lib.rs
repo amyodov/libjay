@@ -494,11 +494,136 @@ fn sequence_to_array(obj: &Bound<'_, PyAny>) -> PyResult<Array> {
     Ok(Array::new(shape, data))
 }
 
+/// One dialect setting, by name. `None` keeps the shipped value.
+///
+/// A name this dialect does not have is a value error here; a name it has
+/// but libjay does not implement is refused by the compiler instead, with
+/// the diagnostic that says so.
+fn setting<T: Copy>(value: Option<&str>, field: &str, choices: &[(&str, T)]) -> PyResult<Option<T>> {
+    let Some(value) = value else { return Ok(None) };
+    for (name, v) in choices {
+        if *name == value {
+            return Ok(Some(*v));
+        }
+    }
+    let names: Vec<&str> = choices.iter().map(|(n, _)| *n).collect();
+    Err(JayError::new_err(format!(
+        "unknown {field}: {value:?} (this dialect setting is one of: {})",
+        names.join(", ")
+    )))
+}
+
+/// The dialect the host asked for. Everything unnamed is the shipped
+/// default, which is the APL2/ISO line GNU APL verifies.
+#[allow(clippy::too_many_arguments)]
+fn dialect_of(
+    index_origin: Option<i64>,
+    comparison_tolerance: Option<f64>,
+    nested_model: Option<&str>,
+    first_disclose: Option<&str>,
+    index_form: Option<&str>,
+    dfn_result: Option<&str>,
+    default_arg: Option<&str>,
+    complex_order: Option<&str>,
+    trains: Option<bool>,
+) -> PyResult<Dialect> {
+    use jay::frontend::{ComplexOrder, DefaultArg, DfnResult, FirstDisclose, IndexForm, NestedModel};
+    let d = Dialect::default();
+    Ok(Dialect {
+        index_origin,
+        comparison_tolerance,
+        nested_model: setting(
+            nested_model,
+            "nested_model",
+            &[("floating", NestedModel::Floating), ("grounded", NestedModel::Grounded)],
+        )?
+        .unwrap_or(d.nested_model),
+        first_disclose: setting(
+            first_disclose,
+            "first_disclose",
+            &[
+                ("up-is-first", FirstDisclose::UpIsFirst),
+                ("up-is-mix", FirstDisclose::UpIsMix),
+            ],
+        )?
+        .unwrap_or(d.first_disclose),
+        index_form: setting(
+            index_form,
+            "index_form",
+            &[
+                ("scalar-per-axis", IndexForm::ScalarPerAxis),
+                ("axis-vectors", IndexForm::AxisVectors),
+            ],
+        )?
+        .unwrap_or(d.index_form),
+        dfn_result: setting(
+            dfn_result,
+            "dfn_result",
+            &[
+                ("last-sentence", DfnResult::LastSentence),
+                ("first-non-assignment", DfnResult::FirstNonAssignment),
+            ],
+        )?
+        .unwrap_or(d.dfn_result),
+        default_arg: setting(
+            default_arg,
+            "default_arg",
+            &[("eager", DefaultArg::Eager), ("lazy", DefaultArg::Lazy)],
+        )?
+        .unwrap_or(d.default_arg),
+        complex_order: setting(
+            complex_order,
+            "complex_order",
+            &[
+                ("real-then-imaginary", ComplexOrder::RealThenImaginary),
+                ("magnitude-then-angle", ComplexOrder::MagnitudeThenAngle),
+            ],
+        )?
+        .unwrap_or(d.complex_order),
+        trains: trains.unwrap_or(d.trains),
+    })
+}
+
 #[pyfunction]
-#[pyo3(signature = (lang, source, index_origin=None))]
-fn compile(lang: &str, source: &str, index_origin: Option<i64>) -> PyResult<Kernel> {
+#[pyo3(signature = (
+    lang,
+    source,
+    index_origin=None,
+    comparison_tolerance=None,
+    nested_model=None,
+    first_disclose=None,
+    index_form=None,
+    dfn_result=None,
+    default_arg=None,
+    complex_order=None,
+    trains=None,
+))]
+#[allow(clippy::too_many_arguments)]
+fn compile(
+    lang: &str,
+    source: &str,
+    index_origin: Option<i64>,
+    comparison_tolerance: Option<f64>,
+    nested_model: Option<&str>,
+    first_disclose: Option<&str>,
+    index_form: Option<&str>,
+    dfn_result: Option<&str>,
+    default_arg: Option<&str>,
+    complex_order: Option<&str>,
+    trains: Option<bool>,
+) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
-    let dialect = Dialect { index_origin };
+    let dialect = dialect_of(
+        index_origin,
+        comparison_tolerance,
+        nested_model,
+        first_disclose,
+        index_form,
+        dfn_result,
+        default_arg,
+        complex_order,
+        trains,
+    )?;
     let program = jay::compile(lang, source, &dialect).map_err(|e| jay_err(source, &e))?;
     Ok(Kernel { program: Arc::new(program), device: None })
 }
@@ -514,15 +639,47 @@ fn devices() -> Vec<(String, String, String, bool)> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (lang, parts, names, index_origin=None))]
+#[pyo3(signature = (
+    lang,
+    parts,
+    names,
+    index_origin=None,
+    comparison_tolerance=None,
+    nested_model=None,
+    first_disclose=None,
+    index_form=None,
+    dfn_result=None,
+    default_arg=None,
+    complex_order=None,
+    trains=None,
+))]
+#[allow(clippy::too_many_arguments)]
 fn compile_parts(
     lang: &str,
     parts: Vec<String>,
     names: Vec<String>,
     index_origin: Option<i64>,
+    comparison_tolerance: Option<f64>,
+    nested_model: Option<&str>,
+    first_disclose: Option<&str>,
+    index_form: Option<&str>,
+    dfn_result: Option<&str>,
+    default_arg: Option<&str>,
+    complex_order: Option<&str>,
+    trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
-    let dialect = Dialect { index_origin };
+    let dialect = dialect_of(
+        index_origin,
+        comparison_tolerance,
+        nested_model,
+        first_disclose,
+        index_form,
+        dfn_result,
+        default_arg,
+        complex_order,
+        trains,
+    )?;
     let part_refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
     let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
     let program = jay::compile_parts(lang, &part_refs, &name_refs, &dialect)

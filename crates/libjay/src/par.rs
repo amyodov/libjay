@@ -213,6 +213,26 @@ where
     ok.then_some(out)
 }
 
+/// True when any element satisfies `f`.
+///
+/// Every element is read: no short circuit. That is what makes the scan one
+/// branch-free pass the compiler can widen and the pool can split, and the
+/// answer is the same either way. The callers are the checks that ask
+/// whether a whole buffer will leave the reals, where the usual answer is
+/// no and the whole buffer is read regardless.
+pub fn any<T, F>(v: &[T], f: F) -> bool
+where
+    T: Sync,
+    F: Fn(&T) -> bool + Sync + Send,
+{
+    let scan = |part: &[T]| part.iter().fold(false, |a, x| a | f(x));
+    if worth_it(v.len()) {
+        in_pool(|| v.par_chunks(chunk_len(v.len())).map(scan).reduce(|| false, |a, b| a | b))
+    } else {
+        scan(v)
+    }
+}
+
 /// Map `0 .. n` in parallel, in order. The caller has already decided that
 /// the work is worth splitting and that `f` is safe to run off the main
 /// thread.
@@ -224,27 +244,22 @@ where
     in_pool(|| (0..n).into_par_iter().map(&f).collect())
 }
 
-/// Fold `v` right to left in chunks combined right to left. `step` must be
-/// associative: the regrouping is the whole point. None when a step left
-/// its type (integer overflow) anywhere.
-pub fn try_fold_chunks<T, F>(v: &[T], step: F) -> Option<T>
+/// Fold `v` right to left in chunks combined right to left, each chunk
+/// folded by `seq`. `step` must be associative: the regrouping is the whole
+/// point, and it is what lets `seq` regroup inside its own chunk too. None
+/// when a step left its type (integer overflow) anywhere.
+pub fn try_fold_chunks<T, C, F>(v: &[T], seq: C, step: F) -> Option<T>
 where
     T: Copy + Send + Sync,
+    C: Fn(&[T]) -> Option<T> + Sync + Send,
     F: Fn(T, T) -> Option<T> + Sync + Send,
 {
-    let seq = |part: &[T]| {
-        let mut acc = part[part.len() - 1];
-        for &x in part[..part.len() - 1].iter().rev() {
-            acc = step(x, acc)?;
-        }
-        Some(acc)
-    };
     if !worth_it(v.len()) {
         return seq(v);
     }
     let chunk = chunk_len(v.len());
     let parts: Vec<Option<T>> =
-        in_pool(|| v.par_chunks(chunk).map(seq).collect::<Vec<Option<T>>>());
+        in_pool(|| v.par_chunks(chunk).map(&seq).collect::<Vec<Option<T>>>());
     let parts: Option<Vec<T>> = parts.into_iter().collect();
     let parts = parts?;
     let mut acc = parts[parts.len() - 1];

@@ -1,0 +1,39 @@
+// Sentences a differential fuzz run disagreed with GNU APL on, kept as
+// regressions. `jay-corpus fuzz apl --compare` is what drew them.
+
+// Reshape lays out ELEMENTS here, which is where APL and J part company
+// above rank 1, and an empty argument FILLS rather than being refused.
+6⍴2 3⍴⍳6
+⍴6⍴2 3⍴⍳6
+⍴3⍴3 4⍴⍳12
+2 3⍴⍳0
+2 2⍴⍳0
+2 3⍴''
+2 3⍴⍳6
+2⍴5
+4⍴1 2 3
+
+// Replicate: a negative count contributes that many fills, and a scalar
+// right argument stands in for every count.
+¯2/1 2
+1 0 1/5
+2/1 2 3
+0/1 2 3
+
+// Equality across a character and a number is total, as it is in J.
+'a'=1
+'a'≠1
+'abc'=1 2 3
+
+// Signum is exact here: a magnitude below `⎕CT` still has its sign, where
+// J's `*` reads it as zero.
+×1E¯15
+×1E¯13
+
+// APL extends any frame of ONE cell, whatever its rank, not only a scalar.
+(1 1⍴5)+1 2 3
+(,5)+1 2 3
+(1 1 1⍴5)+2 3⍴⍳6
+⍴(1 1⍴5)+1 2 3
+(,5)+2 3⍴⍳6
+⍴(2 3⍴⍳6)+,5

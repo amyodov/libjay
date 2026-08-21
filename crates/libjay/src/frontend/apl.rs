@@ -11,7 +11,9 @@ use std::sync::Arc;
 
 use crate::array::{Array, Data};
 use crate::error::{Error, Result, Span};
-use crate::frontend::{Segment, SourceParts};
+use crate::frontend::{
+    DefaultArg, DfnResult, FirstDisclose, IndexForm, NestedModel, Rules, Segment, SourceParts,
+};
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
     BoolDyad, DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind,
@@ -19,21 +21,22 @@ use crate::verb::{
 };
 
 /// Parse an APL program (sentences separated by newlines or `⋄`) into IR
-/// statements. `origin` is the dialect's `⎕IO`.
-pub fn parse(src: &SourceParts, origin: i64) -> Result<Vec<Expr>> {
-    let sentences = lex(src, origin)?;
+/// statements. `d` is the dialect, resolved: `⎕IO`, `⎕CT` and the
+/// lineage settings the parser reads.
+pub fn parse(src: &SourceParts, d: Rules) -> Result<Vec<Expr>> {
+    let sentences = lex(src, d)?;
     let mut verbs: HashMap<String, Verb> = HashMap::new();
     let mut stmts = Vec::with_capacity(sentences.len());
     let mut i = 0usize;
     while i < sentences.len() {
         if matches!(sentences[i].first().map(|t| &t.kind), Some(Tok::Del)) {
-            let stmt = parse_tradfn(&sentences, &mut i, origin, &mut verbs)?;
+            let stmt = parse_tradfn(&sentences, &mut i, d, &mut verbs)?;
             stmts.push(stmt);
             continue;
         }
         let sentence = sentences[i].clone();
         i += 1;
-        if let Some(stmt) = parse_statement(sentence, origin, &mut verbs, false)? {
+        if let Some(stmt) = parse_statement(sentence, d, &mut verbs, false)? {
             stmts.push(stmt);
         }
     }
@@ -44,12 +47,12 @@ pub fn parse(src: &SourceParts, origin: i64) -> Result<Vec<Expr>> {
 /// None where the sentence held nothing but blanks and a comment.
 fn parse_statement(
     sentence: Vec<Token>,
-    origin: i64,
+    d: Rules,
     verbs: &mut HashMap<String, Verb>,
     in_def: bool,
 ) -> Result<Option<Expr>> {
     let sentence = substitute_verbs(sentence, verbs);
-    let sentence = fold_dfns(sentence, origin, verbs)?;
+    let sentence = fold_dfns(sentence, d, verbs)?;
     // `F←{⍵×2}` names a function: the sentence does no work at run time, and
     // later sentences read `F` as the function itself.
     if let [name, assign, func] = &sentence[..] {
@@ -70,7 +73,7 @@ fn parse_statement(
             }
         }
     }
-    let toks = fold_paren_funcs(fold_axes(fold_operators(sentence, origin)?, origin)?);
+    let toks = fold_paren_funcs(fold_axes(fold_operators(sentence, d)?, d)?);
     if toks.is_empty() {
         return Ok(None);
     }
@@ -89,10 +92,10 @@ fn parse_statement(
     let hint = Span::merge(toks[0].span, toks[toks.len() - 1].span);
     // `A[i]←v` replaces part of a named value; nothing else assigns through
     // a bracket.
-    if let Some(e) = indexed_assignment(&toks, origin, hint)? {
+    if let Some(e) = indexed_assignment(&toks, d, hint)? {
         return Ok(Some(e));
     }
-    parse_range(&toks, 0, toks.len(), hint, origin).map(Some)
+    parse_range(&toks, 0, toks.len(), hint, d).map(Some)
 }
 
 /// Replace every name the program has given a function by that function,
@@ -277,12 +280,20 @@ fn literal(k: &Tok) -> Option<&Array> {
 // Primitive table
 // ---------------------------------------------------------------------------
 
-/// The primitive for a function glyph. `origin` parameterises `⍳`.
-fn prim_for(ch: char, origin: i64) -> Option<Prim> {
+/// The primitive for a function glyph, under the dialect `d`: `⎕IO`
+/// parameterises the counting primitives, and the lineage settings decide
+/// the glyphs the APL lines read differently (`↑ ⊃ ⊂ ⌷`).
+///
+/// A glyph whose meaning this dialect does not have is `None` here, as an
+/// unknown glyph is — but a dialect that reads one differently is refused
+/// by [`Dialect::rules`](crate::Dialect::rules) before a program reaches
+/// this table, so `None` here is only ever the unknown glyph.
+fn prim_for(ch: char, d: Rules) -> Option<Prim> {
     use DyadOp as D;
     use MonadOp as M;
     use ScalarDyad as SD;
     use ScalarMonad as SM;
+    let origin = d.origin;
     let p = match ch {
         '+' => Prim {
             name: "+",
@@ -461,17 +472,25 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
             dyad: D::NotYet("dyadic transpose"),
             ranks: [RANK_INF, 1, RANK_INF],
         },
-        // GNU APL is APL2-flavoured here: `↑` is first and `⊃` is
-        // disclose, the opposite of the Dyalog reading.
+        // `↑` and `⊃` are the lineages' clearest divergence, so the
+        // dialect names which reading applies; the dyads agree.
         '↑' => Prim {
             name: "↑",
-            monad: M::First,
+            monad: match d.first_disclose {
+                FirstDisclose::UpIsFirst => M::First,
+                FirstDisclose::UpIsMix => return None,
+            },
             dyad: D::Take,
             ranks: [RANK_INF, 1, RANK_INF],
         },
         '⊂' => Prim {
             name: "⊂",
-            monad: M::Enclose(Enclose::ExceptSimpleScalar),
+            // A floating model cannot nest a simple scalar, so `⊂3` is 3;
+            // a grounded one encloses it like anything else.
+            monad: match d.nested_model {
+                NestedModel::Floating => M::Enclose(Enclose::ExceptSimpleScalar),
+                NestedModel::Grounded => return None,
+            },
             dyad: D::PartitionEnclose,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
@@ -491,10 +510,14 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
             dyad: D::IntervalIndex { offset: origin - 1 },
             ranks: [RANK_INF, 1, RANK_INF],
         },
-        // GNU APL's `⌷` is APL2's: one scalar index per axis, no monad.
+        // `⌷` indexes with one scalar per axis and has no monadic case in
+        // the APL2 reading; the other reads index vectors instead.
         '⌷' => Prim {
             name: "⌷",
-            monad: M::Same,
+            monad: match d.index_form {
+                IndexForm::ScalarPerAxis => M::Same,
+                IndexForm::AxisVectors => return None,
+            },
             dyad: D::Squad { origin },
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
@@ -512,7 +535,10 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         },
         '⊃' => Prim {
             name: "⊃",
-            monad: M::Open,
+            monad: match d.first_disclose {
+                FirstDisclose::UpIsFirst => M::Open,
+                FirstDisclose::UpIsMix => return None,
+            },
             dyad: D::Pick { origin },
             ranks: [0, RANK_INF, RANK_INF],
         },
@@ -560,7 +586,7 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         },
         '⍎' => Prim {
             name: "⍎",
-            monad: M::Execute { apl: true, origin },
+            monad: M::Execute { apl: true },
             dyad: D::None,
             ranks: [1, RANK_INF, RANK_INF],
         },
@@ -572,8 +598,8 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
 /// The function a glyph denotes. Every glyph but `⌽` is a bare primitive;
 /// `⌽` is `⊖` applied to rows, so it carries the rank that does that: cells
 /// of rank 1 on the right, atoms on the left.
-fn verb_for(ch: char, origin: i64) -> Option<Verb> {
-    let p = prim_for(ch, origin)?;
+fn verb_for(ch: char, d: Rules) -> Option<Verb> {
+    let p = prim_for(ch, d)?;
     if ch == '⌽' {
         return Some(Verb::Rank(Box::new(Verb::Prim(p)), [1, 0, 1]));
     }
@@ -585,25 +611,26 @@ fn verb_for(ch: char, origin: i64) -> Option<Verb> {
 ///
 /// `⎕IO` and `⎕CT` are the dialect's own settings, readable but not
 /// assignable — the compiler fixed them before the program ran.
-fn quad_name(name: &str, origin: i64, span: Span) -> Result<Tok> {
+fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
     let chars = |s: &str| Tok::Value(Array::from_chars(s.chars().collect()));
     Ok(match name {
         "A" => chars("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
         "D" => chars("0123456789"),
-        "IO" => Tok::Value(Array::scalar_i64(origin)),
-        "CT" => Tok::Value(Array::scalar_f64(crate::verb::Tol::APL.ct)),
+        "IO" => Tok::Value(Array::scalar_i64(d.origin)),
+        "CT" => Tok::Value(Array::scalar_f64(d.ct)),
         "UCS" => Tok::Func(Verb::Prim(Prim {
             name: "⎕UCS",
             monad: MonadOp::Unicode { pass_chars: false },
             dyad: DyadOp::None,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         })),
-        // The ones that would read a clock, a workspace or a file.
+        // The ones that would read a clock, a workspace or a file. The
+        // sandbox is a property of libjay, not a queue position, so this
+        // is a refusal and not a promise.
         "TS" | "AI" | "TC" | "WA" | "SI" | "LC" | "NL" | "EX" | "FIO" | "NA" | "SH" | "CMD"
-        | "MAP" | "SVO" | "SVQ" | "TZ" | "DL" => Err(Error::new(
-            crate::ErrorKind::NotYet,
+        | "MAP" | "SVO" | "SVQ" | "TZ" | "DL" => Err(Error::language(
             format!("⎕{name} is closed by the sandbox: it reads outside the program"),
-            Some(span),
+            span,
         ))?,
         other => Err(Error::not_yet(format!("the system name ⎕{other}"), span))?,
     })
@@ -658,7 +685,7 @@ fn copy_verb(leading: bool) -> Verb {
 
 /// Split the source into sentences of tokens. Blank sentences are dropped.
 /// Spans are absolute offsets into `SourceParts::display`.
-fn lex(src: &SourceParts, origin: i64) -> Result<Vec<Vec<Token>>> {
+fn lex(src: &SourceParts, d: Rules) -> Result<Vec<Vec<Token>>> {
     let mut out: Vec<Vec<Token>> = Vec::new();
     let mut cur: Vec<Token> = Vec::new();
     // A comment runs to the end of a line, which may be a later segment.
@@ -667,7 +694,7 @@ fn lex(src: &SourceParts, origin: i64) -> Result<Vec<Vec<Token>>> {
     for seg in &src.segments {
         match seg {
             Segment::Text { text, offset } => {
-                lex_text(text, *offset, origin, &mut out, &mut cur, &mut in_comment, &mut braces)?;
+                lex_text(text, *offset, d, &mut out, &mut cur, &mut in_comment, &mut braces)?;
             }
             Segment::Param { index, offset, len } => {
                 if !in_comment {
@@ -689,7 +716,7 @@ fn lex(src: &SourceParts, origin: i64) -> Result<Vec<Vec<Token>>> {
 fn lex_text(
     text: &str,
     offset: usize,
-    origin: i64,
+    d: Rules,
     out: &mut Vec<Vec<Token>>,
     cur: &mut Vec<Token>,
     in_comment: &mut bool,
@@ -849,17 +876,20 @@ fn lex_text(
                     let name = text[after..j].to_uppercase();
                     // Every system name libjay answers is read-only: the
                     // ones that are settings were fixed by the dialect
-                    // before the program was compiled.
+                    // before the program was compiled, so assigning one is
+                    // a refusal and not a promise. A name libjay does not
+                    // answer at all reports itself first.
                     if text[j..].trim_start().starts_with('←') {
-                        return Err(Error::not_yet(
+                        quad_name(&name, d, span)?;
+                        return Err(Error::language(
                             format!(
-                                "assigning system variables (⎕{name} is a compiler \
-                                 dialect setting, read-only here)"
+                                "⎕{name} is read-only: libjay's system names are \
+                                 fixed before the program runs"
                             ),
                             span,
                         ));
                     }
-                    cur.push(Token { kind: quad_name(&name, origin, span)?, span });
+                    cur.push(Token { kind: quad_name(&name, d, span)?, span });
                     i = j;
                     continue;
                 }
@@ -888,7 +918,7 @@ fn lex_text(
             }
             _ => {
                 let mut end = i + clen;
-                if let Some(v) = verb_for(ch, origin) {
+                if let Some(v) = verb_for(ch, d) {
                     cur.push(Token {
                         kind: Tok::Func(v),
                         span: Span::new(offset + i, offset + end),
@@ -1101,7 +1131,7 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
 /// Fold monadic and dyadic operators into derived-function tokens, left to
 /// right. After this the sentence holds only values, names, functions, `←`,
 /// `⎕` and parentheses.
-fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
+fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
     let mut out: Vec<Token> = Vec::new();
     let mut it = toks.into_iter().peekable();
     while let Some(t) = it.next() {
@@ -1229,7 +1259,7 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
         // An explicit axis replaces the glyph's own choice of one: `+/[k]`
         // and `+⌿[k]` both reduce axis k, and `f\\[k]` and `f⍀[k]` both scan
         // it, which is what makes the two spellings the same function here.
-        if let Some((k, aspan)) = take_axis(&mut it, origin)? {
+        if let Some((k, aspan)) = take_axis(&mut it, d)? {
             let inner = match op {
                 OpGlyph::Slash | OpGlyph::SlashBar => Verb::Reduce(Box::new(f)),
                 OpGlyph::Backslash | OpGlyph::BackslashBar => {
@@ -1336,7 +1366,7 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
 /// given in `⎕IO` origin and comes back as a zero-based one.
 fn take_axis(
     it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
-    origin: i64,
+    d: Rules,
 ) -> Result<Option<(usize, Span)>> {
     if !matches!(it.peek().map(|t| &t.kind), Some(Tok::LBracket)) {
         return Ok(None);
@@ -1359,6 +1389,7 @@ fn take_axis(
     let [k] = ints[..] else {
         return Err(Error::not_yet("several axes in one specification", spec.span));
     };
+    let origin = d.origin;
     let k = k - origin;
     if k < 0 {
         return Err(Error::domain(format!("axis {} does not exist", k + origin), spec.span));
@@ -1393,7 +1424,7 @@ fn fold_paren_funcs(toks: Vec<Token>) -> Vec<Token> {
 }
 
 /// `f[k]` where `f` is a plain function rather than a derived one.
-fn fold_axes(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
+fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
     let mut out: Vec<Token> = Vec::new();
     let mut it = toks.into_iter().peekable();
     while let Some(t) = it.next() {
@@ -1401,7 +1432,7 @@ fn fold_axes(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
             out.push(t);
             continue;
         };
-        let Some((k, aspan)) = take_axis(&mut it, origin)? else {
+        let Some((k, aspan)) = take_axis(&mut it, d)? else {
             out.push(t);
             continue;
         };
@@ -1429,11 +1460,11 @@ fn leading_axis_form(v: &Verb) -> Option<Verb> {
 }
 
 /// One bracket slot: axis `axis` of the right argument selected by the left.
-fn select_axis_verb(axis: usize, rank: usize, origin: i64) -> Verb {
+fn select_axis_verb(axis: usize, rank: usize, d: Rules) -> Verb {
     Verb::Prim(Prim {
         name: "[…]",
         monad: MonadOp::None,
-        dyad: DyadOp::SelectAxis { axis, rank, origin },
+        dyad: DyadOp::SelectAxis { axis, rank, origin: d.origin },
         ranks: [RANK_INF; 3],
     })
 }
@@ -1472,8 +1503,8 @@ fn rank_spec(a: &Array, span: Span) -> Result<[i64; 3]> {
 
 /// Parse the token range `[lo, hi)` as one expression, right to left.
 /// `hint` locates errors when the range is empty.
-fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, origin: i64) -> Result<Expr> {
-    let (mut acc, mut start) = parse_operand(toks, lo, hi, hint, origin)?;
+fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, d: Rules) -> Result<Expr> {
+    let (mut acc, mut start) = parse_operand(toks, lo, hi, hint, d)?;
     let end = toks[hi - 1].span.end;
     loop {
         if start == lo {
@@ -1485,7 +1516,7 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, origin: i64) ->
                 // Dyadic exactly when an operand ends to the left of `f`.
                 let dyadic = start >= lo + 2 && is_operand_end(&toks[start - 2].kind);
                 if dyadic {
-                    let (x, xstart) = parse_operand(toks, lo, start - 1, left.span, origin)?;
+                    let (x, xstart) = parse_operand(toks, lo, start - 1, left.span, d)?;
                     acc = Expr::Dyad {
                         verb: f.clone(),
                         x: Box::new(x),
@@ -1534,7 +1565,13 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, origin: i64) ->
             _ => break,
         }
     }
-    Err(Error::parse("syntax error", Span::new(toks[lo].span.start, toks[start - 1].span.end)))
+    let span = Span::new(toks[lo].span.start, toks[start - 1].span.end);
+    // A run of functions where a value belongs is a train in the dialects
+    // that have them, and a syntax error in the ones that do not.
+    if d.trains && toks[lo..start].iter().all(|t| matches!(t.kind, Tok::Func(_))) {
+        return Err(Error::not_yet("a train (a function derived from a run of functions)", span));
+    }
+    Err(Error::parse("syntax error", span))
 }
 
 /// Parse the operand ending at `hi - 1`, vector notation included.
@@ -1548,9 +1585,9 @@ fn parse_operand(
     lo: usize,
     hi: usize,
     hint: Span,
-    origin: i64,
+    d: Rules,
 ) -> Result<(Expr, usize)> {
-    let (first, mut start) = parse_primary(toks, lo, hi, hint, origin)?;
+    let (first, mut start) = parse_primary(toks, lo, hi, hint, d)?;
     if start == lo || !is_operand_end(&toks[start - 1].kind) {
         return Ok((first, start));
     }
@@ -1561,14 +1598,14 @@ fn parse_operand(
         if start == lo || !is_operand_end(&toks[start - 1].kind) {
             break;
         }
-        let (e, s) = parse_primary(toks, lo, start, toks[start - 1].span, origin)?;
+        let (e, s) = parse_primary(toks, lo, start, toks[start - 1].span, d)?;
         cur = e;
         start = s;
     }
     let span = Span::new(toks[start].span.start, toks[hi - 1].span.end);
     let mut it = items.into_iter();
     let last = it.next().expect("a strand has at least one item");
-    let mut acc = Expr::Monad { verb: strand_seed(), y: Box::new(last), span };
+    let mut acc = Expr::Monad { verb: strand_seed(d), y: Box::new(last), span };
     for item in it {
         acc = Expr::Dyad { verb: strand_verb(), x: Box::new(item), y: Box::new(acc), span };
     }
@@ -1591,10 +1628,10 @@ fn push_items(items: &mut Vec<Expr>, e: Expr, tok: &Token) {
 
 /// `,⊂y`: the one-item vector a single operand makes — flat when the
 /// operand is a simple scalar, nested when it is anything else.
-fn strand_seed() -> Verb {
+fn strand_seed(d: Rules) -> Verb {
     Verb::Atop(
-        Box::new(Verb::Prim(prim_for(',', 0).expect("`,` is a primitive"))),
-        Box::new(Verb::Prim(prim_for('⊂', 0).expect("`⊂` is a primitive"))),
+        Box::new(Verb::Prim(prim_for(',', d).expect("`,` is a primitive"))),
+        Box::new(Verb::Prim(prim_for('⊂', d).expect("`⊂` is a primitive"))),
     )
 }
 
@@ -1615,7 +1652,7 @@ fn parse_primary(
     lo: usize,
     hi: usize,
     hint: Span,
-    origin: i64,
+    d: Rules,
 ) -> Result<(Expr, usize)> {
     if hi == lo {
         return Err(Error::parse("empty parentheses", hint));
@@ -1638,10 +1675,10 @@ fn parse_primary(
         Tok::RParen => {
             let l = match_lparen(toks, lo, hi - 1)?;
             let hint = Span::merge(toks[l].span, t.span);
-            let inner = parse_range(toks, l + 1, hi - 1, hint, origin)?;
+            let inner = parse_range(toks, l + 1, hi - 1, hint, d)?;
             Ok((inner, l))
         }
-        Tok::RBracket => index_brackets(toks, lo, hi, origin),
+        Tok::RBracket => index_brackets(toks, lo, hi, d),
         // `F←+/` names a function in some dialects. The reference this
         // frontend follows, GNU APL, rejects it as a syntax error, so it is
         // not implemented here; J's `mean =. +/ % #` is the spelling libjay
@@ -1686,14 +1723,14 @@ fn index_brackets(
     toks: &[Token],
     lo: usize,
     hi: usize,
-    origin: i64,
+    d: Rules,
 ) -> Result<(Expr, usize)> {
     let close = &toks[hi - 1];
     let open = match_lbracket(toks, lo, hi - 1)?;
     if open == lo || !is_operand_end(&toks[open - 1].kind) {
         return Err(Error::parse("[ needs a value on its left", toks[open].span));
     }
-    let (base, start) = parse_primary(toks, lo, open, toks[open].span, origin)?;
+    let (base, start) = parse_primary(toks, lo, open, toks[open].span, d)?;
     let slots = index_slots(toks, open + 1, hi - 1, toks[open].span)?;
     let span = Span::new(toks[start].span.start, close.span.end);
     let rank = slots.len();
@@ -1701,11 +1738,11 @@ fn index_brackets(
     let mut first = true;
     for (axis, slot) in slots.iter().enumerate().rev() {
         let Some((slo, shi)) = *slot else { continue };
-        let idx = parse_range(toks, slo, shi, toks[open].span, origin)?;
+        let idx = parse_range(toks, slo, shi, toks[open].span, d)?;
         let check = if first { rank } else { 0 };
         first = false;
         acc = Expr::Dyad {
-            verb: select_axis_verb(axis, check, origin),
+            verb: select_axis_verb(axis, check, d),
             x: Box::new(idx),
             y: Box::new(acc),
             span,
@@ -1823,7 +1860,7 @@ fn match_close(toks: &[Token], open: usize, opener: &Tok, closer: &Tok) -> Optio
 /// Replace every `{ … }` in a sentence by the function it defines.
 fn fold_dfns(
     toks: Vec<Token>,
-    origin: i64,
+    d: Rules,
     verbs: &HashMap<String, Verb>,
 ) -> Result<Vec<Token>> {
     let Some(open) = toks.iter().position(|t| matches!(t.kind, Tok::LBrace)) else {
@@ -1832,7 +1869,7 @@ fn fold_dfns(
     let close = match_close(&toks, open, &Tok::LBrace, &Tok::RBrace)
         .ok_or_else(|| Error::parse("unmatched {", toks[open].span))?;
     let span = Span::merge(toks[open].span, toks[close].span);
-    let (verb, omega) = build_dfn(&toks[open + 1..close], origin, verbs)?;
+    let (verb, omega) = build_dfn(&toks[open + 1..close], d, verbs)?;
     let mut out: Vec<Token> = toks[..open].to_vec();
     let kind = match omega {
         Some(omega) => Tok::UserOp { def: verb, omega },
@@ -1841,7 +1878,7 @@ fn fold_dfns(
     out.push(Token { kind, span });
     out.extend_from_slice(&toks[close + 1..]);
     // A sentence may hold several dfns side by side.
-    fold_dfns(out, origin, verbs)
+    fold_dfns(out, d, verbs)
 }
 
 /// The statements of a dfn body: the runs between the `⋄` and line breaks
@@ -1871,7 +1908,7 @@ fn split_statements(toks: &[Token]) -> Vec<&[Token]> {
 /// it is an operator wanting a right operand as well as a left one.
 fn build_dfn(
     body: &[Token],
-    origin: i64,
+    d: Rules,
     verbs: &HashMap<String, Verb>,
 ) -> Result<(Verb, Option<bool>)> {
     let mut depth = 0usize;
@@ -1895,13 +1932,26 @@ fn build_dfn(
         inner.insert("⍺⍺".to_string(), Verb::Named("⍺⍺".to_string()));
         inner.insert("⍵⍵".to_string(), Verb::Named("⍵⍵".to_string()));
     }
-    let stmts = parse_dfn_body(body, origin, &mut inner)?;
+    let stmts = parse_dfn_body(body, d, &mut inner)?;
+    // The body is a sequence, and the dialect says which of its sentences
+    // is the answer. libjay's block model gives the last one; the other
+    // reading stops at the first sentence that is not an assignment.
+    let span = body.first().map_or(Span::new(0, 0), |t| t.span);
+    match d.dfn_result {
+        DfnResult::LastSentence => {}
+        DfnResult::FirstNonAssignment => {
+            return Err(Error::not_yet("a dfn that answers with its first value", span))
+        }
+    }
     let pure = stmts.iter().all(is_pure_stmt);
     let operator = (alpha_op || omega_op).then_some(omega_op);
     let verb = Verb::Explicit(Arc::new(ExplicitDef {
         name: "{…}".to_string(),
         left: dyadic.then(|| "⍺".to_string()),
         right: "⍵".to_string(),
+        // A dfn runs in either valence; a monadic call simply leaves `⍺`
+        // without a value, unless `⍺←` gives it one.
+        dyad_only: false,
         result: None,
         locals: Vec::new(),
         body: stmts,
@@ -1915,7 +1965,7 @@ fn build_dfn(
 
 fn parse_dfn_body(
     body: &[Token],
-    origin: i64,
+    d: Rules,
     verbs: &mut HashMap<String, Verb>,
 ) -> Result<Vec<Expr>> {
     let mut stmts = Vec::new();
@@ -1928,7 +1978,7 @@ fn parse_dfn_body(
                 _ => t.clone(),
             })
             .collect();
-        stmts.push(parse_guarded(stmt, origin, verbs)?);
+        stmts.push(parse_guarded(stmt, d, verbs)?);
     }
     Ok(stmts)
 }
@@ -1936,7 +1986,7 @@ fn parse_dfn_body(
 /// One dfn statement: a guard `cond:expr`, an `⍺←default`, or a sentence.
 fn parse_guarded(
     stmt: Vec<Token>,
-    origin: i64,
+    d: Rules,
     verbs: &mut HashMap<String, Verb>,
 ) -> Result<Expr> {
     let mut depth = 0usize;
@@ -1954,8 +2004,8 @@ fn parse_guarded(
     }
     if let Some(k) = colon {
         let span = Span::merge(stmt[0].span, stmt[stmt.len() - 1].span);
-        let test = one_statement(stmt[..k].to_vec(), origin, verbs, stmt[k].span)?;
-        let body = one_statement(stmt[k + 1..].to_vec(), origin, verbs, stmt[k].span)?;
+        let test = one_statement(stmt[..k].to_vec(), d, verbs, stmt[k].span)?;
+        let body = one_statement(stmt[k + 1..].to_vec(), d, verbs, stmt[k].span)?;
         // A guard that holds is the dfn's answer: the value, then out.
         let arm = Branch {
             test: Some(vec![test]),
@@ -1967,16 +2017,22 @@ fn parse_guarded(
             span,
         ));
     }
-    // `⍺←v` gives the left argument a value only where none arrived.
+    // `⍺←v` gives the left argument a value only where none arrived. The
+    // dialect says whether `v` is evaluated when one did: eagerly, the
+    // sentence runs and its value is dropped.
     let default = matches!(
         (stmt.first().map(|t| &t.kind), stmt.get(1).map(|t| &t.kind)),
         (Some(Tok::Name(n)), Some(Tok::Assign)) if n == "⍺"
     );
     let span = stmt.first().map_or(Span::new(0, 0), |t| t.span);
-    let e = one_statement(stmt, origin, verbs, span)?;
+    let e = one_statement(stmt, d, verbs, span)?;
     if default {
+        let scope = match d.default_arg {
+            DefaultArg::Eager => Scope::LocalDefault,
+            DefaultArg::Lazy => return Err(Error::not_yet("a lazy ⍺← default", span)),
+        };
         if let Expr::Assign { name, value, span, .. } = e {
-            return Ok(Expr::Assign { name, value, scope: Scope::LocalDefault, span });
+            return Ok(Expr::Assign { name, value, scope, span });
         }
     }
     Ok(e)
@@ -1984,11 +2040,11 @@ fn parse_guarded(
 
 fn one_statement(
     stmt: Vec<Token>,
-    origin: i64,
+    d: Rules,
     verbs: &mut HashMap<String, Verb>,
     hint: Span,
 ) -> Result<Expr> {
-    parse_statement(stmt, origin, verbs, true)?
+    parse_statement(stmt, d, verbs, true)?
         .ok_or_else(|| Error::parse("this needs an expression", hint))
 }
 
@@ -2032,7 +2088,7 @@ fn is_pure_control(c: &Control) -> bool {
 fn parse_tradfn(
     sentences: &[Vec<Token>],
     i: &mut usize,
-    origin: i64,
+    d: Rules,
     verbs: &mut HashMap<String, Verb>,
 ) -> Result<Expr> {
     let header = &sentences[*i];
@@ -2062,14 +2118,14 @@ fn parse_tradfn(
     let mut labels: Vec<(String, usize)> = Vec::new();
     for line in &body_lines {
         let mut label = None;
-        let item = to_item(line.clone(), origin, &mut inner, &mut label)?;
+        let item = to_item(line.clone(), d, &mut inner, &mut label)?;
         if let Some(name) = label {
             labels.push((name, items.len()));
         }
         items.push(item);
     }
     let item_count = items.len();
-    let mut cursor = AplCursor { items: &items, at: 0 };
+    let mut cursor = AplCursor { items: &items, at: 0, d };
     let mut body = parse_apl_block(&mut cursor, &[])?;
     // A label is the number of a LINE, so the statements have to be the
     // lines: a control structure folds several of them into one and the
@@ -2097,6 +2153,7 @@ fn parse_tradfn(
         name: format!("∇{name}"),
         left: def_left,
         right: def_right,
+        dyad_only: false,
         result,
         locals,
         body,
@@ -2168,7 +2225,7 @@ impl AplItem {
 
 fn to_item(
     line: Vec<Token>,
-    origin: i64,
+    d: Rules,
     verbs: &mut HashMap<String, Verb>,
     label: &mut Option<String>,
 ) -> Result<AplItem> {
@@ -2188,7 +2245,7 @@ fn to_item(
     }
     if matches!(line.first().map(|t| &t.kind), Some(Tok::Arrow)) {
         let span = line[0].span;
-        let target = parse_statement(line[1..].to_vec(), origin, verbs, true)?
+        let target = parse_statement(line[1..].to_vec(), d, verbs, true)?
             .ok_or_else(|| Error::parse("→ needs a line to branch to", span))?;
         let span = Span::merge(span, target.span());
         return Ok(AplItem::Sentence(Expr::Control(
@@ -2208,7 +2265,7 @@ fn to_item(
         )));
     }
     let span = line.first().map_or(Span::new(0, 0), |t| t.span);
-    let e = parse_statement(line, origin, verbs, true)?
+    let e = parse_statement(line, d, verbs, true)?
         .ok_or_else(|| Error::parse("this line has no sentence", span))?;
     Ok(AplItem::Sentence(e))
 }
@@ -2216,6 +2273,8 @@ fn to_item(
 struct AplCursor<'a> {
     items: &'a [AplItem],
     at: usize,
+    /// The dialect, for the sentences a control word carries.
+    d: Rules,
 }
 
 impl<'a> AplCursor<'a> {
@@ -2278,7 +2337,7 @@ fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
             let mut otherwise = None;
             let mut test = rest;
             loop {
-                let test_expr = condition(test, start)?;
+                let test_expr = condition(test, start, cur.d)?;
                 let body = parse_apl_block(cur, &["ElseIf", "Else", "EndIf"])?;
                 arms.push(Branch { test: Some(vec![test_expr]), body, fall_through: false });
                 match cur.peek_word() {
@@ -2302,7 +2361,7 @@ fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
             Control::If { arms, otherwise }
         }
         "While" => {
-            let test = condition(rest, start)?;
+            let test = condition(rest, start, cur.d)?;
             let body = parse_apl_block(cur, &["EndWhile"])?;
             cur.close("EndWhile")?;
             Control::While { test: vec![test], body, body_first: false, until: false }
@@ -2315,24 +2374,24 @@ fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
             let Some(AplItem::Word { rest, span, .. }) = cur.peek() else {
                 return Err(Error::parse("this :Repeat needs an :Until", cur.last_span()));
             };
-            let test = condition(rest.clone(), *span)?;
+            let test = condition(rest.clone(), *span, cur.d)?;
             cur.at += 1;
             Control::While { test: vec![test], body, body_first: true, until: true }
         }
         "For" => {
             // `:For name :In source`.
-            let (name, source) = for_header(&rest, start)?;
+            let (name, source) = for_header(&rest, start, cur.d)?;
             let body = parse_apl_block(cur, &["EndFor"])?;
             cur.close("EndFor")?;
             Control::For { name: Some(name), source: Box::new(source), body }
         }
         "Select" => {
-            let subject = condition(rest, start)?;
+            let subject = condition(rest, start, cur.d)?;
             let mut cases = Vec::new();
             loop {
                 match cur.peek() {
                     Some(AplItem::Word { word: "Case", rest, span }) => {
-                        let test = condition(rest.clone(), *span)?;
+                        let test = condition(rest.clone(), *span, cur.d)?;
                         cur.at += 1;
                         let body = parse_apl_block(cur, &["Case", "Else", "EndSelect"])?;
                         cases.push(Branch {
@@ -2367,14 +2426,14 @@ fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
 }
 
 /// The tokens after a control word, as one expression.
-fn condition(rest: Vec<Token>, span: Span) -> Result<Expr> {
+fn condition(rest: Vec<Token>, span: Span, d: Rules) -> Result<Expr> {
     match rest.first() {
         None => Err(Error::parse("this control word needs a condition", span)),
         Some(first) => {
             let hint = Span::merge(first.span, rest[rest.len() - 1].span);
             match &rest[0].kind {
                 Tok::Control(w) => Err(Error::parse(format!("unexpected :{w}"), rest[0].span)),
-                _ => Ok(AplItem::Sentence(parse_prepared(&rest, hint)?)).map(|it| match it {
+                _ => Ok(AplItem::Sentence(parse_prepared(&rest, hint, d)?)).map(|it| match it {
                     AplItem::Sentence(e) => e,
                     AplItem::Word { .. } => unreachable!(),
                 }),
@@ -2384,7 +2443,7 @@ fn condition(rest: Vec<Token>, span: Span) -> Result<Expr> {
 }
 
 /// `:For name :In source`.
-fn for_header(rest: &[Token], span: Span) -> Result<(String, Expr)> {
+fn for_header(rest: &[Token], span: Span, d: Rules) -> Result<(String, Expr)> {
     let Some(Tok::Name(name)) = rest.first().map(|t| &t.kind) else {
         return Err(Error::parse(":For needs a name to bind", span));
     };
@@ -2399,21 +2458,21 @@ fn for_header(rest: &[Token], span: Span) -> Result<(String, Expr)> {
         return Err(Error::parse(":In needs a value", span));
     };
     let hint = Span::merge(first.span, source[source.len() - 1].span);
-    Ok((name.clone(), parse_prepared(source, hint)?))
+    Ok((name.clone(), parse_prepared(source, hint, d)?))
 }
 
 /// Parse a token run that has already had its names and dfns folded.
-fn parse_prepared(toks: &[Token], hint: Span) -> Result<Expr> {
-    let toks = fold_paren_funcs(fold_axes(fold_operators(toks.to_vec(), 1)?, 1)?);
+fn parse_prepared(toks: &[Token], hint: Span, d: Rules) -> Result<Expr> {
+    let toks = fold_paren_funcs(fold_axes(fold_operators(toks.to_vec(), d)?, d)?);
     if toks.is_empty() {
         return Err(Error::parse("this needs an expression", hint));
     }
-    parse_range(&toks, 0, toks.len(), hint, 1)
+    parse_range(&toks, 0, toks.len(), hint, d)
 }
 
 /// `A[i;j]←v`: the one assignment that writes through a bracket. None when
 /// the sentence is not one.
-fn indexed_assignment(toks: &[Token], origin: i64, hint: Span) -> Result<Option<Expr>> {
+fn indexed_assignment(toks: &[Token], d: Rules, hint: Span) -> Result<Option<Expr>> {
     let Some(assign) = toks.iter().position(|t| matches!(t.kind, Tok::Assign)) else {
         return Ok(None);
     };
@@ -2436,16 +2495,16 @@ fn indexed_assignment(toks: &[Token], origin: i64, hint: Span) -> Result<Option<
     for slot in &ranges {
         slots.push(match *slot {
             None => None,
-            Some((lo, hi)) => Some(parse_range(toks, lo, hi, toks[open].span, origin)?),
+            Some((lo, hi)) => Some(parse_range(toks, lo, hi, toks[open].span, d)?),
         });
     }
-    let value = parse_range(toks, assign + 1, toks.len(), toks[assign].span, origin)?;
+    let value = parse_range(toks, assign + 1, toks.len(), toks[assign].span, d)?;
     let span = Span::merge(toks[0].span, toks[toks.len() - 1].span);
     Ok(Some(Expr::AmendIndex {
         name: name.clone(),
         slots,
         value: Box::new(value),
-        origin,
+        origin: d.origin,
         scope: Scope::Local,
         span,
     }))
@@ -2534,9 +2593,16 @@ mod tests {
     use crate::error::ErrorKind;
     use rstest::rstest;
 
+    /// The shipped dialect at the given index origin.
+    fn rules(origin: i64) -> Rules {
+        crate::Dialect { index_origin: Some(origin), ..crate::Dialect::default() }
+            .rules(crate::Lang::Apl)
+            .expect("the shipped dialect is implemented")
+    }
+
     /// Parse one source string with `⎕IO←1`.
     fn p(src: &str) -> Result<Vec<Expr>> {
-        parse(&SourceParts::from_source(src).unwrap(), 1)
+        parse(&SourceParts::from_source(src).unwrap(), rules(1))
     }
 
     fn one(src: &str) -> Expr {
@@ -2720,13 +2786,15 @@ mod tests {
 
     #[test]
     fn system_variables_are_read_only() {
+        // Read-only is permanent, not a queue position: the dialect fixed
+        // these before the program was compiled.
         let e = err("⎕IO←0");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("assigning system variables"), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Language);
+        assert!(e.msg.contains("read-only"), "{}", e.msg);
         // The ones that would reach outside the program are refused by
         // name, whether they are read or written.
         let e = err("⎕TS");
-        assert_eq!(e.kind, ErrorKind::NotYet);
+        assert_eq!(e.kind, ErrorKind::Language);
         assert!(e.msg.contains("closed by the sandbox"), "{}", e.msg);
     }
 
@@ -2808,7 +2876,7 @@ mod tests {
     #[case(1)]
     fn iota_carries_the_index_origin(#[case] origin: i64) {
         let sp = SourceParts::from_source("⍳3").unwrap();
-        let stmts = parse(&sp, origin).unwrap();
+        let stmts = parse(&sp, rules(origin)).unwrap();
         match &stmts[0] {
             Expr::Monad { verb, .. } => {
                 assert_eq!(as_prim(verb).monad, MonadOp::IotaApl { origin });
@@ -3089,7 +3157,7 @@ mod tests {
     #[test]
     fn a_parameter_hole_is_an_operand() {
         let sp = SourceParts::from_parts(&["", "+1"], &["x"]);
-        let stmts = parse(&sp, 1).unwrap();
+        let stmts = parse(&sp, rules(1)).unwrap();
         let (x, y) = dyad_of(&stmts[0], "+");
         assert!(matches!(x, Expr::Param(0, _)));
         assert_eq!(as_const(y).data, Data::I64(vec![1].into()));
@@ -3101,7 +3169,7 @@ mod tests {
     #[test]
     fn a_parameter_can_be_reduced_over() {
         let sp = SourceParts::from_parts(&["+/", ""], &["m"]);
-        let stmts = parse(&sp, 1).unwrap();
+        let stmts = parse(&sp, rules(1)).unwrap();
         match &stmts[0] {
             Expr::Monad { verb: Verb::Rank(_, [1, 1, 1]), y, .. } => {
                 assert!(matches!(y.as_ref(), Expr::Param(0, _)));
@@ -3113,7 +3181,7 @@ mod tests {
     #[test]
     fn a_parameter_inside_a_comment_is_dropped() {
         let sp = SourceParts::from_parts(&["1 ⍝ ", "\n2"], &["x"]);
-        let stmts = parse(&sp, 1).unwrap();
+        let stmts = parse(&sp, rules(1)).unwrap();
         assert_eq!(stmts.len(), 2);
         assert_eq!(as_const(&stmts[0]).data, Data::I64(vec![1].into()));
         assert_eq!(as_const(&stmts[1]).data, Data::I64(vec![2].into()));

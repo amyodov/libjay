@@ -6,7 +6,7 @@ never to global state.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from . import _Lang
 
@@ -24,13 +24,51 @@ class J:
 
 
 class APL:
-    """The APL language."""
+    """The APL language.
+
+    libjay implements one APL: the APL2/ISO line that GNU APL embodies and
+    that the differential suite verifies. The settings below are the points
+    where the APL lineages differ; each defaults to that line's reading, and
+    asking for the other one is a "not implemented yet" error from the
+    compiler rather than a silently different answer.
+    """
 
     @dataclass(frozen=True)
     class Dialect:
         index_base: int = 1
+        """APL's ``⎕IO``."""
+
+        comparison_tolerance: float | None = None
+        """``⎕CT``; None is the language's own default."""
+
+        nested_model: str = "floating"
+        """"floating" (a simple scalar cannot be nested) or "grounded"."""
+
+        first_disclose: str = "up-is-first"
+        """"up-is-first" (``↑`` first, ``⊃`` disclose) or "up-is-mix"."""
+
+        index_form: str = "scalar-per-axis"
+        """What ``⌷`` indexes with: "scalar-per-axis" or "axis-vectors"."""
+
+        dfn_result: str = "last-sentence"
+        """Which sentence of a dfn answers: "last-sentence" or
+        "first-non-assignment"."""
+
+        default_arg: str = "eager"
+        """When ``⍺←v`` evaluates ``v``: "eager" or "lazy"."""
+
+        complex_order: str = "real-then-imaginary"
+        """How a grade orders complex values: "real-then-imaginary" or
+        "magnitude-then-angle"."""
+
+        trains: bool = False
+        """Whether a run of functions in a value's place is a train."""
+
+    # The one preset that exists, and the default: GNU APL's reading.
+    Dialect.gnu = Dialect()
 
     @staticmethod
     def create_compiler(dialect: "APL.Dialect | None" = None) -> _Lang:
-        base = dialect.index_base if dialect is not None else 1
-        return _Lang("apl", index_origin=base)
+        d = dialect if dialect is not None else APL.Dialect.gnu
+        settings = asdict(d)
+        return _Lang("apl", index_origin=settings.pop("index_base"), **settings)

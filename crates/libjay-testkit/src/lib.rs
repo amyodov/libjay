@@ -17,7 +17,7 @@ pub mod eval;
 pub mod replay;
 pub mod snapshot;
 
-pub use jay::Lang;
+pub use jay::{Error, ErrorKind, Lang};
 
 /// How a language names itself in a path (`corpus/j`, `snapshots/apl`).
 pub fn lang_dir(lang: Lang) -> &'static str {

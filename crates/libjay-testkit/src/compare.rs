@@ -64,9 +64,20 @@ fn numbers_match(x: f64, y: f64) -> bool {
     (x - y).abs() <= 1e-9 + 1e-5 * scale
 }
 
+/// The lines a side is compared by: trailing blanks and the blank lines at
+/// either end go, because the recorder already strips them from the
+/// oracle's side and a value whose whole display is spaces — `2 3⍴''` — has
+/// to compare equal to the empty text that leaves.
+fn significant(text: &str) -> Vec<&str> {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    let start = lines.iter().position(|l| !l.is_empty()).unwrap_or(lines.len());
+    let end = lines.iter().rposition(|l| !l.is_empty()).map_or(start, |i| i + 1);
+    lines[start..end].to_vec()
+}
+
 pub fn outputs_match(lang: Lang, ours: &str, theirs: &str) -> bool {
-    let ol: Vec<&str> = ours.lines().collect();
-    let tl: Vec<&str> = theirs.lines().collect();
+    let ol = significant(ours);
+    let tl = significant(theirs);
     if ol.len() != tl.len() {
         return false;
     }

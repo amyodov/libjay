@@ -470,7 +470,6 @@ fn the_gaps_this_wave_leaves_name_themselves() {
         (Lang::J, "(0 1 H. 1) 2", "hypergeometric"),
         (Lang::J, "(^ t. 3) 0", "Taylor"),
         (Lang::J, "(^ t: 3) 0", "Taylor"),
-        (Lang::J, "(+ T. 0) 1", "T. starts J's own threads"),
         (Lang::J, "e. 1 2", "raze-in"),
         (Lang::J, "{ 1 2", "catalogue"),
         (Lang::J, "2 \": 1.5", "format with a specification"),
@@ -481,4 +480,9 @@ fn the_gaps_this_wave_leaves_name_themselves() {
         assert_eq!(e.kind, ErrorKind::NotYet, "{src}: {}", e.msg);
         assert!(e.msg.contains(what), "{src}: {}", e.msg);
     }
+    // A gap the sandbox holds open permanently is not a promise: `T.`
+    // starts J's own threads, which libjay will not open.
+    let threads = err(Lang::J, "(+ T. 0) 1");
+    assert_eq!(threads.kind, ErrorKind::Language);
+    assert!(threads.msg.contains("T. starts J's own threads"), "{}", threads.msg);
 }

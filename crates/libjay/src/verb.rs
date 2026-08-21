@@ -13,6 +13,7 @@ use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::exact::{self, Ext, Rat};
 use crate::fmt::FmtOpts;
+use crate::frontend::{ComplexOrder, Rules};
 use crate::par;
 use crate::simd::multiversioned;
 
@@ -68,6 +69,26 @@ impl Tol {
             a.abs().max(b.abs())
         };
         (a - b).abs() < self.ct * s
+    }
+
+    /// Whose rule this is. A scalar verb is handed the tolerance and
+    /// nothing else about the dialect, and two rules below need to know
+    /// which one they are under: J reads a magnitude below the tolerance
+    /// as zero, and J's equality is total across the box boundary where
+    /// APL's reaches inside the box instead.
+    #[inline(always)]
+    pub fn is_j(self) -> bool {
+        self.by_smaller
+    }
+
+    /// Whether the tolerance reads this magnitude as zero.
+    ///
+    /// J's signum does: `* 1e_15` is 0 and `* 6e_14` is 1, the threshold
+    /// being the tolerance itself. APL's `×` is exact there. With `!.0` the
+    /// tolerance is zero, so the rule falls away with it.
+    #[inline(always)]
+    pub fn is_zero(self, y: f64) -> bool {
+        self.is_j() && y.abs() < self.ct
     }
 
     /// Tolerant `<`: less, and not tolerantly equal.
@@ -127,9 +148,12 @@ impl Tol {
 pub struct EvalCfg {
     pub agreement: Agreement,
     pub fmt: FmtOpts,
-    /// Comparison tolerance, from the dialect; `u!.n` overrides it inside
-    /// the verb it is attached to.
+    /// Comparison tolerance in force; it starts as the dialect's and `u!.n`
+    /// overrides it inside the verb it is attached to.
     pub tol: Tol,
+    /// The dialect's settings, resolved once at compile time. A rule that
+    /// only bites at run time reads it from here rather than deducing it.
+    pub rules: Rules,
 }
 
 impl EvalCfg {
@@ -264,6 +288,61 @@ pub struct Ctx<'a> {
     /// Where the run was placed. None is the CPU, which is also what every
     /// path that cannot use a device does; only a fused node reads it.
     pub device: Option<&'a crate::device::Device>,
+}
+
+/// How deep one application may sit inside another before libjay stops.
+///
+/// Every level costs stack frames — in the expression walk, in the rank
+/// machinery, in a verb's own tree — and a string is the interface, so a
+/// pathological one must come back as a diagnostic rather than take the
+/// host process down with it. The count is per THREAD, which is what a
+/// stack belongs to: a cell handed to another worker starts from zero on a
+/// stack of its own.
+const MAX_NESTING: usize = 400;
+
+thread_local! {
+    static NESTING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Report a tree already known to be too deep to walk.
+pub(crate) fn check_nesting(depth: usize, span: Span) -> Result<()> {
+    if depth > MAX_NESTING {
+        return Err(Error::new(
+            ErrorKind::Limit,
+            format!("this program nests more than {MAX_NESTING} applications deep"),
+            Some(span),
+        ));
+    }
+    Ok(())
+}
+
+/// One level of nesting, released when it goes out of scope.
+pub(crate) struct Nesting;
+
+impl Nesting {
+    /// Claim a level, or report that the program nests too deeply.
+    pub(crate) fn enter(span: Span) -> Result<Nesting> {
+        let depth = NESTING.with(|c| {
+            let d = c.get() + 1;
+            c.set(d);
+            d
+        });
+        if depth > MAX_NESTING {
+            NESTING.with(|c| c.set(c.get() - 1));
+            return Err(Error::new(
+                ErrorKind::Limit,
+                format!("this program nests more than {MAX_NESTING} applications deep"),
+                Some(span),
+            ));
+        }
+        Ok(Nesting)
+    }
+}
+
+impl Drop for Nesting {
+    fn drop(&mut self) {
+        NESTING.with(|c| c.set(c.get().saturating_sub(1)));
+    }
 }
 
 impl Ctx<'_> {
@@ -496,7 +575,7 @@ pub enum MonadOp {
     /// this language and run it here, over the names the caller already
     /// has. Nothing else about the sandbox changes: the nested program can
     /// reach exactly what the outer one can.
-    Execute { apl: bool, origin: i64 },
+    Execute { apl: bool },
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -507,7 +586,8 @@ pub enum MonadOp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DyadOp {
     Scalar(ScalarDyad),
-    /// x $ y / x ⍴ y: reuse y's ravel cyclically to fill shape x.
+    /// x $ y / x ⍴ y: lay out shape x, reusing y — its ITEMS in J, its
+    /// ravel in APL.
     Reshape,
     /// x {. y / x ↑ y: per-axis take, negative from the end, overtake fills.
     Take,
@@ -1007,6 +1087,7 @@ impl Verb {
 
     /// Full monadic application including rank/frame machinery.
     pub fn monad(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+        let _depth = Nesting::enter(span)?;
         match self {
             Verb::Prim(p) => {
                 // Scalar verbs have cell rank 0: the cells are the elements,
@@ -1037,6 +1118,11 @@ impl Verb {
                     // The inner verb applies its own rank machinery to the
                     // whole argument; that is what `"` means.
                     return v.monad(y, ctx, span);
+                }
+                // A reduction over vector cells is every row of the buffer
+                // folded in place, without an array per cell.
+                if let Some(a) = reduce_vector_cells(v, y, frame_rank) {
+                    return Ok(a);
                 }
                 let frame = y.shape[..frame_rank].to_vec();
                 let n: usize = frame.iter().product();
@@ -1142,6 +1228,7 @@ impl Verb {
 
     /// Full dyadic application including rank/frame/agreement machinery.
     pub fn dyad(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+        let _depth = Nesting::enter(span)?;
         match self {
             Verb::Prim(_) | Verb::Rank(_, _) | Verb::Each(..) => {
                 self.dyad_ranked(x, y, ctx, span)
@@ -1489,11 +1576,13 @@ fn agree(
                 let n: usize = fx.iter().product();
                 return Ok(Pairing { frame: fx.to_vec(), n, x_div: 1, y_div: 1 });
             }
-            if fx.is_empty() {
+            // APL extends any frame of ONE cell, whatever its rank, not
+            // only a scalar one: `(1 1⍴5)+1 2 3` is `6 7 8`.
+            if fx.iter().product::<usize>() == 1 {
                 let n: usize = fy.iter().product();
                 return Ok(Pairing { frame: fy.to_vec(), n, x_div: n.max(1), y_div: 1 });
             }
-            if fy.is_empty() {
+            if fy.iter().product::<usize>() == 1 {
                 let n: usize = fx.iter().product();
                 return Ok(Pairing { frame: fx.to_vec(), n, x_div: 1, y_div: n.max(1) });
             }
@@ -1798,11 +1887,15 @@ fn wrong_type(d: DType, span: Span) -> Error {
 }
 
 /// Borrow numeric data as i64, widening a boolean buffer into `tmp`.
+///
+/// The widening is a pass over the whole buffer, so it takes the thread
+/// pool on the sizes that are worth splitting; the values are the same
+/// whichever way it runs.
 fn borrow_i64<'a>(d: &'a Data, tmp: &'a mut Vec<i64>) -> &'a [i64] {
     match d {
         Data::I64(v) => v,
         Data::Bool(v) => {
-            *tmp = v.iter().map(|&b| b as i64).collect();
+            *tmp = par::map(v, |&b| b as i64);
             &tmp[..]
         }
         // Callers exclude character data before reaching here.
@@ -1815,19 +1908,19 @@ fn borrow_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>) -> &'a [f64] {
     match d {
         Data::F64(v) => v,
         Data::I64(v) => {
-            *tmp = v.iter().map(|&x| x as f64).collect();
+            *tmp = par::map(v, |&x| x as f64);
             &tmp[..]
         }
         Data::Bool(v) => {
-            *tmp = v.iter().map(|&x| x as f64).collect();
+            *tmp = par::map(v, |&x| x as f64);
             &tmp[..]
         }
         Data::Ext(v) => {
-            *tmp = v.iter().map(exact::ext_to_f64).collect();
+            *tmp = par::map(v, exact::ext_to_f64);
             &tmp[..]
         }
         Data::Rat(v) => {
-            *tmp = v.iter().map(Rat::to_f64).collect();
+            *tmp = par::map(v, Rat::to_f64);
             &tmp[..]
         }
         _ => &[],
@@ -1839,19 +1932,19 @@ fn borrow_cx<'a>(d: &'a Data, tmp: &'a mut Vec<Cx>) -> &'a [Cx] {
     match d {
         Data::Complex(v) => v,
         Data::Ext(v) => {
-            *tmp = v.iter().map(|x| [exact::ext_to_f64(x), 0.0]).collect();
+            *tmp = par::map(v, |x| [exact::ext_to_f64(x), 0.0]);
             &tmp[..]
         }
         Data::Rat(v) => {
-            *tmp = v.iter().map(|x| [x.to_f64(), 0.0]).collect();
+            *tmp = par::map(v, |x| [x.to_f64(), 0.0]);
             &tmp[..]
         }
         Data::F64(v) => {
-            *tmp = v.iter().map(|&x| [x, 0.0]).collect();
+            *tmp = par::map(v, |&x| [x, 0.0]);
             &tmp[..]
         }
         Data::I64(v) => {
-            *tmp = v.iter().map(|&x| [x as f64, 0.0]).collect();
+            *tmp = par::map(v, |&x| [x as f64, 0.0]);
             &tmp[..]
         }
         Data::Bool(v) => {
@@ -2147,7 +2240,13 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, span: Span) -> Result<f64> {
             }
         }
         Residue => {
-            if a == 0.0 {
+            // An infinite modulus leaves a value of its own sign alone and
+            // sends the other one to that infinity, which is the limit both
+            // references answer with; the general formula cannot reach it,
+            // because it runs into `inf * 0`.
+            if a.is_infinite() {
+                if b == 0.0 || (b > 0.0) == (a > 0.0) { b } else { a }
+            } else if a == 0.0 {
                 b
             } else {
                 b - a * (b / a).floor()
@@ -2656,6 +2755,18 @@ fn dyad_f64(
     })
 }
 
+/// Whether two element types have nothing in common to compare: a
+/// character against a number, or a box against either. Two numeric types
+/// always meet somewhere, however far apart the widths are.
+fn crossed_types(a: DType, b: DType) -> bool {
+    let class = |d: DType| match d {
+        DType::Box => 2,
+        DType::Char => 1,
+        _ => 0,
+    };
+    class(a) != class(b)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compare_data(
     op: ScalarDyad,
@@ -2672,18 +2783,26 @@ fn compare_data(
     use ScalarDyad::*;
     let (dx, dy) = (x.dtype(), y.dtype());
     let equality = matches!(op, Eq | Ne);
-    if dx == DType::Box || dy == DType::Box {
+    // Equality is TOTAL across a character and a number in both
+    // references: `'a' = 1` is 0. It is total across the BOX boundary in J
+    // too — `(<1) = 1` is 0 — but not in APL, where a scalar verb reaches
+    // inside the box instead, so that case falls through to the diagnostic
+    // below rather than answering 0.
+    let boxed = dx == DType::Box || dy == DType::Box;
+    if equality && crossed_types(dx, dy) && (!boxed || tol.is_j()) {
+        let unequal = op == Ne;
+        return Ok(Data::Bool(vec![u8::from(unequal); n].into()));
+    }
+    if boxed {
         // Boxes have no order — J refuses `<` on them — but they do have
         // equality, which compares their contents.
         if !equality {
             return Err(box_arith(span));
         }
         let (Data::Box(a), Data::Box(b)) = (x, y) else {
-            return Err(Error::new(
-                ErrorKind::Type,
-                "cannot compare boxed and unboxed values",
-                Some(span),
-            ));
+            // Only APL reaches here: its scalar verbs pervade into a
+            // nested argument, which is a promise rather than a refusal.
+            return Err(Error::not_yet("a scalar function inside a nested array", span));
         };
         let (out, _) = par::fill(n, |start, part: &mut [u8]| {
             for (k, slot) in part.iter_mut().enumerate() {
@@ -2697,8 +2816,6 @@ fn compare_data(
     }
     if dx == DType::Char || dy == DType::Char {
         if dx != dy {
-            // J compares mixed types as unequal rather than failing; libjay
-            // reports it, per the "refuse rather than guess" rule.
             return Err(Error::new(
                 ErrorKind::Type,
                 "cannot compare character and numeric data",
@@ -3248,9 +3365,26 @@ fn scalar_dyad(
     span: Span,
 ) -> Result<Array> {
     let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
+    // Nothing to apply the verb to: `'a' + ''` is an empty, not a type
+    // error, because no pair of elements was ever formed. The agreement
+    // above still holds — `1 2 3 + ''` is a length error either way.
+    if p.n == 0 {
+        return Ok(Array::new(p.frame, Data::empty(empty_result_type(x, y))));
+    }
     let data =
         scalar_dyad_data(op, &x.data, 0, p.x_div, &y.data, 0, p.y_div, p.n, cfg.tol, span)?;
     Ok(Array::new(p.frame, data))
+}
+
+/// The element type of an empty answer. A numeric operand names it; with
+/// none, the numbers an arithmetic result would have held.
+fn empty_result_type(x: &Array, y: &Array) -> DType {
+    for a in [x, y] {
+        if a.dtype().is_numeric() {
+            return a.dtype();
+        }
+    }
+    DType::I64
 }
 
 /// Is `v` exactly representable as an i64?
@@ -3265,8 +3399,8 @@ fn monad_leaves_reals(op: ScalarMonad, d: &Data) -> bool {
         // The two that make a complex number out of a real one.
         Imaginary | Polar => d.dtype().is_numeric(),
         Sqrt | Ln => match d {
-            Data::I64(v) => v.iter().any(|&x| x < 0),
-            Data::F64(v) => v.iter().any(|&x| x < 0.0),
+            Data::I64(v) => par::any(v, |&x| x < 0),
+            Data::F64(v) => par::any(v, |&x| x < 0.0),
             Data::Ext(v) => v.iter().any(|x| x.sign() == num_bigint::Sign::Minus),
             Data::Rat(v) => v.iter().any(|x| x < &Rat::zero()),
             _ => false,
@@ -3322,6 +3456,11 @@ fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
 fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     use ScalarMonad::*;
     let d = &y.data;
+    // An empty argument has no element for the verb to run on, so its type
+    // never comes up: `%: ''` is an empty, not a type error.
+    if y.count() == 0 && !d.dtype().is_numeric() {
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::I64)));
+    }
     if d.dtype() == DType::Complex || monad_leaves_reals(op, d) {
         return complex_monad(op, y, span);
     }
@@ -3353,9 +3492,21 @@ fn scalar_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arra
         Signum => match d {
             Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
             Data::I64(v) => Data::I64(par::map(v, |&x| x.signum()).into()),
-            // NaN has no sign here; it yields 0.
+            // NaN has no sign here; it yields 0, and so does anything the
+            // dialect's tolerance reads as zero.
             Data::F64(v) => Data::F64(
-                par::map(v, |&x| if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }).into(),
+                par::map(v, |&x| {
+                    if tol.is_zero(x) {
+                        0.0
+                    } else if x > 0.0 {
+                        1.0
+                    } else if x < 0.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .into(),
             ),
             _ => return Err(wrong_type(d.dtype(), span)),
         },
@@ -3530,7 +3681,7 @@ fn iota_j(y: &Array, span: Span) -> Result<Array> {
         .to_i64_vec()
         .ok_or_else(|| Error::domain("index generator needs integer lengths", span))?;
     let shape: Vec<usize> = dims.iter().map(|d| d.unsigned_abs() as usize).collect();
-    let n: usize = shape.iter().product();
+    let n = crate::limits::elements(&shape, span)?;
     let st = strides(&shape);
     let mut out = Vec::with_capacity(n);
     let mut coord = vec![0usize; shape.len()];
@@ -3760,8 +3911,11 @@ fn cmp_items(d: &Data, i: usize, j: usize, m: usize) -> std::cmp::Ordering {
         Data::I64(v) => v[a + k].cmp(&v[b + k]),
         Data::F64(v) => v[a + k].partial_cmp(&v[b + k]).unwrap_or(Equal),
         // Grading a complex array orders it by real part then imaginary,
-        // which is the order J's `/:` puts it in. The ordering VERBS still
-        // refuse it; a grade is a permutation, not a claim about size.
+        // which is the order J's `/:` puts it in and the dialect's
+        // `ComplexOrder::RealThenImaginary`; `check_gradable` has already
+        // refused the other reading. The ordering VERBS still refuse
+        // complex outright: a grade is a permutation, not a claim about
+        // size.
         Data::Complex(v) => v[a + k][0]
             .partial_cmp(&v[b + k][0])
             .unwrap_or(Equal)
@@ -3809,32 +3963,42 @@ fn select_items(y: &Array, order: &[usize]) -> Array {
     Array::new(shape, data)
 }
 
-/// `x /: y` / `x \: y`: x's items reordered by the grade of y's items.
+/// What a grade refuses, and the dialect setting it reads.
+///
 /// Ordering boxes needs J's total array ordering, which libjay does not
 /// implement yet; sorting boxed items BY something else works.
-fn no_grading_boxes(y: &Array, span: Span) -> Result<()> {
+fn check_gradable(y: &Array, order: ComplexOrder, span: Span) -> Result<()> {
     if y.dtype() == DType::Box {
         return Err(Error::not_yet("grading boxed arrays (the total array ordering)", span));
+    }
+    // A grade still has to be total over complex values, and the dialect
+    // says in which order; only one of the two readings is implemented.
+    if y.dtype() == DType::Complex && order != ComplexOrder::RealThenImaginary {
+        return Err(Error::not_yet("grading complex values by magnitude and angle", span));
     }
     Ok(())
 }
 
-fn grade_select(x: &Array, y: &Array, down: bool, span: Span) -> Result<Array> {
-    no_grading_boxes(y, span)?;
+/// `x /: y` is `(/: y) { x`: the grade of y is an index into x, so the two
+/// lengths need not agree — a shorter key selects fewer items, and only an
+/// index past the end of x is an error.
+fn grade_select(
+    x: &Array,
+    y: &Array,
+    down: bool,
+    order: ComplexOrder,
+    span: Span,
+) -> Result<Array> {
+    check_gradable(y, order, span)?;
     let order = grade_order(y, down);
-    if x.items() != order.len() {
-        return Err(Error::new(
-            ErrorKind::Length,
-            format!(
-                "sorting {} items by a key of {} items",
-                x.items(),
-                order.len()
-            ),
-            Some(span),
-        ));
-    }
     if x.rank() == 0 {
         return Ok(x.clone());
+    }
+    if let Some(&past) = order.iter().find(|&&i| i >= x.items()) {
+        return Err(Error::domain(
+            format!("index {past} is out of range: the argument has {} items", x.items()),
+            span,
+        ));
     }
     Ok(select_items(x, &order))
 }
@@ -4044,7 +4208,11 @@ fn catenate(
     if ragged && !fill {
         return Err(Error::new(
             ErrorKind::Length,
-            format!("catenating shapes {:?} and {:?}", xa.shape, ya.shape),
+            format!(
+                "cannot catenate: left shape {}, right shape {}",
+                show_shape(&xa.shape),
+                show_shape(&ya.shape)
+            ),
             Some(span),
         ));
     }
@@ -4101,17 +4269,23 @@ fn catenate(
     Ok(Array::new(shape, data))
 }
 
-/// `x # y`: item i of y appears x[i] times. Only a scalar x is extended to
-/// every item — a one-element vector is a length error, as in J.
-fn copy_items(x: &Array, y: &Array, span: Span) -> Result<Array> {
+/// `x # y` / `x / y`: item i of y appears x[i] times.
+///
+/// A scalar x applies to every item, and a SCALAR y is extended to as many
+/// items as x has counts — a one-item vector is not, which is why
+/// `1 0 1 # 5` is `5 5` and `1 0 1 # ,5` is a length error. A negative
+/// count is APL's: it contributes that many fills. J has no such reading
+/// and refuses it.
+fn copy_items(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
     let counts = x
         .to_i64_vec()
         .ok_or_else(|| Error::domain("replication counts must be integers", span))?;
-    if counts.iter().any(|&c| c < 0) {
+    if !apl && counts.iter().any(|&c| c < 0) {
         return Err(Error::domain("replication counts must be nonnegative", span));
     }
-    let n = y.items();
+    let scalar_y = y.rank() == 0;
     let m = y.item_size();
+    let n = if x.rank() == 0 || !scalar_y { y.items() } else { counts.len() };
     let per = if x.rank() == 0 { vec![counts[0]; n] } else { counts };
     if per.len() != n {
         return Err(Error::new(
@@ -4120,17 +4294,26 @@ fn copy_items(x: &Array, y: &Array, span: Span) -> Result<Array> {
             Some(span),
         ));
     }
-    let total: usize = per.iter().map(|&c| c as usize).sum();
+    // Items, not elements: an item of zero elements still costs a trip
+    // round the loop, so the ceiling applies to whichever is larger.
+    let items: u128 = per.iter().map(|&c| c.unsigned_abs() as u128).sum();
+    let total = crate::limits::count(items * m.max(1) as u128, span)? / m.max(1);
     let mut data = Data::empty(y.dtype());
     for (i, &c) in per.iter().enumerate() {
-        for _ in 0..c {
+        // A scalar y stands in for every count.
+        let src = if scalar_y { 0 } else { i };
+        for _ in 0..c.unsigned_abs() {
             for k in 0..m {
-                push_elem(&mut data, &y.data, i * m + k);
+                if c < 0 {
+                    data.push_fill();
+                } else {
+                    push_elem(&mut data, &y.data, src * m + k);
+                }
             }
         }
     }
     // A scalar argument has one item, so replicating it yields a vector.
-    let mut shape = if y.rank() == 0 { vec![1] } else { y.shape.clone() };
+    let mut shape = if scalar_y { vec![1] } else { y.shape.clone() };
     shape[0] = total;
     Ok(Array::new(shape, data))
 }
@@ -4407,7 +4590,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Reverse => Ok(reverse(y)),
         MonadOp::Nub => Ok(nub(y, ctx.cfg.tol)),
         MonadOp::GradeUp { origin } | MonadOp::GradeDown { origin } => {
-            no_grading_boxes(y, span)?;
+            check_gradable(y, ctx.cfg.rules.complex_order, span)?;
             let down = matches!(p.monad, MonadOp::GradeDown { .. });
             let order = grade_order(y, down);
             Ok(Array::from_i64(order.iter().map(|&i| origin + i as i64).collect()))
@@ -4467,10 +4650,10 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Nest => Ok(nest(y)),
         MonadOp::PolyRoots => poly_roots(y, span),
         MonadOp::PolyDeriv => poly_deriv(y, span),
-        MonadOp::AnagramIndex => anagram_index(y, span),
+        MonadOp::AnagramIndex => anagram_index(y, ctx.cfg.rules.complex_order, span),
         MonadOp::CycleForm => cycle_form(y, span),
         MonadOp::Split => Ok(split_items(y)),
-        MonadOp::Execute { apl, origin } => execute(y, apl, origin, ctx, span),
+        MonadOp::Execute { apl } => execute(y, apl, ctx, span),
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         MonadOp::None => {
             Err(Error::domain(format!("{} has no monadic meaning", p.name), span))
@@ -4498,28 +4681,51 @@ fn axis_counts(x: &Array, what: &str, span: Span) -> Result<Vec<i64>> {
             Some(span),
         ));
     }
+    // An empty left argument asks for no axes at all, whatever type it
+    // happens to carry: `'' $ y` is y's first item, not a type error.
+    if x.count() == 0 {
+        return Ok(Vec::new());
+    }
     x.to_i64_vec()
         .ok_or_else(|| Error::domain(format!("{what} needs integer lengths"), span))
 }
 
-fn reshape(x: &Array, y: &Array, span: Span) -> Result<Array> {
+/// `x $ y` and `x ⍴ y` are not the same verb.
+///
+/// J lays out ITEMS: the result's shape is x followed by the shape of an
+/// item of y, and the items are reused cyclically, so `$ 3 $ i. 3 4` is
+/// `3 4` and `'' $ y` is y's first item. APL lays out ELEMENTS: the shape
+/// is exactly x and y's ravel is reused. The two agree on every vector y,
+/// which is why the difference shows only above rank 1.
+///
+/// An empty y parts them too: J refuses to invent items it was not given,
+/// and APL fills with the type's fill element.
+fn reshape(x: &Array, y: &Array, by_items: bool, span: Span) -> Result<Array> {
     let dims = axis_counts(x, "reshape", span)?;
     if dims.iter().any(|&d| d < 0) {
         return Err(Error::domain("reshape lengths must be nonnegative", span));
     }
-    let shape: Vec<usize> = dims.iter().map(|&d| d as usize).collect();
-    let n: usize = shape.iter().product();
-    let src = y.count();
-    if n > 0 && src == 0 {
-        return Err(Error::new(
-            ErrorKind::Length,
-            "reshape of an empty array",
-            Some(span),
-        ));
-    }
+    let mut shape: Vec<usize> = dims.iter().map(|&d| d as usize).collect();
+    // An item of a scalar is the scalar itself, and a scalar has one item.
+    let (unit, src) = if by_items {
+        let item_shape = if y.rank() == 0 { &[][..] } else { &y.shape[1..] };
+        shape.extend_from_slice(item_shape);
+        (item_shape.iter().product::<usize>(), y.items().max(usize::from(y.rank() == 0)))
+    } else {
+        (1, y.count())
+    };
+    let n = crate::limits::elements(&shape, span)?;
     let mut data = Data::empty(y.dtype());
+    if n > 0 && src == 0 {
+        if by_items {
+            return Err(Error::new(ErrorKind::Length, "reshape of an empty array", Some(span)));
+        }
+        return Ok(Array::new(shape, fill_data(y.dtype(), n)));
+    }
     for i in 0..n {
-        push_elem(&mut data, &y.data, i % src);
+        // Element i of the result is element `i % unit` of item
+        // `(i / unit) % src`; with `unit` 1 that is the plain cyclic ravel.
+        push_elem(&mut data, &y.data, (i / unit) % src * unit + i % unit);
     }
     Ok(Array::new(shape, data))
 }
@@ -4571,7 +4777,7 @@ fn take(x: &Array, y: &Array, prototype_fill: bool, span: Span) -> Result<Array>
     for (a, &k) in counts.iter().enumerate() {
         out_shape[a] = k.unsigned_abs() as usize;
     }
-    let n: usize = out_shape.iter().product();
+    let n = crate::limits::elements(&out_shape, span)?;
     let st = strides(&base.shape);
     let mut data = Data::empty(base.dtype());
     let mut coord = vec![0usize; out_shape.len()];
@@ -4665,7 +4871,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         // Reached only when a scalar verb is given non-zero cell ranks; the
         // cells then agree among themselves.
         DyadOp::Scalar(op) => scalar_dyad(op, x, y, cfg, span),
-        DyadOp::Reshape => reshape(x, y, span),
+        DyadOp::Reshape => reshape(x, y, cfg.agreement == Agreement::LeadingPrefix, span),
         DyadOp::Take => take(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
         DyadOp::Drop => drop_(x, y, span),
         DyadOp::Right => Ok(y.clone()),
@@ -4685,8 +4891,8 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::From => from_index(x, y, span),
         DyadOp::Match => Ok(Array::scalar_bool(arrays_match(x, y, tol))),
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
-        DyadOp::GradeSelect { down } => grade_select(x, y, down, span),
-        DyadOp::Copy => copy_items(x, y, span),
+        DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules.complex_order, span),
+        DyadOp::Copy => copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
         DyadOp::Decode => decode(Some(x), y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Encode => encode(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, span),
@@ -4855,18 +5061,112 @@ where
     }
 }
 
+/// Independent accumulators an associative fold over a flat run keeps in
+/// flight at once.
+///
+/// One accumulator makes the fold a chain of dependent steps — a float add
+/// is four cycles on this class of machine, and nothing else can start
+/// until it retires — so the loop waits on latency and leaves both the
+/// pipeline and the vector registers idle. Lanes break the chain into
+/// independent ones and give the autovectoriser a shape it can widen: lane
+/// `j` takes every eighth element, which is a contiguous vector load.
+/// Eight is two AVX2 registers of f64 and four of the complex pair.
+const FOLD_LANES: usize = 8;
+
+/// Elements below which a flat fold keeps its plain single accumulator.
+///
+/// Below this the lanes cost more to set up and combine than the width
+/// gives back, and a short fold keeps exactly the rounding it always had.
+const MIN_LANE_WORK: usize = 8 * FOLD_LANES;
+
+/// Fold a flat run right to left with [`FOLD_LANES`] accumulators, the
+/// lanes combined right to left at the end and the leading remainder folded
+/// into the result last — so the fold is a regrouping of the sequential one,
+/// which only an associative step may take (§5.9).
+#[inline(always)]
+fn fold_lanes_body<T, F>(v: &[T], step: &F) -> Option<T>
+where
+    T: Copy,
+    F: Fn(T, T) -> (T, bool),
+{
+    let n = v.len();
+    let mut over = false;
+    if n < MIN_LANE_WORK {
+        let mut acc = v[n - 1];
+        for &x in v[..n - 1].iter().rev() {
+            let (r, o) = step(x, acc);
+            acc = r;
+            over |= o;
+        }
+        return (!over).then_some(acc);
+    }
+    // The lanes cover a whole number of rows at the end of the run; `head`
+    // is what is left over at the front.
+    let rows = n / FOLD_LANES;
+    let head = n - rows * FOLD_LANES;
+    let last = head + (rows - 1) * FOLD_LANES;
+    let mut acc = [v[last]; FOLD_LANES];
+    acc.copy_from_slice(&v[last..last + FOLD_LANES]);
+    for r in (0..rows - 1).rev() {
+        let row = &v[head + r * FOLD_LANES..head + (r + 1) * FOLD_LANES];
+        for (slot, &x) in acc.iter_mut().zip(row) {
+            let (r, o) = step(x, *slot);
+            *slot = r;
+            over |= o;
+        }
+    }
+    let mut a = acc[FOLD_LANES - 1];
+    for &x in acc[..FOLD_LANES - 1].iter().rev() {
+        let (r, o) = step(x, a);
+        a = r;
+        over |= o;
+    }
+    for &x in v[..head].iter().rev() {
+        let (r, o) = step(x, a);
+        a = r;
+        over |= o;
+    }
+    (!over).then_some(a)
+}
+
+multiversioned! {
+    fn fold_lanes_vectorised[T: Copy, F: Fn(T, T) -> (T, bool)](
+        v: &[T],
+        step: &F,
+    ) -> Option<T> = fold_lanes_body;
+}
+
+/// A flat run folded with lanes where they pay and with one accumulator
+/// where they do not.
+#[inline]
+fn fold_lanes<T, F>(v: &[T], step: &F) -> Option<T>
+where
+    T: Copy,
+    F: Fn(T, T) -> (T, bool),
+{
+    if v.len() < MIN_LANE_WORK {
+        fold_lanes_body(v, step)
+    } else {
+        fold_lanes_vectorised(v, step)
+    }
+}
+
 /// Fold `n` single-element items, right to left. Associative steps fold in
-/// chunks on several threads.
+/// chunks on several threads, and in lanes within a chunk.
 fn fold_flat<T, F>(v: &[T], n: usize, assoc: bool, step: &F) -> Option<T>
 where
     T: Copy + Send + Sync,
     F: Fn(T, T) -> (T, bool) + Sync + Send,
 {
-    if assoc && par::worth_it(n) {
-        return par::try_fold_chunks(&v[..n], |a, b| {
-            let (r, o) = step(a, b);
-            (!o).then_some(r)
-        });
+    if assoc {
+        return par::try_fold_chunks(
+            &v[..n],
+            |part| fold_lanes(part, step),
+            |a, b| {
+                let (r, o) = step(a, b);
+                (!o).then_some(r)
+            },
+        );
     }
     let mut acc = v[n - 1];
     let mut over = false;
@@ -4996,6 +5296,145 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
     }
 }
 
+/// Fold each run of `m` consecutive elements into one, right to left.
+///
+/// This is the reduction of a vector cell, done for every cell of the frame
+/// at once. Each run is folded on its own, in the order the insert has, so
+/// no step is regrouped and any operation at all is safe here.
+#[inline(always)]
+fn fold_runs_body<T, F>(v: &[T], start: usize, m: usize, out: &mut [T], step: &F) -> bool
+where
+    T: Copy,
+    F: Fn(T, T) -> (T, bool),
+{
+    let mut over = false;
+    for (k, slot) in out.iter_mut().enumerate() {
+        let run = &v[(start + k) * m..(start + k + 1) * m];
+        let mut acc = run[m - 1];
+        for &x in run[..m - 1].iter().rev() {
+            let (r, o) = step(x, acc);
+            acc = r;
+            over |= o;
+        }
+        *slot = acc;
+    }
+    !over
+}
+
+multiversioned! {
+    fn fold_runs_vectorised[T: Copy, F: Fn(T, T) -> (T, bool)](
+        v: &[T],
+        start: usize,
+        m: usize,
+        out: &mut [T],
+        step: &F,
+    ) -> bool = fold_runs_body;
+}
+
+/// One output per run of `m`, in parallel over the runs. None when a step
+/// left the element type: the general path then runs and knows how to widen.
+fn fold_runs<T, F>(v: &[T], n: usize, m: usize, step: F) -> Option<Vec<T>>
+where
+    T: Copy + Default + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    // A run is the loop a vector clone would widen, so a short run takes the
+    // baseline compilation — the rule `VECTOR_COLUMNS` carries for the fold
+    // across an item's columns, which is the same loop seen sideways.
+    let wide = m >= VECTOR_COLUMNS;
+    let (out, ok) = par::fill_wide(n, n * m, |start, part: &mut [T]| {
+        if wide {
+            fold_runs_vectorised(v, start, m, part, &step)
+        } else {
+            fold_runs_body(v, start, m, part, &step)
+        }
+    });
+    ok.then_some(out)
+}
+
+fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
+    use ScalarDyad::*;
+    match d {
+        Data::F64(v) => Some(Data::F64(
+            match op {
+                Add => fold_runs(v, n, m, |a: f64, b: f64| (a + b, false)),
+                Sub => fold_runs(v, n, m, |a: f64, b: f64| (a - b, false)),
+                Mul => fold_runs(v, n, m, |a: f64, b: f64| (a * b, false)),
+                Min => fold_runs(v, n, m, |a: f64, b: f64| (a.min(b), false)),
+                Max => fold_runs(v, n, m, |a: f64, b: f64| (a.max(b), false)),
+                _ => None,
+            }?
+            .into(),
+        )),
+        Data::I64(v) => Some(Data::I64(
+            match op {
+                Add => fold_runs(v, n, m, i64::overflowing_add),
+                Sub => fold_runs(v, n, m, i64::overflowing_sub),
+                Mul => fold_runs(v, n, m, i64::overflowing_mul),
+                Min => fold_runs(v, n, m, |a: i64, b: i64| (a.min(b), false)),
+                Max => fold_runs(v, n, m, |a: i64, b: i64| (a.max(b), false)),
+                _ => None,
+            }?
+            .into(),
+        )),
+        // Min and Max have no complex meaning; the general path reports it.
+        Data::Complex(v) => Some(Data::Complex(
+            match op {
+                Add => fold_runs(v, n, m, |a: Cx, b: Cx| (cx::add(a, b), false)),
+                Sub => fold_runs(v, n, m, |a: Cx, b: Cx| (cx::sub(a, b), false)),
+                Mul => fold_runs(v, n, m, |a: Cx, b: Cx| (cx::mul(a, b), false)),
+                _ => None,
+            }?
+            .into(),
+        )),
+        // Booleans reduce as integers, which is what promotion says the
+        // general path would produce; widen once and fold.
+        Data::Bool(v) => {
+            let widened = par::map(v, |&b| b as i64);
+            fold_runs_data(op, &Data::I64(widened.into()), n, m)
+        }
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+    }
+}
+
+/// `u/"1 y` and its like: a reduction whose cells are vectors, answered by
+/// folding every cell out of the one buffer.
+///
+/// The rank machinery would build an array per cell, reduce it, and frame
+/// the results — three allocations for every row of a matrix. This produces
+/// exactly what that produces, and reads the buffer once. None means the
+/// shape, the verb or the type is not one this covers, and the general path
+/// runs instead.
+fn reduce_vector_cells(u: &Verb, y: &Array, frame_rank: usize) -> Option<Array> {
+    let Verb::Reduce(inner) = u else { return None };
+    let Verb::Prim(p) = &**inner else { return None };
+    let DyadOp::Scalar(op) = p.dyad else { return None };
+    // The cell is a vector, so its reduction is a scalar and the result has
+    // the frame's own shape.
+    if y.rank() != frame_rank + 1 || !y.dtype().is_numeric() {
+        return None;
+    }
+    let m = y.shape[frame_rank];
+    // An empty cell reduces to the operation's identity, which the general
+    // path knows and this one does not.
+    if m == 0 {
+        return None;
+    }
+    use ScalarDyad::{Add, Max, Min, Mul, Sub};
+    if !matches!(op, Add | Sub | Mul | Min | Max) {
+        return None;
+    }
+    let frame = y.shape[..frame_rank].to_vec();
+    if m == 1 {
+        // A cell of one element reduces to that element, type and all: the
+        // insert never runs, so nothing widens.
+        return Some(Array::new(frame, y.data.clone()));
+    }
+    let n: usize = frame.iter().product();
+    let data = fold_runs_data(op, &y.data, n, m)?;
+    Some(Array::new(frame, data))
+}
+
 /// Insert `v` between the items of `y`, folding right to left.
 fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     if y.rank() == 0 {
@@ -5008,6 +5447,12 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     let cell_shape = y.shape[1..].to_vec();
     let m: usize = cell_shape.iter().product();
     if n == 0 {
+        // Catenation's identity is the empty LIST, whatever shape the cells
+        // that were not there would have had: `,/ i. 0 3` is `i. 0`.
+        if matches!(v, Verb::Prim(p) if matches!(p.dyad, DyadOp::AppendLeading | DyadOp::AppendLast))
+        {
+            return Ok(Array::new(vec![0], Data::empty(y.dtype())));
+        }
         return match reduce_identity(v, m) {
             Some(d) => Ok(Array::new(cell_shape, d)),
             None => Err(Error::domain(
@@ -6511,14 +6956,25 @@ fn cut(
             let flags = x
                 .to_i64_vec()
                 .ok_or_else(|| Error::domain("cut frets must be integers", span))?;
-            if flags.len() != n {
-                return Err(Error::new(
-                    ErrorKind::Length,
-                    format!("{} fret(s) for {n} item(s)", flags.len()),
-                    Some(span),
-                ));
+            // A fret is a flag, and only 0 and 1 are flags: `2 u;.1 y` is
+            // a domain error, as the reference has it.
+            if let Some(&bad) = flags.iter().find(|&&f| f != 0 && f != 1) {
+                return Err(Error::domain(format!("{bad} is not a fret: a fret is 0 or 1"), span));
             }
-            flags.iter().map(|&f| f != 0).collect()
+            // A scalar fret marks every item, which is the whole of
+            // `1 u;.2 y`: one interval per item.
+            if x.rank() == 0 {
+                vec![flags[0] != 0; n]
+            } else {
+                if flags.len() != n {
+                    return Err(Error::new(
+                        ErrorKind::Length,
+                        format!("{} fret(s) for {n} item(s)", flags.len()),
+                        Some(span),
+                    ));
+                }
+                flags.iter().map(|&f| f != 0).collect()
+            }
         }
         None => {
             // The fret is the argument's own first or last item.
@@ -7393,7 +7849,7 @@ fn key_pairs(
         }
     }
     let groups = group_positions(&base, ctx.cfg.tol);
-    let origin = if matches!(ctx.cfg.agreement, Agreement::ExactOrScalar) { 1 } else { 0 };
+    let origin = ctx.cfg.rules.origin;
     let mut cells = Vec::with_capacity(groups.len());
     for (first, at) in &groups {
         let key = item_or_self(&base, *first);
@@ -7528,10 +7984,11 @@ fn iota_apl(y: &Array, origin: i64, span: Span) -> Result<Array> {
     }
     if dims.len() <= 1 {
         let n = dims.first().copied().unwrap_or(0);
+        crate::limits::count(n as u128, span)?;
         return Ok(Array::from_i64((0..n).map(|i| origin + i).collect()));
     }
     let shape: Vec<usize> = dims.iter().map(|&n| n as usize).collect();
-    let total: usize = shape.iter().product();
+    let total = crate::limits::elements(&shape, span)?;
     let mut cells = Vec::with_capacity(total);
     let mut coord = vec![0usize; shape.len()];
     for _ in 0..total {
@@ -7756,22 +8213,24 @@ pub(crate) fn pick_gerund(vs: &[Verb], at: i64, span: Span) -> Result<Verb> {
 fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     let k = one_int(x, "an outfix width", span)?;
     let n = y.items() as i64;
-    if k < 0 {
-        return Err(Error::not_yet("a negative outfix width (x u\\. y)", span));
-    }
-    if k > n {
-        return Err(Error::new(
-            ErrorKind::Length,
-            format!("an outfix of {k} items over {n}"),
-            Some(span),
-        ));
-    }
-    let mut cells = Vec::with_capacity((n - k + 1) as usize);
-    for start in 0..=(n - k) {
-        let keep: Vec<usize> = (0..n as usize)
-            .filter(|&i| i < start as usize || i >= (start + k) as usize)
-            .collect();
-        cells.push(u.monad(&select_items(&as_list(y), &keep), ctx, span)?);
+    let list = as_list(y);
+    // A positive width leaves out every run of x consecutive items, so
+    // there are `1 + n - x` of them and none at all once x is longer than
+    // the argument. A negative one leaves out NON-OVERLAPPING runs, the
+    // last of them short where the length does not divide.
+    let starts: Vec<i64> = if k < 0 {
+        let step = -k;
+        (0..(n + step - 1) / step).map(|i| i * step).collect()
+    } else {
+        (0..=(n - k)).collect()
+    };
+    let width = k.unsigned_abs() as usize;
+    let mut cells = Vec::with_capacity(starts.len());
+    for start in starts {
+        let start = start as usize;
+        let keep: Vec<usize> =
+            (0..n as usize).filter(|&i| i < start || i >= start + width).collect();
+        cells.push(u.monad(&select_items(&list, &keep), ctx, span)?);
     }
     assemble(&[cells.len()], cells, span)
 }
@@ -8009,8 +8468,8 @@ fn bool_dyad(op: BoolDyad, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
 /// The ranks of y's items: the position each would take in a stable sort.
 /// This is the permutation `A.` reports the index of, which is why a list
 /// that is not itself a permutation still has an anagram index.
-fn item_ranks(y: &Array, span: Span) -> Result<Vec<usize>> {
-    no_grading_boxes(y, span)?;
+fn item_ranks(y: &Array, order: ComplexOrder, span: Span) -> Result<Vec<usize>> {
+    check_gradable(y, order, span)?;
     if !y.dtype().is_numeric() {
         return Err(Error::domain("an anagram index needs numbers", span));
     }
@@ -8024,8 +8483,8 @@ fn item_ranks(y: &Array, span: Span) -> Result<Vec<usize>> {
 
 /// `A. y`: where the permutation y's items rank as stands in the
 /// lexicographic list of the permutations of that length.
-fn anagram_index(y: &Array, span: Span) -> Result<Array> {
-    let ranks = item_ranks(y, span)?;
+fn anagram_index(y: &Array, order: ComplexOrder, span: Span) -> Result<Array> {
+    let ranks = item_ranks(y, order, span)?;
     let n = ranks.len();
     let mut index: i128 = 0;
     for i in 0..n {
@@ -8481,13 +8940,15 @@ fn expand(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// is what makes `". 'a =. 3'` assign in the scope the sentence stands in.
 /// It reaches nothing the caller could not reach: the sandbox contract is
 /// about what a primitive may touch, and evaluation touches nothing new.
-fn execute(y: &Array, apl: bool, origin: i64, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+fn execute(y: &Array, apl: bool, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     let Data::Char(v) = &y.data else {
         return Err(Error::domain("execute reads a character list", span));
     };
     let src: String = v.iter().collect();
     let lang = if apl { crate::Lang::Apl } else { crate::Lang::J };
-    let dialect = crate::Dialect { index_origin: apl.then_some(origin) };
+    // The nested program runs under the dialect the caller was compiled
+    // with — every setting of it, not the index origin alone.
+    let dialect = ctx.cfg.rules.dialect();
     let nested = crate::compile(lang, &src, &dialect).map_err(|e| nested_error(e, &src, span))?;
     if !nested.params.is_empty() {
         return Err(Error::domain(
@@ -8603,7 +9064,20 @@ mod tests {
             let mut env = Env::new(Vec::new());
             #[allow(unused_mut)]
             let mut $name = Ctx {
-                cfg: EvalCfg { agreement: $agreement, fmt: FmtOpts::J, tol: Tol::J },
+                cfg: EvalCfg {
+                    agreement: $agreement,
+                    fmt: FmtOpts::J,
+                    tol: Tol::J,
+                    // The agreement names the language here, so the rules
+                    // a verb reads are that language's shipped dialect.
+                    rules: crate::frontend::Dialect::default()
+                        .rules(if $agreement == Agreement::ExactOrScalar {
+                            crate::Lang::Apl
+                        } else {
+                            crate::Lang::J
+                        })
+                        .expect("the shipped dialect is implemented"),
+                },
                 out: &mut sink,
                 env: &mut env,
                 device: None,
@@ -9660,7 +10134,12 @@ mod tests {
         };
         let mut env = Env::new(Vec::new());
         let mut c = Ctx {
-            cfg: EvalCfg { agreement: Agreement::LeadingPrefix, fmt: FmtOpts::J, tol: Tol::J },
+            cfg: EvalCfg {
+                agreement: Agreement::LeadingPrefix,
+                fmt: FmtOpts::J,
+                tol: Tol::J,
+                rules: Rules::default(),
+            },
             out: &mut sink,
             env: &mut env,
             device: None,

@@ -393,6 +393,9 @@ fn build_definition(
         name: name.to_string(),
         left: dyadic.then(|| "x".to_string()),
         right: "y".to_string(),
+        // J decides a definition's valence from its header (or, for a
+        // `{{ }}`, from its words): one that takes `x` is a dyad only.
+        dyad_only: dyadic,
         result: None,
         locals: Vec::new(),
         body: stmts,
@@ -920,7 +923,7 @@ fn primitive(word: &str) -> Option<Prim> {
         "L." => prim("L.", M::LevelOf, D::None, [INF, INF, INF]),
         "\"." => prim(
             "\".",
-            M::Execute { apl: false, origin: 0 },
+            M::Execute { apl: false },
             D::NotYet("numbers from text (dyadic \".)"),
             [1, INF, INF],
         ),
@@ -1542,6 +1545,7 @@ enum Rule {
 
 fn parse_sentence(tokens: Vec<Frag>, nouns: &HashSet<String>) -> Result<Expr> {
     let sentence = sentence_span(&tokens);
+    check_parens(&tokens)?;
     let mut stack: Vec<Frag> = Vec::new();
     for frag in tokens.into_iter().rev() {
         stack.insert(0, frag);
@@ -1563,6 +1567,28 @@ fn parse_sentence(tokens: Vec<Frag>, nouns: &HashSet<String>) -> Result<Expr> {
         }
     }
     Err(Error::parse("syntax error", sentence))
+}
+
+/// Report an unbalanced parenthesis at the parenthesis itself, before the
+/// sentence is reduced: the reduction would otherwise blame whatever
+/// fragments the stray one left stranded beside each other.
+fn check_parens(tokens: &[Frag]) -> Result<()> {
+    let mut open: Vec<Span> = Vec::new();
+    for frag in tokens {
+        match frag {
+            Frag::LParen(s) => open.push(*s),
+            Frag::RParen(s) => {
+                if open.pop().is_none() {
+                    return Err(Error::parse("this `)` has no opening `(`", *s));
+                }
+            }
+            _ => {}
+        }
+    }
+    match open.pop() {
+        None => Ok(()),
+        Some(s) => Err(Error::parse("this `(` has no closing `)`", s)),
+    }
 }
 
 fn sentence_span(tokens: &[Frag]) -> Span {
@@ -1626,6 +1652,24 @@ fn match_rule(s: &[Frag]) -> Option<Rule> {
 
 fn take(stack: &mut Vec<Frag>, range: Range<usize>) -> Vec<Frag> {
     stack.drain(range).collect()
+}
+
+/// The fragment, pointing at `to` instead of at its own words. Removing a
+/// pair of parentheses uses it so that the fragment left behind still
+/// covers the brackets it was written in.
+fn respan(f: Frag, to: Span) -> Frag {
+    match f {
+        Frag::Noun(mut e) => {
+            e.set_span(to);
+            Frag::Noun(e)
+        }
+        Frag::Name(n, _) => Frag::Name(n, to),
+        Frag::Verb(v, _) => Frag::Verb(v, to),
+        Frag::Adverb(a, _) => Frag::Adverb(a, to),
+        Frag::Conj(c, _) => Frag::Conj(c, to),
+        Frag::Gerund(vs, _) => Frag::Gerund(vs, to),
+        other => other,
+    }
 }
 
 fn apply(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<bool> {
@@ -1699,9 +1743,11 @@ fn apply(stack: &mut Vec<Frag>, nouns: &HashSet<String>) -> Result<bool> {
         }
         Rule::Paren9 => {
             let mut t = take(stack, 0..3);
-            t.pop();
+            let close = t.pop().expect("three slots");
             let inner = t.pop().expect("three slots");
-            stack.insert(0, inner);
+            let open = t.pop().expect("three slots");
+            let outer = Span::merge(open.span(), close.span());
+            stack.insert(0, respan(inner, outer));
         }
     }
     Ok(true)
@@ -1746,6 +1792,7 @@ fn noun_value(f: &Frag) -> Option<Array> {
         agreement: crate::verb::Agreement::LeadingPrefix,
         fmt: crate::fmt::FmtOpts::J,
         tol: crate::verb::Tol::J,
+        rules: crate::frontend::Rules::default(),
     };
     crate::ir::fold_const(e, cfg)
 }
@@ -1956,9 +2003,6 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
             vs.extend(gerund_verbs(&v, span)?);
             Ok(Frag::Gerund(vs, span))
         }
-        // `3 : '...'` and its relatives are J's explicit definitions, not a
-        // composition; the diagnostic should say so.
-        ":" => Err(Error::not_yet("explicit definitions (3 : '...' and 4 : '...')", span)),
         // `u :: v` answers a refusal of u by running v instead. A noun on
         // the right is the constant verb yielding it, as J reads it.
         "::" => {
@@ -1990,14 +2034,20 @@ fn apply_conj(u: Frag, c: Frag, v: Frag) -> Result<Frag> {
         "H." => Err(Error::not_yet("the hypergeometric conjunction (m H. n)", span)),
         // Threads reach outside the expression, which the sandbox closes;
         // libjay's own parallelism is not something a sentence asks for.
-        "T." => Err(Error::new(
-            ErrorKind::NotYet,
+        // That is a property of libjay, not a queue position.
+        "T." => Err(Error::language(
             "T. starts J's own threads, which libjay's sandbox does not open",
-            Some(span),
+            span,
         )),
         "t." => Err(Error::not_yet("the Taylor series (u t. n)", span)),
         "t:" => Err(Error::not_yet("the weighted Taylor series (u t: n)", span)),
-        _ => Err(Error::not_yet(format!("composition ({glyph})"), span)),
+        "." => Err(Error::not_yet("the inner product (u . v)", span)),
+        "!:" => Err(Error::not_yet("the foreign conjunction (m !: n)", span)),
+        // `u : v` is J's monad/dyad conjunction. The explicit definitions
+        // spelled `3 : '…'` and `4 : '…'` are read by the lexer and never
+        // reach here.
+        ":" => Err(Error::not_yet("the monad-dyad conjunction (u : v)", span)),
+        _ => Err(Error::not_yet(format!("the conjunction {glyph}"), span)),
     }
 }
 
@@ -2192,7 +2242,14 @@ fn apply_bident(a: Frag, b: Frag, nouns: &HashSet<String>) -> Result<Frag> {
         let (g, _) = as_verb(b)?;
         return Ok(Frag::Verb(VerbFrag::V(Verb::Hook(Box::new(f), Box::new(g))), span));
     }
-    Err(Error::not_yet("that bident", span))
+    // Two verbs are the only pair J makes a train of. Anything else here —
+    // a noun beside a noun, a noun beside a verb, a leftover modifier — is
+    // a sentence the language does not have a reading for, which is what
+    // the reference calls a syntax error. It is not a queue position.
+    if matches!(a, Frag::Verb(VerbFrag::Cap, _)) {
+        return Err(Error::parse("`[:` caps a fork; it has no verb of its own", span));
+    }
+    Err(Error::parse("syntax error", span))
 }
 
 fn apply_assign(target: Frag, value: Frag, scope: Scope) -> Result<Frag> {
@@ -2468,8 +2525,9 @@ mod tests {
         assert_eq!(prim_of(&v).name, "*");
         let (iv, _, _) = dyad_of(&x);
         assert_eq!(prim_of(&iv).name, "+");
-        // The parentheses are dropped; the span covers what they held.
-        assert_eq!(x.span(), Span::new(1, 6));
+        // The parentheses are dropped, but the span still covers them, so
+        // that a caret under the group underlines something balanced.
+        assert_eq!(x.span(), Span::new(0, 7));
         assert_eq!(ints(&y), vec![3]);
     }
 
@@ -2825,17 +2883,18 @@ mod tests {
     #[test]
     fn cap_is_never_applied_as_a_verb() {
         // `[:` has no meaning of its own; it only caps a fork. Here it is
-        // left over as a bident with the result of `# 1 2 3`.
+        // left over beside the result of `# 1 2 3`.
         let e = err("[: # 1 2 3");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("that bident"), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Parse);
+        assert!(e.msg.contains("caps a fork"), "{}", e.msg);
     }
 
     #[test]
-    fn a_bident_of_nouns_is_not_supported_yet() {
+    fn two_nouns_side_by_side_are_a_syntax_error() {
+        // The reference reads no train here, and neither does libjay.
         let e = err("'ab' 'cd'");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("that bident"), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Parse);
+        assert_eq!(e.msg, "syntax error");
     }
 
     #[test]
@@ -2964,8 +3023,8 @@ mod tests {
         // A name that does hold a value is a different complaint: two
         // nouns side by side, which the reference calls a syntax error.
         let e = err("a =. 5\na 1 2 3");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("that bident"), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Parse);
+        assert_eq!(e.msg, "syntax error");
     }
 
     #[test]
@@ -3135,17 +3194,20 @@ mod tests {
 
     #[test]
     fn an_unbalanced_sentence_is_a_syntax_error() {
+        // The parenthesis itself is what is wrong, so that is what the
+        // span covers.
         let e = err("(1 + 2");
         assert_eq!(e.kind, ErrorKind::Parse);
-        assert_eq!(e.msg, "syntax error");
-        assert_eq!(e.span, Some(Span::new(0, 6)));
+        assert!(e.msg.contains("no closing"), "{}", e.msg);
+        assert_eq!(e.span, Some(Span::new(0, 1)));
     }
 
     #[test]
     fn a_stray_right_parenthesis_is_a_syntax_error() {
         let e = err("1 + 2)");
         assert_eq!(e.kind, ErrorKind::Parse);
-        assert_eq!(e.msg, "syntax error");
+        assert!(e.msg.contains("no opening"), "{}", e.msg);
+        assert_eq!(e.span, Some(Span::new(5, 6)));
     }
 
     #[test]

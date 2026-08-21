@@ -718,3 +718,145 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   is extended or rational, which is a two-line rule (`carry_exact`) rather
   than a change to how they compute. `3!:0` would now report the same
   number on both sides.
+- 2026-08-21 — A composed-expression fuzzer (`jay-corpus fuzz <lang>
+  [--compare]`, `crates/libjay-devtools/src/fuzz.rs`) draws trees rather
+  than one verb over one noun, and triages each disagreement with an oracle
+  into differ / gap / we-refuse / they-refuse by reading the ErrorKind of
+  our own refusal. What it found, and what the answers are:
+  - J's `$` lays out ITEMS (`$ 3 $ i. 3 4` is `3 4`), APL's `⍴` lays out
+    elements. The two rules are one op parameterised by the dialect, as
+    `{.` already was; the corpus never caught it because every recorded
+    reshape had a vector right argument, where the rules agree. An empty y
+    is refused in J and fills in APL, which retires the `2 2⍴⍳0` divergence.
+  - Equality is TOTAL: `'a' = 1` is 0 in both references, and `(<1) = 1` is
+    0 in J. libjay refused, on a reading of "refuse rather than guess" that
+    belongs to input DATA and not to language semantics. Ordering keeps its
+    domain. APL's box case is a gap, not an answer, because APL pervades
+    into the box instead — which libjay does not do yet.
+  - A verb never runs on an empty frame, so its operand types never come up:
+    `'a' + ''` and `%: ''` are empties, not type errors. Agreement is still
+    checked, so `1 2 3 + ''` stays a length error.
+  - The outfix `x u\. y` yields no results at all when x is longer than y,
+    and a negative x leaves out non-overlapping runs. Frets are flags: only
+    0 and 1, and a scalar one marks every item.
+  - `x /: y` is `(/: y) { x`, so the lengths need not agree.
+  - APL extends any frame of ONE cell, not only a rank-0 one.
+  - J's `*` reads a magnitude below the comparison tolerance as zero
+    (`* 1e_15` is 0, `* 6e_14` is 1); APL's `×` is exact there. `Tol::is_j`
+    is the seam, since the tolerance is all a scalar verb is told about the
+    dialect.
+  - An infinite modulus: `_ | y` is y for y ≥ 0 and `_` otherwise.
+  - A negative replication count in a VECTOR is legal (APL2, Dyalog) and a
+    length error in GNU APL; libjay keeps the general rule and records the
+    divergence.
+- 2026-08-21 — A nesting ceiling of 400 applications, counted per thread at
+  the verb and expression entries and once iteratively over each parsed
+  sentence. A string is the interface, so a pathological one has to come
+  back as a `limit error`; before this, a few thousand nested applications
+  took the host process down with a stack overflow. The iterative
+  measurement (`Expr::depth`) exists because the thing being measured is
+  precisely what a recursive walk cannot survive.
+- 2026-08-21 — A performance pass over the reductions, the cell machinery
+  and the data boundary, measured before and after against a build of the
+  same commit in the same session (numbers in bench/README.md, section
+  "Reductions, cells and the boundary"). Five changes, every one of them
+  semantics-preserving; both corpora, every suite and clippy unchanged.
+  - `Buf` grew a third shape, `Slice`: a window `[off, off+len)` over a
+    refcounted `Vec`. Slicing an owned buffer copied; slicing a foreign one
+    never did. Now neither does, so taking a cell or a section out of an
+    array is a pointer and a length whichever kind of array it is (`19 }. x`
+    over 20M f64: 89 ms to nothing). A window keeps its whole allocation
+    alive, exactly as a foreign slice keeps its owner alive, and `to_mut`
+    copies a window out before any write, so a `Buf` still behaves as a
+    private value. The change is worth nothing for arguments imported
+    zero-copy, since those were already views.
+  - An associative flat fold keeps eight accumulators in flight rather than
+    one (`verb::FOLD_LANES`, `fuse::FOLD_LANES`, both with a vector clone).
+    A single accumulator makes the fold a chain of four-cycle dependencies
+    and leaves the vector registers unused; eight lanes are eight
+    independent chains and a shape the autovectoriser widens. Only
+    associative steps take it — the §5.9 regrouping a chunked fold already
+    takes — and a run under 64 elements keeps one accumulator and its exact
+    old rounding. `+/ x` at 20M on one thread: 23.2 to 7.9 ms. This closes
+    the "multiple accumulators" half of phase 6; the width half was the
+    earlier SIMD dispatch, and it had already shown that width was not the
+    limit.
+  - `u/"1 y` (`reduce_vector_cells`) folds every row out of the one buffer
+    instead of building an array per cell, reducing it and framing 2.5M
+    results back together. Each row folds right to left, the insert's own
+    order, so nothing is regrouped and every operation is safe including the
+    ones that are not associative. An empty cell, an integer product that
+    leaves i64 and a comparison that decides its own result type all fall
+    through to the general path. 2.5M x 8 f64: 539 to 9.3 ms on eight
+    threads. Pinned by tests/hotpaths.rs against `u/ |: y`, which is the
+    same fold along the leading axis.
+  - The table boundary's column-major-to-rows-leading weave moved out of the
+    binding crate and into the core as `Data::interleave`, because it is an
+    array operation and the core is where the thread pool is. Isolated,
+    2.5M x 8 f64: 104 to 49 ms on eight threads.
+  - The Python front door memoises compiled programs in process, keyed by
+    (language, source, index origin), bounded at 512, emptied by
+    `jay.clear_cache()`. A `Kernel`'s inner program is a frozen pyclass that
+    holds no data and is documented as shareable between threads, so the
+    second compilation of a source already seen is the first one handed
+    back. In memory only: nothing is written to disk. `jay.j("2+2")`: 7.3 to
+    2.1 us.
+- 2026-08-21 — Three things the same pass measured and did not do, with the
+  numbers that rank them (bench/README.md, "Next"):
+  - A **column-major layout flag on `Array`** would remove the boundary
+    weave for DataFrame shapes, which is 68 of the 72.5 ms a row-wise
+    reduction over a 2.5M x 8 frame costs. Declined here as not containable:
+    every verb that indexes a buffer would have to honour the flag or refuse
+    it explicitly, and the ones that quietly assume rows-leading are the
+    bugs it would introduce. It wants a design, not a hot-path pass.
+  - **Absorbing a window verb into the fused kernel** would take about 100
+    of the Bollinger kernel's 378 ms. Declined: the kernel's invariant is
+    that every input and every slot is read at the same index and has the
+    same length, and a window reads `x[i .. i+k]` and yields `n-k+1`
+    outputs. It needs a haloed block load, a block prefix/suffix stage and a
+    carry between blocks — a change to the invariant rather than an addition
+    to it.
+  - **Widening inside the parallel pass** (a complex-plus-float pass widens
+    the float side into a whole buffer and reads it back) is worth about 4
+    of 13.7 ms at 2M elements, and needs every scalar chunk function to be
+    told where its slice of the source begins — a signature change through
+    the shared offset-and-divider agreement machinery. The widening itself
+    is at least parallel now (`par::map` in `borrow_f64`/`borrow_cx`), and
+    the sequential negative-argument check that `%:` needs became one
+    branch-free parallel pass (`par::any`).
+- 2026-08-21 — APL lineage (owner): v0.1.0 implements one APL — the APL2/ISO
+  line that GNU APL embodies and that our oracle can verify (`↑` first, `⊃`
+  disclose, floating nested model, one-index-per-axis `⌷`, rising-flag `⊂`,
+  no trains). Dyalog (and other well-known dialects) are a planned future
+  choice made the same way `⎕IO` is made today: a preinitialised `Dialect`
+  object passed at compile time (e.g. `APL.Dialect.gnu` / `APL.Dialect.dyalog`),
+  never global state and never a guess from the source text. Until then:
+  every place the two lines diverge is to be implemented behind the
+  dialect (a named knob or an `Agreement`-style enum), not hard-wired, and
+  the divergence is to be listed in docs/coverage.md's "Which APL" section
+  so the generalisation is a matter of filling in the second column. The
+  Dyalog-only features already present (`⊆ ⍛ f⍤g ⌸ ⍤`) stay available in
+  the GNU dialect as extensions with no oracle, marked as such.
+- 2026-08-21 — The dialect became a settings object, with no change to what
+  any program answers. `Dialect` now carries `index_origin` (`⎕IO`),
+  `comparison_tolerance` (`⎕CT`), and one setting per point where the APL
+  lines diverge: `nested_model` (floating / grounded), `first_disclose`
+  (`↑` first and `⊃` disclose, or `↑` mix and `⊃` first), `index_form`
+  (`⌷` over one scalar per axis, or over index vectors), `dfn_result` (the
+  last sentence, or the first non-assignment one), `default_arg` (whether
+  `⍺←v` evaluates `v` when the left argument arrived), `complex_order`
+  (a grade by real-then-imaginary or by magnitude-then-angle) and `trains`.
+  `Dialect::gnu_apl()` writes every one of them out and equals
+  `Dialect::default()`, which tests/dialect.rs pins; `Dialect::j()` is the
+  empty one. `Dialect::rules(lang)` is the single place a choice is made:
+  it resolves the settings into `Rules` — carried by `Program` and by every
+  `EvalCfg`, so the engine reads the same dialect the parser did — and
+  refuses a reading libjay does not implement as a gap ("not supported
+  yet"), by name, rather than answering with this line's meaning. Three
+  rules turned out to be hard-wired past the dialect and now read it: `⌸`
+  answered with positions from 1 whenever the language was APL, a `:For`
+  header parsed its source at origin 1 whatever `⎕IO` said, and `⍎`
+  compiled its nested program with the index origin alone. Python's
+  `APL.Dialect` grew the same fields with the same defaults and an
+  `APL.Dialect.gnu` preset; the C ABI keeps `index_origin` and gains
+  nothing, the stable surface staying stable.

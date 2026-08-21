@@ -21,23 +21,33 @@ pub type Owner = Arc<dyn Any + Send + Sync>;
 /// A borrowed (foreign) buffer points into memory owned by someone else — an
 /// Arrow C data interface import, a Python buffer — and holds an `Owner`
 /// handle that keeps that memory alive for at least as long as the buffer.
-/// An owned buffer is refcounted. Either way cloning is a refcount bump and
-/// mutation copies first if the memory is shared or foreign ([`Buf::to_mut`]),
-/// so a `Buf` behaves as a private value however cheaply it was cloned.
+/// An owned buffer is refcounted, and [`Buf::slice`] of one is a window over
+/// the same allocation rather than a copy. However the buffer was made,
+/// cloning is a refcount bump and mutation copies first if the memory is
+/// shared, foreign or a window ([`Buf::to_mut`]), so a `Buf` behaves as a
+/// private value however cheaply it was cloned.
 pub struct Buf<T> {
     repr: Repr<T>,
 }
 
 enum Repr<T> {
+    /// The whole of a refcounted `Vec`.
     Owned(Arc<Vec<T>>),
+    /// The window `[off, off + len)` of a refcounted `Vec`, which is what
+    /// taking a cell or a section out of an owned array gives: a view over
+    /// the same allocation, never a copy. Writing to one copies first, as
+    /// writing to a shared whole does.
+    Slice { buf: Arc<Vec<T>>, off: usize, len: usize },
     Foreign { ptr: *const T, len: usize, owner: Owner },
 }
 
-// SAFETY: neither variant hands out aliased mutable access. A foreign buffer
+// SAFETY: no variant hands out aliased mutable access. A foreign buffer
 // is read-only for its whole life and its `owner` keeps the memory alive; an
 // owned buffer shares its `Vec` through an `Arc` and only ever mutates it
 // through `Arc::make_mut`, which copies unless this buffer is the sole
-// holder. So `Buf` is exactly as shareable as the `&[T]` it derefs to —
+// holder; a window over part of one becomes a `Vec` of its own before any
+// write, so it never mutates the allocation it shares. So `Buf` is exactly
+// as shareable as the `&[T]` it derefs to —
 // which, because an owned buffer is an `Arc<Vec<T>>` that may be dropped or
 // read from any thread holding a clone, needs `T: Send + Sync` on both.
 unsafe impl<T: Send + Sync> Send for Buf<T> {}
@@ -78,7 +88,7 @@ impl<T> Buf<T> {
     /// location without becoming a different kind of array.
     pub fn owner(&self) -> Option<&Owner> {
         match &self.repr {
-            Repr::Owned(_) => None,
+            Repr::Owned(_) | Repr::Slice { .. } => None,
             Repr::Foreign { owner, .. } => Some(owner),
         }
     }
@@ -86,6 +96,7 @@ impl<T> Buf<T> {
     pub fn as_slice(&self) -> &[T] {
         match &self.repr {
             Repr::Owned(v) => v,
+            Repr::Slice { buf, off, len } => &buf[*off..*off + *len],
             Repr::Foreign { ptr, len, .. } => {
                 if *len == 0 {
                     &[]
@@ -105,20 +116,24 @@ impl<T: Clone> Buf<T> {
     /// shared with another holder. Subsequent calls on the same buffer are
     /// free until it is cloned again.
     pub fn to_mut(&mut self) -> &mut Vec<T> {
-        if self.is_foreign() {
+        // A window over part of a `Vec` becomes a `Vec` of its own first:
+        // what the caller writes — a change of length included — must not
+        // reach the other windows over the same allocation.
+        if !matches!(self.repr, Repr::Owned(_)) {
             self.repr = Repr::Owned(Arc::new(self.as_slice().to_vec()));
         }
         match &mut self.repr {
             Repr::Owned(v) => Arc::make_mut(v),
-            Repr::Foreign { .. } => unreachable!("just converted to owned"),
+            _ => unreachable!("just converted to a whole owned buffer"),
         }
     }
 
     /// The contents as a `Vec`, moving it out when this buffer is the sole
-    /// holder and copying otherwise.
+    /// holder of a whole one and copying otherwise.
     pub fn into_vec(self) -> Vec<T> {
         match self.repr {
             Repr::Owned(v) => Arc::try_unwrap(v).unwrap_or_else(|v| v.as_slice().to_vec()),
+            Repr::Slice { ref buf, off, len } => buf[off..off + len].to_vec(),
             Repr::Foreign { .. } => self.as_slice().to_vec(),
         }
     }
@@ -131,11 +146,25 @@ impl<T: Clone> Buf<T> {
         self.to_mut().extend_from_slice(other);
     }
 
-    /// Elements `[start, end)`. Free for a foreign buffer (the slice keeps
-    /// borrowing, sharing the same owner), a copy for an owned one.
+    /// Elements `[start, end)`, as a view: no element is copied, whatever
+    /// the buffer is. A foreign slice keeps borrowing and shares the same
+    /// owner; an owned one is a window over the same refcounted `Vec`, so
+    /// it holds that whole allocation alive for as long as it lives.
     pub fn slice(&self, start: usize, end: usize) -> Buf<T> {
         match &self.repr {
-            Repr::Owned(v) => Buf::from_vec(v[start..end].to_vec()),
+            Repr::Owned(v) => {
+                assert!(start <= end && end <= v.len(), "slice out of range");
+                if start == 0 && end == v.len() {
+                    return Buf { repr: Repr::Owned(Arc::clone(v)) };
+                }
+                Buf { repr: Repr::Slice { buf: Arc::clone(v), off: start, len: end - start } }
+            }
+            Repr::Slice { buf, off, len } => {
+                assert!(start <= end && end <= *len, "slice out of range");
+                let repr =
+                    Repr::Slice { buf: Arc::clone(buf), off: off + start, len: end - start };
+                Buf { repr }
+            }
             Repr::Foreign { ptr, len, owner } => {
                 assert!(start <= end && end <= *len, "slice out of range");
                 // SAFETY: `start <= len` keeps the offset inside the same
@@ -154,13 +183,16 @@ impl<T> Deref for Buf<T> {
     }
 }
 
-/// Cloning never copies elements: both variants are a refcount bump, and the
-/// copy happens later, in [`Buf::to_mut`], only if someone writes while the
-/// memory is still shared.
+/// Cloning never copies elements: every shape of buffer is a refcount bump,
+/// and the copy happens later, in [`Buf::to_mut`], only if someone writes
+/// while the memory is still shared.
 impl<T: Clone> Clone for Buf<T> {
     fn clone(&self) -> Buf<T> {
         match &self.repr {
             Repr::Owned(v) => Buf { repr: Repr::Owned(Arc::clone(v)) },
+            Repr::Slice { buf, off, len } => {
+                Buf { repr: Repr::Slice { buf: Arc::clone(buf), off: *off, len: *len } }
+            }
             Repr::Foreign { ptr, len, owner } => {
                 // SAFETY: same pointer, same owner, same guarantees.
                 unsafe { Buf::foreign(*ptr, *len, owner.clone()) }
@@ -343,6 +375,96 @@ impl Data {
             _ => return false,
         }
         true
+    }
+
+    /// Weave column-major buffers into one row-major block of shape
+    /// `[rows, columns.len()]`.
+    ///
+    /// This is the table boundary: a DataFrame arrives as one buffer per
+    /// column and libjay works rows-leading, so the elements have to be
+    /// woven once. The weave reads every column in order and writes its
+    /// result straight through, split across threads at the sizes that pay.
+    ///
+    /// None when the columns disagree on element type, when one is shorter
+    /// than `rows`, or when there are no columns at all — the importing
+    /// side has already reported that.
+    pub fn interleave(columns: &[Data], rows: usize) -> Option<Data> {
+        let cols = columns.len();
+        let first = columns.first()?;
+        if columns.iter().any(|c| c.dtype() != first.dtype() || c.len() < rows) {
+            return None;
+        }
+
+        /// One row of the output takes one element from each column, so a
+        /// chunk of the output is a run of whole rows plus, at either end,
+        /// the part of a row the neighbouring chunk does not hold.
+        fn weave<T: Copy + Default + Send + Sync>(columns: &[&[T]], rows: usize) -> Vec<T> {
+            let cols = columns.len();
+            let (out, _) = crate::par::fill(rows * cols, |start, part: &mut [T]| {
+                let mut rest = &mut part[..];
+                let mut at = start;
+                // The tail of a row that began in the chunk before this one.
+                let lead = ((cols - at % cols) % cols).min(rest.len());
+                if lead > 0 {
+                    let (head, tail) = rest.split_at_mut(lead);
+                    let r = at / cols;
+                    for (k, slot) in head.iter_mut().enumerate() {
+                        *slot = columns[at % cols + k][r];
+                    }
+                    at += lead;
+                    rest = tail;
+                }
+                let whole = rest.len() / cols;
+                let (body, tail) = rest.split_at_mut(whole * cols);
+                let r0 = at / cols;
+                for (k, row) in body.chunks_exact_mut(cols).enumerate() {
+                    for (slot, col) in row.iter_mut().zip(columns) {
+                        *slot = col[r0 + k];
+                    }
+                }
+                // The head of a row the next chunk finishes.
+                let r = r0 + whole;
+                for (c, slot) in tail.iter_mut().enumerate() {
+                    *slot = columns[c][r];
+                }
+                true
+            });
+            out
+        }
+
+        /// The same weave for the heap-backed types, which are neither
+        /// `Copy` nor worth a thread: Arrow carries none of them, so this
+        /// only ever runs on data libjay built itself.
+        fn weave_cloned<T: Clone>(columns: &[&[T]], rows: usize) -> Vec<T> {
+            let mut out = Vec::with_capacity(rows * columns.len());
+            for r in 0..rows {
+                for c in columns {
+                    out.push(c[r].clone());
+                }
+            }
+            out
+        }
+
+        macro_rules! by {
+            ($variant:ident, $weave:ident) => {{
+                let mut s = Vec::with_capacity(cols);
+                for c in columns {
+                    let Data::$variant(v) = c else { return None };
+                    s.push(v.as_slice());
+                }
+                Some(Data::$variant($weave(&s, rows).into()))
+            }};
+        }
+        match first.dtype() {
+            DType::Bool => by!(Bool, weave),
+            DType::I64 => by!(I64, weave),
+            DType::F64 => by!(F64, weave),
+            DType::Complex => by!(Complex, weave),
+            DType::Char => by!(Char, weave),
+            DType::Ext => by!(Ext, weave_cloned),
+            DType::Rat => by!(Rat, weave_cloned),
+            DType::Box => by!(Box, weave_cloned),
+        }
     }
 
     /// Widen to `to`. Returns None for unsupported conversions.

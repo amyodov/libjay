@@ -42,11 +42,6 @@
 ? nub takes items of any rank here, vectors only there
 < 1 2 3
 > <error>
-= 2 2⍴⍳0
-? empty reshape is a fill of zeros there, an error here
-< <error>
-> 0 0
-> 0 0
 = 8○3
 ? principal branch here, the lower one there
 < 0J3.16228
@@ -136,3 +131,11 @@
 < 7
 > 6
 > 7
+= ¯1 2/1 2
+? a negative count inside a vector is legal here, a length error there
+< 0 2 2
+> <error>
+= 1 ¯2/1 2
+? a negative count inside a vector is legal here, a length error there
+< 1 0 0
+> <error>

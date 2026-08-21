@@ -9,6 +9,7 @@
 //!
 //! The interpreters stay black-box oracles: never linked, never read.
 
+mod fuzz;
 mod generate;
 mod oracle;
 
@@ -26,6 +27,11 @@ jay-corpus — record what the reference interpreters answer to the corpus.
       --missing    record only expressions the snapshot does not have yet
   jay-corpus gen <j|apl> [--count N] [--seed S]
                                         append generated expressions
+  jay-corpus fuzz <j|apl> [--count N] [--seed S] [--depth D]
+                                        print composed expressions
+      --compare    run libjay and the oracle over them, report the mismatches
+      --quiet      with --compare, the summary only
+      --exprs FILE read the expressions from a corpus file instead
   jay-corpus stats [j|apl]              corpus and snapshot sizes
 
 FILE is a corpus file: a path, or a bare name such as `arithmetic`. With no
@@ -49,6 +55,7 @@ fn run(args: &[String]) -> Result<(), String> {
     match command.as_str() {
         "record" => record(rest),
         "gen" => generate_corpus(rest),
+        "fuzz" => fuzz_command(rest),
         "stats" => stats(rest),
         "-h" | "--help" | "help" => {
             println!("{USAGE}");
@@ -244,6 +251,110 @@ fn generate_corpus(args: &[String]) -> Result<(), String> {
         println!("record them: cargo run -p libjay-devtools -- record {dir} generated");
     }
     Ok(())
+}
+
+/// Composed expressions, printed or compared. Nothing is written to the
+/// corpus: a line worth keeping is moved into `fuzz_found.txt` by hand.
+fn fuzz_command(args: &[String]) -> Result<(), String> {
+    let mut positional: Vec<&String> = Vec::new();
+    let mut count = 200usize;
+    let mut seed = fuzz::DEFAULT_SEED;
+    let mut depth = 3u32;
+    let mut compare_them = false;
+    let mut quiet = false;
+    let mut given: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--count" => {
+                let value = it.next().ok_or("--count needs a number")?;
+                count = value.parse().map_err(|_| format!("--count {value:?}"))?;
+            }
+            "--seed" => {
+                let value = it.next().ok_or("--seed needs a number")?;
+                seed = parse_seed(value)?;
+            }
+            "--depth" => {
+                let value = it.next().ok_or("--depth needs a number")?;
+                depth = value.parse().map_err(|_| format!("--depth {value:?}"))?;
+            }
+            "--compare" => compare_them = true,
+            "--quiet" => quiet = true,
+            "--exprs" => {
+                let value = it.next().ok_or("--exprs needs a file")?;
+                given = Some(value.clone());
+            }
+            other if other.starts_with("--") => return Err(format!("unknown option {other:?}")),
+            _ => positional.push(arg),
+        }
+    }
+    let lang = parse_lang(positional.first().copied())?;
+    // A file of expressions takes the generator's place, which is how a
+    // candidate line is put through the same triage before it is trusted
+    // enough to become a corpus line.
+    let exprs = match &given {
+        Some(path) => corpus::read(std::path::Path::new(path))
+            .into_iter()
+            .map(|e| e.expr)
+            .collect(),
+        None => fuzz::fuzz(lang, count, seed, depth),
+    };
+    if !compare_them {
+        for expr in &exprs {
+            println!("{expr}");
+        }
+        return Ok(());
+    }
+
+    let oracle = oracle::Oracle::find(lang)?;
+    let io = 1u8;
+    let verdicts: Vec<(String, fuzz::Verdict, String, String)> = exprs
+        .par_iter()
+        .map(|expr| {
+            let ours = libjay_testkit::eval::eval_detail(lang, expr, io);
+            let theirs = oracle.eval(expr, io);
+            let verdict = fuzz::triage(lang, &ours, theirs.as_deref());
+            let ours_text = match &ours {
+                libjay_testkit::eval::Answer::Value(v) => v.clone(),
+                libjay_testkit::eval::Answer::NoValue => "<no value>".to_string(),
+                libjay_testkit::eval::Answer::Refused(e) => format!("<error> {e}"),
+            };
+            let theirs_text = theirs.unwrap_or_else(|| "<error>".to_string());
+            (expr.clone(), verdict, ours_text, theirs_text)
+        })
+        .collect();
+
+    let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+    for (expr, verdict, ours, theirs) in &verdicts {
+        *counts.entry(verdict.label()).or_default() += 1;
+        if verdict.is_mismatch() && !quiet {
+            println!("--- {} : {expr}", verdict.label());
+            println!("  libjay:    {}", one_line(ours));
+            println!("  reference: {}", one_line(theirs));
+        }
+    }
+    let mismatches: usize = verdicts.iter().filter(|v| v.1.is_mismatch()).count();
+    let total = verdicts.len();
+    println!("\n{total} expressions, {mismatches} mismatches ({:.1}%)", ratio(mismatches, total));
+    for (label, n) in counts {
+        println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));
+    }
+    Ok(())
+}
+
+fn ratio(n: usize, total: usize) -> f64 {
+    if total == 0 { 0.0 } else { 100.0 * n as f64 / total as f64 }
+}
+
+/// A multi-line answer on one line, so a mismatch stays one screenful.
+fn one_line(text: &str) -> String {
+    let joined = text.replace('\n', " / ");
+    if joined.chars().count() > 200 {
+        let cut: String = joined.chars().take(200).collect();
+        format!("{cut}…")
+    } else {
+        joined
+    }
 }
 
 fn parse_seed(value: &str) -> Result<u64, String> {

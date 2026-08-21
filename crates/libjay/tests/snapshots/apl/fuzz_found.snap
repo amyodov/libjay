@@ -1,0 +1,69 @@
+# libjay reference snapshot: APL (GNU APL) — corpus/apl/fuzz_found.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreter. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`  the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> TEXT`  one line of the reference's answer.
+#   `< TEXT`  one line of libjay's answer (divergence records only).
+#   `? TEXT`  why the two are expected to differ (divergence records only).
+#   `@ io=N`  the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`  a comment.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= 6⍴2 3⍴⍳6
+> 1 2 3 4 5 6
+= ⍴6⍴2 3⍴⍳6
+> 6
+= ⍴3⍴3 4⍴⍳12
+> 3
+= 2 3⍴⍳0
+> 0 0 0
+> 0 0 0
+= 2 2⍴⍳0
+> 0 0
+> 0 0
+= 2 3⍴''
+>
+= 2 3⍴⍳6
+> 1 2 3
+> 4 5 6
+= 2⍴5
+> 5 5
+= 4⍴1 2 3
+> 1 2 3 1
+= ¯2/1 2
+> 0 0 0 0
+= 1 0 1/5
+> 5 5
+= 2/1 2 3
+> 1 1 2 2 3 3
+= 0/1 2 3
+>
+= 'a'=1
+> 0
+= 'a'≠1
+> 1
+= 'abc'=1 2 3
+> 0 0 0
+= ×1E¯15
+> 1
+= ×1E¯13
+> 1
+= (1 1⍴5)+1 2 3
+> 6 7 8
+= (,5)+1 2 3
+> 6 7 8
+= (1 1 1⍴5)+2 3⍴⍳6
+> 6  7  8
+> 9 10 11
+= ⍴(1 1⍴5)+1 2 3
+> 3
+= (,5)+2 3⍴⍳6
+> 6  7  8
+> 9 10 11
+= ⍴(2 3⍴⍳6)+,5
+> 2 3

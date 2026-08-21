@@ -26,7 +26,11 @@ lands in context by accident, do not use it and tell the owner.
 Published documentation is the specification: read it freely, paraphrase it,
 never copy its prose. Reference interpreters may be run as black-box
 subprocess oracles; that is the differential test suite — and where a spec
-or a guess disagrees with the reference, THE ORACLE WINS.
+or a guess disagrees with the reference, THE ORACLE WINS. An oracle binary
+never enters the repository, CI, wheels, or install scripts: it lives only
+on the machine that records the corpus (the GPL ones by policy, a
+proprietary one such as Dyalog by licence). Dyalog is a permitted future
+oracle for a Dyalog dialect under exactly those terms.
 
 ## Fixed points
 

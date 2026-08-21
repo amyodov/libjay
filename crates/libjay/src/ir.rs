@@ -6,8 +6,9 @@ use std::sync::Arc;
 use crate::array::{Array, Data};
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::fmt::{format_array, FmtOpts};
+use crate::frontend::Rules;
 use crate::fuse::FusedKernel;
-use crate::verb::{arrays_match, Agreement, Ctx, Env, EvalCfg, Tol, Verb};
+use crate::verb::{arrays_match, Agreement, Ctx, Env, EvalCfg, Verb};
 
 /// Where an assignment puts its name. The two differ only inside an
 /// explicit definition, which is the only thing that has a local frame.
@@ -125,6 +126,11 @@ pub struct ExplicitDef {
     /// with no left name has no dyadic valence.
     pub left: Option<String>,
     pub right: String,
+    /// True where a left name is part of the definition's valence rather
+    /// than a name the body may or may not read: J's `4 : '…'` and a `{{ }}`
+    /// that mentions `x` are dyads and nothing else, while an APL dfn that
+    /// names `⍺` still runs monadically and finds `⍺` undefined.
+    pub dyad_only: bool,
     /// The name the result is read from when the body does not yield one
     /// (an APL `∇`-definition's `Z←`); None means the body's own value.
     pub result: Option<String>,
@@ -142,6 +148,36 @@ pub struct ExplicitDef {
 }
 
 impl Expr {
+    /// How deeply this tree nests, counted WITHOUT recursing — the point
+    /// of the measurement is that walking such a tree is what runs out of
+    /// stack, so the measurement itself must not.
+    pub(crate) fn depth(&self) -> usize {
+        let mut deepest = 0usize;
+        let mut stack: Vec<(&Expr, usize)> = vec![(self, 1)];
+        while let Some((e, d)) = stack.pop() {
+            deepest = deepest.max(d);
+            let kids: Vec<&Expr> = match e {
+                Expr::Const(..)
+                | Expr::Param(..)
+                | Expr::Name(..)
+                | Expr::Control(..)
+                | Expr::VerbDef { .. } => Vec::new(),
+                Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => vec![value],
+                Expr::AmendIndex { slots, value, .. } => {
+                    slots.iter().flatten().chain(std::iter::once(&**value)).collect()
+                }
+                Expr::Monad { y, .. } => vec![y],
+                Expr::Dyad { x, y, .. } => vec![x, y],
+                Expr::Fused { inputs, orig, .. } => {
+                    inputs.iter().chain(std::iter::once(&**orig)).collect()
+                }
+                Expr::Elided { orig, .. } => orig.iter().collect(),
+            };
+            stack.extend(kids.into_iter().map(|c| (c, d + 1)));
+        }
+        deepest
+    }
+
     pub fn span(&self) -> Span {
         match self {
             Expr::Const(_, s) | Expr::Param(_, s) | Expr::Name(_, s) => *s,
@@ -154,6 +190,24 @@ impl Expr {
             | Expr::Fused { span, .. }
             | Expr::Elided { span, .. }
             | Expr::VerbDef { span, .. } => *span,
+        }
+    }
+
+    /// Widen (or move) the source this node points at. A parenthesised
+    /// expression uses it to take in its own brackets, so that a caret
+    /// under it underlines something balanced.
+    pub fn set_span(&mut self, to: Span) {
+        match self {
+            Expr::Const(_, s) | Expr::Param(_, s) | Expr::Name(_, s) => *s = to,
+            Expr::Control(_, s) => *s = to,
+            Expr::AmendIndex { span, .. } => *span = to,
+            Expr::Assign { span, .. }
+            | Expr::Monad { span, .. }
+            | Expr::Dyad { span, .. }
+            | Expr::PrintPass { span, .. }
+            | Expr::Fused { span, .. }
+            | Expr::Elided { span, .. }
+            | Expr::VerbDef { span, .. } => *span = to,
         }
     }
 
@@ -187,8 +241,8 @@ pub struct Program {
     pub display_src: String,
     pub agreement: Agreement,
     pub fmt: FmtOpts,
-    /// The dialect's comparison tolerance.
-    pub tol: Tol,
+    /// The dialect this program was compiled under, resolved.
+    pub rules: Rules,
 }
 
 /// What an instrumented run saw at one node.
@@ -257,13 +311,24 @@ impl Program {
         device: Option<&crate::device::Device>,
     ) -> Result<Option<Array>> {
         if args.len() != self.params.len() {
-            return Err(Error::internal(format!(
-                "expected {} argument(s), got {}",
-                self.params.len(),
-                args.len()
-            )));
+            let names: Vec<&str> = self.params.iter().map(|p| p.name.as_str()).collect();
+            let wanted = if names.is_empty() {
+                "no arguments".to_string()
+            } else {
+                format!("one value for each of {}", names.join(", "))
+            };
+            return Err(Error::new(
+                ErrorKind::Value,
+                format!("this program takes {wanted}, and was given {}", args.len()),
+                None,
+            ));
         }
-        let cfg = EvalCfg { agreement: self.agreement, fmt: self.fmt, tol: self.tol };
+        let cfg = EvalCfg {
+            agreement: self.agreement,
+            fmt: self.fmt,
+            tol: self.rules.tol(),
+            rules: self.rules,
+        };
         let mut env = Env::new(args.to_vec());
         let mut ctx = Ctx { cfg, out, env: &mut env, device };
         let mut last = None;
@@ -569,6 +634,17 @@ pub(crate) fn call_explicit(
             Some(span),
         ));
     }
+    if x.is_none() && def.dyad_only {
+        return Err(Error::new(
+            ErrorKind::Domain,
+            format!(
+                "{} has no monadic definition: it names {}",
+                def.name,
+                def.left.as_deref().unwrap_or("a left argument")
+            ),
+            Some(span),
+        ));
+    }
     let mut frame: HashMap<String, Array> = HashMap::new();
     frame.insert(def.right.clone(), y.clone());
     if let (Some(name), Some(v)) = (&def.left, x) {
@@ -663,6 +739,9 @@ pub(crate) fn fold_const(e: &Expr, cfg: EvalCfg) -> Option<Array> {
 }
 
 fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
+    // The walk is recursive, so a deeply nested sentence would run out of
+    // stack; the ceiling turns that into a diagnostic.
+    let _depth = crate::verb::Nesting::enter(e.span())?;
     let v = eval_node(e, ctx, rec)?;
     if let Some(t) = rec.as_mut() {
         // A fused node has already left what it knows about its kernel.

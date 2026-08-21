@@ -232,6 +232,46 @@ class TestDialect:
         c = APL.create_compiler(APL.Dialect(index_base=0))
         assert c("⍳3").tolist() == [0, 1, 2]
 
+    def test_the_preset_is_the_default(self):
+        from jay.lang import APL
+
+        assert APL.Dialect.gnu == APL.Dialect()
+
+    def test_comparison_tolerance(self):
+        from jay.lang import APL
+
+        assert apl("⎕CT") == pytest.approx(1e-13)
+        c = APL.create_compiler(APL.Dialect(comparison_tolerance=1e-10))
+        assert c("⎕CT") == pytest.approx(1e-10)
+        # The setting is what comparisons use, not a number to read back.
+        assert c("1=1+1e¯11") == 1
+        assert apl("1=1+1e¯11") == 0
+
+    def test_another_dialects_reading_is_refused(self):
+        from jay.lang import APL
+
+        # libjay implements one APL; asking for the other line's reading
+        # of a divergence is a gap, said out loud.
+        for setting in [
+            {"nested_model": "grounded"},
+            {"first_disclose": "up-is-mix"},
+            {"index_form": "axis-vectors"},
+            {"dfn_result": "first-non-assignment"},
+            {"default_arg": "lazy"},
+            {"complex_order": "magnitude-then-angle"},
+            {"trains": True},
+        ]:
+            c = APL.create_compiler(APL.Dialect(**setting))
+            with pytest.raises(JayError, match="not supported yet"):
+                c.compile("1 2 3")
+
+    def test_an_unknown_setting_value_is_named(self):
+        from jay.lang import APL
+
+        c = APL.create_compiler(APL.Dialect(index_form="sideways"))
+        with pytest.raises(JayError, match="unknown index_form"):
+            c.compile("1 2 3")
+
 
 class TestErrors:
     def test_error_points_into_source(self):

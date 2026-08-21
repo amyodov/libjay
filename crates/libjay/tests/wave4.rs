@@ -352,18 +352,19 @@ fn apl_system_names_are_read_only_and_pure() {
     // `⎕IO` and `⎕CT` report the dialect the compiler was given.
     assert_eq!(val(Lang::Apl, "⎕IO"), Array::scalar_i64(1));
     assert_eq!(
-        run_dialect(Lang::Apl, "⎕IO", &Dialect { index_origin: Some(0) }),
+        run_dialect(Lang::Apl, "⎕IO", &Dialect { index_origin: Some(0), ..Dialect::default() }),
         Some(Array::scalar_i64(0))
     );
     assert_eq!(val(Lang::Apl, "⎕CT"), Array::scalar_f64(1e-13));
     // Neither can be assigned: the dialect fixed them before the run.
+    // That is permanent, so it is not spelled as a promise.
     let e = err(Lang::Apl, "⎕IO←0");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("read-only"), "{}", e.msg);
     // The ones that would reach a clock or a filesystem are closed.
     for src in ["⎕TS", "⎕AI", "⎕FIO"] {
         let e = err(Lang::Apl, src);
-        assert_eq!(e.kind, ErrorKind::NotYet, "{src}");
+        assert_eq!(e.kind, ErrorKind::Language, "{src}");
         assert!(e.msg.contains("closed by the sandbox"), "{src}: {}", e.msg);
     }
     // An unknown one is named rather than guessed at.
@@ -393,7 +394,13 @@ fn the_outfix_leaves_out_a_run_of_items() {
     assert_eq!(val(Lang::J, "3 -/\\. i. 5"), i64s(&[3], &[-1, -4, -1]));
     // A width of zero leaves everything in, once per position.
     assert_eq!(val(Lang::J, "0 +/\\. 1 2 3"), i64s(&[4], &[6, 6, 6, 6]));
-    assert_eq!(err(Lang::J, "9 +/\\. 1 2 3").kind, ErrorKind::Length);
+    // A width longer than the argument leaves out no run at all, so there
+    // are no results — not an error.
+    assert_eq!(val(Lang::J, "$ 9 +/\\. 1 2 3"), i64s(&[1], &[0]));
+    // A NEGATIVE width leaves out non-overlapping runs, the last short.
+    assert_eq!(val(Lang::J, "_2 +/\\. i. 5"), i64s(&[3], &[9, 5, 6]));
+    assert_eq!(val(Lang::J, "_3 +/\\. i. 5"), i64s(&[2], &[7, 3]));
+    assert_eq!(val(Lang::J, "_7 +/\\. i. 5"), i64s(&[1], &[0]));
 }
 
 #[test]

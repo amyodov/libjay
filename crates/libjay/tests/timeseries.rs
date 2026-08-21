@@ -24,7 +24,7 @@ fn val(lang: Lang, src: &str) -> Array {
 
 /// The same, with `⎕IO` set to 0, so APL's `⍳` counts the way J's `i.` does.
 fn val0(src: &str) -> Array {
-    run_dialect(Lang::Apl, src, &Dialect { index_origin: Some(0) })
+    run_dialect(Lang::Apl, src, &Dialect { index_origin: Some(0), ..Dialect::default() })
         .unwrap_or_else(|| panic!("{src:?} yielded no value"))
 }
 

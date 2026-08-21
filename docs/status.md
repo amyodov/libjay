@@ -77,7 +77,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 
 | Spelling | Monad | Dyad |
 |---|---|---|
-| `$` | 🟢 shape of; extended where the argument is | 🟡 reshape; an empty argument is refused, not filled |
+| `$` | 🟢 shape of; extended where the argument is | 🟢 reshape, laying out ITEMS |
 | `#` | 🟢 tally; extended where the argument is | 🟢 copy |
 | `,` | 🟢 ravel | 🟢 append; unequal item shapes are overtaken, which fills |
 | `,.` | 🟢 ravel items | 🟢 stitch |
@@ -264,7 +264,7 @@ conjunctions above:
 
 | Glyph | Monad | Dyad |
 |---|---|---|
-| `⍴` | 🟢 shape | 🟡 reshape; an empty argument is refused, not filled |
+| `⍴` | 🟢 shape | 🟢 reshape, laying out elements; an empty argument fills |
 | `,` | 🟢 ravel | 🟢 catenate (last axis); a simple side joined to a nested one has its items enclosed |
 | `⍪` | 🟢 table | 🟢 catenate (leading axis); same |
 | `⌽` | 🟢 reverse | 🟢 rotate |
@@ -339,7 +339,7 @@ conjunctions above:
 | Function assignment `F←+/` | 🔴 GNU APL rejects it; J's spelling has landed |
 | Dfns `{⍵+1}`, `⍺`/`⍵`, `⋄` bodies, nesting | 🟢 |
 | Dfn assignment `F←{⍵×2}` | 🟢 |
-| Dfn guards `cond:expr`, `⍺←default`, `∇` self-reference | 🟡 no oracle: GNU APL has none of the three |
+| Dfn guards `cond:expr`, `⍺←default`, `∇` self-reference | 🟡 guards and `∇` have no oracle (absent from GNU APL); `⍺←` follows the published default-only rule where GNU APL assigns unconditionally (recorded divergence) |
 | Dfn operators `⍺⍺` / `⍵⍵` | 🟡 no oracle: GNU APL has neither; a dfn naming one is an operator, and naming the operator keeps it one |
 | Tradfns `∇ Z←L F R;locals` … `∇` | 🟢 including APL's global-by-default scope rule, and the niladic form, which naming calls |
 | Trains (forks and atops) | 🔴 |
@@ -347,6 +347,7 @@ conjunctions above:
 | Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
 | Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`; the rest named |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
+| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟡 one preset — `Dialect::gnu_apl()`, the APL2/ISO line, which is the default; every point where the lineages diverge is a setting on it (nested model, `↑`/`⊃`, `⌷`, dfn result, `⍺←`, complex order, trains) and asking for the other reading is refused as not implemented yet |
 | `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS`), read-only; the ones that read a clock or a filesystem are closed by the sandbox |
 | Control structures `:If :While :Repeat :For :Select` | 🟡 no oracle: GNU APL rejects them |
 | `:Return` `:Leave` `:Continue` | 🟡 no oracle, as above |

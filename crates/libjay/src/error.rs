@@ -34,6 +34,8 @@ pub enum ErrorKind {
     NotYet,
     /// Absent from the language itself; will never exist.
     Language,
+    /// Larger than libjay will allocate.
+    Limit,
     Internal,
 }
 
@@ -49,6 +51,7 @@ impl ErrorKind {
             ErrorKind::Value => "value error",
             ErrorKind::NotYet => "not supported yet",
             ErrorKind::Language => "not in the language",
+            ErrorKind::Limit => "limit error",
             ErrorKind::Internal => "internal error",
         }
     }
@@ -129,14 +132,20 @@ impl std::error::Error for Error {}
 /// Find the source line containing `span` and the span's position in it,
 /// measured in characters (for caret alignment).
 fn locate(src: &str, span: Span) -> Option<(&str, usize, usize)> {
-    if span.start > src.len() {
+    // A span that does not land on this source has no caret to draw; the
+    // message still stands on its own.
+    if span.start > src.len() || !src.is_char_boundary(span.start) {
         return None;
     }
     let line_start = src[..span.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let line_end = src[span.start..].find('\n').map(|i| span.start + i).unwrap_or(src.len());
     let line = &src[line_start..line_end];
     let col_start = src[line_start..span.start].chars().count();
-    let span_end = span.end.min(line_end);
-    let col_len = src[span.start..span_end.max(span.start)].chars().count();
+    let span_end = span.end.min(line_end).max(span.start);
+    let col_len = if src.is_char_boundary(span_end) {
+        src[span.start..span_end].chars().count()
+    } else {
+        1
+    };
     Some((line, col_start, col_len))
 }

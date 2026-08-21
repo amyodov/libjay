@@ -25,7 +25,7 @@ fn val(lang: Lang, src: &str) -> Array {
 
 /// The same, with `⎕IO` set to 0 (APL only).
 fn val0(src: &str) -> Array {
-    run_dialect(Lang::Apl, src, &Dialect { index_origin: Some(0) })
+    run_dialect(Lang::Apl, src, &Dialect { index_origin: Some(0), ..Dialect::default() })
         .unwrap_or_else(|| panic!("{src:?} yielded no value"))
 }
 
@@ -306,8 +306,10 @@ fn dyadic_grade_sorts_one_array_by_another() {
     assert_eq!(val(Lang::J, "3 1 4 1 5 \\: 3 1 4 1 5"), i64s(&[5], &[5, 4, 3, 1, 1]));
     assert_eq!(val(Lang::J, "'abc' /: 3 1 2"), text(&[3], "bca"));
     assert_eq!(val(Lang::J, "'abc' \\: 3 1 2"), text(&[3], "acb"));
-    // Items of the two arguments have to pair up.
-    assert_eq!(err(Lang::J, "1 2 /: 1 2 3").kind, ErrorKind::Length);
+    // The grade of y indexes x, so a longer key runs off the end of it.
+    assert_eq!(err(Lang::J, "1 2 /: 1 2 3").kind, ErrorKind::Domain);
+    // A SHORTER key is not an error: it selects fewer items.
+    assert_eq!(val(Lang::J, "1 2 3 /: 'ab'"), i64s(&[2], &[1, 2]));
 }
 
 // --- LCM and GCD --------------------------------------------------------

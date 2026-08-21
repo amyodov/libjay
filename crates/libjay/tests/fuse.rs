@@ -545,7 +545,11 @@ fn a_split_reduce_agrees_to_the_float_contract() {
     let args = vec![data("x", 4_000_000)];
     let a = run(&p, &args).unwrap().unwrap().to_f64_vec().unwrap()[0];
     let b = run(&unfused(&p), &args).unwrap().unwrap().to_f64_vec().unwrap()[0];
-    assert!((a - b).abs() <= 1e-12 * b.abs(), "fused {a}, unfused {b}");
+    // The two fold in different groupings, which §5.9 licenses, and the
+    // grouping depends on the pool size — so the bound has to hold at
+    // every LIBJAY_THREADS. Four million additions regrouped stay well
+    // inside a relative 1e-10; a real semantic difference would not.
+    assert!((a - b).abs() <= 1e-10 * b.abs(), "fused {a}, unfused {b}");
 }
 
 // ------------------------------------------------------------- the fuzz

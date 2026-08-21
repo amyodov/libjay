@@ -63,14 +63,16 @@ valences, 62 green / 21 partial / 33 red of 116 APL valences. Both primitive
 sets are differential-tested against the reference implementations: 3483
 J and 895 APL expressions, recorded as snapshots from black-box runs of the
 reference interpreters and replayed on every test run, 100% agreement. A
-20-period Bollinger z-score written as one J kernel runs 20M rows in 437 ms
-against the equivalent Polars pipeline's 768, agreeing to 8.7e-10. Dense numeric arrays, complex numbers, boxes, and J's exact
+20-period Bollinger z-score written as one J kernel runs 20M rows in 404 ms
+against the equivalent Polars pipeline's 755, agreeing to 8.7e-10. Dense numeric arrays, complex numbers, boxes, and J's exact
 types — extended-precision integers and rationals; things the languages
 have but libjay doesn't yet fail with an explicit "not supported yet".
 Fused kernels can be placed on a GPU (`kernel.deploy("gpu")`, wgpu over
 Metal/Vulkan/DX12, in the ordinary wheel and dormant without an adapter);
 resident data runs 1.5x to 5x the 8-thread CPU at 20M rows. Next on the
-roadmap: more of both languages.
+roadmap: more of both languages. The APL implemented today is the APL2/ISO
+line, verified against GNU APL; Dyalog-specific behaviour is a planned
+dialect switch (see [docs/coverage.md#which-apl](docs/coverage.md#which-apl)).
 
 ## License
 

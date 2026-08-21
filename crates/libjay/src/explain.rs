@@ -331,13 +331,18 @@ fn one_line(s: &str) -> String {
 
 /// The sentence this node was compiled from, as the user wrote it.
 ///
-/// A node's span covers what the parser kept, which drops the parentheses
-/// around it, so the span is widened to the sentence that holds it: to the
-/// line in J, and to the `⋄`-separated part of the line in APL.
+/// A node's span covers the words it was built from, so it is widened to
+/// the sentence that holds it: to the line in J, and to the `⋄`-separated
+/// part of the line in APL. A span that does not land on the display source
+/// yields nothing rather than cutting it: explaining never fails.
 fn source_of(p: &Program, e: &Expr) -> String {
     let span = e.span();
     let src = &p.display_src;
-    if span.start >= span.end || span.end > src.len() {
+    if span.start >= span.end
+        || span.end > src.len()
+        || !src.is_char_boundary(span.start)
+        || !src.is_char_boundary(span.end)
+    {
         return String::new();
     }
     let mut start = src[..span.start].rfind('\n').map_or(0, |i| i + 1);

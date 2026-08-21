@@ -15,6 +15,7 @@ pub mod fmt;
 pub mod frontend;
 pub mod fuse;
 pub mod ir;
+pub mod limits;
 mod par;
 mod rng;
 pub mod simd;

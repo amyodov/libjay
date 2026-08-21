@@ -8,6 +8,7 @@ kernel. ``jay.apl`` is the same thing for APL.
 from __future__ import annotations
 
 import sys
+from functools import lru_cache
 from typing import NamedTuple
 
 from . import _jay
@@ -21,6 +22,7 @@ __all__ = [
     "Device",
     "DeviceArray",
     "JayError",
+    "clear_cache",
 ]
 __version__ = _jay.__version__
 
@@ -48,6 +50,45 @@ def devices() -> list[Device]:
 
 _HAVE_TSTRINGS = sys.version_info >= (3, 14)
 
+# Compiling the same string twice gives the same program, and a compiled
+# program is immutable, holds no data and is safe to share between threads —
+# so the second compilation of a source that has already been seen is
+# answered from here. The cache is this process's only; nothing is written
+# to disk. It is keyed by everything the compiler reads, and bounded, so a
+# caller that generates source text cannot grow it without limit.
+_CACHE_SIZE = 512
+
+
+# The dialect settings a compiler carries besides the index origin, in the
+# order the extension takes them. Each is None for "the shipped default";
+# `jay.lang.APL.Dialect` is the named form of the same thing.
+_DIALECT_KEYS = (
+    "comparison_tolerance",
+    "nested_model",
+    "first_disclose",
+    "index_form",
+    "dfn_result",
+    "default_arg",
+    "complex_order",
+    "trains",
+)
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def _compiled(lang: str, source: str, origin, dialect: tuple = ()):
+    return _jay.compile(lang, source, origin, *dialect)
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def _compiled_parts(lang: str, parts: tuple, names: tuple, origin, dialect: tuple = ()):
+    return _jay.compile_parts(lang, list(parts), list(names), origin, *dialect)
+
+
+def clear_cache() -> None:
+    """Forget every compiled program this process has cached."""
+    _compiled.cache_clear()
+    _compiled_parts.cache_clear()
+
 
 def _write_stdout(text: str) -> None:
     sys.stdout.write(text)
@@ -60,16 +101,19 @@ class Kernel:
     shared and reusable across threads.
     """
 
-    __slots__ = ("_inner", "_defaults")
+    __slots__ = ("_inner", "_defaults", "_params")
 
     def __init__(self, inner, defaults: dict):
         self._inner = inner
         self._defaults = defaults
+        # The compiled program's parameter list does not change, and every
+        # call reads it two or three times; read it across once instead.
+        self._params = list(inner.params)
 
     @property
     def params(self) -> list[str]:
         """Parameter names, in positional order."""
-        return list(self._inner.params)
+        return list(self._params)
 
     def bind(self, data: dict) -> "Kernel":
         """Return a new kernel with these values overriding current defaults."""
@@ -122,12 +166,13 @@ class Kernel:
         host is not implemented yet.)
         """
         values = self._defaults if not data else {**self._defaults, **self._check_names(data)}
-        missing = [p for p in self._inner.params if p not in values]
-        if missing:
+        try:
+            ordered = [values[p] for p in self._params]
+        except KeyError:
+            missing = [p for p in self._params if p not in values]
             raise JayError(
                 "missing value(s) for parameter(s): " + ", ".join(missing)
-            )
-        ordered = [values[p] for p in self._inner.params]
+            ) from None
         result, _ = self._inner.run(ordered, _write_stdout, False, keep_on_device)
         return result
 
@@ -142,26 +187,26 @@ class Kernel:
         produced; when one is missing, the structure is described alone.
         """
         values = self._defaults if not data else {**self._defaults, **self._check_names(data)}
-        if any(p not in values for p in self._inner.params):
+        if any(p not in values for p in self._params):
             return self._inner.explain(None)
-        return self._inner.explain([values[p] for p in self._inner.params])
+        return self._inner.explain([values[p] for p in self._params])
 
     def run_display(self, data: dict | None = None) -> str | None:
         """Execute like __call__, but return the last value formatted for
         display (None when there is no value). Used by the CLI."""
         values = self._defaults if not data else {**self._defaults, **self._check_names(data)}
-        ordered = [values[p] for p in self._inner.params]
+        ordered = [values[p] for p in self._params]
         _, display = self._inner.run(ordered, _write_stdout, True)
         return display
 
     def _check_names(self, data: dict) -> dict:
-        unknown = [k for k in data if k not in self._inner.params]
+        unknown = [k for k in data if k not in self._params]
         if unknown:
             raise JayError(
                 "unknown parameter(s): "
                 + ", ".join(unknown)
                 + "; this expression has: "
-                + (", ".join(self._inner.params) or "none")
+                + (", ".join(self._params) or "none")
             )
         return data
 
@@ -170,11 +215,21 @@ class _Lang:
     """One language's entry point: callable for the one-shot form, with
     ``compile`` for the kernel form."""
 
-    __slots__ = ("_name", "_index_origin")
+    __slots__ = ("_name", "_index_origin", "_dialect")
 
-    def __init__(self, name: str, index_origin: int | None = None):
+    def __init__(self, name: str, index_origin: int | None = None, **dialect):
+        unknown = [k for k in dialect if k not in _DIALECT_KEYS]
+        if unknown:
+            raise TypeError(
+                "unknown dialect setting(s): "
+                + ", ".join(unknown)
+                + "; this language has: "
+                + ", ".join(_DIALECT_KEYS)
+            )
         self._name = name
         self._index_origin = index_origin
+        # A tuple, because it is part of the compilation cache's key.
+        self._dialect = tuple(dialect.get(k) for k in _DIALECT_KEYS)
 
     @property
     def name(self) -> str:
@@ -192,9 +247,11 @@ class _Lang:
             from ._tstring import split_template
 
             parts, names, defaults = split_template(source)
-            inner = _jay.compile_parts(self._name, parts, names, origin)
+            inner = _compiled_parts(
+                self._name, tuple(parts), tuple(names), origin, self._dialect
+            )
         elif isinstance(source, str):
-            inner = _jay.compile(self._name, source, origin)
+            inner = _compiled(self._name, source, origin, self._dialect)
         else:
             raise TypeError(f"expected str or Template, got {type(source).__name__}")
         kernel = Kernel(inner, defaults)

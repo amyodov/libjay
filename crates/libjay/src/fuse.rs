@@ -1272,6 +1272,60 @@ where
     ok.then_some(out)
 }
 
+/// Independent accumulators the fold over a block keeps in flight, and the
+/// block length below which one accumulator is cheaper. The reasoning is
+/// the one `verb::FOLD_LANES` carries: a single accumulator makes the fold
+/// a chain of dependent steps, and only an associative step is ever
+/// absorbed here, so the lanes are a regrouping the float contract already
+/// allows (§5.9).
+const FOLD_LANES: usize = 8;
+const MIN_LANE_WORK: usize = 8 * FOLD_LANES;
+
+/// Fold one block of mapped values right to left, in lanes. None when a
+/// step left the element type.
+#[inline(always)]
+fn fold_block_body<T, S>(v: &[T], step: &S) -> Option<T>
+where
+    T: Copy,
+    S: Fn(T, T) -> Option<T>,
+{
+    let n = v.len();
+    if n < MIN_LANE_WORK {
+        let mut acc = v[n - 1];
+        for &x in v[..n - 1].iter().rev() {
+            acc = step(x, acc)?;
+        }
+        return Some(acc);
+    }
+    let rows = n / FOLD_LANES;
+    let head = n - rows * FOLD_LANES;
+    let last = head + (rows - 1) * FOLD_LANES;
+    let mut acc = [v[last]; FOLD_LANES];
+    acc.copy_from_slice(&v[last..last + FOLD_LANES]);
+    for r in (0..rows - 1).rev() {
+        let row = &v[head + r * FOLD_LANES..head + (r + 1) * FOLD_LANES];
+        for (slot, &x) in acc.iter_mut().zip(row) {
+            *slot = step(x, *slot)?;
+        }
+    }
+    let mut a = acc[FOLD_LANES - 1];
+    for &x in acc[..FOLD_LANES - 1].iter().rev() {
+        a = step(x, a)?;
+    }
+    for &x in v[..head].iter().rev() {
+        a = step(x, a)?;
+    }
+    Some(a)
+}
+
+multiversioned! {
+    /// One block's values folded into one, at the CPU's own width.
+    fn fold_block[T: Copy, S: Fn(T, T) -> Option<T>](
+        v: &[T],
+        step: &S,
+    ) -> Option<T> = fold_block_body;
+}
+
 /// Fold the mapped values of `lo .. hi` right to left, block by block.
 #[allow(clippy::too_many_arguments)]
 fn fold_range<T, M, D, S>(
@@ -1304,12 +1358,11 @@ where
             &k.code, srcs, start, len, &mut scratch, w, &mut free, &mut stack, &mut lets, None,
             mon, dya,
         )?;
-        for &v in scratch[slot * w..slot * w + len].iter().rev() {
-            acc = Some(match acc {
-                None => v,
-                Some(a) => step(v, a)?,
-            });
-        }
+        let block = fold_block(&scratch[slot * w..slot * w + len], step)?;
+        acc = Some(match acc {
+            None => block,
+            Some(a) => step(block, a)?,
+        });
     }
     acc
 }
@@ -1381,13 +1434,17 @@ macro_rules! zip {
 }
 
 #[inline(always)]
-fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64]) -> bool {
+fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64], tol: Tol) -> bool {
     use ScalarMonad::*;
     match op {
         Conj => each!(a, dst, |x: f64| x),
         Neg => each!(a, dst, |x: f64| -x),
         Abs => each!(a, dst, f64::abs),
-        Signum => each!(a, dst, |x: f64| if x > 0.0 {
+        // A magnitude the dialect's tolerance reads as zero has no sign,
+        // exactly as unfused.
+        Signum => each!(a, dst, |x: f64| if tol.is_zero(x) {
+            0.0
+        } else if x > 0.0 {
             1.0
         } else if x < 0.0 {
             -1.0
@@ -1425,7 +1482,11 @@ fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64], tol: Tol
         } else {
             x / y
         }),
-        Residue => zip!(a, b, dst, |x: f64, y: f64| if x == 0.0 {
+        // An infinite modulus leaves a value of its own sign alone and
+        // sends the other one to that infinity, exactly as unfused.
+        Residue => zip!(a, b, dst, |x: f64, y: f64| if x.is_infinite() {
+            if y == 0.0 || (y > 0.0) == (x > 0.0) { y } else { x }
+        } else if x == 0.0 {
             y
         } else {
             y - x * (y / x).floor()
@@ -1518,7 +1579,12 @@ multiversioned! {
     /// One instruction of a kernel over one block of floats: the monadic
     /// operations. False is unreachable — every operation a kernel holds is
     /// covered — and exists so the two passes have one signature.
-    fn monad_f64(op: ScalarMonad, a: &[f64], dst: &mut [f64]) -> bool = monad_f64_body;
+    fn monad_f64(
+        op: ScalarMonad,
+        a: &[f64],
+        dst: &mut [f64],
+        tol: Tol,
+    ) -> bool = monad_f64_body;
 }
 
 multiversioned! {
@@ -1664,6 +1730,7 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
     // with, so a fused comparison answers as the unfused one does.
     let tol = k.tol;
     let cmp_f64 = move |op, a: &[f64], b: &[f64], dst: &mut [f64]| dyad_f64(op, a, b, dst, tol);
+    let sign_f64 = move |op, a: &[f64], dst: &mut [f64]| monad_f64(op, a, dst, tol);
 
     let data = if working == DType::F64 {
         let owned: Vec<Option<Vec<f64>>> = inputs.iter().map(|a| to_f64(a, w)).collect();
@@ -1677,11 +1744,11 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
             .collect();
         match k.reduce() {
             None => {
-                let out = map_pass(k, &srcs, n, monad_f64, cmp_f64)?;
+                let out = map_pass(k, &srcs, n, sign_f64, cmp_f64)?;
                 float_result(out, root)
             }
             Some(op) => {
-                let v = reduce_pass(k, &srcs, n, monad_f64, cmp_f64, |a, b| step_f64(op, a, b))?;
+                let v = reduce_pass(k, &srcs, n, sign_f64, cmp_f64, |a, b| step_f64(op, a, b))?;
                 // A comparison at the root maps to exact 0 and 1, which the
                 // fold keeps exact; the reduction of booleans is integer.
                 match root {

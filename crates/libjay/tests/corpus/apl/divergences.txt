@@ -28,10 +28,6 @@
 // the monad to vectors.
 ∪2 3⍴1 2 3 1 2 3
 ? nub takes items of any rank here, vectors only there
-// Reshaping from an empty argument: APL2 fills with the prototype (0 or
-// blank), libjay refuses rather than invent data.
-2 2⍴⍳0
-? empty reshape is a fill of zeros there, an error here
 // The circle functions on a REAL argument whose answer is imaginary: GNU
 // APL carries a negative zero into the square root and lands on the lower
 // branch, libjay takes the principal one, which is what J answers.
@@ -113,3 +109,10 @@ F←{⍺←10 ⋄ ⍺+⍵} ⋄ 3 F 5
 // value of every statement that is not an assignment on its way through.
 F←{⍵+1 ⋄ ⍵+2} ⋄ F 5
 ? only the last statement is displayed here, every one of them there
+// A negative replication count is a run of fills. GNU APL takes one only
+// as a SCALAR left argument and calls a vector holding one a length error,
+// where APL2 and Dyalog spell out the general rule; libjay follows them.
+¯1 2/1 2
+? a negative count inside a vector is legal here, a length error there
+1 ¯2/1 2
+? a negative count inside a vector is legal here, a length error there

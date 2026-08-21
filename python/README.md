@@ -55,6 +55,11 @@ k2({"data": chunk3})             # only the changing part at call time
 Kernels are immutable — `bind` returns a new one — and the compiled program
 is shared and safe to run from several threads.
 
+Compiling the same source twice does not compile it twice: programs are
+memoised in the process, so the one-shot form is cheap to call in a loop.
+`jay.clear_cache()` empties the table if you ever need it emptied; nothing
+is written to disk.
+
 On Python 3.14+, t-strings make the same thing typo-safe — interpolated
 values become both the type contract and the defaults:
 
