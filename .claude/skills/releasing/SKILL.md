@@ -94,7 +94,9 @@ fi
 gh release create v$1 --title "v$1 — <short summary>" --notes-file docs/release-notes-$1.md
 ```
 
-The title names WHAT THIS RELEASE CHANGES, not what libjay is: the
+Release-notes files use one line per paragraph — GitHub renders
+hard-wrapped prose as ragged lines (the repo's 72-column habit does not
+apply there). The title names WHAT THIS RELEASE CHANGES, not what libjay is: the
 project description belongs on the repo, the title is the one-liner a
 reader scans in the releases list (`v0.2.0 — AVX-512, column-major
 DataFrames, APL trains`, not `v0.2.0 — independent J and APL…`). Lead with
