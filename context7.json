@@ -1,0 +1,21 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "libjay",
+  "description": "Independent, modern implementations of the J and APL array languages: parallel and vectorized, embeddable from Rust, Python, and C",
+  "folders": ["docs", "examples", "python", "crates/libjay", "crates/libjay-capi/include"],
+  "excludeFolders": ["crates/libjay/src", "crates/libjay/tests", "bench", ".claude", ".github"],
+  "excludeFiles": ["CLAUDE.md", "decisions.md", "release-notes-0.1.0.md", "release-notes-0.2.0.md"],
+  "rules": [
+    "The PyPI package and CLI are named libjay, but the Python import is jay (like pillow/PIL): pip install libjay, then import jay.",
+    "Braces in a program string always bind data ({name} is a parameter), never splice text into the program.",
+    "jay.j(...) and jay.apl(...) compile, bind and execute in one call; jay.j.compile(...) returns a reusable kernel with .bind() for defaults.",
+    "The APL implemented is the APL2/ISO line verified against GNU APL; trains and function assignment are extensions on by default, and Dyalog-specific readings are a planned dialect switch, not the default.",
+    "DataFrames map to a matrix rows-leading: J +/ sums each column, +/\"1 sums each row; Arrow/numpy int64 and float64 columns cross zero-copy.",
+    "Columns with nulls or mixed numeric types are refused with an error naming the column; cast or fill explicitly rather than expecting coercion.",
+    "Errors point into the source string; 'not supported yet' means planned, 'not in the language' and 'closed by the sandbox' mean permanent.",
+    "Use kernel.explain() or libjay --explain to see how an expression parsed, what fused, and per-node result shapes."
+  ],
+  "previousVersions": [
+    { "tag": "v0.1.0" }
+  ]
+}
