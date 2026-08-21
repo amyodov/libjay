@@ -70,6 +70,7 @@ _DIALECT_KEYS = (
     "dfn_result",
     "default_arg",
     "complex_order",
+    "nested_grade",
     "trains",
 )
 

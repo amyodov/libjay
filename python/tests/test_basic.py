@@ -349,6 +349,7 @@ class TestDialect:
             {"dfn_result": "first-non-assignment"},
             {"default_arg": "lazy"},
             {"complex_order": "magnitude-then-angle"},
+            {"nested_grade": "total-order"},
         ]:
             c = APL.create_compiler(APL.Dialect(**setting))
             with pytest.raises(JayError, match="not supported yet"):
@@ -384,7 +385,7 @@ class TestErrors:
 
     def test_not_yet_wording(self):
         with pytest.raises(JayError, match="not supported yet"):
-            j("/: 1;2")
+            j("2 ;: 'a b'")
 
     def test_parse_error(self):
         with pytest.raises(JayError):

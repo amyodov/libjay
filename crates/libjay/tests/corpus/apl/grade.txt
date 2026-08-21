@@ -1,0 +1,61 @@
+// Grading a NESTED array: the APL2 rule GNU APL implements, one line per
+// rule. Recorded from the oracle; every claim below is its answer.
+
+// The rank first — before the type, and before the shape.
+⍋(1)(1 2)
+⍋(1 2)(1)
+⍋(1 1⍴1)(1 2)
+⍋(2 2 2⍴0)(3 3⍴0)
+⍋(⊂1 2)(1 2)
+⍋(2 2⍴⍳4)(1 2 3 4)
+⍋(2 2⍴'ab')('')
+
+// Then the shape, read from the FIRST axis.
+⍋(1 4⍴0)(2 3⍴0)
+⍋(2 3⍴0)(1 4⍴0)
+⍋(2 3⍴1)(3 2⍴0)
+⍋(2 0⍴0)(0 2⍴0)
+⍋(1 2)(1 2 3)
+⍋('abc')(1 2)
+⍋(⍳0)(,1)
+⍋('a')('a' 'b')
+
+// Then the atoms: a character precedes a number precedes a nested value.
+⍋1 'a'
+⍋(⊂1)(⊂'a')
+⍋('a')(1)
+⍋(⊂1 2)(3)
+⍋(⊂1 2)('a')
+⍋('ab')(1 2)
+⍋('a' 1)(1 'a')
+⍋(1 'a')(1 1)
+⍋(1 2)(1 3)
+⍋('abc')('abd')
+⍋(⊂1 2)(⊂1 3)
+⍋(⊂1 2)(⊂'ab')
+⍋(⊂⊂1 2)(⊂1 3)
+⍋(⊂'')(⊂⍳0)
+
+// Two arrays with no atoms are separated by their types instead.
+⍋('')(⍳0)
+⍋(⍳0)('')
+⍋(0⍴⊂1 2)(⍳0)
+⍋(0⍴⊂1 2)('')
+
+// Equal items keep their order, up and down alike.
+⍋(1 2)(3 4)(1 2)
+⍒(1 2)(3 4)(1 2)
+⍒(⊂'a')(⊂'a')(⊂'b')
+
+// A nested array of rank 2 grades its ROWS, and the sort idiom follows.
+⍋3 2⍴(1 2)(3 4)(0 5)(1 1)(2 2)(3 3)
+⍋(1 2)('ab')(⊂1 2)(1)('a')
+⍒(1 2)('ab')(⊂1 2)(1)('a')
+⍴((1 2)(3 4)(0 5))[⍋(1 2)(3 4)(0 5)]
+⊃((1 2)(3 4)(0 5))[⍋(1 2)(3 4)(0 5)]
+
+// A grade orders ITEMS, and an enclosed array is one scalar.
+⍋⊂1 2
+@ io=0
+⍋(1 2)('ab')(⊂1 2)(1)('a')
+⍒('')(⍳0)

@@ -9,7 +9,8 @@
 //! not implement and getting a "not implemented yet" refusal for it.
 
 use jay::frontend::{
-    ComplexOrder, DefaultArg, DfnResult, Dialect, FirstDisclose, IndexForm, NestedModel,
+    ComplexOrder, DefaultArg, DfnResult, Dialect, FirstDisclose, IndexForm, NestedGrade,
+    NestedModel,
 };
 use jay::{compile, Array, Data, ErrorKind, Lang};
 
@@ -54,6 +55,7 @@ fn the_defaults_resolve_to_this_apl() {
     assert_eq!(r.dfn_result, DfnResult::LastSentence);
     assert_eq!(r.default_arg, DefaultArg::Eager);
     assert_eq!(r.complex_order, ComplexOrder::RealThenImaginary);
+    assert_eq!(r.nested_grade, NestedGrade::Apl2);
     // Trains ship on, as an extension: GNU APL has none, and both readings
     // are implemented, so the setting is a choice rather than a gap.
     assert!(r.trains);
@@ -83,6 +85,10 @@ fn asking_for_the_other_reading_is_refused_as_a_gap() {
         (
             "complex_order",
             Dialect { complex_order: ComplexOrder::MagnitudeThenAngle, ..Dialect::default() },
+        ),
+        (
+            "nested_grade",
+            Dialect { nested_grade: NestedGrade::TotalOrder, ..Dialect::default() },
         ),
     ];
     for (name, dialect) in cases {

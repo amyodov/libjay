@@ -87,9 +87,11 @@
 // length of `⍕`.
 ⍴⍕(1 2)(3 4)
 ? one space between items here, two there
-// A named gap: ordering boxes needs J's total array ordering.
-⍋(1 2)(3 4)
-? graded there, a `grading boxed arrays` gap here
+// GNU APL's grade reads ⎕CT: two values within the tolerance tie, and its
+// stable sort leaves them where they were. libjay's grade is exact, as J's
+// is — a tolerant comparison is not a total order, and a sort needs one.
+⍋2 (1+1E¯14) 1
+? tolerant there, exact here
 // `⍺←v` inside a dfn is a DEFAULT here, as the published dfn model has it:
 // a left argument that arrived keeps its value. GNU APL assigns
 // unconditionally, so the default overwrites the argument.

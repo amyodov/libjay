@@ -435,12 +435,12 @@ fn apl_scalar_functions_pervade_a_nested_argument() {
 }
 
 #[test]
-fn grading_boxes_is_named_as_missing() {
-    for (lang, src) in [(Lang::J, "/: 'b';'a'"), (Lang::J, "\\: 1;2"), (Lang::Apl, "⍋(1 2)(3 4)")] {
-        let e = err(lang, src);
-        assert_eq!(e.kind, ErrorKind::NotYet, "{src}");
-        assert!(e.msg.contains("grading boxed arrays"), "{src}: {}", e.msg);
-    }
+fn boxes_grade_by_the_ordering_of_the_language_being_graded_in() {
+    // J orders by type class first, APL2 by rank first; the batteries are
+    // in tests/wave8.rs and the two corpora.
+    assert_eq!(val(Lang::J, "/: 'b';'a'"), val(Lang::J, "1 0"));
+    assert_eq!(val(Lang::J, "\\: 1;2"), val(Lang::J, "1 0"));
+    assert_eq!(val(Lang::Apl, "⍋(1 2)(3 4)"), val(Lang::Apl, "1 2"));
     // Sorting boxed items BY a key that is not boxed works.
     assert_eq!(val(Lang::J, "('ab';'c';'d') /: 3 1 2"), val(Lang::J, "'c';'d';'ab'"));
 }

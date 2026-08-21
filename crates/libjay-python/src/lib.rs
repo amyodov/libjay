@@ -555,9 +555,12 @@ fn dialect_of(
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
+    nested_grade: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Dialect> {
-    use jay::frontend::{ComplexOrder, DefaultArg, DfnResult, FirstDisclose, IndexForm, NestedModel};
+    use jay::frontend::{
+        ComplexOrder, DefaultArg, DfnResult, FirstDisclose, IndexForm, NestedGrade, NestedModel,
+    };
     let d = Dialect::default();
     Ok(Dialect {
         index_origin,
@@ -610,6 +613,12 @@ fn dialect_of(
             ],
         )?
         .unwrap_or(d.complex_order),
+        nested_grade: setting(
+            nested_grade,
+            "nested_grade",
+            &[("apl2", NestedGrade::Apl2), ("total-order", NestedGrade::TotalOrder)],
+        )?
+        .unwrap_or(d.nested_grade),
         trains: trains.unwrap_or(d.trains),
     })
 }
@@ -626,6 +635,7 @@ fn dialect_of(
     dfn_result=None,
     default_arg=None,
     complex_order=None,
+    nested_grade=None,
     trains=None,
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -640,6 +650,7 @@ fn compile(
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
+    nested_grade: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
@@ -652,6 +663,7 @@ fn compile(
         dfn_result,
         default_arg,
         complex_order,
+        nested_grade,
         trains,
     )?;
     let program = jay::compile(lang, source, &dialect).map_err(|e| jay_err(source, &e))?;
@@ -681,6 +693,7 @@ fn devices() -> Vec<(String, String, String, bool)> {
     dfn_result=None,
     default_arg=None,
     complex_order=None,
+    nested_grade=None,
     trains=None,
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -696,6 +709,7 @@ fn compile_parts(
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
+    nested_grade: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
@@ -708,6 +722,7 @@ fn compile_parts(
         dfn_result,
         default_arg,
         complex_order,
+        nested_grade,
         trains,
     )?;
     let part_refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();

@@ -113,10 +113,10 @@
 ? one space between items here, two there
 < 9
 > gnu: 10
-= ⍋(1 2)(3 4)
-? graded there, a `grading boxed arrays` gap here
-< <error>
-> gnu: 1 2
+= ⍋2 (1+1E¯14) 1
+? tolerant there, exact here
+< 3 2 1
+> gnu: 2 3 1
 = F←{⍺←10 ⋄ ⍺+⍵} ⋄ 3 F 5
 ? ⍺← is a default here, an unconditional assignment there
 < 8

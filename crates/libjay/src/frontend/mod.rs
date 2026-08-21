@@ -96,6 +96,21 @@ pub enum ComplexOrder {
     MagnitudeThenAngle,
 }
 
+/// How a grade orders NESTED items.
+///
+/// The APL2 line, which GNU APL implements and the oracle verifies, orders
+/// two items by rank, then by shape, then atom by atom with characters
+/// before numbers before nested values. Dyalog's total array ordering is a
+/// different comparator throughout: it compares the atoms first, padding
+/// the shorter array with an item below every type, extends a lower rank
+/// with leading 1s, and orders numbers before characters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NestedGrade {
+    #[default]
+    Apl2,
+    TotalOrder,
+}
+
 /// Dialect settings supplied by the host.
 ///
 /// This is what a host asks for; [`Rules`] is what the compiler and the
@@ -121,6 +136,7 @@ pub struct Dialect {
     pub dfn_result: DfnResult,
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
+    pub nested_grade: NestedGrade,
     /// Whether a function may stand where a value belongs: a run of
     /// functions is then a train, and `F←+/` names one. Both readings are
     /// implemented, so this is a choice and not a gap. It ships on, as an
@@ -151,6 +167,7 @@ impl Dialect {
             dfn_result: DfnResult::LastSentence,
             default_arg: DefaultArg::Eager,
             complex_order: ComplexOrder::RealThenImaginary,
+            nested_grade: NestedGrade::Apl2,
             trains: true,
         }
     }
@@ -214,6 +231,12 @@ impl Dialect {
                 return Err(refuse("grading complex values by magnitude and angle"))
             }
         }
+        match self.nested_grade {
+            NestedGrade::Apl2 => {}
+            NestedGrade::TotalOrder => {
+                return Err(refuse("a total array ordering for a nested grade"))
+            }
+        }
         let origin = match lang {
             Lang::J => 0,
             Lang::Apl => self.index_origin.unwrap_or(1),
@@ -232,6 +255,7 @@ impl Dialect {
             dfn_result: self.dfn_result,
             default_arg: self.default_arg,
             complex_order: self.complex_order,
+            nested_grade: self.nested_grade,
             trains: self.trains,
         })
     }
@@ -256,6 +280,7 @@ pub struct Rules {
     pub dfn_result: DfnResult,
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
+    pub nested_grade: NestedGrade,
     pub trains: bool,
 }
 
@@ -277,6 +302,7 @@ impl Rules {
             dfn_result: self.dfn_result,
             default_arg: self.default_arg,
             complex_order: self.complex_order,
+            nested_grade: self.nested_grade,
             trains: self.trains,
         }
     }

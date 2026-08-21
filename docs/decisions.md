@@ -1343,3 +1343,59 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
     read on both axes that is not a scalar, and everything the kernel
     declined before. Each falls back to the chain it came from, which is
     the rule the fusion pass has always had.
+
+- 2026-08-21 — **Ordering whole arrays: two orderings, derived from the two
+  oracles, and a third named as a gap.** Grading a boxed argument was the
+  last named gap either grade had, and the wave-5 note that described it
+  ("type, then element count, then rank, then contents") was wrong in two
+  places; what follows is what jconsole and GNU APL actually answer, probed
+  pair by pair before a line of it was written.
+  - **J's total array ordering** compares, in this order: the TYPE CLASS —
+    numeric, then symbol (which libjay has not), then character, then boxed
+    (`/: 1;'a';(1 2);(<<3)` is `0 2 1 3`, so a two-atom numeric list still
+    precedes a character atom); the RANK, ascending, which beats the atom
+    count (`/: (1 1$1);(1 2)` is `1 0`); the SHAPE, read with the LAST axis
+    most significant (`/: (2 3$0);(3 2$0)` is `1 0`, and `/: (1 4$0);(2
+    3$0)` is `1 0` although four atoms is fewer than six — so it is not a
+    count at all); then the ATOMS in row-major order, a boxed atom by the
+    same rules one level down. Element count is not a step, and rank comes
+    before shape, not after: both corrections to the old note.
+  - **An empty array has no atoms to take a class from**, and J treats it
+    as the lowest class whatever its type: `/: (<''),(<<1)` puts the empty
+    character list first, `/: (<0$'a'),(<i.0)` ties two empties of
+    different types, and `/: (i.0);1` still puts the numeric SCALAR first
+    because rank 0 precedes rank 1. Read as "an empty array is numeric",
+    the rule is a total order; every other reading of those three answers
+    is a cycle.
+  - **GNU APL does not refuse a nested grade** — the premise this work
+    started from. `⍋(1 2)(3 4)` is `1 2` there, and the APL2 comparator is
+    a different one from J's at every step: the RANK first (a nested scalar
+    precedes a simple vector), then the SHAPE read from the FIRST axis,
+    then the ATOMS with a character before a number before a nested value —
+    the opposite of J's class order — and two arrays with no atoms are
+    separated by their types, which J ties. The oracle wins, so libjay
+    implements that, and the entry pinning `⍋(1 2)(3 4)` as a divergence is
+    gone.
+  - **Dyalog's total array ordering is a third comparator**, and it stays a
+    named gap: `Dialect.nested_grade` has an `Apl2` arm (the default, what
+    GNU APL answers) and a `TotalOrder` arm that `Dialect::rules` refuses
+    by name, as every other lineage setting does. The published rule
+    compares the atoms first, pads the shorter array with an item below
+    every type, extends a lower rank with leading 1s and puts numbers
+    before characters — and it does not say where an enclosed item sorts
+    against a simple one, which is the one thing a NESTED grade must know.
+    Guessing it under a dialect name nobody can verify would ship a wrong
+    answer wearing Dyalog's label; the refusal is honest, and a recorded
+    Dyalog would lift it in an afternoon.
+  - **Both comparators are exact**, and that is a deliberate divergence on
+    the APL side: GNU APL's grade reads `⎕CT`, so `⍋2 (1+1E¯14) 1` ties the
+    near pair there and separates it here (now pinned in
+    divergences.txt). Tolerant equality is not transitive, a sort whose
+    comparator is not a total order may refuse to run, and J — which is
+    exact — agrees with libjay. A NaN still ties with everything, as it did
+    before.
+  - One comparator function serves both languages and every caller of a
+    grade (`/:` `\:` monadic and dyadic, `⍋` `⍒`, the sort idioms, `A.`),
+    so there is one place where the ordering is written down. The verbs
+    that compare boxes by MATCH — `~.`, `e.`, `i.` — were left alone: they
+    are tolerant, as both references have them, and match is not order.

@@ -64,6 +64,11 @@ class APL:
         """How a grade orders complex values: "real-then-imaginary" or
         "magnitude-then-angle"."""
 
+        nested_grade: str = "apl2"
+        """How a grade orders nested items: "apl2" (rank, then shape, then
+        the atoms, characters before numbers before nested values) or
+        "total-order" (Dyalog's total array ordering)."""
+
         trains: bool = True
         """Whether a function may stand where a value belongs: a run of
         functions is then a train, and ``F←+/`` names one. Ships on, as an

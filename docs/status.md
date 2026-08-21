@@ -18,10 +18,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 146 green / 22 partial / 7 red / 2 absent by design, of 177 valences
+**J: 148 green / 20 partial / 7 red / 2 absent by design, of 177 valences
 in the inventory.**
 
-**APL: 87 green / 24 partial / 4 red of 115 valences in the inventory.**
+**APL: 89 green / 22 partial / 4 red of 115 valences in the inventory.**
 
 ## J — verbs
 
@@ -102,8 +102,8 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `I.` | 🟢 indices | 🟢 interval index |
 | `e.` | 🟢 raze in | 🟢 member of |
 | `E.` | — | 🟢 member of interval |
-| `/:` | 🟡 grade up; boxes need total ordering | 🟢 sort |
-| `\:` | 🟡 grade down; boxes need total ordering | 🟢 sort |
+| `/:` | 🟢 grade up; boxes by the total array ordering | 🟢 sort |
+| `\:` | 🟢 grade down; boxes by the total array ordering | 🟢 sort |
 | `A.` | 🟢 anagram index | 🟢 anagram |
 | `C.` | 🟢 cycle-direct | 🟡 permute; a direct or cyclic permutation, not an atom |
 
@@ -297,8 +297,8 @@ conjunctions above:
 | `⍷` | — | 🟢 find |
 | `∪` | 🟢 unique | 🟢 union |
 | `∩` | — | 🟢 intersection |
-| `⍋` | 🟡 grade up; nested needs total ordering | 🟢 collating grade |
-| `⍒` | 🟡 grade down; nested needs total ordering | 🟢 collating grade |
+| `⍋` | 🟢 grade up; nested by the APL2 rule (`nested_grade`) | 🟢 collating grade |
+| `⍒` | 🟢 grade down; nested by the APL2 rule (`nested_grade`) | 🟢 collating grade |
 
 ### Format, I/O, identity
 

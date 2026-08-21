@@ -53,6 +53,15 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   axis, where the movement row is written out.
 - APL's `⍢` (under) and `⌺` (stencil), and the collating grades `x⍋y` and
   `x⍒y`.
+- Grading BOXED (nested) arrays, in both languages, which had been the
+  last thing a grade refused. J's `/:` and `\:` order whole arrays by J's
+  total array ordering — the type class, then the rank, then the shape read
+  with the last axis first, then the atoms, recursing through boxes — and
+  APL's `⍋` and `⍒` order them by the APL2 rule GNU APL answers with, which
+  is a different comparator at every step. The dyads (`x /: y`, sorting by
+  a nested key) and the sort idioms follow from the same ordering. The new
+  `nested_grade` dialect setting names Dyalog's total array ordering as the
+  other reading, and refuses it rather than answering with this one.
 
 ### Changed
 

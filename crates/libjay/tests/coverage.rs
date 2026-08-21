@@ -688,9 +688,6 @@ fn newly_spelled_words_name_what_they_still_lack() {
         (Lang::J, "2 \": 1.5", "format with a specification"),
         (Lang::J, "+ &. (+/ % #) 1 2", "obverse"),
         (Lang::Apl, "1∘×2", "∘ with a value operand"),
-        // Boxes arrived; what they still lack is named too.
-        (Lang::J, "/: 1;2", "grading boxed arrays"),
-        (Lang::Apl, "⍋⊂1 2", "grading boxed arrays"),
     ];
     for (lang, src, what) in cases {
         let e = err(lang, src);

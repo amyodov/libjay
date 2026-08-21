@@ -92,8 +92,8 @@ feature — that is a promise, not a refusal.
 | `?` | roll: a random value below each element (`? 0` is a uniform double) | deal: x distinct values from `i. y` |
 | `?.` | roll from a fixed seed, restarted on every invocation | deal from that fixed seed |
 | `{::` | the map: y's box structure with every leaf replaced by the path that fetches it — a boxed list of one index per level descended, empty where the level is a boxed scalar | fetch: follow the path x into y, opening one level a step |
-| `/:` | grade up (stable permutation) | x's items in the ascending order of y's |
-| `\:` | grade down (stable permutation) | x's items in the descending order of y's |
+| `/:` | grade up (stable permutation). A BOXED argument orders by J's total array ordering: the type class (numeric, then character, then boxed — and an empty array takes the lowest class whatever its type), then the rank, then the shape read with the LAST axis most significant, then the atoms in row-major order, a boxed atom recursively | x's items in the ascending order of y's |
+| `\:` | grade down (stable permutation), the same ordering read backwards | x's items in the descending order of y's |
 | `]` `[` | same | right / left |
 | `echo` | print (formatted) | — |
 
@@ -429,7 +429,7 @@ that second column looks like once one row is filled in.
 | `⍎` | execute: the characters are compiled as an APL program and run HERE, over the names the sentence itself can see | — |
 | `⎕UCS` | codepoints become characters, characters become their codepoints | — |
 | `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill |
-| `⍋` `⍒` | grade up / down (stable; respects `⎕IO`) | collating grade: every character of y is keyed by where it FIRST occurs in the collating array x — the coordinate read with the last axis most significant, and one past the end for a character x does not hold — and the items of y are ordered by those keys read left to right |
+| `⍋` `⍒` | grade up / down (stable; respects `⎕IO`). A NESTED argument orders by the APL2 rule: the rank, then the shape read from the FIRST axis, then the atoms in row-major order — a character before a number before a nested value, a nested one recursively — and two arrays with no atoms are separated by their types instead. It is a different comparator from J's at every step; `Dialect.nested_grade` names Dyalog's total array ordering as the other reading | collating grade: every character of y is keyed by where it FIRST occurs in the collating array x — the coordinate read with the last axis most significant, and one past the end for a character x does not hold — and the items of y are ordered by those keys read left to right |
 | `⊢` `⊣` | same | right / left |
 | `○` | pi times y | circle function k (see below) |
 | `/` `⌿` | — | replicate, after an operand: `/` counts the LAST axis, `⌿` the leading one |
@@ -843,7 +843,11 @@ The tolerance reaches `=` `~:` `<` `<:` `>` `>:` `-:` `e.` `i.` `i:` `~.`
 `I.` in J, the same family plus `≡` `∊` `⍳` `∪` `⍸` in APL, and the two
 roundings `<.`/`⌊` and `>.`/`⌈`, which snap to a neighbouring integer when
 they are tolerantly equal to it. It does NOT reach grade (`/:`, `\:`, `⍋`,
-`⍒`), which both references leave exact.
+`⍒`), which libjay leaves exact in both languages: J does the same, and GNU
+APL does not — `⍋2 (1+1E¯14) 1` ties the two near values there and separates
+them here, a divergence pinned in divergences.txt. A tolerant comparison is
+not transitive, and a sort whose comparator is not a total order is a sort
+that may refuse to run.
 
 J's `!.` sets it per verb: `=!.0` compares bit for bit, and any tolerance
 above 2⁻³⁴ is refused, as J refuses it. `⎕CT` as a runtime variable is not
@@ -1296,13 +1300,15 @@ sections above is also collected here.
 - A bonded noun (`n&v`, `u&n`) has to be a literal, as a noun fork's left
   tine does; a computed one says "bonds over a non-literal noun is not
   supported yet".
-- Ordering boxes needs J's total array ordering — which sorts by type,
-  then by element count, then by rank, then by contents — so `/:`, `\:`,
-  `⍋` and `⍒` name it as a gap when the array being graded is boxed.
-  Sorting boxed items BY an unboxed key works. A COMPLEX array grades by
-  (real, imaginary), which is what J's `/:` answers; the ordering verbs
-  still refuse complex operands, because a permutation is not a claim about
-  size.
+- A COMPLEX array grades by (real, imaginary), which is what J's `/:`
+  answers and GNU APL refuses; the ordering verbs still refuse complex
+  operands, because a permutation is not a claim about size. Ordering
+  BOXED items is implemented in both languages now — see the `/:` and `⍋`
+  rows above — with one reading left named: `Dialect.nested_grade` asks for
+  Dyalog's total array ordering, which is refused, because the published
+  rule differs from the APL2 one at every step and does not say where an
+  enclosed item sorts against a simple one, and no Dyalog is installed here
+  to settle it.
 - An explicit modifier whose body derives the modifier itself is refused:
   libjay derives at parse time, so the body would be parsed for ever.
   Recursion inside the derived verb's own body, by `$:` or by a verb's name,

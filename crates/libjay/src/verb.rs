@@ -4309,10 +4309,164 @@ fn nub(y: &Array, tol: Tol) -> Array {
     Array::new(shape, data)
 }
 
+/// Which ordering a grade puts whole arrays in when its items are boxed —
+/// J's total array ordering, or the APL2 rule GNU APL implements. The two
+/// disagree at every step, so a comparison says which one it is answering
+/// for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tao {
+    J,
+    Apl2,
+}
+
+impl Tao {
+    fn of(rules: Rules) -> Tao {
+        match rules.lang {
+            crate::Lang::J => Tao::J,
+            // The other reading of a nested grade, Dyalog's total array
+            // ordering, is refused when the dialect is resolved.
+            crate::Lang::Apl => Tao::Apl2,
+        }
+    }
+
+    /// The type class compared before the atoms: J puts numeric first,
+    /// then symbol (which libjay has not), then character, then boxed;
+    /// APL2 puts character first, then numeric, then nested.
+    fn class(self, dt: DType) -> u8 {
+        match self {
+            Tao::J => match dt {
+                DType::Char => 2,
+                DType::Box => 3,
+                _ => 0,
+            },
+            Tao::Apl2 => match dt {
+                DType::Char => 0,
+                DType::Box => 2,
+                _ => 1,
+            },
+        }
+    }
+}
+
+/// Order two whole arrays, which is how a grade compares boxed items.
+///
+/// J compares the type class first — and an EMPTY array has no atoms to
+/// take a class from, so it takes the lowest one whatever its type, which
+/// is why `/: (<''),(<<1)` puts the empty character list first and two
+/// empties of different types tie. Then the rank, then the shape read with
+/// the LAST axis most significant, then the atoms in row-major order.
+///
+/// APL2 compares the rank first, then the shape read from the FIRST axis,
+/// then the atoms, where a character precedes a number precedes a nested
+/// value; two arrays with no atoms are separated by their types instead.
+///
+/// Both are exact — a grade never reads the comparison tolerance — and a
+/// NaN ties with everything, which keeps the sort total.
+fn cmp_items_total(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
+    use std::cmp::Ordering::Equal;
+    match tao {
+        Tao::J => {
+            let class = |a: &Array| if a.count() == 0 { 0 } else { tao.class(a.dtype()) };
+            class(x)
+                .cmp(&class(y))
+                .then_with(|| x.rank().cmp(&y.rank()))
+                .then_with(|| x.shape.iter().rev().cmp(y.shape.iter().rev()))
+                .then_with(|| cmp_atoms(x, y, tao))
+        }
+        Tao::Apl2 => x
+            .rank()
+            .cmp(&y.rank())
+            .then_with(|| x.shape.iter().cmp(y.shape.iter()))
+            .then_with(|| cmp_atoms(x, y, tao))
+            .then_with(|| {
+                if x.count() == 0 {
+                    tao.class(x.dtype()).cmp(&tao.class(y.dtype()))
+                } else {
+                    Equal
+                }
+            }),
+    }
+}
+
+/// The atoms of two arrays of the same shape, in row-major order. A boxed
+/// atom is compared by its contents, which is where the ordering recurses.
+fn cmp_atoms(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
+    use std::cmp::Ordering::Equal;
+    let n = x.count();
+    if n == 0 {
+        return Equal;
+    }
+    let (xr, yr) = (x.to_row_major(), y.to_row_major());
+    let (dx, dy) = (xr.row_major_data(), yr.row_major_data());
+    let opened = |d: &Data, i: usize| -> Array {
+        match d {
+            Data::Box(v) => v[i].clone(),
+            _ => {
+                let mut one = Data::empty(d.dtype());
+                push_elem(&mut one, d, i);
+                Array::new(vec![], one)
+            }
+        }
+    };
+    if matches!(dx, Data::Box(_)) || matches!(dy, Data::Box(_)) {
+        return (0..n)
+            .map(|i| cmp_items_total(&opened(dx, i), &opened(dy, i), tao))
+            .find(|o| *o != Equal)
+            .unwrap_or(Equal);
+    }
+    // Neither side is boxed, so one class covers all of each side's atoms.
+    let classes = tao.class(dx.dtype()).cmp(&tao.class(dy.dtype()));
+    if classes != Equal {
+        return classes;
+    }
+    match (dx, dy) {
+        (Data::Char(a), Data::Char(b)) => a[..n].cmp(&b[..n]),
+        _ => cmp_numbers(dx, dy, n),
+    }
+}
+
+/// Two numeric buffers, `n` elements each, compared in order. The widening
+/// is the one `arrays_match` uses, so `1r2` and `0.5` compare where they
+/// belong however each is spelled.
+fn cmp_numbers(dx: &Data, dy: &Data, n: usize) -> std::cmp::Ordering {
+    use std::cmp::Ordering::Equal;
+    let seek = |f: &dyn Fn(usize) -> std::cmp::Ordering| {
+        (0..n).map(f).find(|o| *o != Equal).unwrap_or(Equal)
+    };
+    match DType::promote(dx.dtype(), dy.dtype()) {
+        Some(DType::Complex) => {
+            let (mut ta, mut tb) = (Vec::new(), Vec::new());
+            let (a, b) = (borrow_cx(dx, &mut ta), borrow_cx(dy, &mut tb));
+            seek(&|k| {
+                a[k][0]
+                    .partial_cmp(&b[k][0])
+                    .unwrap_or(Equal)
+                    .then_with(|| a[k][1].partial_cmp(&b[k][1]).unwrap_or(Equal))
+            })
+        }
+        Some(DType::F64) => {
+            let (mut ta, mut tb) = (Vec::new(), Vec::new());
+            let (a, b) = (borrow_f64(dx, &mut ta), borrow_f64(dy, &mut tb));
+            seek(&|k| a[k].partial_cmp(&b[k]).unwrap_or(Equal))
+        }
+        Some(t) if t.is_exact() => match (to_rat_vec(dx), to_rat_vec(dy)) {
+            (Some(a), Some(b)) => seek(&|k| a[k].cmp(&b[k])),
+            _ => Equal,
+        },
+        // Characters and boxes never reach here: the classes agreed.
+        None => Equal,
+        Some(_) => {
+            let (mut ta, mut tb) = (Vec::new(), Vec::new());
+            let (a, b) = (borrow_i64(dx, &mut ta), borrow_i64(dy, &mut tb));
+            seek(&|k| a[k].cmp(&b[k]))
+        }
+    }
+}
+
 /// Compare items `i` and `j` (of `m` elements each) elementwise, left to
 /// right. Characters order by codepoint; a NaN compares equal to anything,
 /// which keeps the sort total.
-fn cmp_items(d: &Data, i: usize, j: usize, m: usize) -> std::cmp::Ordering {
+fn cmp_items(d: &Data, i: usize, j: usize, m: usize, tao: Tao) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
     let (a, b) = (i * m, j * m);
     let ord = |k: usize| match d {
@@ -4334,14 +4488,15 @@ fn cmp_items(d: &Data, i: usize, j: usize, m: usize) -> std::cmp::Ordering {
         // grades exactly where `1r2` does.
         Data::Ext(v) => v[a + k].cmp(&v[b + k]),
         Data::Rat(v) => v[a + k].cmp(&v[b + k]),
-        // Grading a boxed array is refused before it gets here.
-        Data::Box(_) => Equal,
+        // A boxed element is a whole array: the ordering of the language
+        // being graded in decides between two of them.
+        Data::Box(v) => cmp_items_total(&v[a + k], &v[b + k], tao),
     };
     (0..m).map(ord).find(|o| *o != Equal).unwrap_or(Equal)
 }
 
 /// The stable permutation that sorts the items of `y`.
-fn grade_order(y: &Array, down: bool) -> Vec<usize> {
+fn grade_order(y: &Array, down: bool, tao: Tao) -> Vec<usize> {
     if y.rank() == 0 {
         return vec![0];
     }
@@ -4351,9 +4506,9 @@ fn grade_order(y: &Array, down: bool) -> Vec<usize> {
     // A stable sort leaves equal items in their original order, which is
     // what both languages promise, ascending and descending alike.
     if down {
-        idx.sort_by(|&a, &b| cmp_items(&y.data, b, a, m));
+        idx.sort_by(|&a, &b| cmp_items(&y.data, b, a, m, tao));
     } else {
-        idx.sort_by(|&a, &b| cmp_items(&y.data, a, b, m));
+        idx.sort_by(|&a, &b| cmp_items(&y.data, a, b, m, tao));
     }
     idx
 }
@@ -4508,15 +4663,10 @@ fn select_items(y: &Array, order: &[usize]) -> Array {
 
 /// What a grade refuses, and the dialect setting it reads.
 ///
-/// Ordering boxes needs J's total array ordering, which libjay does not
-/// implement yet; sorting boxed items BY something else works.
-fn check_gradable(y: &Array, order: ComplexOrder, span: Span) -> Result<()> {
-    if y.dtype() == DType::Box {
-        return Err(Error::not_yet("grading boxed arrays (the total array ordering)", span));
-    }
-    // A grade still has to be total over complex values, and the dialect
-    // says in which order; only one of the two readings is implemented.
-    if y.dtype() == DType::Complex && order != ComplexOrder::RealThenImaginary {
+/// A grade has to be total over complex values, and the dialect says in
+/// which order; only one of the two readings is implemented.
+fn check_gradable(y: &Array, rules: Rules, span: Span) -> Result<()> {
+    if y.dtype() == DType::Complex && rules.complex_order != ComplexOrder::RealThenImaginary {
         return Err(Error::not_yet("grading complex values by magnitude and angle", span));
     }
     Ok(())
@@ -4525,15 +4675,9 @@ fn check_gradable(y: &Array, order: ComplexOrder, span: Span) -> Result<()> {
 /// `x /: y` is `(/: y) { x`: the grade of y is an index into x, so the two
 /// lengths need not agree — a shorter key selects fewer items, and only an
 /// index past the end of x is an error.
-fn grade_select(
-    x: &Array,
-    y: &Array,
-    down: bool,
-    order: ComplexOrder,
-    span: Span,
-) -> Result<Array> {
-    check_gradable(y, order, span)?;
-    let order = grade_order(y, down);
+fn grade_select(x: &Array, y: &Array, down: bool, rules: Rules, span: Span) -> Result<Array> {
+    check_gradable(y, rules, span)?;
+    let order = grade_order(y, down, Tao::of(rules));
     if x.rank() == 0 {
         return Ok(x.clone());
     }
@@ -5268,14 +5412,14 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         // recorded divergence from GNU APL's vectors-only monad.
         MonadOp::Nub => Ok(nub(y, ctx.cfg.tol)),
         MonadOp::GradeUp { origin } | MonadOp::GradeDown { origin } => {
-            check_gradable(y, ctx.cfg.rules.complex_order, span)?;
+            check_gradable(y, ctx.cfg.rules, span)?;
             // APL grades the ITEMS of an array, so a scalar has none to
             // grade; J answers with the one-item permutation.
             if ctx.cfg.rules.lang == crate::Lang::Apl && y.rank() == 0 {
                 return Err(Error::domain("a grade needs an array, not a scalar", span));
             }
             let down = matches!(p.monad, MonadOp::GradeDown { .. });
-            let order = grade_order(y, down);
+            let order = grade_order(y, down, Tao::of(ctx.cfg.rules));
             Ok(Array::from_i64(order.iter().map(|&i| origin + i as i64).collect()))
         }
         MonadOp::IotaJ => iota_j(y, span),
@@ -5342,7 +5486,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Nest => Ok(nest(y)),
         MonadOp::PolyRoots => poly_roots(y, span),
         MonadOp::PolyDeriv => poly_deriv(y, span),
-        MonadOp::AnagramIndex => anagram_index(y, ctx.cfg.rules.complex_order, span),
+        MonadOp::AnagramIndex => anagram_index(y, ctx.cfg.rules, span),
         MonadOp::CycleForm => cycle_form(y, span),
         MonadOp::Split => Ok(split_items(y)),
         MonadOp::Execute { apl } => execute(y, apl, ctx, span),
@@ -5625,7 +5769,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
             Ok(Array::scalar_bool(!empties_differ && arrays_match(x, y, tol)))
         }
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
-        DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules.complex_order, span),
+        DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules, span),
         DyadOp::Copy => copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
         DyadOp::CollateGrade { down, origin } => collate_grade(x, y, down, origin, span),
         DyadOp::TransposeJ => transpose_j(x, y, span),
@@ -10135,12 +10279,12 @@ fn bool_dyad(op: BoolDyad, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
 /// The ranks of y's items: the position each would take in a stable sort.
 /// This is the permutation `A.` reports the index of, which is why a list
 /// that is not itself a permutation still has an anagram index.
-fn item_ranks(y: &Array, order: ComplexOrder, span: Span) -> Result<Vec<usize>> {
-    check_gradable(y, order, span)?;
+fn item_ranks(y: &Array, rules: Rules, span: Span) -> Result<Vec<usize>> {
+    check_gradable(y, rules, span)?;
     if !y.dtype().is_numeric() {
         return Err(Error::domain("an anagram index needs numbers", span));
     }
-    let order = grade_order(&as_list(y), false);
+    let order = grade_order(&as_list(y), false, Tao::of(rules));
     let mut ranks = vec![0usize; order.len()];
     for (place, &i) in order.iter().enumerate() {
         ranks[i] = place;
@@ -10150,8 +10294,8 @@ fn item_ranks(y: &Array, order: ComplexOrder, span: Span) -> Result<Vec<usize>> 
 
 /// `A. y`: where the permutation y's items rank as stands in the
 /// lexicographic list of the permutations of that length.
-fn anagram_index(y: &Array, order: ComplexOrder, span: Span) -> Result<Array> {
-    let ranks = item_ranks(y, order, span)?;
+fn anagram_index(y: &Array, rules: Rules, span: Span) -> Result<Array> {
+    let ranks = item_ranks(y, rules, span)?;
     let n = ranks.len();
     let mut index: i128 = 0;
     for i in 0..n {

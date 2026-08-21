@@ -200,7 +200,6 @@ const J_PROMISES: &[Case] = &[
     j("m =. /\nm", ErrorKind::NotYet, "m", &["displaying a modifier"]),
     j("s: 'a'", ErrorKind::NotYet, "s: 'a'", &["symbols"]),
     j("'a' ;: 'b'", ErrorKind::NotYet, "'a' ;: 'b'", &["sequential machine"]),
-    j("/: < 1 2", ErrorKind::NotYet, "/: < 1 2", &["grading boxed"]),
     j("(+/ % #) ^: _1 [ 1 2 3", ErrorKind::NotYet, "(+/ % #) ^: _1", &["obverse"]),
 ];
 
@@ -392,7 +391,6 @@ const APL_PROMISES: &[Case] = &[
     apl("3+F←+/", ErrorKind::NotYet, "F←+/", &["naming a function inside"]),
     apl("(A+×)4", ErrorKind::NotYet, "A", &["computed value"]),
     apl("⍕[1]⍳3", ErrorKind::NotYet, "[1]", &["axis specification for ⍕"]),
-    apl("⍋⊂1 2", ErrorKind::NotYet, "⍋⊂1 2", &["grading boxed"]),
     apl("2 3⍕⊂1 2", ErrorKind::NotYet, "2 3⍕⊂1 2", &["nested"]),
 ];
 
