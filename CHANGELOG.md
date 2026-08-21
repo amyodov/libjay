@@ -43,6 +43,35 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   argument one block at a time. Results are unchanged to the last bit; at
   20M elements `{c} + {f}` runs 2.5x faster, `{i} + {f}` 2.2x and
   `+/ {i} * {f}` 5.5x. See bench/README.md, "Mixed-type passes".
+- Four verbs that were correct but far slower than the work they describe
+  are now the algorithm they describe, with the same answers. Between them
+  they close the three losses bench/workloads.md diagnosed:
+  - **The suffix scan `u/\.` is one pass.** Folding right to left is the
+    insert's own order, so each suffix is one step past the suffix after
+    it — for any verb, not just an arithmetic one. It used to fold every
+    suffix from scratch. This is what J's spelling of an exponential
+    smoothing rests on (`|. u/\. |. y`), and RSI(14) over 20 million bars
+    went from n²/2 steps of a general dyad — about nine years — to 2.3
+    seconds. Floats come out bit for bit what the old path gave.
+  - **A first-order recurrence is recognised and run as one.** A scan whose
+    step is the fork `[ + c * ]` (or its mirror `(c * ]) + [`) with a
+    constant `c` becomes `acc = y + c*acc` over the buffer instead of an
+    interpreted step per item — about ten nanoseconds an element rather
+    than a microsecond.
+    The rule matches that tree and nothing else; anything it declines takes
+    the general path, which is itself linear backwards now.
+  - **The key `u/.` hashes its keys.** It used to find each group by
+    sweeping the whole key vector, which is rows × groups: a VWAP over 20
+    million minute bars grouped by 13,889 days took hours and now takes 1.4
+    seconds. Groups still come out in first-occurrence order, and keys
+    compared under a tolerance — floats, complex numbers — still are. APL's
+    `f⌸` gets the same fix.
+  - **A reshape that keeps the elements shares the buffer.** `2 3 $ i. 6`
+    and any other `$` whose result the argument's own elements already
+    cover is now a refcount bump rather than an element-by-element copy of
+    the ravel; a shape that cycles the ravel still copies. The frame-RMS
+    workload's reshape of 16 million samples went from 457 ms to nothing
+    measurable, and the whole workload from 535 ms to 49 on one thread.
 - Two APL spellings moved from "not supported yet" to "absent by design",
   because neither is work that can be queued: `⌶` (I-beam) is defined by
   each interpreter for itself and has no published behaviour to follow,

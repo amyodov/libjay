@@ -29,7 +29,7 @@ rustc     1.89 (rust-toolchain.toml)
 python    3.12.9, numpy 2.2.6, polars 1.43.2, numba 0.61.2
 sizes     OHLCV 20,000,000 minute bars, audio 16,000,000 samples
 method    best of 5 after one warmup, 2 alternating passes, wall time in ms
-date      2026-08-21, one-minute load average 4.1
+date      2026-08-22, one-minute load average 3.2
 peak RSS  2.51 GB
 ```
 
@@ -56,23 +56,23 @@ numba and its eight-thread column against Polars.
 
 | workload | libjay 1 thread | libjay 8 threads | speedup | polars | numba | numpy |
 |---|---:|---:|---:|---:|---:|---:|
-| cumulative return | 650.8 | 378.0 | 1.72x | 899.0 | 440.0 | 711.8 |
-| golden cross (20/50/200) | 1729.4 | 690.9 | 2.50x | 556.9 | 96.5 | 1150.2 |
-| Bollinger bands (20, 2σ) | 593.8 | 206.5 | 2.88x | 747.4 | 77.8 | 1407.9 |
-| RSI(14), Wilder smoothing | *quadratic: see Where libjay loses* | — | — | 1691.5 | 144.0 | n/a |
-| VWAP per day | *rows x groups: see Where libjay loses* | — | — | 510.6 | 69.5 | 320.2 |
-| maximum drawdown | 169.9 | 159.6 | 1.07x | 405.5 | 30.9 | 375.9 |
-| volatility regime | 541.1 | 190.6 | 2.84x | 907.4 | 184.4 | 1390.7 |
-| low-pass and peak count | 1087.2 | 427.2 | 2.55x | 1183.0 | 33.5 | 167.2 |
-| frame RMS in dB | 535.0 | 478.6 | 1.12x | 86.2 | 20.8 | 42.9 |
-| single-bin detection | 345.9 | 156.8 | 2.21x | 172.0 | 55.7 | 183.7 |
-| naive DFT of one frame | 19.6 | 15.2 | 1.29x | n/a | 1.4 | 0.720 |
-| rolling cross-correlation | 115.6 | 43.3 | 2.67x | 357.0 | 47.6 | 153.0 |
+| cumulative return | 591.7 | 356.2 | 1.66x | 862.8 | 426.1 | 638.4 |
+| golden cross (20/50/200) | 1173.5 | 396.5 | 2.96x | 533.2 | 94.3 | 1109.9 |
+| Bollinger bands (20, 2σ) | 501.6 | 182.8 | 2.74x | 718.9 | 75.5 | 1352.6 |
+| RSI(14), Wilder smoothing | 2329.8 | 2237.0 | 1.04x | 1591.3 | 139.1 | n/a |
+| VWAP per day | 1438.0 | 1359.4 | 1.06x | 483.7 | 65.1 | 304.1 |
+| maximum drawdown | 156.9 | 148.1 | 1.06x | 389.5 | 29.9 | 368.7 |
+| volatility regime | 474.8 | 169.7 | 2.80x | 888.3 | 176.1 | 1329.6 |
+| low-pass and peak count | 992.4 | 392.3 | 2.53x | 1138.7 | 31.6 | 152.2 |
+| frame RMS in dB | 49.2 | 29.8 | 1.65x | 79.3 | 19.6 | 36.7 |
+| single-bin detection | 169.8 | 78.6 | 2.16x | 160.4 | 54.3 | 161.3 |
+| naive DFT of one frame | 19.2 | 12.5 | 1.53x | n/a | 1.4 | 0.568 |
+| rolling cross-correlation | 96.2 | 37.4 | 2.57x | 342.1 | 45.4 | 143.7 |
 
 ### What the table says
 
-**On eight threads libjay beats Polars on seven of the nine rows both can
-run, beats numpy on seven of ten, and beats numba on two.** That is the
+**On eight threads libjay beats Polars on nine of the eleven rows both can
+run, beats numpy on eight of eleven, and beats numba on two.** That is the
 honest summary, and all three halves have one cause. A libjay sentence
 becomes one or two passes over the column where a Polars pipeline is four or
 five, which is where the wins come from; a numba loop is *one* pass that
@@ -82,35 +82,35 @@ numba loop — the cumulative return and the rolling cross-correlation — are
 the two where the loop has real arithmetic per element and libjay has four
 cores to put on it.
 
-**On one thread libjay loses to numba on every row**, by two to thirteen
-times. That is the gap this file exists to name, and it is a gap in traffic,
-not in arithmetic: a fused kernel still reads and writes whole columns
-between the steps a hand-written loop keeps in registers.
+**On one thread libjay loses to numba on every row**, by one and a half to
+thirty times. That is the gap this file exists to name, and it is a gap in
+traffic, not in arithmetic: a fused kernel still reads and writes whole
+columns between the steps a hand-written loop keeps in registers.
 
-**Two workloads libjay cannot run at these sizes at all**, and one spelling
-of a third, each for a reason named and diagnosed under "Where libjay loses"
-below: Wilder's smoothing, because the general suffix scan `u/\.` is
-quadratic; VWAP, because the key `+//.` costs rows × groups; and the
-single-bin *recurrence* spelling, which is linear but interpreted a scalar
-at a time (the vectorised spelling of the same quantity is in the table and
-runs fine). The first and third are one missing rule — an affine fold step
-is a running fold, and a running fold is already a kernel instruction. The
-second is one algorithm — hash the distinct keys once.
+**The three rows that were diagnosed here last time now have numbers.** Two
+of them had none at all. RSI(14) was the suffix scan `u/\.` folding every
+suffix from scratch — n²/2 steps of a general dyad, which at 20M rows is not
+a duration — and is 2.3 seconds now that the scan carries an accumulator and
+the affine step `[ + c * ]` is run as the recurrence it is. VWAP was the key
+`+//.` costing rows × groups, or hours at 13,889 days, and is 1.4 seconds
+now that the keys are hashed once. Frame RMS was the worst row in the file
+at 535 ms, four fifths of it a reshape copying a buffer into its own shape,
+and is 30 ms — a row libjay now wins. Both of the first two still lose to
+the rivals that have a native answer, and the reasons are under each row.
+Every other row was re-measured in the same session on the same build: what
+moved there moved with the machine, not with the code.
 
-**Three more rows lose for reasons that are equally specific.** Frame RMS
-spends 457 of its 535 one-thread milliseconds in `$`, reshaping a vector
-into a matrix element by element when the element count already matches;
-hand libjay the matrix and the same fold is 19 ms against numpy's 43. The
-peak count folds its 32-tap filter four times, because the fusion pass moves
-a named value into every sentence that reads it and this one reads it at
-four alignments. The golden cross is the same shape at a smaller scale:
-three window folds where numba slides three accumulators through one pass,
-and it is the one row Polars wins outright.
+**Two rows lose for reasons that are equally specific.** The peak count
+folds its 32-tap filter four times, because the fusion pass moves a named
+value into every sentence that reads it and this one reads it at four
+alignments. The golden cross is the same shape at a smaller scale: three
+window folds where numba slides three accumulators through one pass, and it
+is the row where the widest gap to a hand-written loop survives threading.
 
 **Where libjay is at its best it is at its best by a lot.** The rolling
 cross-correlation — two shifted views of one buffer, multiplied, and a
-window fold over the product — is eight times Polars, three and a half times
-numpy and slightly faster than the numba loop, on a sentence of thirty-four
+window fold over the product — is nine times Polars, nearly four times numpy
+and slightly faster than the numba loop, on a sentence of thirty-four
 characters. Bollinger bands, the volatility regime and the cumulative return
 are the same shape and the same story: three to seven times numpy, and level
 with or ahead of the hand-written loop once the threads are in.
@@ -123,62 +123,29 @@ independent implementations.
 
 ## Where libjay loses
 
-Two workloads above have no libjay figure, and a third has a second
-spelling that would have none — this is why. Each is measured at the
-sizes it can be run at, beside the rival that has a linear answer: one
-call, not a best of five, because the shape of the curve is the whole
-point and a repeat would not change it.
-
-### Wilder smoothing — the suffix scan `u/\.`
-
-| bars | libjay, one call, 1 thread | numba | ratio |
-|---:|---:|---:|---:|
-| 1,000 | 724.7 | 0.004 | 179,791x |
-| 2,000 | 2967.0 | 0.007 | 421,029x |
-| 4,000 | 12184.3 | 0.012 | 1,054,277x |
-| 8,000 | 46530.3 | 0.025 | 1,834,501x |
-
-Each suffix is folded from scratch, so the work is n²/2 steps of a
-general dyad rather than n. Every doubling of the input quadruples the time,
-which the table shows: 46 seconds at 8,000 bars means about nine years at
-20 million. What would answer it is a rule that recognises an affine step
-— `[ + c * ]` — and hands `u/\.` to the running-fold machinery the fused
-kernel already runs `+/\` with.
+One spelling in the file has no row of its own, because the quantity
+it computes is already in the table under another spelling and this
+one is the slow way to write it. It is measured over four sizes,
+beside the rival that has a linear answer: one call, not a best of
+five, because the shape of the curve is the whole point and a repeat
+would not change it.
 
 ### Goertzel — the fold `([ + w * ])/`
 
 | samples | libjay, one call, 1 thread | numba | ratio |
 |---:|---:|---:|---:|
-| 16,384 | 12.4 | 0.054 | 229x |
-| 65,536 | 48.1 | 0.209 | 230x |
-| 262,144 | 195.2 | 0.831 | 235x |
-| 1,048,576 | 786.9 | 3.6 | 220x |
+| 16,384 | 10.9 | 0.053 | 207x |
+| 65,536 | 43.5 | 0.214 | 203x |
+| 262,144 | 180.6 | 0.831 | 217x |
+| 1,048,576 | 722.1 | 3.5 | 205x |
 
 This one is linear — the fold really does make one pass — but each
 step is a general dyad applied to a pair of complex scalars through the whole
-interpreter, at 750 nanoseconds an element against numba's 3.5.
-It is the cost of *not* being in a kernel, and it is the same
-missing rule: a fold whose step is affine is a running fold, and a running
-fold is already a kernel instruction.
-
-### VWAP — the key `+//.`
-
-| bars | libjay, one call, 1 thread | polars | ratio |
-|---:|---:|---:|---:|
-| 36,000 | 46.0 | 0.700 | 66x |
-| 72,000 | 167.2 | 1.1 | 158x |
-| 144,000 | 652.6 | 1.6 | 396x |
-| 288,000 | 2554.0 | 3.0 | 845x |
-
-`x u/. y` costs rows × groups, not rows: the implementation finds
-each group by sweeping the whole key vector for it — eight times the bars
-over eight times the days is 56 times the work, which is what the table
-shows. 288,000 bars over 200 days is two and a half seconds; 20M bars over
-13,889 days is 4,800 times that, or about three and a half hours, so the row
-above has no libjay figure at all. Polars sorts or hashes the keys once and
-is linear. This is not a language gap — the key is implemented and correct —
-it is one algorithm inside it, and a hash of the distinct keys followed by a
-single pass would close it outright.
+interpreter, at about 690 nanoseconds an element against numba's 3.3. It is
+the cost of *not* being in a kernel. The scan `([ + w * ])/\.` over the same
+step is now a typed loop over the buffer, because the affine rule is on the
+windowed path; the plain fold `u/` is not on that path yet, and putting it
+there is the same recognition applied one function along.
 
 ## The workloads
 
@@ -340,8 +307,8 @@ does: over 20M bars the closest the fast and slow averages ever come to each
 other is 5.9e-6, and the four ways of computing them differ by around 1e-8,
 so the crossings land on the same bars in all four.
 
-**This is the one row Polars wins outright**, and libjay is seven times the
-numba loop. Three moving averages is three window folds, and libjay's fold
+**This is the row where the gap to a hand-written loop is widest**, and it
+is four times the numba loop on eight threads and twelve on one. Three moving averages is three window folds, and libjay's fold
 reads and writes the whole column for each of them — `b` is read by both
 signals, so its 50-wide fold runs twice, four folds in all. numba slides
 three accumulators along the closes in a single pass and touches 160 MB
@@ -489,21 +456,25 @@ def numpy_rsi(d):
     return None
 ```
 
-**The honest loss.** Wilder's smoothing is a first-order linear
-recurrence, and J's spelling of one is the suffix scan `u/\.` — correct in
-libjay, and quadratic: every suffix is folded from scratch. Measured at
-1,000 to 8,000 rows the time grows as n², so 20M rows is not a number that
-exists. numba's loop does it in one pass and Polars has `ewm_mean` natively,
-so both win outright; the numpy column is empty for a version of libjay's own
-reason — numpy has no first-order recurrence either, so its only spelling is
-a Python loop over twenty million samples.
+**The row that used to say "quadratic".** Wilder's smoothing is a
+first-order linear recurrence, and J spells one `|. u/\. |. y`: reversed at
+both ends so that the fold runs in the direction the insert already goes.
+Every suffix used to be folded from scratch, which is n²/2 steps and made
+20 million rows a number that did not exist. The suffix scan now hands its
+accumulator from item to item — that is what right-to-left buys, for any
+verb at all — and the affine step `[ + c * ]` is recognised and run as the
+recurrence itself over the buffer, so the row is 2.3 seconds instead.
 
-What would fix it is narrow and known: `u/\.` and `u/\` over an associative
-or affine step are a single right-to-left accumulation, which is what `+/\`
-already does inside the fused kernel. The kernel has the running-fold
-machinery; what it lacks is a rule that recognises `[ + c * ]` as an affine
-step and hands it to that machinery. Until then, an EWMA is the one thing in
-this file libjay should not be asked to do.
+It still loses to both rivals, and the reason is the one this whole file
+keeps finding. numba carries two accumulators in registers and writes one
+array. libjay writes the difference, the two clipped copies, the four
+reversals and the two smoothed columns — nine columns of 160 MB before the
+last sentence starts — and the scan itself is a serial chain no thread
+splits,
+which is why the eight-thread column is the one-thread column. Polars has
+`ewm_mean` natively and is one pass; the numpy column is empty for a version
+of libjay's old reason — numpy has no first-order recurrence either, so its
+only spelling is a Python loop over twenty million samples.
 
 ### VWAP per day
 
@@ -564,21 +535,20 @@ def numpy_vwap(d):
     return run
 ```
 
-**The second honest loss, and the worse of the two.** `+//.` is J's
-key — the groups in the order their keys first appear, one fold each — and it
-is correct here: over 200 days of bars libjay agrees with Polars, numba and
-numpy to the last bit. It is also quadratic in disguise. The implementation
-finds each group by sweeping the whole key column for it, so the cost is rows
-× groups: 288,000 bars over 200 days take four seconds, and 20M bars over
-13,889 days would take about six hours. There is no number to put in this
-row.
+**The other row that used to have no figure.** `+//.` is J's key —
+the groups in the order their keys first appear, one fold each — and it was
+correct all along and quadratic in disguise: each group was found by
+sweeping the whole key column for it, so the cost was rows × groups, and
+20M bars over 13,889 days came to hours. The keys are hashed once now, into
+buckets in first-occurrence order, and the row is 1.4 seconds.
 
-This is the one place a DataFrame engine is on its home ground and libjay is
-not merely losing but absent, and the fix is not a language feature: the key
-is implemented, and hashing the distinct keys once and then making a single
-pass would make it linear. Until that lands, hand the grouping to Polars and
-libjay the numeric block — which is what python/README.md already tells the
-reader to do.
+It is still the row a DataFrame engine wins, and this is its home ground.
+The sentence groups twice — once for the weighted price and once for the
+volume — so 20M keys are hashed twice and the two group passes are separate
+walks over 160 MB each; Polars hashes once for a `group_by` that carries
+both aggregates, and numba, which is told the day count up front, needs
+neither a hash nor a second pass. The agreement is exact: over 200 days of
+bars libjay, Polars, numba and numpy give the same value to the last bit.
 
 ### maximum drawdown
 
@@ -733,7 +703,7 @@ this row exists to exercise, and the opposite decision from the one the peak
 count below suffers from.
 
 Even paying for that buffer, eight threads land level with the numba loop
-(191 against 184) and seven times numpy, because everything either side of
+(170 against 176) and nearly eight times numpy, because everything either side of
 the buffer is one pass.
 
 ### low-pass and peak count
@@ -874,24 +844,22 @@ def numpy_frame_rms(d):
 
 Reshape and reduce along the rows — `n 1024 $ {x}` gives the frames
 and `+/"1` folds each where it lies. It is the shortest expression in the
-suite and libjay's worst row: eleven times numpy and twenty-three times
-numba.
+suite, and it used to be libjay's worst row at 535 ms: 457 of those went on
+the reshape alone, copying 128 MB an element at a time to produce a matrix
+with exactly the elements the vector already had, in exactly that order.
 
-**The reshape is the whole of it.** Timed separately at 16M samples on one
-thread: `$ {x}` costs nothing at all, `$ (15625 1024 $ {x})` — asking only
-for the *shape* of the reshaped signal, no arithmetic anywhere in it —
-costs 457 ms of the row's 535, and the row fold over a matrix libjay is
-handed directly (`+/"1 {m}`) costs 19 ms, against numpy's 43 for the same
-answer. A reshape that keeps the element count is a change of shape and
-nothing else; this one copies 128 MB an element at a time.
+**A reshape that keeps the elements is now a change of shape and nothing
+else** — the buffer comes through shared, foreign memory included — and the
+row is 49 ms on one thread and 30 on eight, ahead of both numpy and Polars
+and half again the numba loop. Timed separately at 16M samples on one
+thread, `$ (15625 1024 $ {x})` — asking only for the *shape* of the
+reshaped signal — now costs nothing at all, where it cost 457 ms.
 
-Second, smaller: `explain` reports the fused kernel *declining* this program
-— "the reduction needs one axis of two or more items" — so `*:` writes a
-whole 128 MB buffer that the fold then reads back. `+/"1 *: {m}` is 51 ms
-against `+/"1 {m}`'s 19, and numpy's `einsum('ij,ij->i')`, which fuses the
-same two steps, is 12.
-
-Neither is a language gap. Hand libjay the matrix and it wins the row.
+What is left is the second, smaller thing: `explain` reports the fused
+kernel *declining* this program — "the reduction needs one axis of two or
+more items" — so `*:` writes a whole 128 MB buffer that the fold then reads
+back. `+/"1 *: {m}` is 57 ms against `+/"1 {m}`'s 20, and numpy's
+`einsum('ij,ij->i')`, which fuses the same two steps, is 12.
 
 ### single-bin detection
 
@@ -952,10 +920,10 @@ The Goertzel recurrence z ← x[n] + w·z summed over the whole signal
 is exactly Σ x[n]·wⁿ, so the vectorised spelling is a complex weighted sum
 and this row measures that. The recurrence spelling of the same quantity —
 the fold `([ + w * ])/` — is under "Where libjay loses" below, and it is
-about 330 times slower than numba's loop.
+about 200 times slower than numba's loop.
 
-**libjay wins this on eight threads and only just**, and the reason it is
-not further ahead is traffic it chose. The vectorised spelling needs the
+**libjay wins this on eight threads by two to one**, and the reason it is
+not further ahead than that is traffic it chose. The vectorised spelling needs the
 table of complex weights, so it reads 128 MB of signal and 256 MB of
 weights; numba's recurrence generates each weight from the last and reads
 only the signal, which is why one core of it beats four of libjay's. Polars

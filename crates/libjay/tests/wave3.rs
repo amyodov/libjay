@@ -284,6 +284,22 @@ fn j_key_groups_by_first_appearance() {
     assert_eq!(ints(&boxes[1]), vec![20]);
 }
 
+/// The groups come out in the order their keys first appear, whatever the
+/// keys are made of and however many of them there are.
+#[test]
+fn j_key_groups_whole_columns_in_first_appearance_order() {
+    let v = val(Lang::J, "1 2 1 2 +//. 10.5 20.25 30.5 40.25");
+    assert_eq!(v.to_f64_vec().expect("floats"), vec![41.0, 60.5]);
+    assert_eq!(ints(&val(Lang::J, "'aab' #/. 1 2 3")), vec![2, 1]);
+    // 200 items over three keys, the third of them seen first.
+    let counts = val(Lang::J, "(3 | 2 + i. 200) #/. i. 200");
+    assert_eq!(ints(&counts), vec![67, 67, 66]);
+    let sums = val(Lang::J, "(3 | 2 + i. 200) +//. i. 200");
+    assert_eq!(ints(&sums)[0], (0..200).step_by(3).sum::<i64>());
+    // Rows as keys: two columns compared as one item.
+    assert_eq!(ints(&val(Lang::J, "(2 2 $ 0 1 0 1) +//. 10 20")), vec![30]);
+}
+
 #[test]
 fn j_oblique_runs_over_the_anti_diagonals() {
     assert_eq!(ints(&val(Lang::J, "+//. i. 3 3")), vec![0, 4, 12, 12, 8]);

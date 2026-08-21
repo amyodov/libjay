@@ -1555,3 +1555,63 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   the three poisoned versions and the proc-macro1 typosquat, a license
   allowlist, and unknown-registry/git denial; enforced locally (deny.toml)
   and in CI on every push.
+
+- 2026-08-22 — The three measured losses in bench/workloads.md were one
+  shape of mistake in three places: a general path recomputing what it
+  already had. All three are algorithm changes inside verbs that were
+  already correct, and the answers are unchanged. At the workload sizes,
+  one thread: RSI(14) over 20M bars from n²/2 steps (about nine years) to
+  2330 ms, VWAP over 13,889 days from rows × groups (hours) to 1438 ms,
+  the frame-RMS reshape of 16M samples from 457 ms to nothing measurable
+  and its whole row from 535 ms to 49.
+  - **`u/\.` carries an accumulator, whatever the verb is.** Right to left
+    is the insert's OWN order, so suffix k is item k folded with suffix
+    k+1 — one step per item, for any dyad, in exactly the operations and
+    the order the per-suffix fold took (bit for bit, floats included).
+    Prefixes have no such relation: prefix k and prefix k+1 share their
+    tail, not their head, so `u/\` stays a fold per prefix except where
+    the step associates and the existing running scan already covers it.
+    That asymmetry is the whole reason J spells an exponential smoothing
+    `|. u/\. |. y` — the reversals put the recurrence in the direction the
+    insert can carry. The suffix scan is O(n) for a boxed or character
+    verb too; only an impure verb keeps the old path, so that the number
+    of applications a side effect sees does not change.
+  - **An affine step is recognised as the recurrence it is.** The rule is
+    deliberately narrow and matches the TREE, not the meaning: a fork
+    `[ + c * ]` or its mirror `(c * ]) + [`, where `+` and `*` are the
+    primitives at scalar rank, `[` and `]` are the primitives at infinite
+    rank, and `c` is a rank-0 numeric noun written in the source (a noun
+    fork, which is what the parser makes of a constant in a train). Then
+    `u/\.` is `acc = y[k] + c*acc` over the buffer and `u/\` is the same
+    series carried forward as `p[k] = p[k-1] + c^k * y[k]`. Anything else
+    — a name, a vector `c`, a bond, an atop, a dfn that computes the same
+    number — falls through to the general path, which is now linear
+    backwards anyway. Two limits, both deliberate: the fast path is taken
+    only where the answer is float or complex (two integers fold exactly
+    and are left alone), and the FORWARD direction declines outright once
+    a power of `c` leaves the finite range, because that is the one case
+    where the carried power and the fold it stands for disagree about
+    where the overflow happens.
+  - **The forward direction is a documented reassociation.** `p[k]` as a
+    running sum of `c^i * y[i]` is not the Horner fold from the prefix's
+    own tail, so its float rounding is not the insert's. That is the same
+    licence the blocked window fold takes (§5.9) and it is recorded in
+    docs/coverage.md beside it. Backwards nothing moves at all, which is
+    what the tests assert bit for bit — and backwards is where every
+    recurrence an analyst writes actually lives.
+  - **The key hashes its keys.** `x u/. y` swept the whole key vector once
+    per group, so 20M bars over 13,889 days was rows × groups. It now
+    hashes each item's elements once (the content key `nub` already had)
+    into a first-occurrence bucket list, and the tolerant cases — float or
+    complex keys under a non-zero comparison tolerance, boxed or exact
+    items — keep the comparison loop, because tolerant equality is not an
+    equivalence a hash can stand in for. APL's `f⌸` shares the code and
+    the fix. The hasher is a multiply-and-rotate mix rather than the
+    default SipHash: the keys are already spread over a `u64`, and nothing
+    here is exposed to a chosen key.
+  - **A reshape that keeps the elements shares the buffer.** `x $ y` walked
+    the ravel element by element even when the result asked for no more
+    elements than the argument has, where the mapping is the identity;
+    below that bound it is now a refcount bump on the same buffer, foreign
+    (Arrow, numpy) as well as owned. A shape that has to go round the
+    ravel again still copies, because it must. `,` already shared.

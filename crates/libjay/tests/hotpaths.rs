@@ -8,6 +8,13 @@
 //! `u/ |: y` reduces along the leading axis, which is the older path, and a
 //! run short enough to stay under the lane threshold keeps one accumulator.
 //!
+//! The suffix scan, the key and the reshape are here for the same reason.
+//! `u/\\.` folds one step per item instead of folding every suffix from
+//! scratch, and the reference is the fold of each suffix taken on its own;
+//! the key groups by a hash of the item where the same keys as floats are
+//! compared one by one; a reshape that keeps the element count hands the
+//! buffer through, which shows as the pointer it came in with.
+//!
 //! Integer, boolean and complex results must be identical; a float
 //! reduction is compared to 1e-12 relative, since regrouping an associative
 //! float fold is already contracted (§5.9).
@@ -279,4 +286,124 @@ fn a_mixed_pass_answers_what_the_widened_one_answers() {
             }
         }
     }
+}
+
+// ------------------------------------------------- scans, keys and shapes
+
+/// Every suffix folded on its own — `u/ i }. y` for each i — as one array.
+/// This is the answer `u/\.` had before it learnt to carry an accumulator,
+/// and it is what it must still give.
+fn suffixes(verb: &str, y: &Array) -> Array {
+    let n = y.shape[0];
+    let cells: Vec<Array> = (0..n)
+        .map(|i| run(&format!("{verb}/ {i} }}. {{y}}"), std::slice::from_ref(y)))
+        .collect();
+    let mut out = Vec::with_capacity(n);
+    for c in &cells {
+        out.extend(c.to_f64_vec().expect("numeric"));
+    }
+    Array::from_f64(out)
+}
+
+/// The running suffix fold, against every suffix folded from scratch.
+///
+/// Right to left is the insert's own order, so the two are the same
+/// operations in the same order and the floats must agree to the last bit —
+/// including for the verbs no fast path covers (`-`, `%`) and for the
+/// affine step, whose one-pass form is the recurrence itself.
+#[test]
+fn the_running_suffix_fold_matches_folding_every_suffix() {
+    let mut rng = Rng(11);
+    for n in [1usize, 2, 5, 40] {
+        let y = Array::from_f64(rng.f64s(n).iter().map(|x| x + 1.5).collect());
+        for verb in ["+", "-", "*", "%", ">.", "<.", "([ + 0.5 * ])", "((0.25 * ]) + [)"] {
+            let fast = run(&format!("{verb}/\\. {{y}}"), std::slice::from_ref(&y));
+            assert_eq!(fast.shape, vec![n], "{verb}");
+            identical(&fast, &suffixes(verb, &y));
+        }
+    }
+}
+
+/// An affine step the recogniser does not know — the same arithmetic
+/// written with a bond and an atop — must give exactly what the recognised
+/// spelling gives, backwards. Forwards the one-pass form carries the power
+/// of the constant instead of folding each prefix from its tail, which is
+/// the same series regrouped and rounds accordingly.
+#[test]
+fn a_recognised_affine_step_answers_what_the_general_one_answers() {
+    let mut rng = Rng(13);
+    let y = Array::from_f64(rng.f64s(64).iter().map(|x| x + 1.5).collect());
+    let arg = std::slice::from_ref(&y);
+    identical(
+        &run("([ + 0.5 * ])/\\. {y}", arg),
+        &run("([ + (0.5&*)@]) /\\. {y}", arg),
+    );
+    agree(&run("([ + 0.5 * ])/\\ {y}", arg), &run("([ + (0.5&*)@]) /\\ {y}", arg));
+    // A power that leaves the finite range is refused rather than carried:
+    // the general fold runs and answers what it always did.
+    identical(
+        &run("([ + 1e300 * ])/\\ {y}", arg),
+        &run("([ + (1e300&*)@]) /\\ {y}", arg),
+    );
+}
+
+/// The hashed grouping and the compared one, on the same groups: whole
+/// numbers as integers take the hash, the same numbers as floats are
+/// compared under the tolerance, and both must find the same groups in the
+/// same first-occurrence order.
+#[test]
+fn the_hashed_key_finds_the_groups_the_compared_one_finds() {
+    let mut rng = Rng(17);
+    for n in [1usize, 3, 500] {
+        let k: Vec<i64> = rng.i64s(n, 4);
+        let keys = Array::from_i64(k.clone());
+        let floats = Array::from_f64(k.iter().map(|&x| x as f64).collect());
+        let v = Array::from_f64(rng.f64s(n));
+        for verb in ["+/", "#", "{.", "(+/ % #)"] {
+            let src = format!("{{k}} {verb}/. {{v}}");
+            let fast = run(&src, &[keys.clone(), v.clone()]);
+            let slow = run(&src, &[floats.clone(), v.clone()]);
+            identical(&fast, &slow);
+        }
+        // The keys themselves, as items of a table: one row per key, which
+        // is the wide shape the hash builds a vector of element keys for.
+        let table = Array::new(
+            vec![n, 2],
+            Data::I64(k.iter().flat_map(|&x| [x, x * 2]).collect::<Vec<_>>().into()),
+        );
+        let wide = run("{k} +/. {v}", &[table, v.clone()]);
+        identical(&wide, &run("{k} +/. {v}", &[keys.clone(), v.clone()]));
+    }
+}
+
+/// The first element of a buffer, as an address: two arrays that share a
+/// buffer report the same one, and a copy never does.
+fn addr(a: &Array) -> usize {
+    match &a.data {
+        Data::F64(v) => v.as_slice().as_ptr() as usize,
+        Data::I64(v) => v.as_slice().as_ptr() as usize,
+        d => panic!("no address for {d:?}"),
+    }
+}
+
+/// A reshape the argument's own elements cover is a change of shape and
+/// nothing else, so the buffer comes through shared. A reshape that has to
+/// go round the ravel again still copies.
+#[test]
+fn a_reshape_that_keeps_the_elements_shares_the_buffer() {
+    let y = Array::from_f64((0..12).map(|i| i as f64).collect());
+    let arg = std::slice::from_ref(&y);
+    let here = addr(&y);
+    for src in ["3 4 $ {y}", "2 3 $ {y}", "2 2 3 $ {y}", "12 $ {y}", ", {y}"] {
+        assert_eq!(addr(&run(src, arg)), here, "{src} copied");
+    }
+    // Longer than the ravel: the fill cycles, and that is a new buffer.
+    assert_ne!(addr(&run("4 4 $ {y}", arg)), here);
+    // The values are what they always were.
+    assert_eq!(run("3 4 $ {y}", arg), run("3 4 $ 12 $ {y}", arg));
+    assert_eq!(
+        run("4 4 $ {y}", arg).to_f64_vec().expect("floats")[13],
+        1.0,
+        "the cyclic refill starts over"
+    );
 }

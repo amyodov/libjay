@@ -98,6 +98,30 @@ fn j_suffix_scans_apply_the_verb_to_every_suffix() {
     assert_eq!(val(Lang::J, "3 -/\\. i. 5"), i64s(&[3], &[-1, -4, -1]));
 }
 
+/// `u/\\.` over an affine step is a first-order recurrence, which is how J
+/// spells an exponential smoothing: `|. ([ + c * ])/\\. |. y`.
+#[test]
+fn an_affine_suffix_scan_is_the_recurrence_it_stands_for() {
+    // suffix 3 is 4; suffix 2 is 3 + 4/2 = 5; suffix 1 is 2 + 5/2 = 4.5;
+    // suffix 0 is 1 + 4.5/2 = 3.25.
+    assert_eq!(val(Lang::J, "([ + 0.5 * ])/\\. 1 2 3 4"), f64s(&[4], &[3.25, 4.5, 5.0, 4.0]));
+    // The mirror spelling is the same step and the same answer.
+    assert_eq!(
+        val(Lang::J, "((0.5 * ]) + [)/\\. 1 2 3 4"),
+        f64s(&[4], &[3.25, 4.5, 5.0, 4.0])
+    );
+    // Reversed either side, it is Wilder's smoothing: y0, then y1 + c*y0.
+    assert_eq!(
+        val(Lang::J, "|. ([ + 0.5 * ])/\\. |. 1 2 3 4"),
+        f64s(&[4], &[1.0, 2.5, 4.25, 6.125])
+    );
+    // The prefix scan of the same step is the insert's order too: prefix 2
+    // is 1 + 0.5*(2 + 0.5*3) = 2.75.
+    assert_eq!(val(Lang::J, "([ + 0.5 * ])/\\ 1 2 3 4"), f64s(&[4], &[1.0, 2.0, 2.75, 3.25]));
+    // Whole numbers stay whole: the recurrence is not a licence to widen.
+    assert_eq!(val(Lang::J, "([ + 2 * ])/\\. 1 2 3 4"), i64s(&[4], &[49, 24, 11, 4]));
+}
+
 #[test]
 fn apl_scans_follow_the_axis_of_their_glyph() {
     // `\` scans the last axis, `⍀` the leading one — the same divergence

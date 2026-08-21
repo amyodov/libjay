@@ -6282,9 +6282,15 @@ fn reshape(x: &Array, y: &Array, by_items: bool, span: Span) -> Result<Array> {
         }
         return Ok(Array::new(shape, fill_data(y.dtype(), n)));
     }
+    // Element i of the result is element `i % unit` of item
+    // `(i / unit) % src`; with `unit` 1 that is the plain cyclic ravel.
+    // Below `unit * src` the item index never wraps and that element is
+    // element i itself, so a result the argument's own elements cover is a
+    // change of shape and nothing else: the buffer comes through shared.
+    if y.is_row_major() && n <= unit.saturating_mul(src) && n <= y.data.len() {
+        return Ok(Array::new(shape, y.data.slice(0, n)));
+    }
     for i in 0..n {
-        // Element i of the result is element `i % unit` of item
-        // `(i / unit) % src`; with `unit` 1 that is the plain cyclic ravel.
         push_elem(&mut data, &y.data, (i / unit) % src * unit + i % unit);
     }
     Ok(Array::new(shape, data))
@@ -7574,6 +7580,121 @@ fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Optio
     }
 }
 
+/// The constant `c` of an affine step `x u y = x + c * y`, when the verb is
+/// exactly that tree and `c` is a scalar noun written in the source.
+///
+/// The two spellings of a first-order recurrence are `[ + c * ]` and its
+/// mirror `(c * ]) + [`. The match is on the tree, so a verb that computes
+/// the same thing another way is not one of them and folds the general way.
+fn affine_step(u: &Verb) -> Option<&Array> {
+    // The ranks are part of the match: arithmetic pairs atoms and `[` and
+    // `]` take whole arguments, and a verb wearing any other rank is a
+    // different verb.
+    fn prim(v: &Verb, want: DyadOp, ranks: [i64; 3]) -> bool {
+        matches!(v, Verb::Prim(p) if p.dyad == want && p.ranks == ranks)
+    }
+    const ATOMS: [i64; 3] = [0, 0, 0];
+    const WHOLE: [i64; 3] = [RANK_INF; 3];
+    // `c * ]`: the accumulator scaled by the constant, and nothing else.
+    fn scaled(v: &Verb) -> Option<&Array> {
+        let Verb::NounFork(c, g, h) = v else { return None };
+        let noun = c.rank() == 0
+            && matches!(c.dtype(), DType::Bool | DType::I64 | DType::F64 | DType::Complex);
+        let tree = prim(g, DyadOp::Scalar(ScalarDyad::Mul), ATOMS)
+            && prim(h, DyadOp::Right, WHOLE);
+        (noun && tree).then_some(c)
+    }
+    let Verb::Fork(f, g, h) = u else { return None };
+    if !prim(g, DyadOp::Scalar(ScalarDyad::Add), ATOMS) {
+        return None;
+    }
+    if prim(f, DyadOp::Left, WHOLE) {
+        scaled(h)
+    } else if prim(h, DyadOp::Left, WHOLE) {
+        scaled(f)
+    } else {
+        None
+    }
+}
+
+/// The arithmetic a running affine fold needs of its element type, and the
+/// test that a power of the constant is still a number.
+struct Ring<T> {
+    add: fn(T, T) -> T,
+    mul: fn(T, T) -> T,
+    one: T,
+    finite: fn(T) -> bool,
+}
+
+/// A running affine fold: `out[k] = v[k] + c * out[k+1]` backwards, and
+/// forwards the same series carried the only way one pass can carry it —
+/// the k-th prefix is the sum of `c^i * v[i]`, so the power of `c` runs
+/// along with it. None when a power leaves the finite range, which is the
+/// one case that sum and the fold it stands for do not agree on.
+fn affine_flat<T>(v: &[T], c: T, n: usize, m: usize, back: bool, r: &Ring<T>) -> Option<Vec<T>>
+where
+    T: Copy + Default,
+{
+    let (add, mul) = (r.add, r.mul);
+    let mut out = vec![T::default(); n * m];
+    if back {
+        out[(n - 1) * m..].copy_from_slice(&v[(n - 1) * m..n * m]);
+        for i in (0..n - 1).rev() {
+            for j in 0..m {
+                out[i * m + j] = add(v[i * m + j], mul(c, out[(i + 1) * m + j]));
+            }
+        }
+    } else {
+        out[..m].copy_from_slice(&v[..m]);
+        let mut pow = r.one;
+        for i in 1..n {
+            pow = mul(pow, c);
+            if !(r.finite)(pow) {
+                return None;
+            }
+            for j in 0..m {
+                out[i * m + j] = add(out[(i - 1) * m + j], mul(pow, v[i * m + j]));
+            }
+        }
+    }
+    Some(out)
+}
+
+/// `u/\ y` and `u/\. y` over an affine step, in one pass instead of one
+/// fold per run.
+///
+/// Backwards this is the insert's own order — the steps are the steps the
+/// general path takes, in the same order, so the answer is the same to the
+/// last bit. Forwards it is the same series regrouped, which rounds as the
+/// blocked window fold rounds and not as the insert would. None when the
+/// types are not the ones that carry it: two integers fold exactly and are
+/// left alone, as are the exact types.
+fn affine_scan(c: &Array, y: &Array, back: bool) -> Option<Data> {
+    let (n, m) = (y.items(), y.item_size());
+    let machine = |t: DType| matches!(t, DType::Bool | DType::I64 | DType::F64 | DType::Complex);
+    if n == 0 || !machine(c.dtype()) || !machine(y.dtype()) {
+        return None;
+    }
+    match DType::promote(c.dtype(), y.dtype())? {
+        DType::F64 => {
+            let (mut tc, mut tv) = (Vec::new(), Vec::new());
+            let k = *borrow_f64(&c.data, &mut tc).first()?;
+            let v = borrow_f64(y.row_major_data(), &mut tv);
+            let r = Ring { add: |a, b| a + b, mul: |a, b| a * b, one: 1.0, finite: f64::is_finite };
+            Some(Data::F64(affine_flat(v, k, n, m, back, &r)?.into()))
+        }
+        DType::Complex => {
+            let (mut tc, mut tv) = (Vec::new(), Vec::new());
+            let k = *borrow_cx(&c.data, &mut tc).first()?;
+            let v = borrow_cx(y.row_major_data(), &mut tv);
+            let finite = |z: Cx| z[0].is_finite() && z[1].is_finite();
+            let r = Ring { add: cx::add, mul: cx::mul, one: [1.0, 0.0], finite };
+            Some(Data::Complex(affine_flat(v, k, n, m, back, &r)?.into()))
+        }
+        _ => None,
+    }
+}
+
 /// Fold every window of `w` consecutive items into one item.
 ///
 /// The items are cut into blocks of `w`. Within a block the running folds
@@ -7832,6 +7953,31 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
             && let Some(d) = scan_typed(op, base.row_major_data(), n, m, back)
         {
             return Ok(Array::new(base.shape.clone(), d));
+        }
+    }
+    if n > 0 && let Verb::Reduce(inner) = u {
+        if base.dtype().is_numeric()
+            && let Some(c) = affine_step(inner)
+            && let Some(d) = affine_scan(c, base, back)
+        {
+            return Ok(Array::new(base.shape.clone(), d));
+        }
+        // Suffix k is item k folded with suffix k+1, because right to left
+        // is the insert's own order: one step per item, whatever the verb.
+        // Prefixes have no such relation — prefix k and prefix k+1 share
+        // their tail, not their head — so only this direction is a running
+        // fold in general, and it is the direction `|. u/\. |. y` reverses
+        // twice to reach.
+        if back && u.is_pure() {
+            let mut acc = base.item(n - 1);
+            let mut cells = Vec::with_capacity(n);
+            cells.push(acc.clone());
+            for i in (0..n - 1).rev() {
+                acc = inner.dyad(&base.item(i), &acc, ctx, span)?;
+                cells.push(acc.clone());
+            }
+            cells.reverse();
+            return assemble(&[n], cells, span);
         }
     }
     let cells = each_cell(n, n * m, u.is_pure(), ctx, |i, c| {
@@ -8812,23 +8958,11 @@ fn key(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             Some(span),
         ));
     }
-    let tol = ctx.cfg.tol;
-    let mut order: Vec<usize> = Vec::new();
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    for i in 0..n {
-        let k = keys.item(i);
-        match order.iter().position(|&j| arrays_match(&k, &keys.item(j), tol)) {
-            Some(g) => groups[g].push(i),
-            None => {
-                order.push(i);
-                groups.push(vec![i]);
-            }
-        }
-    }
+    let groups = group_positions(&keys, ctx.cfg.tol);
     let items = if y.rank() == 0 { Array::new(vec![1], y.data.clone()) } else { y.clone() };
     let mut cells = Vec::with_capacity(groups.len());
-    for g in &groups {
-        cells.push(u.monad(&select_items(&items, g), ctx, span)?);
+    for (_, at) in &groups {
+        cells.push(u.monad(&select_items(&items, at), ctx, span)?);
     }
     assemble(&[groups.len()], cells, span)
 }
@@ -10251,6 +10385,23 @@ fn key_pairs(
 /// it holds), in first-occurrence order.
 fn group_positions(y: &Array, tol: Tol) -> Vec<(usize, Vec<usize>)> {
     let n = y.items();
+    let m = y.item_size();
+    // Exact equality is an equivalence a hash stands in for, so the groups
+    // come out of one pass. Tolerant equality is not one, and neither a box
+    // nor an exact number has a cheap key: those are compared by content,
+    // each item against the distinct ones already found.
+    let hashable = match y.dtype() {
+        DType::Box | DType::Ext | DType::Rat => false,
+        DType::F64 | DType::Complex => tol.ct == 0.0,
+        _ => true,
+    };
+    if hashable {
+        return if m == 1 {
+            group_by_key(n, |i| elem_key(&y.data, i))
+        } else {
+            group_by_key(n, |i| (0..m).map(|k| elem_key(&y.data, i * m + k)).collect::<Vec<u64>>())
+        };
+    }
     let mut keys: Vec<Array> = Vec::new();
     let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
     for i in 0..n {
@@ -10264,6 +10415,67 @@ fn group_positions(y: &Array, tol: Tol) -> Vec<(usize, Vec<usize>)> {
         }
     }
     groups
+}
+
+/// The positions `0 .. n`, grouped by the key each of them has, in the
+/// order the keys first appear: one hash lookup per position, not one
+/// comparison per position per group.
+fn group_by_key<K, F>(n: usize, key: F) -> Vec<(usize, Vec<usize>)>
+where
+    K: Eq + std::hash::Hash,
+    F: Fn(usize) -> K,
+{
+    use std::collections::hash_map::Entry;
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    let mut at: HashMap<K, usize, KeyHash> =
+        HashMap::with_capacity_and_hasher(n.min(1 << 16), KeyHash);
+    for i in 0..n {
+        match at.entry(key(i)) {
+            Entry::Occupied(e) => groups[*e.get()].1.push(i),
+            Entry::Vacant(e) => {
+                e.insert(groups.len());
+                groups.push((i, vec![i]));
+            }
+        }
+    }
+    groups
+}
+
+/// The hasher the grouping uses. Its keys are [`elem_key`] values, which
+/// already spread a value across the whole of a `u64`, so mixing them costs
+/// a multiply where the default hasher runs a block cipher over them.
+/// Nothing here is exposed to a chosen key, which is what that default is
+/// for.
+#[derive(Clone, Copy, Default)]
+struct KeyHash;
+
+impl std::hash::BuildHasher for KeyHash {
+    type Hasher = KeyHasher;
+    fn build_hasher(&self) -> KeyHasher {
+        KeyHasher(0)
+    }
+}
+
+struct KeyHasher(u64);
+
+impl std::hash::Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 33;
+        x = x.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        x ^ (x >> 29)
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
 }
 
 /// APL `x ⍕ y`: format by specification. `x` is one width-and-precision

@@ -1262,9 +1262,13 @@ oracle directly, one entry per line of
 - Grade puts NaN wherever the comparison lands rather than at a defined end.
 - A moving window of an associative verb (`+`, `*`, `<.`, `>.`) is folded in
   blocks rather than strictly right to left, which reorders the float
-  rounding — the same regrouping reduction already takes (§5.9). Every other
-  verb, and every prefix scan of a verb that does not associate, is folded
-  exactly as the insert would.
+  rounding — the same regrouping reduction already takes (§5.9). A PREFIX
+  scan of an affine step (`[ + c * ]` and its mirror) is regrouped for the
+  same reason: the k-th prefix is the sum of `c^i × y[i]`, and one pass
+  carries the power of `c` forward instead of folding every prefix from its
+  own tail. Every other verb — and every SUFFIX scan, which is the insert's
+  own direction and is carried step for step — is folded exactly as the
+  insert would.
 - The binomial `x ! y` returns an exact integer wherever the whole-number
   answer fits i64; J switches to float earlier (`28 ! 56` prints
   `7.64869e15` there and exactly here). The values agree to well within the

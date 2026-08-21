@@ -1026,6 +1026,28 @@ is the same defect in the single-buffer fold family (`reduce_typed`,
 `window_typed`, `scan_typed`) rather than in the two-buffer passes this
 section is about. It is the top entry under "Next" below.
 
+## Three algorithms, not three kernels
+
+Everything above measures how fast a pass over a buffer is. The three
+biggest losses in workloads.md were not that: each was a general path doing
+work it already had the answer to, and each is now the algorithm the
+sentence describes. Measured at the full workload sizes, one thread:
+
+| workload | what it was | before | after |
+|---|---|---:|---:|
+| RSI(14), 20M bars | the suffix scan, per suffix | n²/2 steps (~9 years) | 2330 ms |
+| VWAP, 20M bars over 13,889 days | the key, per group | rows × groups (~hours) | 1438 ms |
+| frame RMS, the reshape alone, 16M samples | the ravel, per element | 457 ms | nothing measurable |
+
+The suffix scan `u/\.` carries an accumulator from item to item, which
+right-to-left folding allows for ANY verb; an affine step `[ + c * ]` is
+recognised and run as a first-order recurrence over the buffer; the key
+hashes its keys once instead of sweeping the column per group; and a
+reshape whose result the argument's own elements cover shares the buffer
+rather than walking it. The prose and the whole re-measured table are in
+[workloads.md](workloads.md); what each rule does and does not cover is in
+docs/decisions.md.
+
 ## Next
 
 In the order the measurements rank them:
