@@ -156,6 +156,9 @@ fn record(args: &[String]) -> Result<(), String> {
 
     let mut complaints: Vec<String> = Vec::new();
     let mut agreement = (0usize, 0usize);
+    // Sentences the interpreter never finished, gathered across the files
+    // and reported as complaints: a corpus line has to be recordable.
+    let timed_out: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
     for path in &paths {
         let label = corpus::label(path);
         let snap = corpus::snapshot_of(path);
@@ -178,7 +181,16 @@ fn record(args: &[String]) -> Result<(), String> {
                 });
                 record.note = entry.note.clone();
                 if !(missing_only && record.answer(&key).is_some()) {
-                    record.set(&key, Side::of(oracle.eval(&entry.expr, entry.io)));
+                    match oracle.eval(&entry.expr, entry.io) {
+                        // A corpus line the reference cannot finish is one
+                        // no recording can hold: the previous answer stays
+                        // and the run says which line it was.
+                        oracle::Reply::TimedOut => timed_out
+                            .lock()
+                            .expect("the timeout list")
+                            .push(entry.expr.clone()),
+                        reply => record.set(&key, Side::of(reply.answer())),
+                    }
                 }
                 if divergences {
                     record.ours = Some(Side::of(eval::eval(lang, &entry.expr, entry.io)));
@@ -203,6 +215,10 @@ fn record(args: &[String]) -> Result<(), String> {
                     ));
                 }
             }
+        }
+
+        for expr in timed_out.lock().expect("the timeout list").drain(..) {
+            complaints.push(format!("{label}: {expr:?} did not finish (LIBJAY_ORACLE_TIMEOUT)"));
         }
 
         if !followed {
@@ -422,15 +438,29 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     let verdicts: Vec<(String, fuzz::Verdict, String, String)> = exprs
         .par_iter()
         .map(|expr| {
-            let ours = libjay_testkit::eval::eval_detail(lang, expr, io);
+            // A panic is a crash, not a diagnostic: catching it here keeps
+            // one bad sentence from ending a run of thousands, and reports
+            // it under its own name.
+            let ours = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                libjay_testkit::eval::eval_detail(lang, expr, io)
+            }));
             let theirs = oracle.eval(expr, io);
-            let verdict = fuzz::triage(lang, &ours, theirs.as_deref());
-            let ours_text = match &ours {
-                libjay_testkit::eval::Answer::Value(v) => v.clone(),
-                libjay_testkit::eval::Answer::NoValue => "<no value>".to_string(),
-                libjay_testkit::eval::Answer::Refused(e) => format!("<error> {e}"),
+            let timed_out = matches!(theirs, oracle::Reply::TimedOut);
+            let theirs = theirs.answer();
+            let verdict = match (&ours, timed_out) {
+                (Err(_), _) => fuzz::Verdict::Panicked,
+                (_, true) => fuzz::Verdict::Unfinished,
+                (Ok(ours), false) => fuzz::triage(lang, ours, theirs.as_deref()),
             };
-            let theirs_text = theirs.unwrap_or_else(|| "<error>".to_string());
+            let ours_text = match &ours {
+                Err(_) => "<panic>".to_string(),
+                Ok(libjay_testkit::eval::Answer::Value(v)) => v.clone(),
+                Ok(libjay_testkit::eval::Answer::NoValue) => "<no value>".to_string(),
+                Ok(libjay_testkit::eval::Answer::Refused(e)) => format!("<error> {e}"),
+            };
+            let theirs_text = theirs.unwrap_or_else(|| {
+                if timed_out { "<unfinished>".to_string() } else { "<error>".to_string() }
+            });
             (expr.clone(), verdict, ours_text, theirs_text)
         })
         .collect();
@@ -445,7 +475,9 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         }
     }
     let mismatches: usize = verdicts.iter().filter(|v| v.1.is_mismatch()).count();
-    let total = verdicts.len();
+    // An expression the oracle never finished was not compared, so it is
+    // not in the denominator either.
+    let total = verdicts.iter().filter(|v| v.1.is_compared()).count();
     println!("\n{total} expressions, {mismatches} mismatches ({:.1}%)", ratio(mismatches, total));
     for (label, n) in counts {
         println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));

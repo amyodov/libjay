@@ -305,6 +305,11 @@ const APL_RANKS: &[&str] = &["0", "1", "2", "0 1", "1 1", "1 0"];
 /// A function phrase. Only the operators GNU APL has are drawn: `∘`, `⍥`,
 /// `⍛`, `f⍤g` and `⌸` are Dyalog's and have no oracle, so fuzzing them
 /// would report the oracle's refusal over and over.
+///
+/// The left operand of `⍤` and `⍣` is parenthesised even when it is one
+/// glyph. GNU APL binds `+/⍤1` as `+(/⍤1)` and refuses it, so an unbracketed
+/// derived operand would make the fuzzer report a parse it never meant to
+/// test; the divergence itself is one recorded line in `divergences.txt`.
 fn apl_fn(rng: &mut Rng, depth: u32) -> String {
     if depth == 0 {
         return rng.pick(APL_MONADS).to_string();
@@ -317,7 +322,7 @@ fn apl_fn(rng: &mut Rng, depth: u32) -> String {
         5 => format!("{}\\", rng.pick(APL_FOLDS)),
         6 => format!("{}⍨", rng.pick(APL_DYADS)),
         7 => format!("{}¨", apl_fn(rng, d)),
-        _ => format!("({}⍤{})", apl_fn(rng, d), rng.pick(APL_RANKS)),
+        _ => format!("(({})⍤{})", apl_fn(rng, d), rng.pick(APL_RANKS)),
     }
 }
 
@@ -345,7 +350,7 @@ fn apl_expr(rng: &mut Rng, depth: u32) -> String {
         9 => format!("{}\\{}", rng.pick(APL_FOLDS), arg(rng)),
         10 => format!("{}⍀{}", rng.pick(APL_FOLDS), arg(rng)),
         11 => format!("({})∘.{}{}", apl_expr(rng, d), rng.pick(APL_DYADS), arg(rng)),
-        12 => format!("{}⍣{} {}", apl_fn(rng, d), rng.below(4), arg(rng)),
+        12 => format!("({})⍣{} {}", apl_fn(rng, d), rng.below(4), arg(rng)),
         13 => format!("{}⌽{}", apl_int(rng, -3, 3), arg(rng)),
         // The shape and take verbs, and replicate, with a literal on the
         // left.
@@ -375,6 +380,11 @@ pub enum Verdict {
     WeRefuse,
     /// libjay answered something the oracle refused.
     TheyRefuse,
+    /// The oracle never finished, so there is nothing to compare against.
+    Unfinished,
+    /// libjay panicked. Always a bug: a refusal is a diagnostic, a panic is
+    /// a crash.
+    Panicked,
 }
 
 impl Verdict {
@@ -385,12 +395,19 @@ impl Verdict {
             Verdict::Gap => "gap",
             Verdict::WeRefuse => "we-refuse",
             Verdict::TheyRefuse => "they-refuse",
+            Verdict::Unfinished => "unfinished",
+            Verdict::Panicked => "panic",
         }
     }
 
     /// A verdict worth a human's attention.
     pub fn is_mismatch(self) -> bool {
-        !matches!(self, Verdict::Agree)
+        !matches!(self, Verdict::Agree | Verdict::Unfinished)
+    }
+
+    /// Whether the two answers were compared at all.
+    pub fn is_compared(self) -> bool {
+        !matches!(self, Verdict::Unfinished)
     }
 }
 

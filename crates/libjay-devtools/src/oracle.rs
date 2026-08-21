@@ -40,6 +40,80 @@ impl Absent {
     }
 }
 
+/// What one run of an interpreter came back with.
+pub enum Reply {
+    /// What it printed.
+    Answer(String),
+    /// It refused the sentence.
+    Refused,
+    /// It was still running when the limit ran out, and was killed. That is
+    /// neither an answer nor a refusal: a composed sentence can ask a
+    /// reference for work measured in hours, and nothing about it is
+    /// recorded.
+    TimedOut,
+}
+
+impl Reply {
+    fn of(answer: Option<String>) -> Reply {
+        match answer {
+            Some(text) => Reply::Answer(text),
+            None => Reply::Refused,
+        }
+    }
+
+    /// The answer, with a refusal as `None`. A timeout is a refusal here,
+    /// so a caller that has no opinion about it stays as it was.
+    pub fn answer(self) -> Option<String> {
+        match self {
+            Reply::Answer(text) => Some(text),
+            Reply::Refused | Reply::TimedOut => None,
+        }
+    }
+}
+
+/// How long one sentence may keep an interpreter busy, in seconds.
+/// `LIBJAY_ORACLE_TIMEOUT` overrides it; 0 waits for ever.
+fn limit() -> Option<std::time::Duration> {
+    let secs: u64 = std::env::var("LIBJAY_ORACLE_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20);
+    (secs > 0).then(|| std::time::Duration::from_secs(secs))
+}
+
+/// Wait for a child that has already been written to, draining both pipes
+/// in threads of their own so neither can fill and block, and killing it if
+/// it outstays the limit. `None` is a kill.
+fn wait_within(mut child: std::process::Child) -> Option<(String, String)> {
+    fn drain<R: std::io::Read + Send + 'static>(r: R) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut r = r;
+            let mut buf = Vec::new();
+            let _ = r.read_to_end(&mut buf);
+            buf
+        })
+    }
+    let out = drain(child.stdout.take().expect("piped stdout"));
+    let err = drain(child.stderr.take().expect("piped stderr"));
+    let deadline = limit().map(|d| std::time::Instant::now() + d);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => break,
+            Ok(None) => {}
+        }
+        if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let text = |h: std::thread::JoinHandle<Vec<u8>>| {
+        String::from_utf8_lossy(&h.join().unwrap_or_default()).into_owned()
+    };
+    Some((text(out), text(err)))
+}
+
 /// Where the interpreter is, which implementation it is, and where its
 /// scratch files may go.
 pub struct Oracle {
@@ -96,12 +170,14 @@ impl Oracle {
         Ok(Oracle { key: key.to_string(), path, scratch })
     }
 
-    /// Run one sentence. `None` is a refusal.
-    pub fn eval(&self, expr: &str, index_origin: u8) -> Option<String> {
+    /// Run one sentence.
+    pub fn eval(&self, expr: &str, index_origin: u8) -> Reply {
         match self.key.as_str() {
             IMPL_J => eval_j(&self.path, expr),
             IMPL_GNU => eval_apl(&self.path, &self.thread_dir(), expr, index_origin),
-            IMPL_DYALOG => dyalog::eval(&self.path, &self.thread_dir(), expr, index_origin),
+            IMPL_DYALOG => {
+                Reply::of(dyalog::eval(&self.path, &self.thread_dir(), expr, index_origin))
+            }
             other => panic!("no runner for the {other} implementation"),
         }
     }
@@ -117,7 +193,7 @@ impl Oracle {
     }
 }
 
-fn eval_j(jconsole: &Path, expr: &str) -> Option<String> {
+fn eval_j(jconsole: &Path, expr: &str) -> Reply {
     let mut child = Command::new(jconsole)
         .args(["-jprofile", "/dev/null"])
         .stdin(Stdio::piped())
@@ -133,19 +209,19 @@ fn eval_j(jconsole: &Path, expr: &str) -> Option<String> {
         .unwrap()
         .write_all(format!("{expr}\n").as_bytes())
         .expect("write to jconsole");
-    let out = child.wait_with_output().expect("wait for jconsole");
-    let text = String::from_utf8_lossy(&out.stdout);
-    let complaint = String::from_utf8_lossy(&out.stderr);
+    let Some((text, complaint)) = wait_within(child) else {
+        return Reply::TimedOut;
+    };
     if (text.contains("error") && text.contains('|')) || !complaint.trim().is_empty() {
-        return None;
+        return Reply::Refused;
     }
-    Some(text.trim_end().to_string())
+    Reply::Answer(text.trim_end().to_string())
 }
 
 /// `--script` silences the banner and the input echo, `--safe` and `--noSV`
 /// keep the interpreter from opening sockets or loading a workspace, and a
 /// wide `⎕PW` stops long vectors from wrapping onto continuation lines.
-fn eval_apl(apl: &Path, cwd: &Path, expr: &str, index_origin: u8) -> Option<String> {
+fn eval_apl(apl: &Path, cwd: &Path, expr: &str, index_origin: u8) -> Reply {
     let line = if index_origin == 1 { expr.to_string() } else { format!("⎕IO←0⋄{expr}") };
     // `--eval` takes one line. A `∇` definition needs several, so a program
     // with a line break goes in on stdin instead, closed with `)OFF` — the
@@ -171,15 +247,15 @@ fn eval_apl(apl: &Path, cwd: &Path, expr: &str, index_origin: u8) -> Option<Stri
             .write_all(format!("{line}\n)OFF\n").as_bytes())
             .expect("write to GNU APL");
     }
-    let out = child.wait_with_output().expect("wait for GNU APL");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let Some((stdout, stderr)) = wait_within(child) else {
+        return Reply::TimedOut;
+    };
     // GNU APL always exits 0; a failed sentence is reported on stderr as a
     // named error plus a caret line under the offending glyphs.
     if !stderr.trim().is_empty() || has_error_marker(&stdout) {
-        return None;
+        return Reply::Refused;
     }
-    Some(normalize(&stdout))
+    Reply::Answer(normalize(&stdout))
 }
 
 fn has_error_marker(text: &str) -> bool {
