@@ -29,6 +29,7 @@ A DataFrame no longer costs a copy to read, a moving window now joins the fused 
 - J's `^:` accepts a list of counts, and the boxed forms that collect every intermediate result — `u^:(<n)` and `u^:a:`.
 - J's tessellation `;.3` accepts a negative block size, which reverses that axis, where the movement row is written out.
 - APL's `⍢` (under) and `⌺` (stencil), and the collating grades `x⍋y` and `x⍒y`.
+- Grading and sorting whole arrays of boxes: J's `/:` and `\:` order boxed items by J's total array ordering (type class, then rank, then shape, then contents), and APL's `⍋`/`⍒` order nested arrays as APL2 does — both derived from the reference interpreters.
 
 ### Execution
 
@@ -74,9 +75,9 @@ A fuzz sweep of 27,000 composed sentences per language, triaged against jconsole
 
 ## Status
 
-J: 146 of 177 published valences implemented, 22 partial, 7 not yet, 2 refused by design.
+J: 148 of 177 published valences implemented, 20 partial, 7 not yet, 2 refused by design.
 
-APL: 87 of 115 published valences implemented, 24 partial, 4 not yet.
+APL: 89 of 115 published valences implemented, 22 partial, 4 not yet.
 
 The full, per-spelling matrix is [docs/status.md](status.md).
 
