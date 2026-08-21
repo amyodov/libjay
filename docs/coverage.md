@@ -190,8 +190,11 @@ need of it); `` ` `` (tie) and `@.` (agenda).
 `u L: n` and `u S: n` apply u at a boxing level: u runs on every subarray
 whose `L.` is n or below, and `L:` puts each answer back in the box its
 operand came from while `S:` spreads them into the items of one array. A
-negative n counts down from the argument's own level. Only the monads are
-implemented; a dyadic level is a named gap.
+negative n counts down from the argument's own level. Dyadically both
+arguments are descended together and u is applied to each pair; a side that
+has already reached its level is held while the other descends, so `1 ,L:0
+(3;4)` reaches every leaf with the same left argument. Two sides that both
+still have boxes must agree in shape.
 
 A gerund is the verbs `` ` `` ties together. J spells one as a boxed noun;
 here it is a fragment of the parse, and `@.` is the only thing that reads
@@ -242,11 +245,14 @@ assignment does. A name may change part of speech in either direction, and
 the last assignment before a sentence decides how that sentence reads; that
 is enough for the straight-line programs this frontend compiles, since
 there is no control flow for a definition to reach backwards through.
-Adverb and conjunction assignment (`avg =. +/ % #` as a name for a
-verb TRAIN works; naming a bare adverb or conjunction, `m =. /`, does not)
-is recognised and reported as not supported yet. The explicit definitions
-themselves — `3 : '...'`, `4 : '...'`, `{{ }}` — work; see "Explicit
-definitions" below.
+Naming a bare adverb or conjunction — `m =. /`, `c =. @` — works the same
+way and for the same reason: a modifier is applied while the sentence
+holding it is parsed, so the name has to be resolved then, and from the
+next sentence on it parses exactly as the glyph would. What is still a
+named gap is WRITING a new modifier (`1 :`, `2 :`) and the tacit translator
+(`13 :`), and displaying a bare verb or modifier name. The explicit
+definitions themselves — `3 : '...'`, `4 : '...'`, `{{ }}` — work; see
+"Explicit definitions" below.
 
 ## APL
 
@@ -276,8 +282,8 @@ read off an old note:
 | `⍺←` inside a dfn | assigns UNCONDITIONALLY — verified against the oracle (`F←{⍺←10⋄⍺+⍵}⋄3 F 5` is `15` there) | a DEFAULT: fills `⍺` only where no left argument arrived | neither running oracle — the published dfn model, which is `8` here, not `15` |
 | ordering `< ≤ > ≥` on complex numbers | extends them to a lexicographic order on (real, imaginary) — verified against the oracle (`2J3<2J5` is `1` there) | refuses, as the standard does | neither running oracle — refused, matching the standard |
 | negative replication count in a VECTOR (`¯1 2/1 2`) | a LENGTH ERROR — restricts a negative count to a scalar left argument, verified against the oracle | legal: a run of fills, the general rule | neither running oracle — the general APL2/Dyalog rule, which is `0 2 2` here |
-| trains `(f g h)` | not in APL2, not in GNU APL — a SYNTAX ERROR, verified against the oracle | a Dyalog 14+ feature | not implemented (🔴 in status.md) |
-| tacit / function assignment `F←+/` | a SYNTAX ERROR, verified against the oracle | supported | not supported yet; named gap. J's `mean =. +/ % #` is the spelling libjay has today |
+| trains `(f g h)` | not in APL2, not in GNU APL — a SYNTAX ERROR, verified against the oracle | a Dyalog 14+ feature | DYALOG, as an extension shipped on by default (`Dialect.trains`); `Dialect(trains=False)` gives GNU APL's refusal back |
+| tacit / function assignment `F←+/` | a SYNTAX ERROR, verified against the oracle | supported | DYALOG, under the same `trains` setting: a function may stand where a value belongs, or it may not, and one flag decides both |
 
 Three of the rows above are where libjay follows neither running reference:
 GNU APL's own implementation departs from the ISO/APL2 line it otherwise
@@ -297,20 +303,50 @@ nest, dyadic partition — see above), `∘` (beside), `⍥` (over), `⍛`
 (before), `f⍤g` (atop with a function operand — the rank-specification form
 of `⍤` does have an oracle), `⌸` (key), dfn guards (`cond:expr`), `∇`
 self-reference, dfn operators (`⍺⍺`/`⍵⍵`), and the tradfn control
-structures (`:If :While :Repeat :For :Select`, `:Return :Leave :Continue`).
+structures (`:If :While :Repeat :For :Select`, `:Return :Leave :Continue`),
+TRAINS and FUNCTION ASSIGNMENT.
 Monadic `↓` (split) and monadic `⌷` (materialise) are in the same "no
 oracle" boat for the same reason — GNU APL lacks the valence outright — but
 read from the published Dyalog and ISO definitions together, not from
 Dyalog alone.
 
+Trains and function assignment are the two of those that a GNU APL run CAN
+answer — it refuses them — so they are pinned in
+`crates/libjay/tests/corpus/apl/divergences.txt` alongside the deliberate
+divergences above, and the shapes themselves are hand-tested in
+`crates/libjay/tests/wave6.rs`. They are one setting, `Dialect.trains`,
+because they are one question: may a function stand where a value belongs?
+It ships on. A feature the oracle merely LACKS is not a reason to withhold
+it; a feature the oracle ANSWERS DIFFERENTLY is, and those still follow GNU
+APL. `Dialect(trains=False)` restores the strict sentence, and both
+readings are implemented — it is the one setting on the object that is a
+choice rather than a gap.
+
+A train is a run of functions where a value belongs, and it is a function
+itself. It forms inside parentheses, and on the right of an assignment,
+which is the whole of the rule: nowhere else does APL leave a function
+standing. Two tines are an ATOP — `(g h) ⍵` is `g (h ⍵)` and `⍺ (g h) ⍵` is
+`g (⍺ h ⍵)`. Three are a FORK — `(f g h) ⍵` is `(f ⍵) g (h ⍵)` and
+`⍺ (f g h) ⍵` is `(⍺ f ⍵) g (⍺ h ⍵)`. The leftmost tine may be a VALUE,
+which stands where `f ⍵` would: `(3+×) 4` is `3 + × 4`. Longer runs group
+from the right — an odd count forks its first two tines over the train the
+rest makes, an even one atops its first over that train — so `(f g h j k)`
+is `(f g (h j k))` and `(f g h j)` is `(f (g h j))`. `⊢` and `⊣` are the
+identity tines. These lower to the same `Fork`, `Atop` and `NounFork` the
+J frontend builds, so no new semantics reach the engine; a value tine has
+to be a literal, exactly as J's noun fork does. `F←+/÷≢` then names the
+train, and `F←+/` names a derived function, by the same machinery that
+already names a dfn.
+
 v0.1.0 implements one APL: the table above is the checklist, not a
 roadmap commitment. A Dyalog (or other) dialect is planned as a
 preinitialised `Dialect` object chosen at compile time, the same way
 `⎕IO` is chosen today (`APL.Dialect.gnu` / `APL.Dialect.dyalog`) — never
-global state, never a guess from the source text. Until that lands, every
-row above stays hard-wired to the GNU/APL2 answer; the point of pulling
-them into one table is that generalising later is a matter of filling in
-a second column, not re-deriving the list.
+global state, never a guess from the source text. Every row above except
+`trains` still stays hard-wired to the GNU/APL2 answer; the point of
+pulling them into one table is that generalising later is a matter of
+filling in a second column, not re-deriving the list, and `trains` is what
+that second column looks like once one row is filled in.
 
 | Glyph | Monadic | Dyadic |
 |---|---|---|
@@ -444,15 +480,18 @@ specification, a bare index expression) — only `A[i]←v`/`A[i;j]←v` write.
 
 `/` and `⌿` are operators after a function and replicate after an operand;
 names are always values in this subset, so which one is meant is decided by
-the token to the left and nothing else.
+the token to the left and nothing else. Parentheses around a bare operator
+glyph are transparent, so `1 0 1(/)1 2 3` is the replication `1 0 1/1 2 3`
+— the token OUTSIDE them is what decides the reading, which is what the
+reference does with it too.
 
 `←` assignment (incl. inline), `⎕←` output, `⋄` and newline sentence
 separators, `⍝` comments, `¯` negatives, `''` strings. Index origin is a
 dialect setting of the compiler instance (`⎕IO` as a variable is
 deliberately not runtime state).
 
-Function assignment (`F←+/`) is not supported yet — see "Which APL" above.
-J's `mean =. +/ % #` is the spelling libjay has for the idea today.
+Function assignment (`F←+/`, `F←+/÷≢`) and trains are extensions under the
+`trains` dialect setting, which ships on — see "Which APL" above.
 
 ## The circle functions (`o.` / `○`)
 
@@ -1073,25 +1112,31 @@ sections above is also collected here.
   (real, imaginary), which is what J's `/:` answers; the ordering verbs
   still refuse complex operands, because a permutation is not a claim about
   size.
-- Adverb and conjunction definitions are still to come — J's, that is;
-  APL's dfn operators (`⍺⍺`, `⍵⍵`) work. Named on their own, beyond what
+- Adverb and conjunction DEFINITIONS are still to come — J's `1 :` and
+  `2 :`, that is; naming an existing one (`m =. /`) works, and APL's dfn
+  operators (`⍺⍺`, `⍵⍵`) do. Named on their own, beyond what
   the tables above already mark "not supported yet": J's dyad of `;:` (the
   sequential machine), `s:` (symbols), `$.` (sparse), `` `: `` (evoke
-  gerund), `H.` (hypergeometric), `t.` and `t:` (the Taylor series), `..`
-  and `.:` (even and odd), a NEGATIVE block size in a tessellation, a
-  dyadic `L:` or `S:`, a characteristic of `b.` other than `0`, and `!.` as
+  gerund), `t.` and `t:` (the Taylor series), `..`
+  and `.:` (even and odd), a NEGATIVE block size in a tessellation,
+  a characteristic of `b.` other than `0`, and `!.` as
   a fill on any verb but `|.`; APL's `⍢` (under), `⌺` (stencil), `⍠`
-  (variant), a nested argument to dyadic `⍕`, and a label sharing a
-  definition with a control structure. `T.` is not a queue position: it
+  (variant), `⌶` (I-beam), `⍞` (character I/O), a nested argument to
+  dyadic `⍕`, and a label sharing a definition with a control structure.
+  The five APL glyphs are reported by NAME rather than as unknown
+  characters: a glyph the language has and libjay has not reached is a
+  queue position, and the diagnostic says which one. `T.` is not a queue position: it
   starts J's own threads, which the sandbox does not open, and `d.` `D.`
   `D:` are not in the language the reference implements at all.
   J's map `{::`, the index specifications of `{` and `}`, amend with a verb
   operand `u}`, the tessellations `;.3` and `;._3`, the rectangle cut
   `x u;.0 y`, the fill shift `|.!.f`, `f.` (fix), `M.` (memo), `L:` and
-  `S:`, `p.` and `p..` (the polynomial verbs) and `m b.` (the boolean and
+  `S:` in both valences, `H.` (the hypergeometric series),
+  `p.` and `p..` (the polynomial verbs) and `m b.` (the boolean and
   bitwise functions) all work, as do APL's `⍳` on a shape, mixed simple
   arrays, prototype fills, partitioned enclose at any rank, dyadic `⍕`,
-  `⊆`, `⍛`, `f⍤g`, `⌸`, the branch `→` and the niladic `∇`. Boxes and
+  `⊆`, `⍛`, `f⍤g`, `⌸`, trains, function assignment, the branch `→` and the
+  niladic `∇`. Boxes and
   complex numbers are both implemented; bigints and rationals (the exact
   types) are too — see "The numeric tower and the exact types" above.
 - Complex numbers reach every scalar verb, the reductions, the scans and

@@ -73,9 +73,23 @@ fn parse_statement(
             }
         }
     }
-    let toks = fold_paren_funcs(fold_axes(fold_operators(sentence, d)?, d)?);
+    let toks = fold_axes(fold_operators(unwrap_lone_operators(sentence), d)?, d)?;
     if toks.is_empty() {
         return Ok(None);
+    }
+    // `F←+/` and `F←+/÷≢` name a function, derived or tacit. Like the dfn
+    // above, the sentence does no work at run time and later sentences read
+    // the name as the function itself.
+    if let [name, assign, rest @ ..] = &toks[..] {
+        if let (Tok::Name(n), Tok::Assign) = (&name.kind, &assign.kind) {
+            if let Some(v) = tine_run(rest, d)? {
+                let span = Span::merge(name.span, toks[toks.len() - 1].span);
+                if !in_def {
+                    verbs.insert(n.clone(), v.clone());
+                }
+                return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
+            }
+        }
     }
     if let Some(t) = toks.iter().find(|t| matches!(t.kind, Tok::Control(_))) {
         return Err(Error::parse(
@@ -636,6 +650,19 @@ fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
     })
 }
 
+/// A glyph the language has and libjay does not, with the name to report
+/// it under. These are queue positions, not unknown characters.
+fn queued_glyph(ch: char) -> Option<&'static str> {
+    Some(match ch {
+        '⍢' => "the under operator (f⍢g)",
+        '⌺' => "the stencil operator (f⌺w)",
+        '⍠' => "the variant operator (f⍠v)",
+        '⌶' => "I-beam (⌶)",
+        '⍞' => "character input and output (⍞)",
+        _ => return None,
+    })
+}
+
 fn op_for(ch: char) -> Option<OpGlyph> {
     match ch {
         '/' => Some(OpGlyph::Slash),
@@ -934,6 +961,10 @@ fn lex_text(
                         kind: Tok::Op(op),
                         span: Span::new(offset + i, offset + end),
                     });
+                } else if let Some(what) = queued_glyph(ch) {
+                    // A glyph of the language libjay has not reached yet is
+                    // a promise, not an unknown character, and says so.
+                    return Err(Error::not_yet(what, Span::new(offset + i, offset + end)));
                 } else {
                     return Err(Error::parse(
                         format!("unknown symbol: {ch}"),
@@ -1135,6 +1166,15 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
     let mut out: Vec<Token> = Vec::new();
     let mut it = toks.into_iter().peekable();
     while let Some(t) = it.next() {
+        // Parentheses close here rather than in a pass of their own: by the
+        // time the `)` arrives everything inside has been folded, so a pair
+        // holding nothing but functions is a single function from here on
+        // and the operator to its right binds to it.
+        if matches!(t.kind, Tok::RParen) {
+            out.push(t);
+            close_paren(&mut out, d)?;
+            continue;
+        }
         // A dfn that mentions `⍺⍺` or `⍵⍵` is an operator: it takes the
         // function on its left, and one on its right where it asked for it.
         if let Tok::UserOp { def, omega } = &t.kind {
@@ -1397,30 +1437,139 @@ fn take_axis(
     Ok(Some((k as usize, span)))
 }
 
-/// `(f)` is `f`: a function alone in parentheses is only grouped, and the
-/// parser reads a bare function as a missing argument otherwise.
-fn fold_paren_funcs(toks: Vec<Token>) -> Vec<Token> {
+/// `(/)` is `/`: parentheses around a bare operator glyph are transparent,
+/// so what decides the glyph's reading is the token outside them. The pair
+/// has no other meaning — an operator has no operand inside them — and the
+/// reference reads `1 0 1(/)1 2 3` as the replication it spells without.
+fn unwrap_lone_operators(toks: Vec<Token>) -> Vec<Token> {
     let mut out: Vec<Token> = Vec::with_capacity(toks.len());
     for t in toks {
-        if matches!(t.kind, Tok::RBracket) {
-            out.push(t);
-            continue;
-        }
-        let is_close = matches!(t.kind, Tok::RParen);
         let n = out.len();
-        if is_close
+        if matches!(t.kind, Tok::RParen)
             && n >= 2
-            && matches!(out[n - 1].kind, Tok::Func(_))
+            && matches!(out[n - 1].kind, Tok::Op(_))
             && matches!(out[n - 2].kind, Tok::LParen)
         {
-            let f = out.pop().expect("checked above");
+            let op = out.pop().expect("checked above");
             let open = out.pop().expect("checked above");
-            out.push(Token { kind: f.kind, span: Span::merge(open.span, t.span) });
+            out.push(Token { kind: op.kind, span: Span::merge(open.span, t.span) });
             continue;
         }
         out.push(t);
     }
     out
+}
+
+/// A `)` has just been pushed: collapse the pair it closes when what it
+/// holds is a function. `(f)` is `f` — a function alone in parentheses is
+/// only grouped — and a run of two or more is a train.
+fn close_paren(out: &mut Vec<Token>, d: Rules) -> Result<()> {
+    let close = out.len() - 1;
+    let Some(open) = matching_lparen(out, close) else { return Ok(()) };
+    let span = Span::merge(out[open].span, out[close].span);
+    let inner = &out[open + 1..close];
+    if inner.len() == 1 && matches!(inner[0].kind, Tok::Func(_)) {
+        let Some(Token { kind, .. }) = out.get(open + 1).cloned() else {
+            unreachable!("checked above")
+        };
+        out.truncate(open);
+        out.push(Token { kind, span });
+        return Ok(());
+    }
+    if !d.trains || inner.len() < 2 || !inner[1..].iter().all(|t| matches!(t.kind, Tok::Func(_))) {
+        return Ok(());
+    }
+    let Some(verb) = train(inner)? else { return Ok(()) };
+    out.truncate(open);
+    out.push(Token { kind: Tok::Func(verb), span });
+    Ok(())
+}
+
+/// The `(` that `out[close]` closes, counting the pairs between.
+fn matching_lparen(out: &[Token], close: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for i in (0..close).rev() {
+        match out[i].kind {
+            Tok::RParen => depth += 1,
+            Tok::LParen => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The function a run of tines derives, grouping from the right: a pair is
+/// an atop `g (h ⍵)`, a triple a fork `(f ⍵) g (h ⍵)`, and a longer run is
+/// one of those over the train the rest of it makes. The leftmost tine may
+/// be a value, which stands where `f ⍵` would.
+///
+/// `None` where the run is not a train after all, so that the sentence gets
+/// the reading it would have had; every other refusal is an error, because
+/// nothing else can be meant by a run of functions.
+fn train(tines: &[Token]) -> Result<Option<Verb>> {
+    debug_assert!(!tines.is_empty());
+    if tines.len() == 1 {
+        return Ok(match &tines[0].kind {
+            Tok::Func(f) => Some(f.clone()),
+            _ => None,
+        });
+    }
+    if tines.len() == 2 {
+        let (Tok::Func(g), Tok::Func(h)) = (&tines[0].kind, &tines[1].kind) else {
+            return Ok(None);
+        };
+        return Ok(Some(Verb::Atop(Box::new(g.clone()), Box::new(h.clone()))));
+    }
+    // An odd run forks its first two tines over the rest; an even one has
+    // no tine to fork with, so the first is an atop over the rest.
+    let head = &tines[0].kind;
+    if tines.len() % 2 == 0 {
+        let Tok::Func(f) = head else {
+            return Err(Error::parse(
+                "a value may only be a fork's left tine, and this train has an even number of tines",
+                tines[0].span,
+            ));
+        };
+        let Some(rest) = train(&tines[1..])? else { return Ok(None) };
+        return Ok(Some(Verb::Atop(Box::new(f.clone()), Box::new(rest))));
+    }
+    let Some(rest) = train(&tines[2..])? else { return Ok(None) };
+    let Tok::Func(g) = &tines[1].kind else { unreachable!("the tail is all functions") };
+    match head {
+        Tok::Func(f) => {
+            Ok(Some(Verb::Fork(Box::new(f.clone()), Box::new(g.clone()), Box::new(rest))))
+        }
+        Tok::Value(n) | Tok::Nums(n) => {
+            Ok(Some(Verb::NounFork(n.clone(), Box::new(g.clone()), Box::new(rest))))
+        }
+        // A name, an interpolation hole or a bracketed selection is a value
+        // this frontend only has at run time; a fork's left tine is settled
+        // when the train is built, as J's is.
+        Tok::Name(_) | Tok::Param(_) | Tok::RParen | Tok::RBracket | Tok::Niladic(_) => {
+            Err(Error::not_yet("a train whose left tine is a computed value", tines[0].span))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The tail of `toks` when it is a run of tines that names a function: the
+/// value side of `F←+/`, `F←+/÷≢` or `F←2 3⍴⍳`.
+///
+/// A single function is that function; two or more are a train. `None`
+/// where the tail is not a run of tines at all.
+fn tine_run(toks: &[Token], d: Rules) -> Result<Option<Verb>> {
+    if !d.trains || toks.is_empty() {
+        return Ok(None);
+    }
+    if !toks[1..].iter().all(|t| matches!(t.kind, Tok::Func(_))) {
+        return Ok(None);
+    }
+    train(toks)
 }
 
 /// `f[k]` where `f` is a plain function rather than a derived one.
@@ -1566,10 +1715,14 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, d: Rules) -> Re
         }
     }
     let span = Span::new(toks[lo].span.start, toks[start - 1].span.end);
-    // A run of functions where a value belongs is a train in the dialects
-    // that have them, and a syntax error in the ones that do not.
+    // A run of functions is a train, and a train is a function: standing
+    // where a value belongs, it is missing its argument. Parenthesised, it
+    // has already become one function by the time the parser sees it.
     if d.trains && toks[lo..start].iter().all(|t| matches!(t.kind, Tok::Func(_))) {
-        return Err(Error::not_yet("a train (a function derived from a run of functions)", span));
+        return Err(Error::parse(
+            "a train is a function; parenthesise it to apply it to an argument",
+            span,
+        ));
     }
     Err(Error::parse("syntax error", span))
 }
@@ -1679,13 +1832,17 @@ fn parse_primary(
             Ok((inner, l))
         }
         Tok::RBracket => index_brackets(toks, lo, hi, d),
-        // `F←+/` names a function in some dialects. The reference this
-        // frontend follows, GNU APL, rejects it as a syntax error, so it is
-        // not implemented here; J's `mean =. +/ % #` is the spelling libjay
-        // has for the same idea.
+        // `F←+/` names a function. A whole sentence that does so is settled
+        // in `parse_statement`; reaching here means the assignment is
+        // nested inside a larger sentence, which names nothing.
         Tok::Func(_) if hi >= lo + 2 && matches!(toks[hi - 2].kind, Tok::Assign) => {
             let from = if hi >= lo + 3 { toks[hi - 3].span } else { toks[hi - 2].span };
-            Err(Error::not_yet("function assignment (F←+/)", Span::merge(from, t.span)))
+            let span = Span::merge(from, t.span);
+            if d.trains {
+                Err(Error::not_yet("naming a function inside a larger sentence", span))
+            } else {
+                Err(Error::not_yet("function assignment (F←+/)", span))
+            }
         }
         Tok::Func(_) => Err(Error::parse("missing right argument", t.span)),
         Tok::Assign => Err(Error::parse("← needs a value on its right", t.span)),
@@ -2463,7 +2620,7 @@ fn for_header(rest: &[Token], span: Span, d: Rules) -> Result<(String, Expr)> {
 
 /// Parse a token run that has already had its names and dfns folded.
 fn parse_prepared(toks: &[Token], hint: Span, d: Rules) -> Result<Expr> {
-    let toks = fold_paren_funcs(fold_axes(fold_operators(toks.to_vec(), d)?, d)?);
+    let toks = fold_axes(fold_operators(toks.to_vec(), d)?, d)?;
     if toks.is_empty() {
         return Err(Error::parse("this needs an expression", hint));
     }
@@ -2583,7 +2740,8 @@ fn set_scopes(e: &mut Expr, own: &[String]) {
         | Expr::Name(..)
         | Expr::Fused { .. }
         | Expr::Elided { .. }
-        | Expr::VerbDef { .. } => {}
+        | Expr::VerbDef { .. }
+        | Expr::ModDef { .. } => {}
     }
 }
 

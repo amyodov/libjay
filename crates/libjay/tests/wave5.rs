@@ -227,10 +227,11 @@ fn the_levels_apply_a_verb_at_a_boxing_depth() {
         val(Lang::J, "# L: _1 (1 2;3 4)"),
         boxes(&[2], vec![Array::scalar_i64(2), Array::scalar_i64(2)])
     );
-    // There is no dyadic level yet, and it says so.
-    let e = err(Lang::J, "2 (+ L: 0) (1;2)");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("dyadic level"), "{}", e.msg);
+    // The dyadic level landed in wave 6; tests/wave6.rs carries it.
+    assert_eq!(
+        val(Lang::J, "2 (+ L: 0) (1;2)"),
+        boxes(&[2], vec![Array::scalar_i64(3), Array::scalar_i64(4)])
+    );
 }
 
 // --- J: the polynomial verbs ----------------------------------------------
@@ -467,7 +468,6 @@ fn the_gaps_this_wave_leaves_name_themselves() {
         (Lang::J, "(+:`-: `:0) 5", "evoke gerund"),
         (Lang::J, "s: <'abc'", "symbols"),
         (Lang::J, "$. 1 2", "sparse"),
-        (Lang::J, "(0 1 H. 1) 2", "hypergeometric"),
         (Lang::J, "(^ t. 3) 0", "Taylor"),
         (Lang::J, "(^ t: 3) 0", "Taylor"),
         (Lang::J, "e. 1 2", "raze-in"),

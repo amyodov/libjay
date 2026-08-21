@@ -180,6 +180,14 @@ fn expr_lines(e: &Expr, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             );
             verb_lines(verb, depth + 1, p, tr, out);
         }
+        Expr::ModDef { name, spelling, conjunction, .. } => {
+            let what = if *conjunction { "conjunction" } else { "adverb" };
+            let _ = writeln!(
+                out,
+                "{pad}{what} definition {name} = {spelling}  \
+                 [named at parse time; no runtime work]"
+            );
+        }
         Expr::AmendIndex { name, slots, value, .. } => {
             let shown: Vec<String> = slots
                 .iter()
@@ -442,6 +450,7 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             head(out, &format!("along axis {k}"));
             verb_lines(u, depth + 1, p, tr, out);
         }
+        Verb::Hypergeometric { .. } => head(out, "hypergeometric H. (a series)"),
         Verb::Beside(f, g) => {
             head(out, "beside ∘ (the right argument is prepared)");
             verb_lines(f, depth + 1, p, tr, out);
