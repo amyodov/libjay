@@ -1,0 +1,4 @@
+# What fetch-results.sh brings down. A cloud number enters the repository
+# only when the owner writes it into bench/README.md by hand, with the
+# provenance block those tables carry.
+results/

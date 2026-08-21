@@ -1109,4 +1109,7 @@ What is left, in the order the measurements rank it:
 6. **AVX-512 measurement.** The x86-64-v4 rung is built and symbol-checked
    (see "SIMD dispatch") but has never run: no machine on hand has the
    hardware. Pending a runner that does; `tests/simd.rs --nocapture` reports
-   itself the day one shows up in CI.
+   itself the day one shows up in CI. [bench/cloud/](cloud/README.md) is the
+   designed way to rent one — along with a Graviton box for the first ARM
+   numbers and an NVIDIA box for the f64 shader path, which has likewise
+   never executed anywhere. Designed, not run.

@@ -1615,3 +1615,89 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
     below that bound it is now a refcount bump on the same buffer, foreign
     (Arrow, numpy) as well as owned. A shape that has to go round the
     ravel again still copies, because it must. `,` already shared.
+- 2026-08-22 — One-shot AWS spot runs, designed and not executed
+  (bench/cloud/). Three claims in this repository cannot be checked on the
+  machine that made them: the x86-64-v4 clones are built and symbol-checked
+  but have never run, the GPU f64 shader path has never executed anywhere
+  (Metal has no `double`), and there are no ARM numbers at all — the
+  linux-aarch64 wheel publish.yml cross-compiles is marked `smoke: false`
+  because the runner that builds it cannot run it. A rented machine answers
+  all three; the design question was how to rent one from an unattended
+  agent without either the credentials or the bill becoming a problem.
+
+  **Two identities, and the launching one is nearly powerless.** A dedicated
+  IAM user whose key lives only in the owner's `~/.aws` may launch spot
+  instances of four types in one region from Amazon-published AMIs into one
+  security group, terminate what it tagged, read the region's EC2
+  inventory, and read and write three prefixes of one bucket. It may not
+  launch on demand (an explicit `Deny` keyed on `ec2:InstanceMarketType`,
+  which also fires when the key is absent), may not launch through Fleet,
+  Spot Fleet, Auto Scaling, Batch, ECS, EKS, Lambda or SageMaker (each
+  explicitly denied, since each would sidestep the `RunInstances`
+  conditions), and may not create or modify any IAM identity. The instance
+  is the second identity, a role that can write one S3 prefix and one log
+  group and has no EC2 permission whatever — not even to terminate itself,
+  because it does not need one.
+
+  **What bounds a thief is a quota, not a policy.** IAM has no condition key
+  for how many instances may exist, so the answer is the account's spot vCPU
+  quotas, lowered as an owner setup step to 16 Standard and 4 G. With those,
+  and with AWS never billing spot above the on-demand rate, the worst
+  simultaneous burn is about \$1.72/hour. That is the honest number; the
+  Budget alerts are what keep the exposure to hours rather than a month.
+  Named rather than hidden: `ec2:Describe*` cannot be resource-scoped, so
+  the region's inventory leaks; and the security group's egress is
+  80/443/53/123 to anywhere, because the bootstrap needs PyPI, apt and two
+  tarballs, so mining over 443 is possible and it is the quota that stops
+  it. Mirroring the inputs into the bucket would let egress drop to the S3
+  endpoint and close that; it is logged as an open question, not done.
+
+  **The cost bound is arithmetic, not a promise.** A spot price cap times a
+  lifetime three independent timers enforce, plus the volume, is a number:
+  no run can cost more than \$2.33, and the default profiles are \$0.47 to
+  \$1.21. The instance is launched with
+  `instance-initiated-shutdown-behavior=terminate` and the launcher reads
+  that attribute back and terminates immediately if EC2 did not take it —
+  the whole story rests on that one attribute, so it is verified rather than
+  assumed. There is no TTL sweeper, because a sweeper is infrastructure this
+  design owns none of; "cannot cost more than \$2.33" is the stronger
+  statement anyway.
+
+  **The owner rejected a per-launch confirmation, so fourteen checks replace
+  it**, each a refusal rather than a warning: placeholders present, caller
+  is not the dedicated user, another tagged instance is alive (concurrency
+  one), month-to-date spend over a guard read two ways, a lifetime over the
+  ceiling, a market price over the cap, a `run-instances --dry-run` that the
+  policy would refuse, and a ledger written to S3 before the launch. The
+  spend guard is deliberately two readings because neither is enough: the
+  Budget's actual covers the whole account but refreshes a few times a day,
+  and the ledger is exact but only knows launches this script made. Cost
+  Explorer was considered and rejected — \$0.01 a call, its own permission,
+  and no fresher than the Budget.
+
+  **Prebuild: the CI wheel, relayed through S3 — with one correction.** The
+  measuring half needs no compiler: manylinux wheels exist for both linux
+  architectures, as do polars', numpy's and numba's, so a released tag
+  installs from PyPI and an unreleased tree takes publish.yml's dry-run
+  artifact, which the LOCAL orchestrator downloads under the owner's `gh`
+  login and uploads to the run prefix — the instance holds no GitHub
+  credential and reads S3 only. But the VALIDATING half is Rust: the AVX-512
+  equivalence battery is `tests/simd.rs` and the GPU f64 battery is
+  `tests/device.rs`, neither reachable from a wheel, so those two profiles
+  install the pinned toolchain as well. The wheel produces the numbers and
+  the toolchain produces the verdicts. A custom AMI was rejected (minutes
+  saved against a permanent lifecycle burden at one run a week) and
+  cross-compiling from the Mac was rejected (CI already builds exactly these
+  wheels, on the pinned compiler, from a clean checkout). Inputs are pinned
+  by sha256 in the user-data, which is the one thing a stolen key cannot
+  rewrite, so swapping a staged wheel before boot buys nothing.
+
+  **Observability without a way in.** No SSH, no key pair, no ingress, no
+  SSM in v1. The instance syncs its whole log to S3 every thirty seconds
+  along with a one-word status and a file per phase, and mirrors the log to
+  CloudWatch through a small `PutLogEvents` pump — S3 primary because it
+  needs nothing the upload does not already need, CloudWatch secondary
+  because the console is convenient. The CloudWatch agent was considered and
+  not used: an install that can fail before any channel exists, to cover
+  ground three lines of shell already cover. Phases upload as they finish,
+  so a run that dies in its fourth still delivers three.

@@ -1,0 +1,53 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteThisRunsOutputAndNothingElse",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
+      "Resource": "arn:aws:s3:::OWNER-BUCKET-NAME/runs/*"
+    },
+    {
+      "Sid": "ReadTheInputsStagedForIt",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": [
+        "arn:aws:s3:::OWNER-BUCKET-NAME/runs/*",
+        "arn:aws:s3:::OWNER-BUCKET-NAME/prebuilt/*"
+      ]
+    },
+    {
+      "Sid": "CacheAnOracleBuildForTheNextRun",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
+      "Resource": "arn:aws:s3:::OWNER-BUCKET-NAME/prebuilt/*"
+    },
+    {
+      "Sid": "ListOnlyThoseTwoPrefixes",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::OWNER-BUCKET-NAME",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["runs/*", "prebuilt/*", "runs", "prebuilt"]
+        }
+      }
+    },
+    {
+      "Sid": "StreamIntoTheOneLogGroupButDoNotCreateIt",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams"
+      ],
+      "Resource": "arn:aws:logs:OWNER-REGION:OWNER-ACCOUNT-ID:log-group:/libjay/bench:*"
+    },
+    {
+      "Sid": "TheInstanceNeedsNoEc2PermissionAtAll",
+      "Effect": "Deny",
+      "Action": ["ec2:*", "iam:*", "sts:AssumeRole", "s3:Delete*", "logs:CreateLogGroup"],
+      "Resource": "*"
+    }
+  ]
+}

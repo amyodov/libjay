@@ -33,6 +33,11 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - J's number reading, the dyad of `".`: the numbers a line of text spells,
   with a value of your choosing standing in for anything that is not one —
   `0 ". '1 2 x 3'` is `1 2 0 3`.
+- `bench/cloud/`: a design, scripts and IAM policies for one-shot rented
+  spot-instance runs — AVX-512, Graviton and an NVIDIA GPU, the three
+  machines this project's own numbers have never been taken on. Nothing in
+  it has been executed and every script refuses to start until the owner
+  fills in his account's details.
 
 ### Changed
 

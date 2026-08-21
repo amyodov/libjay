@@ -1,0 +1,258 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RunOnlyOurInstanceTypesOnlyAsSpotOnlyTagged",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:OWNER-REGION:OWNER-ACCOUNT-ID:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:InstanceType": [
+            "c7i.4xlarge",
+            "c7g.4xlarge",
+            "g5.xlarge",
+            "g6.xlarge"
+          ],
+          "ec2:InstanceMarketType": "spot",
+          "aws:RequestTag/Project": "libjay-bench",
+          "aws:RequestedRegion": "OWNER-REGION"
+        },
+        "Null": {
+          "aws:RequestTag/RunId": "false",
+          "aws:RequestTag/Profile": "false",
+          "aws:RequestTag/Expires": "false"
+        }
+      }
+    },
+    {
+      "Sid": "RunOnlyAmazonPublishedImages",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:OWNER-REGION::image/ami-*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Owner": "amazon",
+          "aws:RequestedRegion": "OWNER-REGION"
+        }
+      }
+    },
+    {
+      "Sid": "RunOnlyASmallGp3RootVolume",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:OWNER-REGION:OWNER-ACCOUNT-ID:volume/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:VolumeType": "gp3",
+          "aws:RequestedRegion": "OWNER-REGION"
+        },
+        "NumericLessThanEquals": { "ec2:VolumeSize": "200" }
+      }
+    },
+    {
+      "Sid": "RunOnlyInTheBenchSecurityGroupAndVpc",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": [
+        "arn:aws:ec2:OWNER-REGION:OWNER-ACCOUNT-ID:security-group/OWNER-SECURITY-GROUP-ID",
+        "arn:aws:ec2:OWNER-REGION:OWNER-ACCOUNT-ID:subnet/*",
+        "arn:aws:ec2:OWNER-REGION:OWNER-ACCOUNT-ID:network-interface/*",
+        "arn:aws:ec2:OWNER-REGION:OWNER-ACCOUNT-ID:spot-instances-request/*"
+      ],
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "OWNER-REGION" }
+      }
+    },
+    {
+      "Sid": "TagOnlyWhileCreating",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "arn:aws:ec2:OWNER-REGION:OWNER-ACCOUNT-ID:*/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": "RunInstances",
+          "aws:RequestedRegion": "OWNER-REGION"
+        }
+      }
+    },
+    {
+      "Sid": "PassOnlyTheBenchInstanceRoleAndOnlyToEc2",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::OWNER-ACCOUNT-ID:role/libjay-bench-instance",
+      "Condition": {
+        "StringEquals": { "iam:PassedToService": "ec2.amazonaws.com" }
+      }
+    },
+    {
+      "Sid": "TerminateOnlyOurOwnTaggedInstances",
+      "Effect": "Allow",
+      "Action": "ec2:TerminateInstances",
+      "Resource": "arn:aws:ec2:OWNER-REGION:OWNER-ACCOUNT-ID:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/Project": "libjay-bench",
+          "aws:RequestedRegion": "OWNER-REGION"
+        }
+      }
+    },
+    {
+      "Sid": "ReadOnlyEc2Inventory",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceAttribute",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeInstanceTypeOfferings",
+        "ec2:DescribeImages",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeAvailabilityZones",
+        "ec2:DescribeSpotPriceHistory",
+        "ec2:DescribeSpotInstanceRequests",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeTags"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "OWNER-REGION" }
+      }
+    },
+    {
+      "Sid": "ResolveOnlyThePublicAmiParameters",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "ssm:GetParameters"],
+      "Resource": [
+        "arn:aws:ssm:OWNER-REGION::parameter/aws/service/ami-amazon-linux-latest/*",
+        "arn:aws:ssm:OWNER-REGION::parameter/aws/service/deeplearning/*"
+      ]
+    },
+    {
+      "Sid": "OneBucketThreePrefixes",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": [
+        "arn:aws:s3:::OWNER-BUCKET-NAME/runs/*",
+        "arn:aws:s3:::OWNER-BUCKET-NAME/ledger/*",
+        "arn:aws:s3:::OWNER-BUCKET-NAME/prebuilt/*"
+      ]
+    },
+    {
+      "Sid": "ListOnlyThoseThreePrefixes",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::OWNER-BUCKET-NAME",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["runs/*", "ledger/*", "prebuilt/*", "runs", "ledger", "prebuilt"]
+        }
+      }
+    },
+    {
+      "Sid": "ReadTheRunLogsButWriteNone",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogStreams",
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents"
+      ],
+      "Resource": "arn:aws:logs:OWNER-REGION:OWNER-ACCOUNT-ID:log-group:/libjay/bench:*"
+    },
+    {
+      "Sid": "ReadTheMonthlyBudget",
+      "Effect": "Allow",
+      "Action": "budgets:ViewBudget",
+      "Resource": "arn:aws:budgets::OWNER-ACCOUNT-ID:budget/libjay-monthly"
+    },
+    {
+      "Sid": "DenyAnyLaunchThatIsNotSpot",
+      "Effect": "Deny",
+      "Action": "ec2:RunInstances",
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": { "ec2:InstanceMarketType": "spot" }
+      }
+    },
+    {
+      "Sid": "DenyEveryOtherWayToStartCompute",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:CreateFleet",
+        "ec2:RequestSpotFleet",
+        "ec2:RequestSpotInstances",
+        "ec2:RunScheduledInstances",
+        "ec2:CreateCapacityReservation",
+        "ec2:CreateLaunchTemplate",
+        "ec2:CreateLaunchTemplateVersion",
+        "ec2:PurchaseHostReservation",
+        "ec2:AllocateHosts",
+        "ec2:StartInstances",
+        "ec2:ModifyInstanceAttribute",
+        "ec2:CreateImage",
+        "ec2:CopyImage",
+        "ec2:CreateSnapshot",
+        "ec2:CreateVolume",
+        "ec2:CreateSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:CreateVpc",
+        "ec2:CreateSubnet",
+        "ec2:CreateNatGateway",
+        "autoscaling:*",
+        "batch:*",
+        "ecs:*",
+        "eks:*",
+        "emr:*",
+        "sagemaker:*",
+        "lambda:*",
+        "lightsail:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyEveryPathToMorePrivilege",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreateUser",
+        "iam:CreateRole",
+        "iam:CreateAccessKey",
+        "iam:CreateLoginProfile",
+        "iam:UpdateLoginProfile",
+        "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:CreateServiceLinkedRole",
+        "iam:AttachUserPolicy",
+        "iam:AttachRolePolicy",
+        "iam:AttachGroupPolicy",
+        "iam:PutUserPolicy",
+        "iam:PutRolePolicy",
+        "iam:PutGroupPolicy",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:DeleteUserPermissionsBoundary",
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PutUserPermissionsBoundary",
+        "iam:PutRolePermissionsBoundary",
+        "sts:AssumeRole",
+        "organizations:*",
+        "account:*",
+        "billing:*",
+        "aws-portal:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyEc2AndLogsOutsideTheOneRegion",
+      "Effect": "Deny",
+      "Action": ["ec2:*", "logs:*", "ssm:*"],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": { "aws:RequestedRegion": "OWNER-REGION" }
+      }
+    }
+  ]
+}

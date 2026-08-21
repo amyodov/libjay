@@ -1,0 +1,37 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RefuseAnythingNotOverTls",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::OWNER-BUCKET-NAME",
+        "arn:aws:s3:::OWNER-BUCKET-NAME/*"
+      ],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+    },
+    {
+      "Sid": "OnlyTheTwoBenchIdentitiesAndTheOwner",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::OWNER-BUCKET-NAME",
+        "arn:aws:s3:::OWNER-BUCKET-NAME/*"
+      ],
+      "Condition": {
+        "StringNotLike": {
+          "aws:PrincipalArn": [
+            "arn:aws:iam::OWNER-ACCOUNT-ID:user/libjay-bench-launcher",
+            "arn:aws:iam::OWNER-ACCOUNT-ID:role/libjay-bench-instance",
+            "arn:aws:sts::OWNER-ACCOUNT-ID:assumed-role/libjay-bench-instance/*",
+            "arn:aws:iam::OWNER-ACCOUNT-ID:root",
+            "arn:aws:iam::OWNER-ACCOUNT-ID:user/OWNER-ADMIN-USER"
+          ]
+        }
+      }
+    }
+  ]
+}
