@@ -641,3 +641,80 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   (`Agreement::LeadingPrefix`) rather than applied everywhere, which is the
   same axis the two languages already differ on: J fills where APL insists
   on conformability. One `catenate` still serves both; it takes the flag.
+
+- 2026-08-21 — **Coverage wave 5.** Five representation choices are worth
+  recording; the rest is ordinary implementation and lives in the status
+  matrix and in docs/coverage.md.
+
+  **A mixed simple array is a box of simple scalars.** APL2's `1 'a'` has
+  two items, shape `2` and depth 1: a SIMPLE array holding values of
+  different types. libjay has no heterogeneous dense buffer and does not
+  want one — every dtype in `Data` is a flat buffer of one kind, and that
+  is what makes the boundary zero-copy. The representation chosen instead
+  is the one APL itself makes unambiguous: a boxed array whose every
+  element is a simple SCALAR. In APL enclosing a scalar is the identity
+  (`⊂5` is `5`), so no other value can be spelled that way, and the depth
+  rule already in place — one more than the deepest content — reports 1
+  without a special case. Three places read the shape and act on it: the
+  formatter draws such an array like a plain one (no nested spacing), `⊃`
+  answers it with itself rather than taking its cells apart, and the
+  stranding verb builds one where the types will not promote. No flag, no
+  new dtype, no change to the buffers. The cost is that J, whose `<1` IS a
+  real box, must never take the same shortcut: the two readings are kept
+  apart by asking whether the elements share a type at all, which they do
+  in J's `1;2` and do not in APL's `1 'a'`.
+
+  **A memo's cache belongs to the derived verb.** J's `u M.` keeps what u
+  has already answered. The cache is an `Arc<Mutex<HashMap<…>>>` held by
+  the `Verb::Memo` node, so every clone of the derived verb shares it and
+  it lives exactly as long as the compiled program does — not longer (no
+  process-wide table to grow without bound) and not shorter (a cache reset
+  between applications would be no cache at all). The key is the arguments
+  encoded exactly: valence, then shape and dtype and one `u64` per element,
+  recursively for a box. Exact integers and rationals have no cheap key, so
+  a memo over them simply does not cache rather than risking a wrong hit —
+  the answer is the same either way, which is the property that makes a
+  memo safe to skip. `is_pure` on a memo is `is_pure` on the verb inside
+  it: answering from a cache is only an optimisation for a verb whose
+  answer depends on nothing else.
+
+  **`→` runs the body as lines, not as a block.** Everything else in the
+  IR is structured: a block's value is its last sentence's, and control
+  words nest. APL's branch is a goto, and forcing it into that shape would
+  have meant rewriting the body into a state machine. Instead `Flow` gained
+  a `Goto(usize)` that leaves every enclosing block the way `break.` does,
+  and a definition's body is run by a program counter rather than by
+  `run_block`. Labels are not statements: they are recorded on the
+  `ExplicitDef` as (name, statement index) and bound as local values —
+  their line numbers — when the call's frame is built, which is exactly
+  what makes `→(cond)/LABEL` work with no new syntax. The restriction that
+  follows is named rather than papered over: a control structure folds
+  several lines into one statement, so a label and a control structure in
+  one definition is refused, and the reference has no control structures to
+  disagree with that.
+
+  **A niladic definition is called by naming it.** `∇Z←H ⋄ Z←42 ⋄ ∇` makes
+  `H` a value, not a function, and there is no `⍎`-free way to write "apply
+  H to nothing". The definition is stored as an ordinary `ExplicitDef`
+  whose right-argument name is `"(no argument)"` — a name no sentence can
+  spell, so the body cannot read the argument it never gets — and the
+  frontend, when substituting names, turns such a name into a call rather
+  than into a function token. Nothing in the evaluator changed.
+
+  **A gerund is still a parse fragment.** Wave 4 recorded the reasoning and
+  wave 5 leaves it standing: `` `: `` (evoke gerund) needs a gerund that is
+  a real boxed noun, which needs `Array` to be able to carry a verb. The
+  three forms were probed against the reference: `` `:0 `` applies each verb
+  of the gerund to the argument in turn and frames the answers, which is
+  plain enough; `` `:3 `` and `` `:6 `` build trains, and what the reference
+  answers for them was not pinned down far enough to implement from. Both
+  the data model and that measurement belong to the wave that wants J's
+  adverb and conjunction definitions anyway.
+
+  **The counting verbs carry exactness.** `$`, `#`, `#.`, `#:`, `p:` and
+  `q:` answered with machine integers where J answers with extended ones —
+  the values agreed and only the type differed, which was recorded as a
+  divergence. It is gone: those six now widen their answer when an argument
+  is extended or rational, which is a two-line rule (`carry_exact`) rather
+  than a change to how they compute. `3!:0` would now report the same
+  number on both sides.

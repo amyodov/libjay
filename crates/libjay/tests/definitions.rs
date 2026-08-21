@@ -152,7 +152,7 @@ fn control_words_libjay_has_not_are_named(#[case] src: &str, #[case] msg: &str) 
 /// not an error the program can handle, so it goes straight through.
 #[test]
 fn try_does_not_swallow_a_not_yet() {
-    let e = fails(Lang::J, "f =. 3 : 0\ntry.\n{:: y\ncatch.\n0\nend.\n)\nf 1");
+    let e = fails(Lang::J, "f =. 3 : 0\ntry.\ne. y\ncatch.\n0\nend.\n)\nf 1");
     assert_eq!(e.kind, ErrorKind::NotYet);
 }
 
@@ -270,17 +270,50 @@ fn a_monadic_dfn_refuses_a_left_argument_it_has_no_name_for() {
 }
 
 #[test]
-fn a_dfn_operator_is_a_named_gap() {
-    let e = fails(Lang::Apl, "F←{⍺⍺ ⍵}");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("dfn operators"), "{}", e.msg);
+fn a_dfn_that_mentions_the_operand_names_is_an_operator() {
+    // `⍺⍺` and `⍵⍵` are the operands; the dfn is applied to functions.
+    assert_eq!(apl("+{⍺⍺/⍵}1 2 3"), vec![6]);
+    assert_eq!(apl("×{⍺⍺/⍵}1 2 3 4"), vec![24]);
+    // A named operator is still an operator in the sentences that follow.
+    assert_eq!(apl("TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ -TWICE 5"), vec![5]);
+    assert_eq!(apl("BOTH←{(⍺⍺ ⍵),⍵⍵ ⍵} ⋄ -BOTH+ 3"), vec![-3, 3]);
+    // An operator that asks for a right operand and is given none says so.
+    let e = fails(Lang::Apl, "-{⍺⍺ ⍵⍵ ⍵}5");
+    assert!(e.msg.contains("⍵⍵ needs a function"), "{}", e.msg);
 }
 
 #[test]
-fn a_branch_arrow_is_a_named_gap() {
+fn a_branch_outside_a_definition_has_nowhere_to_go() {
     let e = fails(Lang::Apl, "→3");
+    assert_eq!(e.kind, ErrorKind::Parse);
+    assert!(e.msg.contains("∇ definition"), "{}", e.msg);
+}
+
+#[test]
+fn a_branch_moves_to_the_line_a_label_names() {
+    // A loop written the way APL wrote loops before control structures.
+    assert_eq!(
+        apl("∇Z←F N\nZ←0\nL1:\n→(N=0)/END\nZ←Z+N\nN←N-1\n→L1\nEND:\n∇\nF 5"),
+        vec![15]
+    );
+    // `→0` leaves the definition, and so does any other line it has not.
+    assert_eq!(apl("∇Z←G N\n→(N>3)/BIG\nZ←1\n→0\nBIG:\nZ←2\n∇\nG 5"), vec![2]);
+    assert_eq!(apl("∇Z←G N\n→(N>3)/BIG\nZ←1\n→0\nBIG:\nZ←2\n∇\nG 1"), vec![1]);
+    // An empty target falls through to the next line.
+    assert_eq!(apl("∇Z←K N\nZ←1\n→⍬\nZ←2\n∇\nK 0"), vec![2]);
+    // A label and a control structure in one definition would make the
+    // line numbers a label stands for mean nothing.
+    let e = fails(Lang::Apl, "∇Z←F R\nL:\n:If R\nZ←1\n:EndIf\n∇\nF 1");
     assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("branching"), "{}", e.msg);
+    assert!(e.msg.contains("label"), "{}", e.msg);
+}
+
+#[test]
+fn a_niladic_definition_is_called_by_naming_it() {
+    assert_eq!(apl("∇Z←H\nZ←42\n∇\nH"), vec![42]);
+    assert_eq!(apl("∇Z←H\nZ←42\n∇\n2×H"), vec![84]);
+    assert_eq!(apl("∇Z←H;T\nT←6\nZ←T×7\n∇\nH"), vec![42]);
+    assert_eq!(apl("∇Z←P\nZ←⍳4\n∇\n+/P"), vec![10]);
 }
 
 // --- APL: ∇-definitions and control structures ---------------------------
@@ -326,7 +359,6 @@ fn a_del_definition_writes_globals_unless_the_header_declares_them() {
 #[case("∇Z←F R\n:If R\nZ←1\n∇\nF 1", ":EndIf")]
 #[case("∇Z←F R\nZ←1\n:EndIf\n∇\nF 1", "no matching opening word")]
 #[case("∇Z←F R\nZ←1", "no closing ∇")]
-#[case("∇Z←F\nZ←1\n∇\nF", "niladic")]
 fn apl_definition_diagnostics(#[case] src: &str, #[case] msg: &str) {
     let e = fails(Lang::Apl, src);
     assert!(e.msg.contains(msg), "{src}: {}", e.msg);

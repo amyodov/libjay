@@ -53,12 +53,21 @@ fn parse_statement(
     // `F←{⍵×2}` names a function: the sentence does no work at run time, and
     // later sentences read `F` as the function itself.
     if let [name, assign, func] = &sentence[..] {
-        if let (Tok::Name(n), Tok::Assign, Tok::Func(v)) = (&name.kind, &assign.kind, &func.kind) {
-            let span = Span::merge(name.span, func.span);
-            if !in_def {
-                verbs.insert(n.clone(), v.clone());
+        if let (Tok::Name(n), Tok::Assign) = (&name.kind, &assign.kind) {
+            // A dfn that mentions `⍺⍺` or `⍵⍵` is an operator; naming it
+            // keeps it one, waiting for the operands.
+            let named = match &func.kind {
+                Tok::Func(v) => Some(v.clone()),
+                Tok::UserOp { def, omega } => Some(unapplied_op(def.clone(), *omega)),
+                _ => None,
+            };
+            if let Some(v) = named {
+                let span = Span::merge(name.span, func.span);
+                if !in_def {
+                    verbs.insert(n.clone(), v.clone());
+                }
+                return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
             }
-            return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v.clone(), span }));
         }
     }
     let toks = fold_paren_funcs(fold_axes(fold_operators(sentence, origin)?, origin)?);
@@ -68,6 +77,12 @@ fn parse_statement(
     if let Some(t) = toks.iter().find(|t| matches!(t.kind, Tok::Control(_))) {
         return Err(Error::parse(
             "control structures are only meaningful inside a ∇ definition",
+            t.span,
+        ));
+    }
+    if let Some(t) = toks.iter().find(|t| matches!(t.kind, Tok::Arrow)) {
+        return Err(Error::parse(
+            "→ branches, and only a line of a ∇ definition may begin with it",
             t.span,
         ));
     }
@@ -89,7 +104,13 @@ fn substitute_verbs(mut toks: Vec<Token>, verbs: &HashMap<String, Verb>) -> Vec<
             continue;
         }
         if let Some(v) = verbs.get(n) {
-            toks[i].kind = Tok::Func(v.clone());
+            // A niladic definition is called by naming it, so its name
+            // stands where a value does, not where a function does.
+            toks[i].kind = match as_user_op(v) {
+                Some((def, omega)) => Tok::UserOp { def, omega },
+                None if is_niladic(v) => Tok::Niladic(v.clone()),
+                None => Tok::Func(v.clone()),
+            };
         }
     }
     toks
@@ -123,6 +144,10 @@ enum OpGlyph {
     Jot,
     /// `¨` — each.
     Each,
+    /// `⍛` before: `f⍛g` prepares the LEFT argument with f.
+    Before,
+    /// `⌸` key (Dyalog): each distinct major cell with what shares it.
+    Key,
 }
 
 impl OpGlyph {
@@ -138,6 +163,8 @@ impl OpGlyph {
             OpGlyph::JotDot | OpGlyph::Jot => '∘',
             OpGlyph::Over => '⍥',
             OpGlyph::Each => '¨',
+            OpGlyph::Before => '⍛',
+            OpGlyph::Key => '⌸',
         }
     }
 }
@@ -174,6 +201,14 @@ enum Tok {
     Separator,
     /// The `:` of a dfn's guard, `cond:expr`.
     Colon,
+    /// `→` — the branch, which only a `∇` definition's line may open with.
+    Arrow,
+    /// A niladic `∇` definition named where a value belongs: naming it is
+    /// what calls it.
+    Niladic(Verb),
+    /// A dfn that mentions `⍺⍺` or `⍵⍵`: an operator, waiting for its
+    /// operands. `omega` says whether it wants one on its right too.
+    UserOp { def: Verb, omega: bool },
     /// `∇`: a definition's bracket outside a dfn, a self-reference inside.
     Del,
     /// A control word, `:If` and its family, without the colon.
@@ -191,8 +226,43 @@ struct Token {
 fn is_operand_end(k: &Tok) -> bool {
     matches!(
         k,
-        Tok::Value(_) | Tok::Nums(_) | Tok::Param(_) | Tok::Name(_) | Tok::RParen | Tok::RBracket
+        Tok::Value(_)
+            | Tok::Nums(_)
+            | Tok::Param(_)
+            | Tok::Name(_)
+            | Tok::Niladic(_)
+            | Tok::RParen
+            | Tok::RBracket
     )
+}
+
+/// A user-written operator with no operands yet: the two names stand in
+/// for them until it is applied, which is how a NAMED operator survives
+/// from the sentence that defined it to the one that uses it.
+fn unapplied_op(def: Verb, omega: bool) -> Verb {
+    Verb::UserDerived {
+        def: Box::new(def),
+        alpha: Box::new(Verb::Named("⍺⍺".to_string())),
+        omega: omega.then(|| Box::new(Verb::Named("⍵⍵".to_string()))),
+    }
+}
+
+/// The definition and right-operand appetite of an operator that is still
+/// waiting for its operands.
+fn as_user_op(v: &Verb) -> Option<(Verb, bool)> {
+    match v {
+        Verb::UserDerived { def, alpha, omega }
+            if matches!(&**alpha, Verb::Named(n) if n == "⍺⍺") =>
+        {
+            Some(((**def).clone(), omega.is_some()))
+        }
+        _ => None,
+    }
+}
+
+/// True for a `∇` definition that takes no argument.
+fn is_niladic(v: &Verb) -> bool {
+    matches!(v, Verb::Explicit(d) if d.left.is_none() && d.right == crate::ir::NILADIC)
 }
 
 /// The array a literal token holds.
@@ -367,7 +437,7 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '⍕' => Prim {
             name: "⍕",
             monad: M::Format,
-            dyad: D::NotYet("format with a specification (dyadic ⍕)"),
+            dyad: D::FormatSpec,
             ranks: [RANK_INF, 1, RANK_INF],
         },
         // `⊥` and `⊤` have no monadic meaning in APL; J spells those `#.`
@@ -402,6 +472,14 @@ fn prim_for(ch: char, origin: i64) -> Option<Prim> {
         '⊂' => Prim {
             name: "⊂",
             monad: M::Enclose(Enclose::ExceptSimpleScalar),
+            dyad: D::PartitionEnclose,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        },
+        // Dyalog's `⊆`: nest monadically, and the partition GNU APL spells
+        // `⊂` dyadically. GNU APL has neither, so both follow Dyalog.
+        '⊆' => Prim {
+            name: "⊆",
+            monad: M::Nest,
             dyad: D::PartitionEnclose,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
@@ -543,6 +621,8 @@ fn op_for(ch: char) -> Option<OpGlyph> {
         '∘' => Some(OpGlyph::Jot),
         '⍥' => Some(OpGlyph::Over),
         '¨' => Some(OpGlyph::Each),
+        '⍛' => Some(OpGlyph::Before),
+        '⌸' => Some(OpGlyph::Key),
         _ => None,
     }
 }
@@ -707,10 +787,11 @@ fn lex_text(
                 i = j;
             }
             '→' => {
-                return Err(Error::not_yet(
-                    "branching (→ with a label)",
-                    Span::new(offset + i, offset + i + clen),
-                ));
+                cur.push(Token {
+                    kind: Tok::Arrow,
+                    span: Span::new(offset + i, offset + i + clen),
+                });
+                i += clen;
             }
             // `⍬` is the empty numeric vector, written as a constant.
             '⍬' => {
@@ -1024,6 +1105,35 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
     let mut out: Vec<Token> = Vec::new();
     let mut it = toks.into_iter().peekable();
     while let Some(t) = it.next() {
+        // A dfn that mentions `⍺⍺` or `⍵⍵` is an operator: it takes the
+        // function on its left, and one on its right where it asked for it.
+        if let Tok::UserOp { def, omega } = &t.kind {
+            let (def, omega) = (def.clone(), *omega);
+            let right = if omega {
+                match it.peek() {
+                    Some(tok) if matches!(tok.kind, Tok::Func(_)) => {
+                        let g = it.next().expect("peeked");
+                        let Tok::Func(g) = g.kind else { unreachable!("checked above") };
+                        Some(Box::new(g))
+                    }
+                    _ => {
+                        return Err(Error::parse("⍵⍵ needs a function on the operator's right", t.span));
+                    }
+                }
+            } else {
+                None
+            };
+            let Some(Token { kind: Tok::Func(f), span: fspan }) = out.pop() else {
+                return Err(Error::parse("⍺⍺ needs a function on the operator's left", t.span));
+            };
+            let derived = Verb::UserDerived {
+                def: Box::new(def),
+                alpha: Box::new(f),
+                omega: right,
+            };
+            out.push(Token { kind: Tok::Func(derived), span: Span::merge(fspan, t.span) });
+            continue;
+        }
         let op = match t.kind {
             Tok::Op(op) => op,
             _ => {
@@ -1047,7 +1157,7 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
         }
         // `f∘g` and `f⍥g` need a function on both sides; the right one is
         // taken here so the ordinary "operand to the left" path can run.
-        if matches!(op, OpGlyph::Jot | OpGlyph::Over) {
+        if matches!(op, OpGlyph::Jot | OpGlyph::Over | OpGlyph::Before) {
             let Some(gtok) = it.peek().filter(|x| matches!(x.kind, Tok::Func(_))) else {
                 return Err(Error::not_yet(
                     format!("{} with a value operand", op.glyph()),
@@ -1067,10 +1177,10 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
             let span = Span::merge(fspan, gspan);
             // Beside runs g on the right argument only; over runs it on
             // both. Neither is in GNU APL, so both follow Dyalog.
-            let derived = if op == OpGlyph::Jot {
-                Verb::Beside(Box::new(f), Box::new(g))
-            } else {
-                Verb::Compose(Box::new(f), Box::new(g))
+            let derived = match op {
+                OpGlyph::Jot => Verb::Beside(Box::new(f), Box::new(g)),
+                OpGlyph::Before => Verb::Before(Box::new(f), Box::new(g)),
+                _ => Verb::Compose(Box::new(f), Box::new(g)),
             };
             out.push(Token { kind: Tok::Func(derived), span });
             continue;
@@ -1093,6 +1203,8 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
                     | OpGlyph::JotDot
                     | OpGlyph::Jot
                     | OpGlyph::Over
+                    | OpGlyph::Before
+                    | OpGlyph::Key
                     | OpGlyph::Each => {
                         return Err(Error::parse(
                             format!("{} needs a function to its left", op.glyph()),
@@ -1152,6 +1264,7 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
                 Verb::Windowed(Box::new(Verb::Reduce(Box::new(f))), WindowKind::Scan)
             }
             OpGlyph::Commute => Verb::Commute(Box::new(f)),
+            OpGlyph::Key => Verb::KeyPairs(Box::new(f)),
             // Each: the function runs on the contents of every item and
             // its result goes back into an item. A simple scalar result
             // stays simple, which is APL's enclosure rule.
@@ -1183,11 +1296,17 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
             }
             OpGlyph::Rank => {
                 let spec = match it.peek() {
+                    // `f⍤g` with a function on the right is Dyalog's atop:
+                    // monadically `f g y`, dyadically `f (x g y)`.
                     Some(tok) if matches!(tok.kind, Tok::Func(_)) => {
-                        return Err(Error::not_yet(
-                            "function composition (f⍤g)",
-                            Span::merge(span, tok.span),
-                        ));
+                        let gtok = it.next().unwrap();
+                        let Tok::Func(g) = gtok.kind else { unreachable!("checked above") };
+                        let v = Verb::Atop(Box::new(f), Box::new(g));
+                        out.push(Token {
+                            kind: Tok::Func(v),
+                            span: Span::merge(span, gtok.span),
+                        });
+                        continue;
                     }
                     Some(tok) if literal(&tok.kind).is_some() => it.next().unwrap(),
                     _ => {
@@ -1203,8 +1322,8 @@ fn fold_operators(toks: Vec<Token>, origin: i64) -> Result<Vec<Token>> {
                 out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
                 continue;
             }
-            // Both are answered before the left operand is taken.
-            OpGlyph::JotDot | OpGlyph::Jot | OpGlyph::Over => {
+            // These are answered before the left operand is taken.
+            OpGlyph::JotDot | OpGlyph::Jot | OpGlyph::Over | OpGlyph::Before => {
                 unreachable!("handled above")
             }
         };
@@ -1506,6 +1625,16 @@ fn parse_primary(
         Tok::Value(a) | Tok::Nums(a) => Ok((Expr::Const(a.clone(), t.span), hi - 1)),
         Tok::Param(i) => Ok((Expr::Param(*i, t.span), hi - 1)),
         Tok::Name(n) => Ok((Expr::Name(n.clone(), t.span), hi - 1)),
+        // Naming a niladic definition runs it; the argument it is handed
+        // is the empty one its body cannot reach.
+        Tok::Niladic(v) => Ok((
+            Expr::Monad {
+                verb: v.clone(),
+                y: Box::new(Expr::Const(Array::empty(crate::dtype::DType::I64), t.span)),
+                span: t.span,
+            },
+            hi - 1,
+        )),
         Tok::RParen => {
             let l = match_lparen(toks, lo, hi - 1)?;
             let hint = Span::merge(toks[l].span, t.span);
@@ -1528,6 +1657,14 @@ fn parse_primary(
         Tok::LBracket => Err(Error::parse("unmatched [", t.span)),
         Tok::Semi => Err(Error::parse("; is only meaningful inside index brackets", t.span)),
         Tok::Colon => Err(Error::parse(": is only meaningful in a dfn guard", t.span)),
+        Tok::UserOp { .. } => Err(Error::parse(
+            "this dfn mentions ⍺⍺ or ⍵⍵, so it is an operator and needs a function operand",
+            t.span,
+        )),
+        Tok::Arrow => Err(Error::parse(
+            "→ branches, and only a line of a ∇ definition may begin with it",
+            t.span,
+        )),
         Tok::Del => Err(Error::parse("∇ opens a definition; it is not a value", t.span)),
         Tok::Control(w) => Err(Error::parse(
             format!(":{w} is only meaningful inside a ∇ definition"),
@@ -1695,9 +1832,13 @@ fn fold_dfns(
     let close = match_close(&toks, open, &Tok::LBrace, &Tok::RBrace)
         .ok_or_else(|| Error::parse("unmatched {", toks[open].span))?;
     let span = Span::merge(toks[open].span, toks[close].span);
-    let verb = build_dfn(&toks[open + 1..close], origin, verbs)?;
+    let (verb, omega) = build_dfn(&toks[open + 1..close], origin, verbs)?;
     let mut out: Vec<Token> = toks[..open].to_vec();
-    out.push(Token { kind: Tok::Func(verb), span });
+    let kind = match omega {
+        Some(omega) => Tok::UserOp { def: verb, omega },
+        None => Tok::Func(verb),
+    };
+    out.push(Token { kind, span });
     out.extend_from_slice(&toks[close + 1..]);
     // A sentence may hold several dfns side by side.
     fold_dfns(out, origin, verbs)
@@ -1726,26 +1867,38 @@ fn split_statements(toks: &[Token]) -> Vec<&[Token]> {
 
 /// `{ … }`: the body's own words decide the valence, and `∇` in it names
 /// the dfn itself.
-fn build_dfn(body: &[Token], origin: i64, verbs: &HashMap<String, Verb>) -> Result<Verb> {
+/// The verb a dfn defines, and — when it mentions `⍺⍺` or `⍵⍵` — whether
+/// it is an operator wanting a right operand as well as a left one.
+fn build_dfn(
+    body: &[Token],
+    origin: i64,
+    verbs: &HashMap<String, Verb>,
+) -> Result<(Verb, Option<bool>)> {
     let mut depth = 0usize;
     let mut dyadic = false;
-    let mut operator = None;
+    let mut alpha_op = false;
+    let mut omega_op = false;
     for t in body {
         match &t.kind {
             Tok::LBrace => depth += 1,
             Tok::RBrace => depth = depth.saturating_sub(1),
             Tok::Name(n) if depth == 0 && n == "⍺" => dyadic = true,
-            Tok::Name(n) if depth == 0 && (n == "⍺⍺" || n == "⍵⍵") => operator = Some(t.span),
+            Tok::Name(n) if depth == 0 && n == "⍺⍺" => alpha_op = true,
+            Tok::Name(n) if depth == 0 && n == "⍵⍵" => omega_op = true,
             _ => {}
         }
     }
-    if let Some(s) = operator {
-        return Err(Error::not_yet("dfn operators (⍺⍺ and ⍵⍵)", s));
-    }
     let mut inner = verbs.clone();
+    // The operand names are functions inside the body; what they stand for
+    // is bound when the derived function runs.
+    if alpha_op || omega_op {
+        inner.insert("⍺⍺".to_string(), Verb::Named("⍺⍺".to_string()));
+        inner.insert("⍵⍵".to_string(), Verb::Named("⍵⍵".to_string()));
+    }
     let stmts = parse_dfn_body(body, origin, &mut inner)?;
     let pure = stmts.iter().all(is_pure_stmt);
-    Ok(Verb::Explicit(Arc::new(ExplicitDef {
+    let operator = (alpha_op || omega_op).then_some(omega_op);
+    let verb = Verb::Explicit(Arc::new(ExplicitDef {
         name: "{…}".to_string(),
         left: dyadic.then(|| "⍺".to_string()),
         right: "⍵".to_string(),
@@ -1754,8 +1907,10 @@ fn build_dfn(body: &[Token], origin: i64, verbs: &HashMap<String, Verb>) -> Resu
         body: stmts,
         // A dfn that reaches its end without a value has no result to give.
         empty: None,
+        labels: Vec::new(),
         pure,
-    })))
+    }));
+    Ok((verb, operator))
 }
 
 fn parse_dfn_body(
@@ -1853,6 +2008,7 @@ fn is_pure_control(c: &Control) -> bool {
     let all = |b: &Vec<Expr>| b.iter().all(is_pure_stmt);
     match c {
         Control::Return | Control::Break | Control::Continue => true,
+        Control::Branch(target) => is_pure_stmt(target),
         Control::If { arms, otherwise } => {
             arms.iter().all(|a| a.test.as_ref().is_none_or(all) && all(&a.body))
                 && otherwise.as_ref().is_none_or(all)
@@ -1903,11 +2059,24 @@ fn parse_tradfn(
     let mut inner = verbs.clone();
     inner.insert(name.clone(), Verb::Named(name.clone()));
     let mut items = Vec::new();
+    let mut labels: Vec<(String, usize)> = Vec::new();
     for line in &body_lines {
-        items.push(to_item(line.clone(), origin, &mut inner)?);
+        let mut label = None;
+        let item = to_item(line.clone(), origin, &mut inner, &mut label)?;
+        if let Some(name) = label {
+            labels.push((name, items.len()));
+        }
+        items.push(item);
     }
+    let item_count = items.len();
     let mut cursor = AplCursor { items: &items, at: 0 };
     let mut body = parse_apl_block(&mut cursor, &[])?;
+    // A label is the number of a LINE, so the statements have to be the
+    // lines: a control structure folds several of them into one and the
+    // numbering would no longer mean anything.
+    if !labels.is_empty() && body.len() != item_count {
+        return Err(Error::not_yet("a label and a control structure in one definition", span));
+    }
     if let Some(item) = cursor.peek() {
         return Err(Error::parse(
             format!(":{} has no matching opening word", item.word().unwrap_or("?")),
@@ -1932,6 +2101,7 @@ fn parse_tradfn(
         locals,
         body,
         empty: None,
+        labels,
         pure,
     }));
     verbs.insert(name.clone(), verb.clone());
@@ -1968,7 +2138,7 @@ fn parse_header(toks: &[Token], span: Span) -> Result<Header> {
     match names.len() {
         3 => Ok((names[1].clone(), Some(names[0].clone()), names[2].clone(), result, locals)),
         2 => Ok((names[0].clone(), None, names[1].clone(), result, locals)),
-        1 => Err(Error::not_yet("niladic ∇ definitions", span)),
+        1 => Ok((names[0].clone(), None, crate::ir::NILADIC.to_string(), result, locals)),
         _ => Err(Error::parse("a ∇ definition header names a function and its arguments", span)),
     }
 }
@@ -2000,11 +2170,42 @@ fn to_item(
     line: Vec<Token>,
     origin: i64,
     verbs: &mut HashMap<String, Verb>,
+    label: &mut Option<String>,
 ) -> Result<AplItem> {
+    let mut line = line;
+    // `L:` in front of a line names it, and `→` takes the number of the
+    // line a name stands for.
+    if let (Some(Tok::Name(n)), Some(Tok::Colon)) =
+        (line.first().map(|t| &t.kind), line.get(1).map(|t| &t.kind))
+    {
+        *label = Some(n.clone());
+        line.drain(..2);
+    }
     if let Some(Tok::Control(word)) = line.first().map(|t| &t.kind) {
         let word = *word;
         let span = line[0].span;
         return Ok(AplItem::Word { word, rest: line[1..].to_vec(), span });
+    }
+    if matches!(line.first().map(|t| &t.kind), Some(Tok::Arrow)) {
+        let span = line[0].span;
+        let target = parse_statement(line[1..].to_vec(), origin, verbs, true)?
+            .ok_or_else(|| Error::parse("→ needs a line to branch to", span))?;
+        let span = Span::merge(span, target.span());
+        return Ok(AplItem::Sentence(Expr::Control(
+            Box::new(Control::Branch(Box::new(target))),
+            span,
+        )));
+    }
+    // A labelled line may hold nothing else; the label is then a place to
+    // branch to and the line does no work of its own. `→⍬` is exactly that
+    // line: a branch with no target falls through and yields nothing.
+    if line.is_empty() {
+        let span = label.as_ref().map_or(Span::new(0, 0), |_| Span::new(0, 0));
+        let nowhere = Expr::Const(Array::empty(crate::dtype::DType::I64), span);
+        return Ok(AplItem::Sentence(Expr::Control(
+            Box::new(Control::Branch(Box::new(nowhere))),
+            span,
+        )));
     }
     let span = line.first().map_or(Span::new(0, 0), |t| t.span);
     let e = parse_statement(line, origin, verbs, true)?
@@ -2282,6 +2483,7 @@ fn set_scopes(e: &mut Expr, own: &[String]) {
         Expr::Control(c, _) => {
             let walk = |b: &mut Vec<Expr>| b.iter_mut().for_each(|s| set_scopes(s, own));
             match &mut **c {
+                Control::Branch(target) => set_scopes(target, own),
                 Control::If { arms, otherwise } => {
                     for arm in arms {
                         if let Some(t) = &mut arm.test {
@@ -2549,7 +2751,7 @@ mod tests {
     #[case(',', MonadOp::Ravel, DyadOp::AppendLast)]
     #[case('⍪', MonadOp::TableOf, DyadOp::AppendLeading)]
     #[case('!', MonadOp::Scalar(ScalarMonad::Factorial), DyadOp::Scalar(ScalarDyad::Binomial))]
-    #[case('⍕', MonadOp::Format, DyadOp::NotYet("format with a specification (dyadic ⍕)"))]
+    #[case('⍕', MonadOp::Format, DyadOp::FormatSpec)]
     #[case('⊥', MonadOp::None, DyadOp::Decode)]
     #[case('⊤', MonadOp::None, DyadOp::Encode)]
     #[case('≢', MonadOp::Tally, DyadOp::NotMatch)]
@@ -2810,10 +3012,11 @@ mod tests {
     }
 
     #[test]
-    fn function_composition_is_not_yet() {
-        let e = err("+⍤×5");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("composition"), "{}", e.msg);
+    fn a_function_operand_makes_the_rank_operator_an_atop() {
+        // `f⍤g` with a function on the right is Dyalog's atop, not a rank.
+        let e = one("+⍤×5");
+        let Expr::Monad { verb, .. } = e else { panic!("expected a monad") };
+        assert!(matches!(verb, Verb::Atop(..)), "{verb:?}");
     }
 
     #[rstest]

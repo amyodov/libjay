@@ -209,6 +209,10 @@ fn control_lines(c: &Control, depth: usize, p: &Program, tr: &Trace, out: &mut S
         }
     };
     match c {
+        Control::Branch(target) => {
+            let _ = writeln!(out, "{pad}branch →");
+            expr_lines(target, depth + 1, p, tr, out);
+        }
         Control::If { arms, otherwise } => {
             let _ = writeln!(out, "{pad}if — {} arm(s)", arms.len());
             for (i, arm) in arms.iter().enumerate() {
@@ -369,6 +373,48 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Amend(m) => head(out, &format!("amend at {} index(es)", m.count())),
+        Verb::AmendVerb(u) => {
+            head(out, "amend at the indices a verb computes");
+            verb_lines(u, depth + 1, p, tr, out);
+        }
+        Verb::ShiftFill(f) => {
+            head(out, &format!("shift, filling with {} atom(s)", f.count()))
+        }
+        Verb::Memo(u, _) => {
+            head(out, "memo M. (answers repeat from a cache)");
+            verb_lines(u, depth + 1, p, tr, out);
+        }
+        Verb::Level { u, level, spread } => {
+            head(
+                out,
+                &format!(
+                    "{} at boxing level {level}",
+                    if *spread { "spread S:" } else { "level L:" }
+                ),
+            );
+            verb_lines(u, depth + 1, p, tr, out);
+        }
+        Verb::Before(f, g) => {
+            head(out, "before ⍛ (the left argument is prepared)");
+            verb_lines(f, depth + 1, p, tr, out);
+            verb_lines(g, depth + 1, p, tr, out);
+        }
+        Verb::UserDerived { def, alpha, omega } => {
+            head(out, "a user-written operator with its operands");
+            verb_lines(def, depth + 1, p, tr, out);
+            verb_lines(alpha, depth + 1, p, tr, out);
+            if let Some(g) = omega {
+                verb_lines(g, depth + 1, p, tr, out);
+            }
+        }
+        Verb::KeyPairs(u) => {
+            head(out, "key ⌸ (each key with what shares it)");
+            verb_lines(u, depth + 1, p, tr, out);
+        }
+        Verb::Characteristics(u) => {
+            head(out, "characteristics b. (answers about the verb)");
+            verb_lines(u, depth + 1, p, tr, out);
+        }
         Verb::Key(u) => {
             head(out, "key / oblique");
             verb_lines(u, depth + 1, p, tr, out);

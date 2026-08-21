@@ -41,23 +41,51 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
         return String::new();
     }
     if a.dtype() == DType::Box {
-        return format_boxed(a, opts);
+        // A boxed array whose every element is a simple scalar is APL's
+        // MIXED SIMPLE array: depth 1, and drawn the way a plain array is
+        // rather than with a nested display's extra spacing.
+        match mixed_simple_texts(a, opts) {
+            Some(texts) if opts.boxes == BoxStyle::Spaced => {
+                return laid_out(&a.shape, texts, false)
+            }
+            _ => return format_boxed(a, opts),
+        }
     }
-    let rank = a.rank();
     let texts: Vec<String> = (0..a.count()).map(|i| format_atom(&a.data, i, opts)).collect();
     // Characters are laid out as text lines; everything else as columns.
-    let text_layout = a.dtype() == DType::Char;
+    laid_out(&a.shape, texts, a.dtype() == DType::Char)
+}
+
+/// The scalar each element of a boxed array holds, where every one of them
+/// holds a simple scalar and nothing else.
+fn mixed_simple_texts(a: &Array, opts: &FmtOpts) -> Option<Vec<String>> {
+    let boxes = a.as_boxes()?;
+    let mut texts = Vec::with_capacity(boxes.len());
+    for b in boxes {
+        if b.rank() != 0 || b.dtype() == DType::Box {
+            return None;
+        }
+        texts.push(format_atom(&b.data, 0, opts));
+    }
+    Some(texts)
+}
+
+/// One formatted element per position, laid out for the shape: a vector on
+/// one line, higher ranks as aligned columns and planes.
+fn laid_out(shape: &[usize], texts: Vec<String>, text_layout: bool) -> String {
+    let rank = shape.len();
+    let a_shape = shape;
     match rank {
         0 => texts.into_iter().next().unwrap_or_default(),
         1 if text_layout => texts.concat(),
         1 => texts.join(" "),
         _ => {
-            let ncols = a.shape[rank - 1];
-            let nrows = a.shape[rank - 2];
+            let ncols = a_shape[rank - 1];
+            let nrows = a_shape[rank - 2];
             // Column widths span every plane, so planes stay aligned with
             // each other and not just internally.
             let widths = if text_layout { vec![0; ncols] } else { column_widths(&texts, ncols) };
-            let frame = &a.shape[..rank - 2];
+            let frame = &a_shape[..rank - 2];
             let plane_size = nrows * ncols;
             let planes: usize = frame.iter().product();
             let mut out = String::new();
@@ -610,7 +638,9 @@ mod tests {
     fn a_box_matrix_fences_every_row() {
         let a = boxed(&[2, 2], (1..=4).map(Array::scalar_i64).collect());
         assert_eq!(j(&a), "+-+-+\n|1|2|\n+-+-+\n|3|4|\n+-+-+");
-        assert_eq!(apl(&a), " 1 2 \n 3 4 ");
+        // Every element is a simple scalar, which APL reads as a mixed
+        // SIMPLE array: it draws like a plain one.
+        assert_eq!(apl(&a), "1 2\n3 4");
     }
 
     #[test]

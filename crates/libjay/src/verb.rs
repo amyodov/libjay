@@ -137,7 +137,7 @@ impl EvalCfg {
     /// are empty. Only a verb that [`Verb::is_pure`] accepted is given one
     /// of these, and an explicit definition — the only thing that reads
     /// names — is never pure.
-    fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
+    pub(crate) fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let mut sink = |_: &str| debug_assert!(false, "a pure verb wrote to the output sink");
         let mut env = Env::new(Vec::new());
         f(&mut Ctx { cfg: self, out: &mut sink, env: &mut env, device: None })
@@ -204,6 +204,10 @@ impl Env {
 
     pub fn define(&mut self, name: String, verb: Verb) {
         self.verbs.insert(name, verb);
+    }
+
+    pub fn undefine(&mut self, name: &str) {
+        self.verbs.remove(name);
     }
 
     pub fn verb(&self, name: &str) -> Option<&Verb> {
@@ -464,9 +468,22 @@ pub enum MonadOp {
     Unicode { pass_chars: bool },
     /// J `;:`: J's own tokeniser over a character list, one box per word.
     Words,
+    /// APL `⊆` (Dyalog): nest — enclose y unless it is already nested, or
+    /// a simple scalar, which cannot be enclosed any further.
+    Nest,
     /// J `L.`: the boxing level — 0 for anything unboxed, one more than the
     /// deepest content otherwise.
     LevelOf,
+    /// J `{::`: y's box structure with every leaf replaced by the path that
+    /// fetches it — a boxed list holding one index per level descended.
+    MapPaths,
+    /// J `p.`: the roots of the polynomial whose ascending coefficients y
+    /// holds, as the boxed pair `multiplier ; roots`; a boxed argument of
+    /// that form converts back to coefficients.
+    PolyRoots,
+    /// J `p..`: the derivative of the polynomial y's ascending coefficients
+    /// describe, again as coefficients.
+    PolyDeriv,
     /// J `A.`: the anagram index of the permutation y's items rank as.
     AnagramIndex,
     /// J `C.`: a direct permutation as its cycles, or a boxed list of
@@ -558,6 +575,19 @@ pub enum DyadOp {
     SelectAxis { axis: usize, rank: usize, origin: i64 },
     /// J `x {:: y`: follow the path x into y, opening a level a step.
     Fetch,
+    /// J `x p. y`: the polynomial with ascending coefficients x at y. A
+    /// boxed x is the `multiplier ; roots` form of the same polynomial.
+    PolyEval,
+    /// J `x p.. y`: the integral of the polynomial y's coefficients
+    /// describe, with x as the constant term.
+    PolyIntegral,
+    /// APL `x ⍕ y`: format by specification — one width and precision per
+    /// column of the last axis, or one pair for the whole argument.
+    FormatSpec,
+    /// J `x m b. y`: the boolean function whose truth table `m` numbers,
+    /// on two bits for `m` below 16 and on every bit of two integers for
+    /// `m` from 16 to 31.
+    TruthTable(u8),
     /// J `x x: y`: which exact form. 1 is the rational one, 2 the pair of
     /// numerator and denominator, `_1` the conversion back to a machine
     /// number, `_2` the argument unchanged.
@@ -650,6 +680,11 @@ pub enum Power {
 /// Iterations `Power::Converge` allows before giving up.
 const CONVERGE_LIMIT: usize = 1 << 20;
 
+/// The results `u M.` has already computed, keyed by the arguments that
+/// produced them. Shared by every clone of the derived verb, which is what
+/// makes the cache survive from one application to the next.
+pub type MemoCache = Arc<std::sync::Mutex<HashMap<Vec<u64>, Array>>>;
+
 /// A verb: primitive or derived. Language-agnostic; frontends decide which
 /// combinations their syntax produces (e.g. APL `+/` becomes
 /// `Rank(Reduce(+), [1,1,1])` — reduce the last axis).
@@ -690,6 +725,35 @@ pub enum Verb {
     Fit(Box<Verb>, f64),
     /// J `x m} y`: y with the items at the indices m replaced by x.
     Amend(Array),
+    /// J `u}`: the same amend, with the indices computed rather than
+    /// written — `u} y` is `(u y)} y` and `x u} y` is `x (x u y)} y`.
+    AmendVerb(Box<Verb>),
+    /// J `|.!.f`: shift instead of rotate, the vacated positions taking the
+    /// fill f.
+    ShiftFill(Array),
+    /// J `u M.`: u, with the results it has already computed kept and
+    /// returned again for the same arguments. The cache belongs to this
+    /// derived verb, so it lives exactly as long as the program does.
+    Memo(Box<Verb>, MemoCache),
+    /// J `u L: n` and `u S: n`: apply u to every subarray at boxing level
+    /// n or below. `L:` puts each result back where its operand was; `S:`
+    /// spreads them into the items of one array.
+    Level { u: Box<Verb>, level: i64, spread: bool },
+    /// J `u b.`: answers questions about u rather than applying it. `0` asks
+    /// for its three ranks.
+    Characteristics(Box<Verb>),
+    /// APL `f⍛g` (before): g's LEFT argument is prepared by f — monad
+    /// `(f y) g y`, dyad `(f x) g y`. The mirror of [`Verb::Beside`].
+    Before(Box<Verb>, Box<Verb>),
+    /// APL `f OP` and `f OP g`: a dfn that mentions `⍺⍺` or `⍵⍵` is an
+    /// OPERATOR, and this is that operator with its operands supplied. They
+    /// are bound under those two names for as long as the body runs.
+    UserDerived { def: Box<Verb>, alpha: Box<Verb>, omega: Option<Box<Verb>> },
+    /// APL `f⌸` (key, Dyalog): the major cells are grouped by value, and f
+    /// is applied to each key and the group that shares it. Monadically the
+    /// group is the positions the key occupies; dyadically it is the items
+    /// of the right argument at those positions.
+    KeyPairs(Box<Verb>),
     /// J `u/.`: the key dyadically (u over each group of items sharing a
     /// key), the oblique monadically (u over each anti-diagonal).
     Key(Box<Verb>),
@@ -743,11 +807,18 @@ impl Verb {
             // Amend reads the whole argument, and the rest run their own
             // verb over the argument as a whole.
             Verb::Amend(_)
+            | Verb::AmendVerb(_)
+            | Verb::ShiftFill(_)
+            | Verb::Level { .. }
+            | Verb::Characteristics(_)
+            | Verb::UserDerived { .. }
+            | Verb::KeyPairs(_)
             | Verb::Key(_)
             | Verb::Cut(..)
             | Verb::PowerV(..)
             | Verb::PowerUntil(..)
             | Verb::AlongAxis(..) => [RANK_INF, RANK_INF, RANK_INF],
+            Verb::Memo(v, _) => v.ranks(),
             Verb::WithObverse(v, _) | Verb::Adverse(v, _) => v.ranks(),
             Verb::Beside(..) => [RANK_INF, RANK_INF, RANK_INF],
             _ => [RANK_INF, RANK_INF, RANK_INF],
@@ -776,6 +847,19 @@ impl Verb {
             Verb::Each(v, _) => format!("({}¨)", v.name()),
             Verb::Fit(v, n) => format!("{}!.{n}", v.name()),
             Verb::Amend(_) => "(m})".to_string(),
+            Verb::AmendVerb(v) => format!("({}}})", v.name()),
+            Verb::ShiftFill(_) => "|.!.n".to_string(),
+            Verb::Characteristics(v) => format!("{} b.", v.name()),
+            Verb::Before(f, g) => format!("({}⍛{})", f.name(), g.name()),
+            Verb::KeyPairs(v) => format!("{}⌸", v.name()),
+            Verb::UserDerived { def, alpha, omega } => match omega {
+                Some(g) => format!("({} {} {})", alpha.name(), def.name(), g.name()),
+                None => format!("({} {})", alpha.name(), def.name()),
+            },
+            Verb::Memo(v, _) => format!("{} M.", v.name()),
+            Verb::Level { u, level, spread } => {
+                format!("{} {} {level}", u.name(), if *spread { "S:" } else { "L:" })
+            }
             Verb::Key(v) => format!("{}/.", v.name()),
             Verb::Cut(v, n) => format!("{};.{n}", v.name()),
             Verb::PowerV(v, w) => format!("{}^:{}", v.name(), w.name()),
@@ -840,10 +924,23 @@ impl Verb {
             }
             // An explicit definition's body is a program of its own; `!.`
             // has no reach into it.
-            Verb::Amend(_) | Verb::Explicit(_) | Verb::SelfRef | Verb::Named(_) => false,
+            Verb::Amend(_)
+            | Verb::AmendVerb(_)
+            | Verb::ShiftFill(_)
+            | Verb::Characteristics(_)
+            | Verb::Explicit(_)
+            | Verb::SelfRef
+            | Verb::Named(_) => false,
+            Verb::Memo(v, _) | Verb::Level { u: v, .. } => v.uses_tolerance(),
             Verb::WithObverse(v, _) => v.uses_tolerance(),
-            Verb::Adverse(v, w) | Verb::Beside(v, w) => {
+            Verb::Adverse(v, w) | Verb::Beside(v, w) | Verb::Before(v, w) => {
                 v.uses_tolerance() || w.uses_tolerance()
+            }
+            Verb::KeyPairs(v) => v.uses_tolerance(),
+            Verb::UserDerived { def, alpha, omega } => {
+                def.uses_tolerance()
+                    || alpha.uses_tolerance()
+                    || omega.as_ref().is_some_and(|g| g.uses_tolerance())
             }
             Verb::Agenda(vs, w) => {
                 w.uses_tolerance() || vs.iter().any(Verb::uses_tolerance)
@@ -886,9 +983,20 @@ impl Verb {
             Verb::Key(v) | Verb::Cut(v, _) | Verb::AlongAxis(v, _) => v.is_pure(),
             Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => v.is_pure() && w.is_pure(),
             Verb::WithObverse(v, _) => v.is_pure(),
-            Verb::Adverse(v, w) | Verb::Beside(v, w) => v.is_pure() && w.is_pure(),
+            Verb::Adverse(v, w) | Verb::Beside(v, w) | Verb::Before(v, w) => {
+                v.is_pure() && w.is_pure()
+            }
+            Verb::KeyPairs(v) => v.is_pure(),
+            // The body reads and writes the program's names, exactly as a
+            // definition called any other way does.
+            Verb::UserDerived { .. } => false,
             Verb::Agenda(vs, w) => w.is_pure() && vs.iter().all(Verb::is_pure),
-            Verb::Amend(_) => true,
+            Verb::Amend(_) | Verb::ShiftFill(_) | Verb::Characteristics(_) => true,
+            Verb::AmendVerb(v) | Verb::Level { u: v, .. } => v.is_pure(),
+            // A memo answers from its cache, so the verb inside it must be
+            // pure for the cache to be an optimisation rather than a change
+            // of meaning; running the cells in any order is then safe too.
+            Verb::Memo(v, _) => v.is_pure(),
             // An explicit definition reads and writes the program's names,
             // so its cells can never be run out of order on other threads —
             // whatever its body does. `ExplicitDef::pure` records whether
@@ -905,6 +1013,12 @@ impl Verb {
                 // so the whole buffer is one elementwise pass.
                 if let MonadOp::Scalar(op) = p.monad {
                     return scalar_monad(op, y, ctx.cfg.tol, span);
+                }
+                // A MIXED SIMPLE array is already simple, so opening it
+                // changes nothing — and its cells could not be framed back
+                // into one array if the rank machinery took them apart.
+                if p.monad == MonadOp::Open && is_mixed_simple(y) {
+                    return Ok(y.clone());
                 }
                 let frame_rank = y.rank() - effective_rank(p.ranks[0], y.rank());
                 if frame_rank == 0 {
@@ -979,6 +1093,27 @@ impl Verb {
                 }
                 from_index(m, y, span)
             }
+            // `u} y` computes the indices first: it is `(u y)} y`.
+            Verb::AmendVerb(u) => {
+                let m = u.monad(y, ctx, span)?;
+                Verb::Amend(m).monad(y, ctx, span)
+            }
+            // The monad shifts by one, the fill taking the place the
+            // first item left: `|.!.f y` is `_1 |.!.f y`.
+            Verb::ShiftFill(fill) => shift_fill(&Array::scalar_i64(-1), y, fill, span),
+            Verb::Memo(u, cache) => memoised(u, cache, None, y, ctx, span),
+            Verb::Characteristics(u) => characteristics(u, y, span),
+            Verb::Before(f, g) => {
+                let l = f.monad(y, ctx, span)?;
+                g.dyad(&l, y, ctx, span)
+            }
+            Verb::KeyPairs(u) => key_pairs(u, y, None, ctx, span),
+            Verb::UserDerived { def, alpha, omega } => {
+                with_operands(alpha, omega.as_deref(), ctx, |c| def.monad(y, c, span))
+            }
+            Verb::Level { u, level, spread } => {
+                at_level(u, *level, *spread, y, ctx, span)
+            }
             Verb::Key(u) => oblique(u, y, ctx, span),
             Verb::Cut(u, n) => cut(u, None, y, *n, ctx, span),
             Verb::PowerV(u, v) => power_v(u, v, None, y, ctx, span),
@@ -1050,6 +1185,27 @@ impl Verb {
                 ctx.with_tol(tol, |c| v.dyad(x, y, c, span))
             }
             Verb::Amend(m) => amend(m, x, y, span),
+            // `x u} y` is `x (x u y)} y`: u names the places to amend.
+            Verb::AmendVerb(u) => {
+                let m = u.dyad(x, y, ctx, span)?;
+                amend(&m, x, y, span)
+            }
+            Verb::ShiftFill(fill) => shift_fill(x, y, fill, span),
+            Verb::Memo(u, cache) => memoised(u, cache, Some(x), y, ctx, span),
+            Verb::Characteristics(_) => {
+                Err(Error::domain("u b. has no dyadic meaning", span))
+            }
+            Verb::Before(f, g) => {
+                let l = f.monad(x, ctx, span)?;
+                g.dyad(&l, y, ctx, span)
+            }
+            Verb::KeyPairs(u) => key_pairs(u, x, Some(y), ctx, span),
+            Verb::UserDerived { def, alpha, omega } => {
+                with_operands(alpha, omega.as_deref(), ctx, |c| def.dyad(x, y, c, span))
+            }
+            Verb::Level { .. } => {
+                Err(Error::not_yet("a dyadic level or spread (x u L: n y)", span))
+            }
             Verb::Key(u) => key(u, x, y, ctx, span),
             Verb::Cut(u, n) => cut(u, Some(x), y, *n, ctx, span),
             Verb::PowerV(u, v) => power_v(u, v, Some(x), y, ctx, span),
@@ -1578,6 +1734,16 @@ fn link(x: &Array, y: &Array, span: Span) -> Result<Array> {
     catenate(&head, &tail, true, false, span)
 }
 
+/// `a` with every element enclosed, where `other` is boxed and `a` is not.
+/// The shape is kept, so only the depth changes.
+fn nest_like(a: &Array, other: &Array) -> Array {
+    if a.dtype() == DType::Box || other.dtype() != DType::Box {
+        return a.clone();
+    }
+    let cells: Vec<Array> = (0..a.count()).map(|i| atom(a, i)).collect();
+    Array::new(a.shape.clone(), Data::Box(cells.into()))
+}
+
 /// Every item of `y` boxed; an already boxed array is left alone.
 fn box_items(y: &Array) -> Array {
     if y.dtype() == DType::Box {
@@ -1594,13 +1760,14 @@ fn box_items(y: &Array) -> Array {
 fn strand(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let item = enclose(x, Enclose::ExceptSimpleScalar);
     let one = |a: &Array| Array::new(vec![1], a.data.clone());
-    if item.dtype() != DType::Box && y.dtype() != DType::Box {
-        if DType::promote(item.dtype(), y.dtype()).is_none() {
-            return Err(Error::not_yet(
-                "a vector mixing characters and numbers (simple mixed arrays)",
-                span,
-            ));
-        }
+    // A strand of one kind stays a plain array; one that mixes characters
+    // with numbers becomes APL's MIXED SIMPLE array, which libjay keeps as
+    // boxed scalars. Its depth is 1 and it displays without borders,
+    // because a box holding a simple scalar is a scalar in APL.
+    if item.dtype() != DType::Box
+        && y.dtype() != DType::Box
+        && DType::promote(item.dtype(), y.dtype()).is_some()
+    {
         return catenate(&one(&item), y, true, false, span);
     }
     let head = if item.dtype() == DType::Box { item } else { Array::boxed(item) };
@@ -3799,6 +3966,12 @@ fn index_of(x: &Array, y: &Array, origin: i64, tol: Tol) -> Array {
 
 /// `x { y` for one index atom: the rank machinery supplies the framing.
 fn from_index(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    // A boxed index is J's index specification, which reaches several axes
+    // at once; a plain one selects an item.
+    if let Some(spec) = x.as_boxes().and_then(<[Array]>::first) {
+        let spec = index_spec(spec, y, span)?;
+        return Ok(select_spec(&spec, y));
+    }
     let idx = x
         .to_i64_vec()
         .ok_or_else(|| Error::domain("index must be an integer", span))?;
@@ -3879,9 +4052,17 @@ fn catenate(
         let fit = |a: &Array| -> Result<Array> {
             let mut to = want.clone();
             to[axis] = a.shape[axis] as i64;
-            take(&Array::from_i64(to), a, span)
+            take(&Array::from_i64(to), a, false, span)
         };
         (fit(&xa)?, fit(&ya)?)
+    } else {
+        (xa, ya)
+    };
+    // APL2 catenates a nested array to a simple one by enclosing the
+    // simple side's items: `(1 2),⊂3 4` is a three-item nested vector. J
+    // refuses the mixture, and its `fill` rule is what tells them apart.
+    let (xa, ya) = if !fill && (xa.dtype() == DType::Box) != (ya.dtype() == DType::Box) {
+        (nest_like(&xa, &ya), nest_like(&ya, &xa))
     } else {
         (xa, ya)
     };
@@ -4213,8 +4394,10 @@ fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     match p.monad {
         MonadOp::Scalar(op) => scalar_monad(op, y, ctx.cfg.tol, span),
-        MonadOp::ShapeOf => Ok(Array::from_i64(y.shape.iter().map(|&n| n as i64).collect())),
-        MonadOp::Tally => Ok(Array::scalar_i64(y.items() as i64)),
+        MonadOp::ShapeOf => {
+            Ok(carry_exact(Array::from_i64(y.shape.iter().map(|&n| n as i64).collect()), y))
+        }
+        MonadOp::Tally => Ok(carry_exact(Array::scalar_i64(y.items() as i64), y)),
         MonadOp::Ravel => Ok(Array::new(vec![y.count()], y.data.clone())),
         MonadOp::TransposeAxes => Ok(transpose_axes(y)),
         MonadOp::Head => Ok(head(y)),
@@ -4230,29 +4413,15 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             Ok(Array::from_i64(order.iter().map(|&i| origin + i as i64).collect()))
         }
         MonadOp::IotaJ => iota_j(y, span),
-        MonadOp::IotaApl { origin } => {
-            // A non-scalar argument asks for an array of index vectors, one
-            // per cell of the result: a nested array, which is still to come.
-            if y.rank() != 0 {
-                return Err(Error::not_yet("nested index arrays (⍳ with an array argument)", span));
-            }
-            let n = y
-                .to_i64_vec()
-                .ok_or_else(|| Error::domain("index generator needs an integer argument", span))?
-                [0];
-            if n < 0 {
-                return Err(Error::domain("index generator needs a nonnegative count", span));
-            }
-            Ok(Array::from_i64((0..n).map(|i| origin + i).collect()))
-        }
+        MonadOp::IotaApl { origin } => iota_apl(y, origin, span),
         MonadOp::Echo => {
             (ctx.out)(&format!("{}\n", crate::fmt::format_array(y, &ctx.cfg.fmt)));
             Ok(Array::empty(DType::I64))
         }
         MonadOp::Same => Ok(y.clone()),
         MonadOp::Format => Ok(format_chars(y, &ctx.cfg.fmt)),
-        MonadOp::DecodeBits => decode(None, y, span),
-        MonadOp::EncodeBits => encode_bits(y, span),
+        MonadOp::DecodeBits => decode(None, y, span).map(|r| carry_exact(r, y)),
+        MonadOp::EncodeBits => encode_bits(y, span).map(|r| carry_exact(r, y)),
         MonadOp::Itemize => {
             let mut shape = vec![1usize];
             shape.extend_from_slice(&y.shape);
@@ -4275,14 +4444,14 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
                 .to_i64_vec()
                 .ok_or_else(|| Error::domain("the prime index must be an integer", span))?;
             let v = n.first().copied().unwrap_or(0);
-            Ok(Array::scalar_i64(nth_prime(v, span)?))
+            Ok(carry_exact(Array::scalar_i64(nth_prime(v, span)?), y))
         }
         MonadOp::PrimeFactors => {
             let n = y
                 .to_i64_vec()
                 .ok_or_else(|| Error::domain("prime factors need an integer", span))?;
             let v = n.first().copied().unwrap_or(0);
-            Ok(Array::from_i64(prime_factors(v, span)?))
+            Ok(carry_exact(Array::from_i64(prime_factors(v, span)?), y))
         }
         MonadOp::MatrixInverse => matrix_inverse(y, span),
         MonadOp::Roll { origin, fixed, float_at_zero } => {
@@ -4294,6 +4463,10 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Unicode { pass_chars } => unicode(y, pass_chars, span),
         MonadOp::Words => words(y, span),
         MonadOp::LevelOf => Ok(Array::scalar_i64(boxing_level(y))),
+        MonadOp::MapPaths => Ok(map_paths(y)),
+        MonadOp::Nest => Ok(nest(y)),
+        MonadOp::PolyRoots => poly_roots(y, span),
+        MonadOp::PolyDeriv => poly_deriv(y, span),
         MonadOp::AnagramIndex => anagram_index(y, span),
         MonadOp::CycleForm => cycle_form(y, span),
         MonadOp::Split => Ok(split_items(y)),
@@ -4374,8 +4547,12 @@ fn leading_run(y: &Array, counts: &[i64], drop: bool) -> Option<Array> {
     Some(section(y, lo, lo + keep))
 }
 
-fn take(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn take(x: &Array, y: &Array, prototype_fill: bool, span: Span) -> Result<Array> {
     let counts = axis_counts(x, "take", span)?;
+    // APL overtakes a nested array with the PROTOTYPE of its first item —
+    // that item's shape, with a zero for every number and a blank for every
+    // character. J fills with the empty box instead.
+    let fill = if prototype_fill { prototype_of(y) } else { None };
     let promoted;
     // A scalar right argument is treated as a one-item vector.
     let base = if y.rank() == 0 {
@@ -4418,12 +4595,30 @@ fn take(x: &Array, y: &Array, span: Span) -> Result<Array> {
         }
         if inside {
             push_elem(&mut data, &base.data, idx);
+        } else if let (Data::Box(v), Some(p)) = (&mut data, &fill) {
+            v.push(p.clone());
         } else {
             data.push_fill();
         }
         odometer(&mut coord, &out_shape);
     }
     Ok(Array::new(out_shape, data))
+}
+
+/// APL's prototype of a nested array: the first item's own shape, with a
+/// zero where it holds a number and a blank where it holds a character,
+/// and the same done to each of its items where it is nested itself.
+fn prototype_of(y: &Array) -> Option<Array> {
+    fn zeroed(a: &Array) -> Array {
+        if let Some(items) = a.as_boxes() {
+            let inner: Vec<Array> = items.iter().map(zeroed).collect();
+            return Array::new(a.shape.clone(), Data::Box(inner.into()));
+        }
+        let dtype = if a.dtype() == DType::Char { DType::Char } else { DType::I64 };
+        Array::new(a.shape.clone(), fill_data(dtype, a.count()))
+    }
+    let first = y.as_boxes()?.first()?;
+    Some(zeroed(first))
 }
 
 fn drop_(x: &Array, y: &Array, span: Span) -> Result<Array> {
@@ -4471,7 +4666,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         // cells then agree among themselves.
         DyadOp::Scalar(op) => scalar_dyad(op, x, y, cfg, span),
         DyadOp::Reshape => reshape(x, y, span),
-        DyadOp::Take => take(x, y, span),
+        DyadOp::Take => take(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
         DyadOp::Drop => drop_(x, y, span),
         DyadOp::Right => Ok(y.clone()),
         DyadOp::Left => Ok(x.clone()),
@@ -4492,8 +4687,8 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
         DyadOp::GradeSelect { down } => grade_select(x, y, down, span),
         DyadOp::Copy => copy_items(x, y, span),
-        DyadOp::Decode => decode(Some(x), y, span),
-        DyadOp::Encode => encode(x, y, span),
+        DyadOp::Decode => decode(Some(x), y, span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::Encode => encode(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, span),
         DyadOp::Link => link(x, y, span),
         DyadOp::Strand => strand(x, y, span),
@@ -4506,6 +4701,10 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
             select_axis(x, y, axis, rank, origin, span)
         }
         DyadOp::Fetch => fetch(x, y, span),
+        DyadOp::PolyEval => poly_eval(x, y, span),
+        DyadOp::PolyIntegral => poly_integral(x, y, span),
+        DyadOp::TruthTable(m) => truth_table(m, x, y, span),
+        DyadOp::FormatSpec => format_spec(x, y, &cfg.fmt, span),
         DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, span),
         DyadOp::ExactForm => exact_form(x, y, span),
         DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
@@ -4516,8 +4715,8 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::Permute => permute(x, y, span),
         DyadOp::FindSeq => Ok(find_seq(x, y, tol)),
         DyadOp::UnicodeForm => unicode_form(x, y, span),
-        DyadOp::PrimeMeta => prime_meta(x, y, span),
-        DyadOp::PrimeExponents => prime_exponents(x, y, span),
+        DyadOp::PrimeMeta => prime_meta(x, y, span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::PrimeExponents => prime_exponents(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Pick { origin } => pick(x, y, origin, span),
         DyadOp::Expand => expand(x, y, span),
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
@@ -5965,6 +6164,11 @@ fn amend(m: &Array, x: &Array, y: &Array, span: Span) -> Result<Array> {
     if y.rank() == 0 {
         return Err(Error::new(ErrorKind::Rank, "cannot amend a scalar", Some(span)));
     }
+    // A boxed m is J's index specification, the same one `{` reads.
+    if let Some(spec) = m.as_boxes().and_then(<[Array]>::first) {
+        let spec = index_spec(spec, y, span)?;
+        return amend_spec(&spec, x, y, span);
+    }
     let idx = m
         .to_i64_vec()
         .ok_or_else(|| Error::domain("amend indices must be integers", span))?;
@@ -6047,9 +6251,14 @@ fn fetch(x: &Array, y: &Array, span: Span) -> Result<Array> {
     };
     let mut cur = y.clone();
     for step in steps {
-        let idx = step
-            .to_i64_vec()
-            .ok_or_else(|| Error::domain("a fetch path holds integers", span))?;
+        // An empty step selects the level whole, which is how a path
+        // reaches into a boxed scalar; `a:` spells it and holds characters.
+        let idx = if step.count() == 0 {
+            Vec::new()
+        } else {
+            step.to_i64_vec()
+                .ok_or_else(|| Error::domain("a fetch path holds integers", span))?
+        };
         // A scalar has one item, which is how `{` reads one too.
         let base =
             if cur.rank() == 0 { Array::new(vec![1], cur.data.clone()) } else { cur.clone() };
@@ -6096,8 +6305,35 @@ fn cell_index(y: &Array, idx: &[i64], span: Span) -> Result<usize> {
 /// to anything. That is what GNU APL answers, and it is what makes
 /// `1 1 2 2 ⊂ 'abcd'` two pairs rather than one run.
 fn partition_enclose(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    if y.rank() != 1 {
-        return Err(Error::not_yet("partitioned enclose on a matrix", span));
+    // Rank 2 and above partitions the LAST axis, once per cross section,
+    // so the axes ahead of it frame the answer.
+    if y.rank() > 1 {
+        let last = y.shape[y.rank() - 1];
+        let rows = y.count() / last.max(1);
+        let mut cells: Vec<Array> = Vec::new();
+        let mut width = None;
+        for r in 0..rows {
+            let row = Array::new(vec![last], y.data.slice(r * last, (r + 1) * last));
+            let parts = partition_enclose(x, &row, span)?;
+            let n = parts.count();
+            if *width.get_or_insert(n) != n {
+                return Err(Error::internal("partitions of unequal count"));
+            }
+            match parts.data {
+                Data::Box(v) => cells.extend(v.as_slice().iter().cloned()),
+                _ => return Err(Error::internal("a partition is boxed")),
+            }
+        }
+        let mut shape = y.shape[..y.rank() - 1].to_vec();
+        shape.push(width.unwrap_or(0));
+        return Ok(Array::new(shape, Data::Box(cells.into())));
+    }
+    if y.rank() == 0 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "partitioned enclose needs an array to partition",
+            Some(span),
+        ));
     }
     let flags = x
         .to_i64_vec()
@@ -6251,10 +6487,18 @@ fn cut(
     span: Span,
 ) -> Result<Array> {
     if mode == 0 {
-        if x.is_some() {
-            return Err(Error::not_yet("dyadic cut with a rectangle (x u;.0 y)", span));
-        }
-        return u.monad(&reverse_all_axes(y), ctx, span);
+        let Some(x) = x else {
+            return u.monad(&reverse_all_axes(y), ctx, span);
+        };
+        let (origin, size) = rectangle(x, span)?;
+        let origin = origin.unwrap_or_else(|| vec![0; size.len()]);
+        return u.monad(&subarray(y, &origin, &size, span)?, ctx, span);
+    }
+    if mode.abs() == 3 {
+        let Some(x) = x else {
+            return Err(Error::not_yet("monadic tessellation (u;.3 y)", span));
+        };
+        return tessellate(u, x, y, mode < 0, ctx, span);
     }
     if !matches!(mode, 1 | -1 | 2 | -2) {
         return Err(Error::not_yet(format!("cut (u;.{mode})"), span));
@@ -6293,6 +6537,129 @@ fn cut(
         cells.push(u.monad(&section(&items, *s, *e), ctx, span)?);
     }
     assemble(&[ranges.len()], cells, span)
+}
+
+/// The left argument of `;.0` and `;.3`: one row of origins (or movements)
+/// and one of sizes. A single vector gives only the sizes.
+fn rectangle(x: &Array, span: Span) -> Result<(Option<Vec<i64>>, Vec<i64>)> {
+    let values = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a cut rectangle is whole numbers", span))?;
+    match x.rank() {
+        0 | 1 => Ok((None, values)),
+        2 if x.shape[0] == 2 => {
+            let n = x.shape[1];
+            Ok((Some(values[..n].to_vec()), values[n..].to_vec()))
+        }
+        _ => Err(Error::new(
+            ErrorKind::Rank,
+            "a cut rectangle is a vector of sizes, or two rows of origins and sizes",
+            Some(span),
+        )),
+    }
+}
+
+/// The block of `y` that starts at `origin` and runs `size` along each of
+/// the leading axes, the rest of them taken whole. A negative size runs the
+/// same distance and reverses that axis.
+fn subarray(y: &Array, origin: &[i64], size: &[i64], span: Span) -> Result<Array> {
+    if origin.len() > y.rank() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("a cut of {} axis/axes into a rank-{} value", origin.len(), y.rank()),
+            Some(span),
+        ));
+    }
+    let r = y.rank();
+    let st = strides(&y.shape);
+    let mut shape = y.shape.clone();
+    let mut start = vec![0i64; r];
+    let mut step = vec![1i64; r];
+    for k in 0..origin.len() {
+        let len = size[k].unsigned_abs() as usize;
+        let from = if origin[k] < 0 { origin[k] + y.shape[k] as i64 } else { origin[k] };
+        if from < 0 || from + len as i64 > y.shape[k] as i64 {
+            return Err(Error::domain(
+                format!("a cut of {len} from {from} leaves axis {k} of {}", y.shape[k]),
+                span,
+            ));
+        }
+        shape[k] = len;
+        if size[k] < 0 {
+            start[k] = from + len as i64 - 1;
+            step[k] = -1;
+        } else {
+            start[k] = from;
+        }
+    }
+    Ok(gather(y, &shape, &start, &step, &st))
+}
+
+/// The elements of `y` at `start + step × coordinate`, shaped `shape`.
+fn gather(y: &Array, shape: &[usize], start: &[i64], step: &[i64], st: &[usize]) -> Array {
+    let n: usize = shape.iter().product();
+    let mut data = Data::empty(y.dtype());
+    let mut coord = vec![0usize; shape.len()];
+    for _ in 0..n {
+        let idx: usize = (0..shape.len())
+            .map(|k| (start[k] + step[k] * coord[k] as i64) as usize * st[k])
+            .sum();
+        push_elem(&mut data, &y.data, idx);
+        odometer(&mut coord, shape);
+    }
+    Array::new(shape.to_vec(), data)
+}
+
+/// `x u;.3 y` and `x u;._3 y`: u over every block of the given size, moved
+/// by the given step along each axis. `;.3` keeps the short blocks at the
+/// far edge; `;._3` takes only the complete ones.
+fn tessellate(
+    u: &Verb,
+    x: &Array,
+    y: &Array,
+    complete: bool,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    // A single vector gives the sizes; the blocks then move one at a time.
+    let (movement, size) = rectangle(x, span)?;
+    let movement = movement.unwrap_or_else(|| vec![1; size.len()]);
+    if size.iter().any(|&s| s < 0) {
+        return Err(Error::not_yet("a tessellation with a negative size", span));
+    }
+    if size.len() > y.rank() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("a tessellation of {} axis/axes into a rank-{} value", size.len(), y.rank()),
+            Some(span),
+        ));
+    }
+    let mut frame = Vec::with_capacity(size.len());
+    for k in 0..size.len() {
+        let (len, step, block) = (y.shape[k] as i64, movement[k], size[k]);
+        if step <= 0 {
+            return Err(Error::domain("a tessellation moves by a positive step", span));
+        }
+        let count = if complete {
+            if len < block { 0 } else { (len - block) / step + 1 }
+        } else {
+            (len + step - 1) / step
+        };
+        frame.push(count as usize);
+    }
+    let total: usize = frame.iter().product();
+    let mut cells = Vec::with_capacity(total);
+    let mut coord = vec![0usize; frame.len()];
+    for _ in 0..total {
+        let origin: Vec<i64> = (0..frame.len()).map(|k| coord[k] as i64 * movement[k]).collect();
+        // A block at the far edge is cut short by what is left of the axis.
+        let block: Vec<i64> = (0..frame.len())
+            .map(|k| size[k].min(y.shape[k] as i64 - origin[k]))
+            .collect();
+        cells.push(u.monad(&subarray(y, &origin, &block, span)?, ctx, span)?);
+        odometer(&mut coord, &frame);
+    }
+    assemble(&frame, cells, span)
 }
 
 /// Every axis of `y` reversed — what `u;.0 y` applies its verb to.
@@ -6357,6 +6724,871 @@ fn permute_axes(y: &Array, src: &[usize]) -> Array {
         odometer(&mut coord, &out_shape);
     }
     Array::new(out_shape, data)
+}
+
+// ------------------------------------------------ index specifications
+
+/// What a J index specification picks out of an array.
+struct Spec {
+    /// How many leading axes of the argument the specification indexes.
+    width: usize,
+    /// One coordinate vector per selected cell, in result order.
+    cells: Vec<Vec<usize>>,
+    /// The shape the specification contributes; the argument's remaining
+    /// axes follow it.
+    shape: Vec<usize>,
+}
+
+/// One index against an axis of `len` elements, counting a negative one
+/// from the end.
+fn axis_position(v: i64, len: usize, span: Span) -> Result<usize> {
+    let p = if v < 0 { v + len as i64 } else { v };
+    if p < 0 || p >= len as i64 {
+        return Err(Error::domain(
+            format!("index {v} is out of range: the axis has {len} element(s)"),
+            span,
+        ));
+    }
+    Ok(p as usize)
+}
+
+/// J's index specification: what a BOXED left argument of `{` or `m}` says.
+///
+/// `<A` with a simple `A` reads A's last axis as one index per leading axis
+/// of y, the axes ahead of it framing the result — so `(<1 2) { y` is one
+/// element and `(<2 2$…) { y` is two of them. `<(c0;c1;…)` gives one
+/// component per leading axis instead: a simple component's atoms are that
+/// axis's indices, a scalar one dropping the axis from the result, and a
+/// BOXED component is the complement — every index of the axis except the
+/// ones it holds, which is what `a:` (the empty box) uses to mean "all".
+fn index_spec(content: &Array, y: &Array, span: Span) -> Result<Spec> {
+    let too_deep = |n: usize| {
+        Error::new(
+            ErrorKind::Rank,
+            format!("an index specification of {n} axis/axes into a rank-{} value", y.rank()),
+            Some(span),
+        )
+    };
+    if let Some(items) = content.as_boxes() {
+        if items.len() > y.rank() {
+            return Err(too_deep(items.len()));
+        }
+        let mut per_axis: Vec<Vec<usize>> = Vec::with_capacity(items.len());
+        let mut shape: Vec<usize> = Vec::new();
+        for (k, c) in items.iter().enumerate() {
+            let len = y.shape[k];
+            if c.as_boxes().is_some() {
+                let inner = open_cell(c);
+                let excluded = inner.to_i64_vec().ok_or_else(|| {
+                    Error::domain("an index complement holds integers", span)
+                })?;
+                let mut dropped = vec![false; len];
+                for v in excluded {
+                    dropped[axis_position(v, len, span)?] = true;
+                }
+                let kept: Vec<usize> = (0..len).filter(|i| !dropped[*i]).collect();
+                shape.push(kept.len());
+                per_axis.push(kept);
+            } else {
+                let idx = c
+                    .to_i64_vec()
+                    .ok_or_else(|| Error::domain("an index holds integers", span))?;
+                let mut positions = Vec::with_capacity(idx.len());
+                for v in idx {
+                    positions.push(axis_position(v, len, span)?);
+                }
+                shape.extend_from_slice(&c.shape);
+                per_axis.push(positions);
+            }
+        }
+        // The components run as an odometer, the last one fastest.
+        let mut cells: Vec<Vec<usize>> = vec![Vec::new()];
+        for positions in &per_axis {
+            let mut next = Vec::with_capacity(cells.len() * positions.len());
+            for prefix in &cells {
+                for &p in positions {
+                    let mut cell = prefix.clone();
+                    cell.push(p);
+                    next.push(cell);
+                }
+            }
+            cells = next;
+        }
+        return Ok(Spec { width: per_axis.len(), cells, shape });
+    }
+    let idx = content
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("an index specification holds integers", span))?;
+    let rank = content.rank();
+    let width = if rank == 0 { 1 } else { content.shape[rank - 1] };
+    if width > y.rank() {
+        return Err(too_deep(width));
+    }
+    let shape: Vec<usize> = if rank == 0 { Vec::new() } else { content.shape[..rank - 1].to_vec() };
+    let count: usize = shape.iter().product();
+    let mut cells: Vec<Vec<usize>> = Vec::new();
+    if width == 0 {
+        cells.resize(count, Vec::new());
+    } else {
+        for chunk in idx.chunks(width) {
+            let mut cell = Vec::with_capacity(width);
+            for (k, &v) in chunk.iter().enumerate() {
+                cell.push(axis_position(v, y.shape[k], span)?);
+            }
+            cells.push(cell);
+        }
+    }
+    Ok(Spec { width, cells, shape })
+}
+
+/// The offset of a cell's first element, given the argument's strides.
+fn spec_offset(st: &[usize], cell: &[usize]) -> usize {
+    cell.iter().enumerate().map(|(k, &p)| p * st[k]).sum()
+}
+
+/// `(<spec) { y`: the cells the specification names, in its own order.
+fn select_spec(spec: &Spec, y: &Array) -> Array {
+    let st = strides(&y.shape);
+    let size: usize = y.shape[spec.width..].iter().product();
+    let mut data = Data::empty(y.dtype());
+    for cell in &spec.cells {
+        let base = spec_offset(&st, cell);
+        for e in 0..size {
+            push_elem(&mut data, &y.data, base + e);
+        }
+    }
+    let mut shape = spec.shape.clone();
+    shape.extend_from_slice(&y.shape[spec.width..]);
+    Array::new(shape, data)
+}
+
+/// `x (<spec)} y`: y with the cells the specification names replaced by x,
+/// which is either one cell spread over all of them or one cell each.
+fn amend_spec(spec: &Spec, x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let size: usize = y.shape[spec.width..].iter().product();
+    let per_cell = if x.count() == size {
+        false
+    } else if x.count() == size * spec.cells.len() {
+        true
+    } else {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "cannot amend {} cell(s) of {size} element(s) each with {} element(s)",
+                spec.cells.len(),
+                x.count()
+            ),
+            Some(span),
+        ));
+    };
+    let mismatch = || {
+        Error::new(
+            ErrorKind::Type,
+            "the replacement and the argument hold different kinds of value",
+            Some(span),
+        )
+    };
+    let t = DType::promote(x.dtype(), y.dtype()).ok_or_else(mismatch)?;
+    let (Some(src), Some(base)) = (x.data.cast(t), y.data.cast(t)) else {
+        return Err(mismatch());
+    };
+    let st = strides(&y.shape);
+    let mut plan: Vec<Option<usize>> = vec![None; y.count()];
+    for (n, cell) in spec.cells.iter().enumerate() {
+        let at = spec_offset(&st, cell);
+        for e in 0..size {
+            plan[at + e] = Some(if per_cell { n * size + e } else { e });
+        }
+    }
+    let mut data = Data::empty(t);
+    for (i, slot) in plan.iter().enumerate() {
+        match slot {
+            Some(n) => push_elem(&mut data, &src, *n),
+            None => push_elem(&mut data, &base, i),
+        }
+    }
+    Ok(Array::new(y.shape.clone(), data))
+}
+
+// -------------------------------------------------------------- the map
+
+/// J monadic `{::`: y's box structure with every leaf replaced by the path
+/// that fetches it.
+///
+/// A path is a boxed list holding one index per level descended — the
+/// coordinate vector within that level's array, empty where the level is a
+/// boxed scalar. An unboxed y is one leaf, itself, and its path is empty.
+fn map_paths(y: &Array) -> Array {
+    fn coord_of(shape: &[usize], mut i: usize) -> Array {
+        let mut out = vec![0i64; shape.len()];
+        for k in (0..shape.len()).rev() {
+            out[k] = (i % shape[k]) as i64;
+            i /= shape[k];
+        }
+        Array::from_i64(out)
+    }
+    fn go(y: &Array, prefix: &[Array]) -> Array {
+        let Some(boxes) = y.as_boxes() else {
+            if prefix.is_empty() {
+                return Array::new(vec![0], Data::I64(Vec::new().into()));
+            }
+            return Array::new(vec![prefix.len()], Data::Box(prefix.to_vec().into()));
+        };
+        let cells: Vec<Array> = boxes
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let mut path = prefix.to_vec();
+                path.push(coord_of(&y.shape, i));
+                go(b, &path)
+            })
+            .collect();
+        Array::new(y.shape.clone(), Data::Box(cells.into()))
+    }
+    go(y, &[])
+}
+
+// ------------------------------------------------------- fill and shift
+
+/// `x |.!.f y`: shift along each axis instead of rotating, so an item moved
+/// past an end is dropped and the place it left takes the fill f.
+fn shift_fill(x: &Array, y: &Array, fill: &Array, span: Span) -> Result<Array> {
+    let counts = axis_counts(x, "shift", span)?;
+    if y.rank() == 0 {
+        return Ok(y.clone());
+    }
+    if counts.len() > y.rank() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("shift has {} amounts for an argument of rank {}", counts.len(), y.rank()),
+            Some(span),
+        ));
+    }
+    if fill.count() != 1 {
+        return Err(Error::new(ErrorKind::Length, "a fill is one atom", Some(span)));
+    }
+    let mismatch = || {
+        Error::new(ErrorKind::Type, "the fill and the argument differ in kind", Some(span))
+    };
+    let t = DType::promote(y.dtype(), fill.dtype()).ok_or_else(mismatch)?;
+    let (Some(base), Some(f)) = (y.data.cast(t), fill.data.cast(t)) else {
+        return Err(mismatch());
+    };
+    let st = strides(&y.shape);
+    let r = y.rank();
+    let mut data = Data::empty(t);
+    let mut coord = vec![0usize; r];
+    for _ in 0..y.count() {
+        let mut idx = 0usize;
+        let mut vacated = false;
+        for k in 0..r {
+            let from = coord[k] as i64 + counts.get(k).copied().unwrap_or(0);
+            if from < 0 || from >= y.shape[k] as i64 {
+                vacated = true;
+                break;
+            }
+            idx += from as usize * st[k];
+        }
+        if vacated {
+            push_elem(&mut data, &f, 0);
+        } else {
+            push_elem(&mut data, &base, idx);
+        }
+        odometer(&mut coord, &y.shape);
+    }
+    Ok(Array::new(y.shape.clone(), data))
+}
+
+// ---------------------------------------------------------------- memo
+
+/// An exact key for one array, appended to `out`. False where the value has
+/// no cheap key — an exact number — and the memo must simply not cache it.
+fn memo_key(a: &Array, out: &mut Vec<u64>) -> bool {
+    out.push(a.rank() as u64);
+    out.extend(a.shape.iter().map(|&n| n as u64));
+    out.push(a.dtype() as u64);
+    match &a.data {
+        Data::Ext(_) | Data::Rat(_) => false,
+        Data::Box(items) => items.iter().all(|item| memo_key(item, out)),
+        d => {
+            for i in 0..d.len() {
+                out.push(elem_key(d, i));
+            }
+            true
+        }
+    }
+}
+
+/// `u M.`: u's answer for these arguments, computed once and kept.
+fn memoised(
+    u: &Verb,
+    cache: &MemoCache,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let apply = |ctx: &mut Ctx<'_>| match x {
+        Some(x) => u.dyad(x, y, ctx, span),
+        None => u.monad(y, ctx, span),
+    };
+    let mut key = vec![u64::from(x.is_some())];
+    let keyed = x.is_none_or(|x| memo_key(x, &mut key)) && memo_key(y, &mut key);
+    if !keyed {
+        return apply(ctx);
+    }
+    if let Ok(map) = cache.lock() {
+        if let Some(hit) = map.get(&key) {
+            return Ok(hit.clone());
+        }
+    }
+    let out = apply(ctx)?;
+    if let Ok(mut map) = cache.lock() {
+        map.insert(key, out.clone());
+    }
+    Ok(out)
+}
+
+// ----------------------------------------------------- levels and spread
+
+/// `u L: n y` and `u S: n y`: u over every subarray at boxing level n or
+/// below. `L:` puts each answer back where its operand was; `S:` collects
+/// them into the items of one array.
+fn at_level(
+    u: &Verb,
+    level: i64,
+    spread: bool,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    // A negative level counts down from the argument's own top.
+    let n = if level < 0 { (boxing_level(y) + level).max(0) } else { level };
+    if !spread {
+        return map_level(u, n, y, ctx, span);
+    }
+    let mut cells = Vec::new();
+    collect_level(u, n, y, ctx, span, &mut cells)?;
+    let count = cells.len();
+    assemble(&[count], cells, span)
+}
+
+fn map_level(u: &Verb, n: i64, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let Some(boxes) = y.as_boxes().filter(|_| boxing_level(y) > n) else {
+        return u.monad(y, ctx, span);
+    };
+    let boxes = boxes.to_vec();
+    let mut cells = Vec::with_capacity(boxes.len());
+    for b in &boxes {
+        cells.push(map_level(u, n, b, ctx, span)?);
+    }
+    Ok(Array::new(y.shape.clone(), Data::Box(cells.into())))
+}
+
+fn collect_level(
+    u: &Verb,
+    n: i64,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+    out: &mut Vec<Array>,
+) -> Result<()> {
+    let Some(boxes) = y.as_boxes().filter(|_| boxing_level(y) > n) else {
+        out.push(u.monad(y, ctx, span)?);
+        return Ok(());
+    };
+    let boxes = boxes.to_vec();
+    for b in &boxes {
+        collect_level(u, n, b, ctx, span, out)?;
+    }
+    Ok(())
+}
+
+// --------------------------------------------------------- polynomials
+
+/// The ascending coefficients of a polynomial argument, as complex values.
+fn poly_coeffs(y: &Array, span: Span) -> Result<Vec<Cx>> {
+    let c = y
+        .data
+        .cast(DType::Complex)
+        .ok_or_else(|| Error::domain("a polynomial's coefficients are numbers", span))?;
+    match c {
+        Data::Complex(v) => Ok(v.as_slice().to_vec()),
+        _ => Err(Error::internal("coefficients did not cast to complex")),
+    }
+}
+
+/// A complex vector as an array, real where every imaginary part is zero.
+fn complex_or_real(values: Vec<Cx>) -> Array {
+    if values.iter().all(|z| z[1] == 0.0) {
+        return Array::from_f64(values.iter().map(|z| z[0]).collect());
+    }
+    Array::new(vec![values.len()], Data::Complex(values.into()))
+}
+
+/// `x p. y`: the polynomial with ascending coefficients x, at y — Horner's
+/// rule, or the product over the roots when x is the boxed root form.
+fn poly_eval(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let at = poly_coeffs(y, span)?;
+    let at = at.first().copied().unwrap_or(cx::ZERO);
+    let value = match x.as_boxes() {
+        Some(parts) => {
+            if parts.len() != 2 {
+                return Err(Error::domain(
+                    "the root form of a polynomial is `multiplier ; roots`",
+                    span,
+                ));
+            }
+            let multiplier = poly_coeffs(&parts[0], span)?;
+            let mut v = multiplier.first().copied().unwrap_or(cx::ONE);
+            for r in poly_coeffs(&parts[1], span)? {
+                v = cx::mul(v, cx::sub(at, r));
+            }
+            v
+        }
+        None => {
+            let c = poly_coeffs(x, span)?;
+            let mut v = cx::ZERO;
+            for &k in c.iter().rev() {
+                v = cx::add(cx::mul(v, at), k);
+            }
+            v
+        }
+    };
+    Ok(scalar_complex_or_real(value))
+}
+
+fn scalar_complex_or_real(z: Cx) -> Array {
+    if z[1] == 0.0 {
+        return Array::scalar_f64(z[0]);
+    }
+    Array::new(vec![], Data::Complex(vec![z].into()))
+}
+
+/// `p. y`: the roots of the polynomial whose ascending coefficients y holds,
+/// as `multiplier ; roots`; a y already in that form converts back to
+/// coefficients.
+fn poly_roots(y: &Array, span: Span) -> Result<Array> {
+    if let Some(parts) = y.as_boxes() {
+        if parts.len() != 2 {
+            return Err(Error::domain(
+                "the root form of a polynomial is `multiplier ; roots`",
+                span,
+            ));
+        }
+        let multiplier = poly_coeffs(&parts[0], span)?;
+        let multiplier = multiplier.first().copied().unwrap_or(cx::ONE);
+        // Multiply out `m × (x-r0) × (x-r1) × …`, ascending.
+        let mut coeffs = vec![multiplier];
+        for r in poly_coeffs(&parts[1], span)? {
+            let mut next = vec![cx::ZERO; coeffs.len() + 1];
+            for (k, &c) in coeffs.iter().enumerate() {
+                next[k + 1] = cx::add(next[k + 1], c);
+                next[k] = cx::sub(next[k], cx::mul(c, r));
+            }
+            coeffs = next;
+        }
+        return Ok(complex_or_real(coeffs));
+    }
+    let mut c = poly_coeffs(y, span)?;
+    while c.len() > 1 && c[c.len() - 1] == cx::ZERO {
+        c.pop();
+    }
+    if c.len() < 2 {
+        return Err(Error::domain("a polynomial's roots need a coefficient of x", span));
+    }
+    let lead = c[c.len() - 1];
+    let monic: Vec<Cx> = c.iter().map(|&k| cx::div(k, lead)).collect();
+    let roots = durand_kerner(&monic);
+    let pair = vec![scalar_complex_or_real(lead), complex_or_real(roots)];
+    Ok(Array::new(vec![2], Data::Box(pair.into())))
+}
+
+/// The roots of a monic polynomial, by the Durand–Kerner iteration: every
+/// root is refined against all the others at once, from spread-out starting
+/// points, until none of them moves.
+///
+/// The answer is ordered by descending real part, then descending
+/// imaginary part, which is a stable order the iteration itself has none of.
+fn durand_kerner(monic: &[Cx]) -> Vec<Cx> {
+    let d = monic.len() - 1;
+    let seed = [0.4, 0.9];
+    let mut z: Vec<Cx> = Vec::with_capacity(d);
+    let mut p = cx::ONE;
+    for _ in 0..d {
+        z.push(p);
+        p = cx::mul(p, seed);
+    }
+    let value = |monic: &[Cx], at: Cx| {
+        let mut v = cx::ZERO;
+        for &k in monic.iter().rev() {
+            v = cx::add(cx::mul(v, at), k);
+        }
+        v
+    };
+    for _ in 0..500 {
+        let mut moved: f64 = 0.0;
+        for i in 0..d {
+            let mut denom = cx::ONE;
+            for j in 0..d {
+                if i != j {
+                    denom = cx::mul(denom, cx::sub(z[i], z[j]));
+                }
+            }
+            if denom == cx::ZERO {
+                continue;
+            }
+            let step = cx::div(value(monic, z[i]), denom);
+            z[i] = cx::sub(z[i], step);
+                moved = moved.max(step[0].hypot(step[1]));
+        }
+        if moved < 1e-15 {
+            break;
+        }
+    }
+    // A root within rounding of the real axis is a real root.
+    for r in &mut z {
+        if r[1].abs() < 1e-9 {
+            r[1] = 0.0;
+        }
+        if r[0].abs() < 1e-12 {
+            r[0] = 0.0;
+        }
+    }
+    // Two roots of a conjugate pair have the same real part up to
+    // rounding, so the ordering treats near-equal real parts as ties and
+    // the imaginary part decides — which is the order J answers in.
+    z.sort_by(|a, b| {
+        let close = (a[0] - b[0]).abs() <= 1e-9 * (a[0].abs().max(b[0].abs()) + 1.0);
+        let by_re = if close {
+            std::cmp::Ordering::Equal
+        } else {
+            b[0].partial_cmp(&a[0]).unwrap_or(std::cmp::Ordering::Equal)
+        };
+        by_re.then(b[1].partial_cmp(&a[1]).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    z
+}
+
+/// `p.. y`: the derivative of the polynomial y's ascending coefficients
+/// describe, again as coefficients.
+fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
+    let c = poly_coeffs(y, span)?;
+    if c.len() < 2 {
+        return Ok(Array::from_i64(vec![0]));
+    }
+    let out: Vec<Cx> =
+        c.iter().enumerate().skip(1).map(|(k, &v)| cx::mul(v, cx::from_real(k as f64))).collect();
+    Ok(narrow_numbers(complex_or_real(out)))
+}
+
+/// `x p.. y`: the integral of y's coefficients, with x as the constant term.
+fn poly_integral(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let c = poly_coeffs(y, span)?;
+    let k = poly_coeffs(x, span)?;
+    let mut out = vec![k.first().copied().unwrap_or(cx::ZERO)];
+    for (i, &v) in c.iter().enumerate() {
+        out.push(cx::div(v, cx::from_real((i + 1) as f64)));
+    }
+    Ok(narrow_numbers(complex_or_real(out)))
+}
+
+/// A float array whose values are all whole, as integers. Polynomial
+/// coefficients are computed in floats and mostly come out whole; J prints
+/// and types them as integers, so libjay narrows them back.
+fn narrow_numbers(a: Array) -> Array {
+    let Data::F64(v) = &a.data else { return a };
+    if v.iter().any(|x| !x.is_finite() || x.fract() != 0.0 || x.abs() > 9e15) {
+        return a;
+    }
+    let values: Vec<i64> = v.iter().map(|&x| x as i64).collect();
+    Array::new(a.shape, Data::I64(values.into()))
+}
+
+/// `u b. n`: what u is, rather than what it does. Only `0`, the three
+/// ranks, is answered; the rest of J's characteristics reach into the
+/// representation of a verb, which libjay does not publish.
+fn characteristics(u: &Verb, y: &Array, span: Span) -> Result<Array> {
+    let which = y.to_i64_vec().and_then(|v| v.first().copied());
+    if which != Some(0) {
+        return Err(Error::not_yet("a verb characteristic other than `u b. 0`", span));
+    }
+    let ranks = u.ranks();
+    Ok(Array::from_f64(
+        ranks
+            .iter()
+            .map(|&r| if r == RANK_INF { f64::INFINITY } else { r as f64 })
+            .collect(),
+    ))
+}
+
+/// Run `f` with `⍺⍺` and `⍵⍵` naming the operands a user-written operator
+/// was given, and with whatever they named before put back afterwards.
+fn with_operands<R>(
+    alpha: &Verb,
+    omega: Option<&Verb>,
+    ctx: &mut Ctx<'_>,
+    f: impl FnOnce(&mut Ctx<'_>) -> Result<R>,
+) -> Result<R> {
+    let saved = (ctx.env.verb("⍺⍺").cloned(), ctx.env.verb("⍵⍵").cloned());
+    ctx.env.define("⍺⍺".to_string(), alpha.clone());
+    if let Some(g) = omega {
+        ctx.env.define("⍵⍵".to_string(), g.clone());
+    }
+    let out = f(ctx);
+    match saved.0 {
+        Some(v) => ctx.env.define("⍺⍺".to_string(), v),
+        None => ctx.env.undefine("⍺⍺"),
+    }
+    match saved.1 {
+        Some(v) => ctx.env.define("⍵⍵".to_string(), v),
+        None => ctx.env.undefine("⍵⍵"),
+    }
+    out
+}
+
+/// True for APL's MIXED SIMPLE array: every element is a simple scalar,
+/// and no one type holds all of them. libjay keeps such an array as boxed
+/// scalars, but its depth is 1 and nothing may open it further.
+fn is_mixed_simple(a: &Array) -> bool {
+    let Some(items) = a.as_boxes() else { return false };
+    if items.is_empty() || items.iter().any(|b| b.rank() != 0 || b.dtype() == DType::Box) {
+        return false;
+    }
+    let mut common = Some(items[0].dtype());
+    for b in &items[1..] {
+        common = common.and_then(|t| DType::promote(t, b.dtype()));
+    }
+    common.is_none()
+}
+
+/// APL `⊆ y` (Dyalog): nest — y enclosed, unless it already is nested or
+/// is a simple scalar, neither of which enclosing changes.
+fn nest(y: &Array) -> Array {
+    if y.dtype() == DType::Box || y.rank() == 0 {
+        return y.clone();
+    }
+    Array::boxed(y.clone())
+}
+
+/// APL `f⌸ y` and `x f⌸ y` (Dyalog's key): the distinct major cells of the
+/// left argument, in first-occurrence order, each paired with what shares
+/// it — the positions it occupies, or the right argument's items there.
+fn key_pairs(
+    u: &Verb,
+    keys: &Array,
+    values: Option<&Array>,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let base = if keys.rank() == 0 { Array::new(vec![1], keys.data.clone()) } else { keys.clone() };
+    let n = base.items();
+    if let Some(v) = values {
+        if v.items() != n {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!("{n} key(s) for {} item(s)", v.items()),
+                Some(span),
+            ));
+        }
+    }
+    let groups = group_positions(&base, ctx.cfg.tol);
+    let origin = if matches!(ctx.cfg.agreement, Agreement::ExactOrScalar) { 1 } else { 0 };
+    let mut cells = Vec::with_capacity(groups.len());
+    for (first, at) in &groups {
+        let key = item_or_self(&base, *first);
+        let group = match values {
+            Some(v) => select_items(v, at),
+            None => Array::from_i64(at.iter().map(|&i| origin + i as i64).collect()),
+        };
+        // A dfn that never names `⍺` has no dyadic valence; the key is
+        // then of no use to it and the group is all it is given.
+        let monadic = matches!(u, Verb::Explicit(d) if d.left.is_none());
+        cells.push(if monadic {
+            u.monad(&group, ctx, span)?
+        } else {
+            u.dyad(&key, &group, ctx, span)?
+        });
+    }
+    let count = cells.len();
+    assemble(&[count], cells, span)
+}
+
+/// The distinct items of `y`, each as (its first position, every position
+/// it holds), in first-occurrence order.
+fn group_positions(y: &Array, tol: Tol) -> Vec<(usize, Vec<usize>)> {
+    let n = y.items();
+    let mut keys: Vec<Array> = Vec::new();
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for i in 0..n {
+        let item = y.item(i);
+        match keys.iter().position(|k| arrays_match(k, &item, tol)) {
+            Some(at) => groups[at].1.push(i),
+            None => {
+                keys.push(item);
+                groups.push((i, vec![i]));
+            }
+        }
+    }
+    groups
+}
+
+/// APL `x ⍕ y`: format by specification. `x` is one width-and-precision
+/// pair per column of y's last axis, one pair for all of them, or a lone
+/// precision, which takes the width the values need plus a separating
+/// blank. A value that does not fit its width is a domain error, as the
+/// reference has it.
+fn format_spec(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Array> {
+    let spec = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a format specification is whole numbers", span))?;
+    if y.dtype() == DType::Box {
+        return Err(Error::not_yet("format by specification of a nested array", span));
+    }
+    let cols = if y.rank() == 0 { 1 } else { y.shape[y.rank() - 1] };
+    let rows = y.count() / cols.max(1);
+    // One number is a precision alone; pairs are width and precision.
+    let pairs: Vec<(Option<i64>, i64)> = match spec.len() {
+        1 => vec![(None, spec[0]); cols],
+        2 => vec![(Some(spec[0]), spec[1]); cols],
+        n if n == 2 * cols => spec.chunks(2).map(|c| (Some(c[0]), c[1])).collect(),
+        n => {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!("{n} specification value(s) for {cols} column(s)"),
+                Some(span),
+            ));
+        }
+    };
+    if pairs.iter().any(|&(w, p)| w.is_some_and(|w| w < 0) || p < 0) {
+        return Err(Error::domain("a format width and precision are nonnegative", span));
+    }
+    let numbers = y.to_f64_vec();
+    let text = |i: usize, p: i64| -> String {
+        match (&y.data, &numbers) {
+            (Data::Char(v), _) => v[i].to_string(),
+            (_, Some(v)) => {
+                let s = format!("{:.*}", p as usize, v[i]);
+                if v[i] < 0.0 { format!("{}{}", fmt.neg, &s[1..]) } else { s }
+            }
+            _ => String::new(),
+        }
+    };
+    if y.dtype() != DType::Char && numbers.is_none() {
+        return Err(Error::domain("format by specification takes numbers or characters", span));
+    }
+    // A width the caller did not give is the widest value plus a blank.
+    let widths: Vec<usize> = pairs
+        .iter()
+        .enumerate()
+        .map(|(c, &(w, p))| match w {
+            Some(w) => w as usize,
+            None => {
+                (0..rows).map(|r| text(r * cols + c, p).chars().count()).max().unwrap_or(0) + 1
+            }
+        })
+        .collect();
+    let line: usize = widths.iter().sum();
+    let mut out: Vec<char> = Vec::with_capacity(rows * line);
+    for r in 0..rows {
+        for c in 0..cols {
+            let s = text(r * cols + c, pairs[c].1);
+            let len = s.chars().count();
+            if len > widths[c] {
+                return Err(Error::domain(
+                    format!("{s} does not fit a field {} wide", widths[c]),
+                    span,
+                ));
+            }
+            out.extend(std::iter::repeat_n(' ', widths[c] - len));
+            out.extend(s.chars());
+        }
+    }
+    let mut shape = if y.rank() == 0 { Vec::new() } else { y.shape[..y.rank() - 1].to_vec() };
+    shape.push(line);
+    Ok(Array::new(shape, Data::Char(out.into())))
+}
+
+/// APL `⍳ y`: the indices of an array whose shape is y. One length gives
+/// the plain counting vector; two or more give an array of that shape whose
+/// elements are the boxed coordinate vectors.
+fn iota_apl(y: &Array, origin: i64, span: Span) -> Result<Array> {
+    if y.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "the index generator takes a shape, which is a scalar or a vector",
+            Some(span),
+        ));
+    }
+    let dims = y
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("index generator needs an integer argument", span))?;
+    if dims.iter().any(|&n| n < 0) {
+        return Err(Error::domain("index generator needs nonnegative lengths", span));
+    }
+    if dims.len() <= 1 {
+        let n = dims.first().copied().unwrap_or(0);
+        return Ok(Array::from_i64((0..n).map(|i| origin + i).collect()));
+    }
+    let shape: Vec<usize> = dims.iter().map(|&n| n as usize).collect();
+    let total: usize = shape.iter().product();
+    let mut cells = Vec::with_capacity(total);
+    let mut coord = vec![0usize; shape.len()];
+    for _ in 0..total {
+        cells.push(Array::from_i64(coord.iter().map(|&c| origin + c as i64).collect()));
+        odometer(&mut coord, &shape);
+    }
+    Ok(Array::new(shape, Data::Box(cells.into())))
+}
+
+/// J carries an argument's exactness into the verbs that answer with
+/// counts and digits: `$`, `#`, `#.`, `#:`, `p:` and `q:` of an extended or
+/// rational argument answer with extended integers, not machine ones. The
+/// values are the same either way; only the type differs, and J's own
+/// `3!:0` reports it.
+fn carry_exact(result: Array, y: &Array) -> Array {
+    if !matches!(y.dtype(), DType::Ext | DType::Rat) {
+        return result;
+    }
+    match result.data.cast(DType::Ext) {
+        Some(data) => Array::new(result.shape, data),
+        None => result,
+    }
+}
+
+fn carry_exact2(result: Array, x: &Array, y: &Array) -> Array {
+    let widened = carry_exact(result, x);
+    carry_exact(widened, y)
+}
+
+/// `m b.`: one of the sixteen boolean functions of two bits, and — sixteen
+/// higher — the same function applied to every bit of a pair of integers.
+fn truth_table(m: u8, x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let table = m & 15;
+    let bit = |a: i64, b: i64| ((table >> (3 - (2 * a + b))) & 1) as i64;
+    let xs = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a boolean function takes integers", span))?;
+    let ys = y
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a boolean function takes integers", span))?;
+    let (a, b) = (xs.first().copied().unwrap_or(0), ys.first().copied().unwrap_or(0));
+    if m < 16 {
+        if !(0..=1).contains(&a) || !(0..=1).contains(&b) {
+            return Err(Error::domain(
+                format!("{m} b. takes 0 and 1; {m} b. + 16 is the same function on every bit"),
+                span,
+            ));
+        }
+        return Ok(Array::scalar_bool(bit(a, b) != 0));
+    }
+    let mut out = 0i64;
+    for k in 0..64 {
+        if bit((a >> k) & 1, (b >> k) & 1) != 0 {
+            out |= 1i64 << k;
+        }
+    }
+    Ok(Array::scalar_i64(out))
 }
 
 /// APL `A[i;j]←v`: `base` with the elements the slots select replaced by
@@ -8073,9 +9305,11 @@ mod tests {
         assert_eq!(ints(&r), vec![0, 1, 2]);
         let e = iota_apl(1).monad(&Array::scalar_i64(-1), &mut c, sp()).unwrap_err();
         assert_eq!(e.kind, ErrorKind::Domain);
-        // A vector of lengths asks for an array of index vectors.
-        let e = iota_apl(1).monad(&Array::from_i64(vec![2, 3]), &mut c, sp()).unwrap_err();
-        assert_eq!(e.kind, ErrorKind::NotYet);
+        // A vector of lengths asks for an array of index vectors, one per
+        // cell of the result.
+        let r = iota_apl(1).monad(&Array::from_i64(vec![2, 3]), &mut c, sp()).unwrap();
+        assert_eq!(r.shape, vec![2, 3]);
+        assert_eq!(ints(&r.as_boxes().expect("boxed")[4]), vec![2, 2]);
     }
 
     #[test]

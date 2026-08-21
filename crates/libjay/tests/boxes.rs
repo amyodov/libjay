@@ -250,10 +250,14 @@ fn apl_stranding_makes_vectors() {
     assert_eq!(val(Lang::Apl, "A←1 2 ⋄ ⍴A (3 4)"), i64s(&[1], &[2]));
     // A strand is one operand, so a function to its left takes all of it.
     assert_eq!(val(Lang::Apl, "≢(1 2)(3 4)(5 6)"), Array::scalar_i64(3));
-    // Simple scalars of different types would need a mixed simple array.
-    let e = err(Lang::Apl, "1 'a'");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("mixing characters and numbers"), "{}", e.msg);
+    // Simple scalars of different types make a MIXED SIMPLE array: two
+    // items, depth 1, kept as boxed scalars and displayed unboxed.
+    assert_eq!(
+        val(Lang::Apl, "1 'a'"),
+        boxes(&[2], vec![Array::scalar_i64(1), text(&[], "a")])
+    );
+    assert_eq!(val(Lang::Apl, "⍴1 'a'"), i64s(&[1], &[2]));
+    assert_eq!(val(Lang::Apl, "≡1 'a'"), Array::scalar_i64(1));
 }
 
 // --- enlist, depth, mix, split -----------------------------------------
@@ -432,11 +436,15 @@ fn grading_boxes_is_named_as_missing() {
 
 #[test]
 fn mixing_boxed_and_unboxed_is_refused_rather_than_guessed() {
-    for (lang, src) in [(Lang::J, "(1;2) , 5"), (Lang::J, "1 , <2"), (Lang::Apl, "1 2,⊂3 4")] {
+    for (lang, src) in [(Lang::J, "(1;2) , 5"), (Lang::J, "1 , <2")] {
         let e = err(lang, src);
         assert_eq!(e.kind, ErrorKind::Type, "{src}");
         assert!(e.msg.contains("boxed"), "{src}: {}", e.msg);
     }
+    // APL2 does not refuse the mixture: it encloses the simple side's
+    // items, so the answer is one nested vector.
+    assert_eq!(val(Lang::Apl, "⍴1 2,⊂3 4"), i64s(&[1], &[3]));
+    assert_eq!(val(Lang::Apl, "≡1 2,⊂3 4"), Array::scalar_i64(2));
     // Encoding, decoding and the index generator want numbers.
     assert_eq!(err(Lang::J, "#: <5").kind, ErrorKind::Domain);
     assert_eq!(err(Lang::J, "i. 1;2").kind, ErrorKind::Domain);

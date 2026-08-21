@@ -333,7 +333,7 @@ fn cut_zero_reverses_every_axis() {
 
 #[test]
 fn the_cut_modes_libjay_lacks_are_named() {
-    for src in ["1 <;.3 i. 4 4", "<;.4 'abc'"] {
+    for src in ["<;.4 'abc'", "<;._4 'abc'"] {
         let e = err(Lang::J, src);
         assert_eq!(e.kind, ErrorKind::NotYet, "{src}");
         assert!(e.msg.contains("cut"), "{src}: {}", e.msg);
@@ -642,10 +642,7 @@ fn the_fixed_seed_roll_repeats() {
 #[test]
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
-        (Lang::J, "{:: 'abc';'de'", "map"),
         (Lang::J, "2 ;: 'a bc'", "sequential machine"),
-        (Lang::J, "(+ }) 1 2 3", "amend with a verb operand"),
-        (Lang::Apl, "1 0 1⊂2 2⍴⍳4", "partitioned enclose on a matrix"),
         (Lang::Apl, "1∘×2", "∘ with a value operand"),
     ];
     for (lang, src, what) in cases {

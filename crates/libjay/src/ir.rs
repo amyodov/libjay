@@ -92,6 +92,10 @@ pub enum Control {
     Return,
     /// `break.` / `:Leave`: leave the innermost loop.
     Break,
+    /// APL `→ e`: continue at the line e names. An empty value falls
+    /// through to the next line; anything that is not a line of this
+    /// definition — `→0` above all — leaves it.
+    Branch(Box<Expr>),
     /// `continue.` / `:Continue`: start the innermost loop's next iteration.
     Continue,
 }
@@ -105,6 +109,11 @@ pub struct Branch {
     /// `fcase.`: run the next arm's body too, without testing it.
     pub fall_through: bool,
 }
+
+/// The right-argument name a NILADIC APL definition carries. No sentence
+/// can write it, so the body cannot read the argument it never gets, and a
+/// definition wearing it is called by naming it rather than applying it.
+pub const NILADIC: &str = "(no argument)";
 
 /// An explicit definition: J's `3 : '…'`, `4 : '…'` and `{{ … }}`, APL's
 /// `{…}` and `∇`-defined functions.
@@ -124,6 +133,10 @@ pub struct ExplicitDef {
     pub body: Vec<Expr>,
     /// The value a body that ran nothing yields; None makes that an error.
     pub empty: Option<Array>,
+    /// APL's branch labels: each label with the body statement it names.
+    /// A label's value is its line number, which is one more than its
+    /// position here, and `→` takes one of those numbers.
+    pub labels: Vec<(String, usize)>,
     /// True when running the body can have no effect beyond its result.
     pub pure: bool,
 }
@@ -302,6 +315,8 @@ pub(crate) enum Flow {
     Return,
     Break,
     Continue,
+    /// APL `→`: continue at this statement of the definition's body.
+    Goto(usize),
 }
 
 /// Run a block of sentences: the value is the last sentence's, and an
@@ -394,6 +409,23 @@ fn eval_control(
 ) -> Result<(Option<Array>, Flow)> {
     match c {
         Control::Return => Ok((None, Flow::Return)),
+        // `→ e`: an empty target falls through, a line number of this
+        // definition jumps to it, and anything else leaves.
+        Control::Branch(target) => {
+            let to = eval(target, ctx, rec)?;
+            if to.count() == 0 {
+                return Ok((None, Flow::Normal));
+            }
+            let line = to
+                .to_i64_vec()
+                .and_then(|v| v.first().copied())
+                .ok_or_else(|| Error::domain("a branch target is a line number", span))?;
+            let lines = ctx.env.current_def().map_or(0, |d| d.body.len() as i64);
+            if line >= 1 && line <= lines {
+                return Ok((None, Flow::Goto(line as usize - 1)));
+            }
+            Ok((None, Flow::Return))
+        }
         Control::Break => Ok((None, Flow::Break)),
         Control::Continue => Ok((None, Flow::Continue)),
         Control::If { arms, otherwise } => {
@@ -442,7 +474,9 @@ fn eval_control(
                 match flow {
                     Flow::Normal | Flow::Continue => {}
                     Flow::Break => return Ok((last, Flow::Normal)),
-                    Flow::Return => return Ok((last, Flow::Return)),
+                    // A branch out of a loop leaves the loop, and the
+                    // definition's own statement list takes it from there.
+                    other => return Ok((last, other)),
                 }
             }
         }
@@ -465,7 +499,9 @@ fn eval_control(
                 match flow {
                     Flow::Normal | Flow::Continue => {}
                     Flow::Break => return Ok((last, Flow::Normal)),
-                    Flow::Return => return Ok((last, Flow::Return)),
+                    // A branch out of a loop leaves the loop, and the
+                    // definition's own statement list takes it from there.
+                    other => return Ok((last, other)),
                 }
             }
             Ok((last, Flow::Normal))
@@ -538,11 +574,15 @@ pub(crate) fn call_explicit(
     if let (Some(name), Some(v)) = (&def.left, x) {
         frame.insert(name.clone(), v.clone());
     }
+    // A label's value is its line number, which is what `→` takes.
+    for (label, at) in &def.labels {
+        frame.insert(label.clone(), Array::scalar_i64(*at as i64 + 1));
+    }
     ctx.env.enter(frame, Arc::clone(def), span)?;
     let mut rec = None;
-    let out = run_block(&def.body, None, ctx, &mut rec);
+    let out = run_body(&def.body, ctx, &mut rec);
     let frame = ctx.env.leave();
-    let (value, _) = out?;
+    let value = out?;
     // An APL `∇`-definition names its result; the body's own value is not
     // it, and a definition that never assigned the name has no result.
     if let Some(name) = &def.result {
@@ -564,6 +604,62 @@ pub(crate) fn call_explicit(
             )
         }),
     }
+}
+
+/// How many statements a branching definition may run before libjay stops
+/// it. A `→` loop has no other bound, and an unbounded one would hang.
+const BRANCH_LIMIT: usize = 1 << 22;
+
+/// A definition's body, statement by statement, with `→` free to move the
+/// place it runs from. The value is the last statement that produced one.
+fn run_body(
+    stmts: &[Expr],
+    ctx: &mut Ctx<'_>,
+    rec: &mut Option<Trace>,
+) -> Result<Option<Array>> {
+    let mut last = None;
+    let mut at = 0usize;
+    let mut steps = 0usize;
+    while at < stmts.len() {
+        steps += 1;
+        if steps > BRANCH_LIMIT {
+            return Err(Error::new(
+                ErrorKind::Domain,
+                format!("a definition branched more than {BRANCH_LIMIT} times"),
+                Some(stmts[at].span()),
+            )
+            .note("a loop written with → needs a branch that leaves it"));
+        }
+        let (v, flow) = eval_stmt(&stmts[at], ctx, rec)?;
+        if let Some(v) = v {
+            last = Some(v);
+        }
+        match flow {
+            Flow::Normal => at += 1,
+            Flow::Goto(to) => at = to,
+            _ => break,
+        }
+    }
+    Ok(last)
+}
+
+/// A noun expression's value where the whole of it can be settled now:
+/// constants combined by pure verbs, with no name, no bound parameter and
+/// no control flow anywhere in it. Modifiers that capture a noun operand
+/// use this, so a written-out `(<a:;1)}` is as good as a literal.
+pub(crate) fn fold_const(e: &Expr, cfg: EvalCfg) -> Option<Array> {
+    fn closed(e: &Expr) -> bool {
+        match e {
+            Expr::Const(..) => true,
+            Expr::Monad { verb, y, .. } => verb.is_pure() && closed(y),
+            Expr::Dyad { verb, x, y, .. } => verb.is_pure() && closed(x) && closed(y),
+            _ => false,
+        }
+    }
+    if !closed(e) {
+        return None;
+    }
+    cfg.pure(|ctx| eval(e, ctx, &mut None).ok())
 }
 
 fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {

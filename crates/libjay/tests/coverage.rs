@@ -678,18 +678,15 @@ fn newly_spelled_words_name_what_they_still_lack() {
     let cases = [
         (Lang::J, "{ 1 2", "catalogue"),
         (Lang::J, "e. 1 2", "raze-in"),
-        (Lang::J, "{:: 1 2", "map"),
         (Lang::J, "2 ;: 'a b'", "sequential machine"),
         (Lang::Apl, "1 2⍋3 1 2", "collation"),
         (Lang::Apl, "1 2⍒3 1 2", "collation"),
         (Lang::J, "2 \": 1.5", "format with a specification"),
-        (Lang::Apl, "2⍕1.5", "format with a specification"),
         (Lang::J, "+ &. (+/ % #) 1 2", "obverse"),
         (Lang::Apl, "1∘×2", "∘ with a value operand"),
         // Boxes arrived; what they still lack is named too.
         (Lang::J, "/: 1;2", "grading boxed arrays"),
         (Lang::Apl, "⍋⊂1 2", "grading boxed arrays"),
-        (Lang::Apl, "1 0 1⊂2 2⍴⍳4", "partitioned enclose on a matrix"),
     ];
     for (lang, src, what) in cases {
         let e = err(lang, src);

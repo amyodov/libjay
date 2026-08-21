@@ -95,18 +95,6 @@
 ? artanh 1 is ∞ here, DOMAIN ERROR there
 ⍴+\\,5
 ? scan keeps the shape here, drops a length-1 axis there
-// Nested arrays. A vector of simple scalars of different types is a
-// simple MIXED array in APL2 and has no representation here yet.
-1 'a'
-? a mixed simple vector there, a named gap here
-// Catenating a simple array to a nested one encloses the simple
-// items there; libjay refuses the pair rather than guess the depth.
-1 2,⊂3 4
-? the simple items are enclosed there, a type error here
-// Overtaking a nested array fills with the first item's prototype
-// there and with the empty box (J's `a:`) here.
-4↑(1 2)(3 4)
-? the fill is the item prototype there, an empty box here
 // GNU APL spaces a nested display more widely than libjay does, which
 // the whitespace-insensitive comparison above only sees through the
 // length of `⍕`.
@@ -115,11 +103,6 @@
 // A named gap: ordering boxes needs J's total array ordering.
 ⍋(1 2)(3 4)
 ? graded there, a `grading boxed arrays` gap here
-// The index generator on a vector of lengths: an array of index vectors
-// there, a named gap here. Refusing it is the point — the monad has rank
-// ∞ so the rank machinery cannot quietly frame it into a plain 2 by 3.
-⍳2 3
-? a nested index array there, a named gap here
 // `⍺←v` inside a dfn is a DEFAULT here, as the published dfn model has it:
 // a left argument that arrived keeps its value. GNU APL assigns
 // unconditionally, so the default overwrites the argument.

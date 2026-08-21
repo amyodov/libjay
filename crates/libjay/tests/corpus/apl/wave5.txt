@@ -1,0 +1,86 @@
+// Wave 5: the index generator on a shape, mixed simple arrays, the item
+// prototype as a fill, catenating nested to simple, partitioned enclose
+// above rank 1, and format by specification.
+
+// The index generator on a shape: a nested array of coordinate vectors.
+⍳2 3
+⍴⍳2 3
+≡⍳2 3
+⍳,3
+⍳3
+⍴⍳2 2 2
+⊃⍳2 3
+(⍳2 3)[1;2]
+@ io=0
+⍳2 3
+⍴⍳2 3
+@ io=1
+
+// Mixed simple arrays: depth 1, and they display unboxed.
+1 'a'
+⍴1 'a'
+≡1 'a'
+'a' 1 2
+≢1 'a' 2
+1 'a' 2.5
+⊃1 'a'
+1↓1 'a' 2
+⌽1 'a' 2
+
+// The item prototype fills an overtake.
+5↑1 2 3 'a'
+3↑'ab' 'cd'
+5↑⊂1 2
+4↑(1 2)(3 4)
+⍴4↑(1 2)(3 4)
+≡4↑(1 2)(3 4)
+3↑⊂'ab'
+2↑(1 2 3)(4 5 6)
+
+// Nested and simple catenate by enclosing the simple side.
+(1 2),⊂3 4
+⍴(1 2),⊂3 4
+≡(1 2),⊂3 4
+(⊂1 2),3 4
+⍴'ab',⊂'cd'
+≡'ab',⊂'cd'
+⍴(⊂1 2),⊂3 4
+
+// Partitioned enclose above rank 1: the last axis is partitioned.
+1 0 1⊂2 3⍴⍳6
+⍴1 0 1⊂2 3⍴⍳6
+1 1 2⊂2 3⍴⍳6
+1 0 0⊂2 3⍴⍳6
+0 1 1⊂2 3⍴⍳6
+1 1 0 2⊂2 4⍴⍳8
+
+// Format by specification.
+6 2⍕1.5 2.25
+⍴6 2⍕1.5 2.25
+2⍕1.5 2.25
+6 2⍕2 2⍴1.5 2.25 3 4
+⍴6 2⍕2 2⍴1.5 2.25 3 4
+6 2 8 3⍕2 2⍴1.5 2.25 3 4
+0⍕1.567
+5 0⍕1.567
+10 4⍕1 2 3
+6 2⍕'a'
+6 2⍕¯1.5
+8 3⍕○1
+4 1⍕1 2 3 4
+
+// The branch, and the labels it takes its line numbers from.
+∇Z←F N\nZ←0\nL1:\n→(N=0)/END\nZ←Z+N\nN←N-1\n→L1\nEND:\n∇\nF 5
+∇Z←F N\nZ←0\nL1:\n→(N=0)/END\nZ←Z+N\nN←N-1\n→L1\nEND:\n∇\nF 0
+∇Z←G N\n→(N>3)/BIG\nZ←1\n→0\nBIG:\nZ←2\n∇\nG 5
+∇Z←G N\n→(N>3)/BIG\nZ←1\n→0\nBIG:\nZ←2\n∇\nG 1
+∇Z←H N\nZ←1\n→0\nZ←99\n∇\nH 1
+∇Z←K N\nZ←1\n→⍬\nZ←2\n∇\nK 0
+∇Z←M N\nZ←0\nTOP:\n→(N≤0)/0\nZ←Z+2\nN←N-1\n→TOP\n∇\nM 3
+
+// Niladic ∇ definitions: naming one is what calls it.
+∇Z←H\nZ←42\n∇\nH
+∇Z←H\nZ←42\n∇\nH+1
+∇Z←H\nZ←42\n∇\n2×H
+∇Z←H;T\nT←6\nZ←T×7\n∇\nH
+∇Z←P\nZ←⍳4\n∇\n+/P

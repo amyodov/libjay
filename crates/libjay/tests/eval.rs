@@ -229,9 +229,9 @@ fn j_undefined_name() {
 
 #[test]
 fn j_not_yet_is_a_promise_not_a_wall() {
-    let e = err(Lang::J, "{:: 1;2");
+    let e = err(Lang::J, "e. 1 2");
     assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("map"));
+    assert!(e.msg.contains("raze-in"));
 }
 
 #[test]
@@ -266,11 +266,11 @@ fn apl_iota_respects_index_origin() {
     let zero = Dialect { index_origin: Some(0) };
     assert_eq!(run_dialect(Lang::Apl, "⍳4", &zero), Some(i64s(&[4], &[0, 1, 2, 3])));
     assert_eq!(run(Lang::Apl, "⍳0"), Some(Array::empty(jay::DType::I64)));
-    // A vector argument asks for an array of index vectors — a nested array,
-    // which is a named gap rather than a per-atom frame of index vectors.
-    let e = err(Lang::Apl, "⍳2 3");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("nested index arrays"), "{}", e.msg);
+    // A vector argument asks for an array of index vectors: one nested
+    // array of that shape, not a per-atom frame of counting vectors.
+    let nested = run(Lang::Apl, "⍳2 3").expect("a value");
+    assert_eq!(nested.shape, vec![2, 3]);
+    assert_eq!(run(Lang::Apl, "≡⍳2 3"), Some(Array::scalar_i64(2)));
     // J's `i.` reshapes on the same argument and is unaffected.
     assert_eq!(run(Lang::J, "i. 2 3"), Some(i64s(&[2, 3], &[0, 1, 2, 3, 4, 5])));
 }
