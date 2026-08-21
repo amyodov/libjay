@@ -1421,11 +1421,16 @@ impl Extent {
 
 /// One input, in the working type: either the values themselves or one
 /// value repeated, which is how a rank-0 argument reaches every element.
+#[derive(Clone, Copy)]
 struct Loaded<'a, T> {
     data: &'a [T],
     splat: bool,
     /// The axis the chain reads this input on.
     on: On,
+    /// The index `data[0]` stands at on that axis. Zero for an argument's
+    /// own buffer, and the block's own start for one staged a block at a
+    /// time.
+    base: usize,
 }
 
 impl<T> Loaded<'_, T> {
@@ -1434,11 +1439,122 @@ impl<T> Loaded<'_, T> {
         if self.splat {
             return &self.data[..at.len_on(dom)];
         }
-        let (start, len) = match self.on {
-            On::Wide => (at.wide_start, at.wide_len),
-            _ => (at.start, at.len),
-        };
-        &self.data[start..start + len]
+        let (start, len) = read_over(self.on, at);
+        &self.data[start - self.base..start - self.base + len]
+    }
+}
+
+/// The range of its own axis an input standing on `on` is read over for one
+/// block.
+#[inline]
+fn read_over(on: On, at: &Extent) -> (usize, usize) {
+    match on {
+        On::Wide => (at.wide_start, at.wide_len),
+        _ => (at.start, at.len),
+    }
+}
+
+/// An argument narrower than the working type, read where it lies.
+///
+/// A whole widened copy of such an argument costs two round trips of the
+/// working set — writing 160 MB of freshly faulted pages, then reading them
+/// back — where the values themselves are needed one block at a time and a
+/// block fits in cache. So the promotion happens at the block, into a
+/// staging buffer each thread reuses; the values are what the widened copy
+/// would have held, element for element.
+#[derive(Clone, Copy)]
+enum Narrow<'a> {
+    I64(&'a [i64]),
+    Bool(&'a [u8]),
+}
+
+/// One input as the kernel will read it: its own buffer when that already
+/// holds the working type, a narrower buffer to be promoted otherwise.
+enum Source<'a, T> {
+    Ready(Loaded<'a, T>),
+    /// The narrow values, and the axis the chain reads them on.
+    Staged(Narrow<'a>, On),
+}
+
+/// The staging buffer's element type, filled from a narrow argument.
+trait FromNarrow: Copy {
+    fn fill(src: Narrow<'_>, at: usize, dst: &mut [Self]);
+}
+
+impl FromNarrow for f64 {
+    #[inline]
+    fn fill(src: Narrow<'_>, at: usize, dst: &mut [f64]) {
+        match src {
+            Narrow::I64(v) => {
+                for (slot, &x) in dst.iter_mut().zip(&v[at..]) {
+                    *slot = x as f64;
+                }
+            }
+            Narrow::Bool(v) => {
+                for (slot, &x) in dst.iter_mut().zip(&v[at..]) {
+                    *slot = x as f64;
+                }
+            }
+        }
+    }
+}
+
+impl FromNarrow for i64 {
+    #[inline]
+    fn fill(src: Narrow<'_>, at: usize, dst: &mut [i64]) {
+        match src {
+            // The working type is integer only when no input is a float.
+            Narrow::I64(v) => dst.copy_from_slice(&v[at..at + dst.len()]),
+            Narrow::Bool(v) => {
+                for (slot, &x) in dst.iter_mut().zip(&v[at..]) {
+                    *slot = x as i64;
+                }
+            }
+        }
+    }
+}
+
+/// The inputs of one run, and how wide a staging block has to be.
+struct Sources<'a, T> {
+    of: Vec<Source<'a, T>>,
+    staged: usize,
+}
+
+impl<T: FromNarrow + Default> Sources<'_, T> {
+    /// Promote every staged input's block into `stage` and hand the whole
+    /// input list, block-local, to `f`.
+    ///
+    /// `stage` holds one region of `width` per staged input, so the regions
+    /// are the same from block to block and a thread faults them once.
+    fn with_block<R>(
+        &self,
+        at: &Extent,
+        stage: &mut [T],
+        width: usize,
+        f: impl FnOnce(&[Loaded<'_, T>]) -> R,
+    ) -> R {
+        let mut k = 0;
+        for s in &self.of {
+            let Source::Staged(src, on) = s else { continue };
+            let (start, len) = read_over(*on, at);
+            T::fill(*src, start, &mut stage[k * width..k * width + len]);
+            k += 1;
+        }
+        let mut k = 0;
+        let loaded: Vec<Loaded<'_, T>> = self
+            .of
+            .iter()
+            .map(|s| match s {
+                Source::Ready(l) => *l,
+                Source::Staged(_, on) => {
+                    let (start, len) = read_over(*on, at);
+                    let d = &stage[k * width..k * width + len];
+                    k += 1;
+                    Loaded { data: d, splat: false, on: *on, base: start }
+                }
+            })
+            .collect();
+        f(&loaded)
     }
 }
 
@@ -1692,13 +1808,13 @@ fn release(free: &mut Vec<usize>, lets: &[usize], s: Slot) {
 /// The whole mapped result, one block at a time. None on integer overflow.
 fn map_pass<T, M, D, W, S>(
     k: &FusedKernel,
-    srcs: &[Loaded<'_, T>],
+    srcs: &Sources<'_, T>,
     n: usize,
     wide: usize,
     steps: &Steps<M, D, W, S>,
 ) -> Option<Vec<T>>
 where
-    T: Copy + Default + Send + Sync,
+    T: FromNarrow + Default + Send + Sync,
     M: Fn(ScalarMonad, &[T], &mut [T]) -> bool + Sync + Send,
     D: Fn(ScalarDyad, &[T], &[T], &mut [T]) -> bool + Sync + Send,
     W: Fn(ScalarDyad, usize, &[T], usize, &mut [T]) -> bool + Sync + Send,
@@ -1707,9 +1823,14 @@ where
     let run = |start: usize, part: &mut [T]| {
         let w = BLOCK.min(part.len()).max(1);
         let mut sc = Scratch::new(k, w);
+        let width = sc.width;
+        let mut stage = vec![T::default(); srcs.staged * width];
         for (b, chunk) in part.chunks_mut(w).enumerate() {
             let at = Extent::of(start + b * w, chunk.len(), k.window, wide);
-            if exec_block(k, srcs, &at, &mut sc, Some(chunk), steps).is_none() {
+            let done = srcs.with_block(&at, &mut stage, width, |loaded| {
+                exec_block(k, loaded, &at, &mut sc, Some(chunk), steps).is_some()
+            });
+            if !done {
                 return false;
             }
         }
@@ -1783,7 +1904,7 @@ multiversioned! {
 /// Fold the mapped values of `lo .. hi` right to left, block by block.
 fn fold_range<T, M, D, W, C, S>(
     k: &FusedKernel,
-    srcs: &[Loaded<'_, T>],
+    srcs: &Sources<'_, T>,
     lo: usize,
     hi: usize,
     wide: usize,
@@ -1791,7 +1912,7 @@ fn fold_range<T, M, D, W, C, S>(
     step: &S,
 ) -> Option<T>
 where
-    T: Copy + Default,
+    T: FromNarrow + Default,
     M: Fn(ScalarMonad, &[T], &mut [T]) -> bool,
     D: Fn(ScalarDyad, &[T], &[T], &mut [T]) -> bool,
     W: Fn(ScalarDyad, usize, &[T], usize, &mut [T]) -> bool,
@@ -1800,6 +1921,8 @@ where
 {
     let w = BLOCK.min(hi - lo).max(1);
     let mut sc = Scratch::new(k, w);
+    let width = sc.width;
+    let mut stage = vec![T::default(); srcs.staged * width];
     let mut acc: Option<T> = None;
     // Blocks run backwards and the accumulator carries across them, so the
     // fold is the insert's own right-to-left order over the whole range.
@@ -1809,7 +1932,10 @@ where
         let start = lo + b * w;
         let len = (hi - start).min(w);
         let at = Extent::of(start, len, k.window, wide);
-        let slot = exec_block(k, srcs, &at, &mut sc, None, steps)?;
+        let slot = srcs
+            .with_block(&at, &mut stage, width, |loaded| {
+                exec_block(k, loaded, &at, &mut sc, None, steps)
+            })?;
         let block = fold_block(&sc.cells[slot * sc.width..slot * sc.width + len], step)?;
         acc = Some(match acc {
             None => block,
@@ -1822,14 +1948,14 @@ where
 /// The mapped values folded into one. None on integer overflow.
 fn reduce_pass<T, M, D, W, C, S>(
     k: &FusedKernel,
-    srcs: &[Loaded<'_, T>],
+    srcs: &Sources<'_, T>,
     n: usize,
     wide: usize,
     steps: &Steps<M, D, W, C>,
     step: S,
 ) -> Option<T>
 where
-    T: Copy + Default + Send + Sync,
+    T: FromNarrow + Default + Send + Sync,
     M: Fn(ScalarMonad, &[T], &mut [T]) -> bool + Sync + Send,
     D: Fn(ScalarDyad, &[T], &[T], &mut [T]) -> bool + Sync + Send,
     W: Fn(ScalarDyad, usize, &[T], usize, &mut [T]) -> bool + Sync + Send,
@@ -2183,46 +2309,78 @@ fn step_f64(op: ScalarDyad, a: f64, b: f64) -> Option<f64> {
 
 // ------------------------------------------------------------- the driver
 
-/// Elements of `a` as the working type, or None when the array's own buffer
-/// already is that. A rank-0 argument becomes one block of the repeated
-/// value, which is how it reaches every element without an index test.
-fn to_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
-    if a.rank() == 0 {
-        let v = match &a.data {
-            Data::Bool(d) => d[0] as f64,
-            Data::I64(d) => d[0] as f64,
-            Data::F64(d) => d[0],
-            Data::Ext(_) | Data::Rat(_) | Data::Complex(_) | Data::Char(_) | Data::Box(_) => {
-                return Some(Vec::new());
-            }
-        };
-        return Some(vec![v; w]);
+/// A rank-0 argument as one block of the repeated value, which is how it
+/// reaches every element without an index test. None for an argument with
+/// items, which is read where it lies.
+fn splat_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
+    if a.rank() != 0 {
+        return None;
     }
-    match &a.data {
-        Data::F64(_) => None,
-        Data::I64(d) => Some(par::map(d, |&x| x as f64)),
-        Data::Bool(d) => Some(par::map(d, |&x| x as f64)),
+    let v = match &a.data {
+        Data::Bool(d) => d[0] as f64,
+        Data::I64(d) => d[0] as f64,
+        Data::F64(d) => d[0],
         Data::Ext(_) | Data::Rat(_) | Data::Complex(_) | Data::Char(_) | Data::Box(_) => {
-            Some(Vec::new())
+            return Some(Vec::new());
         }
+    };
+    Some(vec![v; w])
+}
+
+fn splat_i64(a: &Array, w: usize) -> Option<Vec<i64>> {
+    if a.rank() != 0 {
+        return None;
+    }
+    let v = match &a.data {
+        Data::Bool(d) => d[0] as i64,
+        Data::I64(d) => d[0],
+        _ => return Some(Vec::new()),
+    };
+    Some(vec![v; w])
+}
+
+/// An argument with items, seen by a float kernel: its own buffer when that
+/// is already f64, the narrow values otherwise.
+fn narrow_f64(a: &Array) -> Result<&[f64], Narrow<'_>> {
+    match &a.data {
+        Data::I64(d) => Err(Narrow::I64(d)),
+        Data::Bool(d) => Err(Narrow::Bool(d)),
+        _ => Ok(a.as_f64_slice().unwrap_or(&[])),
     }
 }
 
-fn to_i64(a: &Array, w: usize) -> Option<Vec<i64>> {
-    if a.rank() == 0 {
-        let v = match &a.data {
-            Data::Bool(d) => d[0] as i64,
-            Data::I64(d) => d[0],
-            _ => return Some(Vec::new()),
-        };
-        return Some(vec![v; w]);
-    }
+fn narrow_i64(a: &Array) -> Result<&[i64], Narrow<'_>> {
     match &a.data {
-        Data::I64(_) => None,
-        Data::Bool(d) => Some(par::map(d, |&x| x as i64)),
-        // The working type is integer only when no input is a float.
-        _ => Some(Vec::new()),
+        Data::Bool(d) => Err(Narrow::Bool(d)),
+        _ => Ok(a.as_i64_slice().unwrap_or(&[])),
     }
+}
+
+/// The input list one run reads: a repeated scalar from `owned`, an
+/// argument's own buffer, or a narrow buffer to be promoted block by block.
+fn sources<'a, T>(
+    inputs: &'a [Array],
+    owned: &'a [Option<Vec<T>>],
+    on: &impl Fn(usize) -> On,
+    narrow: impl Fn(&'a Array) -> Result<&'a [T], Narrow<'a>>,
+) -> Sources<'a, T> {
+    let mut staged = 0;
+    let of = inputs
+        .iter()
+        .zip(owned)
+        .enumerate()
+        .map(|(j, (a, o))| match o {
+            Some(v) => Source::Ready(Loaded { data: v, splat: true, on: on(j), base: 0 }),
+            None => match narrow(a) {
+                Ok(d) => Source::Ready(Loaded { data: d, splat: false, on: on(j), base: 0 }),
+                Err(n) => {
+                    staged += 1;
+                    Source::Staged(n, on(j))
+                }
+            },
+        })
+        .collect();
+    Sources { of, staged }
 }
 
 /// The shape every element of the result has: identical for all non-scalar
@@ -2339,18 +2497,8 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
             window: window_pass_f64,
             scan: scan_pass_f64,
         };
-        let owned: Vec<Option<Vec<f64>>> = inputs.iter().map(|a| to_f64(a, w)).collect();
-        let srcs: Vec<Loaded<f64>> = inputs
-            .iter()
-            .zip(&owned)
-            .enumerate()
-            .map(|(j, (a, o))| match o {
-                Some(v) => Loaded { data: v, splat: a.rank() == 0, on: on(j) },
-                None => {
-                    Loaded { data: a.as_f64_slice().unwrap_or(&[]), splat: false, on: on(j) }
-                }
-            })
-            .collect();
+        let owned: Vec<Option<Vec<f64>>> = inputs.iter().map(|a| splat_f64(a, w)).collect();
+        let srcs = sources(inputs, &owned, &on, narrow_f64);
         match k.reduce() {
             None => {
                 let out = map_pass(k, &srcs, n, wide, &steps)?;
@@ -2373,18 +2521,8 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
             window: window_pass_i64,
             scan: scan_pass_i64,
         };
-        let owned: Vec<Option<Vec<i64>>> = inputs.iter().map(|a| to_i64(a, w)).collect();
-        let srcs: Vec<Loaded<i64>> = inputs
-            .iter()
-            .zip(&owned)
-            .enumerate()
-            .map(|(j, (a, o))| match o {
-                Some(v) => Loaded { data: v, splat: a.rank() == 0, on: on(j) },
-                None => {
-                    Loaded { data: a.as_i64_slice().unwrap_or(&[]), splat: false, on: on(j) }
-                }
-            })
-            .collect();
+        let owned: Vec<Option<Vec<i64>>> = inputs.iter().map(|a| splat_i64(a, w)).collect();
+        let srcs = sources(inputs, &owned, &on, narrow_i64);
         match k.reduce() {
             None => {
                 let out = map_pass(k, &srcs, n, wide, &steps)?;

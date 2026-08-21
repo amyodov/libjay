@@ -181,3 +181,102 @@ fn a_flat_fold_in_lanes_agrees_with_one_accumulator() {
         }
     }
 }
+
+// ------------------------------------------------------ the mixed passes
+
+/// The same values one step up the numeric tower — the buffer a mixed pass
+/// used to build before it ran.
+fn widened(a: &Array, to: DType) -> Array {
+    let f = a.to_f64_vec().expect("numeric data");
+    match to {
+        DType::F64 => Array::from_f64(f),
+        DType::Complex => Array::new(
+            a.shape.clone(),
+            Data::Complex(f.iter().map(|&x| [x, 0.0]).collect::<Vec<_>>().into()),
+        ),
+        other => panic!("nothing widens to {}", other.name()),
+    }
+}
+
+/// Bit-for-bit equality, NaN included: promoting an element and then
+/// operating is the same arithmetic on the same values as promoting the
+/// whole buffer first, so nothing at all may move.
+fn identical(a: &Array, b: &Array) {
+    assert_eq!(a.shape, b.shape, "shapes differ");
+    assert_eq!(a.dtype(), b.dtype(), "types differ");
+    match (&a.data, &b.data) {
+        (Data::F64(x), Data::F64(y)) => {
+            for (i, (p, q)) in x.iter().zip(y.iter()).enumerate() {
+                assert_eq!(p.to_bits(), q.to_bits(), "element {i}: {p} vs {q}");
+            }
+        }
+        (Data::Complex(x), Data::Complex(y)) => {
+            for (i, (p, q)) in x.iter().zip(y.iter()).enumerate() {
+                assert_eq!(
+                    [p[0].to_bits(), p[1].to_bits()],
+                    [q[0].to_bits(), q[1].to_bits()],
+                    "element {i}: {p:?} vs {q:?}"
+                );
+            }
+        }
+        (x, y) => assert_eq!(x, y, "values differ"),
+    }
+}
+
+/// A pass whose two operands have different element types promotes each
+/// element where it reads it. What comes out must be exactly what the pass
+/// gave when it widened the narrow operand into a buffer of its own first,
+/// which is what handing it the widened argument makes it do.
+///
+/// The sizes straddle `par::MIN_WORK`, so the one-thread and the chunked
+/// passes both run, and a scalar operand exercises the repeated-element
+/// shape beside the element-per-element one.
+#[test]
+fn a_mixed_pass_answers_what_the_widened_one_answers() {
+    let mut rng = Rng(23);
+    for n in [1usize, 97, 100_000] {
+        let f = Array::new(vec![n], Data::F64(rng.f64s(n).into()));
+        let i = Array::new(vec![n], Data::I64(rng.i64s(n, 1_000_000).into()));
+        let b = Array::new(vec![n], Data::Bool(rng.bools(n).into()));
+        let cx: Vec<[f64; 2]> = rng.f64s(2 * n).chunks_exact(2).map(|p| [p[0], p[1]]).collect();
+        let z = Array::new(vec![n], Data::Complex(cx.into()));
+        // Every arithmetic verb the typed passes pick a step for, and the
+        // comparisons, which have passes of their own.
+        let float_verbs = ["+", "-", "*", "%", "<.", ">.", "|", "=", "~:", "<", ">:"];
+        // Complex has no order: only the arithmetic and equality.
+        let cx_verbs = ["+", "-", "*", "%", "=", "~:"];
+        for (narrow, wide, verbs, up) in [
+            (&i, &f, &float_verbs[..], DType::F64),
+            (&b, &f, &float_verbs[..], DType::F64),
+            (&i, &z, &cx_verbs[..], DType::Complex),
+            (&b, &z, &cx_verbs[..], DType::Complex),
+            (&f, &z, &cx_verbs[..], DType::Complex),
+        ] {
+            let up_narrow = widened(narrow, up);
+            for verb in verbs {
+                for src in [
+                    format!("{{a}} {verb} {{y}}"),
+                    format!("{{y}} {verb} {{a}}"),
+                    // A scalar on the narrow side, which every element reads.
+                    format!("(0 {{ {{a}}) {verb} {{y}}"),
+                ] {
+                    let mixed = run(&src, &[narrow.clone(), wide.clone()]);
+                    let plain = run(&src, &[up_narrow.clone(), wide.clone()]);
+                    identical(&mixed, &plain);
+                }
+            }
+        }
+        // A fused chain loads its narrow arguments a block at a time, and a
+        // window reads the block's halo as well.
+        for src in ["+/ {a} * {y}", "{a} * 2 + {y}", "20 +/\\ {a} * {y}"] {
+            if n < 20 && src.contains("+/\\") {
+                continue;
+            }
+            for narrow in [&i, &b] {
+                let mixed = run(src, &[narrow.clone(), f.clone()]);
+                let plain = run(src, &[widened(narrow, DType::F64), f.clone()]);
+                identical(&mixed, &plain);
+            }
+        }
+    }
+}

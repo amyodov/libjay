@@ -2191,6 +2191,116 @@ fn borrow_cx<'a>(d: &'a Data, tmp: &'a mut Vec<Cx>) -> &'a [Cx] {
     }
 }
 
+/// One element of a narrow buffer, read as the type a pass computes in.
+///
+/// This is what lets a pass over operands of two different types run
+/// without a widened copy of either: the promotion happens where the
+/// element is read, inside the chunk, so the only buffer the pass touches
+/// besides its arguments is its own result. Promotion and then the
+/// operation is exactly what the widened copy would have fed it, so the
+/// answers are identical either way.
+pub(crate) trait Widen<T>: Copy + Send + Sync {
+    fn widen(self) -> T;
+}
+
+macro_rules! widens {
+    ($($from:ty => $to:ty : |$v:ident| $e:expr;)*) => {
+        $(impl Widen<$to> for $from {
+            #[inline(always)]
+            fn widen(self) -> $to {
+                let $v = self;
+                $e
+            }
+        })*
+    };
+}
+
+widens! {
+    u8 => i64: |v| v as i64;
+    i64 => i64: |v| v;
+    u8 => f64: |v| v as f64;
+    i64 => f64: |v| v as f64;
+    f64 => f64: |v| v;
+    u8 => Cx: |v| [v as f64, 0.0];
+    i64 => Cx: |v| [v as f64, 0.0];
+    f64 => Cx: |v| [v, 0.0];
+    Cx => Cx: |v| v;
+}
+
+/// Bind `$s` to the buffer behind one numeric operand of an integer pass,
+/// in the buffer's own element type, and evaluate `$body` with it.
+macro_rules! i64_source {
+    ($d:expr, $tmp:ident, $s:ident, $body:expr) => {
+        match $d {
+            Data::I64(v) => {
+                let $s: &[i64] = v;
+                $body
+            }
+            Data::Bool(v) => {
+                let $s: &[u8] = v;
+                $body
+            }
+            other => {
+                let $s: &[i64] = borrow_i64(other, &mut $tmp);
+                $body
+            }
+        }
+    };
+}
+
+/// The same for a float pass. The exact types have no fixed-width buffer to
+/// read element by element, so they keep the widened copy.
+macro_rules! f64_source {
+    ($d:expr, $tmp:ident, $s:ident, $body:expr) => {
+        match $d {
+            Data::F64(v) => {
+                let $s: &[f64] = v;
+                $body
+            }
+            Data::I64(v) => {
+                let $s: &[i64] = v;
+                $body
+            }
+            Data::Bool(v) => {
+                let $s: &[u8] = v;
+                $body
+            }
+            other => {
+                let $s: &[f64] = borrow_f64(other, &mut $tmp);
+                $body
+            }
+        }
+    };
+}
+
+/// The same for a complex pass.
+macro_rules! cx_source {
+    ($d:expr, $tmp:ident, $s:ident, $body:expr) => {
+        match $d {
+            Data::Complex(v) => {
+                let $s: &[Cx] = v;
+                $body
+            }
+            Data::F64(v) => {
+                let $s: &[f64] = v;
+                $body
+            }
+            Data::I64(v) => {
+                let $s: &[i64] = v;
+                $body
+            }
+            Data::Bool(v) => {
+                let $s: &[u8] = v;
+                $body
+            }
+            other => {
+                let $s: &[Cx] = borrow_cx(other, &mut $tmp);
+                $body
+            }
+        }
+    };
+}
+
 /// Numeric data as f64, borrowed when it already is that.
 fn as_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>, span: Span) -> Result<&'a [f64]> {
     if !d.dtype().is_numeric() {
@@ -2225,13 +2335,16 @@ fn arith_type(a: DType, b: DType, span: Span) -> Result<DType> {
 /// element spread over a whole chunk — become plain loops over slices, which
 /// is what lets the compiler vectorise the pass; anything else keeps the
 /// general index arithmetic. `f` returns false to abandon the chunk.
+///
+/// The two sides carry their own element types, so a pass over operands of
+/// different widths reads each buffer as it lies and promotes inside `f`.
 #[allow(clippy::too_many_arguments)]
 #[inline]
-fn zip_chunk<T, U, F>(
-    xs: &[T],
+fn zip_chunk<A, B, U, F>(
+    xs: &[A],
     xoff: usize,
     xdiv: usize,
-    ys: &[T],
+    ys: &[B],
     yoff: usize,
     ydiv: usize,
     start: usize,
@@ -2239,8 +2352,9 @@ fn zip_chunk<T, U, F>(
     mut f: F,
 ) -> bool
 where
-    T: Copy,
-    F: FnMut(T, T, &mut U) -> bool,
+    A: Copy,
+    B: Copy,
+    F: FnMut(A, B, &mut U) -> bool,
 {
     let len = out.len();
     if len == 0 {
@@ -2684,12 +2798,12 @@ fn no_complex_order(span: Span) -> Error {
 
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn dyad_cx_chunk(
+fn dyad_cx_chunk_body<A: Widen<Cx>, B: Widen<Cx>>(
     op: ScalarDyad,
-    xs: &[Cx],
+    xs: &[A],
     xoff: usize,
     xdiv: usize,
-    ys: &[Cx],
+    ys: &[B],
     yoff: usize,
     ydiv: usize,
     start: usize,
@@ -2702,7 +2816,7 @@ fn dyad_cx_chunk(
     macro_rules! plain {
         ($step:expr) => {{
             zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut Cx| {
-                *slot = $step(a, b);
+                *slot = $step(a.widen(), b.widen());
                 true
             });
             return Ok(());
@@ -2717,7 +2831,7 @@ fn dyad_cx_chunk(
     }
     let mut err = None;
     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut Cx| {
-        match cx_op(op, a, b, span) {
+        match cx_op(op, a.widen(), b.widen(), span) {
             Ok(v) => {
                 *slot = v;
                 true
@@ -2734,13 +2848,31 @@ fn dyad_cx_chunk(
     }
 }
 
+multiversioned! {
+    /// One chunk of a complex pass, compiled per CPU feature level. Either
+    /// operand may be narrower than complex, and is promoted as it is read.
+    #[allow(clippy::too_many_arguments)]
+    fn dyad_cx_chunk[A: Widen<Cx>, B: Widen<Cx>](
+        op: ScalarDyad,
+        xs: &[A],
+        xoff: usize,
+        xdiv: usize,
+        ys: &[B],
+        yoff: usize,
+        ydiv: usize,
+        start: usize,
+        out: &mut [Cx],
+        span: Span,
+    ) -> Result<()> = dyad_cx_chunk_body;
+}
+
 #[allow(clippy::too_many_arguments)]
-fn dyad_cx(
+fn dyad_cx<A: Widen<Cx>, B: Widen<Cx>>(
     op: ScalarDyad,
-    xs: &[Cx],
+    xs: &[A],
     xoff: usize,
     xdiv: usize,
-    ys: &[Cx],
+    ys: &[B],
     yoff: usize,
     ydiv: usize,
     n: usize,
@@ -2751,7 +2883,14 @@ fn dyad_cx(
     })
 }
 
-/// One complex pass over two buffers, widening both to complex first.
+/// One complex pass over two buffers.
+///
+/// An operand that is not complex already is read in its own type and
+/// promoted element by element, so the pass allocates nothing but its
+/// result. Only the exact types, which have no fixed-width buffer, are
+/// widened into one first — and a pass with no complex operand at all (`j.`
+/// of two reals, a power that leaves the reals) with them, since promoting
+/// two whole buffers is what such a pass is for.
 #[allow(clippy::too_many_arguments)]
 fn complex_dyad_data(
     op: ScalarDyad,
@@ -2765,9 +2904,22 @@ fn complex_dyad_data(
     span: Span,
 ) -> Result<Data> {
     let (mut tx, mut ty) = (Vec::new(), Vec::new());
-    let xs = borrow_cx(x, &mut tx);
-    let ys = borrow_cx(y, &mut ty);
-    Ok(Data::Complex(dyad_cx(op, xs, xoff, xdiv, ys, yoff, ydiv, n, span)?.into()))
+    macro_rules! pass {
+        ($xs:expr, $ys:expr) => {
+            Data::Complex(dyad_cx(op, $xs, xoff, xdiv, $ys, yoff, ydiv, n, span)?.into())
+        };
+    }
+    Ok(match (x, y) {
+        (Data::Complex(a), _) => {
+            let xs: &[Cx] = a;
+            cx_source!(y, ty, ys, pass!(xs, ys))
+        }
+        (_, Data::Complex(b)) => {
+            let ys: &[Cx] = b;
+            cx_source!(x, tx, xs, pass!(xs, ys))
+        }
+        _ => pass!(borrow_cx(x, &mut tx), borrow_cx(y, &mut ty)),
+    })
 }
 
 /// `9 o.` to `12 o.` read a part of a number — real, magnitude, imaginary,
@@ -2812,12 +2964,12 @@ fn pass_leaves_reals(
 
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn dyad_i64_chunk_body(
+fn dyad_i64_chunk_body<A: Widen<i64>, B: Widen<i64>>(
     op: ScalarDyad,
-    xs: &[i64],
+    xs: &[A],
     xoff: usize,
     xdiv: usize,
-    ys: &[i64],
+    ys: &[B],
     yoff: usize,
     ydiv: usize,
     start: usize,
@@ -2831,7 +2983,7 @@ fn dyad_i64_chunk_body(
         ($m:ident) => {{
             let mut over = false;
             zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut i64| {
-                let (v, o) = i64::$m(a, b);
+                let (v, o) = i64::$m(a.widen(), b.widen());
                 *slot = v;
                 over |= o;
                 true
@@ -2842,7 +2994,7 @@ fn dyad_i64_chunk_body(
     macro_rules! plain {
         ($step:expr) => {{
             zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut i64| {
-                *slot = $step(a, b);
+                *slot = $step(a.widen(), b.widen());
                 true
             })
         }};
@@ -2854,7 +3006,7 @@ fn dyad_i64_chunk_body(
         Min => plain!(i64::min),
         Max => plain!(i64::max),
         _ => zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut i64| {
-            match i64_op(op, a, b) {
+            match i64_op(op, a.widen(), b.widen()) {
                 Some(v) => {
                     *slot = v;
                     true
@@ -2873,12 +3025,12 @@ multiversioned! {
     /// thousands of elements, so choosing the compilation costs nothing
     /// against the pass it chooses.
     #[allow(clippy::too_many_arguments)]
-    fn dyad_i64_chunk(
+    fn dyad_i64_chunk[A: Widen<i64>, B: Widen<i64>](
         op: ScalarDyad,
-        xs: &[i64],
+        xs: &[A],
         xoff: usize,
         xdiv: usize,
-        ys: &[i64],
+        ys: &[B],
         yoff: usize,
         ydiv: usize,
         start: usize,
@@ -2888,12 +3040,12 @@ multiversioned! {
 
 /// One elementwise integer pass. None means it left i64 anywhere.
 #[allow(clippy::too_many_arguments)]
-fn dyad_i64(
+fn dyad_i64<A: Widen<i64>, B: Widen<i64>>(
     op: ScalarDyad,
-    xs: &[i64],
+    xs: &[A],
     xoff: usize,
     xdiv: usize,
-    ys: &[i64],
+    ys: &[B],
     yoff: usize,
     ydiv: usize,
     n: usize,
@@ -2904,14 +3056,34 @@ fn dyad_i64(
     ok.then_some(out)
 }
 
+/// One elementwise integer pass over two buffers, each read in its own
+/// element type. None means it left i64 anywhere.
 #[allow(clippy::too_many_arguments)]
-#[inline(always)]
-fn dyad_f64_chunk_body(
+fn int_dyad_data(
     op: ScalarDyad,
-    xs: &[f64],
+    x: &Data,
     xoff: usize,
     xdiv: usize,
-    ys: &[f64],
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+) -> Option<Data> {
+    let (mut tx, mut ty) = (Vec::new(), Vec::new());
+    let out = i64_source!(x, tx, xs, {
+        i64_source!(y, ty, ys, dyad_i64(op, xs, xoff, xdiv, ys, yoff, ydiv, n))
+    })?;
+    Some(Data::I64(out.into()))
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn dyad_f64_chunk_body<A: Widen<f64>, B: Widen<f64>>(
+    op: ScalarDyad,
+    xs: &[A],
+    xoff: usize,
+    xdiv: usize,
+    ys: &[B],
     yoff: usize,
     ydiv: usize,
     start: usize,
@@ -2924,7 +3096,7 @@ fn dyad_f64_chunk_body(
     macro_rules! plain {
         ($step:expr) => {{
             zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
-                *slot = $step(a, b);
+                *slot = $step(a.widen(), b.widen());
                 true
             });
             return Ok(());
@@ -2940,7 +3112,7 @@ fn dyad_f64_chunk_body(
     }
     let mut err = None;
     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
-        match f64_op(op, a, b, span) {
+        match f64_op(op, a.widen(), b.widen(), span) {
             Ok(v) => {
                 *slot = v;
                 true
@@ -2958,14 +3130,15 @@ fn dyad_f64_chunk_body(
 }
 
 multiversioned! {
-    /// One chunk of a float pass, compiled per CPU feature level.
+    /// One chunk of a float pass, compiled per CPU feature level. Either
+    /// operand may be an integer or a boolean buffer, promoted as it is read.
     #[allow(clippy::too_many_arguments)]
-    fn dyad_f64_chunk(
+    fn dyad_f64_chunk[A: Widen<f64>, B: Widen<f64>](
         op: ScalarDyad,
-        xs: &[f64],
+        xs: &[A],
         xoff: usize,
         xdiv: usize,
-        ys: &[f64],
+        ys: &[B],
         yoff: usize,
         ydiv: usize,
         start: usize,
@@ -2975,12 +3148,12 @@ multiversioned! {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn dyad_f64(
+fn dyad_f64<A: Widen<f64>, B: Widen<f64>>(
     op: ScalarDyad,
-    xs: &[f64],
+    xs: &[A],
     xoff: usize,
     xdiv: usize,
-    ys: &[f64],
+    ys: &[B],
     yoff: usize,
     ydiv: usize,
     n: usize,
@@ -2989,6 +3162,26 @@ fn dyad_f64(
     par::try_fill(n, |start, part| {
         dyad_f64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, span)
     })
+}
+
+/// One float pass over two buffers, each read in its own element type.
+#[allow(clippy::too_many_arguments)]
+fn float_dyad_data(
+    op: ScalarDyad,
+    x: &Data,
+    xoff: usize,
+    xdiv: usize,
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+    span: Span,
+) -> Result<Data> {
+    let (mut tx, mut ty) = (Vec::new(), Vec::new());
+    let out = f64_source!(x, tx, xs, {
+        f64_source!(y, ty, ys, dyad_f64(op, xs, xoff, xdiv, ys, yoff, ydiv, n, span)?)
+    });
+    Ok(Data::F64(out.into()))
 }
 
 /// Whether two element types have nothing in common to compare: a
@@ -3087,13 +3280,16 @@ fn compare_data(
             return Err(no_complex_order(span));
         }
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
-        let xs = borrow_cx(x, &mut tx);
-        let ys = borrow_cx(y, &mut ty);
-        let (out, _) = par::fill(n, |start, part: &mut [u8]| {
-            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
-                let e = tol.eq_cx(a, b);
-                *slot = if op == Eq { e as u8 } else { !e as u8 };
-                true
+        let out = cx_source!(x, tx, xs, {
+            cx_source!(y, ty, ys, {
+                par::fill(n, |start, part: &mut [u8]| {
+                    zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
+                        let e = tol.eq_cx(a.widen(), b.widen());
+                        *slot = if op == Eq { e as u8 } else { !e as u8 };
+                        true
+                    })
+                })
+                .0
             })
         });
         return Ok(Data::Bool(out.into()));
@@ -3101,27 +3297,32 @@ fn compare_data(
     // Floats compare with the dialect's tolerance; integers are exact
     // whatever it is, so the integer pass below is untouched by it.
     let out = if DType::promote(dx, dy) == Some(DType::F64) {
-        let (mut tx, mut ty) = (Vec::new(), Vec::new());
-        let xs = borrow_f64(x, &mut tx);
-        let ys = borrow_f64(y, &mut ty);
-        par::fill(n, |start, part: &mut [u8]| {
-            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
-                *slot = tol_cmp(op, a, b, tol) as u8;
-                true
+        let (mut tx, mut ty) = (Vec::<f64>::new(), Vec::<f64>::new());
+        f64_source!(x, tx, xs, {
+            f64_source!(y, ty, ys, {
+                par::fill(n, |start, part: &mut [u8]| {
+                    zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
+                        *slot = tol_cmp(op, a.widen(), b.widen(), tol) as u8;
+                        true
+                    })
+                })
+                .0
             })
         })
-        .0
     } else {
-        let (mut tx, mut ty) = (Vec::new(), Vec::new());
-        let xs = borrow_i64(x, &mut tx);
-        let ys = borrow_i64(y, &mut ty);
-        par::fill(n, |start, part: &mut [u8]| {
-            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
-                *slot = cmp_result(op, Some(i64::cmp(&a, &b))) as u8;
-                true
+        let (mut tx, mut ty) = (Vec::<i64>::new(), Vec::<i64>::new());
+        i64_source!(x, tx, xs, {
+            i64_source!(y, ty, ys, {
+                par::fill(n, |start, part: &mut [u8]| {
+                    zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
+                        let (a, b): (i64, i64) = (a.widen(), b.widen());
+                        *slot = cmp_result(op, Some(i64::cmp(&a, &b))) as u8;
+                        true
+                    })
+                })
+                .0
             })
         })
-        .0
     };
     Ok(Data::Bool(out.into()))
 }
@@ -3684,11 +3885,8 @@ fn scalar_dyad_data(
     if t == DType::I64 && !matches!(op, DivJ | DivApl | Log | Root | Circle) {
         // Binomial reaches this path: a whole pair has a whole answer, and
         // the i64 step declines (None) exactly where J widens to float.
-        let (mut tx, mut ty) = (Vec::new(), Vec::new());
-        let xs = borrow_i64(x, &mut tx);
-        let ys = borrow_i64(y, &mut ty);
-        if let Some(v) = dyad_i64(op, xs, xoff, xdiv, ys, yoff, ydiv, n) {
-            return Ok(Data::I64(v.into()));
+        if let Some(d) = int_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n) {
+            return Ok(d);
         }
         // Integer overflow (or a fractional result): J widens to float.
     }
@@ -3702,10 +3900,7 @@ fn scalar_dyad_data(
         }
         return Ok(data);
     }
-    let (mut tx, mut ty) = (Vec::new(), Vec::new());
-    let xs = borrow_f64(x, &mut tx);
-    let ys = borrow_f64(y, &mut ty);
-    Ok(Data::F64(dyad_f64(op, xs, xoff, xdiv, ys, yoff, ydiv, n, span)?.into()))
+    float_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span)
 }
 
 /// Elementwise dyadic application of a scalar operation to whole arrays.

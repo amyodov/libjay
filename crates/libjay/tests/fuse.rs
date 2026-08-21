@@ -782,7 +782,7 @@ fn identical(a: &Array, b: &Array) -> bool {
 #[test]
 fn random_chains_agree_with_the_interpreter() {
     let mut rng = Rng::new(20_260_820);
-    let mut fused_any = 0;
+    let (mut fused_any, mut ran) = (0, 0);
     for i in 0..400 {
         let body = expr(&mut rng, 4);
         // Every fourth one is reduced, which exercises the absorbed fold
@@ -795,14 +795,27 @@ fn random_chains_agree_with_the_interpreter() {
         // 97 elements: below the parallel threshold, so even a fold runs
         // right to left over the whole vector in both programs.
         let args: Vec<Array> = p.params.iter().map(|s| data(&s.name, 97)).collect();
-        match (run(&p, &args), run(&unfused(&p), &args)) {
+        let declines = fallback_count();
+        let fused = run(&p, &args);
+        if is_fused(&p) && fallback_count() == declines {
+            ran += 1;
+        }
+        match (fused, run(&unfused(&p), &args)) {
             (Ok(Some(f)), Ok(Some(u))) => {
                 assert!(identical(&f, &u), "`{src}`\n  fused {f:?}\n  plain {u:?}")
             }
             (f, u) => assert_eq!(f, u, "`{src}`"),
         }
     }
+    // The acceptance rate: how many of the chains the pass fused were run by
+    // the kernel rather than handed back at run time. `--nocapture` prints
+    // it; a change to the type rules is what moves it. The rest decline for
+    // one reason — an integer-typed STEP along a float path, which f64
+    // cannot hold exactly past 53 bits. An integer LEAF is not such a step:
+    // the unfused chain widens it once too, so the kernel takes it.
+    println!("random chains: {fused_any} of 400 fused, {ran} run by the kernel");
     assert!(fused_any > 250, "only {fused_any} of 400 random chains fused");
+    assert!(ran > 60, "only {ran} of {fused_any} fused chains reached the kernel");
 }
 
 #[test]
@@ -845,4 +858,5 @@ fn integer_chains_are_exact_however_they_split() {
     let args = vec![data("a", 200_000), data("b", 200_000)];
     assert_eq!(run(&p, &args), run(&unfused(&p), &args));
 }
+
 

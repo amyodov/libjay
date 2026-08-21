@@ -1399,6 +1399,64 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
     so there is one place where the ordering is written down. The verbs
     that compare boxes by MATCH — `~.`, `e.`, `i.` — were left alone: they
     are tolerant, as both references have them, and match is not order.
+- 2026-08-21 — **A pass over two element types promotes where it reads,
+  not before it runs.** The item bench/README.md's "Next" list had at the
+  top. `{c} + {f}` widened the float argument into a complex buffer of its
+  own and then read it back; at 20M that is 320 MB written into freshly
+  faulted pages, which the bandwidth probes in the same file already showed
+  costs more than the arithmetic and does not parallelise. The narrow
+  operand is now read in its own type and promoted element by element.
+  `{c} + {f}` at 20M went 148.6 → 58.8 ms on eight threads, `{i} + {f}`
+  110.5 → 50.8, `+/ {i} * {f}` 72.8 → 13.3; the same-type passes do not
+  move. Numbers in bench/README.md, section "Mixed-type passes".
+  - **A `Widen<T>` element trait, not a widened buffer.** `zip_chunk` — the
+    shared offset-and-divider machinery every scalar pass runs on — now
+    carries an element type per side rather than one for both, and the
+    three typed chunk bodies (`dyad_i64_chunk`, `dyad_f64_chunk`,
+    `dyad_cx_chunk`) are generic over `A: Widen<T>, B: Widen<T>` and
+    promote in the step. They stay multiversioned: the macro already took
+    generic parameters, so each combination is compiled per CPU feature
+    level like every other leaf. The comparisons take the same adapter.
+  - **The dispatch is a macro over the buffer's own variant**, one arm per
+    fixed-width numeric type, and the exact types (`Ext`, `Rat`) keep the
+    widened copy — a bignum has no fixed-width buffer to read element by
+    element. The complex pass only takes the typed path when one side is
+    already complex; two real arguments meeting in the complex plane (`j.`,
+    a power that leaves the reals) widen both, which is what such a pass is
+    for and holds the monomorphisation count to seven instead of sixteen.
+    Release build time went from 2m39 to 3m20 for the whole workspace, most
+    of it the complex leaf.
+  - **The fused kernel stages a narrow argument at the block.** It used to
+    call `to_f64` on every input, which allocated and filled a whole f64
+    copy of an i64 or boolean argument — the one large buffer a fused
+    reduction otherwise never touches. `Loaded` grew a `base` field naming
+    the index its first element stands at, so a block-local buffer can
+    stand in for a whole one, and each thread promotes the block it is
+    about to read into a staging buffer it reuses. That is why
+    `+/ {i} * {f}` at 20M now runs at the same 13 ms as the all-float
+    `+/ {w} * {x}`, which is memory bandwidth.
+  - **Bit-identical, by construction and by test.** Promoting an element
+    and then operating is the same arithmetic on the same values as
+    promoting the buffer and then operating; nothing is reordered and no
+    step changes type. `hotpaths.rs` asserts it directly — every mixed pass
+    against the same program handed the widened argument, bit for bit, NaN
+    included, for both operand orders, a scalar operand, a fused chain and
+    a window.
+  - **The kernel's acceptance rate did not move, and should not have.**
+    The type rule already promoted an integer LEAF into a float kernel:
+    `working_type` marks an integer *step* and not a `Load`, because the
+    unfused chain widens a leaf exactly once too, where an i64 step past 53
+    bits is exact in i64 and not in f64. The fuzz battery runs 72 of its
+    295 fused chains through the kernel before and after; of the 223
+    declines, 212 are that rule and every one of them has an integer-typed
+    step in it. `tests/fuse.rs` now prints the rate, so a change to the
+    type rules shows up as a number.
+  - **Left undone, deliberately:** the single-buffer folds. `+/ {b}` still
+    widens a boolean buffer to i64 whole before folding it, because the
+    fold family (`fold_items`, `fold_range`, `fold_flat`, `window_fold`,
+    the scans) threads one element type through five functions where the
+    dyadic passes thread it through two. It is the top entry under "Next"
+    in bench/README.md, with its number: 63.2 ms at 20M.
 - 2026-08-21 — v0.2.0 released from tag `f794936`: GitHub release (10 assets),
   PyPI (five abi3 wheels + sdist, cold-verified with `uvx`), and crates.io
   through OIDC trusted publishing for the first time — the `crates` job

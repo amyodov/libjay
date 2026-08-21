@@ -943,6 +943,79 @@ for complex. The DataFrame rows carried the weave when this table was taken
 was the layout question under "Next". It has since been answered: the same
 two programs are 12.5 and 6.2 ms under "Layout" above.
 
+## Mixed-type passes
+
+The item this file's "Next" list had at the top, and it was worth three
+times what that entry estimated. A pass whose two operands had different
+element types — `{c} + {f}`, `{i} + {f}`, `{b} + {f}` — used to widen the
+narrow one into a whole buffer of its own and then read it back. At 20M
+that buffer is 160 MB written into freshly faulted pages and read once,
+which is the cost the "Where the bandwidth is" probes measured at the
+bottom of this file: more than the arithmetic, and none of it parallel.
+
+The narrow operand is now read where it lies and promoted element by
+element, inside the chunk. Both scalar-dyad leaves carry the promotion —
+the float pass and the complex one, each still compiled per CPU feature
+level — and so do the comparisons; the fused kernel does the same at the
+block, staging a narrow argument's block into a buffer each thread reuses
+instead of widening the argument whole. Promoting an element and then
+operating is the same arithmetic on the same values as promoting the buffer
+first, so **every figure below is bit-for-bit what the old path gave**;
+`hotpaths.rs` asserts it, mixed pass against widened argument, for every
+verb and both operand orders.
+
+Measured 2026-08-21 on the machine below, rustc 1.89, two builds of libjay
+alternated three times through and the best of each taken. Milliseconds;
+2M and 20M elements per argument.
+
+| program | 8 threads before | after | 1 thread before | after |
+|---|---:|---:|---:|---:|
+| `+/ {b} * {f}`, 20M | 70.2 | 7.6 | 108.5 | 24.9 |
+| `+/ {i} * {f}`, 20M | 72.8 | 13.3 | 116.0 | 29.5 |
+| `+/ {i} * {f}`, 2M | 5.2 | 1.3 | 6.1 | 2.8 |
+| `{i} > {f}`, 20M | 89.3 | 27.5 | 184.1 | 90.2 |
+| `{c} + {f}`, 20M | 148.6 | 58.8 | 355.6 | 169.4 |
+| `{b} + {f}`, 20M | 109.7 | 47.6 | 175.3 | 81.9 |
+| `{i} + {f}`, 20M | 110.5 | 50.8 | 182.0 | 86.6 |
+| `{c} + {f}`, 2M | 14.0 | 7.2 | 14.6 | 7.3 |
+| `{i} + {c}`, 2M | 13.7 | 7.2 | 14.9 | 7.2 |
+| `20 +/\ {c} * {f}`, 20M | 244.9 | 157.8 | 607.1 | 411.8 |
+| `+/ {c} * {f}`, 2M | 17.4 | 11.0 | 18.8 | 10.8 |
+
+The same-type passes are the control, and they do not move:
+
+| program | 8 threads before | after | 1 thread before | after |
+|---|---:|---:|---:|---:|
+| `{f} + {g}`, 20M | 49.5 | 50.5 | 85.7 | 87.7 |
+| `{c} + {d}`, 20M | 65.8 | 62.4 | 172.9 | 176.5 |
+| `+/ {f} * {g}`, 20M | 13.0 | 13.0 | 21.5 | 21.9 |
+
+Three things the table says.
+
+A mixed pass is now as fast as the pass over its *wider* operand alone, and
+sometimes faster than the same-type one: `{c} + {f}` at 20M is 58.8 ms
+against 62.4 for `{c} + {d}`, because reading 160 MB of floats beside 320 MB
+of complex is less traffic than reading 320 and 320. `{i} + {f}` at 50.8 is
+`{f} + {g}` at 50.5. The widened copy was the whole of the difference.
+
+`+/ {i} * {f}` gains most — 5.5x on eight threads, and 13.3 ms against 13.0
+for the all-float `+/ {w} * {x}`, which "Where the bandwidth is" shows is at
+memory bandwidth. A fused reduction never materialises anything, so the
+widened argument was the *only* large buffer it touched, and removing it
+removed the last one.
+
+The `{c} * {f}` window row gains 1.55x rather than more because the complex
+product it folds is still an array: complex has no blockwise kernel, so that
+chain runs unfused and the 320 MB intermediate stays. What the change
+removes there is the *other* 160 MB buffer, the widened float.
+
+One case is deliberately untouched and shows as such: `+/ {b}` at 20M, 63.2
+ms before and 61.7 after. A reduction over a boolean buffer with nothing
+mixed into it still widens the whole buffer to i64 before folding it, which
+is the same defect in the single-buffer fold family (`reduce_typed`,
+`window_typed`, `scan_typed`) rather than in the two-buffer passes this
+section is about. It is the top entry under "Next" below.
+
 ## Next
 
 In the order the measurements rank them:
@@ -983,18 +1056,25 @@ What is left, in the order the measurements rank it:
    and the alignment between the two is decided by shapes alone. The
    numbers are under "Windows in the kernel", the design in
    docs/decisions.md.
-3. **Widening inside the parallel pass.** A complex-plus-float pass widens
-   the float argument into a whole buffer and reads it back. Doing it per
-   chunk would save two round trips of the working set — about 4 ms of the
-   13.7 at 2M — and needs the chunk functions to be told where their slice
-   of the source begins, which is a signature change through the shared
-   offset-and-divider machinery every scalar pass uses. The widening itself
-   is at least parallel now.
-4. **The fresh output buffer.** An elementwise pass spends longer faulting
+3. ~~**Widening inside the parallel pass.**~~ Done, and worth two to five
+   times rather than the 4 ms this entry estimated: a pass over two element
+   types promotes the narrow one where it reads it, and the fused kernel
+   stages a narrow argument one block at a time. The numbers are under
+   "Mixed-type passes" above, the design in docs/decisions.md.
+4. **Widening inside a single-buffer fold.** The two-buffer passes are done;
+   the folds are not. `reduce_typed`, `window_typed` and `scan_typed` widen
+   a boolean buffer to i64 whole before folding it, which is 20 MB in and
+   160 MB out at 20M elements and reads it back once: `+/ {b}` is 63.2 ms
+   where `+/ {x}` over eight times the bytes is 5.7. The fix is the one
+   above — promote inside the chunk — but the fold family threads its
+   element type through `fold_items`, `fold_range`, `fold_flat`,
+   `window_fold` and `scan`, so it wants a second type parameter in five
+   places rather than two.
+5. **The fresh output buffer.** An elementwise pass spends longer faulting
    its 160 MB result in than computing it, and that cost does not
    parallelise. A reuse pool would remove it; nothing portable and stable
    will.
-5. **AVX-512 measurement.** The x86-64-v4 rung is built and symbol-checked
+6. **AVX-512 measurement.** The x86-64-v4 rung is built and symbol-checked
    (see "SIMD dispatch") but has never run: no machine on hand has the
    hardware. Pending a runner that does; `tests/simd.rs --nocapture` reports
    itself the day one shows up in CI.

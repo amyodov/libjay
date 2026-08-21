@@ -7,6 +7,15 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 ### Changed
+
+- Elementwise passes over two different element types — complex against
+  float, integer or boolean against float, boolean against integer — now
+  promote the narrower operand where they read it instead of widening it
+  into a buffer of its own first, and the fused kernel promotes a narrow
+  argument one block at a time. Results are unchanged to the last bit; at
+  20M elements `{c} + {f}` runs 2.5x faster, `{i} + {f}` 2.2x and
+  `+/ {i} * {f}` 5.5x. See bench/README.md, "Mixed-type passes".
+
 ### Fixed
 
 ## 0.2.0 — 2026-08-21
