@@ -193,6 +193,13 @@ impl Oracle {
     }
 }
 
+/// jconsole's default output control is `0 256 0 222`: a result wider than
+/// 256 columns or taller than 222 rows comes back ending in `...`, and an
+/// abbreviation recorded as an answer is a wrong answer. The first sentence
+/// of every run widens the page — it is the J side of GNU APL's `--PW`, and
+/// it prints nothing itself.
+const J_PREAMBLE: &str = "9!:37 ] 0 4096 0 4096";
+
 fn eval_j(jconsole: &Path, expr: &str) -> Reply {
     let mut child = Command::new(jconsole)
         .args(["-jprofile", "/dev/null"])
@@ -207,7 +214,7 @@ fn eval_j(jconsole: &Path, expr: &str) -> Reply {
         .stdin
         .take()
         .unwrap()
-        .write_all(format!("{expr}\n").as_bytes())
+        .write_all(format!("{J_PREAMBLE}\n{expr}\n").as_bytes())
         .expect("write to jconsole");
     let Some((text, complaint)) = wait_within(child) else {
         return Reply::TimedOut;

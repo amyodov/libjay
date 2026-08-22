@@ -4,7 +4,8 @@
 //! draws trees — verbs over verbs, trains, rank and power, reductions over
 //! rank-3 arrays, boxes and empties and the numeric edges — which is where
 //! a one-verb corpus stops looking. What it produces is not appended to
-//! anything: `fuzz` prints the expressions, and `fuzz --compare` runs both
+//! anything: `fuzz` prints the expressions, in corpus spelling and with the
+//! `@ io=` directive an origin-0 line needs, and `fuzz --compare` runs both
 //! libjay and the oracle over them and reports where they part. A line
 //! worth keeping is moved into `corpus/<lang>/fuzz_found.txt` by hand,
 //! which is what makes it a regression rather than a run of a generator.
@@ -38,8 +39,24 @@ impl Rng {
     }
 }
 
+/// One sentence to try, and the index origin to read it under. The origin
+/// is a property of the dialect rather than of the text, so it travels
+/// beside the expression: libjay takes it as `⎕IO` and the oracle prepends
+/// `⎕IO←0⋄`. J has no index origin and its probes always carry 1, which
+/// both sides ignore.
+pub struct Probe {
+    pub expr: String,
+    pub io: u8,
+}
+
+/// One APL probe in this many is drawn at index origin 0. Origin-0 code is
+/// ordinary APL, and a comparison that never leaves origin 1 can find no
+/// disagreement about the origin at all; drawing it rarely keeps the bulk
+/// of a run on the origin most of the corpus uses.
+const IO_ZERO_IN: usize = 8;
+
 /// `count` expressions of the language, each a tree up to `depth` deep.
-pub fn fuzz(lang: Lang, count: usize, seed: u64, depth: u32) -> Vec<String> {
+pub fn fuzz(lang: Lang, count: usize, seed: u64, depth: u32) -> Vec<Probe> {
     let mut rng = Rng::new(seed);
     let mut out = Vec::with_capacity(count);
     while out.len() < count {
@@ -48,7 +65,11 @@ pub fn fuzz(lang: Lang, count: usize, seed: u64, depth: u32) -> Vec<String> {
             Lang::J => j_expr(&mut rng, d),
             Lang::Apl => apl_expr(&mut rng, d),
         };
-        out.push(expr);
+        let io = match lang {
+            Lang::J => 1,
+            Lang::Apl => u8::from(rng.below(IO_ZERO_IN) != 0),
+        };
+        out.push(Probe { expr, io });
     }
     out
 }
@@ -440,3 +461,27 @@ pub fn triage(lang: Lang, ours: &libjay_testkit::eval::Answer, theirs: Option<&s
 /// replicate reads.
 const APL_SHAPES: &[&str] = &["2 3", "3", "0", "0 3", "2 2 2", "1", "4", "3 1"];
 const APL_SIZES: &[&str] = &["0", "1", "2", "3", "¯2", "1 0 1", "0 0", "2 0 1", "¯1 2", "2 2"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An origin-0 draw is what makes an index-origin disagreement findable
+    /// at all, and it stays a minority of the run.
+    #[test]
+    fn an_apl_run_visits_both_index_origins() {
+        let probes = fuzz(Lang::Apl, 200, DEFAULT_SEED, 3);
+        let zeros = probes.iter().filter(|p| p.io == 0).count();
+        assert!(zeros > 0, "no origin-0 probe in 200");
+        assert!(zeros * 2 < probes.len(), "{zeros} of 200 at origin 0 is not a minority");
+        assert!(probes.iter().all(|p| p.io == 0 || p.io == 1));
+    }
+
+    /// J has no index origin: a J probe that carried 0 would ask for a
+    /// dialect setting neither side has.
+    #[test]
+    fn a_j_run_stays_at_origin_one() {
+        let probes = fuzz(Lang::J, 200, DEFAULT_SEED, 3);
+        assert!(probes.iter().all(|p| p.io == 1));
+    }
+}

@@ -42,7 +42,8 @@ jay-corpus — record what the reference interpreters answer to the corpus.
                                         print composed expressions
       --compare    run libjay and the oracle over them, report the mismatches
       --quiet      with --compare, the summary only
-      --exprs FILE read the expressions from a corpus file instead
+      --exprs FILE read the expressions from a corpus file instead, under
+                   the index origin its `@ io=` directives give them
   jay-corpus coverage <j|apl>           which primitive × operand cells the
                                         recorded corpus exercises, and which
                                         are empty
@@ -427,26 +428,35 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     // A file of expressions takes the generator's place, which is how a
     // candidate line is put through the same triage before it is trusted
     // enough to become a corpus line.
-    let exprs = match &given {
+    // The index origin travels with the expression: a corpus file's
+    // `@ io=0` directive says under which origin its lines mean what they
+    // are recorded to mean, and comparing them under any other origin
+    // compares something nobody wrote.
+    let probes: Vec<fuzz::Probe> = match &given {
         Some(path) => corpus::read(std::path::Path::new(path))
             .into_iter()
-            .map(|e| e.expr)
+            .map(|e| fuzz::Probe { expr: e.expr, io: e.io })
             .collect(),
         None => fuzz::fuzz(lang, count, seed, depth),
     };
     if !compare_them {
-        for expr in &exprs {
-            println!("{expr}");
+        let mut io = 1u8;
+        for probe in &probes {
+            if probe.io != io {
+                println!("@ io={}", probe.io);
+                io = probe.io;
+            }
+            println!("{}", probe.expr);
         }
         return Ok(());
     }
 
     let oracle = oracle::Oracle::find(lang, libjay_testkit::followed_impl(lang))
         .map_err(|absent| absent.message().to_string())?;
-    let io = 1u8;
-    let verdicts: Vec<(String, fuzz::Verdict, String, String)> = exprs
+    let verdicts: Vec<(String, u8, fuzz::Verdict, String, String)> = probes
         .par_iter()
-        .map(|expr| {
+        .map(|probe| {
+            let (expr, io) = (probe.expr.as_str(), probe.io);
             // A panic is a crash, not a diagnostic: catching it here keeps
             // one bad sentence from ending a run of thousands, and reports
             // it under its own name.
@@ -470,23 +480,26 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
             let theirs_text = theirs.unwrap_or_else(|| {
                 if timed_out { "<unfinished>".to_string() } else { "<error>".to_string() }
             });
-            (expr.clone(), verdict, ours_text, theirs_text)
+            (expr.to_string(), io, verdict, ours_text, theirs_text)
         })
         .collect();
 
     let mut counts = std::collections::BTreeMap::<&str, usize>::new();
-    for (expr, verdict, ours, theirs) in &verdicts {
+    for (expr, io, verdict, ours, theirs) in &verdicts {
         *counts.entry(verdict.label()).or_default() += 1;
         if verdict.is_mismatch() && !quiet {
-            println!("--- {} : {expr}", verdict.label());
+            // A reported line is meant to be pasted into a corpus file, and
+            // at origin 0 it means nothing without the directive.
+            let origin = if *io == 1 { String::new() } else { format!(" [io={io}]") };
+            println!("--- {}{origin} : {expr}", verdict.label());
             println!("  libjay:    {}", one_line(ours));
             println!("  reference: {}", one_line(theirs));
         }
     }
-    let mismatches: usize = verdicts.iter().filter(|v| v.1.is_mismatch()).count();
+    let mismatches: usize = verdicts.iter().filter(|v| v.2.is_mismatch()).count();
     // An expression the oracle never finished was not compared, so it is
     // not in the denominator either.
-    let total = verdicts.iter().filter(|v| v.1.is_compared()).count();
+    let total = verdicts.iter().filter(|v| v.2.is_compared()).count();
     println!("\n{total} expressions, {mismatches} mismatches ({:.1}%)", ratio(mismatches, total));
     for (label, n) in counts {
         println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));

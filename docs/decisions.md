@@ -2146,3 +2146,23 @@ worktree anyway and landed cleanly. The real constraint is scope overlap,
 which is the same in any tree; the orchestrator assigns disjoint scopes,
 agents work in worktrees under .claude/worktrees/, and landing stays
 serial and orchestrator-only.
+
+## 2026-08-22 — The testkit's own two defects: a narrow page and a fixed origin
+
+An oracle that abbreviates is an oracle that lies. jconsole's default
+output control is `0 256 0 222`, so any answer wider than 256 columns came
+back ending in `...` and would have been recorded as that; `9!:37 ] 0 4096
+0 4096` now opens every J run, as `--PW 10000` and `⎕PW←32767` already
+opened the GNU APL and Dyalog ones. Nothing recorded was corrupt — a full
+`record j --check` after the change is clean — so this closes a latent
+recorder bug and a standing source of false "differ" rows, not a snapshot
+repair.
+
+`fuzz --compare` set the index origin to 1 for both sides and dropped the
+`@ io=0` directive of an `--exprs` file, so no index-origin disagreement
+could ever be fuzzed. The origin now travels beside the sentence as a
+`Probe`: an `--exprs` file is compared under the origin its directives
+give it, the printed (non-compare) output re-emits those directives so a
+kept line pastes into a corpus file intact, and the APL generator draws
+one probe in eight at origin 0. J probes stay at 1 — J has no index
+origin, and both sides ignore it.

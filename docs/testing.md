@@ -89,6 +89,13 @@ implementation libjay is held to, and a clean skip for one it merely
 records. Recording the whole of one language takes a few seconds — one
 process per expression, run in parallel.
 
+Every runner pins the page before it asks anything, because an interpreter
+that abbreviates a wide or a tall result would have that abbreviation
+recorded as the answer: jconsole is fed `9!:37 ] 0 4096 0 4096` as its
+first sentence (its default output control is `0 256 0 222`, which ends a
+long vector in `...`), GNU APL is run with `--PW 10000`, and the Dyalog
+script sets `⎕PW←32767`.
+
 `jay-corpus` is the only thing in the repository that spawns an interpreter.
 They stay black-box oracles: never linked, never read. The clean-room rule in
 CLAUDE.md is not relaxed by any of this.
