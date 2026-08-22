@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.2.1 — 2026-08-22
+
+### Added
+
 - J's symbols, `s:`. A symbol is an atom whose value is a name, and the same
   text always gives the same symbol: `(s: <'a') = (s: <'a')` is 1 wherever
   the two sentences stand. ``s: '`red`green`blue'`` makes three of them from a

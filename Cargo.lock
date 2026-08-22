@@ -494,7 +494,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libjay"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "libjay-testkit",
  "multiversion",
@@ -510,14 +510,14 @@ dependencies = [
 
 [[package]]
 name = "libjay-capi"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "libjay",
 ]
 
 [[package]]
 name = "libjay-devtools"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "libjay-testkit",
  "rayon",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "libjay-python"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "libjay-testkit"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "libjay",
 ]
