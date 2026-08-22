@@ -1970,3 +1970,71 @@ primitives, `int-big` by 3, `bool` by 4. APL: five type-classes — extended,
 rational, symbol, i64-edge, float-inf — are reached by NO primitive, and
 `rank3+-empty` by none either. 13 409 empty cells in J and 7381 in APL,
 written out by `--tsv` for a generation stage to consume.
+
+## 2026-08-22 — APL applies its operators between items, not between cells
+
+`¯1 0 1∘.⌽⊂2 3⍴⍳6` answered three unrotated copies of the matrix. The
+outer product was J's `x u/ y` — the table over the cells the operand's
+rank asks for — and `⌽`'s left rank is 0, so the cell on the right was the
+whole enclosure, one item, and rotating one item changes nothing. GNU APL
+answers the three rotations of the matrix, and Dyalog agrees.
+
+The rule the oracle is holding to is not about rotation and not about
+boxes. APL applies a function between the ITEMS of its arguments: what the
+function is handed is the CONTENTS of an item, and a value that is not a
+simple scalar is enclosed again to take one place in the array being
+built. `¨` is the operator named after the rule, but `∘.f`, `f/`, `f⌿`,
+`f\`, `f⍀` and `f.g` all obey it. J reads every one of them by cells and
+leaves its boxes shut. So this is a difference between the two LANGUAGES,
+resolved on `cfg.rules.lang` the way `↑`, `↓` and `≡` already are, and not
+a dialect setting: Dyalog reads the items exactly as GNU APL does.
+
+Probing the family turned up more than the reported case, all of it
+confirmed against GNU APL first and Dyalog second:
+
+- The items are ELEMENTS whatever the operand's rank. `1 2∘.,3 4` is a
+  two-by-two table of pairs and `'ab'∘.,'cd'` is `ac ad` / `bc bd`;
+  libjay made a single catenation of each, because `,` takes its
+  arguments whole and the rank machinery gave it both whole.
+- The insert folds elements too, and encloses the fold. `,/1 2 3` is an
+  enclosed vector, not a bare one; `,/2 3⍴⍳6` is two enclosed rows and
+  `,⌿2 3⍴⍳6` is three enclosed columns, where libjay catenated whole
+  cells. `⍴/2 3⍴⍳6` shows the same thing without a catenation in sight.
+- The scan is the insert over each prefix, so it follows with no work of
+  its own: `,\1 2 3` is `1`, `1 2`, `1 2 3`.
+- The inner product is `f/¨ (⊂[last]x) ∘.g (⊂[first]y)`, and the each in
+  that definition is load-bearing: `1 2,.+3 4` is an enclosed `4 6`, one
+  level deeper than the fold alone would leave it. `+.×` and every other
+  fold that ends in a number is unaffected, which is why the matrix
+  product's blocked fast path needed no change.
+
+What did NOT move: the arithmetic reductions. Folding elements and folding
+cells agree for a scalar function, so the typed fold and the buffer fold
+above the general path keep every `+/`, `×/` and `⌈/` on the fast route
+and answer exactly as before. The corpus proves it — 1224 recorded APL
+expressions replay unchanged.
+
+One consequence needed a decision of its own. An APL array may hold a
+simple scalar beside an enclosure — `,\1 2 3` is exactly that — while
+libjay's framing refuses to mix boxed and unboxed results, as J does.
+`assemble_items` encloses the simple cells when the collection is mixed
+and hands the rest to `assemble` untouched; J still reaches `assemble`
+directly and still refuses the mixture, because J refuses it.
+
+The acceptance test is John Scholes' one-liner, which now runs as written
+and matches GNU APL byte for byte, shape and depth included:
+
+    {↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵}
+
+`tests/corpus/apl/life.txt` records it with its stages, and with the
+element rules underneath them, against both GNU APL and Dyalog.
+
+Two things the sweep surfaced and this wave deliberately left alone, both
+older than it and neither in the outer/inner-product family: dyadic `⊂`
+with a scalar left argument (`1 2∘.⊂(1 2)(3 4)`), and the mixed character
+and numeric array GNU APL builds where libjay refuses one
+(`'ab'∘.,(1 2)(3 4)`). Applying between items makes both reachable from
+more spellings than before; neither answer changed. The same goes for the
+recorded divergence over a vector left argument to `⌽` and `⊖`: libjay
+answers where GNU APL raises a rank error, and now does so from inside
+`∘.` too.

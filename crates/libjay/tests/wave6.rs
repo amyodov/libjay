@@ -119,7 +119,9 @@ fn a_train_is_a_function_wherever_one_belongs() {
     // An operator to the right of the closing parenthesis binds to the
     // train, exactly as it would to a primitive.
     assert_eq!(apl("(+/÷≢)¨(1 2)(3 4 5)"), Array::new(vec![2], Data::F64(vec![1.5, 4.0].into())));
-    assert_eq!(apl("(-,+)/1 2 3"), i64s(&[4], &[2, -4, 0, 6]));
+    // A reduction whose value is not a simple scalar comes back enclosed,
+    // as every APL application between items does; Dyalog says the same.
+    assert_eq!(apl("(-,+)/1 2 3"), Array::boxed(i64s(&[4], &[2, -4, 0, 6])));
     assert_eq!(apl("(⌈/-⌊/)⍤1⊢2 3⍴3 1 4 1 5 9"), i64s(&[2], &[3, 8]));
     // A train alone is still a function, so it has no value to display.
     let e = err(Lang::Apl, "(+/÷≢)");

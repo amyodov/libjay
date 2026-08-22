@@ -545,15 +545,25 @@ The glyphs and features with no oracle at all — because GNU APL lacks the
 valence outright, or because the feature is Dyalog's own — are listed in
 "Which APL" above.
 
+Every APL operator that collects the values of several applications does so
+between ITEMS: what it hands the function is the CONTENTS of an item, and a
+result that is not a simple scalar is enclosed again to take one place in
+the array being built. `¨` says so in its name; `∘.f`, `f/`, `f⌿`, `f\`,
+`f⍀` and `f.g` follow the same rule, which is why `,/1 2 3` is an enclosed
+vector and `¯1 0 1∘.⌽⊂m` rotates the matrix inside the enclosure. J reads
+all of them by cells and leaves its boxes shut; the two languages part here
+and nowhere in between.
+
 Operators: `/` (reduce, LAST axis), `⌿` (reduce, leading axis), `\` (scan,
 last axis), `⍀` (scan, leading axis), `⍤` (rank), `⍨` (commute), `⍣`
 (power, a nonnegative count), `¨` (each: the function runs on the contents
 of every item and its result goes back into an item — a simple scalar
 result stays simple, so `2×¨1 2 3` is flat and `⍴¨'ab' 'cde'` is nested),
-`∘.f` (outer product — the same table J spells
-`x u/ y`, e.g. `1 2 3∘.×1 2 3`), and `f.g` (the inner product, `+.×` above
-all — see "The inner product" under J, which carries the shape rule both
-languages share and the one place their readings of `g` part). A `.` is the
+`∘.f` (outer product — the table J spells `x u/ y`, but read between the
+ELEMENTS of both arguments rather than between the cells the function's
+rank asks for: `1 2 3∘.×1 2 3`, `1 2∘.,3 4`), and `f.g` (the inner product,
+`+.×` above all — see "The inner product" under J, which carries the shape
+rule both languages share and the one place their readings of `g` part). A `.` is the
 inner-product operator only where it is neither the start of a number nor
 the tail of `∘.`, so `2.5×2` and `2 3∘.×1 2` read as they always did. A
 scan's k-th element is the reduce of the

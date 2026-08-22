@@ -325,14 +325,14 @@ conjunctions above:
 
 | Glyph | Status |
 |---|---|
-| `/` reduce (last axis) | 🟢 |
-| `⌿` reduce (leading axis) | 🟢 |
+| `/` reduce (last axis) | 🟢 between the ELEMENTS along the axis, each disclosed and the fold's value enclosed: `,/1 2 3` is an enclosed vector |
+| `⌿` reduce (leading axis) | 🟢 the same rule down the first axis: `,⌿2 3⍴⍳6` pairs the columns |
 | `/` `⌿` replicate (after an operand) | 🟢 |
-| `\` `⍀` scan | 🟢 |
+| `\` `⍀` scan | 🟢 the reduce over each prefix, so it collects the same enclosures |
 | `\` `⍀` expand (after an operand) | 🟢 |
 | `¨` each | 🟢 |
 | `⍨` commute | 🟢 |
-| `∘.` outer product | 🟢 |
+| `∘.` outer product | 🟢 the function between every pair of ELEMENTS whatever its rank, each disclosed on the way in and the result enclosed on the way into the table: `1 2∘.,3 4` is a two-by-two of pairs, `¯1 0 1∘.⌽⊂m` rotates the matrix |
 | `⍤` rank / atop | 🟡 a rank specification, or Dyalog's atop with a function operand; no oracle for the latter |
 | `⍣` power | 🟡 literal count or a function operand (`f⍣≡`); negatives not yet |
 | `∘` beside | 🟡 no oracle: GNU APL has no `∘` operator; Dyalog's `f∘g`, function operands only |
@@ -341,7 +341,7 @@ conjunctions above:
 | `⍢` under | 🟡 no oracle: GNU APL rejects it; Dyalog's `g⍣¯1 ⊢ (g x) f (g y)`, over the same obverse table J's `&.:` uses |
 | `⌸` key | 🟡 no oracle: GNU APL rejects it; Dyalog's, with the operand taking the key and its group |
 | `⌺` stencil | 🟡 no oracle: GNU APL rejects it; Dyalog's monadic-window form — one size per leading axis, the windows centred and the edges filled. The two-row form that also gives the movement is named |
-| `.` inner product | 🟢 `f.g`: `+.×` is the matrix product, `∧.=` asks which rows match. Each vector along x's last axis meets each vector along y's first under g, and f folds the result |
+| `.` inner product | 🟢 `f.g` is `f/¨` over the outer product: `+.×` is the matrix product, `∧.=` asks which rows match. Each vector along x's last axis meets each vector along y's first under g, f folds the result, and the each encloses it |
 | `⍠` variant | 🟡 one dialect setting overridden for one application: `⎕CT` (the principal option, so a bare number sets it) and `⎕IO`, as literal options — `=⍠0`, `⍳⍠('IO' 0)`. Another option, or one that is not settled when the program is compiled, is named. No oracle: GNU APL rejects the glyph |
 | `&` spawn | ⚪ starts an APL thread, which the sandbox does not open — as J's `T.` and `t.` do not |
 
@@ -350,7 +350,7 @@ conjunctions above:
 | Feature | Status |
 |---|---|
 | Stranding (vector notation) | 🟢 |
-| Nested arrays | 🟡 structural verbs, mixed simple arrays and prototype fills; the arithmetic still refuses a boxed operand |
+| Nested arrays | 🟡 structural verbs, mixed simple arrays and prototype fills; the operators apply between items, so `∘.`, `/`, `⌿`, `\`, `⍀` and `.` disclose what they take and enclose what they collect. The arithmetic still refuses a boxed operand |
 | `←` assignment, including inline | 🟢 |
 | Function assignment `F←+/`, `F←+/÷≢` | 🟡 no oracle: GNU APL rejects it; the same extension as trains, and off with it |
 | Dfns `{⍵+1}`, `⍺`/`⍵`, `⋄` bodies, nesting | 🟢 |

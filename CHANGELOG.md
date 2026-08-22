@@ -30,6 +30,36 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- APL's operators now apply their function between the ITEMS of their
+  arguments, which is what the language has always meant by them. An item
+  is disclosed on the way in and a result that is not a simple scalar is
+  enclosed again on the way into the array being built.
+
+  `∘.f` reaches inside an enclosure — `¯1 0 1∘.⌽⊂2 3⍴⍳6` now rotates the
+  MATRIX and answers three rotations of it, where it used to rotate the
+  enclosure (which is one item, so nothing moved) and answer three copies.
+  It also pairs elements whatever the function's rank, so `1 2∘.,3 4` is
+  the two-by-two table of pairs `(1 3)(1 4)` / `(2 3)(2 4)` and
+  `'ab'∘.,'cd'` is `ac ad` / `bc bd`; both used to be a single catenation.
+
+  `f/` and `f⌿` fold the ELEMENTS along the axis they reduce and enclose
+  what the fold makes: `,/1 2 3` is an enclosed three-element vector,
+  `,/2 3⍴⍳6` is two enclosed rows and `,⌿2 3⍴⍳6` is three enclosed
+  columns. `f\` and `f⍀` are the reduce over each prefix, so `,\1 2 3` is
+  now `1`, `1 2`, `1 2 3` rather than a padded table. The arithmetic
+  reductions are untouched: folding elements and folding cells agree for a
+  scalar function, so `+/`, `×/`, `⌈/` and the rest answer as before.
+
+  `f.g` is `f/¨` over that outer product, so the each's enclosure is part
+  of it: `1 2,.+3 4` is an enclosed `4 6`. `+.×` and the other folds to a
+  number are unchanged.
+
+  With this, John Scholes' Game of Life runs as written:
+  `{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵}`.
+
+  J is a different language here and keeps its own reading: `u/` tables by
+  cells, `u/` inserts between cells, and a box stays shut.
+
 ## 0.2.1 — 2026-08-22
 
 ### Added

@@ -1,0 +1,154 @@
+// Conway's Game of Life, and the nested-array rules it needs.
+//
+// APL applies a function between the ITEMS of its arguments: an item is
+// disclosed on the way in and a result that is not a simple scalar is
+// enclosed again on the way into the array being built. `∘.f`, `f/` and
+// `f.g` all read that way, which is what makes one line of APL a
+// generation of Life. J reads the same operators by cells and leaves its
+// boxes shut, so none of this is shared with the J corpus.
+//
+// The nested DISPLAY is libjay's own approximation (see divergences.txt),
+// so the shape, the depth and the enlisted leaves carry the comparison
+// wherever the printed planes could hide a difference.
+
+// --- the outer product is between items ----------------------------------
+// An enclosed matrix is one item, so the rotate reaches the matrix.
+¯1 0 1∘.⌽⊂2 3⍴⍳6
+⍴¯1 0 1∘.⌽⊂2 3⍴⍳6
+≡¯1 0 1∘.⌽⊂2 3⍴⍳6
+∊¯1 0 1∘.⌽⊂2 3⍴⍳6
+2 3∘.⌽⊂2 3⍴⍳6
+(⊂1 2)∘.⌽⊂2 3⍴⍳6
+// The items are elements whatever the function's rank, so a whole-argument
+// function makes a table rather than one application.
+1 2∘.,3 4
+⍴1 2∘.,3 4
+≡1 2∘.,3 4
+∊1 2∘.,3 4
+'ab'∘.,'cd'
+⍴'ab'∘.,'cd'
+≡'ab'∘.,'cd'
+∊'ab'∘.,'cd'
+1 2∘.⍴3 4
+≡1 2∘.⍴3 4
+∊1 2∘.⍴3 4
+(1 2)(3 4)∘.,(5 6)
+⍴(1 2)(3 4)∘.,(5 6)
+≡(1 2)(3 4)∘.,(5 6)
+∊(1 2)(3 4)∘.,(5 6)
+(2 2⍴⍳4)∘.,1 2
+⍴(2 2⍴⍳4)∘.,1 2
+≡(2 2⍴⍳4)∘.,1 2
+// Rotating an element rotates a scalar, which changes nothing.
+0 1∘.⌽2 3⍴⍳6
+⍴0 1∘.⌽2 3⍴⍳6
+1 2∘.⌽'abc'
+// A scalar function on elements is the table it always was.
+1 2 3∘.+10 20
+1 2 3∘.=1 2
+⍴⍳0∘.+1 2
+⍴1 2∘.+⍳0
+1 0∘.+⊂2 2⍴⍳4
+(⊂1 2)∘.+⊂2 2⍴⍳4
+(1 2)(3 4)∘.+(5 6)(7 8)
+
+// --- the insert is between items too -------------------------------------
+,/1 2 3
+⍴,/1 2 3
+≡,/1 2 3
+,/2 3⍴⍳6
+⍴,/2 3⍴⍳6
+≡,/2 3⍴⍳6
+,⌿2 3⍴⍳6
+⍴,⌿2 3⍴⍳6
+≡,⌿2 3⍴⍳6
+⍴/2 3⍴⍳6
+∊⍴/2 3⍴⍳6
+,/'ab' 'cd'
+⍴,/'ab' 'cd'
+≡,/'ab' 'cd'
+,/(1 2)(3 4)(5 6)
+⍴,/(1 2)(3 4)(5 6)
+,/2 1⍴1 2
+⍴,/2 1⍴1 2
+,/1 2⍴1 2
+⍴,/1 2⍴1 2
+,/5
+⍴,/5
++/5
+// The arithmetic reductions fold elements too, and there the two readings
+// agree — which is why nothing here moved.
++/1 2 3
++/2 3⍴⍳6
++⌿2 3⍴⍳6
+⌽/2 3⍴⍳6
++/(1 2)(3 4)(5 6)
+⍴+/(1 2)(3 4)(5 6)
+≡+/(1 2)(3 4)(5 6)
++/(⊂2 2⍴⍳4)(⊂2 2⍴4+⍳4)
+≡+/(⊂2 2⍴⍳4)(⊂2 2⍴4+⍳4)
+// The scan is the insert over each prefix, so it follows.
+,\\1 2 3
+⍴,\\1 2 3
+≡,\\1 2 3
+,\\'abcd'
+⍴,\\'abcd'
++\\1 2 3
+-\\1 2 3
+⌽\\1 2 3
+,⍀2 3⍴⍳6
+⍴,⍀2 3⍴⍳6
+
+// --- the inner product is `f/¨` over the outer one ------------------------
+1 2+.×3 4
+(2 2⍴1 0 0 1)+.×2 2⍴⍳4
+1 2∨.∧3 4
+1 2,.+3 4
+⍴1 2,.+3 4
+≡1 2,.+3 4
+∊1 2,.+3 4
+(2 2⍴⍳4),.+2 2⍴⍳4
+⍴(2 2⍴⍳4),.+2 2⍴⍳4
+≡(2 2⍴⍳4),.+2 2⍴⍳4
+∊(2 2⍴⍳4),.+2 2⍴⍳4
+(2 2⍴⍳4)⌈.+2 2⍴⍳4
+≡(2 2⍴⍳4)⌈.+2 2⍴⍳4
+(2 2⍴⍳4),.,2 2⍴⍳4
+≡(2 2⍴⍳4),.,2 2⍴⍳4
+∊(2 2⍴⍳4),.,2 2⍴⍳4
+(1 2)(3 4)+.,(5 6)(7 8)
+≡(1 2)(3 4)+.,(5 6)(7 8)
+1 2+.,3 4
+
+// --- the neighbourhood, stage by stage -----------------------------------
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ world
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⍴world
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⍴⊂world
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ≡⊂world
+// Two levels of enclosure: GNU APL rules the planes off with blank lines
+// where libjay's printer does not, so only the structure is compared.
+⍴¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+≡¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+∊¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+⍴,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
++/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+⍴+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+≡+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+⊃+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+⍴3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+≡3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 3⍴⍳6
+1 (2 2⍴1 0 0 1)∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 2⍴1 1 1 0
+≡1 (2 2⍴1 0 0 1)∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 2⍴1 1 1 0
+↑1 (2 2⍴1 0 0 1)∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 2⍴1 1 1 0
+⊃↑1 (2 2⍴1 0 0 1)∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 2⍴1 1 1 0
+
+// --- the whole thing -----------------------------------------------------
+// Conway's Game of Life, John Scholes (2009).
+// The canonical APL one-liner.
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ {↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⊃{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⍴⊃{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ≡{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ LIFE←{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} ⋄ ⊃LIFE ⊃LIFE world

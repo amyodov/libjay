@@ -1921,6 +1921,32 @@ fn agree(
 
 // ------------------------------------------------------------- assembly
 
+/// Frame results that need not share a depth, which is how APL collects the
+/// values of an application between items: `,\1 2 3` puts the simple scalar
+/// `1` beside two enclosed vectors. A simple scalar cannot be nested, so it
+/// is enclosed here to take its place among the others; anything already
+/// alike goes straight to [`assemble`]. J refuses such a mixture instead,
+/// and reaches [`assemble`] directly.
+fn assemble_items(frame: &[usize], mut cells: Vec<Array>, span: Span) -> Result<Array> {
+    let boxes = cells.iter().filter(|c| c.dtype() == DType::Box).count();
+    if boxes > 0 && boxes < cells.len() {
+        for c in &mut cells {
+            if c.dtype() != DType::Box {
+                *c = boxed_elements(c);
+            }
+        }
+    }
+    assemble(frame, cells, span)
+}
+
+/// The same array with every element held as its own value, so that it can
+/// be framed beside cells whose elements are nested.
+fn boxed_elements(a: &Array) -> Array {
+    let row = a.to_row_major();
+    let held: Vec<Array> = (0..row.count()).map(|i| atom(&row, i)).collect();
+    Array::new(row.shape.clone(), Data::Box(held.into()))
+}
+
 /// Frame the results of a cell-by-cell application into one array.
 fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
     if cells.is_empty() {
@@ -5771,12 +5797,49 @@ fn table_of(y: &Array) -> Array {
     Array::new(shape, y.data.clone())
 }
 
+/// One application of the APL kind: between two ITEMS.
+///
+/// APL hands a function the contents of an item, not the item, and puts a
+/// result that is not a simple scalar back under an enclosure so it can take
+/// one place in the array being built. J leaves its boxes shut instead,
+/// which is where the two languages part on `∘.⌽` and on `,/`.
+fn item_dyad(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let r = u.dyad(&open_cell(x), &open_cell(y), ctx, span)?;
+    Ok(enclose(&r, Enclose::ExceptSimpleScalar))
+}
+
+/// `x ∘.u y` (APL): u between every element of x and every element of y.
+///
+/// The elements are atoms whatever u's rank — `1 2∘.,3 4` is a 2-by-2 table
+/// of pairs, not one catenation — and each is disclosed on the way in, so
+/// `¯1 0 1∘.⌽⊂m` rotates the matrix rather than the enclosure holding it.
+/// The result of each application is enclosed again unless it is already a
+/// simple scalar.
+fn outer_product(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let mut frame = x.shape.clone();
+    frame.extend_from_slice(&y.shape);
+    let (nx, ny) = (x.count(), y.count());
+    let n = nx * ny;
+    if n == 0 {
+        return assemble(&frame, Vec::new(), span);
+    }
+    let (xr, yr) = (x.to_row_major(), y.to_row_major());
+    let cells = each_cell(n, nx.max(ny).max(n), u.is_pure(), ctx, |i, c| {
+        item_dyad(u, &atom(&xr, i / ny), &atom(&yr, i % ny), c, span)
+    })?;
+    assemble_items(&frame, cells, span)
+}
+
 /// `x u/ y`: u applied to every pair of cells, x's frame before y's.
 ///
 /// The cells are the ones u's own ranks ask for, which is why `1 2 3 +/ 10 20`
 /// is a 3-by-2 table (atoms both sides) while `x ,/ y` is a single catenation
-/// (`,` takes its arguments whole).
+/// (`,` takes its arguments whole). APL spells the same table `∘.u` and reads
+/// it by items instead, so that is where its dyad goes.
 fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    if ctx.cfg.rules.lang == crate::Lang::Apl {
+        return outer_product(u, x, y, ctx, span);
+    }
     let ranks = u.ranks();
     let fxl = x.rank() - effective_rank(ranks[1], x.rank());
     let fyl = y.rank() - effective_rank(ranks[2], y.rank());
@@ -5920,7 +5983,7 @@ fn inner_product(
         return apl_inner_product(u, v, x, y, ctx, span);
     }
     if !apl {
-        return inner_cells(u, v, x, y, ctx, span);
+        return inner_cells(u, v, false, x, y, ctx, span);
     }
     // A scalar v pairs one element of the row with one element of the
     // column, which is the leading-axis pairing J spells out and APL's own
@@ -5929,9 +5992,33 @@ fn inner_product(
     // under it and the caller's rule is put back afterwards.
     let saved = ctx.cfg.agreement;
     ctx.cfg.agreement = Agreement::LeadingPrefix;
-    let out = inner_cells(u, v, x, y, ctx, span);
+    let out = inner_cells(u, v, true, x, y, ctx, span);
     ctx.cfg.agreement = saved;
     out
+}
+
+/// Every element enclosed once more, which is what an each does to the
+/// values it brings back. A simple array is all simple scalars and cannot
+/// be nested any further, so it is returned as it stands.
+fn enclose_elements(a: &Array) -> Array {
+    if a.dtype() == DType::Box { boxed_elements(a) } else { a.clone() }
+}
+
+/// The fold that closes the cells of an inner product.
+///
+/// APL's definition is `f/¨ (⊂[last]x) ∘.g (⊂[first]y)`: the each is part of
+/// it, so what the fold makes of one pair is enclosed unless it is already a
+/// simple scalar. `1 2+.×3 4` is a number either way; `1 2,.+3 4` is an
+/// enclosed vector, and only APL says so.
+fn inner_fold(
+    u: &Verb,
+    apl: bool,
+    inner: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let folded = u.monad(inner, ctx, span)?;
+    Ok(if apl { enclose_elements(&folded) } else { folded })
 }
 
 /// The inner product by the cell machinery: x's cells at v's dyadic left
@@ -5939,6 +6026,7 @@ fn inner_product(
 fn inner_cells(
     u: &Verb,
     v: &Verb,
+    apl: bool,
     x: &Array,
     y: &Array,
     ctx: &mut Ctx<'_>,
@@ -5948,7 +6036,7 @@ fn inner_cells(
     let frame_rank = x.rank() - cell_rank;
     if frame_rank == 0 {
         let inner = v.dyad(x, y, ctx, span)?;
-        return u.monad(&inner, ctx, span);
+        return inner_fold(u, apl, &inner, ctx, span);
     }
     let frame = x.shape[..frame_rank].to_vec();
     let n: usize = frame.iter().product();
@@ -5959,7 +6047,7 @@ fn inner_cells(
     let pure = u.is_pure() && v.is_pure();
     let cells = each_cell(n, work, pure, ctx, |i, c| {
         let inner = v.dyad(&x.cell_at(frame_rank, i), y, c, span)?;
-        u.monad(&inner, c, span)
+        inner_fold(u, apl, &inner, c, span)
     })?;
     assemble(&frame, cells, span)
 }
@@ -6013,7 +6101,7 @@ fn apl_inner_product(
         let left = vector(&x.data, &|t| if x.rank() > 0 { r * k + t } else { 0 });
         let right = vector(&y.data, &|t| if y.rank() > 0 { t * cols + col } else { 0 });
         let inner = v.dyad(&left, &right, c, span)?;
-        u.monad(&inner, c, span)
+        inner_fold(u, true, &inner, c, span)
     })?;
     assemble(&frame, cells, span)
 }
@@ -7606,11 +7694,42 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         }
         return Ok(Array::new(cell_shape, acc));
     }
+    if ctx.cfg.rules.lang == crate::Lang::Apl {
+        return item_fold(v, y, ctx, span);
+    }
     let mut acc = y.item(n - 1);
     for i in (0..n - 1).rev() {
         acc = v.dyad(&y.item(i), &acc, ctx, span)?;
     }
     Ok(acc)
+}
+
+/// The same insert read by items, which is what APL's `f/` and `f⌿` are.
+///
+/// J folds whole cells: `,/ 2 3$i.6` catenates the two rows. APL folds the
+/// ELEMENTS along the reduced axis and leaves the other axes as the frame,
+/// so `,⌿2 3⍴⍳6` pairs the columns and answers three two-element vectors.
+/// Each element is disclosed on the way in and the fold's value is enclosed
+/// on the way out, which is why `,/1 2 3` is an enclosed vector rather than
+/// a bare one. The arithmetic reductions never reach here: folding atoms
+/// and folding cells agree for a scalar function, and the typed path above
+/// keeps them.
+fn item_fold(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let n = y.items();
+    let frame = y.shape[1..].to_vec();
+    let m: usize = frame.iter().product();
+    if m == 0 {
+        return assemble(&frame, Vec::new(), span);
+    }
+    let base = y.to_row_major();
+    let cells = each_cell(m, base.count(), v.is_pure(), ctx, |p, c| {
+        let mut acc = open_cell(&atom(&base, (n - 1) * m + p));
+        for i in (0..n - 1).rev() {
+            acc = v.dyad(&open_cell(&atom(&base, i * m + p)), &acc, c, span)?;
+        }
+        Ok(enclose(&acc, Enclose::ExceptSimpleScalar))
+    })?;
+    assemble_items(&frame, cells, span)
 }
 
 // ------------------------------------------------- windows, scans, power
@@ -8255,11 +8374,12 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
             return assemble(&[n], cells, span);
         }
     }
+    let apl = ctx.cfg.rules.lang == crate::Lang::Apl;
     let cells = each_cell(n, n * m, u.is_pure(), ctx, |i, c| {
         let part = if back { section(base, i, n) } else { section(base, 0, i + 1) };
         u.monad(&part, c, span)
     })?;
-    assemble(&[n], cells, span)
+    if apl { assemble_items(&[n], cells, span) } else { assemble(&[n], cells, span) }
 }
 
 /// The result of a window longer than the argument holds no items, but it
