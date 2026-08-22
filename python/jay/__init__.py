@@ -74,6 +74,7 @@ _DIALECT_KEYS = (
     "complex_order",
     "nested_grade",
     "lookup_left",
+    "gcd_rule",
     "trains",
 )
 

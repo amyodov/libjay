@@ -2085,15 +2085,9 @@ fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64], tol: Tol
         } else {
             x / y
         }),
-        // An infinite modulus leaves a value of its own sign alone and
-        // sends the other one to that infinity, exactly as unfused.
-        Residue => zip!(a, b, dst, |x: f64, y: f64| if x.is_infinite() {
-            if y == 0.0 || (y > 0.0) == (x > 0.0) { y } else { x }
-        } else if x == 0.0 {
-            y
-        } else {
-            y - x * (y / x).floor()
-        }),
+        // The quotient is rounded with the dialect's tolerance, exactly as
+        // unfused: the fused answer must not differ from the plain one.
+        Residue => zip!(a, b, dst, |x: f64, y: f64| tol.residue(x, y)),
         // A comparison is a number here, as it is in J: the boolean only
         // shows in the dtype of a result, which the caller narrows. Floats
         // compare with the dialect's tolerance, as they do unfused.

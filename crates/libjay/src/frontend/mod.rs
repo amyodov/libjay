@@ -150,6 +150,25 @@ pub enum LookupLeft {
     VectorOnly,
 }
 
+/// Which line's `∨` and `∧` these are.
+///
+/// GNU APL's GCD reads three things loosely, all probed against it: a zero
+/// argument hands its partner back with the sign (`¯3∨0` is `¯3`, though
+/// `¯3.5∨0` is `3.5` — only whole numbers keep it); an argument within
+/// `⎕CT` of a whole number is that number (`1.0000000000001∧5` is 5); and
+/// one no larger than `⎕CT` beside the other is zero (`1E¯14∨1` is 1).
+/// Dyalog does none of the three, and neither does J: `¯3∨0` is 3 there,
+/// `1E¯14∨1` is `1E¯14`, and `1.0000000000001∧5` grinds out `1.0008E13`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GcdRule {
+    /// GNU APL: whole-number sign kept, near-whole and vanishing arguments
+    /// rounded first.
+    #[default]
+    Tolerant,
+    /// Dyalog and J: the magnitude, and the values as they stand.
+    Exact,
+}
+
 /// Dialect settings supplied by the host.
 ///
 /// This is what a host asks for; [`Rules`] is what the compiler and the
@@ -179,6 +198,7 @@ pub struct Dialect {
     pub complex_order: ComplexOrder,
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
+    pub gcd_rule: GcdRule,
     /// Whether a function may stand where a value belongs: a run of
     /// functions is then a train, and `F←+/` names one. Both readings are
     /// implemented, so this is a choice and not a gap. It ships on, as an
@@ -213,6 +233,7 @@ impl Dialect {
             complex_order: ComplexOrder::RealThenImaginary,
             nested_grade: NestedGrade::Apl2,
             lookup_left: LookupLeft::AnyRank,
+            gcd_rule: GcdRule::Tolerant,
             trains: true,
         }
     }
@@ -239,6 +260,7 @@ impl Dialect {
             complex_order: ComplexOrder::RealThenImaginary,
             nested_grade: NestedGrade::TotalOrder,
             lookup_left: LookupLeft::VectorOnly,
+            gcd_rule: GcdRule::Exact,
             trains: true,
         }
     }
@@ -310,6 +332,7 @@ impl Dialect {
             complex_order: self.complex_order,
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
+            gcd_rule: self.gcd_rule,
             trains: self.trains,
         })
     }
@@ -338,6 +361,7 @@ pub struct Rules {
     pub complex_order: ComplexOrder,
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
+    pub gcd_rule: GcdRule,
     pub trains: bool,
 }
 
@@ -363,6 +387,7 @@ impl Rules {
             complex_order: self.complex_order,
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
+            gcd_rule: self.gcd_rule,
             trains: self.trains,
         }
     }

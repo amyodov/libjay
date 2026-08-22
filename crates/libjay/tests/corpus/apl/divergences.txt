@@ -81,11 +81,6 @@
 // length of `⍕`.
 ⍴⍕(1 2)(3 4)
 ? one space between items here, two there
-// GNU APL's grade reads ⎕CT: two values within the tolerance tie, and its
-// stable sort leaves them where they were. libjay's grade is exact, as J's
-// is — a tolerant comparison is not a total order, and a sort needs one.
-⍋2 (1+1E¯14) 1
-? tolerant there, exact here
 // `⍺←v` inside a dfn is a DEFAULT here, as the published dfn model has it:
 // a left argument that arrived keeps its value. GNU APL assigns
 // unconditionally, so the default overwrites the argument.
@@ -186,13 +181,13 @@ F←+/ ⋄ F 1 2 3
 ? the empty here, one element there
 // An integer near 2^63 is exact here and goes through a double in GNU APL,
 // which rounds it to 2^63 before the verb sees it. libjay reads the literal
-// out of its text and keeps it exact, so the residues, the encodings and
-// the rotations of such a number differ by the rounding alone. No published
-// definition asks for the rounding.
+// out of its text and keeps it exact, so the residues and the rotations of
+// such a number differ by the rounding alone. No published definition asks
+// for the rounding. `⊤` is NOT in the list: its digits go through the float
+// path either way, and the tolerant residue reads a remainder of 3 beside a
+// modulus of 2^63 as zero, which is what GNU APL answers too.
 9223372036854775806|2 3⍴⍳6
 ? the exact residues here, the residues of 2^63 there
-9223372036854775806⊤3 1 4 1 5
-? the exact digits here, the digits of 2^63 there
 9223372036854775806⌽¯2 0 2
 ? the exact rotation here, the rotation by 2^63 there
 // A width or a precision is a length, and a written number can ask for more

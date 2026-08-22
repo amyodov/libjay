@@ -568,11 +568,12 @@ fn dialect_of(
     complex_order: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
+    gcd_rule: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Dialect> {
     use jay::frontend::{
-        ComplexOrder, DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, LookupLeft,
-        NestedGrade, NestedModel, Partition,
+        ComplexOrder, DefaultArg, DepthSign, DfnResult, FirstDisclose, GcdRule, IndexForm,
+        LookupLeft, NestedGrade, NestedModel, Partition,
     };
     let d = Dialect::default();
     Ok(Dialect {
@@ -650,6 +651,12 @@ fn dialect_of(
             &[("any-rank", LookupLeft::AnyRank), ("vector-only", LookupLeft::VectorOnly)],
         )?
         .unwrap_or(d.lookup_left),
+        gcd_rule: setting(
+            gcd_rule,
+            "gcd_rule",
+            &[("tolerant", GcdRule::Tolerant), ("exact", GcdRule::Exact)],
+        )?
+        .unwrap_or(d.gcd_rule),
         trains: trains.unwrap_or(d.trains),
     })
 }
@@ -670,6 +677,7 @@ fn dialect_of(
     complex_order=None,
     nested_grade=None,
     lookup_left=None,
+    gcd_rule=None,
     trains=None,
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -688,6 +696,7 @@ fn compile(
     complex_order: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
+    gcd_rule: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
@@ -704,6 +713,7 @@ fn compile(
         complex_order,
         nested_grade,
         lookup_left,
+        gcd_rule,
         trains,
     )?;
     let program = jay::compile(lang, source, &dialect).map_err(|e| jay_err(source, &e))?;
@@ -737,6 +747,7 @@ fn devices() -> Vec<(String, String, String, bool)> {
     complex_order=None,
     nested_grade=None,
     lookup_left=None,
+    gcd_rule=None,
     trains=None,
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -756,6 +767,7 @@ fn compile_parts(
     complex_order: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
+    gcd_rule: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
@@ -772,6 +784,7 @@ fn compile_parts(
         complex_order,
         nested_grade,
         lookup_left,
+        gcd_rule,
         trains,
     )?;
     let part_refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();

@@ -87,6 +87,12 @@ class APL:
         left argument of any rank are searched) or "vector-only" (Dyalog's
         rule, where anything but a vector is a rank error)."""
 
+        gcd_rule: str = "tolerant"
+        """Which line's ``∨`` and ``∧``: "tolerant" (GNU APL — a zero
+        argument hands its partner back with the sign, so ``¯3∨0`` is
+        ``¯3``, and a near-whole or vanishing argument is rounded first) or
+        "exact" (Dyalog and J — the magnitude, and the values as given)."""
+
         trains: bool = True
         """Whether a function may stand where a value belongs: a run of
         functions is then a train, and ``F←+/`` names one. Ships on, as an
@@ -108,6 +114,7 @@ class APL:
         dfn_result="first-non-assignment",
         nested_grade="total-order",
         lookup_left="vector-only",
+        gcd_rule="exact",
     )
 
     @staticmethod

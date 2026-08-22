@@ -408,9 +408,36 @@ fn helpers(needs: &Needs, tol: Tol, p: Precision) -> String {
         s.push_str("  return x / y;\n}\n");
     }
     if needs.residue {
+        // The quotient is rounded with the dialect's tolerance, as it is on
+        // the host: J takes the tolerant floor and answers an exact zero
+        // when the product is tolerantly the dividend, GNU APL shifts the
+        // quotient by `⎕CT` and reads the remainder against the modulus.
+        let ct = lit(tol.ct, p);
         s.push_str(&format!("fn residue(x: {t}, y: {t}) -> {t} {{\n"));
         s.push_str(&format!("  if (x == {zero}) {{ return y; }}\n"));
-        s.push_str("  return y - x * floor(y / x);\n}\n");
+        if tol.by_smaller {
+            s.push_str("  let q = y / x;\n");
+            s.push_str("  let c = ceil(q);\n");
+            s.push_str(&format!(
+                "  let k = select(floor(q), c, abs(q - c) < {ct} * min(abs(q), abs(c)));\n"
+            ));
+            s.push_str("  let d = x * k;\n");
+            s.push_str(&format!(
+                "  if (abs(y - d) < {ct} * min(abs(y), abs(d))) {{ return {zero}; }}\n"
+            ));
+            s.push_str("  return y - d;\n}\n");
+        } else {
+            s.push_str("  let q = y / x;\n  let c = ceil(q);\n  let gap = c - q;\n");
+            s.push_str(&format!(
+                "  let k = select(floor(q), c, gap <= {ct} || gap < {ct} * max(abs(q), abs(c)));\n"
+            ));
+            s.push_str("  let r = y - x * k;\n");
+            s.push_str(&format!("  if (abs(r) < {ct} * abs(x)) {{ return {zero}; }}\n"));
+            s.push_str(&format!(
+                "  if (r != {zero} && (r < {zero}) != (x < {zero})) {{ return r + x; }}\n"
+            ));
+            s.push_str("  return r;\n}\n");
+        }
     }
     if !s.is_empty() {
         s.push('\n');

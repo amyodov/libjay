@@ -38,3 +38,57 @@ _ = 1e300
 1 e.!.0 (1 , 1 + 2^_50)
 (1 2 3) i.!.0 (1 + 2^_50)
 (<.!.0) 2.9999999999999
+// --- residue rounds the quotient tolerantly --------------------------
+// `x | y` is `y - x * <. y % x` with the TOLERANT floor, and the answer is
+// an exact zero wherever the product is tolerantly the dividend. That is
+// what makes `0.1 | 0.3` zero rather than a rounding error.
+0.1 | 0.3
+2 | 4 - 1e_14
+2 | 4 + 1e_14
+3 | 9 - 1e_14
+2 | 2 - 1e_14
+2 | 4 - 1e_10
+_2 | 4 - 1e_14
+2 | _4 + 1e_14
+_0.1 | 0.3
+0.1 | _0.3
+_0.1 | _0.3
+0.3 | 0.1
+0 | 0.3
+1 | 2.5
+0.7 | 2.1
+0.7 | 1.4
+0.3 | 0.9
+100 | 99.99999999999
+1000 | 999.9999999999
+2 | 1e100
+1e_15 | 1
+3 | 8.9999999999999
+7 | 6.9999999999999
+2 | 2.0000000000001
+2 | 1.9999999999999
+| 2 - 1e_14
++/ 0.1 | 0.3 0.6 0.9
+// The scale is the DIVIDEND's, not the divisor's: a remainder nowhere near
+// the divisor's magnitude survives.
+2 | 1e_14
+1 | 1e_14
+// --- and the antibase digits are residues ----------------------------
+2 2 #: 4 - 1e_14
+2 2 #: 4 + 1e_14
+2 2 2 #: 8 - 1e_14
+0 2 #: 4 - 1e_14
+10 10 #: 100 - 1e_12
+// --- grade stays exact, whatever the tolerance is --------------------
+/: 1 1.0000000000001 1
+\\: 1 1.0000000000001
+/: 1.0000000000001 1
+/: 1 , 1 + 2^_50
+// --- GCD keeps the magnitude beside a zero ---------------------------
+_3 +. 0
+0 +. _3
+_3.5 +. 0
+// --- fit switches the tolerance off ----------------------------------
+0.1 (|!.0) 0.3
+2 |!.0 (4 - 1e_14)
+2 2 #:!.0 (4 - 1e_14)

@@ -118,11 +118,6 @@
 < 9
 > gnu: 10
 > dyalog: 10
-= ⍋2 (1+1E¯14) 1
-? tolerant there, exact here
-< 3 2 1
-> gnu: 2 3 1
-> dyalog: 3 2 1
 = F←{⍺←10 ⋄ ⍺+⍵} ⋄ 3 F 5
 ? ⍺← is a default here, an unconditional assignment there
 < 8
@@ -279,11 +274,6 @@
 > gnu: 0 0 0
 > dyalog: 0 0 0
 > dyalog: 0 0 0
-= 9223372036854775806⊤3 1 4 1 5
-? the exact digits here, the digits of 2^63 there
-< 3 1 4 1 5
-> gnu: 0 0 0 0 0
-> dyalog: 3 1 4 1 5
 = 9223372036854775806⌽¯2 0 2
 ? the exact rotation here, the rotation by 2^63 there
 < ¯2 0 2

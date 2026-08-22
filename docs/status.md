@@ -44,7 +44,7 @@ inventory. Nothing in APL's primitive tables is red.**
 | `%:` | 🟢 sqrt; a negative gives a complex answer | 🟢 root; same |
 | `<.` | 🟢 floor | 🟢 lesser of |
 | `>.` | 🟢 ceiling | 🟢 larger of |
-| `\|` | 🟢 magnitude | 🟢 residue |
+| `\|` | 🟢 magnitude | 🟢 residue; the quotient is rounded with the tolerance |
 | `<:` | 🟢 decrement | 🟢 less or equal |
 | `>:` | 🟢 increment | 🟢 larger or equal |
 | `+:` | 🟢 double | 🟢 nor; both arguments must be 0 or 1 |
@@ -250,7 +250,7 @@ conjunctions above:
 | `⍟` | 🟡 log; `⍟0` is `¯∞`, not a domain error | 🟢 logarithm |
 | `⌈` | 🟢 ceiling | 🟢 maximum |
 | `⌊` | 🟢 floor | 🟢 minimum |
-| `\|` | 🟢 magnitude | 🟢 residue |
+| `\|` | 🟢 magnitude | 🟢 residue; the quotient is rounded with the tolerance |
 | `!` | 🟡 factorial; a complex argument is a named gap | 🟡 binomial; same |
 | `○` | 🟢 pi times | 🟢 circle; `¯12` to `12`, real and complex |
 | `?` | 🟡 roll; libjay's own stream, not GNU APL's | 🟡 deal; same |
@@ -269,7 +269,7 @@ conjunctions above:
 | `≡` | 🟢 depth | 🟢 match |
 | `≢` | 🟢 tally | 🟢 not match |
 | `∧` | — | 🟢 LCM / and |
-| `∨` | — | 🟢 GCD / or |
+| `∨` | — | 🟢 GCD / or; GNU APL's rounding and zero-sign rules (`gcd_rule`) |
 | `⍲` | — | 🟢 nand |
 | `⍱` | — | 🟢 nor |
 | `~` | 🟢 not | 🟢 without |
@@ -303,8 +303,8 @@ conjunctions above:
 | `⍷` | — | 🟢 find |
 | `∪` | 🟢 unique | 🟢 union |
 | `∩` | — | 🟢 intersection |
-| `⍋` | 🟢 grade up; nested by the APL2 rule (`nested_grade`) | 🟢 collating grade |
-| `⍒` | 🟢 grade down; nested by the APL2 rule (`nested_grade`) | 🟢 collating grade |
+| `⍋` | 🟢 grade up; compares under `⎕CT`; nested by the APL2 rule (`nested_grade`) | 🟢 collating grade |
+| `⍒` | 🟢 grade down; compares under `⎕CT`; nested by the APL2 rule (`nested_grade`) | 🟢 collating grade |
 
 ### Format, I/O, identity
 

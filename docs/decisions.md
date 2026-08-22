@@ -2460,3 +2460,73 @@ the items of a left argument of any rank, Dyalog gives a RANK ERROR for
 anything that is not a vector. `Dialect.lookup_left` carries both, the
 default unchanged, and it is a field on the primitive rather than a rule
 read at run time, so J's `i.` never sees it. Seven rows.
+## 2026-08-22 — Which primitives consult the tolerance, and how each reads it
+
+The adversarial round asked one question — which primitives consult `⎕CT`
+and J's comparison tolerance — and answered it for 23 spellings. This wave
+made the answer match the references, primitive by primitive, and the
+surprise was that the two oracles do not read the tolerance the same way
+even where both consult it. Every rule below was probed; none was inferred
+from a specification.
+
+**Residue rounds the quotient in both languages, by different rules.**
+`0.1|0.3` is 0 in GNU APL and `0.1 | 0.3` is 0 in jconsole; libjay answered
+`0.1` in both, because the quotient went into an untolerant floor. J's rule
+came out of 70 probes as `k = <. y % x` with the TOLERANT floor, then an
+exact zero wherever `tol.eq(y, x*k)` — the scale is the DIVIDEND's, which is
+why `2 | 1e_14` keeps its `1e_14` while `2 | 4 + 1e_14` is 0. GNU APL reads
+the remainder against the MODULUS instead: one within `⎕CT × |x|` is zero,
+and one that rounding pushed out of `[0, x)` comes back into range. That
+scale is real and was probed at both ends — `1E13|3` is 3 and `1E14|3` is 0,
+the threshold moving with the modulus exactly as `⎕CT × |x|` predicts, and
+Dyalog agrees under its own smaller `⎕CT` (`1E14|3` is 3 there, `1E20|3` is
+0). The quotient's rounding needs both an absolute and a relative test to
+match GNU: absolute is what makes `1|¯1E¯14` zero, relative what makes
+`1E¯15|1` zero, where the quotient is 1e15 and the gap 0.1.
+
+There is a band about four ulps wide, at a gap of `⎕CT` exactly, where GNU
+answers as if its threshold were a hair under `⎕CT` — `1|2.9999999999999`
+keeps its remainder there though the gap is 9.992e¯14 against a `⎕CT` of
+1e¯13. Six hypotheses were tried against the boundary scan and every one
+reduced to the same comparison, so the band is left as a known residual and
+the corpus stays out of it.
+
+**`#:` and `⊤` are residues and follow.** `2 2 #: 4 - 1e_14` was `1 2` and
+is `0 0` once `encode_one` takes the digit with the dialect's rule. The
+fused kernel and the wgpu shader carry the same rule; a fused sentence that
+rounded differently would make `|` mean two things.
+
+**`⌊` and `⌈` part company.** J scales the gap by the magnitude, so
+`<. 99.999999999995` is 100. GNU APL shifts by `⎕CT` outright — `floor(y +
+⎕CT)` reproduces every probe, including `⌊99.999999999995` at 99 and
+`⌊¯1E¯13` at 0 — and Dyalog does the same under its own `⎕CT`. libjay had
+J's rule in both.
+
+**Grade is tolerant in APL and exact in J.** `⍋1.0000000000001 1` is `1 2`
+in GNU APL: the keys tie and the stable sort leaves them alone. `/: 1
+1.0000000000001 1` is `0 2 1` in jconsole whatever the tolerance is. The
+comparator now carries a `Grading` — the total ordering AND the tolerance —
+and forces `Tol::EXACT` for J, so the two cannot drift into each other. The
+nested and Dyalog-TAO comparators read the same tolerance; Dyalog's own
+answers are consistent with that once its `⎕CT` of 1e¯14 is used, so no
+second rule was invented for it. This retires a deliberate divergence: the
+note that said "tolerant there, exact here" is gone from the divergences
+corpus.
+
+**GCD/LCM is GNU's alone, and gets a knob.** GNU APL rounds an argument
+within `⎕CT` of a whole number to it, treats one no larger than `⎕CT` beside
+the other as zero, and hands a zero argument's WHOLE partner back with its
+sign (`¯3∨0` is `¯3`; `¯3.5∨0` is `3.5`). Dyalog does none of the three and
+neither does J — `¯3∨0` is 3 there, `1.0000000000001∧5` grinds out `1.0008E13`
+— so this is a dialect setting, `gcd_rule`, not a language rule. Making it
+one kept the Dyalog preset right rather than trading one wrong answer for
+another.
+
+**What was NOT changed, and why.** The adversarial probes also showed both
+references accepting a near-integer float where a COUNT is wanted: `⍳2-1E¯14`
+is `1 2`, `(2-1e_14) {. 1 2 3` is `1 2`, and the same for `⍴ ↑ ↓ ⌽ / { $ |.
+# q: p:`. That acceptance is NOT tolerance consultation — `⎕CT←0` does not
+disable it in GNU APL and `9!:19 (0)` does not disable it in jconsole, and
+its threshold sits near 1e¯10 in both, unmoved by either knob. It is a fixed
+near-integer admission rule, a separate defect, and bundling it into a
+tolerance wave would have tied it to a knob it does not answer to.

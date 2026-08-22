@@ -118,25 +118,79 @@ impl Tol {
 
     /// `<. y`: the largest integer not above y, with a value just under an
     /// integer counting as that integer.
+    ///
+    /// The two references read "just under" differently, and both were
+    /// probed. J scales the gap by the magnitude, so `<. 99.999999999995`
+    /// is 100 and `<. _1e_14` is `_1`. GNU APL shifts by the tolerance
+    /// itself, so `⌊99.999999999995` is 99 — the gap of 5e¯12 is larger
+    /// than `⎕CT` however big the value is — while `⌊¯1E¯13` is 0.
     #[inline(always)]
     pub fn floor(self, y: f64) -> f64 {
-        let c = y.ceil();
-        if self.eq(y, c) {
-            c
+        if self.is_j() {
+            let c = y.ceil();
+            if self.eq(y, c) { c } else { y.floor() }
         } else {
-            y.floor()
+            (y + self.ct).floor()
         }
     }
 
     /// `>. y`: the ceiling, with a value just over an integer counting as
-    /// that integer.
+    /// that integer. The two readings are [`Tol::floor`]'s, mirrored.
     #[inline(always)]
     pub fn ceil(self, y: f64) -> f64 {
-        let f = y.floor();
-        if self.eq(y, f) {
-            f
+        if self.is_j() {
+            let f = y.floor();
+            if self.eq(y, f) { f } else { y.ceil() }
         } else {
-            y.ceil()
+            (y - self.ct).ceil()
+        }
+    }
+
+    /// `x | y`: the remainder of y on division by x, with the quotient read
+    /// tolerantly. Both references round the quotient before subtracting,
+    /// which is what makes `0.1|0.3` zero rather than a rounding error, and
+    /// each rounds it its own way.
+    ///
+    /// J takes the tolerant floor of the quotient and then answers an exact
+    /// zero whenever the product is tolerantly the dividend: `2 | 1e_14` is
+    /// `1e_14` (the quotient is nowhere near an integer) while
+    /// `2 | 4 + 1e_14` is 0 (the product 4 is tolerantly the dividend).
+    ///
+    /// GNU APL reads the remainder against the MODULUS instead: a remainder
+    /// within `⎕CT` of the modulus's magnitude is zero, so `2|1E¯14` is 0
+    /// where J keeps the `1e_14`. A remainder that rounding has pushed out
+    /// of `[0, x)` comes back into range.
+    #[inline]
+    pub fn residue(self, x: f64, y: f64) -> f64 {
+        // An infinite modulus leaves a value of its own sign alone and
+        // sends the other one to that infinity, which is the limit both
+        // references answer with; the general formula cannot reach it,
+        // because it runs into `inf * 0`.
+        if x.is_infinite() {
+            return if y == 0.0 || (y > 0.0) == (x > 0.0) { y } else { x };
+        }
+        if x == 0.0 {
+            return y;
+        }
+        if self.is_j() {
+            let p = x * self.floor(y / x);
+            return if self.eq(y, p) { 0.0 } else { y - p };
+        }
+        // GNU APL counts the quotient as its ceiling when the gap to it is
+        // within `⎕CT` either outright or relative to the magnitude: the
+        // first is what makes `1|¯1E¯14` zero, the second what makes
+        // `1E¯15|1` zero, where the quotient is 1e15 and the gap 0.1.
+        let q = y / x;
+        let c = q.ceil();
+        let gap = c - q;
+        let k = if gap <= self.ct || gap < self.ct * q.abs().max(c.abs()) { c } else { q.floor() };
+        let r = y - x * k;
+        if r.abs() < self.ct * x.abs() {
+            0.0
+        } else if r != 0.0 && (r < 0.0) != (x < 0.0) {
+            r + x
+        } else {
+            r
         }
     }
 }
@@ -1150,6 +1204,9 @@ impl Verb {
                     MonadOp::Scalar(ScalarMonad::Floor)
                         | MonadOp::Scalar(ScalarMonad::Ceil)
                         | MonadOp::Nub
+                        | MonadOp::GradeUp { .. }
+                        | MonadOp::GradeDown { .. }
+                        | MonadOp::EncodeBits
                 ) || matches!(
                     p.dyad,
                     DyadOp::Scalar(
@@ -1159,7 +1216,13 @@ impl Verb {
                             | ScalarDyad::Le
                             | ScalarDyad::Gt
                             | ScalarDyad::Ge
+                            | ScalarDyad::Residue
+                            | ScalarDyad::Gcd
+                            | ScalarDyad::Lcm
                     ) | DyadOp::Match
+                        | DyadOp::GradeSelect { .. }
+                        | DyadOp::Encode
+                        | DyadOp::EncodeApl
                         | DyadOp::NotMatch
                         | DyadOp::MemberJ
                         | DyadOp::MemberApl
@@ -2837,7 +2900,7 @@ fn i64_op(op: ScalarDyad, a: i64, b: i64) -> Option<i64> {
 
 /// One float step.
 #[inline]
-fn f64_op(op: ScalarDyad, a: f64, b: f64, span: Span) -> Result<f64> {
+fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
     use ScalarDyad::*;
     Ok(match op {
         Add => a + b,
@@ -2870,19 +2933,7 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, span: Span) -> Result<f64> {
                 a.powf(b)
             }
         }
-        Residue => {
-            // An infinite modulus leaves a value of its own sign alone and
-            // sends the other one to that infinity, which is the limit both
-            // references answer with; the general formula cannot reach it,
-            // because it runs into `inf * 0`.
-            if a.is_infinite() {
-                if b == 0.0 || (b > 0.0) == (a > 0.0) { b } else { a }
-            } else if a == 0.0 {
-                b
-            } else {
-                b - a * (b / a).floor()
-            }
-        }
+        Residue => tol.residue(a, b),
         Log => {
             if a < 0.0 || b < 0.0 {
                 return Err(Error::not_yet("complex numbers", span));
@@ -3369,6 +3420,7 @@ fn dyad_f64_chunk_body<A: Widen<f64>, B: Widen<f64>>(
     ydiv: usize,
     start: usize,
     out: &mut [f64],
+    tol: Tol,
     span: Span,
 ) -> Result<()> {
     use ScalarDyad::*;
@@ -3393,7 +3445,7 @@ fn dyad_f64_chunk_body<A: Widen<f64>, B: Widen<f64>>(
     }
     let mut err = None;
     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
-        match f64_op(op, a.widen(), b.widen(), span) {
+        match f64_op(op, a.widen(), b.widen(), tol, span) {
             Ok(v) => {
                 *slot = v;
                 true
@@ -3424,6 +3476,7 @@ multiversioned! {
         ydiv: usize,
         start: usize,
         out: &mut [f64],
+        tol: Tol,
         span: Span,
     ) -> Result<()> = dyad_f64_chunk_body;
 }
@@ -3438,10 +3491,11 @@ fn dyad_f64<A: Widen<f64>, B: Widen<f64>>(
     yoff: usize,
     ydiv: usize,
     n: usize,
+    tol: Tol,
     span: Span,
 ) -> Result<Vec<f64>> {
     par::try_fill(n, |start, part| {
-        dyad_f64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, span)
+        dyad_f64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, tol, span)
     })
 }
 
@@ -3456,11 +3510,12 @@ fn float_dyad_data(
     yoff: usize,
     ydiv: usize,
     n: usize,
+    tol: Tol,
     span: Span,
 ) -> Result<Data> {
     let (mut tx, mut ty) = (Vec::new(), Vec::new());
     let out = f64_source!(x, tx, xs, {
-        f64_source!(y, ty, ys, dyad_f64(op, xs, xoff, xdiv, ys, yoff, ydiv, n, span)?)
+        f64_source!(y, ty, ys, dyad_f64(op, xs, xoff, xdiv, ys, yoff, ydiv, n, tol, span)?)
     });
     Ok(Data::F64(out.into()))
 }
@@ -3685,6 +3740,18 @@ pub(crate) fn tol_cmp(op: ScalarDyad, a: f64, b: f64, tol: Tol) -> bool {
     }
 }
 
+/// Two floats ordered under a tolerance: values that are tolerantly equal
+/// tie, which is what leaves them in their original order in a stable sort.
+/// A NaN ties with everything, which keeps the sort total.
+#[inline]
+pub(crate) fn tol_ord(a: f64, b: f64, tol: Tol) -> std::cmp::Ordering {
+    use std::cmp::Ordering::Equal;
+    if tol.ct != 0.0 && tol.eq(a, b) {
+        return Equal;
+    }
+    a.partial_cmp(&b).unwrap_or(Equal)
+}
+
 /// Turn an ordering (None for NaN) into a comparison result.
 fn cmp_result(op: ScalarDyad, ord: Option<std::cmp::Ordering>) -> bool {
     use std::cmp::Ordering::*;
@@ -3704,6 +3771,10 @@ fn cmp_result(op: ScalarDyad, ord: Option<std::cmp::Ordering>) -> bool {
 }
 
 /// Greatest common divisor, always nonnegative; `gcd(0, 0)` is 0.
+///
+/// GNU APL parts company here when one side is zero: `¯3∨0` and `0∨¯3` are
+/// both `¯3` there, the other argument returned unchanged with its sign,
+/// where J answers `3`. [`signed_gcd_i128`] is the APL reading.
 fn gcd_i128(a: i128, b: i128) -> i128 {
     let (mut a, mut b) = (a.abs(), b.abs());
     while b != 0 {
@@ -3712,6 +3783,17 @@ fn gcd_i128(a: i128, b: i128) -> i128 {
         b = t;
     }
     a
+}
+
+/// GNU APL's GCD: the magnitude, except that a zero argument hands back
+/// the other one untouched, sign and all. Only whole numbers keep the sign
+/// — `¯3.5∨0` is `3.5` in GNU, so the real path below stays nonnegative.
+fn signed_gcd_i128(a: i128, b: i128) -> i128 {
+    match (a, b) {
+        (0, _) => b,
+        (_, 0) => a,
+        _ => gcd_i128(a, b),
+    }
 }
 
 /// A finite float as `p / 10^s`, read off the shortest decimal that prints
@@ -3805,11 +3887,25 @@ fn real_lcm_gcd(
     ydiv: usize,
     n: usize,
     tol: Tol,
+    gnu: bool,
     span: Span,
 ) -> Result<Data> {
     let mut out = vec![0.0f64; n];
     let mut ok = true;
+    // GNU APL reads an operand within `⎕CT` of a whole number as that
+    // number before anything else: `1.0000000000001∧5` is 5 there, not the
+    // 5e13 the unrounded value grinds out. J does no such thing —
+    // `1.0000000000001 +. 1` is `9.99e_14` in jconsole.
+    let whole = |v: f64| {
+        let w = v.round();
+        if gnu && tol.eq(v, w) { w } else { v }
+    };
+    // And an operand no larger than `⎕CT` beside the other one is zero,
+    // which leaves the other one: `1E¯13∨1` is 1 in GNU, not `1E¯13`.
+    let vanishes = |v: f64, other: f64| gnu && v != 0.0 && v.abs() <= tol.ct * other.abs();
     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, 0, &mut out, |a, b, slot| {
+        let (a, b) = (whole(a), whole(b));
+        let (a, b) = (if vanishes(a, b) { 0.0 } else { a }, if vanishes(b, a) { 0.0 } else { b });
         let Some(g) = gcd_decimal(a, b).or_else(|| gcd_f64(a, b, tol)) else {
             ok = false;
             return false;
@@ -3843,8 +3939,13 @@ fn lcm_gcd_data(
     ydiv: usize,
     n: usize,
     tol: Tol,
+    rules: Rules,
     span: Span,
 ) -> Result<Data> {
+    // GNU APL's GCD rounds its arguments and keeps a whole one's sign
+    // beside a zero; J's and Dyalog's do neither.
+    let gnu = rules.lang == crate::Lang::Apl
+        && rules.gcd_rule == crate::frontend::GcdRule::Tolerant;
     let t = arith_type(x.dtype(), y.dtype(), span)?;
     if t == DType::Complex {
         // The Gaussian-integer versions, which is what both references give.
@@ -3863,7 +3964,7 @@ fn lcm_gcd_data(
         let yf = borrow_f64(y, &mut ty);
         let integral = |v: &[f64]| v.iter().all(|&a| a.fract() == 0.0 && fits_i64(a));
         if !integral(xf) || !integral(yf) {
-            return real_lcm_gcd(op, xf, xoff, xdiv, yf, yoff, ydiv, n, tol, span);
+            return real_lcm_gcd(op, xf, xoff, xdiv, yf, yoff, ydiv, n, tol, gnu, span);
         }
         (
             xf.iter().map(|&a| a as i64).collect::<Vec<_>>(),
@@ -3879,7 +3980,7 @@ fn lcm_gcd_data(
         let mut fits = true;
         zip_chunk(&xs, xoff, xdiv, &ys, yoff, ydiv, start, part, |a, b, slot| {
             let (a, b) = (a as i128, b as i128);
-            let g = gcd_i128(a, b);
+            let g = if gnu { signed_gcd_i128(a, b) } else { gcd_i128(a, b) };
             let v = if op == ScalarDyad::Gcd {
                 g
             } else if g == 0 {
@@ -4211,6 +4312,7 @@ fn scalar_dyad_data(
     ydiv: usize,
     n: usize,
     tol: Tol,
+    rules: Rules,
     span: Span,
 ) -> Result<Data> {
     use ScalarDyad::*;
@@ -4230,7 +4332,7 @@ fn scalar_dyad_data(
         return compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span);
     }
     if matches!(op, Lcm | Gcd) {
-        return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span);
+        return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, rules, span);
     }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
     if t.is_exact()
@@ -4257,7 +4359,7 @@ fn scalar_dyad_data(
         }
         return Ok(data);
     }
-    float_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span)
+    float_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span)
 }
 
 /// Elementwise dyadic application of a scalar operation to whole arrays.
@@ -4331,8 +4433,19 @@ fn scalar_dyad(
     if p.n == 0 {
         return Ok(Array::new(p.frame, Data::empty(empty_result_type(x, y))));
     }
-    let data =
-        scalar_dyad_data(op, &x.data, 0, p.x_div, &y.data, 0, p.y_div, p.n, cfg.tol, span)?;
+    let data = scalar_dyad_data(
+        op,
+        &x.data,
+        0,
+        p.x_div,
+        &y.data,
+        0,
+        p.y_div,
+        p.n,
+        cfg.tol,
+        cfg.rules,
+        span,
+    )?;
     Ok(Array::new(p.frame, data))
 }
 
@@ -5014,6 +5127,30 @@ impl Tao {
     }
 }
 
+/// A grade's comparator: which total ordering it puts whole arrays in, and
+/// the tolerance the numbers inside it are read with.
+///
+/// APL's `⍋` and `⍒` compare under `⎕CT` — `⍋1.0000000000001 1` is `1 2` in
+/// GNU APL, the two keys equal and left in the order they came — while J's
+/// grade is exact whatever the comparison tolerance is: jconsole answers
+/// `/: 1 1.0000000000001 1` with `0 2 1`.
+#[derive(Clone, Copy, Debug)]
+struct Grading {
+    tao: Tao,
+    tol: Tol,
+}
+
+impl Grading {
+    fn of(rules: Rules, tol: Tol) -> Grading {
+        let tao = Tao::of(rules);
+        Grading { tao, tol: if tao == Tao::J { Tol::EXACT } else { tol } }
+    }
+
+    fn class(self, dt: DType) -> u8 {
+        self.tao.class(dt)
+    }
+}
+
 /// Order two whole arrays, which is how a grade compares boxed items.
 ///
 /// J compares the type class first — and an EMPTY array has no atoms to
@@ -5028,26 +5165,26 @@ impl Tao {
 ///
 /// Both are exact — a grade never reads the comparison tolerance — and a
 /// NaN ties with everything, which keeps the sort total.
-fn cmp_items_total(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
+fn cmp_items_total(x: &Array, y: &Array, ord: Grading) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
-    match tao {
-        Tao::Dyalog => cmp_items_dyalog(x, y),
+    match ord.tao {
+        Tao::Dyalog => cmp_items_dyalog(x, y, ord),
         Tao::J => {
-            let class = |a: &Array| if a.count() == 0 { 0 } else { tao.class(a.dtype()) };
+            let class = |a: &Array| if a.count() == 0 { 0 } else { ord.class(a.dtype()) };
             class(x)
                 .cmp(&class(y))
                 .then_with(|| x.rank().cmp(&y.rank()))
                 .then_with(|| x.shape.iter().rev().cmp(y.shape.iter().rev()))
-                .then_with(|| cmp_atoms(x, y, tao))
+                .then_with(|| cmp_atoms(x, y, ord))
         }
         Tao::Apl2 => x
             .rank()
             .cmp(&y.rank())
             .then_with(|| x.shape.iter().cmp(y.shape.iter()))
-            .then_with(|| cmp_atoms(x, y, tao))
+            .then_with(|| cmp_atoms(x, y, ord))
             .then_with(|| {
                 if x.count() == 0 {
-                    tao.class(x.dtype()).cmp(&tao.class(y.dtype()))
+                    ord.class(x.dtype()).cmp(&ord.class(y.dtype()))
                 } else {
                     Equal
                 }
@@ -5069,13 +5206,12 @@ fn cmp_items_total(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
 ///
 /// Derived from the recorded Dyalog answers in
 /// `crates/libjay/tests/snapshots/apl/grade.snap`, which is what pins it.
-fn cmp_items_dyalog(x: &Array, y: &Array) -> std::cmp::Ordering {
+fn cmp_items_dyalog(x: &Array, y: &Array, ord: Grading) -> std::cmp::Ordering {
     use std::cmp::Ordering::{Equal, Greater, Less};
-    let tao = Tao::Dyalog;
     // Two simple scalars are the bottom of the recursion; everything else
     // is read as an array of atoms.
     if x.rank() == 0 && y.rank() == 0 && x.dtype() != DType::Box && y.dtype() != DType::Box {
-        return cmp_atoms(x, y, tao);
+        return cmp_atoms(x, y, ord);
     }
     let rank = x.rank().max(y.rank());
     let extend = |a: &Array| -> Vec<usize> {
@@ -5096,7 +5232,7 @@ fn cmp_items_dyalog(x: &Array, y: &Array) -> std::cmp::Ordering {
             let at = |st: &[usize]| -> usize { (0..rank).map(|k| coord[k] * st[k]).sum() };
             let here = match (inside(&sx), inside(&sy)) {
                 (true, true) => {
-                    cmp_items_dyalog(&atom_array(dx, at(&stx)), &atom_array(dy, at(&sty)))
+                    cmp_items_dyalog(&atom_array(dx, at(&stx)), &atom_array(dy, at(&sty)), ord)
                 }
                 // What is not there is below what is.
                 (true, false) => Greater,
@@ -5122,8 +5258,10 @@ fn cmp_items_dyalog(x: &Array, y: &Array) -> std::cmp::Ordering {
     // Nothing was there to compare, so the arrays are separated by the item
     // they WOULD have held and then by their shape, last axis first.
     match (proto_item(x), proto_item(y)) {
-        (Some(px), Some(py)) => cmp_items_dyalog(&px, &py),
-        _ => tao.class(x.dtype()).cmp(&tao.class(y.dtype())),
+        // The prototypes are values like any other, and are compared under
+        // the same tolerance the atoms would have been.
+        (Some(px), Some(py)) => cmp_items_dyalog(&px, &py, ord),
+        _ => ord.class(x.dtype()).cmp(&ord.class(y.dtype())),
     }
     .then_with(|| x.shape.iter().rev().cmp(y.shape.iter().rev()))
 }
@@ -5158,7 +5296,7 @@ fn atom_array(d: &Data, i: usize) -> Array {
 
 /// The atoms of two arrays of the same shape, in row-major order. A boxed
 /// atom is compared by its contents, which is where the ordering recurses.
-fn cmp_atoms(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
+fn cmp_atoms(x: &Array, y: &Array, ord: Grading) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
     let n = x.count();
     if n == 0 {
@@ -5168,25 +5306,25 @@ fn cmp_atoms(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
     let (dx, dy) = (xr.row_major_data(), yr.row_major_data());
     if matches!(dx, Data::Box(_)) || matches!(dy, Data::Box(_)) {
         return (0..n)
-            .map(|i| cmp_items_total(&atom_array(dx, i), &atom_array(dy, i), tao))
+            .map(|i| cmp_items_total(&atom_array(dx, i), &atom_array(dy, i), ord))
             .find(|o| *o != Equal)
             .unwrap_or(Equal);
     }
     // Neither side is boxed, so one class covers all of each side's atoms.
-    let classes = tao.class(dx.dtype()).cmp(&tao.class(dy.dtype()));
+    let classes = ord.class(dx.dtype()).cmp(&ord.class(dy.dtype()));
     if classes != Equal {
         return classes;
     }
     match (dx, dy) {
         (Data::Char(a), Data::Char(b)) => a[..n].cmp(&b[..n]),
-        _ => cmp_numbers(dx, dy, n),
+        _ => cmp_numbers(dx, dy, n, ord.tol),
     }
 }
 
 /// Two numeric buffers, `n` elements each, compared in order. The widening
 /// is the one `arrays_match` uses, so `1r2` and `0.5` compare where they
 /// belong however each is spelled.
-fn cmp_numbers(dx: &Data, dy: &Data, n: usize) -> std::cmp::Ordering {
+fn cmp_numbers(dx: &Data, dy: &Data, n: usize, tol: Tol) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
     let seek = |f: &dyn Fn(usize) -> std::cmp::Ordering| {
         (0..n).map(f).find(|o| *o != Equal).unwrap_or(Equal)
@@ -5195,17 +5333,12 @@ fn cmp_numbers(dx: &Data, dy: &Data, n: usize) -> std::cmp::Ordering {
         Some(DType::Complex) => {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
             let (a, b) = (borrow_cx(dx, &mut ta), borrow_cx(dy, &mut tb));
-            seek(&|k| {
-                a[k][0]
-                    .partial_cmp(&b[k][0])
-                    .unwrap_or(Equal)
-                    .then_with(|| a[k][1].partial_cmp(&b[k][1]).unwrap_or(Equal))
-            })
+            seek(&|k| tol_ord(a[k][0], b[k][0], tol).then_with(|| tol_ord(a[k][1], b[k][1], tol)))
         }
         Some(DType::F64) => {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
             let (a, b) = (borrow_f64(dx, &mut ta), borrow_f64(dy, &mut tb));
-            seek(&|k| a[k].partial_cmp(&b[k]).unwrap_or(Equal))
+            seek(&|k| tol_ord(a[k], b[k], tol))
         }
         Some(t) if t.is_exact() => match (to_rat_vec(dx), to_rat_vec(dy)) {
             (Some(a), Some(b)) => seek(&|k| a[k].cmp(&b[k])),
@@ -5224,23 +5357,21 @@ fn cmp_numbers(dx: &Data, dy: &Data, n: usize) -> std::cmp::Ordering {
 /// Compare items `i` and `j` (of `m` elements each) elementwise, left to
 /// right. Characters order by codepoint; a NaN compares equal to anything,
 /// which keeps the sort total.
-fn cmp_items(d: &Data, i: usize, j: usize, m: usize, tao: Tao) -> std::cmp::Ordering {
+fn cmp_items(d: &Data, i: usize, j: usize, m: usize, ord: Grading) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
     let (a, b) = (i * m, j * m);
     let ord = |k: usize| match d {
         Data::Bool(v) => v[a + k].cmp(&v[b + k]),
         Data::I64(v) => v[a + k].cmp(&v[b + k]),
-        Data::F64(v) => v[a + k].partial_cmp(&v[b + k]).unwrap_or(Equal),
+        Data::F64(v) => tol_ord(v[a + k], v[b + k], ord.tol),
         // Grading a complex array orders it by real part then imaginary,
         // which is the order J's `/:` puts it in and the dialect's
         // `ComplexOrder::RealThenImaginary`; `check_gradable` has already
         // refused the other reading. The ordering VERBS still refuse
         // complex outright: a grade is a permutation, not a claim about
         // size.
-        Data::Complex(v) => v[a + k][0]
-            .partial_cmp(&v[b + k][0])
-            .unwrap_or(Equal)
-            .then_with(|| v[a + k][1].partial_cmp(&v[b + k][1]).unwrap_or(Equal)),
+        Data::Complex(v) => tol_ord(v[a + k][0], v[b + k][0], ord.tol)
+            .then_with(|| tol_ord(v[a + k][1], v[b + k][1], ord.tol)),
         Data::Char(v) => v[a + k].cmp(&v[b + k]),
         // Symbols order by the NAME behind the index, not by the order
         // the two names happened to be interned in.
@@ -5251,13 +5382,13 @@ fn cmp_items(d: &Data, i: usize, j: usize, m: usize, tao: Tao) -> std::cmp::Orde
         Data::Rat(v) => v[a + k].cmp(&v[b + k]),
         // A boxed element is a whole array: the ordering of the language
         // being graded in decides between two of them.
-        Data::Box(v) => cmp_items_total(&v[a + k], &v[b + k], tao),
+        Data::Box(v) => cmp_items_total(&v[a + k], &v[b + k], ord),
     };
     (0..m).map(ord).find(|o| *o != Equal).unwrap_or(Equal)
 }
 
 /// The stable permutation that sorts the items of `y`.
-fn grade_order(y: &Array, down: bool, tao: Tao) -> Vec<usize> {
+fn grade_order(y: &Array, down: bool, ord: Grading) -> Vec<usize> {
     if y.rank() == 0 {
         return vec![0];
     }
@@ -5267,9 +5398,9 @@ fn grade_order(y: &Array, down: bool, tao: Tao) -> Vec<usize> {
     // A stable sort leaves equal items in their original order, which is
     // what both languages promise, ascending and descending alike.
     if down {
-        idx.sort_by(|&a, &b| cmp_items(&y.data, b, a, m, tao));
+        idx.sort_by(|&a, &b| cmp_items(&y.data, b, a, m, ord));
     } else {
-        idx.sort_by(|&a, &b| cmp_items(&y.data, a, b, m, tao));
+        idx.sort_by(|&a, &b| cmp_items(&y.data, a, b, m, ord));
     }
     idx
 }
@@ -5436,9 +5567,16 @@ fn check_gradable(y: &Array, rules: Rules, span: Span) -> Result<()> {
 /// `x /: y` is `(/: y) { x`: the grade of y is an index into x, so the two
 /// lengths need not agree — a shorter key selects fewer items, and only an
 /// index past the end of x is an error.
-fn grade_select(x: &Array, y: &Array, down: bool, rules: Rules, span: Span) -> Result<Array> {
+fn grade_select(
+    x: &Array,
+    y: &Array,
+    down: bool,
+    rules: Rules,
+    tol: Tol,
+    span: Span,
+) -> Result<Array> {
     check_gradable(y, rules, span)?;
-    let order = grade_order(y, down, Tao::of(rules));
+    let order = grade_order(y, down, Grading::of(rules, tol));
     if x.rank() == 0 {
         return Ok(x.clone());
     }
@@ -6031,7 +6169,7 @@ fn decode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
 
 /// `x ⊤ y` where x has rank 2 or more: x's LEADING axis is the radix and
 /// its remaining axes frame the answer, so the result is shaped `(⍴x), ⍴y`.
-fn encode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn encode_apl(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let radices = digits_of(x, "encode", span)?;
     let values = digits_of(y, "encode", span)?;
     let k = if x.rank() == 0 { 1 } else { x.shape[0] };
@@ -6045,7 +6183,7 @@ fn encode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
             *r = radices[i * frames + p];
         }
         for (j, &v) in values.iter().enumerate() {
-            encode_one(&radix, v, &mut cell);
+            encode_one(&radix, v, &mut cell, tol);
             for i in 0..k {
                 out[(i * frames + p) * n + j] = cell[i];
             }
@@ -6086,7 +6224,11 @@ fn bit_width(values: &[f64], span: Span) -> Result<usize> {
 /// One value written in the radices `radix`, most significant first. A radix
 /// of 0 takes whatever is left, which is how both languages spell "and the
 /// rest".
-fn encode_one(radix: &[f64], v: f64, out: &mut [f64]) {
+///
+/// Each digit is a residue, and it is taken with the dialect's tolerance as
+/// `|` itself is: `2 2 #: 4 - 1e_14` is `0 0` in jconsole, not the `1 2` an
+/// exact quotient leaves.
+fn encode_one(radix: &[f64], v: f64, out: &mut [f64], tol: Tol) {
     let mut rem = v;
     for i in (0..radix.len()).rev() {
         let b = radix[i];
@@ -6094,7 +6236,7 @@ fn encode_one(radix: &[f64], v: f64, out: &mut [f64]) {
             out[i] = rem;
             rem = 0.0;
         } else {
-            let r = rem - b * (rem / b).floor();
+            let r = tol.residue(b, rem);
             out[i] = r;
             rem = (rem - r) / b;
         }
@@ -6104,7 +6246,7 @@ fn encode_one(radix: &[f64], v: f64, out: &mut [f64]) {
 /// `x #: y` / `x ⊤ y`: the digits become the LEADING axis, so the result has
 /// shape `(#x), $y`. J applies this per atom of y (right rank 0) and APL to
 /// the whole of it (right rank infinite); the operation itself is the same.
-fn encode(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let radix = digits_of(x, "encode", span)?;
     let values = digits_of(y, "encode", span)?;
     let k = radix.len();
@@ -6112,7 +6254,7 @@ fn encode(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let mut out = vec![0.0f64; k * n];
     let mut cell = vec![0.0f64; k];
     for (j, &v) in values.iter().enumerate() {
-        encode_one(&radix, v, &mut cell);
+        encode_one(&radix, v, &mut cell, tol);
         for i in 0..k {
             out[i * n + j] = cell[i];
         }
@@ -6125,13 +6267,13 @@ fn encode(x: &Array, y: &Array, span: Span) -> Result<Array> {
 }
 
 /// `#: y`: base-2 encode of the whole argument, the digits trailing.
-fn encode_bits(y: &Array, span: Span) -> Result<Array> {
+fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let values = digits_of(y, "encode", span)?;
     let k = bit_width(&values, span)?;
     let radix = vec![2.0; k];
     let mut out = vec![0.0f64; values.len() * k];
     for (j, &v) in values.iter().enumerate() {
-        encode_one(&radix, v, &mut out[j * k..(j + 1) * k]);
+        encode_one(&radix, v, &mut out[j * k..(j + 1) * k], tol);
     }
     let mut shape = y.shape.clone();
     shape.push(k);
@@ -6787,7 +6929,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
                 return Err(Error::domain("a grade needs an array, not a scalar", span));
             }
             let down = matches!(p.monad, MonadOp::GradeDown { .. });
-            let order = grade_order(y, down, Tao::of(ctx.cfg.rules));
+            let order = grade_order(y, down, Grading::of(ctx.cfg.rules, ctx.cfg.tol));
             Ok(Array::from_i64(order.iter().map(|&i| origin + i as i64).collect()))
         }
         MonadOp::IotaJ => iota_j(y, span),
@@ -6806,7 +6948,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Same => Ok(y.clone()),
         MonadOp::Format => Ok(format_chars(y, &ctx.cfg.fmt)),
         MonadOp::DecodeBits => decode(None, y, span).map(|r| carry_exact(r, y)),
-        MonadOp::EncodeBits => encode_bits(y, span).map(|r| carry_exact(r, y)),
+        MonadOp::EncodeBits => encode_bits(y, ctx.cfg.tol, span).map(|r| carry_exact(r, y)),
         MonadOp::Itemize => {
             let mut shape = vec![1usize];
             shape.extend_from_slice(&y.shape);
@@ -7189,15 +7331,15 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
             Ok(Array::scalar_bool(!empties_differ && arrays_match(x, y, tol)))
         }
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
-        DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules, span),
+        DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules, cfg.tol, span),
         DyadOp::Copy => copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
         DyadOp::CollateGrade { down, origin } => collate_grade(x, y, down, origin, span),
         DyadOp::TransposeJ => transpose_j(x, y, span),
         DyadOp::TransposeApl => transpose_apl(x, y, cfg.rules.origin, span),
         DyadOp::DecodeApl => decode_apl(x, y, span).map(|r| carry_exact2(r, x, y)),
-        DyadOp::EncodeApl => encode_apl(x, y, span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::EncodeApl => encode_apl(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Decode => decode(Some(x), y, span).map(|r| carry_exact2(r, x, y)),
-        DyadOp::Encode => encode(x, y, span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::Encode => encode(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, span),
         DyadOp::Link => link(x, y, span),
         DyadOp::Strand => strand(x, y, span),
@@ -8113,7 +8255,19 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let mut acc = y.data.slice((n - 1) * m, n * m);
         for i in (0..n - 1).rev() {
             acc =
-                scalar_dyad_data(op, &y.data, i * m, 1, &acc, 0, 1, m, ctx.cfg.tol, span)?;
+                scalar_dyad_data(
+                    op,
+                    &y.data,
+                    i * m,
+                    1,
+                    &acc,
+                    0,
+                    1,
+                    m,
+                    ctx.cfg.tol,
+                    ctx.cfg.rules,
+                    span,
+                )?;
         }
         return Ok(Array::new(cell_shape, acc));
     }
@@ -12656,7 +12810,7 @@ fn item_ranks(y: &Array, rules: Rules, span: Span) -> Result<Vec<usize>> {
     if !y.dtype().is_numeric() {
         return Err(Error::domain("an anagram index needs numbers", span));
     }
-    let order = grade_order(&as_list(y), false, Tao::of(rules));
+    let order = grade_order(&as_list(y), false, Grading::of(rules, rules.tol()));
     let mut ranks = vec![0usize; order.len()];
     for (place, &i) in order.iter().enumerate() {
         ranks[i] = place;

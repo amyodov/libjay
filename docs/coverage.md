@@ -480,7 +480,10 @@ covers both — the lower rank gaining leading 1s, each axis taken to the
 longer of the two, a position one array lacks sorting below every value
 there is, and numbers before nested values before characters where no
 atom separates them. That comparator was derived from the recorded
-answers in `snapshots/apl/grade.snap`, which is what pins it.
+answers in `snapshots/apl/grade.snap`, which is what pins it. A third is
+`Dialect.gcd_rule`: GNU APL's `∨` hands a zero argument's whole partner back
+with its sign and rounds a near-whole or vanishing argument before the
+Euclid runs, and Dyalog does neither (`¯3∨0` is 3 there, `¯3` here).
 
 One more row is the preset's: dyadic `⍳` takes a VECTOR on its left and
 gives a rank error for anything else, scalars included, where the APL2 line
@@ -1090,18 +1093,42 @@ J answers — `3j4 = 3.0000000000001j4` is 1 — and GNU APL is far looser here
 (see divergences.txt).
 
 The tolerance reaches `=` `~:` `<` `<:` `>` `>:` `-:` `e.` `i.` `i:` `~.`
-`I.` in J, the same family plus `≡` `∊` `⍳` `∪` `⍸` in APL, and the two
-roundings `<.`/`⌊` and `>.`/`⌈`, which snap to a neighbouring integer when
-they are tolerantly equal to it. It does NOT reach grade (`/:`, `\:`, `⍋`,
-`⍒`), which libjay leaves exact in both languages: J does the same, and GNU
-APL does not — `⍋2 (1+1E¯14) 1` ties the two near values there and separates
-them here, a divergence pinned in divergences.txt. A tolerant comparison is
-not transitive, and a sort whose comparator is not a total order is a sort
-that may refuse to run.
+`I.` in J, the same family plus `≡` `∊` `⍳` `∪` `⍸` in APL, the residue
+`|` and the encode `#:`/`⊤` whose digits are residues, and the two roundings
+`<.`/`⌊` and `>.`/`⌈`. Grade reads it in APL and NOT in J: `⍋1.0000000000001
+1` is `1 2` — the keys tie and the stable sort leaves them where they were —
+while `/: 1 1.0000000000001 1` is `0 2 1`, both as the references answer.
+A tolerant comparison is not transitive, so a non-transitive triple leaves
+the order to the sort; the ties that matter in practice are the ordinary
+two-key ones.
+
+Each of those reads the tolerance its reference's way, and the two ways
+differ:
+
+- `<.`/`>.` scale the gap to the integer by the magnitude in J, so
+  `<. 99.999999999995` is 100. `⌊`/`⌈` shift by `⎕CT` outright in APL, so
+  `⌊99.999999999995` is 99 and `⌊¯1E¯13` is 0.
+- `x | y` rounds the quotient in both. J then answers an exact zero wherever
+  the product is tolerantly the DIVIDEND, so `2 | 1e_14` keeps its `1e_14`.
+  APL reads the remainder against the MODULUS, so `2|1E¯14` is 0 and a large
+  enough modulus swallows the remainder outright: `1E13|3` is 3, `1E14|3` is
+  0. There is a band about four ulps wide, at a gap of `⎕CT` exactly, where
+  GNU APL's threshold sits a hair below its own `⎕CT` and libjay's does not.
+- `∨`/`∧` are GNU APL's alone: a zero argument hands its whole partner back
+  with its sign, and a near-whole or vanishing argument is rounded first.
+  `Dialect.gcd_rule` names Dyalog's and J's reading, which does neither.
+
+A count is a different matter. Both references accept a float within about
+1e¯10 of a whole number where a LENGTH is wanted (`⍳2-1E¯14` is `1 2`,
+`(2-1e_14) {. 1 2 3` is `1 2`), and libjay refuses it. That admission is not
+the comparison tolerance — neither `⎕CT←0` nor `9!:19 (0)` turns it off — so
+it is named here as a gap of its own rather than folded into the rules above.
 
 J's `!.` sets it per verb: `=!.0` compares bit for bit, and any tolerance
-above 2⁻³⁴ is refused, as J refuses it. `⎕CT` as a runtime variable is not
-implemented — APL's tolerance is the dialect's, as `⎕IO` is.
+above 2⁻³⁴ is refused, as J refuses it. APL's `⍠('CT' n)` does the same for
+one application, and both now reach `|`, `#:`/`⊤`, `⍋`/`⍒` and `∨`/`∧`.
+`⎕CT` as a runtime variable is not implemented — APL's tolerance is the
+dialect's, as `⎕IO` is.
 
 A fused kernel carries the tolerance the program was compiled with, so a
 comparison inside a blockwise chain answers exactly as the same comparison

@@ -30,6 +30,13 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `s + 1` sparse, libjay hands back the dense array; the value is the same
   and the saving is not. Python, Arrow and the C ABI carry the dense array.
 
+- A `gcd_rule` dialect setting, `"tolerant"` (the shipped default, GNU
+  APL's reading of `∨` and `∧`) or `"exact"` (Dyalog's and J's). It decides
+  three probed differences at once: whether a zero argument hands its whole
+  partner back with its sign, whether an argument within `⎕CT` of a whole
+  number is rounded to it first, and whether one no larger than `⎕CT` beside
+  the other counts as zero. `Dialect::dyalog()` sets it to `"exact"`.
+
 - A second APL dialect: `Dialect::dyalog()` in Rust, `APL.Dialect.dyalog` in
   Python. The shipped default is unchanged — the APL2/ISO line GNU APL
   embodies, which is what the differential suite gates — and the preset is
@@ -111,6 +118,38 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   wrong, with no diagnostic. `2×/`, `2-/`, `3+/`, `2+⌿`, `+/[k]` and the
   same under `¨` were all affected. The shape was wrong too: `⍴2+/1 2 3`
   said 3 where it is 2.
+- **Residue reads the comparison tolerance, in both languages.** `0.1|0.3`
+  was `0.1` and is 0, which is what GNU APL and jconsole both answer; the
+  quotient is rounded before the remainder is taken. The two references
+  round it differently and libjay now follows each: J takes the tolerant
+  floor and answers an exact zero wherever the product is tolerantly the
+  dividend, so `2 | 4 + 1e_14` is 0 while `2 | 1e_14` is still `1e_14`; GNU
+  APL reads the remainder against the MODULUS instead, so `2|1E¯14` is 0 and
+  a modulus large enough swallows the remainder outright (`1E20|3` is 0,
+  `1E13|3` is 3). The digits of `#:` and `⊤` are residues and round with it:
+  `2 2 #: 4 - 1e_14` was `1 2` and is `0 0`. The fused kernel and the GPU
+  shader round the same way, so a fused sentence cannot mean something else.
+
+- **APL's `⌊` and `⌈` shift by `⎕CT` rather than scaling by the magnitude.**
+  `⌊99.999999999995` was 100 and is 99 — a gap of 5e¯12 is larger than `⎕CT`
+  however big the value is — while `⌊¯1E¯13` is 0 rather than `¯1`. Both
+  readings were probed; J keeps the relative one, so `<. 99.999999999995`
+  stays 100 and `<. _1e_14` stays `_1`.
+
+- **APL's `⍋` and `⍒` compare under `⎕CT`.** `⍋1.0000000000001 1` was `2 1`
+  and is `1 2`: two keys within the tolerance tie, and the stable sort
+  leaves them in the order they arrived. The nested comparator reads it at
+  every level, so `⍒(1 2)(1 2.0000000000001)` no longer swaps two items that
+  differ inside the tolerance. J's grade is defined exact and stays exact —
+  `/: 1 1.0000000000001 1` is `0 2 1`, as jconsole answers it.
+
+- **GNU APL's `∨` and `∧` round before the Euclid runs.** An argument within
+  `⎕CT` of a whole number is that number, so `1.0000000000001∧5` was `5e13`
+  and is 5; one no larger than `⎕CT` beside the other is zero, so `1E¯14∨1`
+  is 1; and a zero argument hands its WHOLE partner back with its sign, so
+  `¯3∨0` was 3 and is `¯3` (`¯3.5∨0` is `3.5` — only whole numbers keep it).
+  Dyalog does none of the three and neither does J, which is what the new
+  `gcd_rule` dialect setting names.
 - **A field width near the end of the integer range no longer panics.**
   `9223372036854775806 ": 1` multiplied the rows by the summed column width
   and handed the product to an allocator: a capacity overflow in a debug
