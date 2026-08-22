@@ -865,7 +865,7 @@ fn receivers(v: &Verb, valence: Valence, depth: u32) -> Vec<Attr> {
         // whatever the site's valence, and both its arguments are items.
         // The dyadic form is a different function in each language, and is
         // left to the operator table.
-        Verb::Reduce(u) if valence == Valence::Monad => {
+        Verb::Reduce(u) | Verb::NWise(u) if valence == Valence::Monad => {
             let item = Take { cell: None, item: true };
             receivers(u, Valence::Dyad, depth + 1)
                 .into_iter()
@@ -942,7 +942,7 @@ fn modifier(v: &Verb, lang: Lang) -> Option<(Mod, Vec<String>)> {
         }
         // APL's outer product is an insertion too, and the IR keeps one
         // node for both: `f/` and `∘.f` differ by the valence of the site.
-        Verb::Reduce(u) => (
+        Verb::Reduce(u) | Verb::NWise(u) => (
             if apl {
                 m("reduce / outer product", &["/", "⌿", "∘."])
             } else {
@@ -1029,6 +1029,7 @@ fn operand_verbs(v: &Verb) -> Vec<&Verb> {
     match v {
         Verb::Rank(u, _)
         | Verb::Reduce(u)
+        | Verb::NWise(u)
         | Verb::Windowed(u, _)
         | Verb::Commute(u)
         | Verb::PowerN(u, _)
