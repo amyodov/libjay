@@ -83,6 +83,8 @@ stays in the shared tree with at most two agents. A branch must pass the
 full gate on its own before it lands — and ONLY THE ORCHESTRATOR LANDS IT:
 a subagent never merges, rebases onto main, fast-forwards main, or pushes;
 it reports its branch name and final commit. Decisions with reasoning go to docs/decisions.md, not here.
+Never run `cargo fmt` — the tree is not rustfmt-formatted and has no
+rustfmt.toml; a blanket format rewrites the whole codebase.
 
 ## Working notes
 
