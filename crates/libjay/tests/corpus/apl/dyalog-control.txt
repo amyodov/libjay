@@ -1,0 +1,111 @@
+// Control structures — `:If`, `:While`, `:Repeat`, `:For`, `:Select` and
+// the branch words `:Return`, `:Leave`, `:Continue`. They belong to a
+// defined function, not to a dfn, and GNU APL rejects every one of them as
+// a syntax error, so there is no `gnu:` column here: this is recorded
+// Dyalog ground truth for a future Dyalog dialect, gating nothing.
+//
+// The function is fixed with `⎕FX` rather than written between two `∇`s.
+// The reason is the oracle, not the language: Dyalog is driven here as a
+// piped session, where opening the `∇` editor makes it print a `[1]`
+// prompt per line and echo the body, so a `∇`-defined tradfn cannot be
+// recorded through that channel at all. `⎕FX` takes the same lines as a
+// vector of character vectors and fixes the same function. Its result —
+// the name — is assigned away so that only the call displays.
+@ reference=dyalog
+
+// --- :If / :ElseIf / :Else -----------------------------------------------
+n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ (F 5),(F ¯5)
+n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 0
+n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ':ElseIf R<0' 'Z←¯1' ':Else' 'Z←0' ':EndIf' ⋄ (F 5),(F ¯5),(F 0)
+n←⎕FX 'Z←F R' 'Z←0' ':If R>0' 'Z←1' ':EndIf' ⋄ (F 3),(F ¯3)
+n←⎕FX 'Z←F R' ':If 0=3|R' 'Z←''fizz''' ':ElseIf 0=5|R' 'Z←''buzz''' ':Else' 'Z←⍕R' ':EndIf' ⋄ F 9
+n←⎕FX 'Z←F R' ':If 0=3|R' 'Z←''fizz''' ':ElseIf 0=5|R' 'Z←''buzz''' ':Else' 'Z←⍕R' ':EndIf' ⋄ F 10
+n←⎕FX 'Z←F R' ':If 0=3|R' 'Z←''fizz''' ':ElseIf 0=5|R' 'Z←''buzz''' ':Else' 'Z←⍕R' ':EndIf' ⋄ F 7
+n←⎕FX 'Z←F R' ':If R>10' 'Z←''big''' ':ElseIf R>5' 'Z←''mid''' ':ElseIf R>0' 'Z←''small''' ':Else' 'Z←''none''' ':EndIf' ⋄ F¨0 3 7 20
+n←⎕FX 'Z←F R' ':If 1' 'Z←''taken''' ':Else' 'Z←''not''' ':EndIf' ⋄ F 0
+n←⎕FX 'Z←F R' ':If 0' 'Z←''taken''' ':Else' 'Z←''not''' ':EndIf' ⋄ F 0
+n←⎕FX 'Z←L F R' ':If L>R' 'Z←L' ':Else' 'Z←R' ':EndIf' ⋄ (3 F 7),(9 F 2)
+n←⎕FX 'Z←F R' ':If R>0' ':AndIf R<10' 'Z←''in''' ':Else' 'Z←''out''' ':EndIf' ⋄ (F 5),(F 50)
+n←⎕FX 'Z←F R' ':If R<0' ':OrIf R>10' 'Z←''out''' ':Else' 'Z←''in''' ':EndIf' ⋄ (F 5),(F 50)
+n←⎕FX 'Z←F R' ':If R>0' ':AndIf 0=2|R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F¨¯2 ¯1 1 2
+
+// --- :While --------------------------------------------------------------
+n←⎕FX 'Z←F R' 'Z←1' ':While R>1' 'Z←Z×R' 'R←R-1' ':EndWhile' ⋄ F 5
+n←⎕FX 'Z←F R' 'Z←1' ':While R>1' 'Z←Z×R' 'R←R-1' ':EndWhile' ⋄ F 1
+n←⎕FX 'Z←F R' 'Z←1' ':While R>1' 'Z←Z×R' 'R←R-1' ':EndWhile' ⋄ F 0
+n←⎕FX 'Z←F R' 'Z←0' ':While 0<≢R' 'Z←Z+⊃R' 'R←1↓R' ':EndWhile' ⋄ F 1 2 3 4
+n←⎕FX 'Z←F R' 'Z←0' ':While 0<≢R' 'Z←Z+⊃R' 'R←1↓R' ':EndWhile' ⋄ F ⍬
+n←⎕FX 'Z←F R' 'Z←R' ':While Z<100' 'Z←Z×2' ':EndWhile' ⋄ F 1
+n←⎕FX 'Z←F R' 'Z←0' ':While R>1' 'Z←Z+1' 'R←⌊R÷2' ':EndWhile' ⋄ F 100
+n←⎕FX 'Z←F R' 'Z←⍬' ':While R>0' 'Z←Z,R' 'R←R-1' ':EndWhile' ⋄ F 5
+n←⎕FX 'Z←F R' 'Z←0' ':While 0' 'Z←99' ':EndWhile' ⋄ F 0
+n←⎕FX 'Z←L F R' 'Z←0' ':While R≠0' 'Z←L' 'L←R' 'R←Z|R' ':EndWhile' 'Z←L' ⋄ 12 F 18
+n←⎕FX 'Z←F R' 'Z←0' ':While R>0' ':AndIf Z<3' 'Z←Z+1' 'R←R-1' ':EndWhile' ⋄ F 10
+
+// --- :Repeat / :Until ----------------------------------------------------
+n←⎕FX 'Z←F R' 'Z←R' ':Repeat' 'Z←Z×2' ':Until Z>100' ⋄ F 1
+n←⎕FX 'Z←F R' 'Z←R' ':Repeat' 'Z←Z×2' ':Until Z>100' ⋄ F 200
+n←⎕FX 'Z←F R' 'Z←0' ':Repeat' 'Z←Z+1' ':Until Z=R' ⋄ F 7
+n←⎕FX 'Z←F R' 'Z←⍬' ':Repeat' 'Z←Z,R' 'R←R-1' ':Until R=0' ⋄ F 4
+n←⎕FX 'Z←F R' 'Z←1' ':Repeat' 'Z←Z×R' 'R←R-1' ':Until R<1' ⋄ F 5
+n←⎕FX 'Z←F R' 'Z←0' ':Repeat R' 'Z←Z+2' ':EndRepeat' ⋄ F 4
+n←⎕FX 'Z←F R' 'Z←''''' ':Repeat R' 'Z←Z,''x''' ':EndRepeat' ⋄ F 3
+n←⎕FX 'Z←F R' 'Z←0' ':Repeat 0' 'Z←99' ':EndRepeat' ⋄ F 0
+
+// --- :For over a vector --------------------------------------------------
+n←⎕FX 'Z←F R' 'Z←0' ':For x :In R' 'Z←Z+x' ':EndFor' ⋄ F 1 2 3 4
+n←⎕FX 'Z←F R' 'Z←1' ':For x :In R' 'Z←Z×x' ':EndFor' ⋄ F 1 2 3 4
+n←⎕FX 'Z←F R' 'Z←⍬' ':For x :In R' 'Z←x,Z' ':EndFor' ⋄ F 1 2 3 4
+n←⎕FX 'Z←F R' 'Z←0' ':For x :In R' 'Z←Z+1' ':EndFor' ⋄ F ⍳10
+n←⎕FX 'Z←F R' 'Z←0' ':For x :In R' 'Z←Z+x' ':EndFor' ⋄ F ⍬
+n←⎕FX 'Z←F R' 'Z←''''' ':For c :In R' 'Z←c,Z' ':EndFor' ⋄ F 'abcd'
+n←⎕FX 'Z←F R' 'Z←⍬' ':For p :In R' 'Z←Z,+/p' ':EndFor' ⋄ F (1 2)(3 4 5)
+n←⎕FX 'Z←F R' 'Z←0' ':For i :In ⍳R' 'Z←Z+i' ':EndFor' ⋄ F 10
+n←⎕FX 'Z←F R' 'Z←⍬' ':For x :In R' ':If 0=2|x' 'Z←Z,x' ':EndIf' ':EndFor' ⋄ F ⍳10
+n←⎕FX 'Z←F R' 'Z←0' ':For x :In R' 'Z←(Z×10)+x' ':EndFor' ⋄ F 1 2 3
+n←⎕FX 'Z←F R' 'Z←⍬' ':For a b :In R' 'Z←Z,a×b' ':EndFor' ⋄ F (1 2)(3 4)
+
+// --- :Select / :Case -----------------------------------------------------
+n←⎕FX 'Z←F R' ':Select R' ':Case 1' 'Z←''one''' ':Case 2' 'Z←''two''' ':Else' 'Z←''many''' ':EndSelect' ⋄ F 1
+n←⎕FX 'Z←F R' ':Select R' ':Case 1' 'Z←''one''' ':Case 2' 'Z←''two''' ':Else' 'Z←''many''' ':EndSelect' ⋄ F 2
+n←⎕FX 'Z←F R' ':Select R' ':Case 1' 'Z←''one''' ':Case 2' 'Z←''two''' ':Else' 'Z←''many''' ':EndSelect' ⋄ F 9
+n←⎕FX 'Z←F R' ':Select R' ':CaseList 1 2 3' 'Z←''low''' ':CaseList 4 5 6' 'Z←''high''' ':Else' 'Z←''off''' ':EndSelect' ⋄ F¨1 4 9
+n←⎕FX 'Z←F R' ':Select R' ':Case ''a''' 'Z←1' ':Case ''b''' 'Z←2' ':Else' 'Z←0' ':EndSelect' ⋄ F 'b'
+n←⎕FX 'Z←F R' 'Z←0' ':Select R' ':Case 1' 'Z←10' ':EndSelect' ⋄ (F 1),(F 2)
+n←⎕FX 'Z←F R' ':Select ×R' ':Case 1' 'Z←''pos''' ':Case ¯1' 'Z←''neg''' ':Case 0' 'Z←''zero''' ':EndSelect' ⋄ F¨¯4 0 4
+n←⎕FX 'Z←F R' ':Select 2|R' ':Case 0' 'Z←''even''' ':Case 1' 'Z←''odd''' ':EndSelect' ⋄ F 7
+n←⎕FX 'Z←F R' ':Select R' ':Case 1 2' 'Z←''pair''' ':Else' 'Z←''other''' ':EndSelect' ⋄ F 1 2
+
+// --- :Return, :Leave, :Continue ------------------------------------------
+n←⎕FX 'Z←F R' 'Z←''early''' ':If R>0' ':Return' ':EndIf' 'Z←''late''' ⋄ (F 1),(F ¯1)
+n←⎕FX 'Z←F R' 'Z←0' ':For x :In R' ':If x>3' ':Leave' ':EndIf' 'Z←Z+x' ':EndFor' ⋄ F 1 2 3 4 5
+n←⎕FX 'Z←F R' 'Z←0' ':For x :In R' ':If 0=2|x' ':Continue' ':EndIf' 'Z←Z+x' ':EndFor' ⋄ F ⍳10
+n←⎕FX 'Z←F R' 'Z←0' ':While 1' 'Z←Z+1' ':If Z=R' ':Leave' ':EndIf' ':EndWhile' ⋄ F 6
+n←⎕FX 'Z←F R' 'Z←¯1' ':For i :In ⍳≢R' ':If 0=i⊃R' 'Z←i' ':Leave' ':EndIf' ':EndFor' ⋄ F 5 4 0 3
+n←⎕FX 'Z←F R' 'Z←⍬' ':For x :In R' ':If x<0' ':Continue' ':EndIf' 'Z←Z,x' ':EndFor' ⋄ F 1 ¯2 3 ¯4 5
+n←⎕FX 'Z←F R' ':If R=0' 'Z←''zero''' ':Return' ':EndIf' 'Z←''nonzero''' ⋄ (F 0),(F 1)
+n←⎕FX 'Z←F R' 'Z←0' ':Repeat' 'Z←Z+1' ':If Z>R' ':Leave' ':EndIf' ':Until 0' ⋄ F 3
+
+// --- nesting -------------------------------------------------------------
+n←⎕FX 'Z←F R' 'Z←0' ':For i :In ⍳R' ':For j :In ⍳R' 'Z←Z+1' ':EndFor' ':EndFor' ⋄ F 4
+n←⎕FX 'Z←F R' 'Z←⍬' ':For i :In ⍳R' ':If 0=2|i' 'Z←Z,i' ':Else' 'Z←Z,0' ':EndIf' ':EndFor' ⋄ F 6
+n←⎕FX 'Z←F R' 'Z←0' ':For i :In ⍳R' ':For j :In ⍳R' ':If i=j' 'Z←Z+i' ':EndIf' ':EndFor' ':EndFor' ⋄ F 4
+n←⎕FX 'Z←F R' 'Z←0' ':While R>0' ':If 0=2|R' 'Z←Z+R' ':EndIf' 'R←R-1' ':EndWhile' ⋄ F 10
+n←⎕FX 'Z←F R' 'Z←⍬' ':For x :In R' ':Select ×x' ':Case 1' 'Z←Z,1' ':Case ¯1' 'Z←Z,¯1' ':Else' 'Z←Z,0' ':EndSelect' ':EndFor' ⋄ F 3 0 ¯7
+n←⎕FX 'Z←F R' 'Z←0' ':For i :In ⍳R' ':For j :In ⍳R' ':If j>i' ':Leave' ':EndIf' 'Z←Z+1' ':EndFor' ':EndFor' ⋄ F 4
+n←⎕FX 'Z←F R' 'Z←⍬' ':Repeat' ':If 0=2|R' 'Z←Z,R' ':EndIf' 'R←R-1' ':Until R=0' ⋄ F 8
+n←⎕FX 'Z←F R' 'Z←0' ':While R>0' 'i←R' ':While i>0' 'Z←Z+1' 'i←i-1' ':EndWhile' 'R←R-1' ':EndWhile' ⋄ F 4
+
+// --- the tradfn around them ----------------------------------------------
+n←⎕FX 'Z←F R;t' 't←R×2' ':If t>10' 'Z←t' ':Else' 'Z←0' ':EndIf' ⋄ (F 6),(F 2)
+n←⎕FX 'Z←F R' ':If R>0' 'Z←G R' ':Else' 'Z←0' ':EndIf' ⋄ m←⎕FX 'Z←G R' 'Z←R×3' ⋄ F 5
+n←⎕FX 'F R' ':If R>0' '⎕←''pos''' ':Else' '⎕←''neg''' ':EndIf' ⋄ F 1
+n←⎕FX 'Z←F' 'Z←0' ':For i :In ⍳5' 'Z←Z+i' ':EndFor' ⋄ F
+n←⎕FX 'Z←F R' ':If R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 1 1
+
+// --- what Dyalog refuses -------------------------------------------------
+n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ⋄ F 1
+n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ':EndWhile' ⋄ F 1
+n←⎕FX 'Z←F R' 'Z←0' ':Leave' ⋄ F 1
+:If 1 ⋄ 5 ⋄ :EndIf
+{:If ⍵>0 ⋄ 1 ⋄ :EndIf} 5

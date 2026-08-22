@@ -338,11 +338,11 @@ conjunctions above:
 | `∘` beside | 🟡 no oracle: GNU APL has no `∘` operator; Dyalog's `f∘g`, function operands only |
 | `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🟡 no oracle: GNU APL rejects it; Dyalog's `f⍛g` |
-| `⍢` under | 🟡 no oracle: GNU APL rejects it; Dyalog's `g⍣¯1 ⊢ (g x) f (g y)`, over the same obverse table J's `&.:` uses |
+| `⍢` under | 🟡 no oracle, and no reference either: GNU APL rejects the glyph and Dyalog 20.0 answers `SYNTAX ERROR: Invalid token` (recorded in `corpus/apl/dyalog-operators.txt`), so ours is an extension — `g⍣¯1 ⊢ (g x) f (g y)`, over the same obverse table J's `&.:` uses |
 | `⌸` key | 🟡 no oracle: GNU APL rejects it; Dyalog's, with the operand taking the key and its group |
 | `⌺` stencil | 🟡 no oracle: GNU APL rejects it; Dyalog's monadic-window form — one size per leading axis, the windows centred and the edges filled. The two-row form that also gives the movement is named |
 | `.` inner product | 🟢 `f.g` is `f/¨` over the outer product: `+.×` is the matrix product, `∧.=` asks which rows match. Each vector along x's last axis meets each vector along y's first under g, f folds the result, and the each encloses it |
-| `⍠` variant | 🟡 one dialect setting overridden for one application: `⎕CT` (the principal option, so a bare number sets it) and `⎕IO`, as literal options — `=⍠0`, `⍳⍠('IO' 0)`. Another option, or one that is not settled when the program is compiled, is named. No oracle: GNU APL rejects the glyph |
+| `⍠` variant | 🟡 one dialect setting overridden for one application: `⎕CT` (the principal option, so a bare number sets it) and `⎕IO`, as literal options — `=⍠0`, `⍳⍠('IO' 0)`. Another option, or one that is not settled when the program is compiled, is named. No oracle: GNU APL rejects the glyph, and Dyalog takes a variant only on its search-and-replace family — both `=⍠0` and `⍳⍠('IO' 0)` are a DOMAIN ERROR there, recorded in `corpus/apl/dyalog-operators.txt` |
 | `&` spawn | ⚪ starts an APL thread, which the sandbox does not open — as J's `T.` and `t.` do not |
 
 ## APL — syntax and features
@@ -403,6 +403,13 @@ What it does not change yet, measured against the recording:
 | Complex floor and ceiling, and the `¯7○` branch cut | 3 | 🔴 |
 | Two singletons of different rank conforming (`(1 1⍴5)+,3`) | 2 | 🔴 the higher rank wins there, the first argument here |
 | Session echo, nested display width, `⍬≡0⍴⊂⍬`, `6 2⍕'a'` | 5 | ⚪ display and prototype edges, one of them the oracle's own session behaviour |
+
+The extensions libjay already ships (marked "no oracle" against GNU APL in
+the tables above — `⊆`, `∘`, `⍥`, `⌺`, `f⍤g`, `⌸`, dfn guards and `∇` and
+`⍺⍺`/`⍵⍵`, the control structures, trains and function assignment) now
+have Dyalog's own answers recorded in `corpus/apl/dyalog-dfns.txt`,
+`dyalog-dops.txt`, `dyalog-control.txt` and `dyalog-operators.txt` —
+reference data under the `dyalog:` key alone, gating nothing.
 
 `⊇` and the other Dyalog features libjay does not implement at all are
 below; they are the queue for a later wave, not counted in the APL totals.

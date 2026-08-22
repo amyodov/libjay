@@ -8,6 +8,9 @@
 //! - `@ io=N` sets the index origin for the lines after it (APL; 1 unless
 //!   said). `@` opens no sentence: it is a conjunction in J and an operator
 //!   in APL, both of which need something to their left.
+//! - `@ reference=NAME` names the implementation this whole theme is
+//!   recorded against, when it is not the one libjay follows. A theme so
+//!   marked is reference DATA: nothing holds libjay to it.
 //! - `? TEXT` after an expression is a note about it, and only
 //!   `divergences.txt` may carry one: elsewhere `?` is roll, so a line
 //!   starting with it is an expression.
@@ -70,6 +73,37 @@ pub fn is_divergences(path: &Path) -> bool {
     path.file_stem().is_some_and(|s| s == "divergences")
 }
 
+/// The implementation a theme is recorded against, when its file says so
+/// with `@ reference=NAME`. `None` is the ordinary case: the theme is
+/// recorded against the implementation libjay follows and replayed against
+/// it.
+///
+/// A theme naming another implementation is one that implementation alone
+/// can answer — a Dyalog-only feature GNU APL cannot parse, say. Its
+/// records carry that key and no other, the recorder writes nothing else
+/// into it, and the replay measures libjay against it without failing:
+/// what differs is the backlog of a future dialect, not a regression in
+/// this one.
+pub fn reference(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    text.lines().find_map(|line| {
+        line.trim_end().strip_prefix("@ ").and_then(|d| d.strip_prefix("reference=")).map(|name| {
+            assert!(crate::is_impl_key(name), "{name:?} is not an implementation key");
+            name.to_string()
+        })
+    })
+}
+
+/// The key a theme's replay holds libjay to, and `None` when the theme is
+/// another implementation's reference data.
+pub fn gate_of(lang: crate::Lang, path: &Path) -> Option<&'static str> {
+    let followed = crate::followed_impl(lang);
+    match reference(path) {
+        Some(named) if named != followed => None,
+        _ => Some(followed),
+    }
+}
+
 /// Read a corpus file. Panics with the line number on a malformed one.
 pub fn read(path: &Path) -> Vec<Entry> {
     let text = std::fs::read_to_string(path)
@@ -84,6 +118,10 @@ pub fn read(path: &Path) -> Vec<Entry> {
             continue;
         }
         if let Some(rest) = trimmed.strip_prefix("@ ") {
+            if rest.starts_with("reference=") {
+                assert!(entries.is_empty(), "line {line_no}: `@ reference=` is a file-level directive, so it belongs before the first expression");
+                continue;
+            }
             io = rest
                 .strip_prefix("io=")
                 .and_then(|n| n.parse().ok())

@@ -1,0 +1,109 @@
+// Dfn operators: a dfn that names `⍺⍺` or `⍵⍵` is an operator, and what it
+// names is the operand standing to its left (`⍺⍺`) or right (`⍵⍵`). An
+// operand may be a function or an array, and the derived function may be
+// called monadically or dyadically. GNU APL has neither name, so there is
+// no `gnu:` column here and nothing to hold libjay to: this is recorded
+// Dyalog ground truth for a future Dyalog dialect.
+@ reference=dyalog
+
+// --- ⍺⍺ as a function operand -------------------------------------------
++{⍺⍺/⍵}1 2 3 4
+×{⍺⍺/⍵}1 2 3 4
+⌈{⍺⍺/⍵}3 1 4 1 5
+⌊{⍺⍺/⍵}3 1 4 1 5
+,{⍺⍺/⍵}'abc'
+-{⍺⍺/⍵}1 2 3 4
++{⍺⍺/⍵}⍳10
+∨{⍺⍺/⍵}0 0 1 0
+∧{⍺⍺/⍵}1 1 0 1
++{⍺⍺⌿⍵}3 3⍴⍳9
++{⍺⍺\\⍵}1 2 3 4
+⌽{⍺⍺ ⍵}1 2 3
+≢{⍺⍺ ⍵}1 2 3 4
+⍳{⍺⍺ ⍵}3
+⌽{⍺⍺¨⍵}(1 2)(3 4 5)
++{⍺⍺/¨⍵}(1 2)(3 4 5)
+
+// --- ⍺⍺ applied twice, and more -----------------------------------------
+TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ ⌽TWICE 1 2 3
+TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ (2∘×)TWICE 5
+TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ (1∘+)TWICE 5
+TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ -TWICE 7
+TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ ÷TWICE 4
+TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ ⊂TWICE 1 2
+TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ (1∘↓)TWICE 1 2 3 4 5
+THRICE←{⍺⍺ ⍺⍺ ⍺⍺ ⍵} ⋄ (2∘×)THRICE 1
+THRICE←{⍺⍺ ⍺⍺ ⍺⍺ ⍵} ⋄ ⌽THRICE 1 2 3
+TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ (⌽TWICE)TWICE 1 2 3
+SELF←{⍵ ⍺⍺ ⍵} ⋄ +SELF 5
+SELF←{⍵ ⍺⍺ ⍵} ⋄ ×SELF 4
+SELF←{⍵ ⍺⍺ ⍵} ⋄ ,SELF 1 2
+SELF←{⍵ ⍺⍺ ⍵} ⋄ ⍴SELF 3
+
+// --- the derived function called dyadically ------------------------------
+2 (+{⍺ ⍺⍺ ⍵}) 3
+2 (×{⍺ ⍺⍺ ⍵}) 3
+'ab' (,{⍺ ⍺⍺ ⍵}) 'cd'
+COMMUTE←{⍵ ⍺⍺ ⍺} ⋄ 2 (-COMMUTE) 10
+COMMUTE←{⍵ ⍺⍺ ⍺} ⋄ 2 (÷COMMUTE) 10
+COMMUTE←{⍵ ⍺⍺ ⍺} ⋄ 'ab' (,COMMUTE) 'cd'
+COMMUTE←{⍵ ⍺⍺ ⍺} ⋄ 1 2 3 (↑COMMUTE) 5
+BOTH←{(⍺ ⍺⍺ ⍵),(⍵ ⍺⍺ ⍺)} ⋄ 2 (-BOTH) 10
+AMBI←{⍺←0 ⋄ ⍺ ⍺⍺ ⍵} ⋄ +AMBI 5
+AMBI←{⍺←0 ⋄ ⍺ ⍺⍺ ⍵} ⋄ 3 (+AMBI) 5
+AMBI←{⍺←0 ⋄ ⍺ ⍺⍺ ⍵} ⋄ ⌈AMBI 5
+INSERT←{2=≢⍵:(⊃⍵) ⍺⍺ (⊃⌽⍵) ⋄ (⊃⍵) ⍺⍺ ∇1↓⍵} ⋄ +INSERT 1 2 3 4
+INSERT←{2=≢⍵:(⊃⍵) ⍺⍺ (⊃⌽⍵) ⋄ (⊃⍵) ⍺⍺ ∇1↓⍵} ⋄ ×INSERT 1 2 3 4
+
+// --- an array operand ----------------------------------------------------
+2{⍺⍺+⍵}3
+5{⍺⍺×⍵}3
+'ab'{⍺⍺,⍵}'cd'
+1 2 3{⍺⍺+⍵}10
+2{⍺⍺⍴⍵}1 2 3 4 5 6
+0{⍺⍺}9
+(⍳3){⍺⍺+⍵}0
+2{⍺⍺+⍵}¨1 2 3
+10{⍺⍺-⍵}4
+3{(⍺⍺⍴⍵),⍺⍺}'xyz'
+
+// --- both operands: ⍺⍺ and ⍵⍵ --------------------------------------------
+OVER←{(⍵⍵ ⍺) ⍺⍺ (⍵⍵ ⍵)} ⋄ 3 (+OVER ⌊) 4.5
+OVER←{(⍵⍵ ⍺) ⍺⍺ (⍵⍵ ⍵)} ⋄ ¯3 (+OVER |) 4
+OVER←{(⍵⍵ ⍺) ⍺⍺ (⍵⍵ ⍵)} ⋄ 1 2 3 (,OVER ⌽) 4 5 6
+ATOP←{⍺⍺ ⍵⍵ ⍵} ⋄ (-ATOP ⌽) 1 2 3
+ATOP←{⍺⍺ ⍵⍵ ⍵} ⋄ (≢ATOP ⍳) 4
+ATOP←{⍺⍺ ⍵⍵ ⍵} ⋄ (⌽ATOP ⍳) 5
+FORK←{(⍺⍺ ⍵),(⍵⍵ ⍵)} ⋄ (⌽FORK ⍳) 3
+FORK←{(⍺⍺ ⍵),(⍵⍵ ⍵)} ⋄ (⌈/FORK ⌊/) 3 1 4 1 5
+FORK←{(⍺⍺ ⍵),(⍵⍵ ⍵)} ⋄ (+/FORK ≢) 1 2 3 4
+MEAN←{(⍺⍺ ⍵)÷⍵⍵ ⍵} ⋄ (+/MEAN ≢) 1 2 3 4
+PICK←{⍺:⍺⍺ ⍵ ⋄ ⍵⍵ ⍵} ⋄ 1 (⌽PICK ⊖) 1 2 3
+PICK←{⍺:⍺⍺ ⍵ ⋄ ⍵⍵ ⍵} ⋄ 0 (⌽PICK ≢) 1 2 3
+MIX←{⍺⍺/⍵⍵ ⍵} ⋄ (+MIX ⍳) 5
+MIX←{⍺⍺/⍵⍵ ⍵} ⋄ (×MIX ⍳) 5
+BOTHARR←{⍺⍺+⍵⍵} ⋄ (2 BOTHARR 3) 0
+BOTHARR←{⍺⍺,⍵⍵,⍵} ⋄ (1 BOTHARR 2) 3
+HALF←{⍺⍺ ⍵⍵ ⍵} ⋄ (⌽HALF (2∘↑)) 1 2 3 4
+
+// --- a named operator on different operands ------------------------------
+DUP←{⍺⍺ ⍺⍺ ⍵} ⋄ (⌽DUP 1 2 3),(-DUP 5)
+DUP←{⍺⍺ ⍺⍺ ⍵} ⋄ (÷DUP 8),(⌈DUP 2.5)
+REDUCE←{⍺⍺/⍵} ⋄ (+REDUCE 1 2 3),(×REDUCE 1 2 3),(⌈REDUCE 1 2 3)
+REDUCE←{⍺⍺/⍵} ⋄ ⌊REDUCE 9 4 7
+APPLY←{⍺⍺ ⍵} ⋄ (≢APPLY 'abcd'),(⌽APPLY 1 2)
+APPLY←{⍺⍺ ⍵} ⋄ ⍴APPLY 2 3⍴⍳6
+EACH←{⍺⍺¨⍵} ⋄ ≢EACH (1 2)(3 4 5)
+EACH←{⍺⍺¨⍵} ⋄ ⌽EACH (1 2)(3 4 5)
+UNDER←{⍵⍵⍣¯1⊢(⍵⍵ ⍺) ⍺⍺ (⍵⍵ ⍵)} ⋄ 1 2 3 (+UNDER ⌽) 10 20 30
+SORTBY←{⍵[⍋⍺⍺ ⍵]} ⋄ ⊢SORTBY 3 1 2
+SORTBY←{⍵[⍋⍺⍺ ⍵]} ⋄ -SORTBY 3 1 2
+COUNT←{+/⍺⍺ ⍵} ⋄ (2∘|)COUNT ⍳10
+COUNT←{+/⍺⍺ ⍵} ⋄ (0∘=)COUNT 0 1 0 2 0
+F←{⍺⍺ ⍵} ⋄ G←+/F ⋄ G 1 2 3 4
+F←{⍺⍺ ⍵} ⋄ G←⌽F ⋄ G 'abc'
+
+// --- what Dyalog refuses -------------------------------------------------
+{⍺⍺ ⍵} 5
+2 3{⍺⍺+⍵}4 5 6 7
+{⍺⍺ ⍺⍺ ⍵} 5

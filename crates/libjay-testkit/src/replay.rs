@@ -40,6 +40,7 @@ pub fn corpus_file(lang: Lang, path: &Path) {
     assert!(!entries.is_empty(), "{label} has no expressions");
     let recorded = snapshot::index(snapshot::read(&corpus::snapshot_of(path)));
     let divergences = corpus::is_divergences(path);
+    let gate = corpus::gate_of(lang, path);
     let backlog_key = crate::backlog_impl(lang);
     let mut backlog = Backlog::default();
     let mut failures = Vec::new();
@@ -55,6 +56,12 @@ pub fn corpus_file(lang: Lang, path: &Path) {
                 backlog.differ += 1;
             }
         }
+        // A theme recorded against an implementation libjay does not follow
+        // gates nothing: the loop above has already counted it, and there
+        // is no side to hold libjay to.
+        if gate.is_none() {
+            continue;
+        }
         failures.extend(if divergences {
             check_divergence(lang, record, &ours)
         } else {
@@ -68,7 +75,11 @@ pub fn corpus_file(lang: Lang, path: &Path) {
         entries.len(),
         failures.join("\n")
     );
-    eprintln!("{label}: agreement on {} expressions{}", entries.len(), backlog_line(lang, backlog));
+    let held = match gate {
+        Some(_) => "agreement on",
+        None => "reference data:",
+    };
+    eprintln!("{label}: {held} {} expressions{}", entries.len(), backlog_line(lang, backlog));
 }
 
 /// The summary line the battery prints for an implementation libjay does
@@ -96,11 +107,14 @@ pub fn backlog_line(lang: Lang, backlog: Backlog) -> String {
 /// never recorded. (CI compiles from scratch, so its glob is always
 /// current.)
 pub fn every_file_is_recorded(lang: Lang) {
-    let key = crate::followed_impl(lang);
     let mut failures = Vec::new();
     let mut backlog = Backlog::default();
     for path in corpus::files(lang) {
         let label = corpus::label(&path);
+        // A theme marked `@ reference=NAME` is held to THAT key: it is the
+        // only implementation that can answer it, and the only one recorded.
+        let key = corpus::reference(&path).unwrap_or_else(|| crate::followed_impl(lang).to_string());
+        let key = key.as_str();
         let recorded = snapshot::index(snapshot::read(&corpus::snapshot_of(&path)));
         for entry in corpus::read(&path) {
             match recorded.get(&(entry.expr.clone(), entry.io)) {
@@ -120,7 +134,7 @@ pub fn every_file_is_recorded(lang: Lang) {
     }
     assert!(
         failures.is_empty(),
-        "{} corpus expressions have no recorded {key} answer:\n{}",
+        "{} corpus expressions have no recorded reference answer:\n{}",
         failures.len(),
         failures.join("\n")
     );

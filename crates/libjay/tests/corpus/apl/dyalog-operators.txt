@@ -1,0 +1,162 @@
+// The operators Dyalog defines that GNU APL has no character for, or
+// rejects outright: key `⌸`, stencil `⌺`, over `⍥`, under `⍢`, before `⍛`,
+// atop `f⍤g`, nest/partition `⊆`, variant `⍠`, beside `∘`, and power `⍣`
+// with a function operand or a negative count. docs/status.md marks every
+// one of them "no oracle" — this file is that oracle's answer, recorded
+// under the `dyalog:` key alone, gating nothing.
+@ reference=dyalog
+
+// --- ⌸ key ---------------------------------------------------------------
+≢⌸'mississippi'
+≢⌸1 1 2 3 3 3
+≢⌸'aabbbc'
+{≢⍵}⌸'mississippi'
+{⍺}⌸'mississippi'
+{⍺,≢⍵}⌸'abcabca'
+{⊂⍵}⌸'abcabca'
+{+/⍵}⌸1 2 3 4 5
+∪⌸'mississippi'
+{⍺,+/⍵}⌸1 1 2 2 3
+{≢⍵}⌸2 3 2 3 2
+'abcabc'{≢⍵}⌸1 2 3 4 5 6
+'abcabc'{+/⍵}⌸1 2 3 4 5 6
+'aab'{⍺,+/⍵}⌸10 20 30
+1 1 2{⊂⍵}⌸'xyz'
+1 2 1 2{+/⍵}⌸1 2 3 4
+{⍵}⌸'aba'
+{≢⍵}⌸⍬
+{≢⍵}⌸3 3⍴'abcabcabc'
+
+// --- ⌺ stencil -----------------------------------------------------------
+{+/,⍵}⌺3⊢1 2 3 4 5
+{+/,⍵}⌺3⊢⍳6
+{⊂⍵}⌺3⊢1 2 3
+{,⍵}⌺3⊢1 2 3
+{⌈/,⍵}⌺3⊢3 1 4 1 5
+{+/,⍵}⌺5⊢1 2 3 4 5
+{+/,⍵}⌺1⊢1 2 3
+{+/,⍵}⌺3 3⊢3 3⍴⍳9
+{+/,⍵}⌺3 3⊢3 3⍴1
+{+/,⍵}⌺3⊢2 3⍴⍳6
+{≢,⍵}⌺3⊢1 2 3 4 5
+{⍵}⌺3⊢1 2 3
+{+/,⍵}⌺3⊢⍬
+{+/,⍵}⌺3⊢1
+{×/,⍵}⌺3⊢1 2 3 4
+
+// --- ⍥ over --------------------------------------------------------------
+3 +⍥⌊ 4.5
+3.7 +⍥⌊ 4.5
+1 2 3 ,⍥⌽ 4 5 6
+2 =⍥(2∘|) 4
+'abc' ≡⍥⌽ 'cba'
+1 2 3 +⍥≢ 4 5
+(+/)⍥⌽ 1 2 3
+≢⍥⍴ 2 3⍴⍳6
+⌽⍥⍳ 5
+2 ⌈⍥|¯5
+¯3 +⍥| 4
+1 2 ,⍥⊂ 3 4
+2 3 ×⍥≢ 4 5 6
+-⍥÷ 4
+
+// --- ⍢ under: not a glyph this Dyalog knows ------------------------------
+// docs/status.md names Dyalog as the reference for `⍢`; Dyalog 20.0 answers
+// SYNTAX ERROR: Invalid token. The oracle wins, so what is recorded here is
+// the refusal, and libjay's `⍢` is an extension rather than Dyalog's.
+(1∘+)⍢⌽ 1 2 3
+⌽⍢⊂ 1 2 3
+-⍢⊃ 1 2 3
+⌽⍢⍉ 2 3⍴⍳6
+
+// --- ⍛ before ------------------------------------------------------------
+3 -⍛+ 4
+⌽⍛, 1 2 3
+2 ×⍛+ 3
+'ab' ⌽⍛, 'cd'
+≢⍛⍴ 1 2 3
+⌽⍛≡ 1 2 3
+⌽⍛≡ 1 2 1
+2 -⍛↑ 1 2 3 4
+-⍛+ 5
+(2∘×)⍛- 3
+
+// --- f⍤g atop ------------------------------------------------------------
+-⍤÷ 4
+2 -⍤+ 3
+≢⍤⍴ 2 3⍴⍳6
+⌽⍤⍳ 5
+(+/)⍤⍳ 5
+2 ⌽⍤⊢ 1 2 3 4 5
+÷⍤≢ 1 2 3 4
+⍕⍤≢ 'abcd'
+2 ≢⍤↑ 1 2 3 4 5
+⊂⍤⌽ 1 2 3
+
+// --- ⊆ nest and partition ------------------------------------------------
+⊆1 2 3
+⊆⊂1 2 3
+⊆5
+⊆'abc'
+⊆⍬
+≢⊆1 2 3
+≢⊆5
+1 1 2 2 2⊆'abcde'
+1 1 0 1 1⊆'abcde'
+0 0 1 1 0⊆⍳5
+1 1 1⊆1 2 3
+1 2 3⊆'abc'
+1 0 1 0⊆'abcd'
+0 0 0⊆'abc'
+≢1 1 2 2⊆'abcd'
+
+// --- ⍠ variant -----------------------------------------------------------
+// Dyalog's variant carries an option list to the function it modifies, and
+// the functions that take one are the search-and-replace family. The
+// spellings docs/status.md names for it — a bare number setting ⎕CT, an
+// ('IO' n) pair on ⍳ or ⍸ — are DOMAIN ERROR here, and are recorded as such.
+('B' ⎕R 'X'⍠('IC' 1)) 'abcb'
+('B' ⎕R 'X'⍠('IC' 0)) 'abcb'
+('b' ⎕R 'X') 'abcb'
+('b' ⎕S 0) 'abcb'
+('B' ⎕S 0⍠('IC' 1)) 'abcb'
+1(=⍠1)1.0000001
+1(=⍠0)1.0000001
+'abc'(⍳⍠('IO' 0))'b'
+(⍸⍠('IO' 0))0 1 0 1
+
+// --- ∘ beside and bind ---------------------------------------------------
+2∘× 5
+×∘2 5
+(÷∘2) 7
+(2∘÷) 8
+⌽∘⍳ 5
+(+/)∘⍳ 5
+3 (×∘-) 4
+3 (-∘-) 4
+(⊂∘⌽) 1 2 3
+≢∘⍳ 7
+1 2 3 (,∘⌽) 4 5 6
+(⍴∘⍴) 2 3⍴⍳6
+2 (⍴∘⍳) 3
+(-∘1) 10
+(1∘-) 10
+
+// --- ⍣ power -------------------------------------------------------------
+(1∘+)⍣3⊢0
+(2∘×)⍣5⊢1
+⌽⍣2⊢1 2 3
+⌽⍣3⊢1 2 3
+(1∘↓)⍣2⊢1 2 3 4 5
+{(⍵+2÷⍵)÷2}⍣=1
+{⌊⍵÷2}⍣≡100
+(1∘+)⍣¯1⊢5
+(2∘×)⍣¯1⊢8
+⍟⍣¯1⊢1
+⌽⍣¯1⊢1 2 3
+(2∘↑)⍣¯1⊢1 2
+{⍵×2}⍣{⍺>100}⊢1
+{⍵+1}⍣{⍺>10}⊢0
+(1∘+)⍣0⊢5
+3 +⍣2⊢5
+2 ⌽⍣3⊢⍳6

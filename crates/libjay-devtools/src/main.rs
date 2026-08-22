@@ -174,6 +174,15 @@ fn record(args: &[String]) -> Result<(), String> {
     let timed_out: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
     for path in &paths {
         let label = corpus::label(path);
+        // A theme marked `@ reference=NAME` is that implementation's alone:
+        // no other one can answer it, so recording another key into it
+        // would fill the file with refusals. Skip it and say so.
+        if let Some(named) = corpus::reference(path)
+            && named != key
+        {
+            println!("{label}: skipped — recorded against {named} only");
+            continue;
+        }
         let snap = corpus::snapshot_of(path);
         let entries = corpus::read(path);
         let recorded = snapshot::index(snapshot::read(&snap));

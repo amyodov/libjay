@@ -2245,3 +2245,38 @@ changes what the second is measured against.
 The shipped dialect is untouched, and that is checked rather than
 asserted: `--dialect-diff` with no flag still reports 150, and GNU APL's
 column — the actual gate — replays green.
+- 2026-08-22 — Dyalog-only corpus themes, and `@ reference=` to hold them.
+
+  Four themes — `dyalog-dfns`, `dyalog-dops`, `dyalog-control`,
+  `dyalog-operators` — record what only Dyalog can answer: dfn guards, `⍺←`
+  defaults, `∇` recursion, shy results, `⍺⍺`/`⍵⍵` operators, the `:If`
+  family, and the operators GNU APL has no character for. Every one of them
+  is a row docs/status.md marks "no oracle", which until now meant held to
+  the published specification in `tests/definitions.rs` and nothing else.
+
+  **A theme may name the implementation it belongs to.** The corpus format
+  gained one file-level directive, `@ reference=NAME`. The recorder writes
+  only that key into such a file and skips it when asked for another, so a
+  full `record apl` run does not fill it with GNU APL refusals; the replay
+  evaluates every line, counts what libjay already matches, and fails on
+  none of it. The alternative — recording a `gnu:` column of `<error>` and
+  demanding libjay refuse in step — would have pinned the OPPOSITE of the
+  intent: libjay implements most of these, so agreement with GNU APL there
+  is exactly what must not be required. This is the `dyalog:` rule already
+  in force per record, lifted to a whole file.
+
+  **Control structures are fixed with `⎕FX`, not written between two `∇`s.**
+  Not a judgement about the language: the Dyalog oracle is driven as a piped
+  session, where the `∇` editor prints a `[1]` prompt per line onto stdout
+  and echoes the body onto stderr, so a `∇`-defined tradfn cannot be
+  recorded through that channel — every one of them in `definitions.snap`
+  reads `<error>` for exactly this reason. `⎕FX` takes the same lines and
+  fixes the same function. libjay has no `⎕FX` yet, so the whole theme is
+  backlog; the semantics of `:If`, `:While`, `:For` and `:Select` are
+  recorded regardless, which is what a future dialect needs.
+
+  **`⍢` is not a Dyalog glyph.** docs/status.md's under row names Dyalog as
+  its reference; Dyalog 20.0 answers `SYNTAX ERROR: Invalid token: "⍢"`.
+  The oracle wins: the theme keeps a few lines recording the refusal, the
+  row is a libjay extension rather than a Dyalog feature, and the status
+  table should say so.

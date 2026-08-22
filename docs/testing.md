@@ -30,6 +30,7 @@ marker no sentence of either language can begin with:
 ```
 // a comment; a blank line is ignored too
 @ io=0                 ⎕IO for the lines after it (APL; 1 unless said)
+@ reference=dyalog     the whole theme is that implementation's data
 2 + 2                  an expression
 ? why the two differ   a note (divergences.txt only)
 ```
@@ -175,6 +176,37 @@ recording measures the gap in one run. The rows where libjay ALREADY
 differs from GNU APL (`⍺←`, complex ordering, the vector replication count,
 trains) are in `divergences.txt` instead, and its records carry the same
 `dyalog:` column.
+
+### Dyalog-only themes
+
+`dyalog-dfns.txt`, `dyalog-dops.txt`, `dyalog-control.txt` and
+`dyalog-operators.txt` are the other half of the question. Where the probe
+asks what the two APLs answer differently, these hold what GNU APL cannot
+be asked at all: dfn guards, `⍺←` defaults, `∇` recursion, `⍺⍺`/`⍵⍵`
+operators, the `:If` family, and the operators GNU APL has no character for
+(`⌸`, `⌺`, `⍥`, `⍛`, `⊆`, `⍠`, `∘`, `f⍤g`, `f⍣g`). Their records carry a
+`dyalog:` line and no `gnu:` one, and their first line is the directive
+that says so:
+
+```
+@ reference=dyalog
+```
+
+A theme marked that way is reference DATA. The recorder writes only that
+key into it and skips the file when asked for another; the replay evaluates
+every line, counts how many libjay already matches, and fails on none of
+them — the same treatment a `dyalog:` answer gets anywhere else, applied to
+a whole file. `every_corpus_file_is_recorded` holds such a file to having a
+`dyalog:` answer per line rather than a `gnu:` one, so a line added and
+never recorded is still caught.
+
+Control structures belong to a defined function, and in `dyalog-control.txt`
+that function is fixed with `⎕FX` rather than written between two `∇`s. The
+reason is the channel, not the language: Dyalog is driven here as a piped
+session, where opening the `∇` editor makes it print a `[1]` prompt per line
+and echo the body, so a `∇`-defined tradfn cannot be recorded through it.
+`⎕FX` takes the same lines as a vector of character vectors and fixes the
+same function.
 
 ### Installing Dyalog and recording it
 
