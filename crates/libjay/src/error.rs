@@ -30,6 +30,11 @@ pub enum ErrorKind {
     Domain,
     Type,
     Value,
+    /// Arithmetic with no value at all: J refuses a NaN its own arithmetic
+    /// made (`_ - _`, `2 | _`), and names the failure this way. A NaN the
+    /// program itself wrote (`_.`) travels through unrefused, so this is
+    /// about the operation, not the operand.
+    Nan,
     /// Present in the language, not implemented yet.
     NotYet,
     /// Absent from the language itself; will never exist.
@@ -52,6 +57,7 @@ impl ErrorKind {
             ErrorKind::Domain => "domain error",
             ErrorKind::Type => "type error",
             ErrorKind::Value => "value error",
+            ErrorKind::Nan => "NaN error",
             ErrorKind::NotYet => "not supported yet",
             ErrorKind::Language => "not in the language",
             ErrorKind::Sandbox => "closed by the sandbox",
@@ -97,6 +103,13 @@ impl Error {
 
     pub fn domain(msg: impl Into<String>, span: Span) -> Self {
         Self::new(ErrorKind::Domain, msg, Some(span))
+    }
+
+    /// Arithmetic whose answer is a NaN nobody asked for. The message names
+    /// the operation and the pair that produced it, in the source language's
+    /// own spelling of the infinities.
+    pub fn nan(msg: impl Into<String>, span: Span) -> Self {
+        Self::new(ErrorKind::Nan, msg, Some(span))
     }
 
     pub fn internal(msg: impl Into<String>) -> Self {

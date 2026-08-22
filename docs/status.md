@@ -26,7 +26,7 @@ tables are listed separately and not counted.
 **J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
-**APL: 91 green / 23 partial / 3 absent by design, of 117 valences in the
+**APL: 94 green / 20 partial / 3 absent by design, of 117 valences in the
 inventory. Nothing in APL's primitive tables is red.**
 
 ## J — verbs
@@ -246,9 +246,9 @@ conjunctions above:
 | `+` | 🟢 conjugate | 🟢 plus |
 | `-` | 🟢 negate | 🟢 minus |
 | `×` | 🟢 signum | 🟢 times |
-| `÷` | 🟡 reciprocal; `÷0` is `∞`, not a domain error | 🟢 divide |
+| `÷` | 🟢 reciprocal; `÷0` is a domain error, as the dyad is | 🟢 divide |
 | `*` | 🟢 exponential | 🟢 power |
-| `⍟` | 🟡 log; `⍟0` is `¯∞`, not a domain error | 🟢 logarithm |
+| `⍟` | 🟢 log; `⍟0` is a domain error | 🟢 logarithm |
 | `⌈` | 🟢 ceiling | 🟢 maximum |
 | `⌊` | 🟢 floor | 🟢 minimum |
 | `\|` | 🟢 magnitude | 🟢 residue; the quotient is rounded with the tolerance |
@@ -408,7 +408,7 @@ What it does not change yet, measured against the recording:
 | Inner product `f.g` where `g` is not a scalar function (`+.,`, `,.+`, `∨.∧` on nested) | 15 | 🔴 the two lines nest the intermediate differently; libjay follows GNU APL. The Life idiom is the visible casualty |
 | Control words libjay does not have — `:AndIf`, `:OrIf`, `:CaseList`, `:For a b :In` — a `:For` that does not disclose its items, a definition naming one fixed after it, a top-level `:If`, and two places libjay answers where Dyalog refuses | 11 | 🔴 the rest of `dyalog-control.txt` now that `⎕FX` reaches it |
 | `⎕R`/`⎕S` (5), `⌸` with the operand libjay does not take (3), `⍣¯n` inverse powers (2), `⍥`/`⍢`/`⍛` (4), `⍠` where libjay extends and Dyalog refuses (3), `⌺` on an empty (1), a derived function as a user operator's operand (3) | 21 | 🔴 named gaps and extensions, itemised in `dyalog-operators.txt` and `dyalog-dops.txt` |
-| libjay's infinity policy (`÷0`, `⍟0`, `!¯1`) and the empty-base `⊥` | 16 | ⚪ pinned divergences from BOTH references, in `corpus/apl/divergences.txt`, plus the `(⍳0)⊥y` rows in `fuzz_found.txt` |
+| GNU APL's overflow policy (`1E308×2`, `2⋆1E10`), the gamma pole it prints a 0 at (`!¯1E20`), and the empty-base `⊥` | 16 | ⚪ pinned divergences from BOTH references, in `corpus/apl/divergences.txt`, plus the `(⍳0)⊥y` rows in `fuzz_found.txt`. `÷0`, `⍟0` and `!¯1` used to be here and now agree |
 | Complex floor and ceiling, and the `¯7○` branch cut | 3 | 🔴 |
 | Two singletons of different rank conforming (`(1 1⍴5)+,3`) | 2 | 🔴 the higher rank wins there, the first argument here |
 | `6 2⍕'a'` | 1 | ⚪ a display edge |

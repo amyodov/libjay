@@ -1,0 +1,84 @@
+// Where IEEE arithmetic has an infinity and APL has none.
+//
+// GNU APL refuses every arithmetic without a value rather than answering
+// ±∞: `÷0`, `⍟0` and `!¯3` are DOMAIN ERROR, and so is each of them reached
+// through `¨`, `/` or `\`. The cases it DOES define at the same points are
+// here beside them, because they are what keeps the refusal from spreading:
+// `0÷0` is 1, `0⍟0` is 1, `0⍟2` is 0.
+
+// ÷ — the monad refuses what the dyad already refused
+÷0
+÷0 2 4
+÷0 2
+1÷0
+2÷0
+2÷2 0
+0÷0
+0÷2
+0÷0 0
+0 2÷0 2
+÷2 4
+÷¨0 2
+÷¨2 4
+÷\\0 2
+÷⌿0 2
+÷/0 2
+
+// ⍟ — no logarithm of zero, and no infinite logarithm
+⍟0
+⍟0 1 2
+⍟1
+⍟2
+⍟¨0 2
+0⍟2
+0⍟1
+0⍟0
+1⍟1
+1⍟2
+1⍟0
+2⍟0
+1 0⍟2
+2⍟8
+⍟1E¯320
+2⍟1E¯320
+
+// ! — a pole and an overflow are refused alike
+!¯3
+!¯1
+!¯2
+!¯4
+!¯2 0 2
+!171
+!1E308
+!170
+!0
+!5
+!¯0.5
+!¯1.5
+!¯2.5
+!¨¯3 2
+!¨2 3
+¯3!5
+5!¯3
+¯3!¯5
+
+// ⋆ — zero has no negative power
+0*¯1
+0*¯2
+0*0
+0*2
+2*¯100000
+¯1*0.5
+¯2*0.5
+*710
+*¯710
+
+// what the reduce identities and the empties answer
++/⍬
+×/⍬
+⌈/⍬
+÷⍬
+⍟⍬
+!⍬
+÷¨⍳0
+÷2 0⍴0

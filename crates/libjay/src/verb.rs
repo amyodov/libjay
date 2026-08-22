@@ -162,6 +162,14 @@ impl Tol {
     /// of `[0, x)` comes back into range.
     #[inline]
     pub fn residue(self, x: f64, y: f64) -> f64 {
+        // An infinite DIVIDEND has no residue at all under any nonzero
+        // modulus: jconsole refuses `2 | _`, `0.5 | _`, `_1 | _` and `_ | _`
+        // alike with a NaN error, and the NaN made here is what
+        // [`Tol::made_nan`] turns into that refusal. A zero modulus is the
+        // exception, because it never divides: `0 | _` is `_`.
+        if self.is_j() && y.is_infinite() && x != 0.0 {
+            return f64::NAN;
+        }
         // An infinite modulus leaves a value of its own sign alone and
         // sends the other one to that infinity, which is the limit both
         // references answer with; the general formula cannot reach it,
@@ -192,6 +200,48 @@ impl Tol {
         } else {
             r
         }
+    }
+
+    /// `x * y`, with J's rule that a zero factor wins.
+    ///
+    /// J defines `0 * _` as 0 where IEEE arithmetic has no value for it, and
+    /// the rule is the factor's, not the product's: `0 * _.` is 0 too, and
+    /// `*/ 0 , _` is 0. It is also what gives `j. _` its value, because a
+    /// complex product is four real ones and `_ * 0j1` is `0j_` only when
+    /// each of them follows this rule. APL never meets the case — GNU APL
+    /// refuses an infinite operand to `×` outright — so the rule is J's
+    /// alone and a finite pair is untouched, negative zero included.
+    #[inline(always)]
+    pub fn mul(self, x: f64, y: f64) -> f64 {
+        if self.is_j() && (x == 0.0 || y == 0.0) && !(x.is_finite() && y.is_finite()) {
+            return 0.0;
+        }
+        x * y
+    }
+
+    /// Whether a result must be refused because the arithmetic MADE this
+    /// NaN: J answers `_ - _`, `_ % _`, `2 | _`, `0 ^. 0` and `! __` with a
+    /// NaN error, while a NaN the program itself wrote travels on unrefused
+    /// (`_. + 1` is `_.`). Distinguishing the two is exactly the operand
+    /// test below. APL never reaches a NaN with a value of its own, so the
+    /// rule stays J's.
+    #[inline(always)]
+    pub fn made_nan(self, r: f64, x: f64, y: f64) -> bool {
+        self.is_j() && r.is_nan() && !x.is_nan() && !y.is_nan()
+    }
+}
+
+/// One infinity or NaN in J's own spelling, for a diagnostic that has the
+/// value and not the text the user wrote.
+pub(crate) fn j_number(v: f64) -> String {
+    if v.is_nan() {
+        "_.".to_string()
+    } else if v == f64::INFINITY {
+        "_".to_string()
+    } else if v == f64::NEG_INFINITY {
+        "__".to_string()
+    } else {
+        format!("{v}")
     }
 }
 
@@ -2799,6 +2849,19 @@ fn factorial(y: f64) -> f64 {
     gamma(y + 1.0)
 }
 
+/// `! y` under the dialect's rule for an argument the gamma function cannot
+/// reach at all. jconsole answers `_` wherever its own gamma overflows —
+/// `! _`, `! 1e308` and `! _1e20` are each `_` — and refuses `! __` alone,
+/// which is the NaN this leaves standing. The APL caller refuses every
+/// non-finite answer and so needs no rule of its own.
+fn factorial_as(y: f64, tol: Tol) -> f64 {
+    let r = factorial(y);
+    if tol.is_j() && r.is_nan() && !y.is_nan() && y != f64::NEG_INFINITY {
+        return f64::INFINITY;
+    }
+    r
+}
+
 /// The largest left argument the product form of the binomial is taken for;
 /// beyond it the gamma quotient is both faster and accurate enough.
 const BINOMIAL_PRODUCT_LIMIT: i64 = 4096;
@@ -2849,8 +2912,41 @@ fn binomial_exact(x: i64, y: i64) -> Option<i64> {
     i64::try_from(c).ok()
 }
 
+/// `x ! y` where an operand is infinite, which the gamma quotient reaches
+/// only as a NaN. jconsole answers most of these and refuses the rest, and
+/// the table below is what nineteen probes of it say, entry by entry: an
+/// infinite LEFT argument gives 0 unless the right one sits on a pole of
+/// the gamma function; an infinite RIGHT one is read off the left's sign;
+/// and of the four infinite pairs only `__ ! _` has a value. None is a NaN
+/// the caller then refuses.
+fn binomial_at_infinity(x: f64, y: f64) -> Option<f64> {
+    if x.is_infinite() && y.is_infinite() {
+        return (x < 0.0 && y > 0.0).then_some(0.0);
+    }
+    if x.is_infinite() {
+        // `_ ! _1` and `_ ! _2` have none; `_ ! _2.5` is 0, because only a
+        // whole negative right argument is a pole.
+        return (!(y < 0.0 && y.fract() == 0.0)).then_some(0.0);
+    }
+    if x > 0.0 {
+        Some(f64::INFINITY)
+    } else if x == 0.0 {
+        Some(1.0)
+    } else {
+        Some(0.0)
+    }
+}
+
 /// `x ! y` on the reals.
 fn binomial(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() {
+        // A NaN the program wrote travels: `_ ! _.` is `_.`, not a value
+        // read off the table below.
+        return f64::NAN;
+    }
+    if x.is_infinite() || y.is_infinite() {
+        return binomial_at_infinity(x, y).unwrap_or(f64::NAN);
+    }
     if x.fract() == 0.0 && x.abs() < 1e17 {
         let xi = x as i64;
         if xi < 0 {
@@ -2905,10 +3001,10 @@ fn i64_op(op: ScalarDyad, a: i64, b: i64) -> Option<i64> {
 #[inline]
 fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
     use ScalarDyad::*;
-    Ok(match op {
+    let r = match op {
         Add => a + b,
         Sub => a - b,
-        Mul => a * b,
+        Mul => tol.mul(a, b),
         Min => a.min(b),
         Max => a.max(b),
         DivJ => {
@@ -2932,6 +3028,24 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
         Pow => {
             if a == 0.0 && b == 0.0 {
                 1.0
+            } else if a == 0.0 && b < 0.0 && !tol.is_j() {
+                // GNU APL refuses `0⋆¯1`: it is a division by zero under
+                // another name, and its `÷0` is refused too. J answers the
+                // infinity, as its `% 0` does.
+                return Err(Error::domain("zero has no negative power", span));
+            } else if a < 0.0 && b.is_infinite() {
+                // A negative base under an infinite exponent alternates in
+                // sign for ever. jconsole answers only where the magnitude
+                // falls to zero and the sign stops mattering — `_2 ^ __` is
+                // 0 — and refuses the rest, `_1 ^ _` and `_2 ^ _` alike.
+                if a.abs() != 1.0 && (a.abs() > 1.0) == (b < 0.0) {
+                    0.0
+                } else {
+                    return Err(Error::domain(
+                        "a negative base has no infinite power: the sign alternates",
+                        span,
+                    ));
+                }
             } else {
                 a.powf(b)
             }
@@ -2941,7 +3055,19 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
             if a < 0.0 || b < 0.0 {
                 return Err(Error::not_yet("complex numbers", span));
             }
-            b.ln() / a.ln()
+            let r = b.ln() / a.ln();
+            // GNU APL has no infinite logarithm: `1⍟2`, `2⍟0` and `1⍟0` are
+            // all DOMAIN ERROR. The two it does define where the ratio is a
+            // NaN — `0⍟0` and `1⍟1` — are 1, each of them a base raised to
+            // the first power. J keeps the infinity (`1 ^. 2` is `_`) and
+            // refuses only the NaN, which the check below the match does.
+            if !tol.is_j() && !r.is_finite() {
+                if r.is_nan() {
+                    return Ok(1.0);
+                }
+                return Err(Error::domain("this logarithm has no value", span));
+            }
+            r
         }
         Root => {
             if b < 0.0 {
@@ -2949,10 +3075,40 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
             }
             b.powf(1.0 / a)
         }
-        Circle => return circle(a, b, span),
+        // `?`, not `return`: `1 o. _` is a NaN the arithmetic made, and
+        // jconsole refuses it (as a limit error) rather than answering.
+        Circle => {
+            let r = circle(a, b, span)?;
+            // GNU APL refuses a circle function with no value where J
+            // continues it: `¯7○1` is artanh at its pole, an infinity in J
+            // and a DOMAIN ERROR there.
+            if !tol.is_j() && !r.is_finite() && a.is_finite() && b.is_finite() {
+                return Err(Error::domain("this circle function has no value", span));
+            }
+            r
+        }
         Binomial => binomial(a, b),
         _ => return Err(Error::internal("non-arithmetic op in the float path")),
-    })
+    };
+    if tol.made_nan(r, a, b) {
+        return Err(nan_error(op, a, b, span));
+    }
+    Ok(r)
+}
+
+/// The diagnostic for arithmetic with no value, naming the pair that has
+/// none: "NaN error: `_ - _` has no value".
+#[cold]
+fn nan_error(op: ScalarDyad, a: f64, b: f64, span: Span) -> Error {
+    Error::nan(
+        format!(
+            "`{} {} {}` has no value",
+            j_number(a),
+            crate::fuse::dyad_name(op),
+            j_number(b)
+        ),
+        span,
+    )
 }
 
 /// Which of a real pair's operations has no real answer, so the whole pass
@@ -2963,7 +3119,10 @@ fn escapes_reals(op: ScalarDyad, a: f64, b: f64) -> bool {
     use ScalarDyad::*;
     match op {
         // An integer exponent keeps a negative base real (`_1 ^ 2` is 1).
-        Pow => a < 0.0 && b.fract() != 0.0,
+        // An INFINITE one is neither integer nor fractional: `fract` is a
+        // NaN there, and the pair belongs to the real path, which answers
+        // `_2 ^ __` with 0 and refuses the rest.
+        Pow => a < 0.0 && b.is_finite() && b.fract() != 0.0,
         Log => a < 0.0 || b < 0.0,
         Root => b < 0.0,
         Circle => circle_escapes(a, b),
@@ -3438,10 +3597,27 @@ fn dyad_f64_chunk_body<A: Widen<f64>, B: Widen<f64>>(
             return Ok(());
         }};
     }
+    // The arithmetic that cannot fail runs in the plain loop; under J's
+    // rules a NaN in what it wrote means the pass has to be redone one pair
+    // at a time, because only there are both operands in hand to tell a NaN
+    // the arithmetic MADE from one the program wrote. The scan itself
+    // vectorises and finds nothing on ordinary data, so the fast path keeps
+    // its speed and the slow one keeps the rule.
+    macro_rules! plain_checked {
+        ($step:expr) => {{
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
+                *slot = $step(a.widen(), b.widen());
+                true
+            });
+            if !(tol.is_j() && out.iter().any(|v| v.is_nan())) {
+                return Ok(());
+            }
+        }};
+    }
     match op {
-        Add => plain!(|a: f64, b: f64| a + b),
-        Sub => plain!(|a: f64, b: f64| a - b),
-        Mul => plain!(|a: f64, b: f64| a * b),
+        Add => plain_checked!(|a: f64, b: f64| a + b),
+        Sub => plain_checked!(|a: f64, b: f64| a - b),
+        Mul => plain_checked!(|a: f64, b: f64| a * b),
         Min => plain!(f64::min),
         Max => plain!(f64::max),
         _ => {}
@@ -4357,6 +4533,16 @@ fn scalar_dyad_data(
         || pass_leaves_reals(op, x, xoff, xdiv, y, yoff, ydiv, n)
     {
         let data = complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span)?;
+        // GNU APL has no infinite logarithm in the complex domain either:
+        // `¯1⍟0` is a DOMAIN ERROR there, exactly as `2⍟0` is on the reals,
+        // and the real path above already refuses that one.
+        if op == Log
+            && rules.lang == crate::Lang::Apl
+            && let Data::Complex(v) = &data
+            && v.iter().any(|z| !z[0].is_finite() || !z[1].is_finite())
+        {
+            return Err(Error::domain("this logarithm has no value", span));
+        }
         if op == Circle && circle_reads_a_part(x, xoff, xdiv, n) && let Data::Complex(v) = &data {
             return Ok(Data::F64(v.iter().map(|z| z[0]).collect()));
         }
@@ -4612,10 +4798,14 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
             _ => return Err(wrong_type(d.dtype(), span)),
         },
         Recip => {
-            // 1 % 0 is infinity, the J rule. APL's ÷0 is a domain error; a
-            // ScalarMonad cannot tell the two languages apart, so the APL
-            // divergence is left to revisit when monadic ops carry a dialect.
+            // `% 0` is infinity in J. GNU APL has no such value: `÷0` is a
+            // DOMAIN ERROR, as its dyadic `2÷0` already is here, and the
+            // monad has to refuse the same pair the dyad does — including
+            // through `¨`, `/` and `\`, which all arrive at this one step.
             let v = as_f64(d, &mut tmp, span)?;
+            if !tol.is_j() && par::any(v, |&x| x == 0.0) {
+                return Err(Error::domain("zero has no reciprocal", span));
+            }
             Data::F64(par::map(v, |&x| if x == 0.0 { f64::INFINITY } else { 1.0 / x }).into())
         }
         Sqrt => {
@@ -4696,12 +4886,31 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
         }
         Factorial => {
             let v = as_f64(d, &mut tmp, span)?;
-            Data::F64(par::map(v, |&x| factorial(x)).into())
+            let out = par::map(v, |&x| factorial_as(x, tol));
+            if tol.is_j() {
+                // The one factorial J refuses. Everything else its gamma
+                // cannot reach it answers with `_`, which `factorial_as`
+                // has already done.
+                if v.iter().zip(&out).any(|(&x, &r)| tol.made_nan(r, x, 0.0)) {
+                    return Err(Error::nan("`! __` has no value", span));
+                }
+            } else if par::any(&out, |v: &f64| !v.is_finite()) {
+                // GNU APL refuses every factorial without a value: `!¯3`
+                // and `!¯1` sit on a pole of the gamma function, `!171` has
+                // overflowed it. J answers all three with `_`.
+                return Err(Error::domain("this factorial has no value", span));
+            }
+            Data::F64(out.into())
         }
         Ln => {
             // As with `Sqrt`: a negative value is already on the complex path.
             let v = as_f64(d, &mut tmp, span)?;
-            // ln(0) is negative infinity, which is what J prints as __.
+            // ln(0) is negative infinity, which is what J prints as __. GNU
+            // APL has no such value and refuses `⍟0`, exactly as it
+            // refuses `÷0`.
+            if !tol.is_j() && par::any(v, |&x| x == 0.0) {
+                return Err(Error::domain("zero has no logarithm", span));
+            }
             Data::F64(par::map(v, |&x| x.ln()).into())
         }
         OneMinus => match d {
@@ -6130,7 +6339,7 @@ fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
 
 /// `x #. y` / `x ⊥ y`: the digits y read in the radices x. A scalar x is the
 /// radix of every position; otherwise the two have the same length.
-fn decode(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
+fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     if let Some(exact) = decode_exact(x, y) {
         return Ok(exact);
     }
@@ -6159,7 +6368,10 @@ fn decode(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
     };
     let mut acc = 0.0f64;
     for (d, b) in digits.iter().zip(&radix) {
-        acc = acc * b + d;
+        // The dialect's product, so that an infinite radix meets the same
+        // zero-factor rule `*` does: `_ #. 2` is 2, because the running
+        // total is still zero when the infinity multiplies it.
+        acc = tol.mul(acc, *b) + d;
     }
     let integral = is_integral(y) && x.is_none_or(is_integral);
     Ok(Array::new(vec![], narrow(vec![acc], integral)))
@@ -6315,6 +6527,14 @@ fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let mut cell = vec![0.0f64; k];
     for (j, &v) in values.iter().enumerate() {
         encode_one(&radix, v, &mut cell, tol);
+        // Each digit is a residue, so a digit with no value is refused
+        // where the residue itself would be: `5 #: _` has none.
+        if cell.iter().any(|&d| tol.made_nan(d, v, 0.0)) {
+            return Err(Error::nan(
+                format!("`{}` has no digits in this base", j_number(v)),
+                span,
+            ));
+        }
         for i in 0..k {
             out[i * n + j] = cell[i];
         }
@@ -7019,7 +7239,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::Sparse => crate::sparse::sparsify(y, span),
         MonadOp::Same => Ok(y.clone()),
         MonadOp::Format => Ok(format_chars(y, &ctx.cfg.fmt)),
-        MonadOp::DecodeBits => decode(None, y, span).map(|r| carry_exact(r, y)),
+        MonadOp::DecodeBits => decode(None, y, ctx.cfg.tol, span).map(|r| carry_exact(r, y)),
         MonadOp::EncodeBits => encode_bits(y, ctx.cfg.tol, span).map(|r| carry_exact(r, y)),
         MonadOp::Itemize => {
             let mut shape = vec![1usize];
@@ -7410,7 +7630,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::TransposeApl => transpose_apl(x, y, cfg.rules.origin, span),
         DyadOp::DecodeApl => decode_apl(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::EncodeApl => encode_apl(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
-        DyadOp::Decode => decode(Some(x), y, span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Encode => encode(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, span),
         DyadOp::Link => link(x, y, span),
@@ -7795,6 +8015,20 @@ where
     Some(acc)
 }
 
+/// One step of a blockwise float fold, scan or window.
+///
+/// A NaN abandons the block, exactly as an integer overflow does, and the
+/// general path redoes the fold one pair at a time. That is where the
+/// dialect's rules live — J's `*/ 0 , _` is 0 and its `+/ _ , __` is
+/// refused, and each of those is an IEEE NaN — so the blockwise form never
+/// has to carry them, and never answers differently from the plain one. An
+/// infinity is an ordinary value and stays in the block. Ordinary data
+/// takes this road once per fold and finds nothing.
+#[inline(always)]
+fn block_f64(r: f64) -> (f64, bool) {
+    (r, r.is_nan())
+}
+
 /// The integer fold, over any buffer whose elements are integers once read:
 /// an `i64` one, or a boolean one promoted where it is read.
 fn fold_i64<S: Widen<i64>>(op: ScalarDyad, v: &[S], n: usize, m: usize) -> Option<Vec<i64>> {
@@ -7826,9 +8060,9 @@ fn fold_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     let assoc = is_associative(op);
     match op {
-        Add => fold_items(v, n, m, assoc, |a: f64, b: f64| (a + b, false)),
-        Sub => fold_items(v, n, m, assoc, |a: f64, b: f64| (a - b, false)),
-        Mul => fold_items(v, n, m, assoc, |a: f64, b: f64| (a * b, false)),
+        Add => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a + b)),
+        Sub => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a - b)),
+        Mul => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a * b)),
         Min => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.min(b), false)),
         Max => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.max(b), false)),
         _ => None,
@@ -7922,9 +8156,9 @@ fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> 
     match d {
         Data::F64(v) => Some(Data::F64(
             match op {
-                Add => fold_runs(v, n, m, |a: f64, b: f64| (a + b, false)),
-                Sub => fold_runs(v, n, m, |a: f64, b: f64| (a - b, false)),
-                Mul => fold_runs(v, n, m, |a: f64, b: f64| (a * b, false)),
+                Add => fold_runs(v, n, m, |a: f64, b: f64| block_f64(a + b)),
+                Sub => fold_runs(v, n, m, |a: f64, b: f64| block_f64(a - b)),
+                Mul => fold_runs(v, n, m, |a: f64, b: f64| block_f64(a * b)),
                 Min => fold_runs(v, n, m, |a: f64, b: f64| (a.min(b), false)),
                 Max => fold_runs(v, n, m, |a: f64, b: f64| (a.max(b), false)),
                 _ => None,
@@ -8046,9 +8280,9 @@ fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Optio
         Data::F64(v) => Some(Data::F64(
             by!(
                 v,
-                |a: f64, b: f64| (a + b, false),
-                |a: f64, b: f64| (a - b, false),
-                |a: f64, b: f64| (a * b, false),
+                |a: f64, b: f64| block_f64(a + b),
+                |a: f64, b: f64| block_f64(a - b),
+                |a: f64, b: f64| block_f64(a * b),
                 |a: f64, b: f64| (a.min(b), false),
                 |a: f64, b: f64| (a.max(b), false)
             )
@@ -8174,9 +8408,9 @@ fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Optio
         Data::F64(v) => Some(Data::F64(
             by!(
                 v,
-                |a: f64, b: f64| (a + b, false),
-                |a: f64, b: f64| (a - b, false),
-                |a: f64, b: f64| (a * b, false),
+                |a: f64, b: f64| block_f64(a + b),
+                |a: f64, b: f64| block_f64(a - b),
+                |a: f64, b: f64| block_f64(a * b),
                 |a: f64, b: f64| (a.min(b), false),
                 |a: f64, b: f64| (a.max(b), false)
             )
@@ -8547,9 +8781,9 @@ fn scan_f64<S: Widen<f64>>(
 ) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     match op {
-        Add => scan_flat(v, n, m, back, |a: f64, b: f64| (a + b, false)),
-        Sub => scan_flat(v, n, m, back, |a: f64, b: f64| (a - b, false)),
-        Mul => scan_flat(v, n, m, back, |a: f64, b: f64| (a * b, false)),
+        Add => scan_flat(v, n, m, back, |a: f64, b: f64| block_f64(a + b)),
+        Sub => scan_flat(v, n, m, back, |a: f64, b: f64| block_f64(a - b)),
+        Mul => scan_flat(v, n, m, back, |a: f64, b: f64| block_f64(a * b)),
         Min => scan_flat(v, n, m, back, |a: f64, b: f64| (a.min(b), false)),
         Max => scan_flat(v, n, m, back, |a: f64, b: f64| (a.max(b), false)),
         _ => None,
@@ -8940,8 +9174,8 @@ fn window_f64<S: Widen<f64>>(
 ) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     match op {
-        Add => window_fold(v, n, m, w, |a: f64, b: f64| (a + b, false)),
-        Mul => window_fold(v, n, m, w, |a: f64, b: f64| (a * b, false)),
+        Add => window_fold(v, n, m, w, |a: f64, b: f64| block_f64(a + b)),
+        Mul => window_fold(v, n, m, w, |a: f64, b: f64| block_f64(a * b)),
         Min => window_fold(v, n, m, w, |a: f64, b: f64| (a.min(b), false)),
         Max => window_fold(v, n, m, w, |a: f64, b: f64| (a.max(b), false)),
         _ => None,

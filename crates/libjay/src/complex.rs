@@ -39,9 +39,23 @@ pub fn conj(a: Cx) -> Cx {
     [a[0], -a[1]]
 }
 
+/// A complex product is four real ones, and each of them follows J's rule
+/// that a zero factor wins: `_ * 0j1` is `0j_` and `0j_ * 0j_` is `__`
+/// only when `_ * 0` is 0 rather than a NaN. It is also what gives `j. _`
+/// its value, because `j.` multiplies by the imaginary unit. GNU APL never
+/// reaches the case — it refuses an infinite operand to `×` outright — so
+/// the rule costs nothing there.
+#[inline]
+fn prod(x: f64, y: f64) -> f64 {
+    if (x == 0.0 || y == 0.0) && !(x.is_finite() && y.is_finite()) {
+        return 0.0;
+    }
+    x * y
+}
+
 #[inline]
 pub fn mul(a: Cx, b: Cx) -> Cx {
-    [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]]
+    [prod(a[0], b[0]) - prod(a[1], b[1]), prod(a[0], b[1]) + prod(a[1], b[0])]
 }
 
 /// Division, with J's rule for a zero divisor carried onto both parts:
@@ -156,7 +170,10 @@ pub fn pow(a: Cx, b: Cx) -> Cx {
     if a[1] == 0.0 && a[0] < 0.0 && b[1] == 0.0 {
         let m = (-a[0]).powf(b[0]);
         let (c, s) = cos_sin_pi(b[0]);
-        return [m * c, m * s];
+        // `prod`, not `*`: at a half turn the cosine is an exact zero, and
+        // an infinite magnitude beside it is the zero-factor case again.
+        // `__ ^ 0.5` is `0j_` and `__ ^ 1.5` is `0j__`.
+        return [prod(m, c), prod(m, s)];
     }
     exp(mul(b, ln(a)))
 }

@@ -7,16 +7,31 @@
 // `jay-corpus record` re-measures both and fails if a pair has quietly
 // converged, which is the signal that the note (and the entry in
 // docs/coverage.md) should go. The same list appears in docs/coverage.md.
-// libjay's monadic `÷` takes J's rule for division by zero (an
-// infinity); GNU APL raises DOMAIN ERROR, as libjay's DYADIC `÷` does.
-// Recorded as a deliberate gap in docs/coverage.md.
-÷0
-? monadic ÷0 is ∞ here, DOMAIN ERROR there
-÷0 2 4
-? monadic ÷0 is ∞ here, DOMAIN ERROR there
-// `⍟0` is the same disagreement one function along.
-⍟0
-? log 0 is ¯∞ here, DOMAIN ERROR there
+// GNU APL refuses an arithmetic OVERFLOW under × ÷ and ⋆ and lets one
+// through under + and *: `1E308×2` is DOMAIN ERROR there while
+// `1E308+1E308` is ∞ and `*710` is ∞, and `2⋆1E10` is refused while
+// `2⋆10000` — the same infinity by an integer exponent — is not. libjay
+// refuses arithmetic with no VALUE (`÷0`, `⍟0`, `!¯3`, `0⋆¯1`, all of
+// which GNU APL refuses too) and lets an overflow answer with the
+// infinity it reached, in one rule for every operation. No published
+// definition asks for the split, and matching it would mean refusing
+// `1E308×2` while answering `1E308+1E308`.
+1E308×2
+? an overflow answers ∞ here, DOMAIN ERROR there
+1E308×1E308
+? an overflow answers ∞ here, DOMAIN ERROR there
+2*1E10
+? an overflow answers ∞ here, DOMAIN ERROR there
+0×1E308+1E308
+? an infinite operand multiplies here, DOMAIN ERROR there
+(1E308+1E308)÷2
+? an infinite operand divides here, DOMAIN ERROR there
+// The gamma function underflows to zero far down the negative axis, and
+// GNU APL prints that zero even at a POLE, where the value it stands for
+// is undefined: `!¯1E20` is 0 there. libjay refuses it, as it refuses the
+// nearer poles `!¯3` and `!¯1` that GNU APL refuses too.
+!¯1E20
+? a pole is refused here, an underflowed 0 there
 // GNU APL truncates a rotate amount to a signed 32-bit integer before it
 // reduces it modulo the axis, so a large one rotates by the wrong amount:
 // the low 32 bits of 9223372036854775806 are ¯2, and ¯2 modulo 3 is 1.
@@ -67,13 +82,6 @@
 // other axis length, and `⌽`/`⌿` on the same shapes, are fine there.
 +\\2 1⍴⍳12
 ? scan keeps the shape here, drops a length-1 axis there
-// Both continue their functions past the reals the way J does — the
-// gamma pole and artanh 1 are signed infinities — where GNU APL stops
-// at DOMAIN ERROR.
-!¯1
-? the factorial of a negative integer is ∞ here, DOMAIN ERROR there
-¯7○1
-? artanh 1 is ∞ here, DOMAIN ERROR there
 ⍴+\\,5
 ? scan keeps the shape here, drops a length-1 axis there
 // GNU APL spaces a nested display more widely than libjay does, which

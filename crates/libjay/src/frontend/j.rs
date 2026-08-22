@@ -1567,7 +1567,10 @@ fn starts_number(cs: &[(usize, char)], i: usize) -> bool {
     }
     match cs.get(i + 1).map(|&(_, c)| c) {
         None => true,
-        Some(d) => d.is_ascii_digit() || d == '.' || !d.is_alphanumeric(),
+        // `j` is the one letter an infinity can be followed by: `_j_` and
+        // `_j1` are the rectangular form with an infinite real part, and a
+        // J name never begins with `_`, so nothing else claims the word.
+        Some(d) => d.is_ascii_digit() || d == '.' || d == 'j' || !d.is_alphanumeric(),
     }
 }
 
@@ -1746,6 +1749,11 @@ fn parse_plain(word: &str, span: Span) -> Result<Num> {
     }
     if word == "__" {
         return Ok(Num::F(f64::NEG_INFINITY));
+    }
+    // As a component of a complex literal: `_.j_` and `_j_.` are both
+    // words the reference reads.
+    if word == "_." {
+        return Ok(Num::F(f64::NAN));
     }
     let invalid = || Error::parse(format!("invalid number: {word}"), span);
     // `_` is J's negative sign, in the mantissa and after `e`.

@@ -1,0 +1,269 @@
+# libjay reference snapshot: J — corpus/j/nan.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= 0 * _
+> j: 0
+= 0 * __
+> j: 0
+= _ * 0
+> j: 0
+= __ * 0
+> j: 0
+= 0 * _.
+> j: 0
+= 0 * _ __ _.
+> j: 0 0 0
+= 0 * _ , 1
+> j: 0 0
+= */ 0 , _
+> j: 0
+= */ _ 0 __
+> j: 0
+= 1e400 * 0
+> j: 0
+= _ * _
+> j: _
+= _ * __
+> j: __
+= __ * __
+> j: _
+= _ * 2
+> j: _
+= _ * _1
+> j: __
+= _ * 1e400
+> j: _
+= j. _
+> j: 0j_
+= _ * 0j1
+> j: 0j_
+= 0j1 * _
+> j: 0j_
+= _ * 1j1
+> j: _j_
+= _ + _
+> j: _
+= __ + __
+> j: __
+= _ + 2
+> j: _
+= _ - __
+> j: _
+= _ - 2
+> j: _
+= 2 - _
+> j: __
+= 0 - _
+> j: __
+= +/ 0 _
+> j: _
+= _ + __
+> j: <error>
+= __ + _
+> j: <error>
+= _ - _
+> j: <error>
+= __ - __
+> j: <error>
+= 1e400 - 1e400
+> j: <error>
+= +/ _ , __
+> j: <error>
+= _ % 0
+> j: _
+= 0 % 0
+> j: 0
+= 0 % _
+> j: 0
+= _ % 2
+> j: _
+= % _
+> j: 0
+= _ % _
+> j: <error>
+= __ % _
+> j: <error>
+= _ % __
+> j: <error>
+= __ % __
+> j: <error>
+= _ | 2
+> j: 2
+= _ | _2
+> j: _
+= __ | 2
+> j: __
+= __ | _2
+> j: _2
+= _ | 0
+> j: 0
+= 0 | _
+> j: _
+= 0 | __
+> j: __
+= _ #: 5
+> j: 5
+= 2 | _
+> j: <error>
+= 2 | __
+> j: <error>
+= _1 | _
+> j: <error>
+= 0.5 | _
+> j: <error>
+= _ | _
+> j: <error>
+= _ | __
+> j: <error>
+= __ | __
+> j: <error>
+= 5 #: _
+> j: <error>
+= ! _
+> j: _
+= ! 170
+> j: 7.25742e306
+= ! 171
+> j: _
+= ! 1e308
+> j: _
+= ! _1e20
+> j: _
+= ! __
+> j: <error>
+= 2 ! _
+> j: _
+= _ ! 2
+> j: 0
+= _ ! 0
+> j: 0
+= _1 ! _
+> j: 0
+= _ ! _
+> j: <error>
+= _ ! _1
+> j: <error>
+= 0 ^ _
+> j: 0
+= 0 ^ __
+> j: _
+= __ ^ 0
+> j: 1
+= _ ^ 0
+> j: 1
+= _ ^ _
+> j: _
+= _ ^ __
+> j: 0
+= 1 ^ _
+> j: 1
+= 2 ^ _
+> j: _
+= 2 ^ __
+> j: 0
+= _2 ^ __
+> j: 0
+= _0.5 ^ _
+> j: 0
+= 1e400 ^ 2
+> j: _
+= _1 ^ _
+> j: <error>
+= _2 ^ _
+> j: <error>
+= _1 ^ __
+> j: <error>
+= ^. 0
+> j: __
+= ^ __
+> j: 0
+= ^ 1e5
+> j: _
+= %: _
+> j: _
+= 0 %: 4
+> j: _
+= 4 %: 0
+> j: 0
+= _ %: 4
+> j: 1
+= 2 %: _
+> j: _
+= _ ^. 2
+> j: 0
+= 1 ^. 2
+> j: _
+= 2 ^. _
+> j: _
+= _ ^. 0
+> j: <error>
+= 0 ^. 0
+> j: <error>
+= _ ^. _
+> j: <error>
+= _ = _
+> j: 1
+= _ < _
+> j: 0
+= _ <. _
+> j: _
+= _ >. __
+> j: _
+= <. _
+> j: _
+= >. _
+> j: _
+= <. __
+> j: __
+= | _
+> j: _
+= | __
+> j: _
+= - _
+> j: __
+= _ e. _
+> j: 1
+= o. _
+> j: _
+= _ p. 1
+> j: _
+= _.
+> j: _.
+= _. + 1
+> j: _.
+= _. - _.
+> j: _.
+= _. * 2
+> j: _.
+= _ * _.
+> j: _.
+= 2 | _.
+> j: _.
+= ! _.
+> j: _.
+= <. _.
+> j: _.
+= _ % _.
+> j: _.
+= _ ! _.
+> j: _.
+= _. = _.
+> j: 0

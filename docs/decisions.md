@@ -2611,3 +2611,74 @@ symbols and stops there — jconsole answers `#. 0$<1` but refuses
 `2 #. 0$<1`, and including empty boxes would have traded one refusal for a
 silent wrong answer in the other. Two J rows stay refused for that reason
 and are the honest residue of the cluster.
+## 2026-08-22 — Where IEEE has no value: J's NaN discipline, APL's refusals
+
+The two references answer the arithmetic IEEE leaves undefined, and neither
+answers it the way the hardware does. libjay had been handing the hardware's
+result back — `_.` in J, `∞` in APL — which was wrong in both languages at
+once. Every rule below came out of the oracles; none was inferred.
+
+**J defines what it can and refuses the rest.** A zero factor wins: `0 * _`
+is 0, and so are `_ * 0`, `0 * _.` and `*/ 0 , _`. The rule belongs to the
+FACTOR, not the product, which is why `0 * _.` is 0 too, and it is the whole
+explanation of `j. _` being `0j_` — a complex product is four real products,
+and each follows it. Where J has no value it refuses with a NaN error, and
+the test that decides is exactly whether the arithmetic MADE the NaN: `_ - _`
+is refused while `_. + 1` is `_.`. That distinction is cheap to compute (both
+operands are in hand) and impossible to fake afterwards, which is why the
+rule lives in the scalar step rather than in a pass over the result.
+
+Probing turned up more than the register listed. Residue has no value for an
+infinite DIVIDEND under any nonzero modulus — `2 | _`, `0.5 | _`, `_1 | _`
+and `_ | _` are refused alike, while `0 | _` is `_` because a zero modulus
+never divides — and `#:` inherits that, so `5 #: _` is refused too. The
+binomial at an infinity is a nineteen-entry table, not a formula: an infinite
+left argument gives 0 unless the right one sits on a gamma pole (`_ ! _2.5`
+is 0, `_ ! _2` is refused), an infinite right one is read off the left's
+sign, and of the four infinite pairs only `__ ! _` has a value. A negative
+base under an infinite exponent alternates in sign for ever, so J answers
+only where the magnitude falls to zero: `_2 ^ __` is 0, `_1 ^ _` is a domain
+error. And J's factorial answers `_` wherever its gamma overflows — `! 171`,
+`! 1e308`, `! _1e20` — refusing `! __` alone.
+
+**APL has no infinity in a value at all.** `÷0`, `⍟0`, `!¯3` and `0⋆¯1` are
+DOMAIN ERROR in GNU APL, and libjay's monadic `÷0` had been answering `∞`
+while its own DYADIC `2÷0` refused — an inconsistency inside one primitive,
+pinned as a deliberate divergence since the first week and retired here. The
+each, reduce and scan paths reach the same scalar step, so fixing the step
+fixed `÷¨`, `÷/` and `÷\` with it. Two exceptions keep the refusal from
+spreading and were probed rather than guessed: `0÷0` is 1, and `0⍟0` and
+`1⍟1` are 1 while every other non-finite logarithm is refused — so the
+dyadic log reads "a NaN ratio is 1, an infinite one has no value".
+
+**What was NOT matched, and why.** GNU APL also refuses an arithmetic
+OVERFLOW — `1E308×2` and `2⋆1E10` are DOMAIN ERROR — but not uniformly: the
+same infinity reached by `+` (`1E308+1E308`), by `*` (`*710`) or by an
+integer exponent (`2⋆10000`) is answered. No published definition asks for
+the split, and following it would mean refusing `1E308×2` while answering
+`1E308+1E308` in the same expression. libjay draws the line at arithmetic
+with no VALUE and lets an overflow answer with the infinity it reached; the
+five expressions are pinned in divergences.txt. `!¯1E20` is pinned for the
+same reason in the other direction — GNU APL prints the gamma function's
+underflowed 0 at a pole, where the value is undefined and the nearer poles
+`!¯3` and `!¯1` are refused on both sides.
+
+**Keeping the fused and unfused answers identical.** The rules live in the
+unfused verbs, and the blockwise kernels — elementwise, fold, scan, window —
+now decline a block holding a NaN and let the sentence be redone unfused,
+which is the road an integer overflow already takes. Declining on a NaN
+rather than on any non-finite value is deliberate: an infinity is an ordinary
+value in J, and in APL the primitives that would refuse one (`÷ ⍟ ! ⋆ ○`) do
+not fuse at all, `÷`'s zero being caught in the kernel itself. The wider
+rule cost two percentage points of the fused acceptance rate for nothing.
+A GPU answer is held to the stricter test — anything non-finite comes back
+to the CPU — because a shader carries none of these rules and the device's
+standing invariant is that it cannot change a result.
+
+**One place the rule had to be applied twice.** `__ ^ 0.5` is `0j_` and
+`__ ^ 1.5` is `0j__`, while `__ ^ 0.25` is `_j_`. The polar form already
+took an exact cosine at a half turn, so the magnitude met an exact zero
+there and multiplied to a NaN; the zero-factor rule finishes it. The pattern
+is a good hint that jconsole reaches its own answer by rounding the cosine
+with its comparison tolerance, but every probed case is explained by the
+exact-angle path alone, so nothing was built on the hint.

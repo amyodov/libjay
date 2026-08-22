@@ -19,21 +19,30 @@
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.
 
-= ÷0
-? monadic ÷0 is ∞ here, DOMAIN ERROR there
+= 1E308×2
+? an overflow answers ∞ here, DOMAIN ERROR there
 < ∞
 > gnu: <error>
-> dyalog: <error>
-= ÷0 2 4
-? monadic ÷0 is ∞ here, DOMAIN ERROR there
-< ∞ 0.5 0.25
+= 1E308×1E308
+? an overflow answers ∞ here, DOMAIN ERROR there
+< ∞
 > gnu: <error>
-> dyalog: <error>
-= ⍟0
-? log 0 is ¯∞ here, DOMAIN ERROR there
-< ¯∞
+= 2*1E10
+? an overflow answers ∞ here, DOMAIN ERROR there
+< ∞
 > gnu: <error>
-> dyalog: <error>
+= 0×1E308+1E308
+? an infinite operand multiplies here, DOMAIN ERROR there
+< ¯.
+> gnu: <error>
+= (1E308+1E308)÷2
+? an infinite operand divides here, DOMAIN ERROR there
+< ∞
+> gnu: <error>
+= !¯1E20
+? a pole is refused here, an underflowed 0 there
+< <error>
+> gnu: 0.000000000
 = 9223372036854775806⌽1 2 3
 ? the whole amount is reduced here, its low 32 bits there
 < 1 2 3
@@ -98,16 +107,6 @@
 > gnu: 1 2
 > dyalog: 1
 > dyalog: 2
-= !¯1
-? the factorial of a negative integer is ∞ here, DOMAIN ERROR there
-< ∞
-> gnu: <error>
-> dyalog: <error>
-= ¯7○1
-? artanh 1 is ∞ here, DOMAIN ERROR there
-< ∞
-> gnu: <error>
-> dyalog: <error>
 = ⍴+\\,5
 ? scan keeps the shape here, drops a length-1 axis there
 < 1

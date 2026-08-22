@@ -61,7 +61,7 @@ feature — that is a promise, not a refusal.
 | `#` | tally; extended where the argument is | replicate: item i repeated x[i] times (a scalar x applies to every item, and a scalar y is repeated for every count, so `1 0 1 # 5` is `5 5`) |
 | `#.` | base-2 decode (rank 1) | mixed-radix decode; a scalar x is the radix of every digit, a radix of 0 contributes none |
 | `#:` | base-2 encode; the width fits the largest magnitude in the WHOLE argument, so the verb has infinite rank | mixed-radix encode; the digit axis is x's own shape, so `2 #: 5` is a scalar and `2 2 2 #: 5` a 3-list |
-| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity; a complex argument is a named gap | binomial: x things chosen from y, defined on the reals through gamma; complex is the same gap |
+| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity in J and a domain error in APL, which has no infinite value; a complex argument is a named gap | binomial: x things chosen from y, defined on the reals through gamma; complex is the same gap |
 | `j.` | `0j1 * y` | `x + 0j1 * y` |
 | `r.` | `^ 0j1 * y`: the unit complex at angle y | `x * ^ 0j1 * y`: polar coordinates |
 | `":` | format: the characters that display the argument | format by specification: x is one complex `w j d` per column of y's last axis, or one for all of them — `w` the field width, `d` the digits after the point, and the rounding half-to-even. A width of 0 takes what the column needs, with one blank in front of every column but the first; a NEGATIVE width asks for the exponential form, written from the left behind one column of sign. A value too wide for its field is written as that many asterisks rather than refused, and a character or boxed argument is a domain error |
@@ -500,7 +500,7 @@ non-scalar right operand.
 | `+` | identity | plus |
 | `-` | negate | minus |
 | `×` | signum | times |
-| `÷` | reciprocal | divide (float; `0÷0` is `1`, `n÷0` is a domain error) |
+| `÷` | reciprocal (`÷0` is a domain error, as the dyad is) | divide (float; `0÷0` is `1`, `n÷0` is a domain error) |
 | `*` | exponential | power; a negative base with a fractional exponent gives a complex answer |
 | `⍟` | natural logarithm; a negative argument gives a complex answer | logarithm to base x; the same |
 | `⌈` | ceiling | max |
@@ -1434,8 +1434,6 @@ language and reference each entry compares against is named inline;
 oracle directly, one entry per line of
 `crates/libjay/tests/corpus/apl/divergences.txt`.
 
-- Monadic `÷` (APL reciprocal) of 0 currently follows J's rule (infinity)
-  instead of raising a domain error like dyadic `÷`.
 - APL dyadic `⌽` and `⊖` reduce a large rotate amount whole; GNU APL
   truncates it to a signed 32-bit integer first, so `9223372036854775806⌽1 2 3`
   is `1 2 3` here and `2 3 1` there.
@@ -1495,10 +1493,19 @@ line of `crates/libjay/tests/corpus/apl/divergences.txt`, which asserts that
 they keep disagreeing — a silent convergence is a test failure, not a quiet
 win. Everything else in the corpus agrees.
 
-libjay follows J where APL2 stops at DOMAIN ERROR:
+libjay answers an OVERFLOW where GNU APL refuses one:
 
-- monadic `÷0` is `∞` and `⍟0` is `¯∞` (the first is already listed above).
-- `!¯1` is `∞` (the gamma pole) and `¯7○1` — artanh 1 — is `∞`.
+- `1E308×2`, `1E308×1E308` and `2⋆1E10` are `∞` here and DOMAIN ERROR
+  there, and an infinite operand still multiplies and divides
+  (`0×1E308+1E308`, `(1E308+1E308)÷2`). GNU APL's own rule is not uniform —
+  it refuses an overflow under `×` `÷` `⋆` and lets one through under `+`
+  and `*`, so `1E308+1E308` is `∞` and `2⋆10000` is `∞` there — and no
+  published definition asks for the split. libjay refuses arithmetic with
+  no VALUE (`÷0`, `⍟0`, `!¯3`, `0⋆¯1`, `¯7○1`, each of which GNU APL
+  refuses too) and lets an overflow answer with the infinity it reached.
+- `!¯1E20` is refused here and `0` there: the gamma function underflows far
+  down the negative axis and GNU APL prints that zero even at a pole, where
+  the value is undefined.
 
 libjay is more permissive:
 

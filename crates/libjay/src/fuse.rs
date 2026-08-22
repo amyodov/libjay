@@ -2054,8 +2054,15 @@ fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64], tol: Tol) -> bool
         } else {
             0.0
         }),
-        // `% 0` is infinity, the J rule the unfused monad follows.
-        Recip => each!(a, dst, |x: f64| if x == 0.0 { f64::INFINITY } else { 1.0 / x }),
+        // `% 0` is infinity, the J rule the unfused monad follows; under
+        // APL's rules it is a DOMAIN ERROR, which only the unfused monad
+        // can raise, so a zero here declines the whole kernel.
+        Recip => {
+            if !tol.is_j() && a.contains(&0.0) {
+                return false;
+            }
+            each!(a, dst, |x: f64| if x == 0.0 { f64::INFINITY } else { 1.0 / x })
+        }
         // Reached only through an integer chain, where they are the
         // identity: rounding a float narrows its dtype, which is declined.
         Floor => each!(a, dst, f64::floor),
@@ -2096,6 +2103,35 @@ fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64], tol: Tol
         }
         _ => false,
     }
+}
+
+/// Whether a float block is one the fused kernel may keep.
+///
+/// A NaN is where IEEE arithmetic stops agreeing with the languages: J's
+/// `0 * _` is 0 and its `_ - _` is refused, and both of those are an IEEE
+/// NaN. Those rules live in the unfused verbs, so a block holding one
+/// declines and the sentence is redone unfused — what an integer overflow
+/// already does. An INFINITY needs no such treatment: it is an ordinary
+/// value in J and, in APL, the operations that would refuse one (`÷` `⍟`
+/// `!` `⋆` `○`) do not fuse at all, `÷`'s zero being caught in the kernel
+/// above. The pass vectorises and finds nothing on ordinary data.
+#[inline(always)]
+fn no_nan_block(dst: &[f64]) -> bool {
+    !dst.iter().any(|x| x.is_nan())
+}
+
+/// Whether a device's answer holds no NaN. See [`no_nan_block`].
+#[inline(always)]
+fn finite_block(dst: &[f64]) -> bool {
+    dst.iter().all(|x| x.is_finite())
+}
+
+/// One step of a blockwise float fold, scan or window: a NaN abandons the
+/// block for the unfused path, as [`no_nan_block`] does. It is how
+/// `*/ 0 , _` reaches J's zero-factor rule and `+/ _ , __` its refusal.
+#[inline(always)]
+fn block_f64(r: f64) -> (f64, bool) {
+    (r, r.is_nan())
 }
 
 /// Integer passes fold overflow into a flag instead of branching out of the
@@ -2254,8 +2290,8 @@ multiversioned! {
 fn window_pass_f64(op: ScalarDyad, k: usize, v: &[f64], first: usize, dst: &mut [f64]) -> bool {
     use ScalarDyad::*;
     match op {
-        Add => windows_into(v, k, first, dst, &|a: f64, b: f64| (a + b, false)),
-        Mul => windows_into(v, k, first, dst, &|a: f64, b: f64| (a * b, false)),
+        Add => windows_into(v, k, first, dst, &|a: f64, b: f64| block_f64(a + b)),
+        Mul => windows_into(v, k, first, dst, &|a: f64, b: f64| block_f64(a * b)),
         Min => windows_into(v, k, first, dst, &|a: f64, b: f64| (a.min(b), false)),
         Max => windows_into(v, k, first, dst, &|a: f64, b: f64| (a.max(b), false)),
         _ => false,
@@ -2276,8 +2312,8 @@ fn window_pass_i64(op: ScalarDyad, k: usize, v: &[i64], first: usize, dst: &mut 
 fn scan_pass_f64(op: ScalarDyad, v: &[f64], carry: Option<f64>, dst: &mut [f64]) -> Option<f64> {
     use ScalarDyad::*;
     match op {
-        Add => scan_block(v, carry, dst, &|a: f64, b: f64| (a + b, false)),
-        Mul => scan_block(v, carry, dst, &|a: f64, b: f64| (a * b, false)),
+        Add => scan_block(v, carry, dst, &|a: f64, b: f64| block_f64(a + b)),
+        Mul => scan_block(v, carry, dst, &|a: f64, b: f64| block_f64(a * b)),
         Min => scan_block(v, carry, dst, &|a: f64, b: f64| (a.min(b), false)),
         Max => scan_block(v, carry, dst, &|a: f64, b: f64| (a.max(b), false)),
         _ => None,
@@ -2316,8 +2352,10 @@ pub(crate) fn step(op: ScalarDyad, a: f64, b: f64) -> Option<f64> {
 fn step_f64(op: ScalarDyad, a: f64, b: f64) -> Option<f64> {
     use ScalarDyad::*;
     match op {
-        Add => Some(a + b),
-        Mul => Some(a * b),
+        // None here abandons the fused fold for the plain one, which is
+        // where the dialect's rule for the value lives.
+        Add => Some(a + b).filter(|r| !r.is_nan()),
+        Mul => Some(a * b).filter(|r| !r.is_nan()),
         Min => Some(a.min(b)),
         Max => Some(a.max(b)),
         _ => None,
@@ -2514,8 +2552,12 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
 
     let data = if working == DType::F64 {
         let steps = Steps {
-            monad: move |op, a: &[f64], dst: &mut [f64]| monad_f64(op, a, dst, tol),
-            dyad: move |op, a: &[f64], b: &[f64], dst: &mut [f64]| dyad_f64(op, a, b, dst, tol),
+            monad: move |op, a: &[f64], dst: &mut [f64]| {
+                monad_f64(op, a, dst, tol) && no_nan_block(dst)
+            },
+            dyad: move |op, a: &[f64], b: &[f64], dst: &mut [f64]| {
+                dyad_f64(op, a, b, dst, tol) && no_nan_block(dst)
+            },
             window: window_pass_f64,
             scan: scan_pass_f64,
         };
@@ -2761,7 +2803,7 @@ fn monad_name(op: ScalarMonad) -> &'static str {
     }
 }
 
-fn dyad_name(op: ScalarDyad) -> &'static str {
+pub(crate) fn dyad_name(op: ScalarDyad) -> &'static str {
     use ScalarDyad::*;
     match op {
         Add => "+",
@@ -2820,7 +2862,13 @@ pub(crate) fn eval_on(
     // faster to fold where it lies would be the wrong trade anyway.
     if layout == Layout::RowMajor && let Some(d) = device.filter(|d| d.is_gpu()) {
         match crate::device::try_run(d, k, inputs) {
-            Ok(a) => return (Some(a), Placement::Gpu),
+            // A shader computes in IEEE arithmetic and knows none of the
+            // dialect's rules for what an infinity or a NaN means, so an
+            // answer holding one is handed back and the sentence is redone
+            // on the CPU — the same decline the CPU kernels make among
+            // themselves. Without it the device WOULD change a result.
+            Ok(a) if finite_answer(&a) => return (Some(a), Placement::Gpu),
+            Ok(_) => placement = Placement::Cpu(crate::device::Refusal::NonFinite),
             Err(why) => placement = Placement::Cpu(why),
         }
     }
@@ -2829,6 +2877,15 @@ pub(crate) fn eval_on(
         note_fallback();
     }
     (r, placement)
+}
+
+/// Whether a device's answer holds no infinity and no NaN, and may
+/// therefore be kept. See [`finite_block`], whose rule this is.
+fn finite_answer(a: &Array) -> bool {
+    match &a.data {
+        crate::array::Data::F64(v) => finite_block(v),
+        _ => true,
+    }
 }
 
 /// The layout a fused kernel's answer keeps, or None when its inputs

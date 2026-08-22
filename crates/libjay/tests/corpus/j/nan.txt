@@ -1,0 +1,148 @@
+// Where IEEE arithmetic has no value and J does.
+//
+// Three rules run through this file. A zero factor wins, so `0 * _` is 0
+// and not a NaN. A NaN the arithmetic MADE is refused — `_ - _`, `2 | _`,
+// `0 ^. 0` — while one the program wrote travels on. And the infinities are
+// ordinary values everywhere else: they compare, floor, and reduce.
+
+// * — a zero factor wins, whatever the other one is
+0 * _
+0 * __
+_ * 0
+__ * 0
+0 * _.
+0 * _ __ _.
+0 * _ , 1
+*/ 0 , _
+*/ _ 0 __
+1e400 * 0
+_ * _
+_ * __
+__ * __
+_ * 2
+_ * _1
+_ * 1e400
+
+// the same rule through a complex product
+j. _
+_ * 0j1
+0j1 * _
+_ * 1j1
+
+// + - and the NaN they make
+_ + _
+__ + __
+_ + 2
+_ - __
+_ - 2
+2 - _
+0 - _
++/ 0 _
+_ + __
+__ + _
+_ - _
+__ - __
+1e400 - 1e400
++/ _ , __
+
+// % — J divides by zero and refuses only the indeterminate quotient
+_ % 0
+0 % 0
+0 % _
+_ % 2
+% _
+_ % _
+__ % _
+_ % __
+__ % __
+
+// | — an infinite modulus has a limit, an infinite dividend has none
+_ | 2
+_ | _2
+__ | 2
+__ | _2
+_ | 0
+0 | _
+0 | __
+_ #: 5
+2 | _
+2 | __
+_1 | _
+0.5 | _
+_ | _
+_ | __
+__ | __
+5 #: _
+
+// ! — the factorial overflows to infinity and refuses one argument
+! _
+! 170
+! 171
+! 1e308
+! _1e20
+! __
+2 ! _
+_ ! 2
+_ ! 0
+_1 ! _
+_ ! _
+_ ! _1
+
+// ^ ^. %: — powers, logarithms and roots at the infinities
+0 ^ _
+0 ^ __
+__ ^ 0
+_ ^ 0
+_ ^ _
+_ ^ __
+1 ^ _
+2 ^ _
+2 ^ __
+_2 ^ __
+_0.5 ^ _
+1e400 ^ 2
+_1 ^ _
+_2 ^ _
+_1 ^ __
+^. 0
+^ __
+^ 1e5
+%: _
+0 %: 4
+4 %: 0
+_ %: 4
+2 %: _
+_ ^. 2
+1 ^. 2
+2 ^. _
+_ ^. 0
+0 ^. 0
+_ ^. _
+
+// the infinities as ordinary values
+_ = _
+_ < _
+_ <. _
+_ >. __
+<. _
+>. _
+<. __
+| _
+| __
+- _
+_ e. _
+o. _
+_ p. 1
+
+// a NaN the program wrote is not the arithmetic's
+_.
+_. + 1
+_. - _.
+_. * 2
+_ * _.
+2 | _.
+! _.
+<. _.
+_ % _.
+_ ! _.
+_. = _.

@@ -168,6 +168,32 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   the wrong type to refuse. `2 #. ''`, `#: ''` and `i. ''` answer for the
   same reason. An empty BOX is not numeric data — jconsole refuses
   `2 #. 0$<1` — and neither is a non-empty character array.
+- **`0 * _` is 0, and `_ - _` is refused.** J defines arithmetic where IEEE
+  has only a NaN, and libjay was handing the NaN back as `_.`. A zero
+  factor now wins, whatever the other one is — `0 * _`, `_ * 0`, `0 * _.`
+  and `*/ 0 , _` are all 0 — and that one rule is what gives `j. _` its
+  value `0j_`, since a complex product is four real ones. Where J has no
+  value it refuses, with a NaN error naming the pair: `_ - _`, `_ + __`,
+  `_ % _`, `2 | _`, `0.5 | _`, `5 #: _`, `0 ^. 0`, `_ ^. _`, `! __`,
+  `_ ! _` and `1 o. _`. A NaN the program itself wrote still travels
+  through unrefused — `_. + 1` is `_.` — because the rule is about the
+  operation and not the operand.
+
+  The values J does define at the same points came with it: `! _`, `! 171`
+  and `! 1e308` are `_`; `_ ! 2` is 0 and `2 ! _` is `_`, over the whole
+  table of binomials at an infinity; `_ | 2` is 2 and `0 | _` is `_`;
+  `_2 ^ __` is 0 while `_1 ^ _` is a domain error; `__ ^ 0.5` is `0j_`;
+  and `_ #. 2` is 2. The infinite complex literals `_j_`, `_j1` and `_.j_`
+  are read as numbers now instead of failing to parse.
+
+- **APL raises DOMAIN ERROR where it has no value, instead of answering
+  `∞`.** `÷0` and `⍟0` were an infinity and are now refused, as dyadic
+  `2÷0` already was — including through `¨`, `/` and `\`, which reach the
+  same step. So are `!¯3`, `!¯1`, `!171` and `!1E308` (a pole of the gamma
+  function and an overflow of it alike), `0⋆¯1`, `1⍟2`, `2⍟0`, `1 0⍟2`,
+  `¯1⍟0` and `¯7○1`. The values GNU APL defines at those same points are
+  unchanged and are what keep the refusal from spreading: `0÷0` is 1,
+  `0⍟0` and `1⍟1` are 1, `0⍟2` is 0, `0⋆0` is 1.
 
 - **`2+/1 2 3` is `3 5`, not `3 4 5`.** APL's `/`-derived functions had no
   dyadic meaning of their own: the derivation was dropped and the operand

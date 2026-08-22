@@ -309,6 +309,9 @@ pub enum Refusal {
     Unsupported(&'static str),
     /// The kernel itself would decline these inputs, device or no device.
     Declined,
+    /// The shader's answer holds an infinity or a NaN, where the dialect
+    /// has a rule of its own and the shader has only IEEE arithmetic.
+    NonFinite,
     /// Too little data to pay for a dispatch.
     TooSmall,
     /// The device refused: an allocation, a shader, a queue submission.
@@ -325,6 +328,9 @@ impl Refusal {
             }
             Refusal::Unsupported(op) => format!("`{op}` has no shader form here"),
             Refusal::Declined => "the fused kernel declined these inputs".into(),
+            Refusal::NonFinite => {
+                "the answer holds an infinity or a NaN, which the dialect's rules read".into()
+            }
             Refusal::TooSmall => "there is too little data to pay for a dispatch".into(),
             Refusal::Failed(e) => format!("the device refused: {e}"),
         }
