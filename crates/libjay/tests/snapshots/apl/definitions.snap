@@ -21,83 +21,129 @@
 
 = {⍵×2} 21
 > gnu: 42
+> dyalog: 42
 = 2 {⍺+⍵} 3
 > gnu: 5
+> dyalog: 5
 = {⍵+1} 5
 > gnu: 6
+> dyalog: 6
 = F←{⍵×2} ⋄ F 21
 > gnu: 42
+> dyalog: 42
 = F←{⍵×2} ⋄ F¨1 2 3
 > gnu: 2 4 6
+> dyalog: 2 4 6
 = F←{⍺+⍵} ⋄ 3 F 5
 > gnu: 8
+> dyalog: 8
 = F←{⍺×⍵} ⋄ 3 F 5
 > gnu: 15
+> dyalog: 15
 = {a←⍵ ⋄ a+1} 5
 > gnu: 6
+> dyalog: 6
 = F←{a←⍵×2 ⋄ a+1} ⋄ F 5
 > gnu: 11
+> dyalog: 11
 = F←{⍵×2} ⋄ G←{F ⍵} ⋄ G 5
 > gnu: 10
+> dyalog: 10
 = F←{{⍵+1} ⍵×2} ⋄ F 5
 > gnu: 11
+> dyalog: 11
 = F←{+/⍵} ⋄ F 1 2 3 4
 > gnu: 10
+> dyalog: 10
 = F←{(+/⍵)÷≢⍵} ⋄ F 1 2 3 4
 > gnu: 2.5
+> dyalog: 2.5
 = F←{⍵×2} ⋄ F 2 3⍴⍳6
 > gnu: 2  4  6
 > gnu: 8 10 12
+> dyalog: 2  4  6
+> dyalog: 8 10 12
 = a←99 ⋄ F←{a+⍵} ⋄ F 1
 > gnu: 100
+> dyalog: 100
 = a←99 ⋄ F←{a←1 ⋄ a+⍵} ⋄ (F 1),a
 > gnu: 2 99
+> dyalog: 2 99
 = F←{⌽⍵} ⋄ F 1 2 3
 > gnu: 3 2 1
+> dyalog: 3 2 1
 = ∇Z←F R\nZ←R×2\n∇\nF 21
 > gnu: 42
+> dyalog: <error>
 = ∇Z←L G R\nZ←L+R\n∇\n2 G 3
 > gnu: 5
+> dyalog: <error>
 = ∇Z←F R;T\nT←R×2\nZ←T+1\n∇\nF 5
 > gnu: 11
+> dyalog: <error>
 = ∇Z←F R\nZ←+/R\n∇\nF 1 2 3 4
 > gnu: 10
+> dyalog: <error>
 = ∇Z←F R\nZ←R\nZ←Z×3\n∇\nF 7
 > gnu: 21
+> dyalog: <error>
 = X←1\n∇Z←F R\nX←5\nZ←R\n∇\nQ←F 9\nX
 > gnu: 5
+> dyalog: <error>
 = Y←1\n∇Z←G R;Y\nY←5\nZ←R\n∇\nQ←G 9\nY
 > gnu: 1
+> dyalog: <error>
 = ∇Z←F R\nZ←R×2\n∇\n∇Z←G R\nZ←F R\n∇\nG 5
 > gnu: 10
+> dyalog: <error>
 = A←1 2 3 4 ⋄ A[2]←99 ⋄ A
 > gnu: 1 99 3 4
+> dyalog: 1 99 3 4
 = A←1 2 3 4 ⋄ A[1 3]←0 ⋄ A
 > gnu: 0 2 0 4
+> dyalog: 0 2 0 4
 = A←1 2 3 4 ⋄ A[1 3]←7 8 ⋄ A
 > gnu: 7 2 8 4
+> dyalog: 7 2 8 4
 = A←1 2 3 4 ⋄ A[2]←1.5 ⋄ A
 > gnu: 1 1.5 3 4
+> dyalog: 1 1.5 3 4
 = A←3 3⍴⍳9 ⋄ A[2;3]←0 ⋄ A
 > gnu: 1 2 3
 > gnu: 4 5 0
 > gnu: 7 8 9
+> dyalog: 1 2 3
+> dyalog: 4 5 0
+> dyalog: 7 8 9
 = A←3 3⍴⍳9 ⋄ A[1;]←0 0 0 ⋄ A
 > gnu: 0 0 0
 > gnu: 4 5 6
 > gnu: 7 8 9
+> dyalog: 0 0 0
+> dyalog: 4 5 6
+> dyalog: 7 8 9
 = A←2 3⍴⍳6 ⋄ A[1;]←9 ⋄ A
 > gnu: 9 9 9
 > gnu: 4 5 6
+> dyalog: 9 9 9
+> dyalog: 4 5 6
 = A←3 3⍴⍳9 ⋄ A[;2]←0 ⋄ A
 > gnu: 1 0 3
 > gnu: 4 0 6
 > gnu: 7 0 9
+> dyalog: 1 0 3
+> dyalog: 4 0 6
+> dyalog: 7 0 9
 = A←3 3⍴⍳9 ⋄ A[1 2;1 2]←0 ⋄ A
 > gnu: 0 0 3
 > gnu: 0 0 6
 > gnu: 7 8 9
+> dyalog: 0 0 3
+> dyalog: 0 0 6
+> dyalog: 7 8 9
 = A←1 2 3 ⋄ A[3]←4 ⋄ +/A
 > gnu: 7
+> dyalog: 7
 = A←'abcd' ⋄ A[2]←'x' ⋄ A
 > gnu: axcd
+> dyalog: axcd

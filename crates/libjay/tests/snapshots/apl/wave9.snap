@@ -22,14 +22,20 @@
 = (2 3⍴⍳6)+.×(3 2⍴⍳6)
 > gnu: 22 28
 > gnu: 49 64
+> dyalog: 22 28
+> dyalog: 49 64
 = 1 2 3+.×1 2 3
 > gnu: 14
+> dyalog: 14
 = (3 3⍴⍳9)+.×⍳3
 > gnu: 14 32 50
+> dyalog: 14 32 50
 = (⍳3)+.×3 3⍴⍳9
 > gnu: 30 36 42
+> dyalog: 30 36 42
 = ⍴(2 3 4⍴⍳24)+.×(4 5⍴⍳20)
 > gnu: 2 3 5
+> dyalog: 2 3 5
 = (2 3 4⍴⍳24)+.×(4 5⍴⍳20)
 > gnu: 110 120 130  140  150
 > gnu: 246 272 298  324  350
@@ -38,86 +44,144 @@
 > gnu: 518 576 634  692  750
 > gnu: 654 728 802  876  950
 > gnu: 790 880 970 1060 1150
+> dyalog: 110 120 130  140  150
+> dyalog: 246 272 298  324  350
+> dyalog: 382 424 466  508  550
+> dyalog:
+> dyalog: 518 576 634  692  750
+> dyalog: 654 728 802  876  950
+> dyalog: 790 880 970 1060 1150
 = (2 2⍴1 2 3 4)+.×2 2 2⍴⍳8
 > gnu: 11 14
 > gnu: 17 20
 > gnu:
 > gnu: 23 30
 > gnu: 37 44
+> dyalog: 11 14
+> dyalog: 17 20
+> dyalog:
+> dyalog: 23 30
+> dyalog: 37 44
 = ⍴(2 2⍴1 2 3 4)+.×2 2 2⍴⍳8
 > gnu: 2 2 2
+> dyalog: 2 2 2
 = 2+.×3 4
 > gnu: 14
+> dyalog: 14
 = (2 3⍴⍳6)+.×2
 > gnu: 12 30
+> dyalog: 12 30
 = 1 2 3+.×2
 > gnu: 12
+> dyalog: 12
 = (⍳0)+.×⍳0
 > gnu: 0
+> dyalog: 0
 = (0.5×2 3⍴⍳6)+.×0.25×3 2⍴⍳6
 > gnu: 2.75  3.5
 > gnu: 6.125 8
+> dyalog: 2.75  3.5
+> dyalog: 6.125 8
 = 1 2 3-.×4 5 6
 > gnu: 12
+> dyalog: 12
 = 1 2 3×.+4 5 6
 > gnu: 315
+> dyalog: 315
 = (2 2⍴1 2 3 4)⌈.+(2 2⍴1 2 3 4)
 > gnu: 5 6
 > gnu: 7 8
+> dyalog: 5 6
+> dyalog: 7 8
 = (2 2⍴1 2 3 4)⌊.+(2 2⍴1 2 3 4)
 > gnu: 2 3
 > gnu: 4 5
+> dyalog: 2 3
+> dyalog: 4 5
 = (⍳3)∨.∧(⍳3)
 > gnu: 1
+> dyalog: 1
 = (3 3⍴1 0 0 0 1 0 0 0 1)∧.=3 3⍴1 0 0 0 1 0 0 0 1
 > gnu: 1 0 0
 > gnu: 0 1 0
 > gnu: 0 0 1
+> dyalog: 1 0 0
+> dyalog: 0 1 0
+> dyalog: 0 0 1
 = (2 3⍴1 0 1 0 1 0)∨.∧3 2⍴1 1 0 0 1 1
 > gnu: 1 1
 > gnu: 0 0
+> dyalog: 1 1
+> dyalog: 0 0
 = 1 2 3+.=1 2 4
 > gnu: 2
+> dyalog: 2
 = 'ab'∧.='ab'
 > gnu: 1
+> dyalog: 1
 = 'ab'∧.='ac'
 > gnu: 0
+> dyalog: 0
 = (2 3⍴'abcabc')∧.=2 3⍴'abcabx'
 > gnu: <error>
+> dyalog: <error>
 = 3 2⍴'abcabc'
 > gnu: ab
 > gnu: ca
 > gnu: bc
+> dyalog: ab
+> dyalog: ca
+> dyalog: bc
 = (2 3⍴'abcabc')∧.=3 2⍴'abcabc'
 > gnu: 0 0
 > gnu: 0 0
+> dyalog: 0 0
+> dyalog: 0 0
 = (2 2⍴1 2 3 4)+.,2 2⍴1 2 3 4
 > gnu:  7  9
 > gnu: 11 13
+> dyalog:  3 4  3 6
+> dyalog:  7 4  7 6
 = ⍴(2 2⍴1 2 3 4)+.,2 2⍴1 2 3 4
 > gnu: 2 2
+> dyalog: 2 2
 = (⍳3)+.×2 3⍴⍳6
 > gnu: <error>
+> dyalog: <error>
 = (2 3⍴⍳6)∧.=2 3⍴⍳6
 > gnu: <error>
+> dyalog: <error>
 = +.×⍳3
 > gnu: <error>
+> dyalog: <error>
 = 2 3∘.×1 2
 > gnu: 2 4
 > gnu: 3 6
+> dyalog: 2 4
+> dyalog: 3 6
 = 2.5×2
 > gnu: 5
+> dyalog: 5
 = (2 3⍴⍳6)+.×⍉2 3⍴⍳6
 > gnu: 14 32
 > gnu: 32 77
+> dyalog: 14 32
+> dyalog: 32 77
 = ⍉2 3⍴⍳6
 > gnu: 1 4
 > gnu: 2 5
 > gnu: 3 6
+> dyalog: 1 4
+> dyalog: 2 5
+> dyalog: 3 6
 = (3 2⍴⍳6)+.×⍨2 3⍴⍳6
 > gnu: 22 28
 > gnu: 49 64
+> dyalog: 22 28
+> dyalog: 49 64
 = +/,(40 40⍴⍳1600)+.×40 40⍴⍳1600
 > gnu: 41352336000
+> dyalog: 4.1352336E10
 = +/,(0.5×40 40⍴⍳1600)+.×0.25×40 40⍴⍳1600
 > gnu: 5169042000
+> dyalog: 5169042000

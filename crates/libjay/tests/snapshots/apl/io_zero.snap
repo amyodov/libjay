@@ -22,45 +22,68 @@
 @ io=0
 = ⍳5
 > gnu: 0 1 2 3 4
+> dyalog: 0 1 2 3 4
 = ⍸1 0 1 1
 > gnu: 0 2 3
+> dyalog: 0 2 3
 = ⍸2 2⍴1 0 0 1
 > gnu:  0 0  1 1
+> dyalog:  0 0  1 1
 = 0 10 20⍸5 15 25
 > gnu: 0 1 2
+> dyalog: 0 1 2
 = 'abcde'[0]
 > gnu: a
+> dyalog: a
 = 'abcde'[2]
 > gnu: c
+> dyalog: c
 = 2⌷⍳5
 > gnu: 2
+> dyalog: 2
 = +/[0]2 3⍴⍳6
 > gnu: 3 5 7
+> dyalog: 3 5 7
 = ⌽[0]2 3⍴⍳6
 > gnu: 3 4 5
 > gnu: 0 1 2
+> dyalog: 3 4 5
+> dyalog: 0 1 2
 = 1 0 1 0⊂'abcd'
 > gnu:  a c
+> dyalog:  ab  cd
 = ⍳0
 > gnu:
+> dyalog:
 = ⍋3 1 4 1 5
 > gnu: 1 3 0 2 4
+> dyalog: 1 3 0 2 4
 = ⍒3 1 4 1 5
 > gnu: 4 2 0 1 3
+> dyalog: 4 2 0 1 3
 = 1 2 3⍳2
 > gnu: 1
+> dyalog: 1
 = 1 2 3⍳9
 > gnu: 3
+> dyalog: 3
 = 'abc'⍳'cab'
 > gnu: 2 0 1
+> dyalog: 2 0 1
 = 2 3⍴⍳6
 > gnu: 0 1 2
 > gnu: 3 4 5
+> dyalog: 0 1 2
+> dyalog: 3 4 5
 = +/2 3⍴⍳6
 > gnu: 3 12
+> dyalog: 3 12
 = ⍋2 3⍴1 2 1 1 1 3
 > gnu: 1 0
+> dyalog: 1 0
 = ⍒'hello'
 > gnu: 4 2 3 0 1
+> dyalog: 4 2 3 0 1
 = ⍳3
 > gnu: 0 1 2
+> dyalog: 0 1 2

@@ -21,119 +21,179 @@
 
 = ⍴⊂1 2 3
 > gnu:
+> dyalog:
 = ≡⊂1 2 3
 > gnu: 2
+> dyalog: 2
 = ⊂5
 > gnu: 5
+> dyalog: 5
 = ≡⊂5
 > gnu: 0
+> dyalog: 0
 = ≡⊂⊂1 2
 > gnu: 3
+> dyalog: 3
 = ⊃'ab' 'cd'
 > gnu: ab
 > gnu: cd
+> dyalog: ab
 = ⍴⊃'ab' 'cd'
 > gnu: 2 2
+> dyalog: 2
 = ⊃3
 > gnu: 3
+> dyalog: 3
 = ⊃⊂1 2
 > gnu: 1 2
+> dyalog: 1 2
 = ⊃(1 2)(3 4 5)
 > gnu: 1 2 0
 > gnu: 3 4 5
+> dyalog: 1 2
 = ⍴⊃(1 2)(3 4 5)
 > gnu: 2 3
+> dyalog: 2
 = ⍴⊃⍳0
 > gnu: 0
+> dyalog:
 = ⊃'abc'
 > gnu: abc
+> dyalog: a
 = 2×¨1 2 3
 > gnu: 2 4 6
+> dyalog: 2 4 6
 = ≢¨'ab' 'cde'
 > gnu: 2 3
+> dyalog: 2 3
 = +/¨(1 2)(3 4)
 > gnu: 3 7
+> dyalog: 3 7
 = ∊⍴¨'ab' 'cde'
 > gnu: 2 3
+> dyalog: 2 3
 = ∊1+¨(1 2)(3 4)
 > gnu: 2 3 4 5
+> dyalog: 2 3 4 5
 = ∊(1 2)+¨(1 2)(3 4)
 > gnu: 2 3 5 6
+> dyalog: 2 3 5 6
 = ⍴(1 2)(3 4)
 > gnu: 2
+> dyalog: 2
 = ≡(1 2)(3 4)
 > gnu: 2
+> dyalog: 2
 = ⍴'ab' 'cd'
 > gnu: 2
+> dyalog: 2
 = ≡'ab' 'cd'
 > gnu: 2
+> dyalog: 2
 = ⍴1 2 3
 > gnu: 3
+> dyalog: 3
 = ≡1 2 3
 > gnu: 1
+> dyalog: 1
 = ⍴1 (2 3)
 > gnu: 2
+> dyalog: 2
 = ⍴1 2 (3 4)
 > gnu: 3
+> dyalog: 3
 = ⍴'ab' 1 2
 > gnu: 3
+> dyalog: 3
 = ∊(1 2)(3 4 5)
 > gnu: 1 2 3 4 5
+> dyalog: 1 2 3 4 5
 = ∊'ab' 'cd'
 > gnu: abcd
+> dyalog: abcd
 = ∊2 3⍴⍳6
 > gnu: 1 2 3 4 5 6
+> dyalog: 1 2 3 4 5 6
 = ⍴∊5
 > gnu: 1
+> dyalog: 1
 = ∊(1 2)((3 4)(5 6))
 > gnu: 1 2 3 4 5 6
+> dyalog: 1 2 3 4 5 6
 = ≡1
 > gnu: 0
+> dyalog: 0
 = ≡'abc'
 > gnu: 1
+> dyalog: 1
 = ≡1(2(3 4))
 > gnu: 3
+> dyalog: ¯3
 = ↑(1 2)(3 4)
 > gnu: 1 2
+> dyalog: 1 2
+> dyalog: 3 4
 = ↑1 2 3
 > gnu: 1
+> dyalog: 1 2 3
 = ⍴↑1 2 3
 > gnu:
+> dyalog: 3
 = ↑2 3⍴⍳6
 > gnu: 1
+> dyalog: 1 2 3
+> dyalog: 4 5 6
 = ↑⍳0
 > gnu: 0
+> dyalog:
 = ⍴2 2⍴(1 2)(3 4)(5 6)(7 8)
 > gnu: 2 2
+> dyalog: 2 2
 = ≡2 2⍴(1 2)(3 4)(5 6)(7 8)
 > gnu: 2
+> dyalog: 2
 = ∊2 2⍴(1 2)(3 4)(5 6)(7 8)
 > gnu: 1 2 3 4 5 6 7 8
+> dyalog: 1 2 3 4 5 6 7 8
 = ⍴∪(1 2)(3 4)(1 2)
 > gnu: 2
+> dyalog: 2
 = ∊∪(1 2)(3 4)(1 2)
 > gnu: 1 2 3 4
+> dyalog: 1 2 3 4
 = ⍴,⊂1 2
 > gnu: 1
+> dyalog: 1
 = ∊⌽(1 2)(3 4)
 > gnu: 3 4 1 2
+> dyalog: 3 4 1 2
 = ⍴2↑(1 2)(3 4)(5 6)
 > gnu: 2
+> dyalog: 2
 = ∊2↑(1 2)(3 4)(5 6)
 > gnu: 1 2 3 4
+> dyalog: 1 2 3 4
 = ⍴1↓(1 2)(3 4)(5 6)
 > gnu: 2
+> dyalog: 2
 = (1 2)(3 4)⍳⊂3 4
 > gnu: 2
+> dyalog: 2
 = (1 2)(3 4)⍳(3 4)
 > gnu: 3 3
+> dyalog: 3 3
 = (1 2)∊(1 2)(3 4)
 > gnu: 0 0
+> dyalog: 0 0
 = 'ab' 'cd'∊'ab' 'xy'
 > gnu: 1 0
+> dyalog: 1 0
 = ≢(1 2)(3 4)(5 6)
 > gnu: 3
+> dyalog: 3
 = ⍴(⊂1 2),⊂3 4
 > gnu: 2
+> dyalog: 2
 = ∊(⊂1 2),⊂3 4
 > gnu: 1 2 3 4
+> dyalog: 1 2 3 4

@@ -369,23 +369,27 @@ definitions themselves — `3 : '...'`, `4 : '...'`, `{{ }}` — work; see
 The reference is GNU APL 2.0, which embodies the APL2/ISO line; the
 semantics libjay implements are that line, verified differentially against
 it (`crates/libjay/tests/oracle_apl.rs`, corpus in
-`crates/libjay/tests/corpus/apl/`). Every Dyalog-side cell below was written
-from Dyalog's published documentation, not from a live comparison.
+`crates/libjay/tests/corpus/apl/`). Every Dyalog-side cell below was originally written from Dyalog's
+published documentation; as of 2026-08-22 the recording below has
+checked them against a running Dyalog.
 
-Dyalog IS recorded now, in its own `dyalog:` column of the same snapshots
-(docs/testing.md), on the recording machine only. Those recordings gate
-nothing: a difference from Dyalog is the backlog a future Dyalog dialect
-would have to work through, and `jay-corpus stats apl --dialect-diff` is
-what measures it. `corpus/apl/dyalog-probe.txt` is the theme aimed at the
-table below. Where a recording ever contradicts a cell here, the recording
-wins and the cell changes.
+Dyalog IS recorded now: Dyalog 20.0 (the official Docker image, run as
+a quarantined black box like every oracle, on the recording machine
+only) answered the whole corpus on 2026-08-22 into its own `dyalog:`
+column of the same snapshots (docs/testing.md). libjay agrees with it
+on 1224 of 1363 expressions; the 139 differences are the measured
+backlog of a future Dyalog dialect, never a gate, and
+`jay-corpus stats apl --dialect-diff` lists every one.
+`corpus/apl/dyalog-probe.txt` is the theme aimed at the table below.
+Where a recording contradicts a cell here, the recording wins and the
+cell changes.
 
 Every place the two lines are known to diverge, and which one libjay
 follows today. Rows marked "verified against the oracle" were re-checked
 directly against `LIBJAY_ORACLE_APL` while writing this table, not just
 read off an old note:
 
-| Feature | APL2 / GNU APL (oracle) | Dyalog (published docs, not run) | libjay follows |
+| Feature | APL2 / GNU APL (oracle) | Dyalog 20.0 (recorded) | libjay follows |
 |---|---|---|---|
 | monadic `↑` | first: the first element of the ravel, disclosed | mix / disclose | GNU APL — `↑1 2 3` is `1` |
 | monadic `⊃` | disclose / mix: items combined into one array, filled | first: pick the first item, disclosed | GNU APL — `⊃(1 2)(3 4)` mixes to a 2×2 array |
@@ -407,7 +411,9 @@ follows the published rule — which happens to be Dyalog's rule too in all
 three cases — over the oracle's quirk. Everywhere else in this codebase,
 GNU APL wins: these three are pinned as deliberate exceptions in
 `crates/libjay/tests/corpus/apl/divergences.txt` precisely so a silent
-convergence gets noticed. The dyadic `⌷` divergence between GNU APL and
+convergence gets noticed. The 2026-08-22 recording confirms all three:
+Dyalog answers `8` to the `⍺←` sentence, `0 2 2` to `¯1 2/1 2`, and
+refuses to order complex numbers — libjay's own three answers. The dyadic `⌷` divergence between GNU APL and
 Dyalog runs the other way from what the glyph table might suggest: it is
 GNU APL, not libjay, that refuses Dyalog's enclosed-index-vector form.
 

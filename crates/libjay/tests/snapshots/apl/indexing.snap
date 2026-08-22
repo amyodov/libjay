@@ -21,110 +21,169 @@
 
 = ⍸1 0 1 1
 > gnu: 1 3 4
+> dyalog: 1 3 4
 = ⍸0 1 0 2
 > gnu: 2 4 4
+> dyalog: 2 4 4
 = ⍸0 0 0
 > gnu:
+> dyalog:
 = ⍸2 3
 > gnu: 1 1 2 2 2
+> dyalog: 1 1 2 2 2
 = ⍸2 2⍴1 0 0 1
 > gnu:  1 1  2 2
+> dyalog:  1 1  2 2
 = ⍴⍸1 0 1 1
 > gnu: 3
+> dyalog: 3
 = ⍸1 0 1.5
 > gnu: <error>
+> dyalog: <error>
 = 0 10 20⍸5 15 25
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = (⍳5)[2]
 > gnu: 2
+> dyalog: 2
 = (⍳5)[2 3]
 > gnu: 2 3
+> dyalog: 2 3
 = A←3 3⍴⍳9 ⋄ A[2;3]
 > gnu: 6
+> dyalog: 6
 = A←3 3⍴⍳9 ⋄ A[2;]
 > gnu: 4 5 6
+> dyalog: 4 5 6
 = A←3 3⍴⍳9 ⋄ A[;2]
 > gnu: 2 5 8
+> dyalog: 2 5 8
 = A←3 3⍴⍳9 ⋄ A[1 2;2 3]
 > gnu: 2 3
 > gnu: 5 6
+> dyalog: 2 3
+> dyalog: 5 6
 = A←3 3⍴⍳9 ⋄ A[;]
 > gnu: 1 2 3
 > gnu: 4 5 6
 > gnu: 7 8 9
+> dyalog: 1 2 3
+> dyalog: 4 5 6
+> dyalog: 7 8 9
 = A←3 3⍴⍳9 ⋄ ⍴A[1 2;]
 > gnu: 2 3
+> dyalog: 2 3
 = A←3 3⍴⍳9 ⋄ A[2 2⍴1 2 2 1;1]
 > gnu: 1 4
 > gnu: 4 1
+> dyalog: 1 4
+> dyalog: 4 1
 = 'abcde'[2 4]
 > gnu: bd
+> dyalog: bd
 = ((⍳5)[2])+1
 > gnu: 3
+> dyalog: 3
 = +/(⍳5)[2 3]
 > gnu: 5
+> dyalog: 5
 = (⍳5)[6]
 > gnu: <error>
+> dyalog: <error>
 = (⍳5)[0]
 > gnu: <error>
+> dyalog: <error>
 = A←3 3⍴⍳9 ⋄ A[2]
 > gnu: <error>
+> dyalog: <error>
 = 2⌷⍳5
 > gnu: 2
+> dyalog: 2
 = 2 3⌷3 3⍴⍳9
 > gnu: 6
+> dyalog: 6
 = 2⌷'abcde'
 > gnu: b
+> dyalog: b
 = 2⌷3 3⍴⍳9
 > gnu: <error>
+> dyalog: 4 5 6
 = 1 2 3⌷3 3⍴⍳9
 > gnu: <error>
+> dyalog: <error>
 = +/[1]2 3⍴⍳6
 > gnu: 5 7 9
+> dyalog: 5 7 9
 = +/[2]2 3⍴⍳6
 > gnu: 6 15
+> dyalog: 6 15
 = +⌿[1]2 3⍴⍳6
 > gnu: 5 7 9
+> dyalog: 5 7 9
 = ⌽[1]2 3⍴⍳6
 > gnu: 4 5 6
 > gnu: 1 2 3
+> dyalog: 4 5 6
+> dyalog: 1 2 3
 = ⌽[2]2 3⍴⍳6
 > gnu: 3 2 1
 > gnu: 6 5 4
+> dyalog: 3 2 1
+> dyalog: 6 5 4
 = ⊖[2]2 3⍴⍳6
 > gnu: 3 2 1
 > gnu: 6 5 4
+> dyalog: 3 2 1
+> dyalog: 6 5 4
 = +\\[1]2 3⍴⍳6
 > gnu: 1 2 3
 > gnu: 5 7 9
+> dyalog: 1 2 3
+> dyalog: 5 7 9
 = +\\[2]2 3⍴⍳6
 > gnu: 1 3  6
 > gnu: 4 9 15
+> dyalog: 1 3  6
+> dyalog: 4 9 15
 = 1 1 0 1⊂'abcd'
 > gnu:  ab d
+> dyalog:  a  bc  d
 = 1 0 0 1⊂'abcd'
 > gnu:  a d
+> dyalog:  abc  d
 = 0 1 0 1⊂'abcd'
 > gnu:  b d
+> dyalog:  bc  d
 = 1 1 1 1⊂'abcd'
 > gnu:  abcd
+> dyalog:  a  b  c  d
 = 0 0 0 0⊂'abcd'
 > gnu:
+> dyalog:
 = 2 0 1 0⊂'abcd'
 > gnu:  a c
+> dyalog:    ab  cd
 = 1 2 0 1⊂'abcd'
 > gnu:  a b d
+> dyalog:  a    bc  d
 = 2 1 0 1⊂'abcd'
 > gnu:  ab d
+> dyalog:    a  bc  d
 = 1 1 2 2⊂'abcd'
 > gnu:  ab cd
+> dyalog:  a  b    c    d
 = 1 0 1 0⊂⍳4
 > gnu:  1  3
+> dyalog:  1 2  3 4
 = ≢1 0 1 0⊂'abcd'
 > gnu: 2
+> dyalog: 2
 = ⍴¨1 1 0 1⊂'abcd'
 > gnu:  2  1
+> dyalog:  1  2  1
 = 1 0 1⊂'abcd'
 > gnu: <error>
+> dyalog:  ab  cd
 = ¯1 0 1 0⊂'abcd'
 > gnu: <error>
+> dyalog: <error>

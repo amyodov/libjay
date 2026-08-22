@@ -92,6 +92,11 @@ rustfmt.toml; a blanket format rewrites the whole codebase.
   `~/projects/libjay-oracles/j/j64/jconsole -jprofile /dev/null`
   (LIBJAY_ORACLE_J), GNU APL at
   `~/projects/libjay-oracles/gnu-apl/install/bin/apl` (LIBJAY_ORACLE_APL).
+  Dyalog 20.0 runs from the official Docker image through
+  `~/projects/libjay-oracles/dyalog/dyalog-docker.sh` (LIBJAY_ORACLE_DYALOG,
+  with LIBJAY_ORACLE_DYALOG_STDIN=1 and LIBJAY_ORACLE_DYALOG_FLAGS set
+  empty — the wrapper carries its own flags and filters the session echo
+  off stderr).
   Collecting and testing are separate: `cargo run -p libjay-devtools --
   record <j|apl>` runs an oracle over tests/corpus/<lang>/*.txt and records
   the answers into tests/snapshots/<lang>/*.snap; `cargo test`

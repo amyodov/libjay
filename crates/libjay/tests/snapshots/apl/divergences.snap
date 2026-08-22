@@ -23,187 +23,237 @@
 ? monadic ÷0 is ∞ here, DOMAIN ERROR there
 < ∞
 > gnu: <error>
+> dyalog: <error>
 = ÷0 2 4
 ? monadic ÷0 is ∞ here, DOMAIN ERROR there
 < ∞ 0.5 0.25
 > gnu: <error>
+> dyalog: <error>
 = ⍟0
 ? log 0 is ¯∞ here, DOMAIN ERROR there
 < ¯∞
 > gnu: <error>
+> dyalog: <error>
 = 1 2⊖3 4⍴⍳12
 ? left argument is per-axis here, per-column there
 <  7  8 5  6
 < 11 12 9 10
 <  3  4 1  2
 > gnu: <error>
+> dyalog: <error>
 = 1 ¯1 2 0⊖3 4⍴⍳12
 ? left argument is per-axis here, per-column there
 < <error>
 > gnu: 5 10 11  4
 > gnu: 9  2  3  8
 > gnu: 1  6  7 12
+> dyalog: 5 10 11  4
+> dyalog: 9  2  3  8
+> dyalog: 1  6  7 12
 = ∪2 3⍴1 2 3 1 2 3
 ? nub takes items of any rank here, vectors only there
 < 1 2 3
 > gnu: <error>
+> dyalog: 1 2 3
 = 8○3
 ? principal branch here, the lower one there
 < 0J3.16228
 > gnu: 0J¯3.16227766
+> dyalog: 0J3.16227766
 = ¯8○3
 ? principal branch here, the lower one there
 < 0J¯3.16228
 > gnu: 0J3.16227766
+> dyalog: 0J¯3.16227766
 = ¯2○2
 ? principal branch here, the lower one there
 < 0J1.31696
 > gnu: 0J¯1.316957897
+> dyalog: 0J1.316957897
 = 3J4<1J2
 ? no order on complex here, lexicographic there
 < <error>
 > gnu: 0
+> dyalog: <error>
 = 0J1<1
 ? no order on complex here, lexicographic there
 < <error>
 > gnu: 1
+> dyalog: <error>
 = 3J4≤3J4
 ? no order on complex here, lexicographic there
 < <error>
 > gnu: 1
+> dyalog: <error>
 = ⍋3J4 1J1
 ? complex grading here, a domain error there
 < 2 1
 > gnu: <error>
+> dyalog: 2 1
 = 1J1=1.0000000001J1
 ? ⎕CT on the magnitude here, a much looser threshold there
 < 0
 > gnu: 1
+> dyalog: 0
 = 1 2 3⋄4 5
 ? only the last sentence has a value here, every one prints there
 < 4 5
 > gnu: 1 2 3
 > gnu: 4 5
+> dyalog: 1 2 3
+> dyalog: 4 5
 = +\\2 1⍴⍳12
 ? scan keeps the shape here, drops a length-1 axis there
 < 1
 < 2
 > gnu: 1 2
+> dyalog: 1
+> dyalog: 2
 = ⌈/⍳0
 ? the neutral cell of ⌈ is ¯∞ here, ¯1.7976E308 there
 < ¯∞
 > gnu: ¯1.7976E308
+> dyalog: ¯1.797693135E308
 = ⌊/⍳0
 ? the neutral cell of ⌊ is ∞ here, 1.7976E308 there
 < ∞
 > gnu: 1.7976E308
+> dyalog: 1.797693135E308
 = !¯1
 ? the factorial of a negative integer is ∞ here, DOMAIN ERROR there
 < ∞
 > gnu: <error>
+> dyalog: <error>
 = ¯7○1
 ? artanh 1 is ∞ here, DOMAIN ERROR there
 < ∞
 > gnu: <error>
+> dyalog: <error>
 = ⍴+\\,5
 ? scan keeps the shape here, drops a length-1 axis there
 < 1
 > gnu:
+> dyalog: 1
 = ⍴⍕(1 2)(3 4)
 ? one space between items here, two there
 < 9
 > gnu: 10
+> dyalog: 10
 = ⍋2 (1+1E¯14) 1
 ? tolerant there, exact here
 < 3 2 1
 > gnu: 2 3 1
+> dyalog: 3 2 1
 = F←{⍺←10 ⋄ ⍺+⍵} ⋄ 3 F 5
 ? ⍺← is a default here, an unconditional assignment there
 < 8
 > gnu: 15
+> dyalog: 8
 = F←{⍵+1 ⋄ ⍵+2} ⋄ F 5
 ? only the last statement is displayed here, every one of them there
 < 7
 > gnu: 6
 > gnu: 7
+> dyalog: 6
 = ¯1 2/1 2
 ? a negative count inside a vector is legal here, a length error there
 < 0 2 2
 > gnu: <error>
+> dyalog: 0 2 2
 = 1 ¯2/1 2
 ? a negative count inside a vector is legal here, a length error there
 < 1 0 0
 > gnu: <error>
+> dyalog: 1 0 0
 = (+/÷≢)1 2 3 4
 ? a train here, a SYNTAX ERROR there
 < 2.5
 > gnu: <error>
+> dyalog: 2.5
 = (⌈/-⌊/)3 1 4 1 5
 ? a train here, a SYNTAX ERROR there
 < 4
 > gnu: <error>
+> dyalog: 4
 = 1 2(⊣,⊢)3 4
 ? a train here, a SYNTAX ERROR there
 < 1 2 3 4
 > gnu: <error>
+> dyalog: 1 2 3 4
 = F←+/÷≢ ⋄ F 1 2 3 4
 ? a named tacit function here, a SYNTAX ERROR there
 < 2.5
 > gnu: <error>
+> dyalog: 2.5
 = F←+/ ⋄ F 1 2 3
 ? a named derived function here, a SYNTAX ERROR there
 < 6
 > gnu: <error>
+> dyalog: 6
 = 'a'<'b'
 ? no order on characters here, the collating order there
 < <error>
 > gnu: 1
+> dyalog: <error>
 = 'a'≤'b'
 ? no order on characters here, the collating order there
 < <error>
 > gnu: 1
+> dyalog: <error>
 = 'a'<5
 ? no order between a character and a number here, one there
 < <error>
 > gnu: 1
+> dyalog: <error>
 = 5<'a'
 ? no order between a character and a number here, one there
 < <error>
 > gnu: 0
+> dyalog: <error>
 = (⍳0)⊥2 3⍴⍳6
 ? zeros here, a DOMAIN ERROR on display there
 < 0 0 0
 > gnu: <error>
+> dyalog: <error>
 = (2 0⍴0)⊥⍳0
 ? zeros here, a DOMAIN ERROR on display there
 < 0 0
 > gnu: <error>
+> dyalog: 0 0
 = +/⍣0 ⍳3
 ? a derived left operand here, a SYNTAX ERROR there
 < 1 2 3
 > gnu: <error>
+> dyalog: 1 2 3
 = ⌈¨⍣2 ⍳3
 ? a derived left operand here, a SYNTAX ERROR there
 < 1 2 3
 > gnu: <error>
+> dyalog: 1 2 3
 = +/⍤1⊢2 3⍴⍳6
 ? a derived left operand here, a SYNTAX ERROR there
 < 6 15
 > gnu: <error>
+> dyalog: 6 15
 = ⊣1 2 3
 ? identity here, no result at all there
 < 1 2 3
 > gnu:
+> dyalog: 1 2 3
 = ⊣'abc'
 ? identity here, no result at all there
 < abc
 > gnu:
+> dyalog: abc
 = ⊣2 3⍴⍳6
 ? identity here, no result at all there
 < 1 2 3
 < 4 5 6
 > gnu:
+> dyalog: 1 2 3
+> dyalog: 4 5 6
 = ⍬≡0⍴⊂⍬
 ? prototypes of empty nested arrays are not compared here
 < 1
 > gnu: 0
+> dyalog: 0

@@ -1878,3 +1878,29 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   divergence recorded in tests/input.rs. The boolean cases in the sparse
   corpus therefore compute their booleans (`1 0 1 0 = 1`) instead of writing
   them down.
+
+## 2026-08-22 — Dyalog oracle: the Docker image, and the first recording
+
+Dyalog 20.0 runs as the third oracle, from the official `dyalog/dyalog`
+Docker image (amd64+arm64; free for non-commercial use, accepted by use) —
+which sidesteps 20.0 having dropped Intel macOS. The interpreter runs in
+piped session mode (`-b -q`): `-script` and `dyalogscript` do not display
+bare expression values, the session does. A wrapper at
+`~/projects/libjay-oracles/dyalog/dyalog-docker.sh` (quarantine dir, never
+the repository) feeds the script on stdin and filters stderr, keeping real
+errors: the session echoes input there six-spaces-indented, and the image
+prints `Rebuilding user command cache... done` there on every start — the
+first full recording read that line as a refusal and recorded 1325 errors
+of 1377 before the filter caught it. The recorder's assumptions in
+`dyalog.rs` held otherwise.
+
+First clean recording, whole APL corpus, 1363 expressions: libjay agrees
+with Dyalog on 1224, differs on 139 — the measured backlog of the future
+dialect, gating nothing. The recording confirms all three places libjay
+follows the published rule over GNU APL's own behaviour (`⍺←` as a
+default records 8, `¯1 2/1 2` records 0 2 2, complex ordering refused):
+each was a prediction until today. status.md gained "APL — the Dyalog
+line": the queue of Dyalog features libjay does not ship (`⊇`, dfn
+error-guards `::`, `f⍣¯n`, namespaces, the utility quads), with two
+diagnostics gaps recorded — `⊇` parses as "unknown symbol" and `::` as a
+bare syntax error where the contract wants the named promise.

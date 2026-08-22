@@ -21,91 +21,136 @@
 
 = ≠ 1 2 1 3
 > gnu: 1 1 0 1
+> dyalog: 1 1 0 1
 = ≠ 'abca'
 > gnu: 1 1 1 0
+> dyalog: 1 1 1 0
 = 1 0 1 ⍲ 0 1 1
 > gnu: 1 1 0
+> dyalog: 1 1 0
 = 1 0 1 ⍱ 0 1 1
 > gnu: 0 0 0
+> dyalog: 0 0 0
 = 0 0 ⍲ 0 1
 > gnu: 1 1
+> dyalog: 1 1
 = 1 1 ⍱ 0 0
 > gnu: 0 0
+> dyalog: 0 0
 = 1 2 3 4 ~ 2 4
 > gnu: 1 3
+> dyalog: 1 3
 = 'hello' ~ 'l'
 > gnu: heo
+> dyalog: heo
 = 1 2 3 ~ 4 5
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = 1 2 3 ∪ 3 4 5
 > gnu: 1 2 3 4 5
+> dyalog: 1 2 3 4 5
 = 'abc' ∪ 'bcd'
 > gnu: abcd
+> dyalog: abcd
 = 1 2 3 ∪ 1 2 3
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = 1 2 3 ∩ 2 3 4
 > gnu: 2 3
+> dyalog: 2 3
 = 'abc' ∩ 'bcd'
 > gnu: bc
+> dyalog: bc
 = 1 2 3 ∩ 4 5
 > gnu:
+> dyalog:
 = 'abc' ⍷ 'xabcabc'
 > gnu: 0 1 0 0 1 0 0
+> dyalog: 0 1 0 0 1 0 0
 = 1 2 ⍷ 1 2 3 1 2
 > gnu: 1 0 0 1 0
+> dyalog: 1 0 0 1 0
 = 'xy' ⍷ 'abc'
 > gnu: 0 0 0
+> dyalog: 0 0 0
 = 'abcd' ⍷ 'ab'
 > gnu: 0 0
+> dyalog: 0 0
 = 2 ⊃ (1 2)(3 4)
 > gnu: 3 4
+> dyalog: 3 4
 = 1 ⊃ (1 2)(3 4)
 > gnu: 1 2
+> dyalog: 1 2
 = (⊂1 2) ⊃ 2 3 ⍴ ⍳ 6
 > gnu: 2
+> dyalog: 2
 = (⊂2 3) ⊃ 2 3 ⍴ ⍳ 6
 > gnu: 6
+> dyalog: 6
 = 1 0 1 \\ 1 2
 > gnu: 1 0 2
+> dyalog: 1 0 2
 = 1 0 1 ⍀ 1 2
 > gnu: 1 0 2
+> dyalog: 1 0 2
 = 1 0 0 1 \\ 'ab'
 > gnu: a  b
+> dyalog: a  b
 = 1 1 1 \\ 1 2 3
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = 0 0 \\ ⍳ 0
 > gnu: 0 0
+> dyalog: 0 0
 = ⍴⍬
 > gnu: 0
+> dyalog: 0
 = ≢⍬
 > gnu: 0
+> dyalog: 0
 = ⍎'2+2'
 > gnu: 4
+> dyalog: 4
 = ⍎'⍳3'
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = ⍎'⌽⍳4'
 > gnu: 4 3 2 1
+> dyalog: 4 3 2 1
 = ⍎'1 2 3+10'
 > gnu: 11 12 13
+> dyalog: 11 12 13
 = ⎕IO
 > gnu: 1
+> dyalog: 1
 = ⎕UCS 65
 > gnu: A
+> dyalog: A
 = ⎕UCS 'abc'
 > gnu: 97 98 99
+> dyalog: 97 98 99
 = ⎕UCS 955
 > gnu: λ
+> dyalog: λ
 = ⎕UCS 65 66 67
 > gnu: ABC
+> dyalog: ABC
 = (2 3⍴⍳6) , 1 2
 > gnu: 1 2 3 1
 > gnu: 4 5 6 2
+> dyalog: 1 2 3 1
+> dyalog: 4 5 6 2
 = (2 2⍴⍳4) ⍪ 1 2 3
 > gnu: <error>
+> dyalog: <error>
 @ io=0
 = ⎕IO
 > gnu: 0
+> dyalog: 0
 = ⍎'⍳3'
 > gnu: 0 1 2
+> dyalog: 0 1 2
 = 1 0 1 \\ 1 2
 > gnu: 1 0 2
+> dyalog: 1 0 2

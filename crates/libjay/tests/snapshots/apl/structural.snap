@@ -21,31 +21,46 @@
 
 = ⍳5
 > gnu: 1 2 3 4 5
+> dyalog: 1 2 3 4 5
 = ⍳0
 > gnu:
+> dyalog:
 = ⍴⍳0
 > gnu: 0
+> dyalog: 0
 = 2 3⍴⍳6
 > gnu: 1 2 3
 > gnu: 4 5 6
+> dyalog: 1 2 3
+> dyalog: 4 5 6
 = 3 2⍴1 2 3
 > gnu: 1 2
 > gnu: 3 1
 > gnu: 2 3
+> dyalog: 1 2
+> dyalog: 3 1
+> dyalog: 2 3
 = ⍴0 3⍴1
 > gnu: 0 3
+> dyalog: 0 3
 = 0 3⍴1
 > gnu:
+> dyalog:
 = ⍴2 3 4⍴⍳24
 > gnu: 2 3 4
+> dyalog: 2 3 4
 = ⍴⍳5
 > gnu: 5
+> dyalog: 5
 = ⍴5
 > gnu:
+> dyalog:
 = ⍴'a'
 > gnu:
+> dyalog:
 = ⍴'abc'
 > gnu: 3
+> dyalog: 3
 = 2 3 4⍴⍳24
 > gnu:  1  2  3  4
 > gnu:  5  6  7  8
@@ -54,12 +69,24 @@
 > gnu: 13 14 15 16
 > gnu: 17 18 19 20
 > gnu: 21 22 23 24
+> dyalog:  1  2  3  4
+> dyalog:  5  6  7  8
+> dyalog:  9 10 11 12
+> dyalog:
+> dyalog: 13 14 15 16
+> dyalog: 17 18 19 20
+> dyalog: 21 22 23 24
 = 2 2 2⍴⍳8
 > gnu: 1 2
 > gnu: 3 4
 > gnu:
 > gnu: 5 6
 > gnu: 7 8
+> dyalog: 1 2
+> dyalog: 3 4
+> dyalog:
+> dyalog: 5 6
+> dyalog: 7 8
 = 2 2 1 2⍴⍳8
 > gnu: 1 2
 > gnu:
@@ -69,20 +96,36 @@
 > gnu: 5 6
 > gnu:
 > gnu: 7 8
+> dyalog: 1 2
+> dyalog:
+> dyalog: 3 4
+> dyalog:
+> dyalog:
+> dyalog: 5 6
+> dyalog:
+> dyalog: 7 8
 = 1 2 3⍳2
 > gnu: 2
+> dyalog: 2
 = 1 2 3⍳4
 > gnu: 4
+> dyalog: 4
 = 1 2 3⍳2 3 9
 > gnu: 2 3 4
+> dyalog: 2 3 4
 = 'abc'⍳'cab'
 > gnu: 3 1 2
+> dyalog: 3 1 2
 = 5⍳6
 > gnu: 2
+> dyalog: <error>
 = ⍉2 3⍴⍳6
 > gnu: 1 4
 > gnu: 2 5
 > gnu: 3 6
+> dyalog: 1 4
+> dyalog: 2 5
+> dyalog: 3 6
 = ⍉2 3 4⍴⍳24
 > gnu:  1 13
 > gnu:  5 17
@@ -99,180 +142,295 @@
 > gnu:  4 16
 > gnu:  8 20
 > gnu: 12 24
+> dyalog:  1 13
+> dyalog:  5 17
+> dyalog:  9 21
+> dyalog:
+> dyalog:  2 14
+> dyalog:  6 18
+> dyalog: 10 22
+> dyalog:
+> dyalog:  3 15
+> dyalog:  7 19
+> dyalog: 11 23
+> dyalog:
+> dyalog:  4 16
+> dyalog:  8 20
+> dyalog: 12 24
 = ⍉⍳3
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = ⍉5
 > gnu: 5
+> dyalog: 5
 = 2↑5 6 7 8
 > gnu: 5 6
+> dyalog: 5 6
 = ¯2↑5 6 7 8
 > gnu: 7 8
+> dyalog: 7 8
 = 6↑1 2 3
 > gnu: 1 2 3 0 0 0
+> dyalog: 1 2 3 0 0 0
 = ¯5↑1 2 3
 > gnu: 0 0 1 2 3
+> dyalog: 0 0 1 2 3
 = 1 2↑3 3⍴⍳9
 > gnu: 1 2
+> dyalog: 1 2
 = 2↓5 6 7 8
 > gnu: 7 8
+> dyalog: 7 8
 = ¯1↓5 6 7 8
 > gnu: 5 6 7
+> dyalog: 5 6 7
 = 5↓1 2 3
 > gnu:
+> dyalog:
 = 1 1↓3 3⍴⍳9
 > gnu: 5 6
 > gnu: 8 9
+> dyalog: 5 6
+> dyalog: 8 9
 = ⌽1 2 3 4
 > gnu: 4 3 2 1
+> dyalog: 4 3 2 1
 = ⌽3 4⍴⍳12
 > gnu:  4  3  2 1
 > gnu:  8  7  6 5
 > gnu: 12 11 10 9
+> dyalog:  4  3  2 1
+> dyalog:  8  7  6 5
+> dyalog: 12 11 10 9
 = ⊖3 4⍴⍳12
 > gnu: 9 10 11 12
 > gnu: 5  6  7  8
 > gnu: 1  2  3  4
+> dyalog: 9 10 11 12
+> dyalog: 5  6  7  8
+> dyalog: 1  2  3  4
 = ⌽'abc'
 > gnu: cba
+> dyalog: cba
 = ⌽2 3⍴'abcdef'
 > gnu: cba
 > gnu: fed
+> dyalog: cba
+> dyalog: fed
 = ⊖2 3⍴'abcdef'
 > gnu: def
 > gnu: abc
+> dyalog: def
+> dyalog: abc
 = 1⌽1 2 3 4 5
 > gnu: 2 3 4 5 1
+> dyalog: 2 3 4 5 1
 = ¯1⌽1 2 3 4 5
 > gnu: 5 1 2 3 4
+> dyalog: 5 1 2 3 4
 = 2⌽3 4⍴⍳12
 > gnu:  3  4 1  2
 > gnu:  7  8 5  6
 > gnu: 11 12 9 10
+> dyalog:  3  4 1  2
+> dyalog:  7  8 5  6
+> dyalog: 11 12 9 10
 = 1⊖3 4⍴⍳12
 > gnu: 5  6  7  8
 > gnu: 9 10 11 12
 > gnu: 1  2  3  4
+> dyalog: 5  6  7  8
+> dyalog: 9 10 11 12
+> dyalog: 1  2  3  4
 = 1 ¯1 2⌽3 4⍴⍳12
 > gnu:  2  3 4  1
 > gnu:  8  5 6  7
 > gnu: 11 12 9 10
+> dyalog:  2  3 4  1
+> dyalog:  8  5 6  7
+> dyalog: 11 12 9 10
 = 3⌽'abcde'
 > gnu: deabc
+> dyalog: deabc
 = 1 2,3 4
 > gnu: 1 2 3 4
+> dyalog: 1 2 3 4
 = (2 3⍴⍳6),2 2⍴⍳4
 > gnu: 1 2 3 1 2
 > gnu: 4 5 6 3 4
+> dyalog: 1 2 3 1 2
+> dyalog: 4 5 6 3 4
 = (2 3⍴⍳6),9
 > gnu: 1 2 3 9
 > gnu: 4 5 6 9
+> dyalog: 1 2 3 9
+> dyalog: 4 5 6 9
 = (2 3⍴⍳6)⍪7 8 9
 > gnu: 1 2 3
 > gnu: 4 5 6
 > gnu: 7 8 9
+> dyalog: 1 2 3
+> dyalog: 4 5 6
+> dyalog: 7 8 9
 = (2 3⍴⍳6)⍪2 3⍴⍳6
 > gnu: 1 2 3
 > gnu: 4 5 6
 > gnu: 1 2 3
 > gnu: 4 5 6
+> dyalog: 1 2 3
+> dyalog: 4 5 6
+> dyalog: 1 2 3
+> dyalog: 4 5 6
 = ,2 3⍴⍳6
 > gnu: 1 2 3 4 5 6
+> dyalog: 1 2 3 4 5 6
 = ⍪1 2 3
 > gnu: 1
 > gnu: 2
 > gnu: 3
+> dyalog: 1
+> dyalog: 2
+> dyalog: 3
 = ⍪5
 > gnu: 5
+> dyalog: 5
 = ⍪2 3⍴⍳6
 > gnu: 1 2 3
 > gnu: 4 5 6
+> dyalog: 1 2 3
+> dyalog: 4 5 6
 = ⍴⍪2 3 4⍴⍳24
 > gnu: 2 12
+> dyalog: 2 12
 = 'ab','cd'
 > gnu: abcd
+> dyalog: abcd
 = ≢1 2 3
 > gnu: 3
+> dyalog: 3
 = ≢2 3⍴⍳6
 > gnu: 2
+> dyalog: 2
 = ≢5
 > gnu: 1
+> dyalog: 1
 = 1 2 3≡1 2 3
 > gnu: 1
+> dyalog: 1
 = 1 2 3≡1 2
 > gnu: 0
+> dyalog: 0
 = (2 3⍴⍳6)≡2 3⍴⍳6
 > gnu: 1
+> dyalog: 1
 = 1 2 3≢1 2 3
 > gnu: 0
+> dyalog: 0
 = 1 2 3≢1 2
 > gnu: 1
+> dyalog: 1
 = 1 2∊1 3 5
 > gnu: 1 0
+> dyalog: 1 0
 = 1 2 3∊2 3⍴⍳6
 > gnu: 1 1 1
+> dyalog: 1 1 1
 = (2 2⍴1 2 9 9)∊1 2 3
 > gnu: 1 1
 > gnu: 0 0
+> dyalog: 1 1
+> dyalog: 0 0
 = 'ab'∊'abc'
 > gnu: 1 1
+> dyalog: 1 1
 = ∪3 1 4 1 5 9 2 6 5 3
 > gnu: 3 1 4 5 9 2 6
+> dyalog: 3 1 4 5 9 2 6
 = ∪'mississippi'
 > gnu: misp
+> dyalog: misp
 = ⍋3 1 4 1 5
 > gnu: 2 4 1 3 5
+> dyalog: 2 4 1 3 5
 = ⍒3 1 4 1 5
 > gnu: 5 3 1 2 4
+> dyalog: 5 3 1 2 4
 = ⍋'hello'
 > gnu: 2 1 3 4 5
+> dyalog: 2 1 3 4 5
 = ⍒'hello'
 > gnu: 5 3 4 1 2
+> dyalog: 5 3 4 1 2
 = ⍋1.5 0.5 2.5
 > gnu: 2 1 3
+> dyalog: 2 1 3
 = ⍋2 3⍴1 2 1 1 1 3
 > gnu: 2 1
+> dyalog: 2 1
 = ⍒2 3⍴1 2 1 1 1 3
 > gnu: 1 2
+> dyalog: 1 2
 = ⍋1 1 1
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = 2⊥1 0 1
 > gnu: 5
+> dyalog: 5
 = 24 60 60⊥1 2 3
 > gnu: 3723
+> dyalog: 3723
 = 1 0 1⊥1 2 3
 > gnu: 5
+> dyalog: 5
 = 2 2 2⊤5
 > gnu: 1 0 1
+> dyalog: 1 0 1
 = 24 60 60⊤3723
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = 2 2⊤5 6
 > gnu: 0 1
 > gnu: 1 0
+> dyalog: 0 1
+> dyalog: 1 0
 = ⍴2 2⊤5 6
 > gnu: 2 2
+> dyalog: 2 2
 = 0 2 2⊤5
 > gnu: 1 0 1
+> dyalog: 1 0 1
 = 1 1⊤5
 > gnu: 0 0
+> dyalog: 0 0
 = ⍕5
 > gnu: 5
+> dyalog: 5
 = ⍴⍕5
 > gnu: 1
+> dyalog: 1
 = ⍕2.5
 > gnu: 2.5
+> dyalog: 2.5
 = ⍴⍕2.5
 > gnu: 3
+> dyalog: 3
 = ⍕1 2 3
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = ⍴⍕1 2 3
 > gnu: 5
+> dyalog: 5
 = ⍕¯1 22 333
 > gnu: ¯1 22 333
+> dyalog: ¯1 22 333
 = ⍕2 3⍴⍳6
 > gnu: 1 2 3
 > gnu: 4 5 6
+> dyalog: 1 2 3
+> dyalog: 4 5 6
 = ⍴⍕2 3⍴⍳6
 > gnu: 2 5
+> dyalog: 2 5
 = ⍕2 3 4⍴⍳24
 > gnu:  1  2  3  4
 > gnu:  5  6  7  8
@@ -281,132 +439,211 @@
 > gnu: 13 14 15 16
 > gnu: 17 18 19 20
 > gnu: 21 22 23 24
+> dyalog:  1  2  3  4
+> dyalog:  5  6  7  8
+> dyalog:  9 10 11 12
+> dyalog:
+> dyalog: 13 14 15 16
+> dyalog: 17 18 19 20
+> dyalog: 21 22 23 24
 = ⍴⍕2 3 4⍴⍳24
 > gnu: 2 3 11
+> dyalog: 2 3 11
 = ⍕2 2⍴0.5 1 2 3
 > gnu: 0.5 1
 > gnu: 2   3
+> dyalog: 0.5 1
+> dyalog: 2   3
 = ⍕1 2 3=1 5 3
 > gnu: 1 0 1
+> dyalog: 1 0 1
 = 'abc'
 > gnu: abc
+> dyalog: abc
 = 'a'
 > gnu: a
+> dyalog: a
 = 2 3⍴'abcdef'
 > gnu: abc
 > gnu: def
+> dyalog: abc
+> dyalog: def
 = 3⊢5
 > gnu: 5
+> dyalog: 5
 = 3⊣5
 > gnu: 3
+> dyalog: 3
 = 2+2 ⍝ a comment
 > gnu: 4
+> dyalog: 4
 = (2 3⍴⍳6)+2 3⍴⍳6
 > gnu: 2  4  6
 > gnu: 8 10 12
+> dyalog: 2  4  6
+> dyalog: 8 10 12
 = (2 3⍴⍳6)+1 2 3
 > gnu: <error>
+> dyalog: <error>
 = (2 3⍴⍳6)×2
 > gnu: 2  4  6
 > gnu: 8 10 12
+> dyalog: 2  4  6
+> dyalog: 8 10 12
 = 2×2 3⍴⍳6
 > gnu: 2  4  6
 > gnu: 8 10 12
+> dyalog: 2  4  6
+> dyalog: 8 10 12
 = 1 2 3+1 2
 > gnu: <error>
+> dyalog: <error>
 = 0⍴5
 > gnu:
+> dyalog:
 = ⍴0⍴5
 > gnu: 0
+> dyalog: 0
 = +/0⍴5
 > gnu: 0
+> dyalog: 0
 = ×/0⍴5
 > gnu: 1
+> dyalog: 1
 = -/⍳0
 > gnu: 0
+> dyalog: 0
 = ÷/⍳0
 > gnu: 1
+> dyalog: 1
 = */⍳0
 > gnu: 1
+> dyalog: 1
 = |/⍳0
 > gnu: 0
+> dyalog: 0
 = !/⍳0
 > gnu: 1
+> dyalog: 1
 = =/⍳0
 > gnu: 1
+> dyalog: 1
 = ≠/⍳0
 > gnu: 0
+> dyalog: 0
 = </⍳0
 > gnu: 0
+> dyalog: 0
 = ≤/⍳0
 > gnu: 1
+> dyalog: 1
 = >/⍳0
 > gnu: 0
+> dyalog: 0
 = ≥/⍳0
 > gnu: 1
+> dyalog: 1
 = ∧/⍳0
 > gnu: 1
+> dyalog: 1
 = ∨/⍳0
 > gnu: 0
+> dyalog: 0
 = ⍟/⍳0
 > gnu: <error>
+> dyalog: <error>
 = ○/⍳0
 > gnu: <error>
+> dyalog: <error>
 = ≢⍳0
 > gnu: 0
+> dyalog: 0
 = ≢''
 > gnu: 0
+> dyalog: 0
 = ∪⍳0
 > gnu:
+> dyalog:
 = ⌽⍳0
 > gnu:
+> dyalog:
 = 1⌽⍳0
 > gnu:
+> dyalog:
 = 3↑⍳0
 > gnu: 0 0 0
+> dyalog: 0 0 0
 = ⍕⍳0
 > gnu:
+> dyalog:
 = ⍴⍕⍳0
 > gnu: 0
+> dyalog: 0
 = 0=⍳0
 > gnu:
+> dyalog:
 = 1 2 3⍳1 2 3
 > gnu: 1 2 3
+> dyalog: 1 2 3
 = 'abc'⍳'z'
 > gnu: 4
+> dyalog: 4
 = 'ab'≡'ab'
 > gnu: 1
+> dyalog: 1
 = ≢2 3 4⍴⍳24
 > gnu: 2
+> dyalog: 2
 = (2 3⍴⍳6)⍪5
 > gnu: 1 2 3
 > gnu: 4 5 6
 > gnu: 5 5 5
+> dyalog: 1 2 3
+> dyalog: 4 5 6
+> dyalog: 5 5 5
 = 5,2 3⍴⍳6
 > gnu: 5 1 2 3
 > gnu: 5 4 5 6
+> dyalog: 5 1 2 3
+> dyalog: 5 4 5 6
 = 2 3⍴'ab'
 > gnu: aba
 > gnu: bab
+> dyalog: aba
+> dyalog: bab
 = ⌽⍤1⊢2 2 3⍴⍳12
 > gnu:  3  2  1
 > gnu:  6  5  4
 > gnu:
 > gnu:  9  8  7
 > gnu: 12 11 10
+> dyalog:  3  2  1
+> dyalog:  6  5  4
+> dyalog:
+> dyalog:  9  8  7
+> dyalog: 12 11 10
 = ×/2 2⍴0
 > gnu: 0 0
+> dyalog: 0 0
 = |¯0
 > gnu: 0
+> dyalog: 0
 = 2*62
 > gnu: 4611686018427387904
+> dyalog: 4.611686018E18
 = 2*63
 > gnu: 9.223372037E18
+> dyalog: 9.223372037E18
 = 0∧5
 > gnu: 0
+> dyalog: 0
 = 0∨0
 > gnu: 0
+> dyalog: 0
 = 1 2 3∘.=1 2
 > gnu: 1 0
 > gnu: 0 1
 > gnu: 0 0
+> dyalog: 1 0
+> dyalog: 0 1
+> dyalog: 0 0

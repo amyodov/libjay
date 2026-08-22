@@ -21,33 +21,49 @@
 
 = 1=1+1E¯15
 > gnu: 1
+> dyalog: 1
 = 1=1+1E¯13
 > gnu: 1
+> dyalog: 0
 = 1=1+1E¯12
 > gnu: 0
+> dyalog: 0
 = 1=1+2E¯13
 > gnu: 0
+> dyalog: 0
 = 0=1E¯20
 > gnu: 0
+> dyalog: 0
 = 1<1+1E¯15
 > gnu: 0
+> dyalog: 0
 = 1≤1+1E¯15
 > gnu: 1
+> dyalog: 1
 = 1≡1+1E¯15
 > gnu: 1
+> dyalog: 1
 = (1+1E¯15)∊1 2
 > gnu: 1
+> dyalog: 1
 = 1 2⍳1+1E¯15
 > gnu: 1
+> dyalog: 1
 = ∪1,1+1E¯15
 > gnu: 1
+> dyalog: 1
 = ⌊2.9999999999999
 > gnu: 3
+> dyalog: 2
 = ⌊2.99999999999
 > gnu: 2
+> dyalog: 2
 = ⌈3.0000000000001
 > gnu: 3
+> dyalog: 4
 = 1 2 3⍳1.0000000000000002
 > gnu: 1
+> dyalog: 1
 = (2 2⍴1 2 3 4)≡2 2⍴1 2 3 4.0000000000000004
 > gnu: 1
+> dyalog: 1
