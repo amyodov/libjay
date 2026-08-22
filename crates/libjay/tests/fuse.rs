@@ -2,6 +2,8 @@
 //! what the chain it replaced computes, on data of every dtype the kernel
 //! claims, and hand back to that chain wherever it does not.
 
+use std::sync::{RwLock, RwLockReadGuard};
+
 use jay::fuse::{fallback_count, is_fused, is_inlined, unfused};
 use jay::{compile, Array, Data, DType, Dialect, Lang, Program};
 
@@ -63,9 +65,40 @@ fn program(lang: Lang, src: &str) -> Program {
         .unwrap_or_else(|e| panic!("compile failed:\n{}", e.render(src)))
 }
 
+/// The kernel's fallback counter is one number for the whole process, so
+/// reading it says something only while nothing else in this binary is
+/// running a program. Every run here takes this lock — shared for an
+/// ordinary run, exclusive around a measurement — which is what makes the
+/// count belong to the test that measured it and not to whichever tests
+/// happened to run beside it.
+static RUNS: RwLock<()> = RwLock::new(());
+
+/// A shared claim, for a test that runs a program without going through
+/// [`run`]. A lock another test poisoned by failing still serves: the
+/// counter is the only thing it guards.
+fn shared_runs() -> RwLockReadGuard<'static, ()> {
+    RUNS.read().unwrap_or_else(|e| e.into_inner())
+}
+
 fn run(p: &Program, args: &[Array]) -> Result<Option<Array>, String> {
+    let _shared = shared_runs();
+    run_alone(p, args)
+}
+
+/// A run by a caller that holds the lock already.
+fn run_alone(p: &Program, args: &[Array]) -> Result<Option<Array>, String> {
     let mut sink = |_: &str| {};
     p.run(args, &mut sink).map_err(|e| p.render_error(&e))
+}
+
+/// Run `f` with the fallback counter to ourselves, and report both what it
+/// yielded and how far the counter moved. `f` must run its programs with
+/// [`run_alone`]: the lock is held exclusively for the whole call.
+fn fallbacks_during<T>(f: impl FnOnce() -> T) -> (T, u64) {
+    let _exclusive = RUNS.write().unwrap_or_else(|e| e.into_inner());
+    let before = fallback_count();
+    let out = f();
+    (out, fallback_count() - before)
 }
 
 /// Run `src` fused and unfused over the same generated data.
@@ -289,12 +322,14 @@ fn a_window_the_axis_cannot_hold_hands_the_chain_back() {
     // No window of twenty items fits three of them: J's answer is an empty
     // result whose shape the verb decides, which is the chain's business.
     let p = program(Lang::J, "1 + 20 +/\\ {x}");
-    let before = fallback_count();
-    for n in [1usize, 3, 19] {
-        let args = vec![data("x", n)];
-        assert_eq!(run(&p, &args), run(&unfused(&p), &args), "at {n} items");
-    }
-    assert!(fallback_count() > before, "the kernel did not decline the short axis");
+    let plain = unfused(&p);
+    let ((), declines) = fallbacks_during(|| {
+        for n in [1usize, 3, 19] {
+            let args = vec![data("x", n)];
+            assert_eq!(run_alone(&p, &args), run_alone(&plain, &args), "at {n} items");
+        }
+    });
+    assert!(declines > 0, "the kernel did not decline the short axis");
 }
 
 #[test]
@@ -480,6 +515,7 @@ fn output_between_the_sentences_happens_once_and_in_place() {
     let src = "d =. {x} + 1\necho 2 + 2\n+/ d * d";
     let p = program(Lang::J, src);
     assert!(is_inlined(&p), "an unrelated output must not block the move");
+    let _shared = shared_runs();
     let args = vec![data("x", 1_000)];
     let mut fused = String::new();
     let a = p.run(&args, &mut |s| fused.push_str(s)).expect("run");
@@ -496,6 +532,7 @@ fn the_error_a_named_value_raised_is_raised_where_it_was() {
     // it reaches the same type error, before the sentence that reads it.
     let src = "d =. {c} + 1\necho 5\n+/ d * d";
     let p = program(Lang::J, src);
+    let _shared = shared_runs();
     let args = vec![data("c", 100)];
     let mut fused = String::new();
     let a = p.run(&args, &mut |s| fused.push_str(s)).map_err(|e| p.render_error(&e));
@@ -588,9 +625,8 @@ fn an_integer_step_on_a_float_path_falls_back() {
     let p = program(Lang::J, src);
     assert!(is_fused(&p));
     let args = vec![data("x", 1_000), data("w", 1_000)];
-    let before = fallback_count();
-    let got = run(&p, &args).unwrap().unwrap();
-    assert!(fallback_count() > before, "the kernel did not decline");
+    let (got, declines) = fallbacks_during(|| run_alone(&p, &args).unwrap().unwrap());
+    assert!(declines > 0, "the kernel did not decline");
     assert_eq!(got.dtype(), DType::I64);
     assert_eq!(got, run(&unfused(&p), &args).unwrap().unwrap());
 
@@ -600,9 +636,8 @@ fn an_integer_step_on_a_float_path_falls_back() {
     let p = program(Lang::J, src);
     assert!(is_fused(&p));
     let args = vec![data("big", 1_000)];
-    let before = fallback_count();
-    let got = run(&p, &args).unwrap().unwrap();
-    assert!(fallback_count() > before, "the kernel did not decline");
+    let (got, declines) = fallbacks_during(|| run_alone(&p, &args).unwrap().unwrap());
+    assert!(declines > 0, "the kernel did not decline");
     assert_eq!(got, run(&unfused(&p), &args).unwrap().unwrap());
 }
 
@@ -615,9 +650,8 @@ fn integer_overflow_mid_chain_falls_back_to_the_unfused_chain() {
     let p = program(Lang::J, src);
     assert!(is_fused(&p));
     let args = vec![data("big", 1_000)];
-    let before = fallback_count();
-    let got = run(&p, &args).unwrap().unwrap();
-    assert!(fallback_count() > before, "the kernel did not decline");
+    let (got, declines) = fallbacks_during(|| run_alone(&p, &args).unwrap().unwrap());
+    assert!(declines > 0, "the kernel did not decline");
     assert_eq!(got.dtype(), DType::F64);
     assert_eq!(got, run(&unfused(&p), &args).unwrap().unwrap());
 }
@@ -641,9 +675,8 @@ fn a_frame_that_needs_broadcasting_falls_back() {
     let m = Array::new(vec![3, 4], Data::F64((0..12).map(|i| i as f64).collect()));
     let x = Array::from_f64(vec![10.0, 20.0, 30.0]);
     let args = vec![m, x];
-    let before = fallback_count();
-    let got = run(&p, &args).unwrap().unwrap();
-    assert!(fallback_count() > before, "the kernel did not decline");
+    let (got, declines) = fallbacks_during(|| run_alone(&p, &args).unwrap().unwrap());
+    assert!(declines > 0, "the kernel did not decline");
     assert_eq!(got, run(&unfused(&p), &args).unwrap().unwrap());
     assert_eq!(got.shape, vec![3, 4]);
 }
@@ -795,9 +828,8 @@ fn random_chains_agree_with_the_interpreter() {
         // 97 elements: below the parallel threshold, so even a fold runs
         // right to left over the whole vector in both programs.
         let args: Vec<Array> = p.params.iter().map(|s| data(&s.name, 97)).collect();
-        let declines = fallback_count();
-        let fused = run(&p, &args);
-        if is_fused(&p) && fallback_count() == declines {
+        let (fused, declines) = fallbacks_during(|| run_alone(&p, &args));
+        if is_fused(&p) && declines == 0 {
             ran += 1;
         }
         match (fused, run(&unfused(&p), &args)) {

@@ -2038,3 +2038,21 @@ more spellings than before; neither answer changed. The same goes for the
 recorded divergence over a vector left argument to `⌽` and `⊖`: libjay
 answers where GNU APL raises a rank error, and now does so from inside
 `∘.` too.
+
+## 2026-08-22 — The fusion fallback counter belongs to the test measuring it
+
+`random_chains_agree_with_the_interpreter` asserted that at least 60 of
+the fused chains reached the kernel, and counted them by reading
+`fallback_count()` before and after each run. That counter is one number
+for the whole process, so any other test in the binary that made the
+kernel decline during the window was counted against this test: it failed
+twice with "only 58 of 295".
+
+The measurement is worth keeping — the acceptance rate is what tells a
+change to the type rules from a change to the kernel — so the fix gives it
+the counter rather than weakening the assertion. `tests/fuse.rs` now
+routes every run through an `RwLock`: an ordinary run takes it shared, a
+measurement takes it exclusively, and `fallbacks_during` reads the counter
+on both sides of that exclusive window. Ordinary tests still run beside
+each other; only the five that measure serialise, and the rate they report
+is now the same on every run (72 of 295).
