@@ -2280,3 +2280,45 @@ column — the actual gate — replays green.
   The oracle wins: the theme keeps a few lines recording the refusal, the
   row is a libjay extension rather than a Dyalog feature, and the status
   table should say so.
+## 2026-08-22 — Prototypes, fill cells and widths as lengths
+
+**An empty nested array carries its prototype.** APL2's prototype is part
+of a value, not a property of its type: `0⍴⊂2 3⍴9` and `0⍴⊂'ab'` are both
+empty vectors of boxes and `↑` answers a 2 by 3 table of zeros for one and
+two blanks for the other. Nothing in an empty buffer says which, so `Array`
+gained a private `proto: Option<Arc<Array>>`, set by the operations that
+make an empty out of a nested one — reshape, replicate, expand, take,
+drop — and read by the fills, by `↑` and by the fill cell a mix runs on.
+It is APL's alone: J fills a box with `a:` whatever the argument held, so
+no J path sets it, and equality ignores it, which leaves `⍬≡0⍴⊂⍬` the
+named gap it already was.
+
+**A frame with no cells learns the cell's shape from a cell of fills.**
+This is J's own rule, and it was already implemented for one case (a window
+longer than its argument). Generalising it — one `empty_frame` helper, one
+`fill_cell` — fixed the whole "an empty loses its rank" family at the
+root: the rank conjunction, `⍤`, replicate and expand along an axis, the
+scan, the infix, the outfix and the cut all framed cells and all answered
+an empty of the frame alone. Two limits keep it honest: the verb must be
+pure (running it to learn a shape must not run it for its effects) and the
+fill cell must be small enough to be worth building; failing either, the
+frame stands on its own. APL's scan is the one path that does NOT probe —
+its shape is the argument's by definition, function or no function, and
+GNU APL's `+\` and `×⍀` agree.
+
+**A written number that becomes a width is a length.** `9223372036854775806
+": 1` panicked in the formatter for the same reason `9223372036854775806
+|. 1 2 3` panicked in the rotate: a number the program wrote was used as a
+size without being checked. Widths and digit counts now go through
+`limits::count`, in APL's `x⍕y` as well as J's `x ": y`. J itself answers a
+4-billion-character field and stops answering above that, so the ceiling
+lands where the reference's does; GNU APL instead falls back to E-format,
+which is pinned as a divergence.
+
+**Three GNU APL quirks pinned rather than chased.** The relational family
+and `⍸` are ordered across types there and refused here (ISO and Dyalog
+refuse too); `∊` of an empty answers one element there and the empty here
+(Dyalog agrees with us); an integer near 2^63 goes through a double there
+and stays exact here. Together they were about a third of the APL sweep's
+mismatches. A fourth was found by this wave: GNU APL's `-\` and `-⍀` drop
+an empty result to a rank-1 empty where its own `+\` keeps the shape.

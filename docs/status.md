@@ -84,7 +84,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | Spelling | Monad | Dyad |
 |---|---|---|
 | `$` | 🟢 shape of; extended where the argument is | 🟢 reshape, laying out ITEMS |
-| `#` | 🟢 tally; extended where the argument is | 🟢 copy |
+| `#` | 🟢 tally; extended where the argument is | 🟢 copy; `#^:_1` is the expansion that undoes it |
 | `,` | 🟢 ravel | 🟢 append; unequal item shapes are overtaken, which fills |
 | `,.` | 🟢 ravel items | 🟢 stitch |
 | `,:` | 🟢 itemize | 🟢 laminate |
@@ -284,7 +284,7 @@ conjunctions above:
 | `⌽` | 🟢 reverse | 🟢 rotate |
 | `⊖` | 🟢 reverse first | 🟢 rotate first; one amount per column, as `⌽` takes one per row |
 | `⍉` | 🟢 transpose | 🟢 dyadic transpose; x says which axis of the result each axis of y becomes, and a repeated destination runs those axes together |
-| `↑` | 🟢 first | 🟢 take; overtaking a nested array fills with the first item's prototype |
+| `↑` | 🟢 first; an empty nested argument answers the prototype it remembers | 🟢 take; overtaking a nested array fills with the first item's prototype |
 | `↓` | 🟡 no oracle: GNU APL has no monadic `↓`; Dyalog's split | 🟢 drop |
 | `⊂` | 🟢 enclose | 🟢 partitioned enclose; rank 2 and above partitions the last axis |
 | `⊃` | 🟢 disclose / mix | 🟢 pick |
@@ -327,9 +327,9 @@ conjunctions above:
 |---|---|
 | `/` reduce (last axis) | 🟢 between the ELEMENTS along the axis, each disclosed and the fold's value enclosed: `,/1 2 3` is an enclosed vector |
 | `⌿` reduce (leading axis) | 🟢 the same rule down the first axis: `,⌿2 3⍴⍳6` pairs the columns |
-| `/` `⌿` replicate (after an operand) | 🟢 |
+| `/` `⌿` replicate (after an operand) | 🟢 a negative count leaves that many prototype fills |
 | `\` `⍀` scan | 🟢 the reduce over each prefix, so it collects the same enclosures |
-| `\` `⍀` expand (after an operand) | 🟢 |
+| `\` `⍀` expand (after an operand) | 🟢 the gap holds the first item's prototype |
 | `¨` each | 🟢 |
 | `⍨` commute | 🟢 |
 | `∘.` outer product | 🟢 the function between every pair of ELEMENTS whatever its rank, each disclosed on the way in and the result enclosed on the way into the table: `1 2∘.,3 4` is a two-by-two of pairs, `¯1 0 1∘.⌽⊂m` rotates the matrix |

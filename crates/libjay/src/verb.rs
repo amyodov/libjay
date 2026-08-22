@@ -1031,9 +1031,12 @@ impl Verb {
         match self {
             Verb::Prim(p) => p.ranks,
             Verb::Rank(_, r) => *r,
-            // `x u\ y` takes one window size per application, so the left
-            // cell is an atom: a list of sizes frames the result, as in J.
-            Verb::Windowed(_, WindowKind::Prefix) => [RANK_INF, 0, RANK_INF],
+            // `x u\ y` and `x u\. y` take one width per application, so the
+            // left cell is an atom: a list of widths frames the result, as
+            // in J, and an empty list of them frames nothing.
+            Verb::Windowed(_, WindowKind::Prefix | WindowKind::Suffix) => {
+                [RANK_INF, 0, RANK_INF]
+            }
             Verb::Each(..) => [0, 0, 0],
             Verb::Fit(v, _) => v.ranks(),
             // Amend reads the whole argument, and the rest run their own
@@ -1340,6 +1343,12 @@ impl Verb {
                 }
                 let frame = y.shape[..frame_rank].to_vec();
                 let n: usize = frame.iter().product();
+                if n == 0 {
+                    let cell = fill_cell(y, frame_rank, self.is_pure());
+                    return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| {
+                        monad_op(p, cell, c, span)
+                    }));
+                }
                 let cells = each_cell(n, y.count(), self.is_pure(), ctx, |i, c| {
                     monad_op(p, &y.cell_at(frame_rank, i), c, span)
                 })?;
@@ -1359,6 +1368,12 @@ impl Verb {
                 }
                 let frame = y.shape[..frame_rank].to_vec();
                 let n: usize = frame.iter().product();
+                if n == 0 {
+                    let cell = fill_cell(y, frame_rank, self.is_pure());
+                    return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| {
+                        v.monad(cell, c, span)
+                    }));
+                }
                 let cells = each_cell(n, y.count(), self.is_pure(), ctx, |i, c| {
                     v.monad(&y.cell_at(frame_rank, i), c, span)
                 })?;
@@ -1558,11 +1573,11 @@ impl Verb {
             Verb::Prim(_) | Verb::Rank(_, _) | Verb::Each(..) => {
                 self.dyad_ranked(x, y, ctx, span)
             }
-            // `x u\ y` needs the frame machinery: its left cell is an atom.
-            Verb::Windowed(_, WindowKind::Prefix) => self.dyad_ranked(x, y, ctx, span),
-            // `x u\. y` is the outfix: u over y with each run of x
-            // consecutive items left out.
-            Verb::Windowed(u, WindowKind::Suffix) => outfix(u, x, y, ctx, span),
+            // `x u\ y` and `x u\. y` need the frame machinery: their left
+            // cell is an atom.
+            Verb::Windowed(_, WindowKind::Prefix | WindowKind::Suffix) => {
+                self.dyad_ranked(x, y, ctx, span)
+            }
             Verb::Windowed(_, WindowKind::Scan) => {
                 Err(Error::not_yet("dyadic scan (x f\\ y)", span))
             }
@@ -1676,6 +1691,14 @@ impl Verb {
         if p.frame.is_empty() {
             return self.dyad_cell(x, y, ctx, span);
         }
+        if p.n == 0 {
+            let right = fill_cell(y, fyl, self.is_pure());
+            let cell = fill_cell(x, fxl, self.is_pure()).filter(|_| right.is_some());
+            return Ok(empty_frame(&p.frame, y.dtype(), cell, ctx, |left, c| {
+                let right = right.as_ref().expect("a left fill cell comes with a right one");
+                self.dyad_cell(left, right, c, span)
+            }));
+        }
         let work = x.count().max(y.count());
         let cells = each_cell(p.n, work, self.is_pure(), ctx, |i, c| {
             let xc = x.cell_at(fxl, i / p.x_div);
@@ -1697,6 +1720,8 @@ impl Verb {
             }
             Verb::Prim(p) => dyad_op(p, x, y, ctx.cfg, span),
             Verb::Rank(v, _) => v.dyad(x, y, ctx, span),
+            // The infix takes runs of x items; the outfix leaves them out.
+            Verb::Windowed(v, WindowKind::Suffix) => outfix(v, x, y, ctx, span),
             Verb::Windowed(v, _) => infix(v, x, y, ctx, span),
             Verb::Each(u, rule) => {
                 let r = u.dyad(&open_cell(x), &open_cell(y), ctx, span)?;
@@ -1842,6 +1867,67 @@ fn fill_data(dtype: DType, n: usize) -> Data {
         d.push_fill();
     }
     d
+}
+
+/// The largest fill cell worth building to learn a shape from.
+const FILL_CELL_LIMIT: usize = 1 << 20;
+
+/// A cell to learn a shape from where the application had none to run.
+///
+/// An argument whose own frame is not empty still HAS cells — a dyad frames
+/// over both arguments, and only one of them need be the empty one — so its
+/// first cell stands in as it is, and only an argument with no cells at all
+/// is stood in for by a cell of fills.
+///
+/// `None` where the verb is not pure — running it to learn a shape would be
+/// running it for its effects — or where the cell is too large to be worth
+/// building.
+fn fill_cell(y: &Array, frame_rank: usize, pure: bool) -> Option<Array> {
+    if !pure {
+        return None;
+    }
+    if y.shape[..frame_rank].iter().all(|&d| d != 0) {
+        return Some(y.cell_at(frame_rank, 0));
+    }
+    let shape = y.shape[frame_rank..].to_vec();
+    let n: usize = shape.iter().product();
+    if n > FILL_CELL_LIMIT {
+        return None;
+    }
+    // A nested argument that remembers its items fills with the prototype,
+    // so that mixing an empty keeps the axes its items had.
+    let fill = y.proto().cloned();
+    let mut data = Data::empty(y.dtype());
+    for _ in 0..n {
+        push_gap(&mut data, &fill);
+    }
+    Some(Array::new(shape, data))
+}
+
+/// The result of a cell-by-cell application that has no cells to frame.
+///
+/// The frame says how many cells there would have been, not what shape one
+/// would have had, so an empty of the frame's shape alone drops whatever
+/// axes the cells carried: `(,"1) i. 0 3` is a 0 by 3 table, not a list.
+/// The missing axes come from running the verb once on a cell of fills and
+/// keeping the shape of the answer, which is J's own rule. A verb that
+/// refuses the fill cell, or a cell there was no point building, leaves the
+/// frame standing on its own, holding the argument's type.
+fn empty_frame(
+    frame: &[usize],
+    dtype: DType,
+    cell: Option<Array>,
+    ctx: &mut Ctx<'_>,
+    run: impl FnOnce(&Array, &mut Ctx<'_>) -> Result<Array>,
+) -> Array {
+    let mut shape = frame.to_vec();
+    if let Some(cell) = cell
+        && let Ok(answer) = run(&cell, ctx)
+    {
+        shape.extend_from_slice(&answer.shape);
+        return Array::new(shape, Data::empty(answer.dtype()));
+    }
+    Array::new(shape, Data::empty(dtype))
 }
 
 // ------------------------------------------------------------ agreement
@@ -2095,6 +2181,11 @@ fn open_cell(y: &Array) -> Array {
 /// so its fill stands in.
 fn first(y: &Array) -> Array {
     if y.count() == 0 {
+        // A nested empty that remembers its items answers with the
+        // prototype: `↑0⍴⊂2 3⍴9` is the 2 by 3 table of zeros.
+        if let Some(p) = y.proto() {
+            return p.clone();
+        }
         let mut d = Data::empty(y.dtype());
         d.push_fill();
         return open_cell(&Array::new(Vec::new(), d));
@@ -5648,6 +5739,7 @@ fn copy_items(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
     // round the loop, so the ceiling applies to whichever is larger.
     let items: u128 = per.iter().map(|&c| c.unsigned_abs() as u128).sum();
     let total = crate::limits::count(items * m.max(1) as u128, span)? / m.max(1);
+    let fill = if apl { prototype_of(y) } else { None };
     let mut data = Data::empty(y.dtype());
     for (i, &c) in per.iter().enumerate() {
         // A scalar y stands in for every count.
@@ -5655,7 +5747,7 @@ fn copy_items(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
         for _ in 0..c.unsigned_abs() {
             for k in 0..m {
                 if c < 0 {
-                    data.push_fill();
+                    push_gap(&mut data, &fill);
                 } else {
                     push_elem(&mut data, &y.data, src * m + k);
                 }
@@ -5666,7 +5758,7 @@ fn copy_items(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
     // extended one-item argument keeps the shape it already had.
     let mut shape = if y.rank() == 0 { vec![1] } else { y.shape.clone() };
     shape[0] = total;
-    Ok(Array::new(shape, data))
+    Ok(keep_proto(Array::new(shape, data), y, apl))
 }
 
 /// `": y` / `⍕ y`: the argument as the characters that display it.
@@ -6765,7 +6857,7 @@ fn axis_counts(x: &Array, what: &str, span: Span) -> Result<Vec<i64>> {
 ///
 /// An empty y parts them too: J refuses to invent items it was not given,
 /// and APL fills with the type's fill element.
-fn reshape(x: &Array, y: &Array, by_items: bool, span: Span) -> Result<Array> {
+fn reshape(x: &Array, y: &Array, by_items: bool, apl: bool, span: Span) -> Result<Array> {
     let dims = axis_counts(x, "reshape", span)?;
     if dims.iter().any(|&d| d < 0) {
         return Err(Error::domain("reshape lengths must be nonnegative", span));
@@ -6785,7 +6877,12 @@ fn reshape(x: &Array, y: &Array, by_items: bool, span: Span) -> Result<Array> {
         if by_items {
             return Err(Error::new(ErrorKind::Length, "reshape of an empty array", Some(span)));
         }
-        return Ok(Array::new(shape, fill_data(y.dtype(), n)));
+        let fill = if apl { prototype_of(y) } else { None };
+        let mut data = Data::empty(y.dtype());
+        for _ in 0..n {
+            push_gap(&mut data, &fill);
+        }
+        return Ok(Array::new(shape, data));
     }
     // Element i of the result is element `i % unit` of item
     // `(i / unit) % src`; with `unit` 1 that is the plain cyclic ravel.
@@ -6793,12 +6890,12 @@ fn reshape(x: &Array, y: &Array, by_items: bool, span: Span) -> Result<Array> {
     // element i itself, so a result the argument's own elements cover is a
     // change of shape and nothing else: the buffer comes through shared.
     if y.is_row_major() && n <= unit.saturating_mul(src) && n <= y.data.len() {
-        return Ok(Array::new(shape, y.data.slice(0, n)));
+        return Ok(keep_proto(Array::new(shape, y.data.slice(0, n)), y, apl));
     }
     for i in 0..n {
         push_elem(&mut data, &y.data, (i / unit) % src * unit + i % unit);
     }
-    Ok(Array::new(shape, data))
+    Ok(keep_proto(Array::new(shape, data), y, apl))
 }
 
 /// A take or drop that only touches the leading axis moves a run of whole
@@ -6870,7 +6967,7 @@ fn take(x: &Array, y: &Array, prototype_fill: bool, apl: bool, span: Span) -> Re
         return Err(count_rank("take", counts.len(), base.rank(), span));
     }
     if let Some(run) = leading_run(base, &counts, false) {
-        return Ok(run);
+        return Ok(keep_proto(run, base, prototype_fill));
     }
     let mut out_shape = base.shape.clone();
     for (a, &k) in counts.iter().enumerate() {
@@ -6907,7 +7004,7 @@ fn take(x: &Array, y: &Array, prototype_fill: bool, apl: bool, span: Span) -> Re
         }
         odometer(&mut coord, &out_shape);
     }
-    Ok(Array::new(out_shape, data))
+    Ok(keep_proto(Array::new(out_shape, data), base, prototype_fill))
 }
 
 /// APL's prototype of a nested array: the first item's own shape, with a
@@ -6925,8 +7022,36 @@ fn prototype_of(y: &Array) -> Option<Array> {
         };
         Array::new(a.shape.clone(), fill_data(dtype, a.count()))
     }
-    let first = y.as_boxes()?.first()?;
-    Some(zeroed(first))
+    match y.as_boxes()?.first() {
+        Some(first) => Some(zeroed(first)),
+        // No item to take one from: an empty nested array remembers what
+        // its items looked like, and that is already a prototype.
+        None => y.proto().cloned(),
+    }
+}
+
+/// An empty nested result remembers the prototype of the array it was made
+/// from, so that a later fill, reshape or `↑` can answer with it rather
+/// than with a bare empty box. A simple array's type already says what its
+/// fills are, and J fills a nested one with the empty box whatever it held,
+/// so only APL sets this.
+fn keep_proto(out: Array, src: &Array, apl: bool) -> Array {
+    if !apl || out.count() > 0 || out.dtype() != DType::Box {
+        return out;
+    }
+    match prototype_of(src) {
+        Some(p) => out.with_proto(p),
+        None => out,
+    }
+}
+
+/// Write one element of fill: the prototype where the caller worked one out
+/// and the array is nested, and the type's own fill otherwise.
+fn push_gap(data: &mut Data, fill: &Option<Array>) {
+    match (data, fill) {
+        (Data::Box(v), Some(p)) => v.push(p.clone()),
+        (d, _) => d.push_fill(),
+    }
 }
 
 fn drop_(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
@@ -6944,7 +7069,7 @@ fn drop_(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
         return Err(count_rank("drop", counts.len(), base.rank(), span));
     }
     if let Some(run) = leading_run(base, &counts, true) {
-        return Ok(run);
+        return Ok(keep_proto(run, base, apl));
     }
     let mut out_shape = base.shape.clone();
     let mut offset = vec![0usize; base.rank()];
@@ -6965,7 +7090,7 @@ fn drop_(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
         push_elem(&mut data, &base.data, idx);
         odometer(&mut coord, &out_shape);
     }
-    Ok(Array::new(out_shape, data))
+    Ok(keep_proto(Array::new(out_shape, data), base, apl))
 }
 
 /// Dyadic meaning of a primitive, applied to one pair of cells.
@@ -6975,7 +7100,9 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         // Reached only when a scalar verb is given non-zero cell ranks; the
         // cells then agree among themselves.
         DyadOp::Scalar(op) => scalar_dyad(op, x, y, cfg, span),
-        DyadOp::Reshape => reshape(x, y, cfg.agreement == Agreement::LeadingPrefix, span),
+        DyadOp::Reshape => {
+            reshape(x, y, cfg.agreement == Agreement::LeadingPrefix, cfg.rules.lang == crate::Lang::Apl, span)
+        }
         DyadOp::Take => {
             let apl = cfg.rules.lang == crate::Lang::Apl;
             take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, span)
@@ -7065,7 +7192,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::PrimeMeta => prime_meta(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::PrimeExponents => prime_exponents(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Pick { origin } => pick(x, y, origin, span),
-        DyadOp::Expand => expand(x, y, span),
+        DyadOp::Expand => expand(x, y, cfg.rules.lang == crate::Lang::Apl, span),
         // Writing needs the output sink, which this dispatcher does not
         // carry; `dyad_cell` takes it before the call gets here.
         DyadOp::WriteStream => Err(Error::internal("1!:2 reached the pure dyad dispatcher")),
@@ -8582,6 +8709,18 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
     let base = promoted.as_ref().unwrap_or(y);
     let n = base.items();
     let m = base.item_size();
+    // No items, so no runs: the answer's shape cannot come from the cells.
+    // APL's scan keeps the shape it was given, whatever the function is.
+    // J's takes the shape of the verb applied to the one run an empty
+    // argument has, which is the argument itself: `,/\ i.0 3` is a 0 by 0
+    // table where `+/\ i.0 3` is 0 by 3.
+    if n == 0 {
+        if ctx.cfg.rules.lang == crate::Lang::Apl {
+            return Ok(Array::new(base.shape.clone(), Data::empty(base.dtype())));
+        }
+        let cell = u.is_pure().then(|| base.clone());
+        return Ok(empty_frame(&[0], base.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
+    }
     if n > 0 && base.dtype().is_numeric() && let Some(op) = folded_op(u) {
         // Folding from the right is the insert's own order, so it holds
         // for any step; folding from the left needs associativity.
@@ -9868,6 +10007,13 @@ fn cut(
         }
     };
     let ranges = cut_ranges(&frets, mode);
+    // No frets, so no intervals: the one interval an empty argument offers
+    // is the empty itself, and the verb applied to it says what shape the
+    // pieces would have had.
+    if ranges.is_empty() {
+        let cell = u.is_pure().then(|| section(&items, 0, 0));
+        return Ok(empty_frame(&[0], items.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
+    }
     let mut cells = Vec::with_capacity(ranges.len());
     for (s, e) in &ranges {
         cells.push(u.monad(&section(&items, *s, *e), ctx, span)?);
@@ -11285,6 +11431,13 @@ fn format_spec(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Array>
     if pairs.iter().any(|&(w, p)| w.is_some_and(|w| w < 0) || p < 0) {
         return Err(Error::domain("a format width and precision are nonnegative", span));
     }
+    // A width and a precision are lengths, and a written number is free to
+    // ask for more characters than any machine holds. The ceiling applies
+    // here as it does to a shape.
+    for &(w, p) in &pairs {
+        crate::limits::count(w.unwrap_or(0) as u128, span)?;
+        crate::limits::count(p as u128, span)?;
+    }
     let numbers = y.to_f64_vec();
     let text = |i: usize, p: i64| -> String {
         match (&y.data, &numbers) {
@@ -11310,8 +11463,9 @@ fn format_spec(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Array>
             }
         })
         .collect();
-    let line: usize = widths.iter().sum();
-    let mut out: Vec<char> = Vec::with_capacity(rows * line);
+    let line = crate::limits::count(widths.iter().map(|&w| w as u128).sum(), span)?;
+    let total = crate::limits::count(rows as u128 * line as u128, span)?;
+    let mut out: Vec<char> = Vec::with_capacity(total);
     for r in 0..rows {
         for c in 0..cols {
             let s = text(r * cols + c, pairs[c].1);
@@ -11608,9 +11762,22 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
             ));
         }
     };
+    // A width and a digit count are lengths, and a written number is free
+    // to ask for more characters than any machine holds. The ceiling
+    // applies here as it does to a shape: refuse the request instead of
+    // handing the product to an allocator.
+    for &[w, d] in &fields {
+        crate::limits::count(w.abs() as u128, span)?;
+        crate::limits::count(d.max(0.0) as u128, span)?;
+    }
     let text = |r: usize, c: usize| {
         let [w, d] = fields[c];
-        format_field(values[r * cols + c], d.max(0.0) as usize, w < 0.0, fmt.neg)
+        // Only a column of automatic width renders every digit asked for.
+        // Where the width is given, a digit count that reaches it already
+        // overflows the field — the point and the digits alone are wider —
+        // so rendering past that point cannot change the answer.
+        let digits = if w == 0.0 { d.max(0.0) } else { d.max(0.0).min(w.abs()) };
+        format_field(values[r * cols + c], digits as usize, w < 0.0, fmt.neg)
     };
     // A width of zero is the widest value in the column, and a blank
     // between it and whatever stands to its left.
@@ -11624,8 +11791,9 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
             wide + usize::from(c > 0)
         })
         .collect();
-    let line: usize = widths.iter().sum();
-    let mut out: Vec<char> = Vec::with_capacity(rows * line);
+    let line = crate::limits::count(widths.iter().map(|&w| w as u128).sum(), span)?;
+    let total = crate::limits::count(rows as u128 * line as u128, span)?;
+    let mut out: Vec<char> = Vec::with_capacity(total);
     for r in 0..rows {
         for c in 0..cols {
             let s = text(r, c);
@@ -12022,6 +12190,13 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
         (0..=(n - k)).collect()
     };
     let width = k.unsigned_abs() as usize;
+    // A width longer than the argument leaves no place for the run to sit.
+    // The one run an empty argument has is the argument itself, and that is
+    // the cell whose shape the answer keeps.
+    if starts.is_empty() {
+        let cell = u.is_pure().then(|| select_items(&list, &[]));
+        return Ok(empty_frame(&[0], list.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
+    }
     let mut cells = Vec::with_capacity(starts.len());
     for start in starts {
         let start = start as usize;
@@ -12065,6 +12240,18 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
             // back is a quarter turn the other way, which is `-@j.`.
             if matches!(p.monad, MonadOp::Scalar(SM::Imaginary)) {
                 return Some(Verb::Atop(Box::new(swap("-")?), Box::new(swap("j.")?)));
+            }
+            // `x # y` undone with the same x is the expansion: the items
+            // come back where the ones stand and a fill takes every place a
+            // zero left. It has no monadic meaning, since `# y` counts and
+            // a count says nothing about what was counted.
+            if p.dyad == DyadOp::Copy {
+                return Some(Verb::Prim(Prim {
+                    name: "#^:_1",
+                    monad: MonadOp::None,
+                    dyad: DyadOp::Expand,
+                    ranks: [RANK_INF, 1, RANK_INF],
+                }));
             }
             let by_monad: Option<&'static str> = match p.monad {
                 MonadOp::Scalar(SM::Exp) => Some("^."),
@@ -12915,8 +13102,9 @@ fn one_int(a: &Array, what: &str, span: Span) -> Result<i64> {
 }
 
 /// `x \\ y`: expand. Every 1 in x takes the next item of y; every 0 leaves
-/// the type's fill in its place.
-fn expand(x: &Array, y: &Array, span: Span) -> Result<Array> {
+/// a fill in its place — the type's own fill, or, for a nested argument in
+/// APL, the prototype of its first item.
+fn expand(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
     let mask = x
         .to_i64_vec()
         .ok_or_else(|| Error::domain("an expansion mask holds 0s and 1s", span))?;
@@ -12936,6 +13124,7 @@ fn expand(x: &Array, y: &Array, span: Span) -> Result<Array> {
         ));
     }
     let m = ys.item_size();
+    let fill = if apl { prototype_of(&ys) } else { None };
     let mut data = Data::empty(ys.dtype());
     let mut at = 0usize;
     for &b in &mask {
@@ -12947,7 +13136,7 @@ fn expand(x: &Array, y: &Array, span: Span) -> Result<Array> {
             at += 1;
         } else {
             for _ in 0..m {
-                data.push_fill();
+                push_gap(&mut data, &fill);
             }
         }
     }
@@ -12957,7 +13146,7 @@ fn expand(x: &Array, y: &Array, span: Span) -> Result<Array> {
     } else {
         shape[0] = mask.len();
     }
-    Ok(Array::new(shape, data))
+    Ok(keep_proto(Array::new(shape, data), &ys, apl))
 }
 
 /// `". y` and `⍎ y`: the characters of y as a program of this language,

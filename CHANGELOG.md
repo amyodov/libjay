@@ -7,6 +7,10 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- J's `#^:_1`, the obverse of copy: `1 0 1 #^:_1 ] 1 3` is `1 0 3`, putting
+  the items back where the ones stand and a fill in the place of every
+  zero. It is the expansion APL spells `\`, and it fills as J does.
+
 - J's sparse arrays, `$.`. `$. 0 0 3 0 5` keeps only the positions that are
   not zero and prints them the way J does — one line per stored value, its
   position, `|`, then the value. The dyad takes a form number: `0 $.` moves
@@ -62,6 +66,36 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A field width near the end of the integer range no longer panics.**
+  `9223372036854775806 ": 1` multiplied the rows by the summed column width
+  and handed the product to an allocator: a capacity overflow in a debug
+  build and an 8-exabyte request in a release one. A width and a digit
+  count are lengths now, checked against the same ceiling a shape is, so an
+  absurd one is a limit error naming the request. APL's `x⍕y` had the same
+  unchecked pair and takes the same check.
+- **APL fills a nested argument with its prototype.** The gap an expansion,
+  a replication or an overtake leaves holds the first item's shape with a
+  zero for every number and a blank for every character, nested as deeply
+  as the item was: `1 0 1\(1 2)(3 4)` is ` 1 2  0 0  3 4` and `¯2/⊂⍳3` is
+  two vectors of zeros, where both used to leave a blank. An array with no
+  items remembers that prototype, so `↑0⍴⊂2 3⍴9` is the 2 by 3 table of
+  zeros, `4⍴0⍴⊂'ab'` is four pairs of blanks, and `⊃` of such an empty
+  keeps the axes its items had. J's own rule is untouched: it fills a box
+  with the empty box, whatever the argument held.
+- **An empty result keeps the shape a cell would have had.** An application
+  with no cells to frame used to answer an empty of the frame alone, which
+  dropped every axis the cells carried: `$ 1 >./\. (0 3 $ 0)` was `0`
+  where J says `0 3`, and `⍴0/0 3⍴0` was `0` where APL says `0 0`. The
+  cell's shape now comes from running the verb once on a cell of fills —
+  J's own rule — and reaches every path that frames cells: the rank
+  conjunction and `⍤`, replicate and expand along an axis, the scan, the
+  infix, the outfix and the cut. APL's scan keeps the shape it was given,
+  which is its own rule and not the fill cell's. A verb that refuses the
+  fill cell leaves the frame standing on its own.
+- **The width of a J infix or outfix is one atom.** `2 3 +/\. 1 2 3`
+  answers one row per width, as `2 3 +/\ 1 2 3` already did, and an empty
+  list of widths frames nothing instead of being refused as "an outfix
+  width needs an integer".
 - APL's operators now apply their function between the ITEMS of their
   arguments, which is what the language has always meant by them. An item
   is disclosed on the way in and a result that is not a simple scalar is

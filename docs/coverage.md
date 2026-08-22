@@ -317,6 +317,11 @@ already write down:
 
 - self-inverse: `+` `-` `%` `-.` `|.` `|:`
 - paired: `^`/`^.`, `*:`/`%:`, `+:`/`-:`, `>:`/`<:`, `<`/`>`, `#.`/`#:`
+- dyad only: `x # y` is undone by the expansion `x #^:_1 y`, which puts the
+  items back where the ones stand and a fill where each zero was. `# y`
+  counts, and a count cannot be undone, so the entry has no monad —
+  jconsole refuses to NAME this one (`# b. _1` is a domain error there)
+  while answering `#^:_1` itself, and libjay names it.
 - bonded arithmetic: `n&+` and `+&n` are both undone by `-&n`, `n&*` and
   `*&n` by `%&n` — the noun comes off the RIGHT whichever side it was bonded
   to — plus `^&n` (the n-th root), `n&^` (the base-n logarithm), and `n&-`
@@ -1486,15 +1491,20 @@ libjay is stricter, or simply elsewhere:
   by roughly the square root of `⎕CT`, so `1J1=1.0000000001J1` is 1 there.
 - a sequence yields its last sentence and prints nothing on the way, so
   `1 2 3⋄4 5` is `4 5`; GNU APL prints the value of every statement.
-- `< ≤ > ≥` need numbers. GNU APL extends them to characters, ordering
-  characters among themselves and before every number, so `'a'<'b'` and
-  `'a'<5` are both 1 there. libjay refuses, as the standard and J do and as
-  it already refuses to order a complex number.
+- `< ≤ > ≥` need numbers, and so does `⍸`. GNU APL extends them all to
+  characters and to nested values with one internal total order, ordering
+  characters among themselves and before every number, so `'a'<'b'`,
+  `'a'<5`, `'a'⍸1 1` and `(⊂⍳3)⍸¯2 0 2` all answer there. libjay refuses,
+  as the standard and J do and as it already refuses to order a complex
+  number; `=` and `≠` are defined across types and agree. This is the
+  largest single slice of the APL sweep and none of it is a libjay bug.
 - monadic `⊣` is the identity, which is what the status table promises and
   what the Dyalog line has. GNU APL gives it no result at all: `⊣1 2 3` and
   `⍴⊣1 2 3` both display nothing.
 - matching two EMPTY nested arrays compares their prototypes in APL2, and
-  libjay compares only the shape and whether the type is character. `⍬≡''`
+  libjay compares only the shape and whether the type is character — it
+  now CARRIES an empty nested array's prototype, which is what `↑0⍴⊂2 3⍴9`
+  answers from, but equality does not read it. `⍬≡''`
   is 0 on both sides and `⍬≡0⍴⊂1` is 1 on both; `⍬≡0⍴⊂⍬` is where the
   prototype would decide, and that is a named gap here.
 - an operator's left operand may itself be derived: `+/⍣0`, `⌈¨⍣2` and
@@ -1503,8 +1513,25 @@ libjay is stricter, or simply elsewhere:
   raises SYNTAX ERROR, so every `f/⍣n` and `f/⍤r` parts company there. The
   fuzz generator parenthesises the operand for exactly this reason.
 
+- `∊` of an empty argument is the empty vector, which is what APL2's
+  definition (the simple scalars of the argument, in order) gives and what
+  Dyalog answers. GNU APL answers a ONE-element vector holding a zero, so
+  `⍴∊⍳0` is 0 here and 1 there.
+- an integer near 2⋆63 stays exact. libjay reads such a literal out of its
+  text; GNU APL puts it through a double, which rounds it to 2⋆63 before
+  the function sees it, so `9223372036854775806|2 3⍴⍳6` is the exact
+  residues here and the residues of 2⋆63 there. The encodings and the
+  rotations of such a number differ by the rounding alone.
+- a field width or a precision past the element ceiling is a limit error
+  here: `9223372036854775806⍕1` names the request instead of allocating for
+  it. GNU APL falls back to its exponential form and answers ` 1.0E0` as
+  though no width had been asked for.
+
 Two entries are GNU APL's bug rather than a dialect difference, pinned so
-that a later release fixing them is noticed. A scan whose axis has length 1
+that a later release fixing them is noticed. A scan over an EMPTY argument keeps the
+argument's shape when the function is `+` or `×` there and drops it to a
+rank-1 empty when it is `-`, so `⍴-\0 3⍴1` is `0 3` here and `0` there
+while `⍴+\0 3⍴1` is `0 3` on both sides. A scan whose axis has length 1
 loses that axis there, so `+\2 1⍴⍳12` comes back as a 2-vector and `+\,5` as
 a scalar; `⌽`, `⌿` and every other axis length are fine. And a decode whose
 radix axis is EMPTY — `(⍳0)⊥2 3⍴⍳6`, `(2 0⍴0)⊥⍳0` — has a shape there that

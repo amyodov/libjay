@@ -805,6 +805,7 @@ pub struct Array {
     pub data: Data,
     layout: Layout,
     sparse: Option<crate::sparse::Handle>,
+    proto: Option<std::sync::Arc<Array>>,
 }
 
 /// Two arrays are equal when they hold the same elements at the same
@@ -828,7 +829,7 @@ impl PartialEq for Array {
 impl Array {
     pub fn new(shape: Vec<usize>, data: Data) -> Array {
         debug_assert_eq!(shape.iter().product::<usize>(), data.len());
-        Array { shape, data, layout: Layout::RowMajor, sparse: None }
+        Array { shape, data, layout: Layout::RowMajor, sparse: None, proto: None }
     }
 
     /// A sparse array: the logical `shape`, the stored cells, and the
@@ -836,12 +837,30 @@ impl Array {
     /// one element per position, so this is the only constructor that does
     /// not tie the buffer's length to the shape.
     pub fn sparse(shape: Vec<usize>, data: Data, sparse: crate::sparse::Sparse) -> Array {
-        Array { shape, data, layout: Layout::RowMajor, sparse: Some(std::sync::Arc::new(sparse)) }
+        Array { shape, data, layout: Layout::RowMajor, sparse: Some(std::sync::Arc::new(sparse)), proto: None }
     }
 
     /// True while the array holds only its stored cells.
     pub fn is_sparse(&self) -> bool {
         self.sparse.is_some()
+    }
+
+    /// The item an array with no items would have held — APL's prototype.
+    ///
+    /// A simple array's type says what its fills look like, so nothing has
+    /// to be remembered; a nested one does, since an empty buffer of boxes
+    /// no longer says whether its items were pairs of numbers or of
+    /// characters. `0⍴⊂2 3⍴9` is such an array, and `↑` of it answers the
+    /// 2 by 3 table of zeros this holds. Only the operations that make an
+    /// empty out of a nested array set it, and only APL reads it.
+    pub fn proto(&self) -> Option<&Array> {
+        self.proto.as_deref()
+    }
+
+    /// The same array, remembering what its items looked like.
+    pub fn with_proto(mut self, proto: Array) -> Array {
+        self.proto = Some(std::sync::Arc::new(proto));
+        self
     }
 
     /// How this array is stored sparsely, or None for a dense one.
@@ -863,7 +882,7 @@ impl Array {
     pub fn col_major(shape: Vec<usize>, data: Data) -> Array {
         debug_assert_eq!(shape.iter().product::<usize>(), data.len());
         let layout = if shape.len() < 2 { Layout::RowMajor } else { Layout::ColMajor };
-        Array { shape, data, layout, sparse: None }
+        Array { shape, data, layout, sparse: None, proto: None }
     }
 
     /// The same buffer read the other way round. The caller is asserting
@@ -1010,6 +1029,7 @@ impl Array {
             data: self.data.cast(to)?,
             layout: self.layout,
             sparse: None,
+            proto: self.proto.clone(),
         })
     }
 

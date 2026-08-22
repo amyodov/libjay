@@ -163,3 +163,50 @@ F←+/ ⋄ F 1 2 3
 // character. `⍬≡0⍴⊂1` agrees; `⍬≡0⍴⊂⍬` is where the prototype would decide.
 ⍬≡0⍴⊂⍬
 ? prototypes of empty nested arrays are not compared here
+// The same order of GNU APL's reaches ⍸ and the rest of the relational
+// family: a boxed or character bound is placed among the numbers there and
+// refused here. `=` and `≠` are defined across types and agree.
+'a'≥'b'
+? no order on characters here, the collating order there
+'a'>5
+? no order between a character and a number here, one there
+1 2<'ab'
+? no order between a character and a number here, one there
+'a'⍸1 1
+? no order between a character and a number here, one there
+(⊂⍳3)⍸¯2 0 2
+? no order between a nested value and a number here, one there
+// Enlist of an empty: APL2 defines ∊ as the simple vector of the simple
+// scalars of its argument, which for an empty argument is an empty vector.
+// GNU APL answers a ONE-element vector holding a zero. Dyalog agrees with
+// libjay.
+⍴∊⍳0
+? the empty here, one element there
+∊0 3⍴0
+? the empty here, one element there
+// An integer near 2^63 is exact here and goes through a double in GNU APL,
+// which rounds it to 2^63 before the verb sees it. libjay reads the literal
+// out of its text and keeps it exact, so the residues, the encodings and
+// the rotations of such a number differ by the rounding alone. No published
+// definition asks for the rounding.
+9223372036854775806|2 3⍴⍳6
+? the exact residues here, the residues of 2^63 there
+9223372036854775806⊤3 1 4 1 5
+? the exact digits here, the digits of 2^63 there
+9223372036854775806⌽¯2 0 2
+? the exact rotation here, the rotation by 2^63 there
+// A width or a precision is a length, and a written number can ask for more
+// characters than any machine holds: libjay refuses with a limit error
+// rather than allocate. GNU APL falls back to its exponential form and
+// answers as though a width had never been asked for.
+9223372036854775806⍕1
+? a limit error here, an answer in E-format there
+1 9223372036854775806⍕1
+? a limit error here, an answer in E-format there
+// A scan over an empty keeps the argument's shape, as GNU APL's own `+\`
+// and `×⍀` do. Its `-\` and `-⍀` drop the result to a rank-1 empty instead,
+// which is the shape bug this release fixed on libjay's side.
+⍴-\\0 3⍴1
+? the argument's shape here, a rank-1 empty there
+⍴-⍀3 0⍴1
+? the argument's shape here, a rank-1 empty there

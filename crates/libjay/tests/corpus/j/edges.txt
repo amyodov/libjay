@@ -118,3 +118,37 @@ r. i. 0
 (>: :. <:)^:_1 ] 5
 (] :. ])^:_1 ] 'abc'
 (+: :. -:)^:_1 i. 0
+
+// An empty frame keeps the cell's shape: the verb runs once on a cell of
+// fills and the answer's shape stands in for the cells there were none of.
+// The same rule gives a cut with no intervals its piece shape.
+$ (,"1) i. 0 3
+$ (,:"1) i. 0 3
+$ ({."1) i. 0 3
+$ (2&{.)"1 i. 0 3
+$ (,);._2 ''
+$ (<;.1) ''
+$ (~.)"1 (0 3$0)
+$ ,"0 1 (0 3$0)
+$ (i.@#)"1 (0 3$0)
+$ +/"2 (0 3 4$0)
+$ ($)"1 (0 3$0)
+$ (0 3$0) +"1 1 (0 3$0)
+$ (i.0 3) ,"1 (i.0 3)
+$ 2 {."1 (0 3$0)
+$ 2 {."0 (i.0)
+$ (3&$)"0 (i.0)
+$ (,&1)"1 (0 3$0)
+$ (|:)"2 (0 2 3$0)
+$ (/:~)"1 (0 3$0)
+{. i. 0 3
+$ {. i. 0 3
+{. 0 $ <'ab'
+
+// `#^:_1` — the obverse of copy is the expansion: the items come back where
+// the ones stand and a fill takes the place of every zero.
+1 0 1 #^:_1 ] 1 3
+1 0 1 #^:_1 ] 1;3
+1 0 1 #^:_1 'ab'
+1 0 1 #^:_1 (2 2 $ 1 2 3 4)
+$ 1 0 1 #^:_1 (2 2 $ 1 2 3 4)

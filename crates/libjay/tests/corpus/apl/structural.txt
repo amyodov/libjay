@@ -168,3 +168,16 @@
 0∧5
 0∨0
 1 2 3∘.=1 2
+// --- empties keep their frame ------------------------------------
+// An application over no cells still has the shape a cell would have had:
+// replicate and expand work out the axis they change whether or not there
+// are rows to change it in, and a scan keeps the shape it was given.
+⍴0/0 3⍴0
+⍴0⌿0 3⍴0
+⍴1 0 1/0 3⍴0
+⍴¯2/0 3⍴0
+⍴÷⍀0 3⍴0
+⍴+\\0 3⍴0
+⍴×⍀0 3⍴' '
+4⍴×⍀''
+⍴,\\''

@@ -65,3 +65,25 @@ _2 */\\ 1 2 3 4 5
 3 (+/ % #)\\ 1 2 3 4 5
 3 #\\ 1 2 3 4 5
 2 +/\\ 5
+
+// An empty argument has no runs, and the frame alone would lose the shape
+// a run's result had: the verb is run on the one run an empty offers —
+// itself — and the answer keeps that shape. `,/\ i.0 3` is a 0 by 0 table
+// where `+/\ i.0 3` is 0 by 3.
+$ ,/\\ i. 0 3
+$ +/\\ i. 0 3
+$ +/\\. i. 0 3
+$ (<)\\ i. 0 3
+$ (])\\ i. 0 3
+$ ($)\\ i. 0 3
+$ 2 +/\\ i. 0 3
+$ 2 (,)/\\ i. 0 3
+$ 1 >./\\. (0 3 $ 0)
+$ 1 (,)/\\. i. 0 3
+
+// The width of an infix or an outfix is one atom, so a LIST of widths
+// frames the result and an empty list of them frames nothing.
+2 3 +/\\. 1 2 3
+$ 2 3 +/\\. 1 2 3
+$ (0$0) +/\\. 1 2 3
+$ (0$0) +/\\ 1 2 3
