@@ -373,6 +373,27 @@ conjunctions above:
 | `'strings'`, `⍝` comments, `⋄` and newline separators | 🟢 |
 | `{name}` host-data interpolation | 🟢 |
 
+## APL — the Dyalog line
+
+The inventory above is the APL2/ISO vocabulary, which is the line libjay's
+APL follows (docs/coverage.md, "Which APL"). Dyalog's additions fall in two
+groups. The ones libjay already ships as extensions sit in the tables above
+marked "no oracle": `⊆`, `∘`, `⍥`, `⍛`, `⍢`, `⌺`, `f⍤g`, `⌸`, `⍠`, dfn
+guards and `∇` and `⍺⍺`/`⍵⍵`, the control structures, trains and function
+assignment. The ones libjay does not ship yet are below — the queue for a
+Dyalog dialect, not counted in the APL totals. Each will be recorded under
+the `dyalog:` snapshot key before it is implemented, and the recording
+wins over anything a document says.
+
+| Feature | Status |
+|---|---|
+| `⊇` select | 🔴 not yet — and today the parser calls it an unknown symbol rather than naming the promise, which is itself a diagnostics gap |
+| Dfn error-guards `num::expr` | 🔴 not yet — today a bare syntax error at the second `:`, same diagnostics gap |
+| `f⍣¯n` inverse powers | 🔴 the `⍣` row above carries it: a literal count must be non-negative today |
+| Namespaces (`⎕NS`, `#.`, dotted names) | 🔴 refused by name |
+| `⎕JSON`, `⎕R`/`⎕S`, `⎕CSV`, `⎕DT`, `⎕C` | 🔴 refused by name — pure computation, so the sandbox is no obstacle; they are simply not written |
+| `&` spawn | ⚪ the sandbox does not open threads, in any dialect — the row is in the operator table above |
+
 ## Data, boundary, runtime
 
 | Item | Status |
