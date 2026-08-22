@@ -137,6 +137,19 @@ pub enum NestedGrade {
     TotalOrder,
 }
 
+/// What dyadic `⍳` takes on its left.
+///
+/// The APL2/ISO line, which GNU APL implements, looks a cell up among the
+/// items of a left argument of any rank, so `(2 3⍴⍳6)⍳5` answers and a
+/// scalar left argument is a one-item table. Dyalog takes a vector alone
+/// and gives a RANK ERROR for anything else, scalars included.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LookupLeft {
+    #[default]
+    AnyRank,
+    VectorOnly,
+}
+
 /// Dialect settings supplied by the host.
 ///
 /// This is what a host asks for; [`Rules`] is what the compiler and the
@@ -165,6 +178,7 @@ pub struct Dialect {
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
     pub nested_grade: NestedGrade,
+    pub lookup_left: LookupLeft,
     /// Whether a function may stand where a value belongs: a run of
     /// functions is then a train, and `F←+/` names one. Both readings are
     /// implemented, so this is a choice and not a gap. It ships on, as an
@@ -198,6 +212,7 @@ impl Dialect {
             default_arg: DefaultArg::Eager,
             complex_order: ComplexOrder::RealThenImaginary,
             nested_grade: NestedGrade::Apl2,
+            lookup_left: LookupLeft::AnyRank,
             trains: true,
         }
     }
@@ -223,6 +238,7 @@ impl Dialect {
             default_arg: DefaultArg::Eager,
             complex_order: ComplexOrder::RealThenImaginary,
             nested_grade: NestedGrade::TotalOrder,
+            lookup_left: LookupLeft::VectorOnly,
             trains: true,
         }
     }
@@ -293,6 +309,7 @@ impl Dialect {
             default_arg: self.default_arg,
             complex_order: self.complex_order,
             nested_grade: self.nested_grade,
+            lookup_left: self.lookup_left,
             trains: self.trains,
         })
     }
@@ -320,6 +337,7 @@ pub struct Rules {
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
     pub nested_grade: NestedGrade,
+    pub lookup_left: LookupLeft,
     pub trains: bool,
 }
 
@@ -344,6 +362,7 @@ impl Rules {
             default_arg: self.default_arg,
             complex_order: self.complex_order,
             nested_grade: self.nested_grade,
+            lookup_left: self.lookup_left,
             trains: self.trains,
         }
     }

@@ -2396,3 +2396,67 @@ answers a boolean: `○/1 2 3` is 0 there and `¯0.836022` here, and
 `2○/1 2 3 4` is `0 1 0` against `0.909297 ¯0.989992 1.15782`. The MONADIC
 reduce shows it too, so it predates this wave and is not about n-wise
 reduction; `○` is kept out of the n-wise corpus for it.
+## 2026-08-22 — Dyalog wave 2: `⎕FX`, the TAO prototype, dyadic `⍳`'s left rank
+
+The dialect backlog went from 211 of 1892 recorded Dyalog answers to 124.
+
+**`⎕FX` is fixed at compile time, from literal text.** libjay compiles
+before it runs, and a definition is a compile-time object here: the parser
+already turns `∇ … ∇` into an `ExplicitDef` and registers the name. `⎕FX`
+therefore reduces to the same thing — its lines are lexed one at a time,
+each line's spans brought back to the literal it came from, and the header
+and body handed to the `build_tradfn` that `∇` already used. The sentence
+that held the `⎕FX` keeps the name it answers with, and the definition is
+emitted as the statement before it.
+
+The alternative, a genuine run-time system function, needs the evaluator to
+define verbs while the program runs and name resolution to become dynamic.
+That is a language-model change, not a primitive, and it buys nothing the
+corpus asks for: every recorded use fixes literal text. So the run-time
+form is a named promise — "⎕FX on a definition that is not literal text in
+the program", and "⎕FX inside another definition" — rather than a guess.
+Dyalog answers a definition it cannot fix with the number of the offending
+line; libjay reports the fault and points at the line, which is the
+diagnostics contract, and either way the sentence that then calls the
+function fails.
+
+This is what makes `dyalog-control.txt` measurable: the theme is written
+with `⎕FX` because the `∇` editor cannot be driven over a pipe, and libjay
+now agrees with 68 of its 79 expressions where it agreed with 8. The 11
+that remain are control-structure gaps, not `⎕FX` ones: `:AndIf`, `:OrIf`,
+`:CaseList`, `:For a b :In`, a `:For` that does not disclose its items, a
+definition that names one fixed after it, a top-level `:If`, and two places
+libjay answers where Dyalog refuses. `:AndIf` was left alone deliberately —
+Dyalog short-circuits it, and `Branch::test` is a block whose last sentence
+is the condition, not a list of conditions to AND, so the desugaring is a
+design question rather than a line of code.
+
+**The recorder sends a `∇`-definition as the `⎕FX` that fixes it.** Twenty
+rows in `definitions.txt` and `wave5.txt` were recorded as `<error>` for the
+channel's sake alone, and status.md counted them as the largest single
+"cause" of the backlog while being no divergence at all. `dyalog::as_fx`
+rewrites the block before the script is built; all twenty now answer, and
+all twenty agree with libjay. It is the one place the text an oracle is
+asked is not the corpus text, so it is documented as an assumption at the
+top of `dyalog.rs` and in docs/testing.md, and anything it is not sure of —
+an unclosed `∇`, a body line that opens another definition — is passed
+through untouched. The corpus keeps the `∇` spelling because that is the
+sentence libjay is asked.
+
+**The Dyalog grade separates two atomless arrays by their prototype.** The
+comparator had one rule that came from a guess rather than the recording:
+where no atom decided, it compared the TYPE of the buffer, with a box
+placed between the numbers and the characters. Now that an empty nested
+array carries its prototype, the honest comparison is available — the item
+each array would have held, which is the prototype for a nested empty and
+the type's own fill (a zero, a blank) for a simple one, compared by the
+same total ordering. It reproduces both recorded rows, `⍋(0⍴⊂1 2)(⍳0)` and
+`⍋(0⍴⊂1 2)('')`, and the box arm survives only for an empty that has
+forgotten.
+
+**Dyadic `⍳`'s left rank is a dialect setting, not a fix.** GNU APL and
+Dyalog disagree about `(2 3⍴⍳6)⍳5` and about `5⍳6`: the APL2 line searches
+the items of a left argument of any rank, Dyalog gives a RANK ERROR for
+anything that is not a vector. `Dialect.lookup_left` carries both, the
+default unchanged, and it is a field on the primitive rather than a rule
+read at run time, so J's `i.` never sees it. Seven rows.

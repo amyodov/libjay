@@ -683,8 +683,9 @@ pub enum DyadOp {
     /// Catenate along the LAST axis (APL `,`).
     AppendLast,
     /// x i. y / x ⍳ y: the index in x's items of each cell of y, or
-    /// `origin + #items(x)` when absent.
-    IndexOf { origin: i64 },
+    /// `origin + #items(x)` when absent. `vector_left` is the Dyalog
+    /// dialect's rule that the left argument must be a vector.
+    IndexOf { origin: i64, vector_left: bool },
     /// x e. y: is each cell of x, shaped like y's items, an item of y?
     MemberJ,
     /// x ∊ y: does each ELEMENT of x occur anywhere in y?
@@ -4999,10 +5000,11 @@ impl Tao {
                 DType::Box => 2,
                 _ => 1,
             },
-            // Dyalog puts every number before every character; a nested
-            // value falls between them, which is where its prototype puts
-            // it — a nested array of numbers is longer than a number and
-            // still not a character.
+            // Dyalog puts every number before every character. A nested
+            // value is never placed by its own type here: an array with
+            // atoms is decided by them, and an atomless one by the item it
+            // would have held (`proto_item`), so the box arm is reached
+            // only for an empty that has forgotten its prototype.
             Tao::Dyalog => match dt {
                 DType::Char | DType::Symbol => 2,
                 DType::Box => 1,
@@ -5114,9 +5116,31 @@ fn cmp_items_dyalog(x: &Array, y: &Array) -> std::cmp::Ordering {
             }
         }
     }
-    order
-        .then_with(|| tao.class(x.dtype()).cmp(&tao.class(y.dtype())))
-        .then_with(|| x.shape.iter().rev().cmp(y.shape.iter().rev()))
+    if order != Equal {
+        return order;
+    }
+    // Nothing was there to compare, so the arrays are separated by the item
+    // they WOULD have held and then by their shape, last axis first.
+    match (proto_item(x), proto_item(y)) {
+        (Some(px), Some(py)) => cmp_items_dyalog(&px, &py),
+        _ => tao.class(x.dtype()).cmp(&tao.class(y.dtype())),
+    }
+    .then_with(|| x.shape.iter().rev().cmp(y.shape.iter().rev()))
+}
+
+/// The item an atomless array would have held, as an array of its own: a
+/// nested empty's remembered prototype, and for a simple one the fill its
+/// type implies — a zero, or a blank. `None` where there is nothing to say,
+/// which is a nested empty that has forgotten (and an array with atoms,
+/// which is never separated this way).
+fn proto_item(a: &Array) -> Option<Array> {
+    if let Some(p) = a.proto() {
+        return Some(p.clone());
+    }
+    match a.dtype() {
+        DType::Box => None,
+        dt => Some(Array::new(vec![], fill_data(dt, 1))),
+    }
 }
 
 /// Element `i` of a buffer as an array of its own: a box gives up its
@@ -5557,7 +5581,25 @@ fn member_apl(x: &Array, y: &Array, tol: Tol) -> Array {
 }
 
 /// `x i. y` / `x ⍳ y`: where each cell of y sits among the items of x.
-fn index_of(x: &Array, y: &Array, origin: i64, tol: Tol) -> Array {
+///
+/// `vector_left` is the Dyalog reading, where the lookup table is a vector
+/// and nothing else; without it the items of a left argument of any rank
+/// are searched, which is what J and the APL2 line do.
+fn index_of(
+    x: &Array,
+    y: &Array,
+    origin: i64,
+    vector_left: bool,
+    tol: Tol,
+    span: Span,
+) -> Result<Array> {
+    if vector_left && x.rank() != 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("⍳ looks up in a vector, and its left argument has rank {}", x.rank()),
+            Some(span),
+        ));
+    }
     let cell_rank = x.rank().saturating_sub(1).min(y.rank());
     let frame_rank = y.rank() - cell_rank;
     let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
@@ -5571,7 +5613,7 @@ fn index_of(x: &Array, y: &Array, origin: i64, tol: Tol) -> Array {
             .unwrap_or(items);
         out.push(origin + at as i64);
     }
-    Array::new(frame, Data::I64(out.into()))
+    Ok(Array::new(frame, Data::I64(out.into())))
 }
 
 /// `x { y` for one index atom: the rank machinery supplies the framing.
@@ -6224,9 +6266,9 @@ pub(crate) fn with_origin(v: &Verb, origin: i64) -> Option<Verb> {
                 other => other,
             };
             out.dyad = match p.dyad {
-                DyadOp::IndexOf { .. } => {
+                DyadOp::IndexOf { vector_left, .. } => {
                     changed = true;
-                    DyadOp::IndexOf { origin }
+                    DyadOp::IndexOf { origin, vector_left }
                 }
                 DyadOp::IndexOfLast { .. } => {
                     changed = true;
@@ -7130,7 +7172,9 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::AppendLast => {
             catenate(x, y, false, cfg.agreement == Agreement::LeadingPrefix, span)
         }
-        DyadOp::IndexOf { origin } => Ok(index_of(x, y, origin, tol)),
+        DyadOp::IndexOf { origin, vector_left } => {
+            index_of(x, y, origin, vector_left, tol, span)
+        }
         DyadOp::MemberJ => Ok(member_j(x, y, tol)),
         DyadOp::MemberApl => Ok(member_apl(x, y, tol)),
         DyadOp::From => from_index(x, y, span),

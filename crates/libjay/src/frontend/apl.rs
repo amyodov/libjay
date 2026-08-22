@@ -12,8 +12,8 @@ use std::sync::Arc;
 use crate::array::{Array, Data};
 use crate::error::{Error, Result, Span};
 use crate::frontend::{
-    DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, NestedModel, Partition, Rules,
-    Segment, SourceParts,
+    DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, LookupLeft, NestedModel, Partition,
+    Rules, Segment, SourceParts,
 };
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
@@ -35,13 +35,105 @@ pub fn parse(src: &SourceParts, d: Rules) -> Result<Vec<Expr>> {
             stmts.push(stmt);
             continue;
         }
-        let sentence = sentences[i].clone();
+        let mut sentence = sentences[i].clone();
         i += 1;
+        // `⎕FX` defines a function where it stands; the sentence keeps only
+        // the name it answers with.
+        while let Some(at) = outermost_fx(&sentence) {
+            let mut end = at + 1;
+            while end < sentence.len() && matches!(sentence[end].kind, Tok::Value(_)) {
+                end += 1;
+            }
+            let (def, name) = fix_definition(&sentence[at..end], d, &mut verbs)?;
+            stmts.push(def);
+            let span = Span::merge(sentence[at].span, sentence[end - 1].span);
+            sentence.splice(at..end, [Token { kind: Tok::Value(name), span }]);
+        }
         if let Some(stmt) = parse_statement(sentence, d, &mut verbs, false)? {
             stmts.push(stmt);
         }
     }
     Ok(stmts)
+}
+
+/// Where a `⎕FX` stands in a sentence of its own rather than inside a dfn's
+/// braces. One inside a body belongs to that body, which is compiled when
+/// the definition is, so it is left where it is and named there as a gap.
+fn outermost_fx(sentence: &[Token]) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, t) in sentence.iter().enumerate() {
+        match t.kind {
+            Tok::LBrace => depth += 1,
+            Tok::RBrace => depth = depth.saturating_sub(1),
+            Tok::QuadFx if depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `⎕FX`: fix a definition from its text. `toks` opens with the `⎕FX`
+/// itself and runs to the end of the sentence; the lines are a vector of
+/// character vectors, one per line of the definition, the first of them the
+/// header. The answer is the name the definition gives the function.
+///
+/// libjay compiles before it runs, so the lines have to be text the
+/// compiler can read: a definition assembled while the program runs is a
+/// promise, not a refusal. Dyalog's own answer for a definition it cannot
+/// fix is the number of the offending line; libjay reports the fault
+/// instead, pointing at the line that carries it.
+fn fix_definition(
+    toks: &[Token],
+    d: Rules,
+    verbs: &mut HashMap<String, Verb>,
+) -> Result<(Expr, Array)> {
+    let fx = toks[0].span;
+    if toks.len() == 1 {
+        return Err(Error::not_yet(
+            "⎕FX on a definition that is not literal text in the program",
+            fx,
+        ));
+    }
+    let span = Span::merge(fx, toks[toks.len() - 1].span);
+    let mut lines: Vec<(Vec<Token>, Span)> = Vec::new();
+    for t in &toks[1..] {
+        let text = match &t.kind {
+            Tok::Value(a) if a.rank() <= 1 => match &a.data {
+                Data::Char(cs) => Some(cs.iter().collect::<String>()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(text) = text else {
+            return Err(Error::not_yet(
+                "⎕FX on a definition that is not literal text in the program",
+                t.span,
+            ));
+        };
+        let src = SourceParts::from_parts(&[&text], &[]);
+        let mut lexed = lex(&src, d)?;
+        if lexed.len() > 1 {
+            return Err(Error::not_yet("a ⋄ inside a ⎕FX line", t.span));
+        }
+        // Every span inside the line indexes the line's own text, so it is
+        // brought back to the literal the line came from.
+        let mut line = lexed.pop().unwrap_or_default();
+        for tok in &mut line {
+            tok.span = t.span;
+        }
+        lines.push((line, t.span));
+    }
+    let (head, head_span) = lines.remove(0);
+    if head.is_empty() {
+        return Err(Error::parse("⎕FX starts with the definition's header", head_span));
+    }
+    let body: Vec<Vec<Token>> = lines.into_iter().map(|(l, _)| l).collect();
+    let def = build_tradfn(&head, &body, span, d, verbs)?;
+    let Expr::VerbDef { name, .. } = &def else {
+        return Err(Error::internal("⎕FX did not build a definition"));
+    };
+    let answer = Array::from_chars(name.chars().collect());
+    Ok((def, answer))
 }
 
 /// One sentence, with every name known to be a function already a function.
@@ -52,6 +144,12 @@ fn parse_statement(
     verbs: &mut HashMap<String, Verb>,
     in_def: bool,
 ) -> Result<Option<Expr>> {
+    // A `⎕FX` that reaches here is inside another definition's body: the
+    // one that stands on its own was fixed and rewritten away before the
+    // sentence was parsed.
+    if let Some(t) = sentence.iter().find(|t| matches!(t.kind, Tok::QuadFx)) {
+        return Err(Error::not_yet("⎕FX inside another definition", t.span));
+    }
     let sentence = substitute_verbs(sentence, verbs);
     let sentence = fold_dfns(sentence, d, verbs)?;
     // `F←{⍵×2}` names a function: the sentence does no work at run time, and
@@ -245,6 +343,10 @@ enum Tok {
     Del,
     /// A control word, `:If` and its family, without the colon.
     Control(&'static str),
+    /// `⎕FX`, which fixes a definition from its text. It is not a function
+    /// the sentence parser can carry: the definition is built while the
+    /// program is compiled, so the whole sentence is rewritten around it.
+    QuadFx,
 }
 
 #[derive(Clone, Debug)]
@@ -391,7 +493,7 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
         '⍳' => Prim {
             name: "⍳",
             monad: M::IotaApl { origin },
-            dyad: D::IndexOf { origin },
+            dyad: D::IndexOf { origin, vector_left: d.lookup_left == LookupLeft::VectorOnly },
             // The monad takes the whole argument: a vector of lengths asks
             // for a nested index array, which is a refusal, not a frame of
             // one index generator per atom.
@@ -671,6 +773,7 @@ fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
         "D" => chars("0123456789"),
         "IO" => Tok::Value(Array::scalar_i64(d.origin)),
         "CT" => Tok::Value(Array::scalar_f64(d.ct)),
+        "FX" => Tok::QuadFx,
         "UCS" => Tok::Func(Verb::Prim(Prim {
             name: "⎕UCS",
             monad: MonadOp::Unicode { pass_chars: false },
@@ -2132,6 +2235,11 @@ fn parse_primary(
         Tok::LBrace | Tok::RBrace => Err(Error::parse("unmatched {", t.span)),
         Tok::Separator => Err(Error::internal("a statement break survived folding")),
         Tok::Op(_) => Err(Error::internal("operator survived folding")),
+        // The sentence parser never sees a `⎕FX` that libjay could fix:
+        // one is rewritten away before the sentence is parsed. What is
+        // left is a `⎕FX` inside another definition, whose body is not
+        // compiled until it is called.
+        Tok::QuadFx => Err(Error::not_yet("⎕FX inside another definition", t.span)),
     }
 }
 
@@ -2521,7 +2629,7 @@ fn parse_tradfn(
     let header = &sentences[*i];
     let open = header[0].span;
     *i += 1;
-    let (name, def_left, def_right, result, locals) = parse_header(&header[1..], open)?;
+    let head = header[1..].to_vec();
     let mut body_lines: Vec<Vec<Token>> = Vec::new();
     loop {
         let Some(line) = sentences.get(*i) else {
@@ -2537,13 +2645,25 @@ fn parse_tradfn(
         .get(i.saturating_sub(1))
         .and_then(|l| l.first())
         .map_or(open, |t| t.span);
-    let span = Span::merge(open, close);
+    build_tradfn(&head, &body_lines, Span::merge(open, close), d, verbs)
+}
+
+/// A definition from its header tokens and one token list per body line —
+/// the shape both `∇ … ∇` and `⎕FX` reduce to.
+fn build_tradfn(
+    head: &[Token],
+    body_lines: &[Vec<Token>],
+    span: Span,
+    d: Rules,
+    verbs: &mut HashMap<String, Verb>,
+) -> Result<Expr> {
+    let (name, def_left, def_right, result, locals) = parse_header(head, span)?;
     // The body can call the function by its own name.
     let mut inner = verbs.clone();
     inner.insert(name.clone(), Verb::Named(name.clone()));
     let mut items = Vec::new();
     let mut labels: Vec<(String, usize)> = Vec::new();
-    for line in &body_lines {
+    for line in body_lines {
         let mut label = None;
         let item = to_item(line.clone(), d, &mut inner, &mut label)?;
         if let Some(name) = label {
@@ -3309,7 +3429,7 @@ mod tests {
         match &stmts[0] {
             Expr::Monad { verb, .. } => {
                 assert_eq!(as_prim(verb).monad, MonadOp::IotaApl { origin });
-                assert_eq!(as_prim(verb).dyad, DyadOp::IndexOf { origin });
+                assert_eq!(as_prim(verb).dyad, DyadOp::IndexOf { origin, vector_left: false });
                 assert_eq!(as_prim(verb).ranks, [RANK_INF, RANK_INF, RANK_INF]);
             }
             other => panic!("expected a monad, got {other:?}"),

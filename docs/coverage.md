@@ -482,11 +482,15 @@ there is, and numbers before nested values before characters where no
 atom separates them. That comparator was derived from the recorded
 answers in `snapshots/apl/grade.snap`, which is what pins it.
 
+One more row is the preset's: dyadic `⍳` takes a VECTOR on its left and
+gives a rank error for anything else, scalars included, where the APL2 line
+searches the items of a left argument of any rank (`Dialect.lookup_left`).
+
 What the preset still leaves at the GNU reading, and what that costs
 against the recording, is the table in [status.md](status.md), "APL — the
-Dyalog line". The largest item is the inner product with a non-scalar
-right operand; the largest NON-item is the twenty `∇`-definitions the
-recording harness could not put to Dyalog at all.
+Dyalog line". The largest items are an array where a function operand
+belongs (`2∘×`, and an `⍺⍺` bound to a value) and the inner product with a
+non-scalar right operand.
 
 | Glyph | Monadic | Dyadic |
 |---|---|---|
@@ -505,7 +509,7 @@ recording harness could not put to Dyalog at all.
 | `∨` | — | GCD (logical or on booleans; the Gaussian one on complex) |
 | `~` | not (the argument must be 0 or 1) | without: x's items that y has not |
 | `⍴` | shape of | reshape: x lays out y's ELEMENTS, cyclically, which is where APL and J part company above rank 1. An empty y fills with the type's fill |
-| `⍳` | index generator (respects `⎕IO`): one length gives the counting vector, two or more give an array of that shape whose elements are the boxed coordinate vectors | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`) |
+| `⍳` | index generator (respects `⎕IO`): one length gives the counting vector, two or more give an array of that shape whose elements are the boxed coordinate vectors | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`). The items of a left argument of ANY rank are searched; `Dialect.lookup_left` names Dyalog's reading, where the left argument must be a vector and anything else is a rank error |
 | `⍉` | transpose | dyadic transpose: x says, for each axis of y in turn, which axis of the RESULT it becomes; a destination two axes share runs them together, which is the diagonal, and every axis of the result must be named |
 | `↓` | split: the vectors along the LAST axis, each enclosed, laid out in the remaining axes' shape (no oracle — see "Which APL" above) | drop |
 | `,` | ravel | catenate along the LAST axis. Axes other than that one must conform: APL refuses the ragged case that J fills, which is where the two rules part company |
@@ -532,6 +536,7 @@ recording harness could not put to Dyalog at all.
 | `⍷` | — | find: 1 at each position of y where a copy of x begins |
 | `⍎` | execute: the characters are compiled as an APL program and run HERE, over the names the sentence itself can see | — |
 | `⎕UCS` | codepoints become characters, characters become their codepoints | — |
+| `⎕FX` | fix a definition from its lines and answer with its name; the lines must be literal text (see below) | — |
 | `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill |
 | `⍋` `⍒` | grade up / down (stable; respects `⎕IO`). A NESTED argument orders by the APL2 rule: the rank, then the shape read from the FIRST axis, then the atoms in row-major order — a character before a number before a nested value, a nested one recursively — and two arrays with no atoms are separated by their types instead. It is a different comparator from J's at every step; `Dialect.nested_grade` names Dyalog's total array ordering as the other reading | collating grade: every character of y is keyed by where it FIRST occurs in the collating array x — the coordinate read with the last axis most significant, and one past the end for a character x does not hold — and the items of y are ordered by those keys read left to right |
 | `⊢` `⊣` | same | right / left |
@@ -638,7 +643,19 @@ names for as long as the body runs. GNU APL has no dfn operators either.
 The `⎕`-names are read-only and pure: `⎕A` and `⎕D` are the ISO constants
 (GNU APL has no value for either), `⎕IO` and `⎕CT` report the dialect the
 compiler was given, and `⎕UCS` converts between characters and codepoints.
-Assigning any of them is refused — the dialect fixed them before the
+
+`⎕FX` fixes a definition from its text and answers with its name:
+`⎕FX 'Z←F R' 'Z←R×2'` defines `F` and gives back `'F'`, one line per item of
+a vector of character vectors, the first of them the header. It takes the
+same lines a `∇ … ∇` would, control words included. libjay compiles before
+it runs, so the lines have to be literal text the compiler can read: a
+definition assembled while the program runs, or a `⎕FX` inside another
+definition's body, is named as not implemented yet rather than answered.
+Where Dyalog answers a definition it cannot fix with the number of the
+offending line, libjay reports the fault, pointing at the line that carries
+it.
+
+Assigning any of the `⎕`-names is refused — the dialect fixed them before the
 program ran. The ones that would read a clock, a workspace or a filesystem
 (`⎕TS`, `⎕AI`, `⎕FIO` and their relatives) are refused with "closed by the
 sandbox", which is the sandbox speaking rather than a queue position — see
@@ -1582,11 +1599,12 @@ sections above is also collected here.
   answers and GNU APL refuses; the ordering verbs still refuse complex
   operands, because a permutation is not a claim about size. Ordering
   BOXED items is implemented in both languages now — see the `/:` and `⍋`
-  rows above — with one reading left named: `Dialect.nested_grade` asks for
-  Dyalog's total array ordering, which is refused, because the published
-  rule differs from the APL2 one at every step and does not say where an
-  enclosed item sorts against a simple one, and no Dyalog is installed here
-  to settle it.
+  rows above — and so is `Dialect.nested_grade`'s other reading, Dyalog's
+  total array ordering, derived from the recorded answers in
+  `snapshots/apl/grade.snap` rather than from a document. Two arrays with no
+  atoms to separate them are ordered there by the item they WOULD have held:
+  a nested empty's prototype, and for a simple one the fill its type
+  implies.
 - An explicit modifier whose body derives the modifier itself is refused:
   libjay derives at parse time, so the body would be parsed for ever.
   Recursion inside the derived verb's own body, by `$:` or by a verb's name,

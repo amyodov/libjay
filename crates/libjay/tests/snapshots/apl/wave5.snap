@@ -206,37 +206,37 @@
 > dyalog:  1.0 2.0 3.0 4.0
 = ∇Z←F N\nZ←0\nL1:\n→(N=0)/END\nZ←Z+N\nN←N-1\n→L1\nEND:\n∇\nF 5
 > gnu: 15
-> dyalog: <error>
+> dyalog: 15
 = ∇Z←F N\nZ←0\nL1:\n→(N=0)/END\nZ←Z+N\nN←N-1\n→L1\nEND:\n∇\nF 0
 > gnu: 0
-> dyalog: <error>
+> dyalog: 0
 = ∇Z←G N\n→(N>3)/BIG\nZ←1\n→0\nBIG:\nZ←2\n∇\nG 5
 > gnu: 2
-> dyalog: <error>
+> dyalog: 2
 = ∇Z←G N\n→(N>3)/BIG\nZ←1\n→0\nBIG:\nZ←2\n∇\nG 1
 > gnu: 1
-> dyalog: <error>
+> dyalog: 1
 = ∇Z←H N\nZ←1\n→0\nZ←99\n∇\nH 1
 > gnu: 1
-> dyalog: <error>
+> dyalog: 1
 = ∇Z←K N\nZ←1\n→⍬\nZ←2\n∇\nK 0
 > gnu: 2
-> dyalog: <error>
+> dyalog: 2
 = ∇Z←M N\nZ←0\nTOP:\n→(N≤0)/0\nZ←Z+2\nN←N-1\n→TOP\n∇\nM 3
 > gnu: 6
-> dyalog: <error>
+> dyalog: 6
 = ∇Z←H\nZ←42\n∇\nH
 > gnu: 42
-> dyalog: <error>
+> dyalog: 42
 = ∇Z←H\nZ←42\n∇\nH+1
 > gnu: 43
-> dyalog: <error>
+> dyalog: 43
 = ∇Z←H\nZ←42\n∇\n2×H
 > gnu: 84
-> dyalog: <error>
+> dyalog: 84
 = ∇Z←H;T\nT←6\nZ←T×7\n∇\nH
 > gnu: 42
-> dyalog: <error>
+> dyalog: 42
 = ∇Z←P\nZ←⍳4\n∇\n+/P
 > gnu: 10
-> dyalog: <error>
+> dyalog: 10

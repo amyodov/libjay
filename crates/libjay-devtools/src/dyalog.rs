@@ -28,7 +28,9 @@
 //! 5. An error abandons the script, so the closing marker never prints.
 //!    Should a version instead report the error and carry on, the error
 //!    text inside the markers is recognised as well.
-//! 6. `⎕PW`, `⎕PP`, `⎕ML` and `⎕IO` are assignable system variables.
+//! 6. A `∇`-definition is sent as the `⎕FX` that fixes the same function
+//!    (`as_fx` below), because the `∇` editor cannot be driven over a pipe.
+//! 7. `⎕PW`, `⎕PP`, `⎕ML` and `⎕IO` are assignable system variables.
 //!    Pinning them is what makes a recording reproducible on another
 //!    machine: `⎕ML←1` is Dyalog's own migration level (`↑` mix, `⊃`
 //!    first), which is the dialect being recorded, and `⎕PW←32767` keeps a
@@ -126,6 +128,58 @@ fn flags() -> Vec<String> {
     }
 }
 
+/// A `∇`-definition, rewritten as the `⎕FX` that fixes the same function.
+///
+/// Dyalog is driven here as a piped script, and opening the `∇` editor over
+/// that channel makes it print a line prompt per line and echo the body, so
+/// a definition written between two `∇`s cannot be recorded through the
+/// channel at all. `⎕FX` takes the same lines as a vector of character
+/// vectors and fixes the same function; its result is shy, so nothing but
+/// the sentences after it displays.
+///
+/// This is the ONE place the text sent to an oracle is not the corpus text.
+/// The corpus keeps the `∇` spelling, because that is the sentence libjay
+/// is asked, and the two spellings define the same function by Dyalog's own
+/// account of `⎕FX`. Anything the rewrite is not sure of — a `∇` that never
+/// closes, a line inside the body that opens another definition — is passed
+/// through untouched, so what Dyalog says about it is still recorded.
+fn as_fx(expr: &str) -> String {
+    if !expr.contains('∇') {
+        return expr.to_string();
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut lines = expr.lines();
+    while let Some(line) = lines.next() {
+        let Some(header) = line.trim().strip_prefix('∇').map(str::trim) else {
+            out.push(line.to_string());
+            continue;
+        };
+        if header.is_empty() {
+            return expr.to_string();
+        }
+        let mut body = vec![header.to_string()];
+        let mut closed = false;
+        for line in lines.by_ref() {
+            let t = line.trim();
+            if t == "∇" {
+                closed = true;
+                break;
+            }
+            if t.starts_with('∇') {
+                return expr.to_string();
+            }
+            body.push(t.to_string());
+        }
+        if !closed {
+            return expr.to_string();
+        }
+        let quoted: Vec<String> =
+            body.iter().map(|l| format!("'{}'", l.replace('\'', "''"))).collect();
+        out.push(format!("⎕FX {}", quoted.join(" ")));
+    }
+    out.join("\n")
+}
+
 /// The script one sentence is run as. The pins come first, the markers
 /// bracket the sentence, and `⎕OFF` ends the run.
 fn script(expr: &str, index_origin: u8) -> String {
@@ -133,7 +187,7 @@ fn script(expr: &str, index_origin: u8) -> String {
     out.push_str("⎕PW←32767\n⎕PP←10\n⎕ML←1\n");
     out.push_str(&format!("⎕IO←{index_origin}\n"));
     out.push_str(&format!("⎕←'{BEGIN}'\n"));
-    out.push_str(expr.trim_end());
+    out.push_str(as_fx(expr).trim_end());
     out.push('\n');
     out.push_str(&format!("⎕←'{END}'\n"));
     out.push_str("⎕OFF\n");

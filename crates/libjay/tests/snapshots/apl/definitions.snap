@@ -74,28 +74,28 @@
 > dyalog: 3 2 1
 = ∇Z←F R\nZ←R×2\n∇\nF 21
 > gnu: 42
-> dyalog: <error>
+> dyalog: 42
 = ∇Z←L G R\nZ←L+R\n∇\n2 G 3
 > gnu: 5
-> dyalog: <error>
+> dyalog: 5
 = ∇Z←F R;T\nT←R×2\nZ←T+1\n∇\nF 5
 > gnu: 11
-> dyalog: <error>
+> dyalog: 11
 = ∇Z←F R\nZ←+/R\n∇\nF 1 2 3 4
 > gnu: 10
-> dyalog: <error>
+> dyalog: 10
 = ∇Z←F R\nZ←R\nZ←Z×3\n∇\nF 7
 > gnu: 21
-> dyalog: <error>
+> dyalog: 21
 = X←1\n∇Z←F R\nX←5\nZ←R\n∇\nQ←F 9\nX
 > gnu: 5
-> dyalog: <error>
+> dyalog: 5
 = Y←1\n∇Z←G R;Y\nY←5\nZ←R\n∇\nQ←G 9\nY
 > gnu: 1
-> dyalog: <error>
+> dyalog: 1
 = ∇Z←F R\nZ←R×2\n∇\n∇Z←G R\nZ←F R\n∇\nG 5
 > gnu: 10
-> dyalog: <error>
+> dyalog: 10
 = A←1 2 3 4 ⋄ A[2]←99 ⋄ A
 > gnu: 1 99 3 4
 > dyalog: 1 99 3 4

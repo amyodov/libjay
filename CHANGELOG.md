@@ -48,10 +48,30 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   ordering — still refuse the other at compile time rather than answer
   differently in silence, and the preset leaves them where they were.
 
-  Against the 1479 corpus expressions Dyalog 20.0 was recorded on, libjay's
-  default answers 1329 and the preset answers 1418.
+  Dyadic `⍳` takes a VECTOR on its left under the preset and gives a rank
+  error for anything else, scalars included, where the default searches the
+  items of a left argument of any rank.
+
+  Against the 1892 corpus expressions Dyalog 20.0 has been recorded on,
+  libjay's default answers 1667 and the preset answers 1768.
   `jay-corpus stats apl --dialect-diff --dialect dyalog` itemises the rest;
   it replays the recorded column and runs no interpreter.
+
+- APL's `⎕FX`, which fixes a definition from its text and answers with its
+  name. `⎕FX 'Z←F R' 'Z←R×2'` defines `F` and gives back `'F'`: one line per
+  item of a vector of character vectors, the first of them the header, and
+  the same lines a `∇ … ∇` takes, control words included. libjay compiles
+  before it runs, so the lines have to be literal text the compiler can
+  read — a definition assembled while the program runs, or a `⎕FX` inside
+  another definition's body, is named as not implemented yet rather than
+  answered — and a definition that will not fix is reported as the fault it
+  is, pointing at the line that carries it, where Dyalog answers the number
+  of the offending line.
+
+  This is what makes Dyalog's own control-structure theme measurable:
+  `corpus/apl/dyalog-control.txt` writes its functions with `⎕FX` because
+  the `∇` editor cannot be driven over a pipe, and libjay now agrees with 68
+  of its 79 expressions where it agreed with 8.
 
 ### Changed
 
@@ -63,6 +83,11 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   its argument's shape, so `≠2 3⍴⍳6` is a 2 by 3 table of ones and `≠5` is a
   scalar. J's `~:` still runs over items. The two spellings are not the same
   function, and the corpus now holds both.
+- Under the Dyalog nested grade, two arrays with no atoms to separate them
+  are ordered by the item they WOULD have held rather than by the type of
+  their buffer: a nested empty's prototype, and for a simple one the fill
+  its type implies. `⍋(0⍴⊂1 2)('')` was already right; it is now right for
+  the reason the recording gives rather than by a rule guessed for the box.
 
 - **APL's n-wise reduction, `n f/ y`.** The dyadic case of a `/`-derived
   function folds every window of n items along the axis the glyph chooses:

@@ -567,11 +567,12 @@ fn dialect_of(
     default_arg: Option<&str>,
     complex_order: Option<&str>,
     nested_grade: Option<&str>,
+    lookup_left: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Dialect> {
     use jay::frontend::{
-        ComplexOrder, DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, NestedGrade,
-        NestedModel, Partition,
+        ComplexOrder, DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, LookupLeft,
+        NestedGrade, NestedModel, Partition,
     };
     let d = Dialect::default();
     Ok(Dialect {
@@ -643,6 +644,12 @@ fn dialect_of(
             &[("apl2", NestedGrade::Apl2), ("total-order", NestedGrade::TotalOrder)],
         )?
         .unwrap_or(d.nested_grade),
+        lookup_left: setting(
+            lookup_left,
+            "lookup_left",
+            &[("any-rank", LookupLeft::AnyRank), ("vector-only", LookupLeft::VectorOnly)],
+        )?
+        .unwrap_or(d.lookup_left),
         trains: trains.unwrap_or(d.trains),
     })
 }
@@ -662,6 +669,7 @@ fn dialect_of(
     default_arg=None,
     complex_order=None,
     nested_grade=None,
+    lookup_left=None,
     trains=None,
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -679,6 +687,7 @@ fn compile(
     default_arg: Option<&str>,
     complex_order: Option<&str>,
     nested_grade: Option<&str>,
+    lookup_left: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
@@ -694,6 +703,7 @@ fn compile(
         default_arg,
         complex_order,
         nested_grade,
+        lookup_left,
         trains,
     )?;
     let program = jay::compile(lang, source, &dialect).map_err(|e| jay_err(source, &e))?;
@@ -726,6 +736,7 @@ fn devices() -> Vec<(String, String, String, bool)> {
     default_arg=None,
     complex_order=None,
     nested_grade=None,
+    lookup_left=None,
     trains=None,
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -744,6 +755,7 @@ fn compile_parts(
     default_arg: Option<&str>,
     complex_order: Option<&str>,
     nested_grade: Option<&str>,
+    lookup_left: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
@@ -759,6 +771,7 @@ fn compile_parts(
         default_arg,
         complex_order,
         nested_grade,
+        lookup_left,
         trains,
     )?;
     let part_refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();

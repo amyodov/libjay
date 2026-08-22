@@ -82,6 +82,11 @@ class APL:
         the atoms, characters before numbers before nested values) or
         "total-order" (Dyalog's total array ordering)."""
 
+        lookup_left: str = "any-rank"
+        """What dyadic ``⍳`` takes on its left: "any-rank" (the items of a
+        left argument of any rank are searched) or "vector-only" (Dyalog's
+        rule, where anything but a vector is a rank error)."""
+
         trains: bool = True
         """Whether a function may stand where a value belongs: a run of
         functions is then a train, and ``F←+/`` names one. Ships on, as an
@@ -102,6 +107,7 @@ class APL:
         depth_sign="signed",
         dfn_result="first-non-assignment",
         nested_grade="total-order",
+        lookup_left="vector-only",
     )
 
     @staticmethod

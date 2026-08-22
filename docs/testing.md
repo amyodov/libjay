@@ -208,6 +208,17 @@ and echo the body, so a `∇`-defined tradfn cannot be recorded through it.
 `⎕FX` takes the same lines as a vector of character vectors and fixes the
 same function.
 
+The same channel is why a `∇`-definition anywhere else in the corpus —
+`definitions.txt` and `wave5.txt` hold twenty of them — is sent to Dyalog as
+the `⎕FX` that fixes the same function. `dyalog::as_fx` does the rewrite,
+and it is the one place the text an oracle is asked is not the corpus text:
+the corpus keeps the `∇` spelling, because that is the sentence libjay is
+asked, and Dyalog's own account of `⎕FX` is that the two spellings define
+the same function. `⎕FX`'s result is shy, so it displays nothing of its own.
+A `∇` the rewrite is not sure of — one that never closes, or a body line
+that opens another definition — is passed through untouched, so whatever
+Dyalog says about it is still what gets recorded.
+
 ### Installing Dyalog and recording it
 
 Dyalog's download is account-gated, so it is on the recording machine only:

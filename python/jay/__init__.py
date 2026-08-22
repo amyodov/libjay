@@ -73,6 +73,7 @@ _DIALECT_KEYS = (
     "default_arg",
     "complex_order",
     "nested_grade",
+    "lookup_left",
     "trains",
 )
 

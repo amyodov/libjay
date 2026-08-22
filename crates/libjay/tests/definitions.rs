@@ -361,6 +361,55 @@ fn apl_definition_diagnostics(#[case] src: &str, #[case] msg: &str) {
     assert!(e.msg.contains(msg), "{src}: {}", e.msg);
 }
 
+// --- APL: ⎕FX ------------------------------------------------------------
+
+/// `⎕FX` fixes the same function `∇ … ∇` does, from the same lines.
+#[rstest]
+#[case("N←⎕FX 'Z←F R' 'Z←R×2' ⋄ F 21", 42)]
+#[case("N←⎕FX 'Z←L G R' 'Z←L+R' ⋄ 2 G 3", 5)]
+#[case("N←⎕FX 'Z←F R;T' 'T←R×2' 'Z←T+1' ⋄ F 5", 11)]
+#[case("N←⎕FX 'Z←H' 'Z←42' ⋄ H", 42)]
+#[case("N←⎕FX 'Z←F R' ':If R>0' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 5", 1)]
+#[case("N←⎕FX 'Z←F R' ':If R>0' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F ¯5", 0)]
+#[case("N←⎕FX 'Z←F R' 'Z←1' ':While R>1' 'Z←Z×R' 'R←R-1' ':EndWhile' ⋄ F 5", 120)]
+#[case("N←⎕FX 'Z←F R' 'Z←0' ':For X :In R' 'Z←Z+X' ':EndFor' ⋄ F 1 2 3 4", 10)]
+#[case("N←⎕FX 'Z←F R' ':Select R' ':Case 1' 'Z←10' ':Else' 'Z←0' ':EndSelect' ⋄ F 1", 10)]
+#[case("N←⎕FX 'Z←F N' 'Z←0' 'L1:' '→(N=0)/E' 'Z←Z+N' 'N←N-1' '→L1' 'E:' ⋄ F 5", 15)]
+#[case("N←⎕FX 'Z←G R' 'Z←R×3' ⋄ M←⎕FX 'Z←F R' 'Z←G R' ⋄ F 5", 15)]
+fn quad_fx_fixes_a_definition_from_its_lines(#[case] src: &str, #[case] want: i64) {
+    assert_eq!(apl(src), vec![want]);
+}
+
+#[test]
+fn quad_fx_answers_the_name_it_fixed() {
+    let a = run(Lang::Apl, "⎕FX 'Z←F R' 'Z←R×2'").expect("a value");
+    assert_eq!(a, Array::from_chars("F".chars().collect()));
+    // The name is a value like any other, so it can be assigned away.
+    assert_eq!(apl("N←⎕FX 'Z←F R' 'Z←R×2' ⋄ ≢N"), vec![1]);
+}
+
+/// A definition `⎕FX` cannot fix is reported as the fault it is, pointing
+/// at the line that carries it, where Dyalog answers the offending line's
+/// number instead.
+#[rstest]
+#[case("N←⎕FX 'Z←F R' ':If R>0' 'Z←1' ⋄ F 1", ":EndIf")]
+#[case("N←⎕FX 'Z←F R' 'Z←1' ':EndWhile' ⋄ F 1", "no matching opening word")]
+fn quad_fx_reports_a_definition_it_cannot_fix(#[case] src: &str, #[case] msg: &str) {
+    let e = fails(Lang::Apl, src);
+    assert!(e.msg.contains(msg), "{src}: {}", e.msg);
+}
+
+/// libjay fixes at compile time, so a definition it cannot read then is a
+/// promise rather than a wrong answer.
+#[rstest]
+#[case("A←'Z←F R' ⋄ ⎕FX A ⋄ F 1")]
+#[case("N←⎕FX 'Z←G R' 'Z←⎕FX R' ⋄ G 'Z←F R'")]
+fn quad_fx_on_a_definition_it_cannot_read_names_the_gap(#[case] src: &str) {
+    let e = fails(Lang::Apl, src);
+    assert_eq!(e.kind, ErrorKind::NotYet, "{src}: {}", e.msg);
+    assert!(e.msg.contains("⎕FX"), "{src}: {}", e.msg);
+}
+
 // --- APL: indexed assignment ---------------------------------------------
 
 #[rstest]

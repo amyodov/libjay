@@ -10,8 +10,8 @@
 //! dialect's meaning.
 
 use jay::frontend::{
-    ComplexOrder, DefaultArg, DepthSign, DfnResult, Dialect, FirstDisclose, IndexForm, NestedGrade,
-    NestedModel, Partition,
+    ComplexOrder, DefaultArg, DepthSign, DfnResult, Dialect, FirstDisclose, IndexForm, LookupLeft,
+    NestedGrade, NestedModel, Partition,
 };
 use jay::{compile, Array, Data, ErrorKind, Lang};
 
@@ -59,6 +59,7 @@ fn the_defaults_resolve_to_this_apl() {
     assert_eq!(r.default_arg, DefaultArg::Eager);
     assert_eq!(r.complex_order, ComplexOrder::RealThenImaginary);
     assert_eq!(r.nested_grade, NestedGrade::Apl2);
+    assert_eq!(r.lookup_left, LookupLeft::AnyRank);
     // Trains ship on, as an extension: GNU APL has none, and both readings
     // are implemented, so the setting is a choice rather than a gap.
     assert!(r.trains);
@@ -126,6 +127,25 @@ fn the_dyalog_preset_answers_the_dyalog_way() {
     assert_eq!(val("⍋(1 2)('ab')(⊂1 2)(1)('a')", &gnu), i64s(&[5], &[5, 4, 3, 2, 1]));
     assert_eq!(val("⍋1 'a'", &dy), i64s(&[2], &[1, 2]));
     assert_eq!(val("⍋(1 4⍴0)(2 3⍴0)", &dy), i64s(&[2], &[2, 1]));
+    // Two arrays with no atoms are separated by the item they WOULD have
+    // held: an empty nested array's prototype against a simple empty's
+    // fill. `0⍴⊂1 2` remembers a pair of numbers, so it sorts after the
+    // empty numeric vector and before the empty character one.
+    assert_eq!(val("⍋(0⍴⊂1 2)(⍳0)", &dy), i64s(&[2], &[2, 1]));
+    assert_eq!(val("⍋(0⍴⊂1 2)('')", &dy), i64s(&[2], &[1, 2]));
+    // Dyadic `⍳` looks up in a VECTOR and nothing else; the APL2 line
+    // searches the items of a left argument of any rank.
+    assert_eq!(val("'abc'⍳'b'", &dy), Array::scalar_i64(2));
+    for src in ["(2 3⍴⍳6)⍳5", "5⍳6"] {
+        let p = compile(Lang::Apl, src, &dy).expect("it compiles in either reading");
+        let mut sink = |_: &str| {};
+        assert_eq!(
+            p.run(&[], &mut sink).expect_err("a vector is the only left argument").kind,
+            ErrorKind::Rank,
+            "{src}"
+        );
+        run(src, &gnu).unwrap_or_else(|| panic!("{src} answers under the APL2 reading"));
+    }
 }
 
 /// Every setting whose other reading libjay does not implement, asked for.
