@@ -15,6 +15,15 @@ use libjay_testkit::{ErrorKind, Lang};
 /// The seed a fuzz run uses when none is given.
 pub const DEFAULT_SEED: u64 = 0x243F6A8885A308D3;
 
+/// Which generation of the grammar drew the expressions. Generation 1 was
+/// the original tree; generation 2 (2026-08-22) added the J conjunctions the
+/// tree never composed (`^:` with a negative, listed or boxed count, `L:`,
+/// `S:`, `&.` with a named obverse, `&.:`, `!.`, `;:`), deeper and emptier
+/// leaves in both pools, tolerance-edge pairs fed to every dyad, APL bracket
+/// axis, and J ranks of two and three elements. A run's findings are only
+/// comparable with another run's when the generation matches.
+pub const GENERATION: u32 = 2;
+
 /// A small xorshift, so a run is reproducible without any clock access.
 pub struct Rng(u64);
 
@@ -123,6 +132,45 @@ const J_NOUNS: &[&str] = &[
     "_5x",
 ];
 
+/// The leaves generation 2 added: an empty of every type and of ranks 0 to
+/// 3, and nests deeper than one level. Half the register's open weight sits
+/// on empties and prototypes, and the original pool reached them with three
+/// leaves; these make a fill cell something the tree meets rather than
+/// stumbles on.
+const J_NOUNS_EXTRA: &[&str] = &[
+    "i. 0 0",
+    "i. 0 0 3",
+    "i. 2 0 3",
+    "0 0 $ 0",
+    "2 0 3 $ 0",
+    "0 $ 0.5",
+    "0 $ 'a'",
+    "0 $ a:",
+    "0 $ <0",
+    "0 $ 3j4",
+    "0 $ 1r2",
+    "0 $ 123x",
+    "0 0 $ ''",
+    "'' $ 0",
+    "0 $ 1 2 3",
+    "1 0 1 $ 5",
+    "(i. 0);1",
+    "<i. 0",
+    "<''",
+    "<a:",
+    "<<1 2",
+    "((1;2);3);4",
+    "1;'ab';(<i. 2 2)",
+    "2 2 $ <i. 2 2",
+    "3 $ a:",
+    "2 2 $ (<1 2);(<'ab');(<i. 0);<0",
+];
+
+/// How often a leaf is drawn from the original pool rather than the extra
+/// one. Two draws in three keeps the coverage the recorded findings came
+/// from intact; the third reaches the empties and the nests.
+const CORE_LEAF_IN: usize = 3;
+
 /// Scalar dyads: safe on any pair of numbers, whatever the composition
 /// above them decided to hand over.
 /// `^` is not here: an extended-precision base with a large exponent is an
@@ -158,6 +206,79 @@ const J_FOLDS: &[&str] = &["+", "*", "<.", ">.", "|", ",", "-", "%"];
 
 const J_RANKS: &[&str] = &["0", "1", "2", "_", "_1", "_2", "0 1", "1 1", "1 0", "1 0 _", "2 _"];
 
+/// Ranks of two and three elements, drawn on their own arm. A three-element
+/// rank gives the monadic case a rank of its own and the two dyadic cases
+/// different ones, which is the part of the rank conjunction the one-element
+/// draws never reach.
+const J_LONG_RANKS: &[&str] =
+    &["0 1 2", "1 0 _", "2 1 0", "_ 1 1", "0 0 1", "1 _ 0", "_1 0 1", "2 _ _1", "0 2", "1 _1"];
+
+/// Counts for `^:` past the small non-negative ones the original tree drew.
+/// A negative count asks for the obverse, a listed count asks for several
+/// applications at once, and a boxed count asks for the intermediate
+/// results. `_` and `a:` are deliberately absent: both converge, converging
+/// is unbounded, and a generator that can hang has no oracle.
+const J_POWERS: &[&str] =
+    &["_1", "_2", "_3", "(<0 1 2)", "(<_1 1)", "(<2)", "(<0)", "(_1 0 1)", "(2 3)", "(0 1)"];
+
+/// Levels for `L:` and `S:`. Both count boxing levels, and a negative level
+/// counts from the leaves rather than from the root.
+const J_LEVELS: &[&str] = &["0", "1", "2", "_1", "_2", "_"];
+
+/// Verbs whose obverse is worth asking for by name. `&.` runs one and then
+/// undoes it, so an unknown obverse is a refusal rather than a wrong answer,
+/// and the register's obverse gap is exactly a list of these.
+const J_UNDER: &[&str] =
+    &[">", "<", "+:", "-:", "%:", "^.", "|.", "|:", "#.", "#:", ",", "{.", "*:", "j.", "o."];
+
+/// Verbs that read a fit: `!.` gives a comparison its tolerance, a fill its
+/// fill element, and a base conversion its rounding.
+const J_FIT_MONADS: &[&str] = &["~.", "~:", "<.", ">.", "%:", "^.", "|", "=", "{.", ",", "#.", "q:"];
+const J_FIT_DYADS: &[&str] =
+    &["=", "~:", "-:", "i.", "e.", "E.", "<.", ">.", "|", "#.", "+", "*", ",", "{.", "#", "i:"];
+
+/// Fits. Zero and one are the fill elements a take or a catenate wants;
+/// the small ones are the tolerances a comparison wants.
+const J_FITS: &[&str] = &["0", "1", "2", "0.5", "1e_9", "1e_13", "1e_3", "_1", "'z'"];
+
+/// Left arguments for `;:`. The dyad reads a boxed state machine and the
+/// integers are what a machine description is built out of; both refusals
+/// and answers are worth seeing, since the two sides disagree about which
+/// it is.
+const J_WORDS_LEFT: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "1 2 3", "(<1 2);<3 4", "a:"];
+
+/// Pairs that straddle a comparison tolerance: equal under the default
+/// tolerance and unequal exactly, or the reverse, or on the boundary where
+/// a double stops being able to tell. They are fed to every dyad rather
+/// than only to the comparisons, since residue, greatest common divisor,
+/// base conversion and the grades all consult the tolerance too.
+const J_TOLERANCE_PAIRS: &[(&str, &str)] = &[
+    ("1", "1.0000000000000002"),
+    ("1", "1.0000000000001"),
+    ("1", "1.00000000000001"),
+    ("1", "0.9999999999999999"),
+    ("0.3", "0.1 + 0.2"),
+    ("100000000", "100000000.00000001"),
+    ("2147483648", "2147483647.9999998"),
+    ("4503599627370496", "4503599627370497"),
+    ("9007199254740992", "9007199254740993"),
+    ("_1", "_1.0000000000001"),
+    ("1e_15", "0"),
+    ("1e_13", "0"),
+    ("0.5", "0.49999999999999994"),
+    ("3", "3 - 1e_13"),
+    ("1 2 3", "1 2 3 + 1e_14"),
+    ("1e10", "1e10 + 1e_4"),
+];
+
+/// The dyads a tolerance pair is safe to reach. Every one of these reads
+/// its left argument as a value; the verbs that read it as an amount would
+/// turn 9007199254740992 into an allocation.
+const J_TOLERANCE_DYADS: &[&str] = &[
+    "+", "-", "*", "%", "<.", ">.", "|", "=", "~:", "<", ">", "<:", ">:", "*.", "+.", "|.", ",",
+    ",.", ",:", "e.", "i.", "i:", "E.", "-:", "#.", "#:", "j.", "o.", "!", "I.", "%:", "^.",
+];
+
 /// A verb phrase: a primitive, or a train, or a primitive under a
 /// conjunction, down to `depth` levels of nesting.
 fn j_verb(rng: &mut Rng, depth: u32) -> String {
@@ -189,7 +310,11 @@ fn j_int(rng: &mut Rng, lo: i64, hi: i64) -> String {
 }
 
 fn j_noun(rng: &mut Rng) -> String {
-    rng.pick(J_NOUNS).to_string()
+    if rng.below(CORE_LEAF_IN) != 0 {
+        rng.pick(J_NOUNS).to_string()
+    } else {
+        rng.pick(J_NOUNS_EXTRA).to_string()
+    }
 }
 
 fn j_expr(rng: &mut Rng, depth: u32) -> String {
@@ -202,7 +327,11 @@ fn j_expr(rng: &mut Rng, depth: u32) -> String {
     // bare numeric noun after one would be read as more of that number,
     // which makes a sentence the generator did not mean.
     let arg = |rng: &mut Rng| format!("({})", j_expr(rng, d));
-    match rng.below(21) {
+    // Arms 0 to 20 are generation 1's, unchanged and in their original
+    // proportion to one another; 21 to 29 are generation 2's. Widening the
+    // draw rather than reweighting the old arms is what keeps the coverage
+    // the recorded findings came from.
+    match rng.below(30) {
         0..=2 => format!("{} {}", j_verb(rng, d), arg(rng)),
         3..=4 => format!("({}) {} {}", j_expr(rng, d), rng.pick(J_DYADS), arg(rng)),
         5 => format!("({}) {} {}", j_expr(rng, d), rng.pick(J_STRUCT_DYADS), arg(rng)),
@@ -253,7 +382,79 @@ fn j_expr(rng: &mut Rng, depth: u32) -> String {
         17 => format!("{} $ {}", rng.pick(J_SHAPES), arg(rng)),
         18 => format!("{} # {}", rng.pick(J_SIZES), arg(rng)),
         19 => format!("{} {{. {}", rng.pick(J_SIZES), arg(rng)),
-        _ => format!("({}) ^ {}", j_expr(rng, d), rng.pick(&["2", "3", "0", "_1", "0.5", "_2"])),
+        20 => format!("({}) ^ {}", j_expr(rng, d), rng.pick(&["2", "3", "0", "_1", "0.5", "_2"])),
+        // Power past the counts the original tree drew: the obverse, a list
+        // of counts, and the boxed count that keeps the intermediates.
+        21 => format!("{} ^:{} {}", j_verb(rng, d), rng.pick(J_POWERS), arg(rng)),
+        // Level: `L:` runs a verb at a boxing depth, `S:` collects the
+        // results from one.
+        22 => format!("{} L:{} {}", j_verb(rng, d), rng.pick(J_LEVELS), arg(rng)),
+        23 => {
+            if rng.below(2) == 0 {
+                format!("{} S:{} {}", j_verb(rng, d), rng.pick(J_LEVELS), arg(rng))
+            } else {
+                format!(
+                    "({}) {} L:{} {}",
+                    j_expr(rng, d),
+                    rng.pick(J_DYADS),
+                    rng.pick(J_LEVELS),
+                    arg(rng)
+                )
+            }
+        }
+        // Under, at infinite rank and at the operand's own rank. Both ask
+        // for an obverse, which is a table with holes in it.
+        24 => {
+            if rng.below(2) == 0 {
+                format!("{} &.:{} {}", j_verb(rng, d), rng.pick(J_UNDER), arg(rng))
+            } else {
+                format!(
+                    "({}) {} &.:{} {}",
+                    j_expr(rng, d),
+                    rng.pick(J_DYADS),
+                    rng.pick(J_UNDER),
+                    arg(rng)
+                )
+            }
+        }
+        25 => format!("{} &.{} {}", j_verb(rng, d), rng.pick(J_UNDER), arg(rng)),
+        // Fit: a tolerance for a comparison, a fill for a take.
+        26 => {
+            if rng.below(2) == 0 {
+                format!("{} !.{} {}", rng.pick(J_FIT_MONADS), rng.pick(J_FITS), arg(rng))
+            } else {
+                format!(
+                    "({}) {} !.{} {}",
+                    j_expr(rng, d),
+                    rng.pick(J_FIT_DYADS),
+                    rng.pick(J_FITS),
+                    arg(rng)
+                )
+            }
+        }
+        // Words, both valences.
+        27 => {
+            if rng.below(2) == 0 {
+                format!(";: {}", arg(rng))
+            } else {
+                format!("({}) ;: {}", rng.pick(J_WORDS_LEFT), arg(rng))
+            }
+        }
+        // A tolerance-edge pair, fed to a dyad that reads its arguments as
+        // values.
+        28 => {
+            let (left, right) = J_TOLERANCE_PAIRS[rng.below(J_TOLERANCE_PAIRS.len())];
+            format!("({left}) {} ({right})", rng.pick(J_TOLERANCE_DYADS))
+        }
+        // A rank of two or three elements, where the three cases of the
+        // verb are given ranks of their own.
+        _ => format!(
+            "({}) {} \"{} {}",
+            j_expr(rng, d),
+            rng.pick(J_DYADS),
+            rng.pick(J_LONG_RANKS),
+            arg(rng)
+        ),
     }
 }
 
@@ -298,6 +499,38 @@ const APL_NOUNS: &[&str] = &[
     "9223372036854775806",
 ];
 
+/// The leaves generation 2 added. The original pool held two nested values
+/// and one empty, so a prototype was something the tree brushed against;
+/// these give it an empty of every type and rank, a nest three deep, a
+/// nested empty, a mixed nest and a nested matrix.
+const APL_NOUNS_EXTRA: &[&str] = &[
+    "⍬",
+    "0⍴0",
+    "0 0⍴0",
+    "0 0 0⍴0",
+    "2 0 3⍴0",
+    "0 3⍴''",
+    "0 0⍴''",
+    "0⍴0.5",
+    "0⍴'a'",
+    "0⍴⊂⍳3",
+    "3 0⍴⍳0",
+    "0 2⍴⊂⍳3",
+    "⊂⊂⍳3",
+    "⊂⍬",
+    "⊂''",
+    "(1(2 3))(4 5)",
+    "((1 2)(3 4))(5)",
+    "(1 2)('ab')",
+    "1 'a' (1 2)",
+    "2 2⍴(1 2)(3 4)(5)(⍳0)",
+    "2 2⍴⊂'ab'",
+    "⊂2 2⍴⍳4",
+    "3⍴⊂⍳3",
+    "(⍳0)(⍳3)",
+    "(⊂⍳0)(⊂⊂1 2)",
+];
+
 /// Scalar dyads. `÷` is here and its zero divisor with it: the divergence
 /// corpus says what the two do about it, and the fuzzer should see it.
 const APL_DYADS: &[&str] =
@@ -322,6 +555,50 @@ const APL_MONADS: &[&str] = &[
 const APL_FOLDS: &[&str] = &["+", "×", "⌈", "⌊", "|", "-", "÷"];
 
 const APL_RANKS: &[&str] = &["0", "1", "2", "0 1", "1 1", "1 0"];
+
+/// Axes for the bracket forms. The halves are the laminate axes, which are
+/// an axis form the register has one bug from and no coverage of.
+const APL_AXES: &[&str] = &["0", "1", "2", "0.5", "1.5", "¯0.5", "3", "⍳0"];
+
+/// Functions that take a bracket axis with one argument.
+const APL_AXIS_MONADS: &[&str] = &[",", "⍪", "⌽", "⊖", "↑", "↓", "⊂", "≢", "∊"];
+
+/// Functions that take a bracket axis with two, where the left argument is
+/// an ordinary value.
+const APL_AXIS_DYADS: &[&str] = &[",", "⍪", "⌽", "⊖", "↓", "⊂", "⌷", "∊"];
+
+/// Functions that take a bracket axis with two, where the left argument is
+/// an amount and so must stay a small literal.
+const APL_AXIS_SIZED: &[&str] = &["/", "⌿", "\\", "⍀", "↑", "↓"];
+
+/// The same tolerance edges as J's, in APL's spelling. Both languages hold
+/// a comparison tolerance and neither register entry says they read it the
+/// same way.
+const APL_TOLERANCE_PAIRS: &[(&str, &str)] = &[
+    ("1", "1.0000000000000002"),
+    ("1", "1.0000000000001"),
+    ("1", "1.00000000000001"),
+    ("1", "0.9999999999999999"),
+    ("0.3", "0.1+0.2"),
+    ("100000000", "100000000.00000001"),
+    ("2147483648", "2147483647.9999998"),
+    ("4503599627370496", "4503599627370497"),
+    ("9007199254740992", "9007199254740993"),
+    ("¯1", "¯1.0000000000001"),
+    ("0.000000000000001", "0"),
+    ("0.0000000000001", "0"),
+    ("0.5", "0.49999999999999994"),
+    ("3", "3-0.0000000000001"),
+    ("1 2 3", "1 2 3+0.00000000000001"),
+    ("10000000000", "10000000000.0001"),
+];
+
+/// The dyads a tolerance pair is safe to reach: every one reads its left
+/// argument as a value rather than as an amount.
+const APL_TOLERANCE_DYADS: &[&str] = &[
+    "+", "-", "×", "÷", "*", "⌈", "⌊", "|", "=", "≠", "<", "≤", ">", "≥", "∧", "∨", ",", "⍪", "⌽",
+    "⊖", "∊", "≢", "≡", "∪", "∩", "~", "⍳", "⌷", "⊥", "⊤", "⍷", "!", "○", "⍟",
+];
 
 /// A function phrase. Only the operators GNU APL has are drawn: `∘`, `⍥`,
 /// `⍛`, `f⍤g` and `⌸` are Dyalog's and have no oracle, so fuzzing them
@@ -352,15 +629,25 @@ fn apl_int(rng: &mut Rng, lo: i64, hi: i64) -> String {
     if v < 0 { format!("¯{}", -v) } else { v.to_string() }
 }
 
+fn apl_noun(rng: &mut Rng) -> String {
+    if rng.below(CORE_LEAF_IN) != 0 {
+        rng.pick(APL_NOUNS).to_string()
+    } else {
+        rng.pick(APL_NOUNS_EXTRA).to_string()
+    }
+}
+
 fn apl_expr(rng: &mut Rng, depth: u32) -> String {
     if depth == 0 {
-        return rng.pick(APL_NOUNS).to_string();
+        return apl_noun(rng);
     }
     let d = depth - 1;
     // Parenthesised for the same reason as J's: `⍤1` and `⍣2` end in a
     // number, and a numeric noun after one would extend it.
     let arg = |rng: &mut Rng| format!("({})", apl_expr(rng, d));
-    match rng.below(18) {
+    // Arms 0 to 17 are generation 1's, in their original proportion; 18 to
+    // 25 are generation 2's.
+    match rng.below(26) {
         0..=2 => format!("{} {}", apl_fn(rng, d), arg(rng)),
         3..=4 => format!("({}){}{}", apl_expr(rng, d), rng.pick(APL_DYADS), arg(rng)),
         5..=6 => {
@@ -378,9 +665,277 @@ fn apl_expr(rng: &mut Rng, depth: u32) -> String {
         14 => format!("{}⍴{}", rng.pick(APL_SHAPES), arg(rng)),
         15 => format!("{}↑{}", rng.pick(APL_SIZES), arg(rng)),
         16 => format!("{}/{}", rng.pick(APL_SIZES), arg(rng)),
-        _ => format!("{}⌿{}", rng.pick(APL_SIZES), arg(rng)),
+        17 => format!("{}⌿{}", rng.pick(APL_SIZES), arg(rng)),
+        // Bracket axis, in its three shapes: one argument, two arguments,
+        // and the sized left argument a replicate or a take wants.
+        18 => format!("{}[{}]{}", rng.pick(APL_AXIS_MONADS), rng.pick(APL_AXES), arg(rng)),
+        19 => format!(
+            "({}){}[{}]{}",
+            apl_expr(rng, d),
+            rng.pick(APL_AXIS_DYADS),
+            rng.pick(APL_AXES),
+            arg(rng)
+        ),
+        20 => format!(
+            "{}{}[{}]{}",
+            rng.pick(APL_SIZES),
+            rng.pick(APL_AXIS_SIZED),
+            rng.pick(APL_AXES),
+            arg(rng)
+        ),
+        // Reduction and scan along a named axis.
+        21 => {
+            let fold = rng.pick(APL_FOLDS);
+            let op = rng.pick(&["/", "⌿", "\\", "⍀"]);
+            format!("{fold}{op}[{}]{}", rng.pick(APL_AXES), arg(rng))
+        }
+        // A tolerance-edge pair, fed to a dyad that reads its arguments as
+        // values.
+        22 => {
+            let (left, right) = APL_TOLERANCE_PAIRS[rng.below(APL_TOLERANCE_PAIRS.len())];
+            format!("({left}){}({right})", rng.pick(APL_TOLERANCE_DYADS))
+        }
+        // A nest, deliberately: one operand is always a nested value, so
+        // the depth and prototype machinery is reached rather than brushed.
+        23 => format!(
+            "({}){}({})",
+            rng.pick(APL_NOUNS_EXTRA),
+            rng.pick(APL_STRUCT_DYADS),
+            apl_expr(rng, d)
+        ),
+        24 => format!("{} ({})", apl_fn(rng, d), rng.pick(APL_NOUNS_EXTRA)),
+        // Power with a count past the small non-negative ones. `⍣≡` is
+        // deliberately absent: converging is unbounded.
+        _ => format!(
+            "(({})⍣{}) {}",
+            apl_fn(rng, d),
+            rng.pick(&["0", "1", "2", "3", "¯1", "¯2"]),
+            arg(rng)
+        ),
     }
 }
+
+// ---------------------------------------------------------------------
+// Cluster signatures
+// ---------------------------------------------------------------------
+
+/// The characters a J primitive can start with. A primitive is one of these
+/// followed by up to two inflections, which is how `{::` and `p..` are one
+/// token rather than three.
+const J_PRIMITIVE_CHARS: &str = "+-*%^$~|.:,;#!/\\[]{}\"`@&=<>?";
+
+/// The APL glyphs worth naming in a signature. `[` is here so that a
+/// bracket axis shows in the signature of the expression that used one.
+const APL_GLYPHS: &str = "+-×÷*⌈⌊|=≠<≤>≥∧∨⍴,⍪⍉⌽⊖≢≡⍕∊∪∩~⊂⊃↑↓⍳⍸⌷⊥⊤⍷!○⍟⍋⍒⊢⊣⍎?⍣⍤⍨¨⍥⍛∘.⌿⍀/\\⍬⎕⍺⍵→←⋄[";
+
+/// The primitives one expression names, sorted and without repeats.
+/// Literals and numbers are skipped: `0.1` is not a determinant and `'a.'`
+/// is not a verb.
+pub fn primitives(lang: Lang, expr: &str) -> Vec<String> {
+    let mut found = match lang {
+        Lang::J => j_primitives(expr),
+        Lang::Apl => apl_primitives(expr),
+    };
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Step past a quoted literal, whose doubled quote is one character of the
+/// literal rather than its end.
+fn skip_literal(chars: &[char], mut i: usize) -> usize {
+    i += 1;
+    while i < chars.len() {
+        if chars[i] == '\'' {
+            if chars.get(i + 1) == Some(&'\'') {
+                i += 2;
+                continue;
+            }
+            return i + 1;
+        }
+        i += 1;
+    }
+    i
+}
+
+fn j_primitives(expr: &str) -> Vec<String> {
+    let chars: Vec<char> = expr.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\'' {
+            i = skip_literal(&chars, i);
+            continue;
+        }
+        // A number: `_` starts one (it is the negative sign and infinity
+        // both), and the letters inside `1e_15`, `3j4`, `1r2` and `123x`
+        // belong to it rather than to a primitive.
+        if c.is_ascii_digit() || c == '_' {
+            i += 1;
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric() || chars[i] == '.' || chars[i] == '_')
+            {
+                i += 1;
+            }
+            continue;
+        }
+        if c.is_ascii_alphabetic() {
+            // A one-letter word with an inflection is a primitive (`i.`,
+            // `a:`, `L:`); anything longer is a name, and names carry no
+            // meaning a signature wants.
+            let inflected = matches!(chars.get(i + 1), Some('.') | Some(':'));
+            if inflected {
+                let (token, next) = j_token(&chars, i);
+                out.push(token);
+                i = next;
+            } else {
+                i += 1;
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        if J_PRIMITIVE_CHARS.contains(c) {
+            let (token, next) = j_token(&chars, i);
+            out.push(token);
+            i = next;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// One J primitive starting at `at`: the base character and up to two
+/// inflections.
+fn j_token(chars: &[char], at: usize) -> (String, usize) {
+    let mut end = at + 1;
+    while end < chars.len() && end < at + 3 && matches!(chars[end], '.' | ':') {
+        end += 1;
+    }
+    (chars[at..end].iter().collect(), end)
+}
+
+fn apl_primitives(expr: &str) -> Vec<String> {
+    let chars: Vec<char> = expr.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\'' {
+            i = skip_literal(&chars, i);
+            continue;
+        }
+        // A number, so that the point in `0.1` is not read as the inner
+        // product's.
+        if c.is_ascii_digit() || c == '¯' {
+            i += 1;
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric() || chars[i] == '.' || chars[i] == '¯')
+            {
+                i += 1;
+            }
+            continue;
+        }
+        if APL_GLYPHS.contains(c) {
+            out.push(c.to_string());
+        }
+        i += 1;
+    }
+    out
+}
+
+/// A stable name for the cause a mismatch is likely to have. Two sentences
+/// with the same signature are two spellings of one finding, which is what
+/// lets a sweeper say "nothing new" instead of counting rows; deduplicating
+/// on the expression text can never say that, because the space of
+/// expressions is effectively infinite.
+///
+/// The field has two levels, coarse first: what libjay made of the sentence,
+/// then the primitives the sentence names, separated by `|`. A composed
+/// sentence names eight or ten primitives, so the whole set is nearly unique
+/// and only ever collapses exact re-findings; the class before the bar is
+/// the level that says whether a batch found a cause the sweeper has not
+/// seen. A wrapper deduplicates on the first field to answer "is this new"
+/// and on the whole to answer "is this the same sentence again".
+///
+/// `ours` is libjay's side as the comparison printed it: `<panic>`,
+/// `<no value>`, `<error> …`, or the value.
+pub fn signature(lang: Lang, expr: &str, ours: &str) -> String {
+    format!("{}|{}", answer_class(ours), primitives(lang, expr).join(","))
+}
+
+/// The coarse half of a signature on its own.
+pub fn cause_class(signature: &str) -> &str {
+    signature.split('|').next().unwrap_or(signature)
+}
+
+/// What libjay made of the sentence, coarsely enough that two runs of one
+/// cause land in one bucket: the refusal's own words with the numbers taken
+/// out, or the shape and kind of the value.
+fn answer_class(ours: &str) -> String {
+    match ours {
+        "<panic>" => return "panic".to_string(),
+        "<no value>" => return "novalue".to_string(),
+        _ => {}
+    }
+    match ours.strip_prefix("<error> ") {
+        Some(message) => format!("err:{}", normalised_message(message)),
+        None => format!("val:{}", shape_class(ours)),
+    }
+}
+
+/// The refusal's first line, with every run of digits replaced by `#` and
+/// every run of spaces by an underscore, so that "length error: 3 and 4 do
+/// not agree" and the same sentence about 5 and 6 are one cause.
+fn normalised_message(message: &str) -> String {
+    let first = message.lines().next().unwrap_or("");
+    let mut out = String::new();
+    let mut in_number = false;
+    for c in first.chars() {
+        if c.is_ascii_digit() {
+            if !in_number {
+                out.push('#');
+                in_number = true;
+            }
+            continue;
+        }
+        in_number = false;
+        out.push(if c.is_whitespace() { '_' } else { c });
+    }
+    out.chars().take(72).collect()
+}
+
+/// The shape and kind of a printed value: enough to separate "we answer a
+/// table" from "we answer an atom" without making every value its own
+/// class.
+fn shape_class(value: &str) -> String {
+    let kind = if value.chars().all(|c| NUMERIC_OUTPUT.contains(c)) { "num" } else { "text" };
+    let lines: Vec<&str> = value.lines().collect();
+    let shape = match lines.len() {
+        0 => "empty",
+        _ if lines.iter().any(|l| l.trim().is_empty()) => "planes",
+        1 => {
+            let line = lines[0].trim();
+            if line.is_empty() {
+                "empty"
+            } else if line.contains(' ') {
+                "vector"
+            } else {
+                "atom"
+            }
+        }
+        _ => "table",
+    };
+    format!("{shape}/{kind}")
+}
+
+/// The characters a purely numeric answer is printed out of, in either
+/// language: the digits, the two negative signs, the exponent and complex
+/// and rational marks, and the infinities.
+const NUMERIC_OUTPUT: &str = "0123456789.-_¯ejrx \t\n∞";
 
 // ---------------------------------------------------------------------
 // Triage
@@ -483,5 +1038,80 @@ mod tests {
     fn a_j_run_stays_at_origin_one() {
         let probes = fuzz(Lang::J, 200, DEFAULT_SEED, 3);
         assert!(probes.iter().all(|p| p.io == 1));
+    }
+
+    /// An inflection belongs to the primitive before it, a number's point
+    /// belongs to the number, and a quoted `.` is a character.
+    #[test]
+    fn j_primitives_are_read_with_their_inflections() {
+        assert_eq!(primitives(Lang::J, "i. 5"), ["i."]);
+        assert_eq!(primitives(Lang::J, "1.5 + 0.25"), ["+"]);
+        assert_eq!(primitives(Lang::J, "{:: <'a.b'"), ["<", "{::"]);
+        assert_eq!(primitives(Lang::J, "- L: _1 (<1;2)"), ["-", ";", "<", "L:"]);
+        assert_eq!(primitives(Lang::J, "+/\\ 1e_15 , _3"), ["+", ",", "/", "\\"]);
+        assert_eq!(primitives(Lang::J, "> &.: |. i. 0"), ["&.:", ">", "i.", "|."]);
+    }
+
+    /// A glyph is a primitive, a digit is not, and a bracket axis shows in
+    /// the signature of the sentence that used one.
+    #[test]
+    fn apl_primitives_are_glyphs_outside_numbers_and_literals() {
+        assert_eq!(primitives(Lang::Apl, "0.1+0.2"), ["+"]);
+        assert_eq!(primitives(Lang::Apl, "(1 2)∘.×⍳3"), [".", "×", "∘", "⍳"]);
+        assert_eq!(primitives(Lang::Apl, ",[0.5]'a×b'"), [",", "["]);
+        assert_eq!(primitives(Lang::Apl, "⌽[1]2 3⍴⍳6"), ["[", "⌽", "⍳", "⍴"]);
+    }
+
+    /// Two spellings of one cause share a signature; two causes do not.
+    /// The numbers inside a refusal are the part that varies from sentence
+    /// to sentence, so they are the part that is taken out.
+    #[test]
+    fn a_signature_names_the_cause_rather_than_the_sentence() {
+        let one = signature(Lang::J, "3 + 4", "<error> length error: 3 and 4 do not agree");
+        let two = signature(Lang::J, "5 + 6", "<error> length error: 7 and 9 do not agree");
+        assert_eq!(one, two);
+        let other = signature(Lang::J, "3 + 4", "<error> domain error: not a number");
+        assert_ne!(one, other);
+        let elsewhere = signature(Lang::J, "3 - 4", "<error> length error: 3 and 4 do not agree");
+        assert_ne!(one, elsewhere);
+        assert_eq!(signature(Lang::J, "i. 3", "0 1 2"), "val:vector/num|i.");
+        assert_eq!(signature(Lang::Apl, "⍳0", ""), "val:empty/num|⍳");
+        assert_eq!(signature(Lang::Apl, "⍕3", "<panic>"), "panic|⍕");
+        assert_eq!(cause_class(&one), "err:length_error:_#_and_#_do_not_agree");
+    }
+
+    /// Generation 2's axes are reachable at the depths a sweep uses: a run
+    /// that never composes them is a run that cannot find what they hide.
+    #[test]
+    fn generation_two_axes_are_drawn() {
+        let text: String = fuzz(Lang::J, 3000, DEFAULT_SEED, 4)
+            .iter()
+            .map(|p| p.expr.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for axis in ["^:_1", "L:", "S:", "&.:", "!.", ";:", "\"0 1 2", "1.0000000000001"] {
+            assert!(text.contains(axis), "no {axis} in 3000 J expressions");
+        }
+        let text: String = fuzz(Lang::Apl, 3000, DEFAULT_SEED, 4)
+            .iter()
+            .map(|p| p.expr.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for axis in ["[0.5]", "⊂⊂⍳3", "0 0 0⍴0", "(1(2 3))(4 5)", "⍣¯1", "1.0000000000001"] {
+            assert!(text.contains(axis), "no {axis} in 3000 APL expressions");
+        }
+    }
+
+    /// The leaves generation 1 drew are still the bulk of the draws: a new
+    /// axis is worth nothing if it costs the coverage the findings on
+    /// record came from.
+    #[test]
+    fn the_original_leaves_still_dominate() {
+        let mut rng = Rng::new(DEFAULT_SEED);
+        let core = (0..3000).filter(|_| J_NOUNS.contains(&j_noun(&mut rng).as_str())).count();
+        assert!(core > 1800, "{core} of 3000 J leaves from the original pool");
+        let mut rng = Rng::new(DEFAULT_SEED);
+        let core = (0..3000).filter(|_| APL_NOUNS.contains(&apl_noun(&mut rng).as_str())).count();
+        assert!(core > 1800, "{core} of 3000 APL leaves from the original pool");
     }
 }

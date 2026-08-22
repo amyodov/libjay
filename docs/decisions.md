@@ -2682,3 +2682,61 @@ there and multiplied to a NaN; the zero-factor rule finishes it. The pattern
 is a good hint that jconsole reaches its own answer by rounding the cosine
 with its comparison tolerance, but every probed case is explained by the
 exact-angle path alone, so nothing was built on the hint.
+
+## 2026-08-23 — The fuzzer's second generation, and a signature that names the cause
+
+The perpetual sweeper's find rate had been flat across 109 batches while its
+cause discovery had stopped: 33 of 39 clusters appeared in the first fifth of
+the run, and the last three quarters cost about 230 new mismatch rows per new
+cause. Both halves of that have one explanation. The comparator deduplicated
+on the expression text, and the space of depth-5 compositions is effectively
+infinite, so a fresh string was always available and a flat row count could
+never mean "nothing new"; and the grammar drew from pools so narrow that the
+same ten leaves carried nearly every finding.
+
+**The signature is hierarchical, coarse first.** A mismatch line under
+`--signature` carries `<class>|<primitives>`, where the class is libjay's own
+refusal with its numbers replaced by `#`, or the shape and kind of its answer,
+and the primitives are the sorted set the sentence names. The first draft put
+the primitives first, as the triage suggested; at depth 3 that made every one
+of 500 mismatches unique, because a composed sentence names eight or ten
+primitives. The class alone collapses a batch into a dozen buckets and is the
+level that answers "is this new"; the pair stays available for "is this the
+same sentence again". Both counts are printed. The J primitive lexer reads an
+inflection as part of the primitive before it (`{::` and `p..` are one token)
+and skips numbers and literals, so `0.1` is not a determinant and `'a.'` is
+not a verb; the APL one is a glyph set with the same two skips, and `[` is in
+it so a bracket axis shows in the signature of the sentence that used one.
+
+**The generation number is part of the contract.** `fuzz::GENERATION` is
+printed in the summary, and two runs' find rates are comparable only when it
+matches. Generation 2 adds the J conjunctions the tree never composed (`^:`
+with a negative, listed or boxed count, `L:`, `S:`, `&.` with a named
+obverse, `&.:`, `!.`, both valences of `;:`), an empty of every type and rank
+and nests three deep in both leaf pools, tolerance-edge pairs fed to every
+dyad that reads its arguments as values, APL bracket axis in its three shapes,
+and J ranks of two and three elements.
+
+**Old coverage keeps its absolute weight rather than its share.** The new
+productions are new arms on a widened draw — J's 21 arms became 30, APL's 18
+became 26 — so the old arms keep their proportion to one another exactly, and
+the leaf pools are drawn two times in three from the original list. A
+generation that reweights the old arms would make the recorded findings
+incomparable with the new ones for no gain.
+
+**Nothing that converges is in the pools.** `u^:_`, `u^:a:` and `f⍣≡` are all
+unbounded, and the fuzzer has no timeout on its own side: the oracle's
+timeout only produces an `unfinished` verdict, while a libjay that hangs ends
+the run. The same reasoning already kept the verbs that turn a value into a
+length out of the tolerance-pair arm.
+
+**What the first run found.** 500 expressions per language at seed 1: J 23
+mismatches (4.6%), APL 32 (6.4%), 15 distinct causes each. Twelve of APL's 32
+are one already-named gap — bracket axis, which generation 1 never wrote, so
+the gap cost nothing and showed nothing — and the J side does the same for
+`L:_`, `S:_` and `,!.n`. Four causes were new, and the tolerance-pair axis
+produced the best of them: GCD and LCM of two arguments that are equal under
+the comparison tolerance but not exactly equal answer the value itself in
+both oracles, and grind through the float algorithm in libjay. That is the
+rule the tolerance wave's residual said it could not find. They are in the
+bug register; none was fixed here.

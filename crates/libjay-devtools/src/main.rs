@@ -42,6 +42,9 @@ jay-corpus — record what the reference interpreters answer to the corpus.
                                         print composed expressions
       --compare    run libjay and the oracle over them, report the mismatches
       --quiet      with --compare, the summary only
+      --signature  with --compare, prefix every mismatch with a cluster
+                   signature and count the run's distinct signatures, so a
+                   wrapper can deduplicate by cause rather than by text
       --exprs FILE read the expressions from a corpus file instead, under
                    the index origin its `@ io=` directives give them
   jay-corpus coverage <j|apl>           which primitive × operand cells the
@@ -410,6 +413,7 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     let mut depth = 3u32;
     let mut compare_them = false;
     let mut quiet = false;
+    let mut signatures = false;
     let mut given: Option<String> = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -428,6 +432,7 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
             }
             "--compare" => compare_them = true,
             "--quiet" => quiet = true,
+            "--signature" => signatures = true,
             "--exprs" => {
                 let value = it.next().ok_or("--exprs needs a file")?;
                 given = Some(value.clone());
@@ -497,13 +502,26 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         .collect();
 
     let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+    let mut by_signature = std::collections::BTreeMap::<String, usize>::new();
     for (expr, io, verdict, ours, theirs) in &verdicts {
         *counts.entry(verdict.label()).or_default() += 1;
-        if verdict.is_mismatch() && !quiet {
+        if !verdict.is_mismatch() {
+            continue;
+        }
+        // The signature names the cause rather than the sentence, so a
+        // wrapper that keeps a set of them can tell a batch that found
+        // nothing new from a batch that found a thousandth spelling of a
+        // finding it already has.
+        let sig = if signatures { fuzz::signature(lang, expr, ours) } else { String::new() };
+        if signatures {
+            *by_signature.entry(sig.clone()).or_default() += 1;
+        }
+        if !quiet {
             // A reported line is meant to be pasted into a corpus file, and
             // at origin 0 it means nothing without the directive.
             let origin = if *io == 1 { String::new() } else { format!(" [io={io}]") };
-            println!("--- {}{origin} : {expr}", verdict.label());
+            let field = if signatures { format!("sig={sig} ") } else { String::new() };
+            println!("--- {field}{}{origin} : {expr}", verdict.label());
             println!("  libjay:    {}", one_line(ours));
             println!("  reference: {}", one_line(theirs));
         }
@@ -512,9 +530,31 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     // An expression the oracle never finished was not compared, so it is
     // not in the denominator either.
     let total = verdicts.iter().filter(|v| v.2.is_compared()).count();
-    println!("\n{total} expressions, {mismatches} mismatches ({:.1}%)", ratio(mismatches, total));
+    println!(
+        "\ngeneration {}: {total} expressions, {mismatches} mismatches ({:.1}%)",
+        fuzz::GENERATION,
+        ratio(mismatches, total)
+    );
     for (label, n) in counts {
         println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));
+    }
+    if signatures {
+        // The coarse half first: it is the half that answers "did this batch
+        // find a cause the sweeper has not already got", which a count of
+        // rows or of whole signatures cannot.
+        let mut by_class = std::collections::BTreeMap::<&str, usize>::new();
+        for (sig, n) in &by_signature {
+            *by_class.entry(fuzz::cause_class(sig)).or_default() += n;
+        }
+        println!("\n{} distinct causes:", by_class.len());
+        let mut ranked: Vec<(&&str, &usize)> = by_class.iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (class, n) in ranked {
+            println!("  {n:>5}  {class}");
+        }
+        let mut ranked: Vec<(&String, &usize)> = by_signature.iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        println!("\n{} distinct signatures", ranked.len());
     }
     Ok(())
 }

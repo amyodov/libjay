@@ -314,6 +314,34 @@ libjay refuses, sites whose modifier hands its operand something not
 nameable here, and the spellings the frontend rewrites into another form.
 The reasoning is in `docs/decisions.md`.
 
+## Fuzzing against the oracle
+
+`jay-corpus fuzz` composes expressions rather than drawing one verb over one
+noun, and `--compare` runs libjay and the oracle over them and reports where
+they part. Nothing is written to the corpus: a line worth keeping is moved
+into `corpus/<lang>/fuzz_found.txt` by hand, which is what turns a find into
+a regression.
+
+```
+cargo run -p libjay-devtools -- fuzz apl --compare --count 500 --seed 1 --signature
+```
+
+`--signature` prefixes every mismatch with a cluster signature —
+`<what libjay made of it>|<the primitives the sentence names>` — and counts
+the run's distinct causes as well as its distinct signatures. The class
+before the bar is the level that answers "did this batch find anything new":
+a composed sentence names eight or ten primitives, so the whole signature is
+nearly unique, while the class collapses a batch's rows into a handful of
+buckets. A wrapper that sweeps continuously should key on the class, since
+deduplicating on the expression text can never say "nothing new" — the space
+of compositions is effectively infinite, so a fresh string is always
+available.
+
+The grammar carries a generation number (`fuzz::GENERATION`, printed in the
+summary): two runs' find rates are comparable only when it matches. Anything
+whose count is unbounded is deliberately absent from the pools — `u^:_`,
+`u^:a:` and `f⍣≡` all converge, and a generator that can hang has no oracle.
+
 ## The rest of the suite
 
 `tests/eval.rs`, `coverage.rs`, `boxes.rs`, `definitions.rs`, `fuse.rs`,
