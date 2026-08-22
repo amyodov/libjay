@@ -12,7 +12,8 @@ use std::sync::Arc;
 use crate::array::{Array, Data};
 use crate::error::{Error, Result, Span};
 use crate::frontend::{
-    DefaultArg, DfnResult, FirstDisclose, IndexForm, NestedModel, Rules, Segment, SourceParts,
+    DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, NestedModel, Partition, Rules,
+    Segment, SourceParts,
 };
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
@@ -442,7 +443,7 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
         },
         '≡' => Prim {
             name: "≡",
-            monad: M::Depth,
+            monad: M::Depth { signed: d.depth_sign == DepthSign::Signed },
             dyad: D::Match,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
@@ -516,10 +517,15 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
             name: "↑",
             monad: match d.first_disclose {
                 FirstDisclose::UpIsFirst => M::First,
-                FirstDisclose::UpIsMix => return None,
+                FirstDisclose::UpIsMix => M::Open,
+            },
+            // Mix is the rank-0 application: every item opened, and the
+            // results framed into one array. First sees the whole array.
+            ranks: match d.first_disclose {
+                FirstDisclose::UpIsFirst => [RANK_INF, 1, RANK_INF],
+                FirstDisclose::UpIsMix => [0, 1, RANK_INF],
             },
             dyad: D::Take,
-            ranks: [RANK_INF, 1, RANK_INF],
         },
         '⊂' => Prim {
             name: "⊂",
@@ -529,7 +535,12 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
                 NestedModel::Floating => M::Enclose(Enclose::ExceptSimpleScalar),
                 NestedModel::Grounded => return None,
             },
-            dyad: D::PartitionEnclose,
+            // The flag reading is the partition; the count reading is
+            // Dyalog's partitioned enclose, a different function.
+            dyad: match d.partition {
+                Partition::Flags => D::PartitionEnclose,
+                Partition::Counts => D::PartitionCounts,
+            },
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         // Dyalog's `⊆`: nest monadically, and the partition GNU APL spells
@@ -552,11 +563,10 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
         // the APL2 reading; the other reads index vectors instead.
         '⌷' => Prim {
             name: "⌷",
-            monad: match d.index_form {
-                IndexForm::ScalarPerAxis => M::Same,
-                IndexForm::AxisVectors => return None,
-            },
-            dyad: D::Squad { origin },
+            // Monadically `⌷` materialises, which for an array libjay
+            // already holds is the array itself, in both readings.
+            monad: M::Same,
+            dyad: D::Squad { origin, leading: d.index_form == IndexForm::AxisVectors },
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '?' => Prim {
@@ -575,10 +585,13 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
             name: "⊃",
             monad: match d.first_disclose {
                 FirstDisclose::UpIsFirst => M::Open,
-                FirstDisclose::UpIsMix => return None,
+                FirstDisclose::UpIsMix => M::First,
             },
             dyad: D::Pick { origin },
-            ranks: [0, RANK_INF, RANK_INF],
+            ranks: match d.first_disclose {
+                FirstDisclose::UpIsFirst => [0, RANK_INF, RANK_INF],
+                FirstDisclose::UpIsMix => [RANK_INF, RANK_INF, RANK_INF],
+            },
         },
         '↓' => Prim {
             name: "↓",
@@ -2338,15 +2351,20 @@ fn build_dfn(
         inner.insert("⍺⍺".to_string(), Verb::Named("⍺⍺".to_string()));
         inner.insert("⍵⍵".to_string(), Verb::Named("⍵⍵".to_string()));
     }
-    let stmts = parse_dfn_body(body, d, &mut inner)?;
+    let mut stmts = parse_dfn_body(body, d, &mut inner)?;
     // The body is a sequence, and the dialect says which of its sentences
     // is the answer. libjay's block model gives the last one; the other
     // reading stops at the first sentence that is not an assignment.
-    let span = body.first().map_or(Span::new(0, 0), |t| t.span);
     match d.dfn_result {
         DfnResult::LastSentence => {}
         DfnResult::FirstNonAssignment => {
-            return Err(Error::not_yet("a dfn that answers with its first value", span))
+            // A guard is a control structure that returns when it holds, so
+            // it is not the sentence looked for; the sentences after the
+            // one that is never run.
+            let plain = |e: &Expr| !matches!(e, Expr::Assign { .. } | Expr::Control(..));
+            if let Some(k) = stmts.iter().position(plain) {
+                stmts.truncate(k + 1);
+            }
         }
     }
     let pure = stmts.iter().all(is_pure_stmt);
@@ -3231,7 +3249,7 @@ mod tests {
     #[case('⊥', MonadOp::None, DyadOp::DecodeApl)]
     #[case('⊤', MonadOp::None, DyadOp::EncodeApl)]
     #[case('≢', MonadOp::Tally, DyadOp::NotMatch)]
-    #[case('≡', MonadOp::Depth, DyadOp::Match)]
+    #[case('≡', MonadOp::Depth { signed: false }, DyadOp::Match)]
     #[case('∊', MonadOp::Enlist, DyadOp::MemberApl)]
     #[case('∪', MonadOp::Nub, DyadOp::Union)]
     #[case('∧', MonadOp::None, DyadOp::Scalar(ScalarDyad::Lcm))]

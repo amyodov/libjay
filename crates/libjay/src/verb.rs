@@ -13,7 +13,7 @@ use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::exact::{self, Ext, Rat};
 use crate::fmt::FmtOpts;
-use crate::frontend::{ComplexOrder, Rules};
+use crate::frontend::{ComplexOrder, NestedGrade, Rules};
 use crate::par;
 use crate::simd::multiversioned;
 
@@ -573,7 +573,11 @@ pub enum MonadOp {
     Enlist,
     /// APL `≡`: depth — 0 for a simple scalar, 1 for a simple array, one
     /// more than the deepest content for a box.
-    Depth,
+    Depth {
+        /// Negate the depth of an array whose items differ in depth or in
+        /// shape, as the Dyalog line does.
+        signed: bool,
+    },
     /// J `I.` / APL `⍸`: index `i` repeated `y[i]` times. J applies at
     /// rank 1; APL applies whole, and answers a rank-2-or-higher argument
     /// with one boxed coordinate vector per occurrence.
@@ -737,8 +741,18 @@ pub enum DyadOp {
     /// APL `x ⊂ y`: partitioned enclose — a 1 in x opens a partition, a 0
     /// continues it, and a leading run of 0s drops those items.
     PartitionEnclose,
+    /// Dyalog's partitioned enclose: the left argument counts the
+    /// partitions to open before each item, rather than flagging where
+    /// one begins.
+    PartitionCounts,
     /// APL `x ⌷ y`: one scalar index per axis of y.
-    Squad { origin: i64 },
+    Squad {
+        origin: i64,
+        /// Read the index as one item per LEADING axis, so fewer items
+        /// than the rank take the trailing axes whole (the Dyalog line).
+        /// Otherwise there is one item per axis, all of them named.
+        leading: bool,
+    },
     /// One bracket slot of APL indexing: axis `axis` of y selected by x.
     /// `rank`, when it is not zero, is the number of slots the brackets
     /// held, checked by the slot that sees the whole array.
@@ -2094,6 +2108,16 @@ fn depth(y: &Array) -> i64 {
         Data::Box(v) => 1 + v.iter().map(depth).max().unwrap_or(0),
         _ => i64::from(y.rank() > 0),
     }
+}
+
+/// Whether every item of `y`, at every level, has its siblings' depth. A
+/// simple array is uniform, and so is `1 2∘.⍴3 4`, whose items are of one
+/// depth and different lengths; `1(2(3 4))` and `(1 2),⊂3 4` are not.
+fn uniform(y: &Array) -> bool {
+    let Data::Box(v) = &y.data else { return true };
+    let Some(head) = v.first() else { return true };
+    let d = depth(head);
+    v.iter().all(|b| depth(b) == d && uniform(b))
 }
 
 /// Every leaf array inside `a`, in ravel order.
@@ -4842,15 +4866,18 @@ fn nub(y: &Array, tol: Tol) -> Array {
 enum Tao {
     J,
     Apl2,
+    /// Dyalog's total array ordering.
+    Dyalog,
 }
 
 impl Tao {
     fn of(rules: Rules) -> Tao {
         match rules.lang {
             crate::Lang::J => Tao::J,
-            // The other reading of a nested grade, Dyalog's total array
-            // ordering, is refused when the dialect is resolved.
-            crate::Lang::Apl => Tao::Apl2,
+            crate::Lang::Apl => match rules.nested_grade {
+                NestedGrade::Apl2 => Tao::Apl2,
+                NestedGrade::TotalOrder => Tao::Dyalog,
+            },
         }
     }
 
@@ -4871,6 +4898,15 @@ impl Tao {
                 DType::Char | DType::Symbol => 0,
                 DType::Box => 2,
                 _ => 1,
+            },
+            // Dyalog puts every number before every character; a nested
+            // value falls between them, which is where its prototype puts
+            // it — a nested array of numbers is longer than a number and
+            // still not a character.
+            Tao::Dyalog => match dt {
+                DType::Char | DType::Symbol => 2,
+                DType::Box => 1,
+                _ => 0,
             },
         }
     }
@@ -4893,6 +4929,7 @@ impl Tao {
 fn cmp_items_total(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
     match tao {
+        Tao::Dyalog => cmp_items_dyalog(x, y),
         Tao::J => {
             let class = |a: &Array| if a.count() == 0 { 0 } else { tao.class(a.dtype()) };
             class(x)
@@ -4916,6 +4953,85 @@ fn cmp_items_total(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
     }
 }
 
+/// Two whole arrays in Dyalog's total array ordering.
+///
+/// The shapes are brought together rather than compared: the lower rank
+/// gains leading 1s, and each axis is taken to the longer of the two, so
+/// the arrays are read position by position over the shape that covers
+/// both. A position one array has and the other does not answers at once —
+/// what is not there sorts below every value there is — and a position
+/// both hold compares its atoms, which recurses where an atom is nested.
+/// Only arrays with no atoms to separate them reach the type (numbers,
+/// then nested values, then characters) and then the shape, which is read
+/// with the LAST axis most significant.
+///
+/// Derived from the recorded Dyalog answers in
+/// `crates/libjay/tests/snapshots/apl/grade.snap`, which is what pins it.
+fn cmp_items_dyalog(x: &Array, y: &Array) -> std::cmp::Ordering {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    let tao = Tao::Dyalog;
+    // Two simple scalars are the bottom of the recursion; everything else
+    // is read as an array of atoms.
+    if x.rank() == 0 && y.rank() == 0 && x.dtype() != DType::Box && y.dtype() != DType::Box {
+        return cmp_atoms(x, y, tao);
+    }
+    let rank = x.rank().max(y.rank());
+    let extend = |a: &Array| -> Vec<usize> {
+        let mut s = vec![1usize; rank - a.rank()];
+        s.extend_from_slice(&a.shape);
+        s
+    };
+    let (sx, sy) = (extend(x), extend(y));
+    let common: Vec<usize> = (0..rank).map(|k| sx[k].max(sy[k])).collect();
+    let (xr, yr) = (x.to_row_major(), y.to_row_major());
+    let (dx, dy) = (xr.row_major_data(), yr.row_major_data());
+    let (stx, sty) = (strides(&sx), strides(&sy));
+    let mut order = Equal;
+    if !common.contains(&0) {
+        let mut coord = vec![0usize; rank];
+        loop {
+            let inside = |s: &[usize]| (0..rank).all(|k| coord[k] < s[k]);
+            let at = |st: &[usize]| -> usize { (0..rank).map(|k| coord[k] * st[k]).sum() };
+            let here = match (inside(&sx), inside(&sy)) {
+                (true, true) => {
+                    cmp_items_dyalog(&atom_array(dx, at(&stx)), &atom_array(dy, at(&sty)))
+                }
+                // What is not there is below what is.
+                (true, false) => Greater,
+                (false, true) => Less,
+                (false, false) => Equal,
+            };
+            if here != Equal {
+                order = here;
+                break;
+            }
+            // The odometer wraps to all zeros when the last position is
+            // done, and every position either decides or holds equal
+            // atoms, so this walks no further than the shorter array.
+            odometer(&mut coord, &common);
+            if coord.iter().all(|&c| c == 0) {
+                break;
+            }
+        }
+    }
+    order
+        .then_with(|| tao.class(x.dtype()).cmp(&tao.class(y.dtype())))
+        .then_with(|| x.shape.iter().rev().cmp(y.shape.iter().rev()))
+}
+
+/// Element `i` of a buffer as an array of its own: a box gives up its
+/// contents, anything else is a simple scalar.
+fn atom_array(d: &Data, i: usize) -> Array {
+    match d {
+        Data::Box(v) => v[i].clone(),
+        _ => {
+            let mut one = Data::empty(d.dtype());
+            push_elem(&mut one, d, i);
+            Array::new(vec![], one)
+        }
+    }
+}
+
 /// The atoms of two arrays of the same shape, in row-major order. A boxed
 /// atom is compared by its contents, which is where the ordering recurses.
 fn cmp_atoms(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
@@ -4926,19 +5042,9 @@ fn cmp_atoms(x: &Array, y: &Array, tao: Tao) -> std::cmp::Ordering {
     }
     let (xr, yr) = (x.to_row_major(), y.to_row_major());
     let (dx, dy) = (xr.row_major_data(), yr.row_major_data());
-    let opened = |d: &Data, i: usize| -> Array {
-        match d {
-            Data::Box(v) => v[i].clone(),
-            _ => {
-                let mut one = Data::empty(d.dtype());
-                push_elem(&mut one, d, i);
-                Array::new(vec![], one)
-            }
-        }
-    };
     if matches!(dx, Data::Box(_)) || matches!(dy, Data::Box(_)) {
         return (0..n)
-            .map(|i| cmp_items_total(&opened(dx, i), &opened(dy, i), tao))
+            .map(|i| cmp_items_total(&atom_array(dx, i), &atom_array(dy, i), tao))
             .find(|o| *o != Equal)
             .unwrap_or(Equal);
     }
@@ -6029,9 +6135,9 @@ pub(crate) fn with_origin(v: &Verb, origin: i64) -> Option<Verb> {
                     changed = true;
                     DyadOp::CollateGrade { down, origin }
                 }
-                DyadOp::Squad { .. } => {
+                DyadOp::Squad { leading, .. } => {
                     changed = true;
-                    DyadOp::Squad { origin }
+                    DyadOp::Squad { origin, leading }
                 }
                 DyadOp::Pick { .. } => {
                     changed = true;
@@ -6571,7 +6677,10 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::RazeIn => raze_in(y, ctx.cfg.tol, span),
         MonadOp::First => Ok(first(y)),
         MonadOp::Enlist => enlist(y, span),
-        MonadOp::Depth => Ok(Array::scalar_i64(depth(y))),
+        MonadOp::Depth { signed } => {
+            let d = depth(y);
+            Ok(Array::scalar_i64(if signed && d > 1 && !uniform(y) { -d } else { d }))
+        }
         MonadOp::Indices { origin, boxed_coords } => {
             where_indices(y, origin, boxed_coords, span)
         }
@@ -6917,7 +7026,8 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
         DyadOp::MatrixDivide => matrix_divide(x, y, span),
         DyadOp::PartitionEnclose => partition_enclose(x, y, span),
-        DyadOp::Squad { origin } => squad(x, y, origin, span),
+        DyadOp::PartitionCounts => partition_counts(x, y, span),
+        DyadOp::Squad { origin, leading } => squad(x, y, origin, leading, span),
         DyadOp::SelectAxis { axis, rank, origin } => {
             select_axis(x, y, axis, rank, origin, span)
         }
@@ -9183,7 +9293,7 @@ fn matrix_divide(x: &Array, y: &Array, span: Span) -> Result<Array> {
 // ----------------------------------------------------- indexing and amend
 
 /// `x ⌷ y` (APL2): one scalar index per axis of y.
-fn squad(x: &Array, y: &Array, origin: i64, span: Span) -> Result<Array> {
+fn squad(x: &Array, y: &Array, origin: i64, leading: bool, span: Span) -> Result<Array> {
     if x.rank() > 1 {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -9191,13 +9301,16 @@ fn squad(x: &Array, y: &Array, origin: i64, span: Span) -> Result<Array> {
             Some(span),
         ));
     }
-    // One item of x per axis of y. An item is a scalar, which drops its
-    // axis, or an enclosed vector, which keeps it and selects that many.
+    // One item of x per axis of y — per LEADING axis where the dialect
+    // reads it that way, so a shorter index leaves the trailing axes
+    // whole. An item is a scalar, which drops its axis, or an enclosed
+    // vector, which keeps it and selects that many.
     let items: Vec<Array> = if x.rank() == 0 { vec![x.clone()] } else { x.cells(1) };
-    if items.len() != y.rank() {
+    let named = items.len();
+    if named > y.rank() || (!leading && named != y.rank()) {
         return Err(Error::new(
             ErrorKind::Rank,
-            format!("{} index(es) for an argument of rank {}", items.len(), y.rank()),
+            format!("{} index(es) for an argument of rank {}", named, y.rank()),
             Some(span),
         ));
     }
@@ -9222,6 +9335,13 @@ fn squad(x: &Array, y: &Array, origin: i64, span: Span) -> Result<Array> {
         }
         shape.extend_from_slice(&spec.shape);
         specs.push((spec.shape.clone(), idx));
+    }
+    // An index shorter than the rank names the leading axes only; every
+    // trailing axis comes through whole.
+    for k in named..y.rank() {
+        let n = y.shape[k];
+        shape.push(n);
+        specs.push((vec![n], (0..n as i64).map(|i| i + origin).collect()));
     }
     let y = y.to_row_major();
     let st = strides(&y.shape);
@@ -9451,6 +9571,76 @@ fn cell_index(y: &Array, idx: &[i64], span: Span) -> Result<usize> {
 /// as zero — and an item whose flag is zero is dropped rather than joined
 /// to anything. That is what GNU APL answers, and it is what makes
 /// `1 1 2 2 ⊂ 'abcd'` two pairs rather than one run.
+/// `x⊂y` in the Dyalog line: a partitioned enclose.
+///
+/// Each item of x says how many partitions to open before the item of y
+/// beside it, so a count above one leaves an empty partition behind and a
+/// leading zero drops the items ahead of the first partition. The answer
+/// is a VECTOR of partitions however deep y is: rank 2 and above splits
+/// the last axis and every partition keeps the axes ahead of it.
+fn partition_counts(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    if y.rank() == 0 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "partitioned enclose needs an array to partition",
+            Some(span),
+        ));
+    }
+    let counts = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("partition counts must be integers", span))?;
+    if counts.iter().any(|&c| c < 0) {
+        return Err(Error::domain("partition counts must not be negative", span));
+    }
+    let last = y.shape[y.rank() - 1];
+    // A scalar count applies to every item; a vector shorter than the
+    // axis is padded with zeros, so its items stay in the partition
+    // already open. More counts than items is a length error.
+    if counts.len() > last {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{} count(s) for {} item(s)", counts.len(), last),
+            Some(span),
+        ));
+    }
+    let at = |i: usize| -> i64 {
+        if x.rank() == 0 {
+            counts.first().copied().unwrap_or(0)
+        } else {
+            counts.get(i).copied().unwrap_or(0)
+        }
+    };
+    // Each partition is a contiguous run of the last axis: where it
+    // starts, and how many items it holds.
+    let mut groups: Vec<(usize, usize)> = Vec::new();
+    for i in 0..last {
+        for _ in 0..at(i) {
+            groups.push((i, 0));
+        }
+        if let Some(g) = groups.last_mut() {
+            g.1 += 1;
+        }
+    }
+    let y = y.to_row_major();
+    let rows = if last == 0 { 0 } else { y.count() / last };
+    let lead = &y.shape[..y.rank() - 1];
+    let parts: Vec<Array> = groups
+        .iter()
+        .map(|&(start, len)| {
+            let mut d = Data::empty(y.dtype());
+            for r in 0..rows {
+                for c in start..start + len {
+                    push_elem(&mut d, y.row_major_data(), r * last + c);
+                }
+            }
+            let mut shape = lead.to_vec();
+            shape.push(len);
+            Array::new(shape, d)
+        })
+        .collect();
+    Ok(Array::new(vec![parts.len()], Data::Box(parts.into())))
+}
+
 fn partition_enclose(x: &Array, y: &Array, span: Span) -> Result<Array> {
     // Rank 2 and above partitions the LAST axis, once per cross section,
     // so the axes ahead of it frame the answer.

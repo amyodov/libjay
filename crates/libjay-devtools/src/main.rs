@@ -52,7 +52,10 @@ jay-corpus — record what the reference interpreters answer to the corpus.
       --tsv FILE   the empty cells alone, one per line
   jay-corpus stats [j|apl]              corpus and snapshot sizes
       --dialect-diff  every expression whose recorded Dyalog answer differs
-                      from libjay: the backlog of a future Dyalog dialect
+                      from libjay: the backlog of the Dyalog dialect
+      --dialect NAME  run libjay under a dialect preset (gnu, dyalog) while
+                      measuring that backlog, which is how much of it the
+                      preset already answers
 
 FILE is a corpus file: a path, or a bare name such as `arithmetic`. With no
 FILE, every corpus file of the language. LIBJAY_ORACLE_J, LIBJAY_ORACLE_APL
@@ -578,10 +581,19 @@ fn parse_seed(value: &str) -> Result<u64, String> {
 
 fn stats(args: &[String]) -> Result<(), String> {
     let mut dialect_diff = false;
+    let mut dialect = jay::Dialect::default();
+    let mut dialect_name = "gnu".to_string();
     let mut positional: Vec<&String> = Vec::new();
-    for arg in args {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
         match arg.as_str() {
             "--dialect-diff" => dialect_diff = true,
+            "--dialect" => {
+                let name = it.next().ok_or("--dialect needs a name")?;
+                dialect = eval::preset(name)
+                    .ok_or_else(|| format!("unknown dialect {name:?} (gnu, dyalog)"))?;
+                dialect_name = name.clone();
+            }
             other if other.starts_with("--") => return Err(format!("unknown option {other:?}")),
             _ => positional.push(arg),
         }
@@ -592,7 +604,7 @@ fn stats(args: &[String]) -> Result<(), String> {
     };
     for lang in langs {
         if dialect_diff {
-            dialect_backlog(lang);
+            dialect_backlog(lang, dialect, &dialect_name);
             continue;
         }
         let mut exprs = 0;
@@ -636,7 +648,7 @@ fn backlog_column(key: Option<&str>, count: usize) -> String {
 /// What a future dialect would have to explain: every expression whose
 /// recorded answer from an implementation libjay does NOT follow differs
 /// from libjay's own. Nothing here is a failure — it is a list of work.
-fn dialect_backlog(lang: Lang) {
+fn dialect_backlog(lang: Lang, dialect: jay::Dialect, dialect_name: &str) {
     let Some(key) = libjay_testkit::backlog_impl(lang) else {
         println!("{}: no second implementation is recorded\n", libjay_testkit::lang_name(lang));
         return;
@@ -650,7 +662,7 @@ fn dialect_backlog(lang: Lang) {
         for record in snapshot::read(&corpus::snapshot_of(&path)) {
             let Some(theirs) = record.answer(key) else { continue };
             recorded += 1;
-            let ours = Side::of(eval::eval(lang, &record.expr, record.io));
+            let ours = Side::of(eval::eval_as(lang, &record.expr, record.io, dialect));
             if compare::sides_match(lang, &ours, theirs) {
                 continue;
             }
@@ -672,7 +684,10 @@ fn dialect_backlog(lang: Lang) {
         );
         return;
     }
-    println!("{name}: {differ} of {recorded} recorded answers differ from libjay");
+    println!(
+        "{name}: {differ} of {recorded} recorded answers differ from libjay \
+         under the {dialect_name} dialect"
+    );
 }
 
 fn display(path: &Path) -> String {

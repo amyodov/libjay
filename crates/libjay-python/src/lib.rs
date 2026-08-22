@@ -561,6 +561,8 @@ fn dialect_of(
     nested_model: Option<&str>,
     first_disclose: Option<&str>,
     index_form: Option<&str>,
+    partition: Option<&str>,
+    depth_sign: Option<&str>,
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
@@ -568,7 +570,8 @@ fn dialect_of(
     trains: Option<bool>,
 ) -> PyResult<Dialect> {
     use jay::frontend::{
-        ComplexOrder, DefaultArg, DfnResult, FirstDisclose, IndexForm, NestedGrade, NestedModel,
+        ComplexOrder, DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, NestedGrade,
+        NestedModel, Partition,
     };
     let d = Dialect::default();
     Ok(Dialect {
@@ -598,6 +601,18 @@ fn dialect_of(
             ],
         )?
         .unwrap_or(d.index_form),
+        partition: setting(
+            partition,
+            "partition",
+            &[("flags", Partition::Flags), ("counts", Partition::Counts)],
+        )?
+        .unwrap_or(d.partition),
+        depth_sign: setting(
+            depth_sign,
+            "depth_sign",
+            &[("unsigned", DepthSign::Unsigned), ("signed", DepthSign::Signed)],
+        )?
+        .unwrap_or(d.depth_sign),
         dfn_result: setting(
             dfn_result,
             "dfn_result",
@@ -641,6 +656,8 @@ fn dialect_of(
     nested_model=None,
     first_disclose=None,
     index_form=None,
+    partition=None,
+    depth_sign=None,
     dfn_result=None,
     default_arg=None,
     complex_order=None,
@@ -656,6 +673,8 @@ fn compile(
     nested_model: Option<&str>,
     first_disclose: Option<&str>,
     index_form: Option<&str>,
+    partition: Option<&str>,
+    depth_sign: Option<&str>,
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
@@ -669,6 +688,8 @@ fn compile(
         nested_model,
         first_disclose,
         index_form,
+        partition,
+        depth_sign,
         dfn_result,
         default_arg,
         complex_order,
@@ -699,6 +720,8 @@ fn devices() -> Vec<(String, String, String, bool)> {
     nested_model=None,
     first_disclose=None,
     index_form=None,
+    partition=None,
+    depth_sign=None,
     dfn_result=None,
     default_arg=None,
     complex_order=None,
@@ -715,6 +738,8 @@ fn compile_parts(
     nested_model: Option<&str>,
     first_disclose: Option<&str>,
     index_form: Option<&str>,
+    partition: Option<&str>,
+    depth_sign: Option<&str>,
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
@@ -728,6 +753,8 @@ fn compile_parts(
         nested_model,
         first_disclose,
         index_form,
+        partition,
+        depth_sign,
         dfn_result,
         default_arg,
         complex_order,

@@ -26,6 +26,29 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `s + 1` sparse, libjay hands back the dense array; the value is the same
   and the saving is not. Python, Arrow and the C ABI carry the dense array.
 
+- A second APL dialect: `Dialect::dyalog()` in Rust, `APL.Dialect.dyalog` in
+  Python. The shipped default is unchanged — the APL2/ISO line GNU APL
+  embodies, which is what the differential suite gates — and the preset is
+  the other line wherever a recorded Dyalog answer says what it is. `⎕CT` is
+  `1e¯14`; `↑` mixes and `⊃` takes the first, the swap carrying their ranks
+  with it, so `⊃2 3⍴⍳6` is `1` and not the first row; `⌷` names the LEADING
+  axes, so `2⌷3 3⍴⍳9` is `4 5 6` and an
+  enclosed index vector keeps its axis; a dyadic `⊂` counts the partitions
+  to open before each item, so `1 0 1⊂1 2 3` is `(1 2)(3)`, and the answer
+  is a vector of sub-arrays whatever the rank of the argument; `≡` negates
+  the depth of an array whose items do not all have the same depth, so
+  `≡1(2(3 4))` is `¯3`; a dfn answers with its first sentence that is
+  neither an assignment nor a guard; and a nested `⍋`/`⍒` compares over the
+  total array ordering rather than the APL2 one. Settings libjay implements
+  only one reading of — the grounded nested model, a lazy `⍺←`, the complex
+  ordering — still refuse the other at compile time rather than answer
+  differently in silence, and the preset leaves them where they were.
+
+  Against the 1479 corpus expressions Dyalog 20.0 was recorded on, libjay's
+  default answers 1329 and the preset answers 1418.
+  `jay-corpus stats apl --dialect-diff --dialect dyalog` itemises the rest;
+  it replays the recorded column and runs no interpreter.
+
 ### Changed
 
 - APL's `⌈/` and `⌊/` over an empty axis answer the extremes of the

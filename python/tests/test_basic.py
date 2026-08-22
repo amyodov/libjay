@@ -395,20 +395,47 @@ class TestDialect:
     def test_another_dialects_reading_is_refused(self):
         from jay.lang import APL
 
-        # libjay implements one APL; asking for the other line's reading
-        # of a divergence is a gap, said out loud.
+        # A setting libjay implements only one reading of is a gap, said
+        # out loud, rather than the shipped meaning answered in silence.
         for setting in [
             {"nested_model": "grounded"},
-            {"first_disclose": "up-is-mix"},
-            {"index_form": "axis-vectors"},
-            {"dfn_result": "first-non-assignment"},
             {"default_arg": "lazy"},
             {"complex_order": "magnitude-then-angle"},
-            {"nested_grade": "total-order"},
         ]:
             c = APL.create_compiler(APL.Dialect(**setting))
             with pytest.raises(JayError, match="not supported yet"):
                 c.compile("1 2 3")
+
+    def test_the_dyalog_preset_answers_the_dyalog_way(self):
+        from jay.lang import APL
+
+        dy = APL.create_compiler(APL.Dialect.dyalog)
+        # `↑` mixes and `⊃` takes the first — the lineages' clearest fork.
+        assert dy("↑1 2 3").tolist() == [1, 2, 3]
+        assert apl("↑1 2 3") == 1
+        assert dy("⊃(1 2)(3 4)").tolist() == [1, 2]
+        # `⌷` names the leading axes.
+        assert dy("2⌷3 3⍴⍳9").tolist() == [4, 5, 6]
+        # `⎕CT` is a tenth of GNU APL's.
+        assert dy("⎕CT") == pytest.approx(1e-14)
+        # A dfn answers with its first sentence that is not an assignment.
+        assert dy("F←{⍵+1 ⋄ ⍵+2} ⋄ F 5") == 6
+        assert apl("F←{⍵+1 ⋄ ⍵+2} ⋄ F 5") == 7
+        # A dyadic `⊂` counts the partitions to open before each item.
+        assert dy("⊃1 0 1⊂1 2 3").tolist() == [1, 2]
+        assert apl("↑1 0 1⊂1 2 3").tolist() == [1]
+        # `≡` signs the depth of an array whose items do not share one.
+        assert dy("≡1(2(3 4))") == -3
+        assert apl("≡1(2(3 4))") == 3
+        # A nested grade is the total array ordering.
+        assert dy("⍋1 'a'").tolist() == [1, 2]
+        assert apl("⍋1 'a'").tolist() == [2, 1]
+        # The preset is a Dialect like any other, so a setting overrides it.
+        import dataclasses
+
+        both = APL.create_compiler(dataclasses.replace(APL.Dialect.dyalog, index_base=0))
+        assert both("⍳3").tolist() == [0, 1, 2]
+        assert both("≡1(2(3 4))") == -3
 
     def test_trains_are_an_extension_that_can_be_turned_off(self):
         from jay.lang import APL

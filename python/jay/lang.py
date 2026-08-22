@@ -26,13 +26,14 @@ class J:
 class APL:
     """The APL language.
 
-    libjay implements one APL: the APL2/ISO line that GNU APL embodies and
-    that the differential suite verifies. The settings below are the points
-    where the APL lineages differ; each defaults to that line's reading, and
-    asking for the other one is a "not implemented yet" error from the
-    compiler rather than a silently different answer. ``trains`` is the
-    exception: both of its readings are implemented, and it ships on as an
-    extension because refusing a feature the oracle merely lacks serves
+    libjay ships the APL2/ISO line that GNU APL embodies and that the
+    differential suite verifies. The settings below are the points where
+    the APL lineages differ; each defaults to that line's reading, and
+    ``Dialect.dyalog`` is the preset that names the other one wherever
+    libjay implements it. A setting libjay does not implement both
+    readings of is a "not implemented yet" error from the compiler rather
+    than a silently different answer. ``trains`` ships on in both presets,
+    as an extension: refusing a feature the oracle merely lacks serves
     nobody.
     """
 
@@ -51,7 +52,19 @@ class APL:
         """"up-is-first" (``↑`` first, ``⊃`` disclose) or "up-is-mix"."""
 
         index_form: str = "scalar-per-axis"
-        """What ``⌷`` indexes with: "scalar-per-axis" or "axis-vectors"."""
+        """What ``⌷`` indexes with: "scalar-per-axis" (one index per axis,
+        all of them named) or "axis-vectors" (the leading axes, so a
+        shorter index takes the trailing ones whole)."""
+
+        partition: str = "flags"
+        """What a dyadic ``⊂`` does: "flags" (a partition begins where the
+        left argument rises, and a zero drops its item) or "counts"
+        (Dyalog's partitioned enclose). ``⊆`` is the flag reading in
+        both."""
+
+        depth_sign: str = "unsigned"
+        """What ``≡`` answers for an array whose items differ in depth:
+        "unsigned" or "signed" (the depth negated)."""
 
         dfn_result: str = "last-sentence"
         """Which sentence of a dfn answers: "last-sentence" or
@@ -75,8 +88,21 @@ class APL:
         extension GNU APL has neither spelling of; False is the strict
         reading, where both are a syntax error."""
 
-    # The one preset that exists, and the default: GNU APL's reading.
+    # The presets. `gnu` is the default: the APL2/ISO line the oracle
+    # verifies. `dyalog` is as much of the Dyalog line as libjay answers
+    # today — docs/coverage.md says what it still leaves to the other
+    # reading, and docs/status.md counts what the recording still holds
+    # against it.
     Dialect.gnu = Dialect()
+    Dialect.dyalog = Dialect(
+        comparison_tolerance=1e-14,
+        first_disclose="up-is-mix",
+        index_form="axis-vectors",
+        partition="counts",
+        depth_sign="signed",
+        dfn_result="first-non-assignment",
+        nested_grade="total-order",
+    )
 
     @staticmethod
     def create_compiler(dialect: "APL.Dialect | None" = None) -> _Lang:

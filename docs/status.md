@@ -363,7 +363,7 @@ conjunctions above:
 | Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
 | Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`; the rest named |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
-| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟡 one preset — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default; every point where the lineages diverge is a setting on it (nested model, `↑`/`⊃`, `⌷`, dfn result, `⍺←`, complex order, trains) and asking for the other reading is refused as not implemented yet. `trains` is the one setting whose two readings are both implemented, so turning it off gives the strict GNU sentence back |
+| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟢 two presets — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default, and `Dialect::dyalog()` (`APL.Dialect.dyalog` in Python). Every point where the lineages diverge is a setting on it: `⎕CT`, `↑`/`⊃`, `⌷`, dyadic `⊂`, `≡`'s sign, the dfn result, the nested grade and trains are all implemented in both readings; the nested model, `⍺←`'s laziness and the complex order are implemented in one, and asking for the other is refused as not implemented yet |
 | `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS`), read-only; the ones that read a clock or a filesystem are ⚪ closed by the sandbox (`ErrorKind::Sandbox`) |
 | Control structures `:If :While :Repeat :For :Select` | 🟡 no oracle: GNU APL rejects them |
 | `:Return` `:Leave` `:Continue` | 🟡 no oracle, as above |
@@ -376,14 +376,38 @@ conjunctions above:
 ## APL — the Dyalog line
 
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
-APL follows (docs/coverage.md, "Which APL"). Dyalog's additions fall in two
-groups. The ones libjay already ships as extensions sit in the tables above
-marked "no oracle": `⊆`, `∘`, `⍥`, `⍛`, `⍢`, `⌺`, `f⍤g`, `⌸`, `⍠`, dfn
-guards and `∇` and `⍺⍺`/`⍵⍵`, the control structures, trains and function
-assignment. The ones libjay does not ship yet are below — the queue for a
-Dyalog dialect, not counted in the APL totals. Each will be recorded under
-the `dyalog:` snapshot key before it is implemented, and the recording
-wins over anything a document says.
+APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
+a preset of the dialect object rather than a second engine:
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1418 of the
+1479 expressions Dyalog 20.0 was recorded on; the 61 it does not are
+itemised below.
+
+What the preset changes, each of it verified against the recording:
+`⎕CT` is `1e¯14`; `↑` is mix and `⊃` is first; `⌷` names the leading axes,
+so a shorter index takes the trailing ones whole and an enclosed index
+vector keeps its axis; a dyadic `⊂` counts partitions (partitioned
+enclose) while `⊆` stays the partition both lines share; `≡` negates the
+depth of an array whose items do not share one; a dfn answers with its
+first sentence that is not an assignment; and a nested grade uses the
+total array ordering. The preset is Dyalog's default `⎕ML`, which is what
+the recording ran under.
+
+What it does not change yet, measured against the recording:
+
+| Cause | Rows | Status |
+|---|---|---|
+| Inner product `f.g` where `g` is not a scalar function (`+.,`, `,.+`, `∨.∧` on nested) | 15 | 🔴 the two lines nest the intermediate differently; libjay follows GNU APL. The Life idiom is the visible casualty |
+| A `∇`-definition fed to the oracle over a pipe | 20 | ⚪ not a divergence: the recording harness cannot reach Dyalog's `∇` editor, so every tradfn line is recorded as an error. Re-record through `⎕FX` to measure them |
+| Dyadic `⍳` with a left argument that is not a vector (`5⍳6`) | 7 | 🔴 a rank error there, an answer here |
+| libjay's infinity policy (`÷0`, `⍟0`, `!¯1`) and the empty-base `⊥` | 9 | ⚪ pinned divergences from BOTH references, in `corpus/apl/divergences.txt` |
+| Complex floor and ceiling, and the `¯7○` branch cut | 3 | 🔴 |
+| Two singletons of different rank conforming (`(1 1⍴5)+,3`) | 2 | 🔴 the higher rank wins there, the first argument here |
+| Session echo, nested display width, `⍬≡0⍴⊂⍬`, `6 2⍕'a'` | 5 | ⚪ display and prototype edges, one of them the oracle's own session behaviour |
+
+`⊇` and the other Dyalog features libjay does not implement at all are
+below; they are the queue for a later wave, not counted in the APL totals.
+Each will be recorded under the `dyalog:` snapshot key before it is
+implemented, and the recording wins over anything a document says.
 
 | Feature | Status |
 |---|---|

@@ -140,16 +140,33 @@ entry in docs/coverage.md) should go.
 Dyalog is a second APL, recorded under the `dyalog:` key beside GNU APL's.
 It is not a gate and never will be while `Dialect::default()` is the
 APL2/ISO line: an expression where libjay and Dyalog differ is the BACKLOG
-of a future Dyalog dialect — the work that dialect would have to do — not a
+of the Dyalog dialect — the work that dialect still has to do — not a
 regression in this one. The replay counts those expressions and says so in
 its per-theme line; nothing fails.
 
 ```sh
 # what the two disagree about, expression by expression
 cargo run -p libjay-devtools -- stats apl --dialect-diff
+# the same question asked of the Dyalog preset
+cargo run -p libjay-devtools -- stats apl --dialect-diff --dialect dyalog
 # how many answers each key holds
 cargo run -p libjay-devtools -- stats apl
 ```
+
+`--dialect NAME` names the preset libjay itself runs under while the
+backlog is measured: `gnu` (the default, the shipped dialect) or `dyalog`.
+It changes only libjay's side — the recorded answers are read as they
+stand, and no interpreter is started — so it is the offline measure of how
+much of the backlog the preset already answers, and the difference between
+the two numbers is what a wave of dialect work bought. The closing line
+names the dialect it ran under, so the two runs are told apart by their own
+output.
+
+Neither number is a gate — the gate is GNU APL's column, replayed by
+`cargo test` — but the `gnu` number is a useful guard beside it. Dialect
+work is meant to change what the preset answers and nothing else, so the
+`gnu` figure moving means the default moved with it, which is a regression
+whether or not a corpus expression happens to catch it. Run both.
 
 `corpus/apl/dyalog-probe.txt` is the theme aimed at that question: every
 line is a place docs/coverage.md's "Which APL" table says the two lines

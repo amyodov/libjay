@@ -59,6 +59,32 @@ pub enum IndexForm {
     AxisVectors,
 }
 
+/// What a dyadic `⊂` does.
+///
+/// The APL2 line reads the left argument as partition flags: a partition
+/// begins where the flags rise, and a zero drops its item. The other line
+/// reads them as counts — each item says how many partitions to begin
+/// before it, so a count above one leaves empty partitions behind — and
+/// spells the flag reading `⊆`. Both lines agree about `⊆`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Partition {
+    #[default]
+    Flags,
+    Counts,
+}
+
+/// What monadic `≡` answers for an array whose items differ in depth.
+///
+/// Both lines answer with the depth. The other one negates it where the
+/// array is not uniform: where two items of it, at any level, differ in
+/// depth or in shape.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DepthSign {
+    #[default]
+    Unsigned,
+    Signed,
+}
+
 /// Which sentence of a dfn body is its result.
 ///
 /// libjay's block model — the value of the last sentence — is what both
@@ -133,6 +159,8 @@ pub struct Dialect {
     pub nested_model: NestedModel,
     pub first_disclose: FirstDisclose,
     pub index_form: IndexForm,
+    pub partition: Partition,
+    pub depth_sign: DepthSign,
     pub dfn_result: DfnResult,
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
@@ -164,10 +192,37 @@ impl Dialect {
             nested_model: NestedModel::Floating,
             first_disclose: FirstDisclose::UpIsFirst,
             index_form: IndexForm::ScalarPerAxis,
+            partition: Partition::Flags,
+            depth_sign: DepthSign::Unsigned,
             dfn_result: DfnResult::LastSentence,
             default_arg: DefaultArg::Eager,
             complex_order: ComplexOrder::RealThenImaginary,
             nested_grade: NestedGrade::Apl2,
+            trains: true,
+        }
+    }
+
+    /// The Dyalog line, as far as libjay implements it.
+    ///
+    /// Every setting here is one the recorded Dyalog answers verify
+    /// (`docs/testing.md`); the settings left at the GNU/APL2 reading are
+    /// the ones libjay has not derived from a Dyalog answer yet, and
+    /// `docs/coverage.md` lists what that still costs. `⎕ML` is Dyalog's
+    /// own default, 1, which is what the recording ran under: `↑` mixes
+    /// and `⊃` takes the first.
+    pub fn dyalog() -> Dialect {
+        Dialect {
+            index_origin: None,
+            comparison_tolerance: Some(1e-14),
+            nested_model: NestedModel::Floating,
+            first_disclose: FirstDisclose::UpIsMix,
+            index_form: IndexForm::AxisVectors,
+            partition: Partition::Counts,
+            depth_sign: DepthSign::Signed,
+            dfn_result: DfnResult::FirstNonAssignment,
+            default_arg: DefaultArg::Eager,
+            complex_order: ComplexOrder::RealThenImaginary,
+            nested_grade: NestedGrade::TotalOrder,
             trains: true,
         }
     }
@@ -207,20 +262,6 @@ impl Dialect {
             NestedModel::Floating => {}
             NestedModel::Grounded => return Err(refuse("a grounded nested array model")),
         }
-        match self.first_disclose {
-            FirstDisclose::UpIsFirst => {}
-            FirstDisclose::UpIsMix => return Err(refuse("↑ as mix and ⊃ as first")),
-        }
-        match self.index_form {
-            IndexForm::ScalarPerAxis => {}
-            IndexForm::AxisVectors => return Err(refuse("⌷ over index vectors")),
-        }
-        match self.dfn_result {
-            DfnResult::LastSentence => {}
-            DfnResult::FirstNonAssignment => {
-                return Err(refuse("a dfn that answers with its first non-assignment sentence"))
-            }
-        }
         match self.default_arg {
             DefaultArg::Eager => {}
             DefaultArg::Lazy => return Err(refuse("a lazy ⍺← default")),
@@ -229,12 +270,6 @@ impl Dialect {
             ComplexOrder::RealThenImaginary => {}
             ComplexOrder::MagnitudeThenAngle => {
                 return Err(refuse("grading complex values by magnitude and angle"))
-            }
-        }
-        match self.nested_grade {
-            NestedGrade::Apl2 => {}
-            NestedGrade::TotalOrder => {
-                return Err(refuse("a total array ordering for a nested grade"))
             }
         }
         let origin = match lang {
@@ -252,6 +287,8 @@ impl Dialect {
             nested_model: self.nested_model,
             first_disclose: self.first_disclose,
             index_form: self.index_form,
+            partition: self.partition,
+            depth_sign: self.depth_sign,
             dfn_result: self.dfn_result,
             default_arg: self.default_arg,
             complex_order: self.complex_order,
@@ -277,6 +314,8 @@ pub struct Rules {
     pub nested_model: NestedModel,
     pub first_disclose: FirstDisclose,
     pub index_form: IndexForm,
+    pub partition: Partition,
+    pub depth_sign: DepthSign,
     pub dfn_result: DfnResult,
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
@@ -299,6 +338,8 @@ impl Rules {
             nested_model: self.nested_model,
             first_disclose: self.first_disclose,
             index_form: self.index_form,
+            partition: self.partition,
+            depth_sign: self.depth_sign,
             dfn_result: self.dfn_result,
             default_arg: self.default_arg,
             complex_order: self.complex_order,

@@ -225,24 +225,32 @@ fn apl_grades_nested_rows_stably() {
     assert_eq!(e.kind, ErrorKind::Domain);
 }
 
-/// Dyalog's total array ordering is a different comparator at every step —
-/// it compares the atoms first, pads the shorter array with an item below
-/// every type, extends a lower rank with leading 1s, and puts numbers
-/// before characters. libjay implements the APL2 rule its oracle answers
-/// with; asking for the other one is refused by name rather than answered
-/// with this dialect's ordering.
+/// Dyalog's total array ordering is a different comparator at every step:
+/// it reads two arrays over the shape that covers both, a position one of
+/// them lacks sorting below every value there is, and it puts numbers
+/// before characters. libjay grades by the APL2 rule its oracle answers
+/// with; `nested_grade` is what asks for the other one.
 #[test]
-fn the_other_lineages_nested_ordering_is_a_named_gap() {
+fn the_other_lineages_nested_ordering_is_a_dialect_setting() {
     assert_eq!(Dialect::default().nested_grade, NestedGrade::Apl2);
     let dyalog = Dialect { nested_grade: NestedGrade::TotalOrder, ..Dialect::default() };
-    let e = compile(Lang::Apl, "⍋(1 2)(3 4)", &dyalog).expect_err("the other reading is a gap");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("total array ordering"), "{}", e.msg);
-    assert!(e.msg.contains("not supported yet"), "{}", e.msg);
-    // The setting is the APL lineages'; J's ordering is not a choice, and
-    // a dialect that asks for the other reading is refused whichever
-    // language it is resolved against, as every other APL setting is.
-    let e = compile(Lang::J, "/: 'b';'a'", &dyalog).expect_err("the setting is read for J too");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    let under = |src: &str, d: &Dialect| -> Array {
+        compile(Lang::Apl, src, d)
+            .expect("it compiles")
+            .run(&[], &mut |_: &str| {})
+            .expect("it runs")
+            .expect("it answers")
+    };
+    // The APL2 rule takes the rank first, so the matrix leads; the total
+    // ordering compares the atoms, and 1 2 3 4 extends 2 2⍴⍳4 by nothing.
+    assert_eq!(under("⍋(2 2⍴⍳4)(1 2 3 4)", &Dialect::default()), i64s(&[2, 1]));
+    assert_eq!(under("⍋(2 2⍴⍳4)(1 2 3 4)", &dyalog), i64s(&[1, 2]));
+    // Characters before numbers there, numbers before characters here.
+    assert_eq!(under("⍋1 'a'", &Dialect::default()), i64s(&[2, 1]));
+    assert_eq!(under("⍋1 'a'", &dyalog), i64s(&[1, 2]));
+    // What is not there sorts below what is: 'a' before 'ab'.
+    assert_eq!(under("⍋('ab')('a')", &dyalog), i64s(&[2, 1]));
+    // The setting is the APL lineages'. J's ordering is not a choice, and
+    // reading the setting under J would make it one.
     assert_eq!(j("/: 'b';'a'"), i64s(&[1, 0]));
 }

@@ -2166,3 +2166,82 @@ give it, the printed (non-compare) output re-emits those directives so a
 kept line pastes into a corpus file intact, and the APL generator draws
 one probe in eight at origin 0. J probes stay at 1 — J has no index
 origin, and both sides ignore it.
+## 2026-08-22 — The Dyalog dialect, wave 1: the recording taught the semantics
+
+`Dialect::dyalog()` is a preset now, not a refusal. Seven settings moved,
+and every one of them was decided by the recorded `dyalog:` column rather
+than by a document: `⎕CT` is `1e¯14`, `↑` mixes and `⊃` takes the first,
+`⌷` names the leading axes, a dyadic `⊂` counts partitions, `≡` signs its
+depth, a dfn answers with its first sentence that is not an assignment,
+and a nested grade uses the total array ordering. Measured with
+`jay-corpus stats apl --dialect-diff --dialect dyalog`, which replays the
+recorded column under a preset and starts no interpreter: 150 of 1479
+recorded answers differed under the shipped dialect, 61 under the preset.
+The two settings that are not a preset knob but a whole rule — the depth
+sign and the ordering — are the ones the published descriptions got least
+right, which is the point of this entry.
+
+**`≡`'s sign is about DEPTH uniformity, not shape.** The obvious reading
+of "uniform" is that the items agree in structure, shape included. It is
+wrong, and the recording says so in one line: `≡,\1 2 3` is `¯2`. That
+scan's items are `1`, `1 2` and `1 2 3` — different LENGTHS, and if length
+counted the answer would still be negative for the wrong reason, but its
+first item is a simple scalar, depth 0, beside two vectors of depth 1, and
+that is what makes it `¯2`. The confirming line is `1 2∘.⍴3 4`, a 2 by 2
+table whose elements are vectors of depth 1 and of lengths 1 and 2:
+uniform, `2`, positive, though no two of its shapes agree.
+A shape-based rule gets that one wrong and regresses the corpus. So
+`DepthSign::Signed` compares depths and nothing else.
+
+**The total array ordering's tie-breaks are backwards from the APL2 one.**
+Three of its steps had to be read off `snapshots/apl/grade.snap` rather
+than assumed. The shapes are BROUGHT TOGETHER, not compared: the lower
+rank gains leading 1s and each axis is taken to the longer of the two, so
+two arrays are read position by position over a shape that covers both,
+and a position one has and the other lacks decides on the spot — what is
+not there sorts below every value there is. Where no atom separates them
+the type decides, and its order is numbers, then NESTED values, then
+characters — nested in the middle, where APL2 puts it last. Only then the
+shape, read with the LAST axis most significant, which is the reverse of
+APL2's first-axis reading. Each of the three was a coin-flip from the
+prose and a fact in the snapshot.
+
+**A partitioned enclose answers a VECTOR whatever the rank it partitions.**
+`Partition::Counts` reads the left argument as counts — each item says how
+many partitions to open before it, so `1 0 1⊂1 2 3` is `(1 2)(3)` where
+the flag reading gives `(1)(3)`, and a count above one opens a partition
+nothing falls into: `2 0 1⊂1 2 3` is three, the first of them empty. The
+shape of the answer was the surprise. `⍴1 0 1⊂2 3⍴⍳6` is `2` under the
+preset and `2 2` under the shipped dialect: the partitions are a VECTOR,
+and each of them keeps the leading axes whole, rather than the frame of
+the argument carrying a shortened last axis. A left argument shorter than
+the axis zero-pads rather than erroring, so `1 0⊂1 2 3` is one partition
+holding all three. `⊆` is the flag reading in both lines and does not
+move.
+
+**What the recording could NOT settle stayed put, and is documented as
+unsettled.** `⎕CT`'s value is `1e¯14`; whether it scales by the larger or
+the smaller magnitude is a question no recorded answer separates, because
+every corpus expression that reads the tolerance agrees under both rules.
+`by_smaller` therefore stays `false` — the GNU reading libjay already
+verified — and coverage.md says the value is what the preset changes. A
+setting is not moved on a guess when the oracle is silent; the guess would
+be indistinguishable from a measurement in six months.
+
+The 61 that remain are itemised in status.md, "APL — the Dyalog line", and
+they are mostly not dialect knobs. The largest, 20 rows, is not a
+divergence at all: a `∇`-definition cannot reach Dyalog's editor over a
+pipe, so the recorder holds an error for every tradfn line, and measuring
+them means re-recording through `⎕FX`. Then 15 rows of inner product `f.g`
+with a non-scalar `g`, where the two lines nest the intermediate
+differently and the Life idiom is the visible casualty; 9 rows of libjay's
+own pinned divergences from BOTH references (the infinity policy, the
+empty-base `⊥`); 7 rows of dyadic `⍳` with a non-vector left argument; 5 of
+display and prototype edges; 3 of complex floor, ceiling and the `¯7○`
+branch cut; 2 of singletons of different rank conforming. Wave 2 is the
+`⎕FX` re-recording and the inner product, in that order, since the first
+changes what the second is measured against.
+
+The shipped dialect is untouched, and that is checked rather than
+asserted: `--dialect-diff` with no flag still reports 150, and GNU APL's
+column — the actual gate — replays green.

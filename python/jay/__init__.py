@@ -67,6 +67,8 @@ _DIALECT_KEYS = (
     "nested_model",
     "first_disclose",
     "index_form",
+    "partition",
+    "depth_sign",
     "dfn_result",
     "default_arg",
     "complex_order",

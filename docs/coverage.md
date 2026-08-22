@@ -373,16 +373,17 @@ it (`crates/libjay/tests/oracle_apl.rs`, corpus in
 published documentation; as of 2026-08-22 the recording below has
 checked them against a running Dyalog.
 
-Dyalog IS recorded now: Dyalog 20.0 (the official Docker image, run as
-a quarantined black box like every oracle, on the recording machine
-only) answered the whole corpus on 2026-08-22 into its own `dyalog:`
-column of the same snapshots (docs/testing.md). libjay agrees with it
-on 1224 of 1363 expressions; the 139 differences are the measured
-backlog of a future Dyalog dialect, never a gate, and
-`jay-corpus stats apl --dialect-diff` lists every one.
-`corpus/apl/dyalog-probe.txt` is the theme aimed at the table below.
-Where a recording contradicts a cell here, the recording wins and the
-cell changes.
+Dyalog IS recorded: Dyalog 20.0 (the official Docker image, run as a
+quarantined black box like every oracle, on the recording machine only)
+answered the whole corpus on 2026-08-22 into its own `dyalog:` column of
+the same snapshots (docs/testing.md). Under the shipped dialect libjay
+agrees with it on 1329 of 1479 expressions; under `Dialect::dyalog()`, on
+1418. `jay-corpus stats apl --dialect-diff [--dialect gnu|dyalog]` replays
+the recorded column under either preset and lists every disagreement — it
+runs no interpreter, so it needs no Docker. Neither number is a gate: the
+gate is GNU APL. `corpus/apl/dyalog-probe.txt` is the theme aimed at the
+table below. Where a recording contradicts a cell here, the recording wins
+and the cell changes.
 
 Every place the two lines are known to diverge, and which one libjay
 follows today. Rows marked "verified against the oracle" were re-checked
@@ -391,13 +392,13 @@ read off an old note:
 
 | Feature | APL2 / GNU APL (oracle) | Dyalog 20.0 (recorded) | libjay follows |
 |---|---|---|---|
-| monadic `↑` | first: the first element of the ravel, disclosed | mix / disclose | GNU APL — `↑1 2 3` is `1` |
-| monadic `⊃` | disclose / mix: items combined into one array, filled | first: pick the first item, disclosed | GNU APL — `⊃(1 2)(3 4)` mixes to a 2×2 array |
-| dyadic `⌷` | one scalar index per axis of y | an enclosed index vector, one operand | GNU APL — `(⊂1 2)⌷y` is a RANK ERROR on both sides, verified against the oracle |
-| `⊂`/`⊆` dyadic | `⊂` is partitioned enclose: opens where the left argument's flags rise | the same partition operation is spelled `⊆`; dyadic `⊂` is a different function | libjay ships both spellings for the one partition rule — `x⊂y` and `x⊆y` give the same answer, matching GNU APL's `⊂` |
+| monadic `↑` | first: the first element of the ravel, disclosed | mix / disclose | BOTH — `Dialect.first_disclose`: `↑1 2 3` is `1` by default, `1 2 3` under `Dialect::dyalog()` |
+| monadic `⊃` | disclose / mix: items combined into one array, filled | first: pick the first item, disclosed | BOTH — the same setting, the same swap: `⊃(1 2)(3 4)` is a 2×2 array by default and `1 2` under the Dyalog preset |
+| dyadic `⌷` | one scalar index per axis of y, all of them named | one index per LEADING axis; an enclosed one keeps its axis, and a shorter index takes the trailing axes whole | BOTH — `Dialect.index_form`. `2⌷3 3⍴⍳9` is a rank error by default and `4 5 6` under the Dyalog preset; `(⊂2 3)⌷3 3⍴⍳9` is the last two rows there and a rank error here, verified against both oracles |
+| `⊂`/`⊆` dyadic | `⊂` is the partition: opens where the left argument's flags rise, and a zero drops its item | that partition is spelled `⊆`; dyadic `⊂` is partitioned enclose, where the left argument COUNTS the partitions to open before each item — `1 0 1⊂1 2 3` is `(1 2)(3)` there and `(1)(3)` here | BOTH — `Dialect.partition`. `⊆` is the partition in either reading; only `⊂` moves |
 | `⊂5` (enclosing a simple scalar) | identity: `5`, depth 0 | identity, same | both — not a divergence, listed because it underlies the row above |
-| `⎕CT` default | `1e¯13`, scaled by the LARGER magnitude — verified against the oracle | `1e¯14` (per Dyalog's documentation) | GNU APL, value and rule both |
-| dfn return value | the LAST statement — verified against the oracle (`2×{⍵+1⋄⍵+2}5` is `14`, i.e. `2×7`, not `2×6`) | the first statement that is not an assignment | GNU APL — GNU APL also *echoes* every unassigned statement's value to stdout on its way through, which is a separate display quirk, not a different return value |
+| `⎕CT` default | `1e¯13`, scaled by the LARGER magnitude — verified against the oracle | `1e¯14`, the same scaling: no recorded answer separates the two rules, and both references scale by the larger | BOTH — the value is what the preset changes |
+| dfn return value | the LAST statement — verified against the oracle (`2×{⍵+1⋄⍵+2}5` is `14`, i.e. `2×7`, not `2×6`) | the first statement that is not an assignment | BOTH — `Dialect.dfn_result`. A guard is not that statement: it answers only when it holds. GNU APL also *echoes* every unassigned statement's value to stdout on its way through, which is a separate display quirk, not a different return value |
 | `⍺←` inside a dfn | assigns UNCONDITIONALLY — verified against the oracle (`F←{⍺←10⋄⍺+⍵}⋄3 F 5` is `15` there) | a DEFAULT: fills `⍺` only where no left argument arrived | neither running oracle — the published dfn model, which is `8` here, not `15` |
 | ordering `< ≤ > ≥` on complex numbers | extends them to a lexicographic order on (real, imaginary) — verified against the oracle (`2J3<2J5` is `1` there) | refuses, as the standard does | neither running oracle — refused, matching the standard |
 | negative replication count in a VECTOR (`¯1 2/1 2`) | a LENGTH ERROR — restricts a negative count to a scalar left argument, verified against the oracle | legal: a run of fills, the general rule | neither running oracle — the general APL2/Dyalog rule, which is `0 2 2` here |
@@ -460,15 +461,27 @@ to be a literal, exactly as J's noun fork does. `F←+/÷≢` then names the
 train, and `F←+/` names a derived function, by the same machinery that
 already names a dfn.
 
-v0.1.0 implements one APL: the table above is the checklist, not a
-roadmap commitment. A Dyalog (or other) dialect is planned as a
-preinitialised `Dialect` object chosen at compile time, the same way
-`⎕IO` is chosen today (`APL.Dialect.gnu` / `APL.Dialect.dyalog`) — never
-global state, never a guess from the source text. Every row above except
-`trains` still stays hard-wired to the GNU/APL2 answer; the point of
-pulling them into one table is that generalising later is a matter of
-filling in a second column, not re-deriving the list, and `trains` is what
-that second column looks like once one row is filled in.
+The Dyalog dialect is a preinitialised `Dialect` object chosen at compile
+time, the same way `⎕IO` is chosen — never global state, never a guess
+from the source text: `Dialect::dyalog()` in Rust, `APL.Dialect.dyalog`
+in Python, `--dialect dyalog` when the corpus tooling measures it. Two
+more rows are not in it, and are the reason it is a preset rather than a
+second language: `≡` negates the depth of an array whose items do not
+share one (`≡1(2(3 4))` is `¯3` there, `3` here — `Dialect.depth_sign`,
+and items of one depth and different lengths stay uniform, which
+`1 2∘.⍴3 4` pins), and a nested grade is the total array ordering
+(`Dialect.nested_grade`), which compares two arrays over the shape that
+covers both — the lower rank gaining leading 1s, each axis taken to the
+longer of the two, a position one array lacks sorting below every value
+there is, and numbers before nested values before characters where no
+atom separates them. That comparator was derived from the recorded
+answers in `snapshots/apl/grade.snap`, which is what pins it.
+
+What the preset still leaves at the GNU reading, and what that costs
+against the recording, is the table in [status.md](status.md), "APL — the
+Dyalog line". The largest item is the inner product with a non-scalar
+right operand; the largest NON-item is the twenty `∇`-definitions the
+recording harness could not put to Dyalog at all.
 
 | Glyph | Monadic | Dyadic |
 |---|---|---|

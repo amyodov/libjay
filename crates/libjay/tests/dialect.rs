@@ -1,16 +1,17 @@
 //! The dialect object: the settings a host supplies, and the one place
 //! each of them is read.
 //!
-//! libjay implements one APL — the APL2/ISO line GNU APL embodies — and
-//! every point where the APL lineages diverge is a setting on `Dialect`
-//! rather than a constant in the parser. These tests pin two things: that
-//! the shipped dialect is the one the rest of the suite runs under, and
-//! that each setting is really read, by asking for the reading libjay does
-//! not implement and getting a "not implemented yet" refusal for it.
+//! libjay ships the APL2/ISO line GNU APL embodies, and every point where
+//! the APL lineages diverge is a setting on `Dialect` rather than a
+//! constant in the parser. These tests pin three things: that the shipped
+//! dialect is the one the rest of the suite runs under, that the settings
+//! `Dialect::dyalog()` names are really read, and that a setting libjay
+//! does not implement is refused as a gap rather than answered with this
+//! dialect's meaning.
 
 use jay::frontend::{
-    ComplexOrder, DefaultArg, DfnResult, Dialect, FirstDisclose, IndexForm, NestedGrade,
-    NestedModel,
+    ComplexOrder, DefaultArg, DepthSign, DfnResult, Dialect, FirstDisclose, IndexForm, NestedGrade,
+    NestedModel, Partition,
 };
 use jay::{compile, Array, Data, ErrorKind, Lang};
 
@@ -52,6 +53,8 @@ fn the_defaults_resolve_to_this_apl() {
     assert_eq!(r.nested_model, NestedModel::Floating);
     assert_eq!(r.first_disclose, FirstDisclose::UpIsFirst);
     assert_eq!(r.index_form, IndexForm::ScalarPerAxis);
+    assert_eq!(r.partition, Partition::Flags);
+    assert_eq!(r.depth_sign, DepthSign::Unsigned);
     assert_eq!(r.dfn_result, DfnResult::LastSentence);
     assert_eq!(r.default_arg, DefaultArg::Eager);
     assert_eq!(r.complex_order, ComplexOrder::RealThenImaginary);
@@ -65,6 +68,66 @@ fn the_defaults_resolve_to_this_apl() {
     assert!(j.tol().is_j());
 }
 
+/// The Dyalog preset, sentence by sentence: every setting it names, asked
+/// in the language rather than of the object, and the shipped dialect's
+/// answer beside it. The values are the recorded Dyalog ones — the
+/// `dyalog:` column of the snapshots is what pins them.
+#[test]
+fn the_dyalog_preset_answers_the_dyalog_way() {
+    let dy = Dialect::dyalog();
+    let gnu = Dialect::default();
+    // `↑` mixes and `⊃` takes the first: the lineages' clearest fork.
+    assert_eq!(val("↑1 2 3", &dy), i64s(&[3], &[1, 2, 3]));
+    assert_eq!(val("↑1 2 3", &gnu), Array::scalar_i64(1));
+    assert_eq!(val("↑(1 2)(3 4)", &dy), i64s(&[2, 2], &[1, 2, 3, 4]));
+    assert_eq!(val("⊃(1 2)(3 4)", &dy), i64s(&[2], &[1, 2]));
+    assert_eq!(val("⊃(1 2)(3 4)", &gnu), i64s(&[2, 2], &[1, 2, 3, 4]));
+    assert_eq!(val("⊃2 3⍴⍳6", &dy), Array::scalar_i64(1));
+    // `⌷` names the leading axes, and an enclosed index keeps its own.
+    assert_eq!(val("2⌷3 3⍴⍳9", &dy), i64s(&[3], &[4, 5, 6]));
+    assert_eq!(val("(⊂2 3)⌷3 3⍴⍳9", &dy), i64s(&[2, 3], &[4, 5, 6, 7, 8, 9]));
+    // The APL2 reading names every axis, so the same sentence is a rank
+    // error there.
+    let named = compile(Lang::Apl, "2⌷3 3⍴⍳9", &gnu).expect("it compiles in either reading");
+    let mut sink = |_: &str| {};
+    assert_eq!(
+        named.run(&[], &mut sink).expect_err("one index for two axes").kind,
+        ErrorKind::Rank
+    );
+    // `⎕CT` is a tenth of GNU APL's, which two numbers a tenth apart show.
+    assert_eq!(val("⎕CT", &dy), Array::scalar_f64(1e-14));
+    assert_eq!(val("1=1+1E¯13", &dy), Array::scalar_bool(false));
+    assert_eq!(val("1=1+1E¯13", &gnu), Array::scalar_bool(true));
+    assert_eq!(val("⌊2.9999999999999", &dy), Array::scalar_i64(2));
+    // A dfn answers with its first sentence that is not an assignment.
+    assert_eq!(val("F←{⍵+1 ⋄ ⍵+2} ⋄ F 5", &dy), Array::scalar_i64(6));
+    assert_eq!(val("F←{⍵+1 ⋄ ⍵+2} ⋄ F 5", &gnu), Array::scalar_i64(7));
+    // A guard still decides, and an assignment ahead of the answer still
+    // runs: neither is the sentence that answers.
+    assert_eq!(val("F←{⍵>2:⍵ ⋄ 0} ⋄ F 5", &dy), Array::scalar_i64(5));
+    assert_eq!(val("F←{t←⍵×2 ⋄ t+1 ⋄ 99} ⋄ F 5", &dy), Array::scalar_i64(11));
+    // Dyadic `⊂` counts partitions rather than flagging where one starts.
+    assert_eq!(val("≢1 0 1⊂1 2 3", &dy), Array::scalar_i64(2));
+    assert_eq!(val("⊃1 0 1⊂1 2 3", &dy), i64s(&[2], &[1, 2]));
+    assert_eq!(val("≢1 0 1⊂1 2 3", &gnu), Array::scalar_i64(2));
+    assert_eq!(val("↑1 0 1⊂1 2 3", &gnu), i64s(&[1], &[1]));
+    // `⊆` is the partition in both readings.
+    assert_eq!(val("↑1 0 1⊆1 2 3", &gnu), i64s(&[1], &[1]));
+    assert_eq!(val("⊃1 0 1⊆1 2 3", &dy), i64s(&[1], &[1]));
+    // `≡` reports a depth its items do not share as a negative.
+    assert_eq!(val("≡1(2(3 4))", &dy), Array::scalar_i64(-3));
+    assert_eq!(val("≡1(2(3 4))", &gnu), Array::scalar_i64(3));
+    assert_eq!(val("≡(1 2),⊂3 4", &dy), Array::scalar_i64(-2));
+    // Items of one depth and different lengths are uniform all the same.
+    assert_eq!(val("≡1 2∘.⍴3 4", &dy), Array::scalar_i64(2));
+    // A nested grade is the total array ordering: numbers before
+    // characters, and a shorter array before what extends it.
+    assert_eq!(val("⍋(1 2)('ab')(⊂1 2)(1)('a')", &dy), i64s(&[5], &[4, 1, 3, 5, 2]));
+    assert_eq!(val("⍋(1 2)('ab')(⊂1 2)(1)('a')", &gnu), i64s(&[5], &[5, 4, 3, 2, 1]));
+    assert_eq!(val("⍋1 'a'", &dy), i64s(&[2], &[1, 2]));
+    assert_eq!(val("⍋(1 4⍴0)(2 3⍴0)", &dy), i64s(&[2], &[2, 1]));
+}
+
 /// Every setting whose other reading libjay does not implement, asked for.
 /// Each has to be refused as a gap rather than answered with this
 /// dialect's meaning.
@@ -72,23 +135,10 @@ fn the_defaults_resolve_to_this_apl() {
 fn asking_for_the_other_reading_is_refused_as_a_gap() {
     let cases: Vec<(&str, Dialect)> = vec![
         ("nested_model", Dialect { nested_model: NestedModel::Grounded, ..Dialect::default() }),
-        (
-            "first_disclose",
-            Dialect { first_disclose: FirstDisclose::UpIsMix, ..Dialect::default() },
-        ),
-        ("index_form", Dialect { index_form: IndexForm::AxisVectors, ..Dialect::default() }),
-        (
-            "dfn_result",
-            Dialect { dfn_result: DfnResult::FirstNonAssignment, ..Dialect::default() },
-        ),
         ("default_arg", Dialect { default_arg: DefaultArg::Lazy, ..Dialect::default() }),
         (
             "complex_order",
             Dialect { complex_order: ComplexOrder::MagnitudeThenAngle, ..Dialect::default() },
-        ),
-        (
-            "nested_grade",
-            Dialect { nested_grade: NestedGrade::TotalOrder, ..Dialect::default() },
         ),
     ];
     for (name, dialect) in cases {
