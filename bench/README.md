@@ -1019,12 +1019,72 @@ product it folds is still an array: complex has no blockwise kernel, so that
 chain runs unfused and the 320 MB intermediate stays. What the change
 removes there is the *other* 160 MB buffer, the widened float.
 
-One case is deliberately untouched and shows as such: `+/ {b}` at 20M, 63.2
-ms before and 61.7 after. A reduction over a boolean buffer with nothing
-mixed into it still widens the whole buffer to i64 before folding it, which
-is the same defect in the single-buffer fold family (`reduce_typed`,
-`window_typed`, `scan_typed`) rather than in the two-buffer passes this
-section is about. It is the top entry under "Next" below.
+One case was deliberately untouched and showed as such: `+/ {b}` at 20M,
+63.2 ms before and 61.7 after. A reduction over a boolean buffer with
+nothing mixed into it still widened the whole buffer to i64 before folding
+it, which was the same defect in the single-buffer fold family
+(`reduce_typed`, `window_typed`, `scan_typed`) rather than in the two-buffer
+passes this section is about. That is the next section, and it is done.
+
+## Folds over one buffer
+
+The entry the "Next" list had at the top after the section above, and the
+same defect on the other side of the family: a fold, a scan or a window over
+a boolean argument widened the whole buffer to i64 before it ran. At 20M
+that is 20 MB in and 160 MB out, written into freshly faulted pages and read
+back once — which made the narrowest argument in the library the most
+expensive one to reduce.
+
+The fold family now reads the buffer in its own element type and promotes
+each element into the accumulator's type where it reads it, through the same
+`Widen` adapter the two-buffer passes take. Bool to whole number is exact
+and nothing is reordered, so **every figure below is bit-for-bit what the
+old path gave**; `hotpaths.rs` asserts it, every fold, scan, window and row
+fold over a boolean argument against the same program over the integer
+array.
+
+Measured 2026-08-22 on the machine below, rustc 1.89, one-minute load
+average 3.1-4.3 through the run. Two builds — this branch and the same
+commit without the pass — alternated twice through, the best of each taken.
+Milliseconds; the argument is a vector of 2M and of 20M elements.
+
+| program | 8 threads before | after | 1 thread before | after |
+|---|---:|---:|---:|---:|
+| `+/ {b}`, 20M | 65.9 | 2.8 | 101.0 | 8.3 |
+| `>./ {b}`, 20M | 65.2 | 1.7 | 95.6 | 4.6 |
+| `+/\ {b}`, 20M | 182.0 | 83.2 | 180.4 | 83.7 |
+| `20 +/\ {b}`, 20M | 140.5 | 50.1 | 236.7 | 142.9 |
+| `+/ {b}`, 2M | 1.7 | 0.2 | 2.9 | 0.7 |
+| `>./ {b}`, 2M | 3.2 | 0.2 | 3.9 | 0.4 |
+| `+/\ {b}`, 2M | 5.2 | 1.9 | 4.8 | 2.1 |
+| `20 +/\ {b}`, 2M | 4.8 | 2.8 | 10.3 | 7.5 |
+
+The same folds over an argument that was already the accumulator's type are
+the control, and they do not move:
+
+| program | 8 threads before | after | 1 thread before | after |
+|---|---:|---:|---:|---:|
+| `+/ {x}`, 20M | 6.2 | 6.1 | 9.1 | 9.7 |
+| `+/ {i}`, 20M | 6.9 | 7.4 | 16.2 | 16.0 |
+| `+/\ {x}`, 20M | 96.3 | 99.8 | 95.9 | 97.7 |
+| `20 +/\ {i}`, 20M | 51.1 | 50.7 | 151.2 | 151.6 |
+
+Two things the table says.
+
+**A boolean reduction is now the cheapest reduction there is**, which is
+what reading an eighth of the bytes should buy and what it never did:
+`+/ {b}` at 20M is 2.8 ms against 6.1 for the same sum over floats and 7.4
+over whole numbers, where it used to be ten times slower than either.
+`>./ {b}` gains most — 65.2 to 1.7 ms, 38x — because a boolean maximum is
+one pass over 20 MB and was three passes over 340.
+
+**The scans and the windows gain two to three times, not twenty, and the
+reason is the output.** A scan writes one whole number per element whatever
+it read, so the 160 MB the fold no longer reads is 160 MB the scan still has
+to produce: `+/\ {b}` at 83.2 ms is `+/\ {x}` at 99.8, which is the write.
+That buffer is the next entry under "Next" and the last one this file
+measures — an elementwise pass spends longer faulting its result in than
+computing it.
 
 ## Three algorithms, not three kernels
 
@@ -1093,15 +1153,13 @@ What is left, in the order the measurements rank it:
    types promotes the narrow one where it reads it, and the fused kernel
    stages a narrow argument one block at a time. The numbers are under
    "Mixed-type passes" above, the design in docs/decisions.md.
-4. **Widening inside a single-buffer fold.** The two-buffer passes are done;
-   the folds are not. `reduce_typed`, `window_typed` and `scan_typed` widen
-   a boolean buffer to i64 whole before folding it, which is 20 MB in and
-   160 MB out at 20M elements and reads it back once: `+/ {b}` is 63.2 ms
-   where `+/ {x}` over eight times the bytes is 5.7. The fix is the one
-   above — promote inside the chunk — but the fold family threads its
-   element type through `fold_items`, `fold_range`, `fold_flat`,
-   `window_fold` and `scan`, so it wants a second type parameter in five
-   places rather than two.
+4. ~~**Widening inside a single-buffer fold.**~~ Done, and worth up to 38
+   times rather than the copy's share this entry estimated: the fold family
+   reads its buffer in its own element type and promotes into the
+   accumulator where it reads, so `+/ {b}` at 20M went 65.9 → 2.8 ms on
+   eight threads and `>./ {b}` 65.2 → 1.7. The second type parameter landed
+   in eleven functions and `par::try_fold_chunks`; the numbers are under
+   "Folds over one buffer" above, the design in docs/decisions.md.
 5. **The fresh output buffer.** An elementwise pass spends longer faulting
    its 160 MB result in than computing it, and that cost does not
    parallelise. A reuse pool would remove it; nothing portable and stable

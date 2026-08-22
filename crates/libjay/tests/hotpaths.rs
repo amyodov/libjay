@@ -288,6 +288,100 @@ fn a_mixed_pass_answers_what_the_widened_one_answers() {
     }
 }
 
+// ------------------------------------------- the folds over one buffer
+
+/// The same bits as whole numbers — the buffer a fold over a boolean
+/// argument used to build before it ran.
+fn as_ints(shape: &[usize], bits: &[u8]) -> Array {
+    let v: Vec<i64> = bits.iter().map(|&b| b as i64).collect();
+    Array::new(shape.to_vec(), Data::I64(v.into()))
+}
+
+/// A boolean result as whole numbers. The one shape that keeps its type is
+/// the reduction of a single item, which is that item and runs no insert at
+/// all; every fold that runs answers in integers, as promotion says. So the
+/// comparison below is of values, and the boolean answer is promoted to
+/// meet the integer one.
+fn promoted(a: &Array) -> Array {
+    match &a.data {
+        Data::Bool(v) => {
+            let ints: Vec<i64> = v.iter().map(|&b| b as i64).collect();
+            Array::new(a.shape.clone(), Data::I64(ints.into()))
+        }
+        _ => a.clone(),
+    }
+}
+
+/// A fold, a scan or a window over a boolean buffer reads it where it lies
+/// and promotes each element as it reads it. Every answer must be exactly
+/// the answer the same program gives over the integer array, which is the
+/// buffer these paths used to widen the argument into before folding it.
+///
+/// Bool to integer is exact and nothing is reordered, so this is equality
+/// of whole values, not a tolerance: the results are integers either way.
+///
+/// The shapes cover what the family branches on — one element per item and
+/// several, an item wide enough for the vectorised range fold and one too
+/// narrow for it, a column-major argument, and lengths that straddle both
+/// `par::MIN_WORK` and the lane threshold.
+#[test]
+fn a_boolean_fold_answers_what_the_widened_one_answers() {
+    let mut rng = Rng(91);
+    let vector = ["+/ {y}", "*/ {y}", "-/ {y}", "<./ {y}", ">./ {y}"];
+    let scans = ["+/\\ {y}", "+/\\. {y}", ">./\\ {y}", "*/\\ {y}"];
+    let windows = ["5 +/\\ {y}", "5 >./\\ {y}", "5 */\\ {y}"];
+    // A fold along the leading axis, the row fold, and both of them over
+    // the transpose, which is the column-major argument.
+    let table = [
+        "+/ {y}",
+        ">./ {y}",
+        "+/\"1 {y}",
+        "-/\"1 {y}",
+        "+/ |: {y}",
+        "+/\"1 |: {y}",
+    ];
+    for n in [1usize, 3, 97, 100_000] {
+        let bits = rng.bools(n);
+        let b = Array::new(vec![n], Data::Bool(bits.clone().into()));
+        let i = as_ints(&[n], &bits);
+        for src in vector.iter().chain(&scans) {
+            identical(
+                &promoted(&run(src, std::slice::from_ref(&b))),
+                &run(src, std::slice::from_ref(&i)),
+            );
+        }
+        if n >= 5 {
+            for src in windows {
+                identical(
+                    &promoted(&run(src, std::slice::from_ref(&b))),
+                    &run(src, std::slice::from_ref(&i)),
+                );
+            }
+        }
+    }
+    // Narrow items, wide ones, and a single item; the wide ones straddle
+    // the threshold at which an item's columns are folded vectorised.
+    for (rows, cols) in [(1usize, 8usize), (7, 3), (1000, 3), (7, 300), (400, 300)] {
+        let bits = rng.bools(rows * cols);
+        let b = Array::new(vec![rows, cols], Data::Bool(bits.clone().into()));
+        let i = as_ints(&[rows, cols], &bits);
+        for src in table {
+            identical(
+                &promoted(&run(src, std::slice::from_ref(&b))),
+                &run(src, std::slice::from_ref(&i)),
+            );
+        }
+        if rows >= 3 {
+            for src in ["+/\\ {y}", "3 +/\\ {y}", "3 >./\\ {y}"] {
+                identical(
+                    &promoted(&run(src, std::slice::from_ref(&b))),
+                    &run(src, std::slice::from_ref(&i)),
+                );
+            }
+        }
+    }
+}
+
 // ------------------------------------------------- scans, keys and shapes
 
 /// Every suffix folded on its own — `u/ i }. y` for each i — as one array.

@@ -273,10 +273,15 @@ where
 /// folded by `seq`. `step` must be associative: the regrouping is the whole
 /// point, and it is what lets `seq` regroup inside its own chunk too. None
 /// when a step left its type (integer overflow) anywhere.
-pub fn try_fold_chunks<T, C, F>(v: &[T], seq: C, step: F) -> Option<T>
+///
+/// The element type read and the type accumulated are separate, so a fold
+/// that promotes as it reads — a boolean buffer summed as integers — needs
+/// no widened copy of its argument.
+pub fn try_fold_chunks<S, T, C, F>(v: &[S], seq: C, step: F) -> Option<T>
 where
+    S: Copy + Send + Sync,
     T: Copy + Send + Sync,
-    C: Fn(&[T]) -> Option<T> + Sync + Send,
+    C: Fn(&[S]) -> Option<T> + Sync + Send,
     F: Fn(T, T) -> Option<T> + Sync + Send,
 {
     if !worth_it(v.len()) {

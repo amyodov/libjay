@@ -48,6 +48,12 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   argument one block at a time. Results are unchanged to the last bit; at
   20M elements `{c} + {f}` runs 2.5x faster, `{i} + {f}` 2.2x and
   `+/ {i} * {f}` 5.5x. See bench/README.md, "Mixed-type passes".
+- Reductions, scans and moving windows over a yes/no column now read it as
+  it lies instead of expanding it to whole numbers first, so summing one is
+  finally cheaper than summing a column of numbers rather than ten times
+  dearer. Results are unchanged to the last bit; at 20M elements `+/ {b}`
+  runs 24x faster, `>./ {b}` 38x, and the scans and moving windows two to
+  three times. See bench/README.md, "Folds over one buffer".
 - Four verbs that were correct but far slower than the work they describe
   are now the algorithm they describe, with the same answers. Between them
   they close the three losses bench/workloads.md diagnosed:

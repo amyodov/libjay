@@ -1701,3 +1701,53 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   not used: an install that can fail before any channel exists, to cover
   ground three lines of shell already cover. Phases upload as they finish,
   so a run that dies in its fourth still delivers three.
+- 2026-08-22 — **A fold over one buffer promotes where it reads, as a pass
+  over two already did.** The entry bench/README.md's "Next" list had at the
+  top, and the half the mixed-type wave left undone: `+/ {b}` widened a 20 MB
+  boolean buffer into 160 MB of `i64` and read that back to fold it, so the
+  cheapest argument in the library was the most expensive one to reduce.
+  Removing the copy took `+/ {b}` at 20M from 65.9 to 2.8 ms on eight threads
+  and 101.0 to 8.3 on one, and `>./ {b}` from 65.2 to 1.7 — a boolean
+  reduction is now faster than the same reduction over floats, which is what
+  reading an eighth of the bytes should buy. Numbers in bench/README.md,
+  section "Folds over one buffer".
+  - **One more type parameter, not one more family.** The fold family reads
+    `&[S]` and accumulates `T` where `S: Widen<T>` — the trait the mixed-type
+    wave already introduced — so `Data::Bool` reaches the same leaf as
+    `Data::I64` with `u8` in the slice and `i64` in the accumulator. Eleven
+    functions carry the pair (`fold_range`, `fold_lanes`, `fold_flat`,
+    `fold_items`, `fold_runs`, `fold_columns`, `fold_across`, `scan_flat`,
+    `window_fold`, `window_fold_flat`, `window_fold_range`), and
+    `par::try_fold_chunks` carries it too, because a chunked fold reads one
+    type and combines another. The multiversioned leaves stay
+    multiversioned: the macro already took generic parameters, so each
+    combination is compiled per CPU feature level like every other leaf.
+  - **Every buffer copy in the family goes, not just the boolean one.** The
+    integer scan and the integer window retry in floats when a step
+    overflows; the retry used to build an `f64` copy of the `i64` argument
+    and now rereads the argument with an `f64` accumulator. The column-major
+    table folds (`fold_columns`, `fold_across`) widened a boolean table
+    column by column and no longer widen at all. What is left widened is
+    what has no fixed-width buffer to read element by element: `Ext` and
+    `Rat` fold through the general path, one step at a time, as before.
+  - **Bit-identical, and that is the test.** Bool to `i64` is exact and
+    nothing is reordered, so promoting each element and then folding is the
+    same arithmetic on the same values as promoting the buffer first.
+    `hotpaths.rs` asserts it directly — every fold, scan, window and row
+    fold over a boolean argument against the same program over the integer
+    array, whole values, across the sizes that straddle the parallel and the
+    lane thresholds and the shapes that straddle the vectorised range fold.
+    The one answer that legitimately differs in type is the reduction of a
+    single item, which is that item and runs no insert at all; the test
+    promotes it and compares values.
+  - **The scans and the windows gain less, and the reason is the output.**
+    `+/\ {b}` at 20M went 182.0 → 83.2 ms and `20 +/\ {b}` 140.5 → 50.1,
+    two to three times rather than twenty, because a scan still writes one
+    `i64` per element: the 160 MB the fold no longer reads is 160 MB the
+    scan still has to produce. `+/\ {b}` now costs what `+/\ {x}` costs,
+    which is that write. The remaining entry under "Next" — a reuse pool for
+    the fresh output buffer — is the one that would move them again.
+  - **The same-type folds did not move**, which is the control: identity
+    promotion is `#[inline(always)]` and compiles away. `+/ {x}`, `+/ {i}`,
+    `+/\ {x}` and `20 +/\ {i}` at 2M and 20M, on one thread and on eight,
+    all repeat within the few per cent this file quotes as the noise floor.

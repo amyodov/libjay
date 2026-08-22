@@ -6611,8 +6611,8 @@ fn is_associative(op: ScalarDyad) -> bool {
 }
 
 #[inline(always)]
-fn fold_range_body<T, F>(
-    v: &[T],
+fn fold_range_body<S, T, F>(
+    v: &[S],
     m: usize,
     lo: usize,
     hi: usize,
@@ -6621,19 +6621,22 @@ fn fold_range_body<T, F>(
     step: &F,
 ) -> bool
 where
+    S: Widen<T>,
     T: Copy,
     F: Fn(T, T) -> (T, bool),
 {
     let w = acc.len();
     let base = (hi - 1) * m + j0;
-    acc.copy_from_slice(&v[base..base + w]);
+    for (slot, &x) in acc.iter_mut().zip(&v[base..base + w]) {
+        *slot = x.widen();
+    }
     // Overflow is folded into a flag rather than breaking the loop: the
     // whole reduction is redone by the general path either way.
     let mut over = false;
     for i in (lo..hi - 1).rev() {
         let row = &v[i * m + j0..i * m + j0 + w];
         for (slot, &x) in acc.iter_mut().zip(row) {
-            let (r, o) = step(x, *slot);
+            let (r, o) = step(x.widen(), *slot);
             *slot = r;
             over |= o;
         }
@@ -6643,8 +6646,8 @@ where
 
 multiversioned! {
     #[allow(clippy::too_many_arguments)]
-    fn fold_range_vectorised[T: Copy, F: Fn(T, T) -> (T, bool)](
-        v: &[T],
+    fn fold_range_vectorised[S: Widen<T>, T: Copy, F: Fn(T, T) -> (T, bool)](
+        v: &[S],
         m: usize,
         lo: usize,
         hi: usize,
@@ -6671,10 +6674,14 @@ const VECTOR_COLUMNS: usize = 16;
 /// compilation the CPU is entitled to; narrow, and it runs the baseline one.
 /// Either way the fold order is the same: the columns are independent
 /// accumulators, not a reassociation of one.
+///
+/// The buffer is read in its own element type and promoted into the
+/// accumulator's where each element is read, so a narrower argument costs
+/// no widened copy.
 #[allow(clippy::too_many_arguments)]
 #[inline]
-fn fold_range<T, F>(
-    v: &[T],
+fn fold_range<S, T, F>(
+    v: &[S],
     m: usize,
     lo: usize,
     hi: usize,
@@ -6683,6 +6690,7 @@ fn fold_range<T, F>(
     step: &F,
 ) -> bool
 where
+    S: Widen<T>,
     T: Copy,
     F: Fn(T, T) -> (T, bool),
 {
@@ -6716,17 +6724,18 @@ const MIN_LANE_WORK: usize = 8 * FOLD_LANES;
 /// into the result last — so the fold is a regrouping of the sequential one,
 /// which only an associative step may take (§5.9).
 #[inline(always)]
-fn fold_lanes_body<T, F>(v: &[T], step: &F) -> Option<T>
+fn fold_lanes_body<S, T, F>(v: &[S], step: &F) -> Option<T>
 where
+    S: Widen<T>,
     T: Copy,
     F: Fn(T, T) -> (T, bool),
 {
     let n = v.len();
     let mut over = false;
     if n < MIN_LANE_WORK {
-        let mut acc = v[n - 1];
+        let mut acc = v[n - 1].widen();
         for &x in v[..n - 1].iter().rev() {
-            let (r, o) = step(x, acc);
+            let (r, o) = step(x.widen(), acc);
             acc = r;
             over |= o;
         }
@@ -6737,12 +6746,14 @@ where
     let rows = n / FOLD_LANES;
     let head = n - rows * FOLD_LANES;
     let last = head + (rows - 1) * FOLD_LANES;
-    let mut acc = [v[last]; FOLD_LANES];
-    acc.copy_from_slice(&v[last..last + FOLD_LANES]);
+    let mut acc = [v[last].widen(); FOLD_LANES];
+    for (slot, &x) in acc.iter_mut().zip(&v[last..last + FOLD_LANES]) {
+        *slot = x.widen();
+    }
     for r in (0..rows - 1).rev() {
         let row = &v[head + r * FOLD_LANES..head + (r + 1) * FOLD_LANES];
         for (slot, &x) in acc.iter_mut().zip(row) {
-            let (r, o) = step(x, *slot);
+            let (r, o) = step(x.widen(), *slot);
             *slot = r;
             over |= o;
         }
@@ -6754,7 +6765,7 @@ where
         over |= o;
     }
     for &x in v[..head].iter().rev() {
-        let (r, o) = step(x, a);
+        let (r, o) = step(x.widen(), a);
         a = r;
         over |= o;
     }
@@ -6762,8 +6773,8 @@ where
 }
 
 multiversioned! {
-    fn fold_lanes_vectorised[T: Copy, F: Fn(T, T) -> (T, bool)](
-        v: &[T],
+    fn fold_lanes_vectorised[S: Widen<T>, T: Copy, F: Fn(T, T) -> (T, bool)](
+        v: &[S],
         step: &F,
     ) -> Option<T> = fold_lanes_body;
 }
@@ -6771,8 +6782,9 @@ multiversioned! {
 /// A flat run folded with lanes where they pay and with one accumulator
 /// where they do not.
 #[inline]
-fn fold_lanes<T, F>(v: &[T], step: &F) -> Option<T>
+fn fold_lanes<S, T, F>(v: &[S], step: &F) -> Option<T>
 where
+    S: Widen<T>,
     T: Copy,
     F: Fn(T, T) -> (T, bool),
 {
@@ -6785,8 +6797,9 @@ where
 
 /// Fold `n` single-element items, right to left. Associative steps fold in
 /// chunks on several threads, and in lanes within a chunk.
-fn fold_flat<T, F>(v: &[T], n: usize, assoc: bool, step: &F) -> Option<T>
+fn fold_flat<S, T, F>(v: &[S], n: usize, assoc: bool, step: &F) -> Option<T>
 where
+    S: Widen<T>,
     T: Copy + Send + Sync,
     F: Fn(T, T) -> (T, bool) + Sync + Send,
 {
@@ -6800,10 +6813,10 @@ where
             },
         );
     }
-    let mut acc = v[n - 1];
+    let mut acc = v[n - 1].widen();
     let mut over = false;
     for &x in v[..n - 1].iter().rev() {
-        let (r, o) = step(x, acc);
+        let (r, o) = step(x.widen(), acc);
         acc = r;
         over |= o;
     }
@@ -6820,8 +6833,9 @@ where
 /// * a one-element item folds in a register;
 /// * a narrow item splits into chunks of items, which regroups the fold and
 ///   is taken only for an associative step.
-fn fold_items<T, F>(v: &[T], n: usize, m: usize, assoc: bool, step: F) -> Option<Vec<T>>
+fn fold_items<S, T, F>(v: &[S], n: usize, m: usize, assoc: bool, step: F) -> Option<Vec<T>>
 where
+    S: Widen<T>,
     T: Copy + Default + Send + Sync,
     F: Fn(T, T) -> (T, bool) + Sync + Send,
 {
@@ -6864,7 +6878,9 @@ where
     Some(acc)
 }
 
-fn fold_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize) -> Option<Vec<i64>> {
+/// The integer fold, over any buffer whose elements are integers once read:
+/// an `i64` one, or a boolean one promoted where it is read.
+fn fold_i64<S: Widen<i64>>(op: ScalarDyad, v: &[S], n: usize, m: usize) -> Option<Vec<i64>> {
     use ScalarDyad::*;
     let assoc = is_associative(op);
     match op {
@@ -6917,11 +6933,9 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
         Data::Complex(v) => Some(Data::Complex(fold_cx(op, v, n, m)?.into())),
         Data::I64(v) => Some(Data::I64(fold_i64(op, v, n, m)?.into())),
         // Booleans reduce as integers, which is what promotion says the
-        // general path would produce; widen once and fold.
-        Data::Bool(v) => {
-            let widened = par::map(v, |&b| b as i64);
-            Some(Data::I64(fold_i64(op, &widened, n, m)?.into()))
-        }
+        // general path would produce. The promotion happens where the fold
+        // reads the element, so the boolean buffer is folded where it lies.
+        Data::Bool(v) => Some(Data::I64(fold_i64(op, v.as_slice(), n, m)?.into())),
         // A bignum has no blockwise form: the exact types fold, scan and
         // window through the general path, one step at a time.
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
@@ -6934,17 +6948,18 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
 /// at once. Each run is folded on its own, in the order the insert has, so
 /// no step is regrouped and any operation at all is safe here.
 #[inline(always)]
-fn fold_runs_body<T, F>(v: &[T], start: usize, m: usize, out: &mut [T], step: &F) -> bool
+fn fold_runs_body<S, T, F>(v: &[S], start: usize, m: usize, out: &mut [T], step: &F) -> bool
 where
+    S: Widen<T>,
     T: Copy,
     F: Fn(T, T) -> (T, bool),
 {
     let mut over = false;
     for (k, slot) in out.iter_mut().enumerate() {
         let run = &v[(start + k) * m..(start + k + 1) * m];
-        let mut acc = run[m - 1];
+        let mut acc = run[m - 1].widen();
         for &x in run[..m - 1].iter().rev() {
-            let (r, o) = step(x, acc);
+            let (r, o) = step(x.widen(), acc);
             acc = r;
             over |= o;
         }
@@ -6954,8 +6969,8 @@ where
 }
 
 multiversioned! {
-    fn fold_runs_vectorised[T: Copy, F: Fn(T, T) -> (T, bool)](
-        v: &[T],
+    fn fold_runs_vectorised[S: Widen<T>, T: Copy, F: Fn(T, T) -> (T, bool)](
+        v: &[S],
         start: usize,
         m: usize,
         out: &mut [T],
@@ -6965,8 +6980,9 @@ multiversioned! {
 
 /// One output per run of `m`, in parallel over the runs. None when a step
 /// left the element type: the general path then runs and knows how to widen.
-fn fold_runs<T, F>(v: &[T], n: usize, m: usize, step: F) -> Option<Vec<T>>
+fn fold_runs<S, T, F>(v: &[S], n: usize, m: usize, step: F) -> Option<Vec<T>>
 where
+    S: Widen<T>,
     T: Copy + Default + Send + Sync,
     F: Fn(T, T) -> (T, bool) + Sync + Send,
 {
@@ -6998,17 +7014,7 @@ fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> 
             }?
             .into(),
         )),
-        Data::I64(v) => Some(Data::I64(
-            match op {
-                Add => fold_runs(v, n, m, i64::overflowing_add),
-                Sub => fold_runs(v, n, m, i64::overflowing_sub),
-                Mul => fold_runs(v, n, m, i64::overflowing_mul),
-                Min => fold_runs(v, n, m, |a: i64, b: i64| (a.min(b), false)),
-                Max => fold_runs(v, n, m, |a: i64, b: i64| (a.max(b), false)),
-                _ => None,
-            }?
-            .into(),
-        )),
+        Data::I64(v) => Some(Data::I64(fold_runs_i64(op, v.as_slice(), n, m)?.into())),
         // Min and Max have no complex meaning; the general path reports it.
         Data::Complex(v) => Some(Data::Complex(
             match op {
@@ -7019,13 +7025,22 @@ fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> 
             }?
             .into(),
         )),
-        // Booleans reduce as integers, which is what promotion says the
-        // general path would produce; widen once and fold.
-        Data::Bool(v) => {
-            let widened = par::map(v, |&b| b as i64);
-            fold_runs_data(op, &Data::I64(widened.into()), n, m)
-        }
+        // Booleans reduce as integers, and are promoted where they are read.
+        Data::Bool(v) => Some(Data::I64(fold_runs_i64(op, v.as_slice(), n, m)?.into())),
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+    }
+}
+
+/// The row fold's integer arm, over an `i64` buffer or a boolean one.
+fn fold_runs_i64<S: Widen<i64>>(op: ScalarDyad, v: &[S], n: usize, m: usize) -> Option<Vec<i64>> {
+    use ScalarDyad::*;
+    match op {
+        Add => fold_runs(v, n, m, i64::overflowing_add),
+        Sub => fold_runs(v, n, m, i64::overflowing_sub),
+        Mul => fold_runs(v, n, m, i64::overflowing_mul),
+        Min => fold_runs(v, n, m, |a: i64, b: i64| (a.min(b), false)),
+        Max => fold_runs(v, n, m, |a: i64, b: i64| (a.max(b), false)),
+        _ => None,
     }
 }
 
@@ -7060,8 +7075,9 @@ fn run_slices<T: Clone>(b: &Buf<T>, runs: usize, len: usize) -> Vec<&[T]> {
 /// other and takes the run fold, which parallelises across the runs
 /// instead. Both fold in the insert's own order, up to the regrouping an
 /// associative float fold is already allowed (§5.9).
-fn fold_columns<T, F>(cols: &[&[T]], len: usize, assoc: bool, step: F) -> Option<Vec<T>>
+fn fold_columns<S, T, F>(cols: &[&[S]], len: usize, assoc: bool, step: F) -> Option<Vec<T>>
 where
+    S: Widen<T>,
     T: Copy + Default + Send + Sync,
     F: Fn(T, T) -> (T, bool) + Sync + Send,
 {
@@ -7149,16 +7165,19 @@ fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Optio
             ))
         }
         // Booleans reduce as integers, which is what promotion says the
-        // general path would produce; widen once and fold. The widening is
-        // done column by column, so a table that arrived as columns is not
-        // joined in order to widen it.
-        Data::Bool(v) => {
-            let widened: Vec<Buf<i64>> = run_slices(v, runs, len)
-                .iter()
-                .map(|c| Buf::from_vec(par::map(c, |&b| b as i64)))
-                .collect();
-            fold_columns_data(op, &Data::I64(Buf::join(widened)), runs, len)
-        }
+        // general path would produce; the promotion happens where the fold
+        // reads the element, so the columns are folded where they lie.
+        Data::Bool(v) => Some(Data::I64(
+            by!(
+                v,
+                i64::overflowing_add,
+                i64::overflowing_sub,
+                i64::overflowing_mul,
+                |a: i64, b: i64| (a.min(b), false),
+                |a: i64, b: i64| (a.max(b), false)
+            )
+            .into(),
+        )),
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
     }
 }
@@ -7192,8 +7211,9 @@ fn reduce_columns(v: &Verb, y: &Array) -> Option<Array> {
 
 /// Fold the rows of a column-major matrix: one pass that reads the columns
 /// side by side, each row folded right to left in the insert's own order.
-fn fold_across<T, F>(cols: &[&[T]], rows: usize, step: F) -> Option<Vec<T>>
+fn fold_across<S, T, F>(cols: &[&[S]], rows: usize, step: F) -> Option<Vec<T>>
 where
+    S: Widen<T>,
     T: Copy + Default + Send + Sync,
     F: Fn(T, T) -> (T, bool) + Sync + Send,
 {
@@ -7202,9 +7222,9 @@ where
         let mut over = false;
         for (k, slot) in part.iter_mut().enumerate() {
             let i = start + k;
-            let mut acc = last[i];
+            let mut acc = last[i].widen();
             for c in rest.iter().rev() {
-                let (r, o) = step(c[i], acc);
+                let (r, o) = step(c[i].widen(), acc);
                 acc = r;
                 over |= o;
             }
@@ -7272,13 +7292,18 @@ fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Optio
                 .into(),
             ))
         }
-        Data::Bool(v) => {
-            let widened: Vec<Buf<i64>> = run_slices(v, cols, rows)
-                .iter()
-                .map(|c| Buf::from_vec(par::map(c, |&b| b as i64)))
-                .collect();
-            fold_across_data(op, &Data::I64(Buf::join(widened)), rows, cols)
-        }
+        // Read as integers where each element is read, as everywhere else.
+        Data::Bool(v) => Some(Data::I64(
+            by!(
+                v,
+                i64::overflowing_add,
+                i64::overflowing_sub,
+                i64::overflowing_mul,
+                |a: i64, b: i64| (a.min(b), false),
+                |a: i64, b: i64| (a.max(b), false)
+            )
+            .into(),
+        )),
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
     }
 }
@@ -7426,8 +7451,9 @@ fn as_items(y: &Array) -> Option<Array> {
 }
 
 #[inline(always)]
-fn scan_flat_body<T, F>(v: &[T], n: usize, m: usize, back: bool, step: F) -> Option<Vec<T>>
+fn scan_flat_body<S, T, F>(v: &[S], n: usize, m: usize, back: bool, step: F) -> Option<Vec<T>>
 where
+    S: Widen<T>,
     T: Copy + Default,
     F: Fn(T, T) -> (T, bool),
 {
@@ -7437,19 +7463,19 @@ where
         let mut out = vec![T::default(); n];
         let mut over = false;
         if back {
-            let mut acc = v[n - 1];
+            let mut acc = v[n - 1].widen();
             out[n - 1] = acc;
             for (slot, &x) in out[..n - 1].iter_mut().zip(&v[..n - 1]).rev() {
-                let (r, o) = step(x, acc);
+                let (r, o) = step(x.widen(), acc);
                 acc = r;
                 over |= o;
                 *slot = acc;
             }
         } else {
-            let mut acc = v[0];
+            let mut acc = v[0].widen();
             out[0] = acc;
             for (slot, &x) in out[1..n].iter_mut().zip(&v[1..n]) {
-                let (r, o) = step(acc, x);
+                let (r, o) = step(acc, x.widen());
                 acc = r;
                 over |= o;
                 *slot = acc;
@@ -7461,22 +7487,26 @@ where
     let mut acc = vec![T::default(); m];
     let mut over = false;
     if back {
-        acc.copy_from_slice(&v[(n - 1) * m..n * m]);
+        for (slot, &x) in acc.iter_mut().zip(&v[(n - 1) * m..n * m]) {
+            *slot = x.widen();
+        }
         out[(n - 1) * m..n * m].copy_from_slice(&acc);
         for i in (0..n - 1).rev() {
             for (j, slot) in acc.iter_mut().enumerate() {
-                let (r, o) = step(v[i * m + j], *slot);
+                let (r, o) = step(v[i * m + j].widen(), *slot);
                 *slot = r;
                 over |= o;
             }
             out[i * m..i * m + m].copy_from_slice(&acc);
         }
     } else {
-        acc.copy_from_slice(&v[..m]);
+        for (slot, &x) in acc.iter_mut().zip(&v[..m]) {
+            *slot = x.widen();
+        }
         out[..m].copy_from_slice(&acc);
         for i in 1..n {
             for (j, slot) in acc.iter_mut().enumerate() {
-                let (r, o) = step(*slot, v[i * m + j]);
+                let (r, o) = step(*slot, v[i * m + j].widen());
                 *slot = r;
                 over |= o;
             }
@@ -7487,8 +7517,8 @@ where
 }
 
 multiversioned! {
-    fn scan_flat_vectorised[T: Copy + Default, F: Fn(T, T) -> (T, bool)](
-        v: &[T],
+    fn scan_flat_vectorised[S: Widen<T>, T: Copy + Default, F: Fn(T, T) -> (T, bool)](
+        v: &[S],
         n: usize,
         m: usize,
         back: bool,
@@ -7507,8 +7537,9 @@ multiversioned! {
 /// an item's elements. A scan of one element per item is a chain of
 /// dependent steps, which no vector shortens, so it takes the baseline
 /// compilation.
-fn scan_flat<T, F>(v: &[T], n: usize, m: usize, back: bool, step: F) -> Option<Vec<T>>
+fn scan_flat<S, T, F>(v: &[S], n: usize, m: usize, back: bool, step: F) -> Option<Vec<T>>
 where
+    S: Widen<T>,
     T: Copy + Default,
     F: Fn(T, T) -> (T, bool),
 {
@@ -7519,7 +7550,13 @@ where
     }
 }
 
-fn scan_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, back: bool) -> Option<Vec<i64>> {
+fn scan_i64<S: Widen<i64>>(
+    op: ScalarDyad,
+    v: &[S],
+    n: usize,
+    m: usize,
+    back: bool,
+) -> Option<Vec<i64>> {
     use ScalarDyad::*;
     match op {
         Add => scan_flat(v, n, m, back, i64::overflowing_add),
@@ -7541,7 +7578,13 @@ fn scan_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize, back: bool) -> Option<V
     }
 }
 
-fn scan_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize, back: bool) -> Option<Vec<f64>> {
+fn scan_f64<S: Widen<f64>>(
+    op: ScalarDyad,
+    v: &[S],
+    n: usize,
+    m: usize,
+    back: bool,
+) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     match op {
         Add => scan_flat(v, n, m, back, |a: f64, b: f64| (a + b, false)),
@@ -7561,19 +7604,28 @@ fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Optio
     if !matches!(op, Add | Sub | Mul | Min | Max) {
         return None;
     }
-    let widened = |v: &[i64]| {
-        let f: Vec<f64> = v.iter().map(|&x| x as f64).collect();
-        Data::F64(scan_f64(op, &f, n, m, back).expect("the float scan cannot overflow").into())
-    };
-    let ints = |v: &[i64]| match scan_i64(op, v, n, m, back) {
-        Some(out) => Data::I64(out.into()),
-        None => widened(v),
-    };
+    // An integer buffer and a boolean one both scan as integers, each read
+    // in its own type; the float retry reads the same buffer again rather
+    // than a widened copy of it.
+    fn ints<S: Widen<i64> + Widen<f64>>(
+        op: ScalarDyad,
+        v: &[S],
+        n: usize,
+        m: usize,
+        back: bool,
+    ) -> Data {
+        match scan_i64(op, v, n, m, back) {
+            Some(out) => Data::I64(out.into()),
+            None => Data::F64(
+                scan_f64(op, v, n, m, back).expect("the float scan cannot overflow").into(),
+            ),
+        }
+    }
     match d {
-        Data::F64(v) => Some(Data::F64(scan_f64(op, v, n, m, back)?.into())),
+        Data::F64(v) => Some(Data::F64(scan_f64(op, v.as_slice(), n, m, back)?.into())),
         Data::Complex(v) => Some(Data::Complex(scan_cx(op, v, n, m, back)?.into())),
-        Data::I64(v) => Some(ints(v)),
-        Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
+        Data::I64(v) => Some(ints(op, v.as_slice(), n, m, back)),
+        Data::Bool(v) => Some(ints(op, v.as_slice(), n, m, back)),
         // A bignum has no blockwise form: the exact types fold, scan and
         // window through the general path, one step at a time.
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
@@ -7709,8 +7761,9 @@ fn affine_scan(c: &Array, y: &Array, back: bool) -> Option<Data> {
 /// `step` has to be associative: the grouping is not the insert's own. The
 /// float reassociation is the §5.9 contract, the same one reduction takes.
 /// None when a step left the element type.
-fn window_fold<T, F>(v: &[T], n: usize, m: usize, w: usize, step: F) -> Option<Vec<T>>
+fn window_fold<S, T, F>(v: &[S], n: usize, m: usize, w: usize, step: F) -> Option<Vec<T>>
 where
+    S: Widen<T>,
     T: Copy + Default + Send + Sync,
     F: Fn(T, T) -> (T, bool) + Sync + Send,
 {
@@ -7729,11 +7782,13 @@ where
     for b in 0..n.div_ceil(w) {
         let bs = b * w;
         let be = ((b + 1) * w).min(n);
-        pre[..m].copy_from_slice(&v[bs * m..bs * m + m]);
+        for (slot, &x) in pre[..m].iter_mut().zip(&v[bs * m..bs * m + m]) {
+            *slot = x.widen();
+        }
         for i in 1..be - bs {
             let (o, p) = (i * m, (i - 1) * m);
             for j in 0..m {
-                let (r, f) = step(pre[p + j], v[(bs + i) * m + j]);
+                let (r, f) = step(pre[p + j], v[(bs + i) * m + j].widen());
                 pre[o + j] = r;
                 over |= f;
             }
@@ -7755,11 +7810,16 @@ where
             }
         }
         let last = be - 1 - bs;
-        suf[last * m..last * m + m].copy_from_slice(&v[(be - 1) * m..be * m]);
+        for (slot, &x) in suf[last * m..last * m + m]
+            .iter_mut()
+            .zip(&v[(be - 1) * m..be * m])
+        {
+            *slot = x.widen();
+        }
         for i in (0..last).rev() {
             let (o, p) = (i * m, (i + 1) * m);
             for j in 0..m {
-                let (r, f) = step(v[(bs + i) * m + j], suf[p + j]);
+                let (r, f) = step(v[(bs + i) * m + j].widen(), suf[p + j]);
                 suf[o + j] = r;
                 over |= f;
             }
@@ -7778,8 +7838,9 @@ where
 /// so the output splits across threads with nothing shared: a chunk starting
 /// at `lo` starts at the block holding item `lo`, and the first window it
 /// writes begins in that same block.
-fn window_fold_flat<T, F>(v: &[T], n: usize, w: usize, step: F) -> Option<Vec<T>>
+fn window_fold_flat<S, T, F>(v: &[S], n: usize, w: usize, step: F) -> Option<Vec<T>>
 where
+    S: Widen<T>,
     T: Copy + Default + Send + Sync,
     F: Fn(T, T) -> (T, bool) + Sync + Send,
 {
@@ -7790,8 +7851,8 @@ where
 }
 
 #[inline(always)]
-fn window_fold_range_body<T, F>(
-    v: &[T],
+fn window_fold_range_body<S, T, F>(
+    v: &[S],
     n: usize,
     w: usize,
     lo: usize,
@@ -7799,6 +7860,7 @@ fn window_fold_range_body<T, F>(
     step: &F,
 ) -> bool
 where
+    S: Widen<T>,
     T: Copy + Default,
     F: Fn(T, T) -> (T, bool),
 {
@@ -7815,10 +7877,10 @@ where
     while bs < n && bs <= hi + w - 2 {
         let block = &v[bs..(bs + w).min(n)];
         let lb = block.len();
-        let mut acc = block[0];
+        let mut acc = block[0].widen();
         pre[0] = acc;
         for (slot, &x) in pre[1..lb].iter_mut().zip(&block[1..]) {
-            let (r, o) = step(acc, x);
+            let (r, o) = step(acc, x.widen());
             acc = r;
             over |= o;
             *slot = acc;
@@ -7837,10 +7899,10 @@ where
                 r
             };
         }
-        let mut acc = block[lb - 1];
+        let mut acc = block[lb - 1].widen();
         suf[lb - 1] = acc;
         for (slot, &x) in suf[..lb - 1].iter_mut().zip(&block[..lb - 1]).rev() {
-            let (r, o) = step(x, acc);
+            let (r, o) = step(x.widen(), acc);
             acc = r;
             over |= o;
             *slot = acc;
@@ -7856,8 +7918,8 @@ multiversioned! {
     /// Compiled per CPU feature level; the prefix and suffix passes it runs
     /// are dependent chains, so what a wider vector reaches here is the
     /// pairing of the two, not the passes themselves.
-    fn window_fold_range[T: Copy + Default, F: Fn(T, T) -> (T, bool)](
-        v: &[T],
+    fn window_fold_range[S: Widen<T>, T: Copy + Default, F: Fn(T, T) -> (T, bool)](
+        v: &[S],
         n: usize,
         w: usize,
         lo: usize,
@@ -7874,15 +7936,22 @@ multiversioned! {
 /// caller whose buffer starts on a multiple of `w` groups every window
 /// exactly as the pass over the whole argument groups it. False when a step
 /// left the element type.
-pub(crate) fn windows_into<T, F>(v: &[T], w: usize, lo: usize, out: &mut [T], step: &F) -> bool
+pub(crate) fn windows_into<S, T, F>(v: &[S], w: usize, lo: usize, out: &mut [T], step: &F) -> bool
 where
+    S: Widen<T>,
     T: Copy + Default,
     F: Fn(T, T) -> (T, bool),
 {
     window_fold_range(v, v.len(), w, lo, out, step)
 }
 
-fn window_i64(op: ScalarDyad, v: &[i64], n: usize, m: usize, w: usize) -> Option<Vec<i64>> {
+fn window_i64<S: Widen<i64>>(
+    op: ScalarDyad,
+    v: &[S],
+    n: usize,
+    m: usize,
+    w: usize,
+) -> Option<Vec<i64>> {
     use ScalarDyad::*;
     match op {
         Add => window_fold(v, n, m, w, i64::overflowing_add),
@@ -7902,7 +7971,13 @@ fn window_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize, w: usize) -> Option<V
     }
 }
 
-fn window_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize, w: usize) -> Option<Vec<f64>> {
+fn window_f64<S: Widen<f64>>(
+    op: ScalarDyad,
+    v: &[S],
+    n: usize,
+    m: usize,
+    w: usize,
+) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     match op {
         Add => window_fold(v, n, m, w, |a: f64, b: f64| (a + b, false)),
@@ -7921,19 +7996,27 @@ fn window_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, w: usize) -> Optio
     if !matches!(op, Add | Mul | Min | Max) {
         return None;
     }
-    let widened = |v: &[i64]| {
-        let f: Vec<f64> = v.iter().map(|&x| x as f64).collect();
-        Data::F64(window_f64(op, &f, n, m, w).expect("the float fold cannot overflow").into())
-    };
-    let ints = |v: &[i64]| match window_i64(op, v, n, m, w) {
-        Some(out) => Data::I64(out.into()),
-        None => widened(v),
-    };
+    // As in the scan: integers and booleans window as integers, each read in
+    // its own type, and the float retry rereads the same buffer.
+    fn ints<S: Widen<i64> + Widen<f64>>(
+        op: ScalarDyad,
+        v: &[S],
+        n: usize,
+        m: usize,
+        w: usize,
+    ) -> Data {
+        match window_i64(op, v, n, m, w) {
+            Some(out) => Data::I64(out.into()),
+            None => {
+                Data::F64(window_f64(op, v, n, m, w).expect("the float fold cannot overflow").into())
+            }
+        }
+    }
     match d {
-        Data::F64(v) => Some(Data::F64(window_f64(op, v, n, m, w)?.into())),
+        Data::F64(v) => Some(Data::F64(window_f64(op, v.as_slice(), n, m, w)?.into())),
         Data::Complex(v) => Some(Data::Complex(window_cx(op, v, n, m, w)?.into())),
-        Data::I64(v) => Some(ints(v)),
-        Data::Bool(v) => Some(ints(&v.iter().map(|&b| b as i64).collect::<Vec<_>>())),
+        Data::I64(v) => Some(ints(op, v.as_slice(), n, m, w)),
+        Data::Bool(v) => Some(ints(op, v.as_slice(), n, m, w)),
         // A bignum has no blockwise form: the exact types fold, scan and
         // window through the general path, one step at a time.
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
