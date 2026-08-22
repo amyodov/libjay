@@ -11,3 +11,4 @@ uv.lock
 *.dylib
 /lj.png
 .apl.history
+*nogit*
