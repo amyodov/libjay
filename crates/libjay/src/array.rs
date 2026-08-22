@@ -1180,6 +1180,70 @@ impl Array {
             Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
+
+    /// Numeric contents as i64 where a COUNT, a LENGTH or an INDEX is
+    /// wanted, admitting a float that is merely near a whole number.
+    ///
+    /// Both references round such a float to the whole number beside it
+    /// rather than refusing it — `⍳2-1E¯14` is `1 2` and `(2-1e_14) {. 1 2 3`
+    /// is `1 2` — and neither admission is the comparison tolerance:
+    /// `⎕CT←0` and `9!:19 (0)` leave both exactly where they are. The two
+    /// admissions differ in shape. [`NearInt::J`] is relative, a value
+    /// within `2^-44` of a whole number's magnitude; [`NearInt::Apl`] is
+    /// absolute, `1e-10`, whatever the magnitude. Everything a full
+    /// integer apart is still a refusal in both.
+    pub fn to_i64_vec_near(&self, near: NearInt) -> Option<Vec<i64>> {
+        let Data::F64(v) = &self.data else {
+            // Every other type is exact or is refused outright; only a
+            // float can be near a whole number without being one.
+            return self.to_i64_vec();
+        };
+        v.iter().map(|&x| near.round(x)).collect()
+    }
+}
+
+/// The near-integer admission a count, a length or an index position uses.
+///
+/// It is a language constant, not a setting: neither reference lets a
+/// program move it, and it is unrelated to the comparison tolerance the
+/// same program can set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NearInt {
+    /// J: `|x - n| ≤ 2^-44 × max(|x|, |n|)`, so the window grows with the
+    /// magnitude and closes completely at zero.
+    J,
+    /// APL: `|x - n| < 1e-10` at every magnitude.
+    Apl,
+}
+
+impl NearInt {
+    /// J's relative admission, which is also the value J's comparison
+    /// tolerance starts at — the two are separate settings that happen to
+    /// share a number.
+    pub const J_RELATIVE: f64 = 1.0 / 17_592_186_044_416.0;
+    /// APL's absolute admission.
+    pub const APL_ABSOLUTE: f64 = 1e-10;
+
+    /// The rule for a language.
+    pub fn of(lang: crate::Lang) -> NearInt {
+        match lang {
+            crate::Lang::J => NearInt::J,
+            crate::Lang::Apl => NearInt::Apl,
+        }
+    }
+
+    /// The whole number `x` stands for, or None when it stands for none.
+    pub fn round(self, x: f64) -> Option<i64> {
+        if x.fract() == 0.0 {
+            return (x.abs() < i64::MAX as f64).then_some(x as i64);
+        }
+        let n = x.round();
+        let within = match self {
+            NearInt::J => (x - n).abs() <= Self::J_RELATIVE * x.abs().max(n.abs()),
+            NearInt::Apl => (x - n).abs() < Self::APL_ABSOLUTE,
+        };
+        (within && n.abs() < i64::MAX as f64).then_some(n as i64)
+    }
 }
 
 #[cfg(test)]

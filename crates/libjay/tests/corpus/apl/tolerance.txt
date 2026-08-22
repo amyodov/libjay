@@ -110,3 +110,38 @@
 ¯3∨0.5
 1.5∨2.5
 0.1∨0.2
+// --- a near-integer float where a COUNT or an INDEX is wanted --------
+// This is NOT the comparison tolerance: ⎕CT←0 leaves it exactly where it
+// is. GNU APL's admission is ABSOLUTE, 1E¯10 at every magnitude, so a
+// large count buys no room and 1E¯11 reads as 0.
+⍴⍳2-1E¯14
+⍴⍳2+9E¯11
+⍴⍳2-9E¯11
+⍴⍳20+9.9E¯11
+⍴⍳1000+9.9E¯11
+⍴⍳1000000+1E¯11
+⍴⍳1E¯11
+// One step outside it, and the same sentence is a domain error.
+⍳2+1E¯10
+⍳2-1E¯10
+⍳1000+1E¯9
+⍴⍳1000000+1E¯9
+⍳100000+1E¯6
+⍳2.5
+2.5⍴5
+// The whole family reads its count the same way.
+(2-1E¯14)↑1 2 3
+(2+9E¯11)↓1 2 3 4
+(¯2+9E¯11)↑1 2 3
+(2+9E¯11)⍴5
+(2+9E¯11)(2)⍴⍳4
+(1+9E¯11)⌽1 2 3
+(1+9E¯11)⊖2 2⍴⍳4
+(2+9E¯11)/1 2
+(1 0 1+9E¯11)\\1 2
+(⍳5)[2+9E¯11]
+(2+9E¯11)⌷1 2 3
+(2+9E¯11)⊃(1 2)(3 4)
+// The comparison still sees the difference the count ignored.
+(2+9E¯11)=2
+2⍳2+9E¯11

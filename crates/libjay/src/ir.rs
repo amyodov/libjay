@@ -847,7 +847,14 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
             }
             // Amending a sparse array writes into its dense expansion; the
             // stored form is not preserved across the write.
-            let out = crate::verb::amend_at(&base.densified(), &idx, &v.densified(), *origin, *span)?;
+            let out = crate::verb::amend_at(
+                &base.densified(),
+                &idx,
+                &v.densified(),
+                *origin,
+                ctx.cfg.near(),
+                *span,
+            )?;
             ctx.env.assign(name.clone(), out.clone(), *scope);
             Ok(out)
         }

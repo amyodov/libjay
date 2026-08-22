@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::array::{Array, Buf, Data, Layout};
+use crate::array::{Array, Buf, Data, Layout, NearInt};
 use crate::complex::{self as cx, Cx};
 use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
@@ -266,6 +266,13 @@ impl EvalCfg {
     /// are empty. Only a verb that [`Verb::is_pure`] accepted is given one
     /// of these, and an explicit definition — the only thing that reads
     /// names — is never pure.
+    /// The near-integer admission counts, lengths and indices are read
+    /// with here. It is the language's, not the dialect's: no setting
+    /// moves it in either reference.
+    pub(crate) fn near(self) -> NearInt {
+        NearInt::of(self.rules.lang)
+    }
+
     pub(crate) fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let mut sink = |_: &str| debug_assert!(false, "a pure verb wrote to the output sink");
         let mut env = Env::new(Vec::new());
@@ -1549,7 +1556,7 @@ impl Verb {
                         Some(span),
                     ));
                 }
-                from_index(m, y, span)
+                from_index(m, y, ctx.cfg.near(), span)
             }
             // `u} y` computes the indices first: it is `(u y)} y`.
             Verb::AmendVerb(u) => {
@@ -1558,7 +1565,9 @@ impl Verb {
             }
             // The monad shifts by one, the fill taking the place the
             // first item left: `|.!.f y` is `_1 |.!.f y`.
-            Verb::ShiftFill(fill) => shift_fill(&Array::scalar_i64(-1), y, fill, span),
+            Verb::ShiftFill(fill) => {
+                shift_fill(&Array::scalar_i64(-1), y, fill, ctx.cfg.near(), span)
+            }
             Verb::Memo(u, cache) => memoised(u, cache, None, y, ctx, span),
             Verb::Characteristics(u) => characteristics(u, y, span),
             Verb::Before(f, g) => {
@@ -1737,13 +1746,13 @@ impl Verb {
                 let tol = Tol { ct: *n, ..ctx.cfg.tol };
                 ctx.with_tol(tol, |c| v.dyad(x, y, c, span))
             }
-            Verb::Amend(m) => amend(m, x, y, span),
+            Verb::Amend(m) => amend(m, x, y, ctx.cfg.near(), span),
             // `x u} y` is `x (x u y)} y`: u names the places to amend.
             Verb::AmendVerb(u) => {
                 let m = u.dyad(x, y, ctx, span)?;
-                amend(&m, x, y, span)
+                amend(&m, x, y, ctx.cfg.near(), span)
             }
-            Verb::ShiftFill(fill) => shift_fill(x, y, fill, span),
+            Verb::ShiftFill(fill) => shift_fill(x, y, fill, ctx.cfg.near(), span),
             Verb::Memo(u, cache) => memoised(u, cache, Some(x), y, ctx, span),
             Verb::Characteristics(_) => {
                 Err(Error::domain("u b. has no dyadic meaning", span))
@@ -4417,8 +4426,8 @@ fn from_exact(y: &Array) -> Array {
 }
 
 /// `x x: y`: the exact form named by x.
-fn exact_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    match one_whole(x, "the form x: converts to", span)? {
+fn exact_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    match one_whole(x, "the form x: converts to", near, span)? {
         1 => {
             let e = to_exact(y, span)?;
             e.cast(DType::Rat).ok_or_else(|| Error::internal("an exact value has no rational form"))
@@ -4978,7 +4987,7 @@ fn transpose_axes(y: &Array) -> Array {
 
 /// J `i.`: an ascending sequence laid out in shape |y|, running backwards
 /// along every axis whose given length was negative.
-fn iota_j(y: &Array, span: Span) -> Result<Array> {
+fn iota_j(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     if y.rank() > 1 {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -4987,7 +4996,7 @@ fn iota_j(y: &Array, span: Span) -> Result<Array> {
         ));
     }
     let dims = y
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("index generator needs integer lengths", span))?;
     let shape: Vec<usize> = dims.iter().map(|d| d.unsigned_abs() as usize).collect();
     let n = crate::limits::elements(&shape, span)?;
@@ -5087,8 +5096,8 @@ fn reverse(y: &Array) -> Array {
 
 /// `x |. y`: rotate axis k of y left by `x[k]`, cyclically; a negative
 /// amount rotates right. A scalar argument has nothing to rotate.
-fn rotate(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let counts = axis_counts(x, "rotate", span)?;
+fn rotate(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    let counts = axis_counts(x, "rotate", near, span)?;
     if y.rank() == 0 {
         return Ok(y.clone());
     }
@@ -5135,7 +5144,7 @@ fn rotate(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// GNU APL accepts as one) rotates every vector by the same amount.
 /// Anything else is a conformability error: a rank error where the ranks
 /// disagree and a length error where only the lengths do.
-fn rotate_apl(x: &Array, y: &Array, last: bool, span: Span) -> Result<Array> {
+fn rotate_apl(x: &Array, y: &Array, last: bool, near: NearInt, span: Span) -> Result<Array> {
     let scalar_like = x.rank() == 0 || (x.rank() == 1 && x.count() == 1);
     // A scalar has no axis to rotate, so it is its own answer — but only
     // for a left argument that could have rotated something.
@@ -5183,7 +5192,7 @@ fn rotate_apl(x: &Array, y: &Array, last: bool, span: Span) -> Result<Array> {
         }
     }
     let counts = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("rotate needs integer lengths", span))?;
     let len = y.shape[axis] as i64;
     let n = y.count();
@@ -5999,15 +6008,15 @@ fn index_of(
 }
 
 /// `x { y` for one index atom: the rank machinery supplies the framing.
-fn from_index(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn from_index(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     // A boxed index is J's index specification, which reaches several axes
     // at once; a plain one selects an item.
     if let Some(spec) = x.as_boxes().and_then(<[Array]>::first) {
-        let spec = index_spec(spec, y, span)?;
+        let spec = index_spec(spec, y, near, span)?;
         return Ok(select_spec(&spec, y));
     }
     let idx = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("index must be an integer", span))?;
     let Some(&i) = idx.first() else {
         return Err(Error::internal("from_index with no index"));
@@ -6090,7 +6099,9 @@ pub(crate) fn catenate(
         let fit = |a: &Array| -> Result<Array> {
             let mut to = want.clone();
             to[axis] = a.shape[axis] as i64;
-            take(&Array::from_i64(to), a, false, false, span)
+            // The lengths are ours, not the program's: no float
+            // reaches the near-integer admission on this path.
+            take(&Array::from_i64(to), a, false, false, NearInt::J, span)
         };
         (fit(&xa)?, fit(&ya)?)
     } else {
@@ -6146,9 +6157,9 @@ pub(crate) fn catenate(
 /// `1 0 1 # 5` is `5 5` and `1 0 1 # ,5` is a length error. A negative
 /// count is APL's: it contributes that many fills. J has no such reading
 /// and refuses it.
-fn copy_items(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
+fn copy_items(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<Array> {
     let counts = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("replication counts must be integers", span))?;
     if !apl && counts.iter().any(|&c| c < 0) {
         return Err(Error::domain("replication counts must be nonnegative", span));
@@ -7224,8 +7235,8 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             let order = grade_order(y, down, Grading::of(ctx.cfg.rules, ctx.cfg.tol));
             Ok(Array::from_i64(order.iter().map(|&i| origin + i as i64).collect()))
         }
-        MonadOp::IotaJ => iota_j(y, span),
-        MonadOp::IotaApl { origin } => iota_apl(y, origin, span),
+        MonadOp::IotaJ => iota_j(y, ctx.cfg.near(), span),
+        MonadOp::IotaApl { origin } => iota_apl(y, origin, ctx.cfg.near(), span),
         MonadOp::Echo => {
             (ctx.out)(&format!("{}\n", crate::fmt::format_array(y, &ctx.cfg.fmt)));
             Ok(Array::empty(DType::I64))
@@ -7260,32 +7271,32 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             Ok(Array::scalar_i64(if signed && d > 1 && !uniform(y) { -d } else { d }))
         }
         MonadOp::Indices { origin, boxed_coords } => {
-            where_indices(y, origin, boxed_coords, span)
+            where_indices(y, origin, boxed_coords, ctx.cfg.near(), span)
         }
         MonadOp::Steps => steps(y, span),
         MonadOp::ToExact => to_exact(y, span),
         MonadOp::NthPrime => {
             let n = y
-                .to_i64_vec()
+                .to_i64_vec_near(ctx.cfg.near())
                 .ok_or_else(|| Error::domain("the prime index must be an integer", span))?;
             let v = n.first().copied().unwrap_or(0);
             Ok(carry_exact(Array::scalar_i64(nth_prime(v, span)?), y))
         }
         MonadOp::PrimeFactors => {
             let n = y
-                .to_i64_vec()
+                .to_i64_vec_near(ctx.cfg.near())
                 .ok_or_else(|| Error::domain("prime factors need an integer", span))?;
             let v = n.first().copied().unwrap_or(0);
             Ok(carry_exact(Array::from_i64(prime_factors(v, span)?), y))
         }
         MonadOp::MatrixInverse => matrix_inverse(y, span),
         MonadOp::Roll { origin, fixed, float_at_zero } => {
-            roll(y, origin, fixed, float_at_zero, span)
+            roll(y, origin, fixed, float_at_zero, ctx.cfg.near(), span)
         }
         MonadOp::ComplexParts { polar } => complex_parts(y, polar, span),
         MonadOp::SelfClassify => Ok(self_classify(y, ctx.cfg.tol)),
         MonadOp::NubSieve => Ok(nub_sieve(y, ctx.cfg.tol, ctx.cfg.rules.lang)),
-        MonadOp::Unicode { pass_chars } => unicode(y, pass_chars, span),
+        MonadOp::Unicode { pass_chars } => unicode(y, pass_chars, ctx.cfg.near(), span),
         MonadOp::Symbols => to_symbols(y, span),
         MonadOp::Words => words(y, span),
         MonadOp::LevelOf => Ok(Array::scalar_i64(boxing_level(y))),
@@ -7294,7 +7305,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::PolyRoots => poly_roots(y, span),
         MonadOp::PolyDeriv => poly_deriv(y, span),
         MonadOp::AnagramIndex => anagram_index(y, ctx.cfg.rules, span),
-        MonadOp::CycleForm => cycle_form(y, span),
+        MonadOp::CycleForm => cycle_form(y, ctx.cfg.near(), span),
         MonadOp::Split => Ok(split_items(y)),
         MonadOp::Execute { apl } => execute(y, apl, ctx, span),
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
@@ -7316,7 +7327,7 @@ fn complex_parts(y: &Array, polar: bool, span: Span) -> Result<Array> {
     Ok(Array::from_f64(pair))
 }
 
-fn axis_counts(x: &Array, what: &str, span: Span) -> Result<Vec<i64>> {
+fn axis_counts(x: &Array, what: &str, near: NearInt, span: Span) -> Result<Vec<i64>> {
     if x.rank() > 1 {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -7329,7 +7340,7 @@ fn axis_counts(x: &Array, what: &str, span: Span) -> Result<Vec<i64>> {
     if x.count() == 0 {
         return Ok(Vec::new());
     }
-    x.to_i64_vec()
+    x.to_i64_vec_near(near)
         .ok_or_else(|| Error::domain(format!("{what} needs integer lengths"), span))
 }
 
@@ -7343,8 +7354,15 @@ fn axis_counts(x: &Array, what: &str, span: Span) -> Result<Vec<i64>> {
 ///
 /// An empty y parts them too: J refuses to invent items it was not given,
 /// and APL fills with the type's fill element.
-fn reshape(x: &Array, y: &Array, by_items: bool, apl: bool, span: Span) -> Result<Array> {
-    let dims = axis_counts(x, "reshape", span)?;
+fn reshape(
+    x: &Array,
+    y: &Array,
+    by_items: bool,
+    apl: bool,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
+    let dims = axis_counts(x, "reshape", near, span)?;
     if dims.iter().any(|&d| d < 0) {
         return Err(Error::domain("reshape lengths must be nonnegative", span));
     }
@@ -7428,8 +7446,15 @@ fn count_rank(verb: &str, counts: usize, rank: usize, span: Span) -> Error {
     )
 }
 
-fn take(x: &Array, y: &Array, prototype_fill: bool, apl: bool, span: Span) -> Result<Array> {
-    let counts = axis_counts(x, "take", span)?;
+fn take(
+    x: &Array,
+    y: &Array,
+    prototype_fill: bool,
+    apl: bool,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
+    let counts = axis_counts(x, "take", near, span)?;
     // APL overtakes a nested array with the PROTOTYPE of its first item —
     // that item's shape, with a zero for every number and a blank for every
     // character. J fills with the empty box instead.
@@ -7540,8 +7565,8 @@ fn push_gap(data: &mut Data, fill: &Option<Array>) {
     }
 }
 
-fn drop_(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
-    let counts = axis_counts(x, "drop", span)?;
+fn drop_(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<Array> {
+    let counts = axis_counts(x, "drop", near, span)?;
     let promoted;
     let base = if y.rank() == 0 {
         promoted = Array::new(vec![1; counts.len()], y.data.clone());
@@ -7587,17 +7612,18 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         // cells then agree among themselves.
         DyadOp::Scalar(op) => scalar_dyad(op, x, y, cfg, span),
         DyadOp::Reshape => {
-            reshape(x, y, cfg.agreement == Agreement::LeadingPrefix, cfg.rules.lang == crate::Lang::Apl, span)
+            let apl = cfg.rules.lang == crate::Lang::Apl;
+            reshape(x, y, cfg.agreement == Agreement::LeadingPrefix, apl, cfg.near(), span)
         }
         DyadOp::Take => {
             let apl = cfg.rules.lang == crate::Lang::Apl;
-            take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, span)
+            take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, cfg.near(), span)
         }
-        DyadOp::Drop => drop_(x, y, cfg.rules.lang == crate::Lang::Apl, span),
+        DyadOp::Drop => drop_(x, y, cfg.rules.lang == crate::Lang::Apl, cfg.near(), span),
         DyadOp::Right => Ok(y.clone()),
         DyadOp::Left => Ok(x.clone()),
-        DyadOp::Rotate => rotate(x, y, span),
-        DyadOp::RotateApl { last } => rotate_apl(x, y, last, span),
+        DyadOp::Rotate => rotate(x, y, cfg.near(), span),
+        DyadOp::RotateApl { last } => rotate_apl(x, y, last, cfg.near(), span),
         // Only J fills a ragged catenation; APL's conformability rule
         // refuses it, as the reference does.
         DyadOp::AppendLeading => {
@@ -7611,7 +7637,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         }
         DyadOp::MemberJ => Ok(member_j(x, y, tol)),
         DyadOp::MemberApl => Ok(member_apl(x, y, tol)),
-        DyadOp::From => from_index(x, y, span),
+        DyadOp::From => from_index(x, y, cfg.near(), span),
         DyadOp::Match => {
             // APL tells an empty CHARACTER array from an empty numeric one
             // — their prototypes differ — where J's `-:` reads only the
@@ -7624,10 +7650,12 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         }
         DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
         DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules, cfg.tol, span),
-        DyadOp::Copy => copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, span),
+        DyadOp::Copy => {
+            copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, cfg.near(), span)
+        }
         DyadOp::CollateGrade { down, origin } => collate_grade(x, y, down, origin, span),
-        DyadOp::TransposeJ => transpose_j(x, y, span),
-        DyadOp::TransposeApl => transpose_apl(x, y, cfg.rules.origin, span),
+        DyadOp::TransposeJ => transpose_j(x, y, cfg.near(), span),
+        DyadOp::TransposeApl => transpose_apl(x, y, cfg.rules.origin, cfg.near(), span),
         DyadOp::DecodeApl => decode_apl(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::EncodeApl => encode_apl(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
@@ -7640,13 +7668,13 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         }
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
         DyadOp::MatrixDivide => matrix_divide(x, y, span),
-        DyadOp::PartitionEnclose => partition_enclose(x, y, span),
-        DyadOp::PartitionCounts => partition_counts(x, y, span),
-        DyadOp::Squad { origin, leading } => squad(x, y, origin, leading, span),
+        DyadOp::PartitionEnclose => partition_enclose(x, y, cfg.near(), span),
+        DyadOp::PartitionCounts => partition_counts(x, y, cfg.near(), span),
+        DyadOp::Squad { origin, leading } => squad(x, y, origin, leading, cfg.near(), span),
         DyadOp::SelectAxis { axis, rank, origin } => {
-            select_axis(x, y, axis, rank, origin, span)
+            select_axis(x, y, axis, rank, origin, cfg.near(), span)
         }
-        DyadOp::Fetch => fetch(x, y, span),
+        DyadOp::Fetch => fetch(x, y, cfg.near(), span),
         DyadOp::PolyEval => poly_eval(x, y, span),
         DyadOp::PolyIntegral => poly_integral(x, y, span),
         DyadOp::TruthTable(m) => truth_table(m, x, y, span),
@@ -7654,8 +7682,8 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::FormatSpecJ => format_spec_j(x, y, &cfg.fmt, span),
         DyadOp::ParseNumbers => parse_numbers(x, y, span),
         DyadOp::SequentialMachine => sequential_machine(x, y, span),
-        DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, span),
-        DyadOp::ExactForm => exact_form(x, y, span),
+        DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, cfg.near(), span),
+        DyadOp::ExactForm => exact_form(x, y, cfg.near(), span),
         DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
         DyadOp::Less => {
             set_rank(cfg, "without", x, y, span)?;
@@ -7669,18 +7697,20 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
             set_rank(cfg, "intersection", x, y, span)?;
             Ok(intersect_items(x, y, tol))
         }
-        DyadOp::AnagramFrom => anagram_from(x, y, span),
-        DyadOp::Permute => permute(x, y, span),
+        DyadOp::AnagramFrom => anagram_from(x, y, cfg.near(), span),
+        DyadOp::Permute => permute(x, y, cfg.near(), span),
         DyadOp::FindSeq => {
             find_seq(x, y, tol, cfg.rules.lang == crate::Lang::Apl, span)
         }
-        DyadOp::UnicodeForm => unicode_form(x, y, span),
+        DyadOp::UnicodeForm => unicode_form(x, y, cfg.near(), span),
         DyadOp::SymbolForm => symbol_form(x, y, span),
-        DyadOp::SparseForm => sparse_form(x, y, span),
-        DyadOp::PrimeMeta => prime_meta(x, y, span).map(|r| carry_exact2(r, x, y)),
-        DyadOp::PrimeExponents => prime_exponents(x, y, span).map(|r| carry_exact2(r, x, y)),
-        DyadOp::Pick { origin } => pick(x, y, origin, span),
-        DyadOp::Expand => expand(x, y, cfg.rules.lang == crate::Lang::Apl, span),
+        DyadOp::SparseForm => sparse_form(x, y, cfg.near(), span),
+        DyadOp::PrimeMeta => prime_meta(x, y, cfg.near(), span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::PrimeExponents => {
+            prime_exponents(x, y, cfg.near(), span).map(|r| carry_exact2(r, x, y))
+        }
+        DyadOp::Pick { origin } => pick(x, y, origin, cfg.near(), span),
+        DyadOp::Expand => expand(x, y, cfg.rules.lang == crate::Lang::Apl, cfg.near(), span),
         // Writing needs the output sink, which this dispatcher does not
         // carry; `dyad_cell` takes it before the call gets here.
         DyadOp::WriteStream => Err(Error::internal("1!:2 reached the pure dyad dispatcher")),
@@ -9297,9 +9327,9 @@ fn empty_windows(u: &Verb, y: &Array, w: usize, ctx: &mut Ctx<'_>, span: Span) -
 }
 
 /// The window size: one integer atom.
-fn window_size(x: &Array, span: Span) -> Result<i64> {
+fn window_size(x: &Array, near: NearInt, span: Span) -> Result<i64> {
     let v = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("the window size must be an integer", span))?;
     match v.as_slice() {
         [k] => Ok(*k),
@@ -9319,7 +9349,7 @@ fn window_size(x: &Array, span: Span) -> Result<i64> {
 /// takes the n+1 empty runs between and around the items, which is what J
 /// does with it.
 fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
-    let k = window_size(x, span)?;
+    let k = window_size(x, ctx.cfg.near(), span)?;
     let promoted = as_items(y);
     let base = promoted.as_ref().unwrap_or(y);
     let n = base.items();
@@ -9374,7 +9404,7 @@ fn nwise(f: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
             Some(span),
         ));
     }
-    let k = window_size(x, span)?;
+    let k = window_size(x, ctx.cfg.near(), span)?;
     let promoted = as_items(y);
     // A rank-0 argument has no axis to window. One item is what `≢` counts
     // it as, and a window of one leaves it exactly as it was, rank included;
@@ -9503,7 +9533,7 @@ fn power_v(
         None => v.monad(y, ctx, span)?,
     };
     let n = count
-        .to_i64_vec()
+        .to_i64_vec_near(ctx.cfg.near())
         .ok_or_else(|| Error::domain("the power count must be an integer", span))?;
     if n.len() != 1 {
         return Err(Error::not_yet("a list of power counts (u^:v with several)", span));
@@ -9578,9 +9608,9 @@ fn along_axis(
 /// J applies at rank 1, so a higher-rank argument frames the vector answers;
 /// APL applies to the whole argument and answers a rank-2-or-higher one with
 /// one boxed coordinate vector per occurrence.
-fn where_indices(y: &Array, origin: i64, boxed: bool, span: Span) -> Result<Array> {
+fn where_indices(y: &Array, origin: i64, boxed: bool, near: NearInt, span: Span) -> Result<Array> {
     let counts = y
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("indices needs non-negative integers", span))?;
     if counts.iter().any(|&c| c < 0) {
         return Err(Error::domain("indices needs non-negative integers", span));
@@ -9750,10 +9780,11 @@ fn roll(
     origin: i64,
     fixed: bool,
     float_at_zero: bool,
+    near: NearInt,
     span: Span,
 ) -> Result<Array> {
     let bounds = y
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("roll needs whole numbers", span))?;
     if bounds.iter().any(|&b| b < 0) {
         return Err(Error::domain("roll needs non-negative numbers", span));
@@ -9784,9 +9815,16 @@ fn roll(
 }
 
 /// `x ? y` / `x ?. y`: x distinct values drawn from the y below `origin+y`.
-fn deal(x: &Array, y: &Array, origin: i64, fixed: bool, span: Span) -> Result<Array> {
-    let want = one_whole(x, "the count dealt", span)?;
-    let from = one_whole(y, "the range dealt from", span)?;
+fn deal(
+    x: &Array,
+    y: &Array,
+    origin: i64,
+    fixed: bool,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
+    let want = one_whole(x, "the count dealt", near, span)?;
+    let from = one_whole(y, "the range dealt from", near, span)?;
     if want < 0 || from < 0 {
         return Err(Error::domain("deal needs non-negative numbers", span));
     }
@@ -9804,9 +9842,9 @@ fn deal(x: &Array, y: &Array, origin: i64, fixed: bool, span: Span) -> Result<Ar
 }
 
 /// One whole number from a one-element argument.
-fn one_whole(a: &Array, what: &str, span: Span) -> Result<i64> {
+fn one_whole(a: &Array, what: &str, near: NearInt, span: Span) -> Result<i64> {
     let v = a
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain(format!("{what} must be a whole number"), span))?;
     match v[..] {
         [n] => Ok(n),
@@ -10024,7 +10062,7 @@ fn matrix_divide(x: &Array, y: &Array, span: Span) -> Result<Array> {
 // ----------------------------------------------------- indexing and amend
 
 /// `x ⌷ y` (APL2): one scalar index per axis of y.
-fn squad(x: &Array, y: &Array, origin: i64, leading: bool, span: Span) -> Result<Array> {
+fn squad(x: &Array, y: &Array, origin: i64, leading: bool, near: NearInt, span: Span) -> Result<Array> {
     if x.rank() > 1 {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -10053,7 +10091,7 @@ fn squad(x: &Array, y: &Array, origin: i64, leading: bool, span: Span) -> Result
             _ => item.clone(),
         };
         let idx = spec
-            .to_i64_vec()
+            .to_i64_vec_near(near)
             .ok_or_else(|| Error::domain("index must be an integer", span))?;
         for &i in &idx {
             let j = i - origin;
@@ -10106,6 +10144,7 @@ fn select_axis(
     axis: usize,
     rank: usize,
     origin: i64,
+    near: NearInt,
     span: Span,
 ) -> Result<Array> {
     if rank != 0 && y.rank() != rank {
@@ -10123,7 +10162,7 @@ fn select_axis(
         ));
     }
     let idx = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("index must be an integer", span))?;
     let len = y.shape[axis];
     let mut picks = Vec::with_capacity(idx.len());
@@ -10158,17 +10197,17 @@ fn select_axis(
 /// `x m} y` (J): the items of `y` at the indices `m`, replaced by `x`.
 ///
 /// `x` is either one item, used at every index, or one item per index.
-fn amend(m: &Array, x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn amend(m: &Array, x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     if y.rank() == 0 {
         return Err(Error::new(ErrorKind::Rank, "cannot amend a scalar", Some(span)));
     }
     // A boxed m is J's index specification, the same one `{` reads.
     if let Some(spec) = m.as_boxes().and_then(<[Array]>::first) {
-        let spec = index_spec(spec, y, span)?;
+        let spec = index_spec(spec, y, near, span)?;
         return amend_spec(&spec, x, y, span);
     }
     let idx = m
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("amend indices must be integers", span))?;
     let items = y.items() as i64;
     let mut at = Vec::with_capacity(idx.len());
@@ -10242,7 +10281,7 @@ fn amend(m: &Array, x: &Array, y: &Array, span: Span) -> Result<Array> {
 ///
 /// A boxed `x` is one step per box; a simple `x` is a single step, so
 /// `1 {:: y` is item 1 of y opened once.
-fn fetch(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn fetch(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let steps: Vec<Array> = match x.as_boxes() {
         Some(bs) => bs.to_vec(),
         None => vec![x.clone()],
@@ -10254,7 +10293,7 @@ fn fetch(x: &Array, y: &Array, span: Span) -> Result<Array> {
         let idx = if step.count() == 0 {
             Vec::new()
         } else {
-            step.to_i64_vec()
+            step.to_i64_vec_near(near)
                 .ok_or_else(|| Error::domain("a fetch path holds integers", span))?
         };
         // A scalar has one item, which is how `{` reads one too.
@@ -10309,7 +10348,7 @@ fn cell_index(y: &Array, idx: &[i64], span: Span) -> Result<usize> {
 /// leading zero drops the items ahead of the first partition. The answer
 /// is a VECTOR of partitions however deep y is: rank 2 and above splits
 /// the last axis and every partition keeps the axes ahead of it.
-fn partition_counts(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn partition_counts(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     if y.rank() == 0 {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -10318,7 +10357,7 @@ fn partition_counts(x: &Array, y: &Array, span: Span) -> Result<Array> {
         ));
     }
     let counts = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("partition counts must be integers", span))?;
     if counts.iter().any(|&c| c < 0) {
         return Err(Error::domain("partition counts must not be negative", span));
@@ -10372,7 +10411,7 @@ fn partition_counts(x: &Array, y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(vec![parts.len()], Data::Box(parts.into())))
 }
 
-fn partition_enclose(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn partition_enclose(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     // Rank 2 and above partitions the LAST axis, once per cross section,
     // so the axes ahead of it frame the answer.
     if y.rank() > 1 {
@@ -10382,7 +10421,7 @@ fn partition_enclose(x: &Array, y: &Array, span: Span) -> Result<Array> {
         let mut width = None;
         for r in 0..rows {
             let row = Array::new(vec![last], y.data.slice(r * last, (r + 1) * last));
-            let parts = partition_enclose(x, &row, span)?;
+            let parts = partition_enclose(x, &row, near, span)?;
             let n = parts.count();
             if *width.get_or_insert(n) != n {
                 return Err(Error::internal("partitions of unequal count"));
@@ -10404,7 +10443,7 @@ fn partition_enclose(x: &Array, y: &Array, span: Span) -> Result<Array> {
         ));
     }
     let mut flags = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("partition flags must be integers", span))?;
     if flags.iter().any(|&f| f < 0) {
         return Err(Error::domain("partition flags must not be negative", span));
@@ -10844,9 +10883,9 @@ fn transpose_to(y: &Array, dest: &[usize], span: Span) -> Result<Array> {
 
 /// `x ⍉ y`: x names, for each axis of y in turn, the axis of the result it
 /// becomes. Two axes given the same destination are run together.
-fn transpose_apl(x: &Array, y: &Array, io: i64, span: Span) -> Result<Array> {
+fn transpose_apl(x: &Array, y: &Array, io: i64, near: NearInt, span: Span) -> Result<Array> {
     let axes = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("a transpose is given whole numbers", span))?;
     if axes.len() != y.rank() {
         return Err(Error::new(
@@ -10873,18 +10912,18 @@ fn transpose_apl(x: &Array, y: &Array, io: i64, span: Span) -> Result<Array> {
 /// `x |: y`: x names the axes to move to the END, in the order given; the
 /// rest keep their order in front. A boxed x groups axes, and the axes of
 /// one group are run together — the diagonal.
-fn transpose_j(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn transpose_j(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let groups: Vec<Vec<i64>> = match x.as_boxes() {
         Some(bs) => bs
             .iter()
             .map(|b| {
-                b.to_i64_vec().ok_or_else(|| {
+                b.to_i64_vec_near(near).ok_or_else(|| {
                     Error::domain("a transpose is given whole numbers", span)
                 })
             })
             .collect::<Result<Vec<_>>>()?,
         None => x
-            .to_i64_vec()
+            .to_i64_vec_near(near)
             .ok_or_else(|| Error::domain("a transpose is given whole numbers", span))?
             .into_iter()
             .map(|a| vec![a])
@@ -10979,7 +11018,7 @@ fn axis_position(v: i64, len: usize, span: Span) -> Result<usize> {
 /// axis's indices, a scalar one dropping the axis from the result, and a
 /// BOXED component is the complement — every index of the axis except the
 /// ones it holds, which is what `a:` (the empty box) uses to mean "all".
-fn index_spec(content: &Array, y: &Array, span: Span) -> Result<Spec> {
+fn index_spec(content: &Array, y: &Array, near: NearInt, span: Span) -> Result<Spec> {
     let too_deep = |n: usize| {
         Error::new(
             ErrorKind::Rank,
@@ -10997,7 +11036,7 @@ fn index_spec(content: &Array, y: &Array, span: Span) -> Result<Spec> {
             let len = y.shape[k];
             if c.as_boxes().is_some() {
                 let inner = open_cell(c);
-                let excluded = inner.to_i64_vec().ok_or_else(|| {
+                let excluded = inner.to_i64_vec_near(near).ok_or_else(|| {
                     Error::domain("an index complement holds integers", span)
                 })?;
                 let mut dropped = vec![false; len];
@@ -11009,7 +11048,7 @@ fn index_spec(content: &Array, y: &Array, span: Span) -> Result<Spec> {
                 per_axis.push(kept);
             } else {
                 let idx = c
-                    .to_i64_vec()
+                    .to_i64_vec_near(near)
                     .ok_or_else(|| Error::domain("an index holds integers", span))?;
                 let mut positions = Vec::with_capacity(idx.len());
                 for v in idx {
@@ -11035,7 +11074,7 @@ fn index_spec(content: &Array, y: &Array, span: Span) -> Result<Spec> {
         return Ok(Spec { width: per_axis.len(), cells, shape });
     }
     let idx = content
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("an index specification holds integers", span))?;
     let rank = content.rank();
     let width = if rank == 0 { 1 } else { content.shape[rank - 1] };
@@ -11170,8 +11209,14 @@ fn map_paths(y: &Array) -> Array {
 
 /// `x |.!.f y`: shift along each axis instead of rotating, so an item moved
 /// past an end is dropped and the place it left takes the fill f.
-fn shift_fill(x: &Array, y: &Array, fill: &Array, span: Span) -> Result<Array> {
-    let counts = axis_counts(x, "shift", span)?;
+fn shift_fill(
+    x: &Array,
+    y: &Array,
+    fill: &Array,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
+    let counts = axis_counts(x, "shift", near, span)?;
     if y.rank() == 0 {
         return Ok(y.clone());
     }
@@ -12426,7 +12471,7 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
 /// APL `⍳ y`: the indices of an array whose shape is y. One length gives
 /// the plain counting vector; two or more give an array of that shape whose
 /// elements are the boxed coordinate vectors.
-fn iota_apl(y: &Array, origin: i64, span: Span) -> Result<Array> {
+fn iota_apl(y: &Array, origin: i64, near: NearInt, span: Span) -> Result<Array> {
     if y.rank() > 1 {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -12435,7 +12480,7 @@ fn iota_apl(y: &Array, origin: i64, span: Span) -> Result<Array> {
         ));
     }
     let dims = y
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("index generator needs an integer argument", span))?;
     if dims.iter().any(|&n| n < 0) {
         return Err(Error::domain("index generator needs nonnegative lengths", span));
@@ -12515,6 +12560,7 @@ pub fn amend_at(
     slots: &[Option<Array>],
     value: &Array,
     origin: i64,
+    near: NearInt,
     span: Span,
 ) -> Result<Array> {
     if slots.len() != base.rank() {
@@ -12532,7 +12578,7 @@ pub fn amend_at(
     // column-major one is laid out before it is read or written.
     if !base.is_row_major() || !value.is_row_major() {
         let (b, v) = (base.to_row_major(), value.to_row_major());
-        return amend_at(&b, slots, &v, origin, span);
+        return amend_at(&b, slots, &v, origin, near, span);
     }
     // One list of positions per axis, and the shape the value must match.
     let mut axes: Vec<Vec<usize>> = Vec::with_capacity(slots.len());
@@ -12544,7 +12590,7 @@ pub fn amend_at(
             selected.push(len);
             continue;
         };
-        let Some(values) = idx.to_i64_vec() else {
+        let Some(values) = idx.to_i64_vec_near(near) else {
             return Err(Error::new(
                 ErrorKind::Type,
                 "an index must be numeric",
@@ -12650,7 +12696,7 @@ fn agenda_pick(
         Some(x) => w.dyad(x, y, ctx, span)?,
     };
     let at = chosen
-        .to_i64_vec()
+        .to_i64_vec_near(ctx.cfg.near())
         .and_then(|v| v.first().copied())
         .ok_or_else(|| Error::domain("an agenda index must be an integer", span))?;
     pick_gerund(vs, at, span)
@@ -12771,7 +12817,7 @@ fn stencil(u: &Verb, w: &[i64], y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Res
 /// A run of x items has `1 + (#y) - x` places to sit, and that is how many
 /// results there are.
 fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
-    let k = one_int(x, "an outfix width", span)?;
+    let k = one_int(x, "an outfix width", ctx.cfg.near(), span)?;
     let n = y.items() as i64;
     let list = as_list(y);
     // A positive width leaves out every run of x consecutive items, so
@@ -13189,9 +13235,9 @@ fn anagram_index(y: &Array, rules: Rules, span: Span) -> Result<Array> {
 
 /// `x A. y`: y's items in the order the x-th permutation puts them. A
 /// negative x counts back from the last permutation, as J's does.
-fn anagram_from(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn anagram_from(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let idx = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("an anagram index must be an integer", span))?;
     let Some(&want) = idx.first() else {
         return Err(Error::internal("anagram with no index"));
@@ -13231,12 +13277,12 @@ fn anagram_from(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// `C. y`: the two directions between a direct permutation and its cycles.
 /// A boxed argument holds cycles and answers the permutation; anything else
 /// is a permutation and answers its cycles.
-fn cycle_form(y: &Array, span: Span) -> Result<Array> {
+fn cycle_form(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     if y.dtype() == DType::Box {
-        let perm = cycles_to_direct(y, span)?;
+        let perm = cycles_to_direct(y, near, span)?;
         return Ok(Array::from_i64(perm.iter().map(|&i| i as i64).collect()));
     }
-    let perm = direct_permutation(y, span)?;
+    let perm = direct_permutation(y, near, span)?;
     let mut boxes: Vec<Array> = Vec::new();
     let mut done = vec![false; perm.len()];
     for start in 0..perm.len() {
@@ -13266,9 +13312,9 @@ fn cycle_form(y: &Array, span: Span) -> Result<Array> {
 }
 
 /// A direct permutation's entries, checked to be one.
-fn direct_permutation(y: &Array, span: Span) -> Result<Vec<usize>> {
+fn direct_permutation(y: &Array, near: NearInt, span: Span) -> Result<Vec<usize>> {
     let v = y
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("a permutation is a list of integers", span))?;
     let n = v.len();
     let mut seen = vec![false; n];
@@ -13286,13 +13332,13 @@ fn direct_permutation(y: &Array, span: Span) -> Result<Vec<usize>> {
 /// The direct permutation a boxed list of cycles stands for. Its length is
 /// one past the largest element any cycle mentions; everything unmentioned
 /// stays where it is.
-fn cycles_to_direct(y: &Array, span: Span) -> Result<Vec<usize>> {
+fn cycles_to_direct(y: &Array, near: NearInt, span: Span) -> Result<Vec<usize>> {
     let boxes = y.as_boxes().ok_or_else(|| Error::internal("cycles from a simple array"))?;
     let mut cycles: Vec<Vec<usize>> = Vec::new();
     let mut top = 0usize;
     for b in boxes {
         let v = b
-            .to_i64_vec()
+            .to_i64_vec_near(near)
             .ok_or_else(|| Error::domain("a cycle is a list of integers", span))?;
         let mut cycle = Vec::with_capacity(v.len());
         for &i in &v {
@@ -13317,7 +13363,7 @@ fn cycles_to_direct(y: &Array, span: Span) -> Result<Vec<usize>> {
 /// is a direct permutation, and one shorter than y applies to y's last
 /// items with the leading ones brought round to the front — J's extension
 /// of a short permutation.
-fn permute(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn permute(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let ys = as_list(y);
     let n = ys.items();
     let cyclic = x.dtype() == DType::Box;
@@ -13325,7 +13371,7 @@ fn permute(x: &Array, y: &Array, span: Span) -> Result<Array> {
         return Err(Error::not_yet("permuting by a single atom (x C. y)", span));
     }
     let mut perm =
-        if cyclic { cycles_to_direct(x, span)? } else { direct_permutation(&as_list(x), span)? };
+        if cyclic { cycles_to_direct(x, near, span)? } else { direct_permutation(&as_list(x), near, span)? };
     if perm.len() > n {
         return Err(Error::new(
             ErrorKind::Length,
@@ -13352,14 +13398,14 @@ fn permute(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// `u: y` and `⎕UCS`: characters and their codepoints. `pass_chars` is J's
 /// monad, which answers characters with themselves; APL's `⎕UCS` converts
 /// in both directions.
-fn unicode(y: &Array, pass_chars: bool, span: Span) -> Result<Array> {
+fn unicode(y: &Array, pass_chars: bool, near: NearInt, span: Span) -> Result<Array> {
     if y.dtype() == DType::Char {
         if pass_chars {
             return Ok(y.clone());
         }
         return Ok(chars_to_codes(y));
     }
-    codes_to_chars(y, span)
+    codes_to_chars(y, near, span)
 }
 
 fn chars_to_codes(y: &Array) -> Array {
@@ -13367,9 +13413,9 @@ fn chars_to_codes(y: &Array) -> Array {
     Array::new(y.shape.clone(), Data::I64(v.iter().map(|&c| c as i64).collect()))
 }
 
-fn codes_to_chars(y: &Array, span: Span) -> Result<Array> {
+fn codes_to_chars(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let v = y
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("a codepoint must be an integer", span))?;
     let mut out = Vec::with_capacity(v.len());
     for &c in &v {
@@ -13383,7 +13429,7 @@ fn codes_to_chars(y: &Array, span: Span) -> Result<Array> {
 
 /// `x u: y`: 3 asks for codepoints, 10 for the characters they name. The
 /// other forms J defines are byte-oriented and are named, not guessed at.
-fn unicode_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let form = x
         .to_i64_vec()
         .ok_or_else(|| Error::domain("a conversion form is an integer", span))?
@@ -13393,7 +13439,7 @@ fn unicode_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
     match form {
         3 if y.dtype() == DType::Char => Ok(chars_to_codes(y)),
         3 => Err(Error::domain("form 3 converts characters to codepoints", span)),
-        10 => codes_to_chars(y, span),
+        10 => codes_to_chars(y, near, span),
         n => Err(Error::not_yet(format!("the byte-oriented unicode form ({n} u:)"), span)),
     }
 }
@@ -13514,12 +13560,12 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// are stored, and `8` the same array with the entries that hold the sparse
 /// element dropped. `2` also answers a dense argument, which has all of its
 /// axes conceptually sparse; the others refuse one.
-fn sparse_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn sparse_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     if x.rank() != 0 {
         return Err(Error::new(ErrorKind::Rank, "a sparse form is one atom", Some(span)));
     }
     let form = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .and_then(|v| v.first().copied())
         .ok_or_else(|| Error::domain("a sparse form is an integer", span))?;
     match form {
@@ -13583,13 +13629,13 @@ fn split_items(y: &Array) -> Array {
 
 /// `x ⊃ y`: pick. Each item of x is one step of a path — a boxed step is a
 /// whole coordinate vector, a simple one indexes the items.
-fn pick(x: &Array, y: &Array, origin: i64, span: Span) -> Result<Array> {
+fn pick(x: &Array, y: &Array, origin: i64, near: NearInt, span: Span) -> Result<Array> {
     let xs = as_list(x);
     let mut cur = y.clone();
     for i in 0..xs.items() {
         let step = open_cell(&item_or_self(&xs, i));
         let idx = step
-            .to_i64_vec()
+            .to_i64_vec_near(near)
             .ok_or_else(|| Error::domain("a pick path holds integers", span))?;
         let base =
             if cur.rank() == 0 { Array::new(vec![1], cur.data.clone()) } else { cur.clone() };
@@ -13615,9 +13661,9 @@ fn pick(x: &Array, y: &Array, origin: i64, span: Span) -> Result<Array> {
 
 /// `x p: y`: the facts about primes J spells with this conjunction of
 /// arguments. Every form here reads one integer and answers about it.
-fn prime_meta(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let form = one_int(x, "a prime query", span)?;
-    let n = one_int(y, "a prime query", span)?;
+fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    let form = one_int(x, "a prime query", near, span)?;
+    let n = one_int(y, "a prime query", near, span)?;
     match form {
         // How many primes are below y.
         -1 => Ok(Array::scalar_i64(primes_below(n, span)?)),
@@ -13644,8 +13690,8 @@ fn prime_meta(x: &Array, y: &Array, span: Span) -> Result<Array> {
 
 /// `x q: y`: the exponents of the primes in y — of the first x of them, or,
 /// for `__`, of the ones that actually divide y over a second row.
-fn prime_exponents(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let n = one_int(y, "prime exponents", span)?;
+fn prime_exponents(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    let n = one_int(y, "prime exponents", near, span)?;
     let count = x.to_f64_vec().and_then(|v| v.first().copied()).unwrap_or(0.0);
     let (ps, es) = factor_table(n, span)?;
     if count == f64::NEG_INFINITY {
@@ -13654,7 +13700,7 @@ fn prime_exponents(x: &Array, y: &Array, span: Span) -> Result<Array> {
         all.extend(es);
         return Ok(Array::new(vec![2, k], Data::I64(all.into())));
     }
-    let want = one_int(x, "prime exponents", span)?;
+    let want = one_int(x, "prime exponents", near, span)?;
     if want < 0 {
         return Err(Error::not_yet(format!("the prime exponent form ({want} q:)"), span));
     }
@@ -13723,8 +13769,8 @@ fn previous_prime(n: i64, span: Span) -> Result<i64> {
 }
 
 /// One whole number from an argument that has to hold exactly that.
-fn one_int(a: &Array, what: &str, span: Span) -> Result<i64> {
-    a.to_i64_vec()
+fn one_int(a: &Array, what: &str, near: NearInt, span: Span) -> Result<i64> {
+    a.to_i64_vec_near(near)
         .and_then(|v| v.first().copied())
         .ok_or_else(|| Error::domain(format!("{what} needs an integer"), span))
 }
@@ -13732,9 +13778,9 @@ fn one_int(a: &Array, what: &str, span: Span) -> Result<i64> {
 /// `x \\ y`: expand. Every 1 in x takes the next item of y; every 0 leaves
 /// a fill in its place — the type's own fill, or, for a nested argument in
 /// APL, the prototype of its first item.
-fn expand(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
+fn expand(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<Array> {
     let mask = x
-        .to_i64_vec()
+        .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("an expansion mask holds 0s and 1s", span))?;
     if mask.iter().any(|&b| b != 0 && b != 1) {
         return Err(Error::domain("an expansion mask holds 0s and 1s", span));

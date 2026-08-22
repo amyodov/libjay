@@ -69,153 +69,315 @@
 > dyalog: 1
 = 0.1|0.3
 > gnu: 0
+> dyalog: 0
 = 2|4-1E¯14
 > gnu: 0
+> dyalog: 0
 = 2|4+1E¯14
 > gnu: 0
+> dyalog: 0
 = 3|9-1E¯14
 > gnu: 0
+> dyalog: 0
 = 2|2-1E¯14
 > gnu: 0
+> dyalog: 0
 = 2|1E¯14
 > gnu: 0
+> dyalog: 0
 = 2|4-1E¯10
 > gnu: 2
+> dyalog: 2
 = ¯2|4-1E¯14
 > gnu: 0
+> dyalog: 0
 = 2|¯4+1E¯14
 > gnu: 0
+> dyalog: 0
 = ¯0.1|0.3
 > gnu: 0
+> dyalog: 0
 = 0.1|¯0.3
 > gnu: 0
+> dyalog: 0
 = ¯0.1|¯0.3
 > gnu: 0
+> dyalog: 0
 = 0.3|0.1
 > gnu: 0.1
+> dyalog: 0.1
 = 0|0.3
 > gnu: 0.3
+> dyalog: 0.3
 = 1|2.5
 > gnu: 0.5
+> dyalog: 0.5
 = 0.7|2.1
 > gnu: 0
+> dyalog: 0
 = 0.7|1.4
 > gnu: 0
+> dyalog: 0
 = 0.3|0.9
 > gnu: 0
+> dyalog: 0
 = 1|1E¯14
 > gnu: 0
+> dyalog: 1E¯14
 = 1|¯1E¯14
 > gnu: 0
+> dyalog: 1
 = 2|¯1E¯14
 > gnu: 0
+> dyalog: 0
 = ¯2|1E¯14
 > gnu: 0
+> dyalog: 0
 = 100|99.99999999999
 > gnu: 100
+> dyalog: 100
 = 100|99.9999999999999
 > gnu: 0
+> dyalog: 0
 = 1000|999.9999999999
 > gnu: 1000
+> dyalog: 1000
 = 1E¯15|1
 > gnu: 0
+> dyalog: 0
 = 0.001|1
 > gnu: 0
+> dyalog: 0
 = 3|8.9999999999999
 > gnu: 0
+> dyalog: 3
 = 7|6.9999999999999
 > gnu: 0
+> dyalog: 7
 = 2|2.0000000000001
 > gnu: 0
+> dyalog: 9.992007222E¯14
 = 2|1.9999999999999
 > gnu: 0
+> dyalog: 2
 = |2-1E¯14
 > gnu: 2
+> dyalog: 2
 = +/0.1|0.3 0.6 0.9
 > gnu: 0
+> dyalog: 0
 = 1E20|3
 > gnu: 0
+> dyalog: 0
 = 1E20|1E7
 > gnu: 10000000
+> dyalog: 10000000
 = 2 2⊤4-1E¯14
 > gnu: 0 0
+> dyalog: 1 2
 = 2 2⊤4+1E¯14
 > gnu: 0 0
+> dyalog: 0 9.769962617E¯15
 = 2 2 2⊤8-1E¯14
 > gnu: 0 0 0
+> dyalog: 1 1 2
 = 2 2⊤4-1E¯10
 > gnu: 1 2
+> dyalog: 1 2
 = ⌊¯1E¯14
 > gnu: 0
+> dyalog: 0
 = ⌈1E¯14
 > gnu: 0
+> dyalog: 0
 = ⌊¯1E¯13
 > gnu: 0
+> dyalog: ¯1
 = ⌈1E¯13
 > gnu: 0
+> dyalog: 1
 = ⌊99.999999999995
 > gnu: 99
+> dyalog: 99
 = ⌊999.99999999999
 > gnu: 999
+> dyalog: 999
 = ⌊9.9999999999999
 > gnu: 10
+> dyalog: 10
 = ⌈2.0000000000001
 > gnu: 2
+> dyalog: 3
 = ⍋1 1.0000000000001 1
 > gnu: 1 2 3
+> dyalog: 1 3 2
 = ⍒1 1.0000000000001 1
 > gnu: 1 2 3
+> dyalog: 2 1 3
 = ⍋1.0000000000001 1
 > gnu: 1 2
+> dyalog: 2 1
 = ⍒1 1.0000000000001
 > gnu: 1 2
+> dyalog: 2 1
 = ⍋1 1.0000000000001 1 0.9999999999999
 > gnu: 4 1 2 3
+> dyalog: 4 1 3 2
 = ⍋2 (1+1E¯14) 1
 > gnu: 2 3 1
+> dyalog: 3 2 1
 = ⍋3 2 1 1.0000000000001 2.0000000000001
 > gnu: 3 4 2 5 1
+> dyalog: 3 4 2 5 1
 = ⍋2 2⍴1 2 1 2.0000000000001
 > gnu: 1 2
+> dyalog: 1 2
 = ⍋⍋1 1.0000000000001 1
 > gnu: 1 2 3
+> dyalog: 1 3 2
 = ⍋1 1.001 1
 > gnu: 1 3 2
+> dyalog: 1 3 2
 = ⍋(1 2)(1 2.0000000000001)
 > gnu: 1 2
+> dyalog: 1 2
 = ⍒(1 2)(1 2.0000000000001)
 > gnu: 1 2
+> dyalog: 2 1
 = ⍋(1)(1.0000000000001)
 > gnu: 1 2
+> dyalog: 1 2
 = ¯3∨0
 > gnu: ¯3
+> dyalog: 3
 = 0∨¯3
 > gnu: ¯3
+> dyalog: 3
 = ¯3.5∨0
 > gnu: 3.5
+> dyalog: 3.5
 = 0∨¯3.5
 > gnu: 3.5
+> dyalog: 3.5
 = 0∧¯3.5
 > gnu: 0
+> dyalog: 0
 = ¯3∧0
 > gnu: 0
+> dyalog: 0
 = 1.0000000000001∧5
 > gnu: 5
+> dyalog: 1.000799917E13
 = 1.0000000000001∨1
 > gnu: 1
+> dyalog: 9.992007222E¯14
 = 1.0000000000001∨2
 > gnu: 1
+> dyalog: 9.992007222E¯14
 = 2∨1.0000000000001
 > gnu: 1
+> dyalog: 9.992007222E¯14
 = 1 1.0000000000001∨0.1
 > gnu: 0.1 0.1
+> dyalog: 0.1 1.998401444E¯14
 = 1E¯14∨1
 > gnu: 1
+> dyalog: 1E¯14
 = 1E¯13∨1
 > gnu: 1
+> dyalog: 1E¯13
 = ¯3∨0.5
 > gnu: 0.5
+> dyalog: 0.5
 = 1.5∨2.5
 > gnu: 0.5
+> dyalog: 0.5
 = 0.1∨0.2
 > gnu: 0.1
+> dyalog: 0.1
+= ⍴⍳2-1E¯14
+> gnu: 2
+> dyalog: 2
+= ⍴⍳2+9E¯11
+> gnu: 2
+> dyalog: <error>
+= ⍴⍳2-9E¯11
+> gnu: 2
+> dyalog: <error>
+= ⍴⍳20+9.9E¯11
+> gnu: 20
+> dyalog: <error>
+= ⍴⍳1000+9.9E¯11
+> gnu: 1000
+> dyalog: <error>
+= ⍴⍳1000000+1E¯11
+> gnu: 1000000
+> dyalog: 1000000
+= ⍴⍳1E¯11
+> gnu: 0
+> dyalog: <error>
+= ⍳2+1E¯10
+> gnu: <error>
+> dyalog: <error>
+= ⍳2-1E¯10
+> gnu: <error>
+> dyalog: <error>
+= ⍳1000+1E¯9
+> gnu: <error>
+> dyalog: <error>
+= ⍴⍳1000000+1E¯9
+> gnu: <error>
+> dyalog: 1000000
+= ⍳100000+1E¯6
+> gnu: <error>
+> dyalog: <error>
+= ⍳2.5
+> gnu: <error>
+> dyalog: <error>
+= 2.5⍴5
+> gnu: <error>
+> dyalog: <error>
+= (2-1E¯14)↑1 2 3
+> gnu: 1 2
+> dyalog: 1 2
+= (2+9E¯11)↓1 2 3 4
+> gnu: 3 4
+> dyalog: <error>
+= (¯2+9E¯11)↑1 2 3
+> gnu: 2 3
+> dyalog: <error>
+= (2+9E¯11)⍴5
+> gnu: 5 5
+> dyalog: <error>
+= (2+9E¯11)(2)⍴⍳4
+> gnu: 1 2
+> gnu: 3 4
+> dyalog: <error>
+= (1+9E¯11)⌽1 2 3
+> gnu: 2 3 1
+> dyalog: <error>
+= (1+9E¯11)⊖2 2⍴⍳4
+> gnu: 3 4
+> gnu: 1 2
+> dyalog: <error>
+= (2+9E¯11)/1 2
+> gnu: 1 1 2 2
+> dyalog: <error>
+= (1 0 1+9E¯11)\\1 2
+> gnu: 1 0 2
+> dyalog: <error>
+= (⍳5)[2+9E¯11]
+> gnu: 2
+> dyalog: <error>
+= (2+9E¯11)⌷1 2 3
+> gnu: 2
+> dyalog: <error>
+= (2+9E¯11)⊃(1 2)(3 4)
+> gnu: 3 4
+> dyalog: <error>
+= (2+9E¯11)=2
+> gnu: 0
+> dyalog: 0
+= 2⍳2+9E¯11
+> gnu: 2
+> dyalog: <error>

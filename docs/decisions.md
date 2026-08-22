@@ -2740,3 +2740,65 @@ the comparison tolerance but not exactly equal answer the value itself in
 both oracles, and grind through the float algorithm in libjay. That is the
 rule the tolerance wave's residual said it could not find. They are in the
 bug register; none was fixed here.
+## 2026-08-23 — A near-integer float is a count, and each language has its own width
+
+The register's cluster N16: both references accept a float that is merely
+NEAR a whole number where a count, a length or an index is wanted, and
+libjay refused all of it. `⍳2-1E¯14` is `1 2` in GNU APL, `(2-1e_14) {. 1 2 3`
+is `1 2` in jconsole, and libjay answered "needs an integer" to both. It was
+filed separately from the comparison-tolerance wave for a reason that the
+probing confirmed: **no setting moves it.** `⎕CT←0` and `9!:19 (0)` leave the
+admission exactly where it was, and with the tolerance off jconsole still
+answers `(2+1e_13) = 2` with 0 while `i. 2+1e_13` still counts to 2. The two
+questions are asked in the same expression and answered differently.
+
+**The two widths, measured rather than assumed.** The register recorded the
+threshold as "near 1e¯10 in both". It is not the same rule in both, and the
+first bisection said so: at 2, GNU APL takes `9.99996E¯11` and refuses
+`9.99998E¯11`, and the double for the second is 1.0000000827e¯10 — an
+ABSOLUTE `1e¯10`, and the apparent oddity of the boundary is only the
+floating-point grid. Raising the magnitude leaves it where it was: `20+5E¯10`
+and `1000000+1E¯9` are refused, `1000000+1E¯11` is taken. Below the window
+there is no lower edge either — `⍳1E¯11` is the empty vector, because 1e¯11
+reads as 0.
+
+jconsole's is RELATIVE. At 2 the boundary sits between `1.1369e_13` and
+`1.14e_13`, and dividing the accepted delta by the whole number gives
+2^_44 to the last bit; at 20 the boundary is ten times wider, at 1e6 it is
+`5e_8` taken and `6e_8` refused. So J admits `|x - n| ≤ 2^_44 × max(|x|,|n|)`
+— the shape of J's own tolerant comparison, at a FIXED constant that
+`9!:19` cannot touch, which is why the two coincide numerically at the
+default and part company the moment a program moves the tolerance.
+
+The two windows cross at about 1760. Below it APL is the permissive one
+(`⍳2+9E¯11` answers, `i. 2+9e_11` does not); above it J is (`i. 1000000+1e_9`
+answers, `⍳1000000+1E¯9` does not). Neither is a superset, so one shared
+rule was never an option.
+
+**Where it lives.** `Array::to_i64_vec` stays exact — it is also how the
+engine asks whether a value IS an integer, and rounding there would make
+`x:`, the fusion step detector and the sparse paths lie. The admission is a
+second reader, `to_i64_vec_near(NearInt)`, and `NearInt` is threaded from
+`EvalCfg::near()` to the leaves that read a count. That is about thirty
+signatures, and passing the rule rather than deriving it at the leaf is
+deliberate: an `Array` does not know which language is running, and a
+thread-local would not survive the rayon workers the cell paths use.
+
+**It is not universal, and the oracle drew the line.** The count positions
+take it — every one probed did, including `?`, `⎕UCS`, `⊃`, `I.`, `C.`, `|:`,
+`u^:n` and `f`g @. n`. Operand SELECTORS do not: jconsole refuses
+`3 u: 65+1e_13`, `s: 65+1e_13`, `(2+1e_13) b. 3` and both cut modes while
+answering `u: 65+1e_13`. So the rule is the count's, not every noun's, and
+the exact readers were left exact. Two of the operand positions are read at
+compile time, in the J frontend, and take the admission there instead:
+`(>: ^: 2.0000000000001) 3` is 5.
+
+**A third GNU/Dyalog split, found while recording.** The Dyalog column for
+`corpus/apl/tolerance.txt` shows Dyalog's admission is neither GNU's nor
+absent: it is RELATIVE and it follows `⎕CT`. `⍴⍳1000000+1E¯9` answers in
+Dyalog (1e¯15 of the magnitude, inside `⎕CT` 1e¯14) and is a domain error in
+GNU APL, while every `2±9E¯11` case is the other way about. libjay's dyalog
+preset follows GNU, so those seventeen rows are a preset gap, itemised in
+docs/status.md. Closing it is a dialect setting rather than an engine
+change now that `NearInt` is threaded, but it is a new knob on the public
+Dialect object and was left for the wave that decides it.

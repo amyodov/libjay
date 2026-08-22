@@ -381,12 +381,14 @@ conjunctions above:
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
 APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
 a preset of the dialect object rather than a second engine:
-`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1768 of the
-1892 expressions Dyalog 20.0 has been recorded on — the default answers
-1667 of them — and the 124 it does not are itemised below. The count is
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1848 of the
+1989 expressions Dyalog 20.0 has been recorded on — the default answers
+1725 of them — and the 141 it does not are itemised below. The count is
 `jay-corpus stats apl --dialect-diff --dialect dyalog`, which replays the
 recorded column and runs no interpreter; it now includes the four
-Dyalog-only theme files, which the earlier figure of 61 did not.
+Dyalog-only theme files, which the earlier figure of 61 did not, and the
+tolerance theme, whose Dyalog column raised the figure from 124 by
+exposing the two rows below.
 
 What the preset changes, each of it verified against the recording:
 `⎕CT` is `1e¯14`; `↑` is mix and `⊃` is first; `⌷` names the leading axes,
@@ -408,7 +410,9 @@ What it does not change yet, measured against the recording:
 | Inner product `f.g` where `g` is not a scalar function (`+.,`, `,.+`, `∨.∧` on nested) | 15 | 🔴 the two lines nest the intermediate differently; libjay follows GNU APL. The Life idiom is the visible casualty |
 | Control words libjay does not have — `:AndIf`, `:OrIf`, `:CaseList`, `:For a b :In` — a `:For` that does not disclose its items, a definition naming one fixed after it, a top-level `:If`, and two places libjay answers where Dyalog refuses | 11 | 🔴 the rest of `dyalog-control.txt` now that `⎕FX` reaches it |
 | `⎕R`/`⎕S` (5), `⌸` with the operand libjay does not take (3), `⍣¯n` inverse powers (2), `⍥`/`⍢`/`⍛` (4), `⍠` where libjay extends and Dyalog refuses (3), `⌺` on an empty (1), a derived function as a user operator's operand (3) | 21 | 🔴 named gaps and extensions, itemised in `dyalog-operators.txt` and `dyalog-dops.txt` |
-| GNU APL's overflow policy (`1E308×2`, `2⋆1E10`), the gamma pole it prints a 0 at (`!¯1E20`), and the empty-base `⊥` | 16 | ⚪ pinned divergences from BOTH references, in `corpus/apl/divergences.txt`, plus the `(⍳0)⊥y` rows in `fuzz_found.txt`. `÷0`, `⍟0` and `!¯1` used to be here and now agree |
+| The empty-base `⊥` (5), an index or a modulus above 2^53 (3), a diamond-separated sentence's value, `⍴⍕` of a nested array, and `⍬≡0⍴⊂⍬` | 11 | ⚪ pinned divergences from BOTH references, in `corpus/apl/divergences.txt`, plus the `(⍳0)⊥y` rows in `fuzz_found.txt`. `÷0`, `⍟0`, `!¯1` and GNU APL's overflow policy used to be here and now agree |
+| The near-integer admission where a count belongs: Dyalog's is RELATIVE and follows `⎕CT`, GNU APL's is a flat `1E¯10`, so `⍴⍳2+9E¯11` answers here and is refused there while `⍴⍳1000000+1E¯9` is the other way about | 17 | 🔴 a dialect setting, not an engine change: the rule is already threaded, and this is the third GNU/Dyalog split in one family |
+| Tolerance readings the preset does not carry yet: `⊤` taking its digits with its own residue (2), a tolerant `⌊` scaled by the magnitude (1), a total-array-ordering grade that ignores `⎕CT` (1), and the exact GCD grinding on a non-integral float (1) | 5 | 🔴 the rest of `tolerance.txt`, now that its Dyalog column is recorded |
 | Complex floor and ceiling, and the `¯7○` branch cut | 3 | 🔴 |
 | Two singletons of different rank conforming (`(1 1⍴5)+,3`) | 2 | 🔴 the higher rank wins there, the first argument here |
 | `6 2⍕'a'` | 1 | ⚪ a display edge |

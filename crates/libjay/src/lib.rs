@@ -24,7 +24,7 @@ pub mod sparse;
 pub mod symbol;
 pub mod verb;
 
-pub use array::{joins_made, layouts_made, Array, Buf, Data, Layout, Owner};
+pub use array::{joins_made, layouts_made, Array, Buf, Data, Layout, NearInt, Owner};
 pub use complex::Cx;
 pub use device::{Device, Precision};
 pub use dtype::DType;

@@ -317,6 +317,22 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   came back with its shape transposed and its data untouched, `|:"2` was
   wrong at every rank, `∊⍉¨` read the wrong order, and `; |:&.>` asserted
   outright. Every reader of a result now takes the rows.
+- **A float that is merely NEAR a whole number counts as that whole
+  number.** `⍳2-1E¯14` is `1 2` and `(2-1e_14) {. 1 2 3` is `1 2`, as both
+  references answer; libjay refused every one of them, so arithmetic that
+  had drifted by a rounding error could not be used as a length, a count or
+  an index. The admission runs through the whole family that reads one —
+  `⍳ ⍴ ↑ ↓ ⌽ ⊖ / \ ⌷ ⊃ [;] ⎕UCS` in APL, `i. $ {. }. |. |.!. # { A. I. q:
+  p: u: ^: @.` in J — and each language keeps its own width. J's
+  is relative, `2^_44` of the number's own magnitude, so the room grows
+  with the count and closes beside zero: `i. 2+1.1e_13` counts and
+  `i. 1e_14` does not. APL's is a flat `1E¯10` at every magnitude, so
+  `⍳1E¯11` is the empty vector and `⍳1000000+1E¯9` is still a domain
+  error. Neither is the comparison tolerance: setting `⎕CT` to zero leaves
+  both exactly where they were, and `(2+9E¯11)=2` is still 0. A float a
+  real distance from any whole number — `⍳2.5` — is refused as before, and
+  an operand SELECTOR (`3 u:`, `s:`, `m b.`, a cut mode) is still read
+  exactly, which is what the references do.
 
 ## 0.2.1 — 2026-08-22
 

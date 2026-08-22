@@ -1118,11 +1118,30 @@ differ:
   with its sign, and a near-whole or vanishing argument is rounded first.
   `Dialect.gcd_rule` names Dyalog's and J's reading, which does neither.
 
-A count is a different matter. Both references accept a float within about
-1e¯10 of a whole number where a LENGTH is wanted (`⍳2-1E¯14` is `1 2`,
-`(2-1e_14) {. 1 2 3` is `1 2`), and libjay refuses it. That admission is not
-the comparison tolerance — neither `⎕CT←0` nor `9!:19 (0)` turns it off — so
-it is named here as a gap of its own rather than folded into the rules above.
+A count is a different matter, and libjay follows both references there
+without consulting the tolerance at all. A float near a whole number reads
+as that whole number wherever a count, a length or an index is wanted —
+`⍳2-1E¯14` is `1 2`, `(2-1e_14) {. 1 2 3` is `1 2` — and the admission is
+not the comparison tolerance: neither `⎕CT←0` nor `9!:19 (0)` turns it off,
+and with the tolerance off `(2+1e_13) = 2` is 0 while `i. 2+1e_13` still
+counts to 2. The widths differ:
+
+- J's is RELATIVE, `2^_44` of the whole number's own magnitude, so the room
+  grows with the count and closes beside zero: `i. 2+1.1e_13` counts,
+  `i. 2+1.2e_13` and `i. 1e_14` do not, and at a million `5e_8` is still
+  inside.
+- APL's is ABSOLUTE, `1E¯10` at every magnitude: `⍳1E¯11` is the empty
+  vector because 1e¯11 reads as 0, and `⍳1000000+1E¯9` is a domain error
+  where J answers.
+
+The two cross at about 1760, so neither is a superset of the other. The
+whole family that reads a count goes through it — `⍳ ⍴ ↑ ↓ ⌽ ⊖ / \ ⌷ ⊃
+[;] ? ⎕UCS` and `i. $ {. }. |. |.!. # { A. I. C. |: q: p: u: ^: @. ?` — and
+a float a real distance from any whole number is refused as before. An
+operand SELECTOR is not part of it: jconsole refuses `3 u:`, `s:`, `m b.`
+and a cut mode on a near-integer, and libjay reads those exactly too.
+Dyalog's admission is a third reading again — relative, and moving with
+`⎕CT` — which docs/status.md carries as a dialect gap.
 
 J's `!.` sets it per verb: `=!.0` compares bit for bit, and any tolerance
 above 2⁻³⁴ is refused, as J refuses it. APL's `⍠('CT' n)` does the same for

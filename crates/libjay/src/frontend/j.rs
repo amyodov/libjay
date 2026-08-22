@@ -2344,7 +2344,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                 let w = verb_operand(v, span)?;
                 return Ok(Frag::Verb(VerbFrag::V(Verb::Agenda(vs, Box::new(w))), span));
             }
-            let at = one_atom(&v, "agenda", span)?;
+            let at = near_whole(one_atom(&v, "agenda", span)?);
             if at.fract() != 0.0 {
                 return Err(Error::parse("an agenda index must be a whole number", span));
             }
@@ -2640,6 +2640,15 @@ fn rank_spec(f: &Frag, span: Span) -> Result<[i64; 3]> {
 
 /// `u^:n`: one nonnegative integer atom, or `_` for "iterate until the
 /// result stops changing".
+/// The whole number a count operand stands for, or the value unchanged.
+///
+/// A noun operand read at compile time makes the same near-integer
+/// admission a count read at run time makes: jconsole answers
+/// `(>: ^: (2 + 1e_13)) 3` with 5 and `(+`- @. (1 + 1e_14)) 5` with _5.
+fn near_whole(n: f64) -> f64 {
+    crate::array::NearInt::J.round(n).map_or(n, |k| k as f64)
+}
+
 fn power_spec(f: &Frag, span: Span) -> Result<Power> {
     let Some(arr) = noun_value(f) else {
         return Err(Error::not_yet("computed power (u^:n)", span));
@@ -2657,6 +2666,7 @@ fn power_spec(f: &Frag, span: Span) -> Result<Power> {
         let Some(vals) = inner.to_f64_vec() else {
             return Err(Error::parse("power must be numeric", span));
         };
+        let vals: Vec<f64> = vals.into_iter().map(near_whole).collect();
         let [n] = vals[..] else {
             return Err(Error::not_yet("a boxed list of power counts (u^:(<n))", span));
         };
@@ -2674,6 +2684,7 @@ fn power_spec(f: &Frag, span: Span) -> Result<Power> {
     let Some(vals) = arr.to_f64_vec() else {
         return Err(Error::parse("power must be numeric", span));
     };
+    let vals: Vec<f64> = vals.into_iter().map(near_whole).collect();
     if vals.len() > 1 {
         // A list of counts gives one answer each, framed.
         let mut counts = Vec::with_capacity(vals.len());

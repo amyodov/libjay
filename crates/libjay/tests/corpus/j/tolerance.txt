@@ -92,3 +92,54 @@ _3.5 +. 0
 0.1 (|!.0) 0.3
 2 |!.0 (4 - 1e_14)
 2 2 #:!.0 (4 - 1e_14)
+// --- a near-integer float where a COUNT or an INDEX is wanted --------
+// This is NOT the comparison tolerance: `9!:19 (0)` leaves it exactly
+// where it is. J's admission is RELATIVE — within 2^_44 of the whole
+// number's magnitude — so the window widens with the count and closes
+// completely beside zero.
+# i. 2 - 1e_14
+# i. 2 + 1e_14
+# i. 2 + 1e_13
+# i. 2 + 1.1e_13
+# i. 2 - 1.1e_13
+# i. 20 + 1.1e_12
+# i. 200 + 1.1e_11
+# i. 2000 + 1e_10
+# i. 1000000 + 5e_8
+// One step outside it, and the same sentence is a domain error.
+i. 2 + 1.2e_13
+i. 2 - 1.2e_13
+i. 2 + 9e_11
+i. 20 + 1.2e_12
+i. 1000000 + 6e_8
+i. 1e_14
+i. 2.5
+2.5 $ 5
+// The whole family reads its count the same way.
+(2 - 1e_14) {. 1 2 3
+(2 + 1e_13) }. 1 2 3 4
+(_2 + 1e_13) {. 1 2 3
+(2 + 1e_13) $ 5
+2 3 $~ 2 + 1e_13
+(1 + 1e_14) |. 1 2 3
+(1 + 1e_14) |.!.0 ] 1 2 3
+(2 + 1e_13) # 1 2
+(1 + 1e_14) { 1 2 3
+(65 + 1e_13) { a.
+u: 65 + 1e_13
+q: 6 + 1e_13
+p: 5 + 1e_13
+(2 + 1e_13) A. 1 2 3
+(2 + 1e_13) ]\\ 1 2 3
+(2 + 1e_13) <\\ i. 4
+I. 2 3 4 + 1e_13
+(>: ^: 2.0000000000001) 3
+(+`- @. 1.00000000000001) 5
+(2 + 1e_13) {"1 i. 3 3
+// An operand SELECTOR is read exactly, though: the admission is the
+// count's, not every noun's.
+3 u: 65 + 1e_13
+s: 65 + 1e_13
+(2 + 1e_13) b. 3
+1 0 1 (2 + 1e_13) ;. 1 i. 3
+(1 2 + 1e_13) ];.0 i. 4 4
