@@ -44,6 +44,11 @@ loudly at the first failure rather than improvising past it.
 - CI is green on HEAD: `gh run list --branch main --limit 1`. Local tests
   cannot vouch for Windows or Linux; only CI can, and the wheel matrix will
   meet those platforms for real during publish.
+- The full artifact matrix builds on the release candidate: trigger
+  `gh workflow run publish.yml` (a dry run — the publish/crates jobs are
+  gated on the release event) and wait for green. Both prior releases ran
+  this by hand; it once caught a broken toolchain pin that would otherwise
+  have failed the real publish mid-release.
 
 ## 2. Version bump
 
