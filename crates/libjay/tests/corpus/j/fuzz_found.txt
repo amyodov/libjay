@@ -214,3 +214,53 @@ _1.5 *. 2.5
 #. 123x
 2 #. 1 0 1
 10 #. 1 2 3
+
+// A verb may leave a COLUMN-MAJOR result: `|:` flips the layout flag
+// rather than moving the buffer. Framing those results, and opening a box
+// that holds one, has to read the buffer the way it is laid out instead of
+// splicing it end to end — which is what made a transposed cut piece come
+// back with its shape turned and its data untouched.
+|:;._1 i. 3 4
+|:;.1 i. 3 4
+|:;._1 i. 4 3
+|:;.2 i. 3 4
+|:;._2 i. 3 4
+|:"2 i. 2 3 4
+|:"2 i. 2 2 3 4
++/ |:"2 i. 2 3 4
+(<@|:)"2 i. 2 3 4
+(|:@]);._1 i. 3 4
+(+/@|:);._1 i. 3 4
+|:&.> ;._1 i. 3 4
+; |:&.> (i. 3 4) ; (i. 2 3)
+, |:&.> < i. 3 4
+> |:&.> < i. 3 4
+|: L: 0 < i. 3 4
+|: 2 4 $ 4 5 6 7 8 9 10 11
+
+// A rotate or shift amount is any integer the program can write. It is
+// reduced modulo the axis BEFORE a coordinate joins it, so a magnitude
+// near the end of the range neither overflows the addition nor wraps it.
+9223372036854775806 |. 1 2 3
+9223372036854775806 |. 'abc'
+9223372036854775806 |. i. 3 4
+9223372036854775806 9223372036854775806 |. i. 3 4
+9223372036854775806 |.!.0 (1 2 3)
+_9223372036854775807 |. 1 2 3
+_9223372036854775807 |.!.0 (1 2 3)
+9223372036854775806 |. i. 0
+(<: _9223372036854775807) |. 1 2 3
+(<: _9223372036854775807) |.!.0 (1 2 3)
+// A cut given a size with no negation in the machine integers is refused,
+// not counted with the wrapped one.
+(<: _9223372036854775807) ];.0 i. 3 4
+
+// J's neutral cells for `>.` and `<.` over no items stay the infinities;
+// only APL's are the extremes of the representable range.
+>./ i. 0
+<./ i. 0
+>./ 0 3 $ 0
+
+// And J's nub sieve stays over ITEMS, one bit each.
+~: 2 2 $ 1 2 1 2
+~: 2 3 $ i. 6

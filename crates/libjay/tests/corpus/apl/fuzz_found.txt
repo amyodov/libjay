@@ -115,3 +115,79 @@
 2 0 1/5
 1 0/2 2⍴⍳4
 2 3⌿2 2⍴⍳4
+
+// `⌽` and `⊖` rotate ONE axis and read one amount for each vector along
+// it, so `⍴x` must be `⍴y` with that axis removed — a scalar, or the
+// one-item vector the reference accepts as one, turns every vector by the
+// same amount. Anything else is a conformability error: a rank error where
+// the ranks disagree, a length error where only the lengths do. libjay used
+// to read the left argument as J's one amount per AXIS and invent a bigger
+// array for sentences the language rejects.
+0 1 1 0⌽5
+1 2⌽3 4 5
+(⍳0)⊖1 2 3
+(⍳0)⌽5
+⍬⌽5
+(1 1⍴2)⌽1 2 3
+(2 2⍴1)⌽2 2⍴⍳4
+(0⍴0)⌽2 3⍴⍳6
+(1 1⍴1)⌽2 3⍴⍳6
+1 2 3⌽2 3⍴⍳6
+1 2⊖2 3⍴⍳6
+2⌽5
+(1⍴1)⌽5
+(1⍴1)⌽2 3⍴⍳6
+1 2 3⊖2 3⍴⍳6
+1 2⊖3 4⍴⍳12
+1 ¯1 2 0⊖3 4⍴⍳12
+(2 3⍴1)⌽2 3 4⍴⍳24
+// The same rule with the axis named, where `⌽[k]` and `⊖[k]` agree.
+1 2 3⌽[1]2 3⍴⍳6
+1 2⌽[1]2 3⍴⍳6
+2⌽[1]2 3⍴⍳6
+(2 4⍴1)⌽[2]2 3 4⍴⍳24
+(3 4⍴1)⌽[1]2 3 4⍴⍳24
+(2 3⍴1)⌽[3]2 3 4⍴⍳24
+
+// APL keeps no infinity among the reduce identities: over an empty axis
+// `⌈` yields the low extreme of the representable range and `⌊` the high
+// one, once per cell of the result. J's neutral cells for the same pair
+// are the infinities, so the table reads the language. The rest of it is
+// shared, and these rows hold that.
+⌈/⍬
+⌊/⍬
+⌈⌿0 3⍴0
+⌊⌿0 3⍴0
+÷⌿0 3⍴0
+1⌽÷⌿2⌽0 3⍴0
++/⍬
+×/⍬
+∨/⍬
+∧/⍬
+
+// The nub sieve `≠` runs over the ELEMENTS in ravel order and keeps the
+// argument's own shape, so a matrix answers a matrix and a scalar a
+// scalar. J's `~:` is the one that counts items.
+≠2 3⍴⍳6
+≠2 2⍴1 2 1 2
+≠2 3⍴1 2 1 2 1 2
+≠2 2 2⍴1 2 1 2 1 2 1 2
+≠'abcab'
+≠(1 2)(1 2)(3)
+≠5
+⍴≠5
+≠⍬
+≠1 1.0000000000001
+
+// A literal above 2⋆53 keeps every digit: the lexer reads the integer out
+// of the text rather than through a double, so the value that reaches a
+// verb is the one the program wrote.
+9223372036854775806
+9223372036854775806-9223372036854775800
+9223372036854775806+1
+3|9223372036854775806
+(⍳5)|9223372036854775806
+9223372036854775806↓0
+⍴9223372036854775806↓0
+¯9223372036854775806+9223372036854775806
+1000000000000000001-1000000000000000000

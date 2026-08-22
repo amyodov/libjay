@@ -339,3 +339,37 @@ fn a_table_of_borrowed_columns_is_folded_without_a_copy() {
     agree("+/\"1", &rows, &run(Lang::J, "+/\"1 {m}", &[by_rows]).unwrap().unwrap());
     assert_eq!(shape.to_row_major().data, Data::I64(vec![1000, 4].into()));
 }
+
+/// A column-major RESULT is as much a value as a column-major argument.
+///
+/// `|:` leaves one, and what receives it next is not the verb dispatcher —
+/// which materialises the rows — but the framing of cells, the raze of a
+/// box and the enlist of a nested array, each of which reads the buffer
+/// directly. Every one of these had the transposed shape and the untouched
+/// data, or asserted outright, before the readers were taught the flag.
+#[test]
+fn a_column_major_result_survives_being_framed_opened_and_enlisted() {
+    let m = Array::new(vec![3, 4], Data::I64((0..12).collect::<Vec<i64>>().into()));
+    let want = |src: &str, shape: &[usize], values: &[i64]| {
+        let r = run(Lang::J, src, std::slice::from_ref(&m)).expect("run").expect("a value");
+        assert_eq!(r.shape, shape.to_vec(), "{src}");
+        assert_eq!(r.to_i64_vec().expect("integers"), values.to_vec(), "{src}");
+    };
+    let t = [0i64, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11];
+    // Framed by a cut, by the rank operator, and out of a box.
+    want("|:;.1 {m}", &[1, 4, 3], &t);
+    want("(|:@]);.1 {m}", &[1, 4, 3], &t);
+    want("> |:&.> < {m}", &[4, 3], &t);
+    want("; |:&.> < {m}", &[4, 3], &t);
+    want(", > |:&.> < {m}", &[12], &t);
+    let cube = Array::new(vec![2, 3, 4], Data::I64((0..24).collect::<Vec<i64>>().into()));
+    let r = run(Lang::J, "|:\"2 {m}", std::slice::from_ref(&cube)).expect("run").expect("a value");
+    assert_eq!(r.shape, vec![2, 4, 3]);
+    assert_eq!(
+        r.to_i64_vec().expect("integers"),
+        vec![0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11, 12, 16, 20, 13, 17, 21, 14, 18, 22, 15, 19, 23]
+    );
+    // And the APL side, where `∊` walks the leaves of a nested value.
+    let r = run(Lang::Apl, "∊⍉¨(2 3⍴⍳6)(2 2⍴⍳4)", &[]).expect("run").expect("a value");
+    assert_eq!(r.to_i64_vec().expect("integers"), vec![1, 4, 2, 5, 3, 6, 1, 3, 2, 4]);
+}

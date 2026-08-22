@@ -669,6 +669,11 @@ pub enum DyadOp {
     Left,
     /// `x |. y`: rotate axis k of y left by `x[k]` (negative rotates right).
     Rotate,
+    /// `x ⌽ y` and `x ⊖ y`: rotate ONE axis of y — the last one when
+    /// `last`, the leading one otherwise — by one amount per vector along
+    /// it. APL's left argument is a whole array shaped like y with that
+    /// axis removed, not J's one amount per axis.
+    RotateApl { last: bool },
     /// Catenate along the LEADING axis (J `,`, APL `⍪`).
     AppendLeading,
     /// Catenate along the LAST axis (APL `,`).
@@ -1948,12 +1953,23 @@ fn boxed_elements(a: &Array) -> Array {
 }
 
 /// Frame the results of a cell-by-cell application into one array.
+///
+/// The cells arrive as their verb left them, and a verb may leave a
+/// column-major one — `|:` flips the layout flag rather than moving the
+/// buffer. Framing splices the buffers end to end, so every cell is made
+/// row-major first; an already row-major one costs a refcount bump.
 fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
     if cells.is_empty() {
         // Nothing to take a cell shape from. J runs the verb on a fill cell
         // to learn the shape; we yield an empty array of the frame's shape.
         return Ok(Array::new(frame.to_vec(), Data::empty(DType::I64)));
     }
+    let cells: Vec<Array> =
+        if cells.iter().all(Array::is_row_major) {
+            cells
+        } else {
+            cells.iter().map(Array::to_row_major).collect()
+        };
     let mut dt = cells[0].dtype();
     for c in &cells[1..] {
         dt = DType::promote(dt, c.dtype()).ok_or_else(|| {
@@ -2049,9 +2065,14 @@ fn enclose(y: &Array, rule: Enclose) -> Array {
 
 /// One rank-0 cell opened: a box gives up its contents, anything else is
 /// its own contents already.
+///
+/// What comes out is row-major. A box is filled with a RESULT, and a result
+/// carries whatever layout its verb left — `|:&.>` boxes column-major
+/// matrices — while everything downstream of an open reads a value the way
+/// a verb's argument is read.
 fn open_cell(y: &Array) -> Array {
     match &y.data {
-        Data::Box(v) if !v.is_empty() => v[0].clone(),
+        Data::Box(v) if !v.is_empty() => v[0].to_row_major(),
         _ => y.clone(),
     }
 }
@@ -2076,14 +2097,19 @@ fn depth(y: &Array) -> i64 {
 }
 
 /// Every leaf array inside `a`, in ravel order.
+///
+/// A leaf comes out row-major: a box may hold whatever layout the verb that
+/// filled it left behind, and a caller that reads the ravel would otherwise
+/// read a column-major buffer as rows.
 fn leaves(a: &Array, out: &mut Vec<Array>) {
+    let a = a.to_row_major();
     match &a.data {
         Data::Box(v) => {
             for b in v.iter() {
                 leaves(b, out);
             }
         }
-        _ => out.push(a.clone()),
+        _ => out.push(a),
     }
 }
 
@@ -4614,8 +4640,103 @@ fn rotate(x: &Array, y: &Array, span: Span) -> Result<Array> {
         for k in 0..r {
             // No axis is empty here: an empty axis makes n zero.
             let len = y.shape[k] as i64;
-            let s = counts.get(k).copied().unwrap_or(0);
+            // The amount is reduced modulo the axis BEFORE the coordinate
+            // is added to it: a rotate of 9223372036854775806 is a legal
+            // sentence, and adding it to a coordinate first overflows.
+            let s = counts.get(k).copied().unwrap_or(0).rem_euclid(len);
             idx += (coord[k] as i64 + s).rem_euclid(len) as usize * st[k];
+        }
+        push_elem(&mut data, &y.data, idx);
+        odometer(&mut coord, &y.shape);
+    }
+    Ok(Array::new(y.shape.clone(), data))
+}
+
+/// `x ⌽ y` and `x ⊖ y`: rotate one axis of y, by one amount per vector
+/// along it.
+///
+/// APL's left argument is not J's one amount per axis. Exactly one axis
+/// moves — the last for `⌽`, the leading one for `⊖`, the named one for
+/// `⌽[k]` — and x holds one amount for each vector along it, so `⍴x` must
+/// be `⍴y` with that axis removed. A scalar (or a one-item vector, which
+/// GNU APL accepts as one) rotates every vector by the same amount.
+/// Anything else is a conformability error: a rank error where the ranks
+/// disagree and a length error where only the lengths do.
+fn rotate_apl(x: &Array, y: &Array, last: bool, span: Span) -> Result<Array> {
+    let scalar_like = x.rank() == 0 || (x.rank() == 1 && x.count() == 1);
+    // A scalar has no axis to rotate, so it is its own answer — but only
+    // for a left argument that could have rotated something.
+    if y.rank() == 0 {
+        return if scalar_like {
+            Ok(y.clone())
+        } else {
+            Err(Error::new(
+                ErrorKind::Rank,
+                format!(
+                    "rotate has a rank-{} left argument for a scalar, which needs a scalar",
+                    x.rank()
+                ),
+                Some(span),
+            ))
+        };
+    }
+    let axis = if last { y.rank() - 1 } else { 0 };
+    let want: Vec<usize> =
+        y.shape.iter().enumerate().filter(|&(k, _)| k != axis).map(|(_, &n)| n).collect();
+    if !scalar_like {
+        if x.rank() != want.len() {
+            return Err(Error::new(
+                ErrorKind::Rank,
+                format!(
+                    "rotate has a rank-{} left argument for axis {axis} of {}, which needs rank {}",
+                    x.rank(),
+                    show_shape(&y.shape),
+                    want.len()
+                ),
+                Some(span),
+            ));
+        }
+        if x.shape != want {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!(
+                    "rotate has a {} left argument for axis {axis} of {}, which needs {}",
+                    show_shape(&x.shape),
+                    show_shape(&y.shape),
+                    show_shape(&want)
+                ),
+                Some(span),
+            ));
+        }
+    }
+    let counts = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("rotate needs integer lengths", span))?;
+    let len = y.shape[axis] as i64;
+    let n = y.count();
+    if n == 0 {
+        return Ok(y.clone());
+    }
+    let st = strides(&y.shape);
+    let r = y.rank();
+    let mut data = Data::empty(y.dtype());
+    let mut coord = vec![0usize; r];
+    for _ in 0..n {
+        // Which vector this element sits on, in the order x holds them.
+        let mut which = 0usize;
+        for (k, &c) in coord.iter().enumerate() {
+            if k != axis {
+                which = which * y.shape[k] + c;
+            }
+        }
+        let s = if scalar_like { counts[0] } else { counts[which] };
+        // Reduced modulo the axis before the coordinate joins it: the
+        // amount may be any i64 the program can write.
+        let s = s.rem_euclid(len);
+        let mut idx = 0usize;
+        for (k, &c) in coord.iter().enumerate() {
+            let c = if k == axis { (c as i64 + s).rem_euclid(len) as usize } else { c };
+            idx += c * st[k];
         }
         push_elem(&mut data, &y.data, idx);
         odometer(&mut coord, &y.shape);
@@ -6327,7 +6448,7 @@ fn minors(
     // says which column this node starts at.
     let column = rows - left.count_ones() as usize;
     let value = if column >= cols {
-        let data = reduce_identity(v, 1).ok_or_else(|| {
+        let data = reduce_identity(v, 1, ctx.cfg.rules.lang).ok_or_else(|| {
             Error::not_yet(
                 format!("the identity element of {} (a determinant with no columns)", v.name()),
                 span,
@@ -6476,7 +6597,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         }
         MonadOp::ComplexParts { polar } => complex_parts(y, polar, span),
         MonadOp::SelfClassify => Ok(self_classify(y, ctx.cfg.tol)),
-        MonadOp::NubSieve => Ok(nub_sieve(y, ctx.cfg.tol)),
+        MonadOp::NubSieve => Ok(nub_sieve(y, ctx.cfg.tol, ctx.cfg.rules.lang)),
         MonadOp::Unicode { pass_chars } => unicode(y, pass_chars, span),
         MonadOp::Symbols => to_symbols(y, span),
         MonadOp::Words => words(y, span),
@@ -6754,6 +6875,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::Right => Ok(y.clone()),
         DyadOp::Left => Ok(x.clone()),
         DyadOp::Rotate => rotate(x, y, span),
+        DyadOp::RotateApl { last } => rotate_apl(x, y, last, span),
         // Only J fills a ragged catenation; APL's conformability rule
         // refuses it, as the reference does.
         DyadOp::AppendLeading => {
@@ -6844,20 +6966,30 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
 
 // ------------------------------------------------------------- reduction
 
+/// The extreme APL reduces an empty `⌈` or `⌊` to.
+///
+/// The language has no infinity in its identities, and the reference does
+/// not answer the exact largest double either: `⌈/⍬` is this number to
+/// every digit GNU APL will show of it, and arithmetic on the answer
+/// confirms the rest. J's identities are the infinities and stay so.
+const APL_EXTREME: f64 = 1.7976e308;
+
 /// The neutral cell of a reduction over no items, if the verb has one.
 ///
 /// The values are the ones the references produce — both of them, for every
 /// verb both spell (`x %: y` is J's alone). Where a table entry is
 /// conventional rather than algebraic (a comparison has no true identity)
-/// J and GNU APL still agree on it, so libjay follows. The two exceptions
-/// are `⌊` and `⌈`: J's neutral cells are the infinities and GNU APL's are
-/// the largest representable magnitudes — libjay takes J's, and the
-/// difference is recorded in docs/coverage.md.
-fn reduce_identity(v: &Verb, n: usize) -> Option<Data> {
+/// J and GNU APL still agree on it, so libjay follows. `⌊` and `⌈` are the
+/// one place the two references part: J's neutral cells are the infinities
+/// and APL's are the extremes of the representable range, so the table
+/// reads the language.
+fn reduce_identity(v: &Verb, n: usize, lang: crate::Lang) -> Option<Data> {
     let Verb::Prim(p) = v else { return None };
     let DyadOp::Scalar(op) = p.dyad else { return None };
     let ints = |k: i64| Data::I64(vec![k; n].into());
     let bits = |k: u8| Data::Bool(vec![k; n].into());
+    let extreme =
+        |sign: f64| Data::F64(vec![sign * if lang == crate::Lang::Apl { APL_EXTREME } else { f64::INFINITY }; n].into());
     Some(match op {
         ScalarDyad::Add | ScalarDyad::Sub | ScalarDyad::Gcd | ScalarDyad::Residue => ints(0),
         ScalarDyad::Mul
@@ -6867,8 +6999,8 @@ fn reduce_identity(v: &Verb, n: usize) -> Option<Data> {
         | ScalarDyad::Lcm
         | ScalarDyad::Root
         | ScalarDyad::Binomial => ints(1),
-        ScalarDyad::Min => Data::F64(vec![f64::INFINITY; n].into()),
-        ScalarDyad::Max => Data::F64(vec![f64::NEG_INFINITY; n].into()),
+        ScalarDyad::Min => extreme(1.0),
+        ScalarDyad::Max => extreme(-1.0),
         ScalarDyad::Eq | ScalarDyad::Le | ScalarDyad::Ge => bits(1),
         ScalarDyad::Ne | ScalarDyad::Lt | ScalarDyad::Gt => bits(0),
         // `j.` and `r.` build a complex number out of two reals; neither
@@ -7669,7 +7801,7 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         {
             return Ok(Array::new(vec![0], Data::empty(y.dtype())));
         }
-        return match reduce_identity(v, m) {
+        return match reduce_identity(v, m, ctx.cfg.rules.lang) {
             Some(d) => Ok(Array::new(cell_shape, d)),
             None => Err(Error::domain(
                 format!("empty reduction has no identity for {}", v.name()),
@@ -9590,14 +9722,18 @@ fn subarray(y: &Array, origin: &[i64], size: &[i64], span: Span) -> Result<Array
     let mut start = vec![0i64; r];
     let mut step = vec![1i64; r];
     for k in 0..origin.len() {
-        let len = size[k].unsigned_abs() as usize;
+        // The magnitude is measured in u128 so that a size of i64::MIN — a
+        // number the program is free to write — is compared rather than
+        // negated, and the axis check runs before anything is cast down.
+        let want = u128::from(size[k].unsigned_abs());
         let from = if origin[k] < 0 { origin[k] + y.shape[k] as i64 } else { origin[k] };
-        if from < 0 || from + len as i64 > y.shape[k] as i64 {
+        if from < 0 || u128::from(from.unsigned_abs()) + want > y.shape[k] as u128 {
             return Err(Error::domain(
-                format!("a cut of {len} from {from} leaves axis {k} of {}", y.shape[k]),
+                format!("a cut of {want} from {from} leaves axis {k} of {}", y.shape[k]),
                 span,
             ));
         }
+        let len = want as usize;
         shape[k] = len;
         if size[k] < 0 {
             start[k] = from + len as i64 - 1;
@@ -9655,9 +9791,13 @@ fn tessellate(
             Some(span),
         ));
     }
+    // The block size and the step are the program's own numbers and may be
+    // any i64, so how many blocks fit is counted in i128: `size` has no
+    // negation at i64::MIN and `len + step` overflows for a large step.
     let mut frame = Vec::with_capacity(size.len());
     for k in 0..size.len() {
-        let (len, step, block) = (y.shape[k] as i64, movement[k], size[k].abs());
+        let (len, step) = (i128::from(y.shape[k] as i64), i128::from(movement[k]));
+        let block = i128::from(size[k]).abs();
         if step <= 0 {
             return Err(Error::domain("a tessellation moves by a positive step", span));
         }
@@ -9677,7 +9817,8 @@ fn tessellate(
         // a negative size keeps its sign, which reverses that axis.
         let block: Vec<i64> = (0..frame.len())
             .map(|k| {
-                let len = size[k].abs().min(y.shape[k] as i64 - origin[k]);
+                let left = i128::from(y.shape[k] as i64 - origin[k]);
+                let len = i128::from(size[k]).abs().min(left) as i64;
                 if size[k] < 0 { -len } else { len }
             })
             .collect();
@@ -10124,7 +10265,10 @@ fn shift_fill(x: &Array, y: &Array, fill: &Array, span: Span) -> Result<Array> {
         let mut idx = 0usize;
         let mut vacated = false;
         for k in 0..r {
-            let from = coord[k] as i64 + counts.get(k).copied().unwrap_or(0);
+            // Saturating: an amount that cannot be added to the coordinate
+            // has carried the item past the end of the axis by any measure,
+            // which is what a shift vacates.
+            let from = (coord[k] as i64).saturating_add(counts.get(k).copied().unwrap_or(0));
             if from < 0 || from >= y.shape[k] as i64 {
                 vacated = true;
                 break;
@@ -10713,7 +10857,9 @@ fn characteristics(u: &Verb, y: &Array, span: Span) -> Result<Array> {
                 span,
             )),
         },
-        Some(1) => match reduce_identity(u, 1).as_ref().map(identity_spelling) {
+        // `b.` is J's conjunction and has no APL spelling, so the identity
+        // asked for here is always J's.
+        Some(1) => match reduce_identity(u, 1, crate::Lang::J).as_ref().map(identity_spelling) {
             Some(s) => chars(s),
             None => Err(Error::not_yet(
                 format!("the identity function of {} (u b. 1)", u.name()),
@@ -11675,9 +11821,13 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     // there are `1 + n - x` of them and none at all once x is longer than
     // the argument. A negative one leaves out NON-OVERLAPPING runs, the
     // last of them short where the length does not divide.
+    // The widths are the program's own numbers, so the arithmetic that
+    // turns one into a list of starts runs in i128: `_9223372036854775808`
+    // has no negation in i64, and `n + step` overflows for a large step.
     let starts: Vec<i64> = if k < 0 {
-        let step = -k;
-        (0..(n + step - 1) / step).map(|i| i * step).collect()
+        let step = i128::from(k.unsigned_abs());
+        let count = (i128::from(n) + step - 1) / step;
+        (0..count).map(|i| (i * step) as i64).collect()
     } else {
         (0..=(n - k)).collect()
     };
@@ -11817,20 +11967,37 @@ fn self_classify(y: &Array, tol: Tol) -> Array {
     Array::new(vec![rows, items], Data::Bool(out.into()))
 }
 
-/// `~: y` / `≠ y`: 1 at each item that has not been seen before.
-fn nub_sieve(y: &Array, tol: Tol) -> Array {
-    let items = if y.rank() == 0 { 1 } else { y.items() };
+/// `~: y` / `≠ y`: 1 where a value has not been seen before.
+///
+/// The two languages count different things. J's sieve runs over ITEMS and
+/// answers one bit per item, so a matrix gives a vector. APL's runs over
+/// the ELEMENTS in ravel order and keeps the argument's own shape, so a
+/// matrix gives a matrix and a scalar gives a scalar.
+fn nub_sieve(y: &Array, tol: Tol, lang: crate::Lang) -> Array {
+    let by_element = lang == crate::Lang::Apl;
+    let n = if by_element {
+        y.count()
+    } else if y.rank() == 0 {
+        1
+    } else {
+        y.items()
+    };
     let mut seen: Vec<Array> = Vec::new();
-    let mut out = Vec::with_capacity(items);
-    for i in 0..items {
-        let cell = item_or_self(y, i);
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let cell = if by_element {
+            Array::new(Vec::new(), y.data.slice(i, i + 1))
+        } else {
+            item_or_self(y, i)
+        };
         let fresh = !seen.iter().any(|s| arrays_match(s, &cell, tol));
         if fresh {
             seen.push(cell);
         }
         out.push(fresh as u8);
     }
-    Array::new(vec![items], Data::Bool(out.into()))
+    let shape = if by_element { y.shape.clone() } else { vec![n] };
+    Array::new(shape, Data::Bool(out.into()))
 }
 
 /// A rank-0 argument as the one-item list it behaves as for the set verbs.

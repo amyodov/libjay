@@ -28,6 +28,15 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- APL's `⌈/` and `⌊/` over an empty axis answer the extremes of the
+  representable range rather than the infinities. The reduce identity table
+  now reads the language: J's neutral cells for `>./` and `<./` stay `__`
+  and `_`, and every other entry is shared as before.
+- APL's `≠` (the nub sieve) runs over the ELEMENTS in ravel order and keeps
+  its argument's shape, so `≠2 3⍴⍳6` is a 2 by 3 table of ones and `≠5` is a
+  scalar. J's `~:` still runs over items. The two spellings are not the same
+  function, and the corpus now holds both.
+
 ### Fixed
 
 - APL's operators now apply their function between the ITEMS of their
@@ -59,6 +68,30 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
   J is a different language here and keeps its own reading: `u/` tables by
   cells, `u/` inserts between cells, and a box stays shut.
+- **A rotate amount near the end of the integer range no longer panics.**
+  `9223372036854775806 |. 1 2 3` added the amount to a coordinate before
+  reducing it modulo the axis, which overflows: a panic in a debug build and
+  a silent wrap in a release one. The amount is reduced first. The same
+  counting is fixed across the family it belongs to — `|.!.f` (shift),
+  `u;.0` and `u;.3` (the cut rectangle and the tessellation) and `x u\.`
+  (outfix) each turned a number the program wrote into an index without
+  room for it, and each now counts in a width that holds it.
+- APL's `⌽` and `⊖` check conformability. They rotate ONE axis and read one
+  amount for each vector along it, so `⍴x` must be `⍴y` with that axis
+  removed unless x is a scalar (or the one-item vector the reference takes
+  as one). `0 1 1 0⌽5` answered `5 5 5 5` and `1 2⌽3 4 5` built a matrix out
+  of two vectors; both are conformability errors, and the axis forms
+  `⌽[k]`/`⊖[k]` follow the same rule instead of J's one amount per axis.
+- An APL literal above 2^53 keeps every digit. The lexer read every number
+  through a double, so `9223372036854775806⌽1 2 3` was refused as
+  non-integral and `(⍳5)|9223372036854775806` answered from the rounded
+  value. Digits alone are now read straight into a machine integer.
+- A COLUMN-MAJOR result is read as one. `|:` flips the layout flag rather
+  than moving the buffer, and framing cells, opening a box or walking the
+  leaves of a nested value spliced the raw buffer instead: `|:;._1 i. 3 4`
+  came back with its shape transposed and its data untouched, `|:"2` was
+  wrong at every rank, `∊⍉¨` read the wrong order, and `; |:&.>` asserted
+  outright. Every reader of a result now takes the rows.
 
 ## 0.2.1 — 2026-08-22
 

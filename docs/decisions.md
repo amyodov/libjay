@@ -2056,3 +2056,83 @@ measurement takes it exclusively, and `fallbacks_during` reads the counter
 on both sides of that exclusive window. Ordinary tests still run beside
 each other; only the five that measure serialise, and the rate they report
 is now the same on every run (72 of 295).
+- 2026-08-22 — **The sweep's correctness blockers: five clusters, one rule
+  each.** A seeded differential sweep against both oracles produced a
+  register of clusters; this wave closes A6, A1, A5, A12 and A4. Each
+  decision below is the oracle's answer, re-confirmed one sentence at a
+  time and not read out of the sweep.
+
+  **A panic is never an answer, so fix the family and not the instance.**
+  `9223372036854775806 |. 1 2 3` added the rotate amount to a coordinate
+  before reducing it modulo the axis — an overflow, which is a panic in a
+  debug build and a silent wrap in a release one, and a panic crossing the
+  C ABI takes the host process down. The amount is now reduced first. Four
+  more sites counted user integers the same way and were found by probing
+  for them rather than waiting for a report: `|.!.f` (saturating, because
+  an amount that cannot be added has carried the item off the axis by any
+  measure), the cut rectangle in `u;.0`, the tessellation in `u;.3`, and
+  the outfix `x u\.`. The three that compare or divide now do it in
+  i128/u128, which holds `i64::MIN` without negating it. The unit tests
+  assert only that each answers or refuses, never which: what the answer is
+  belongs to the corpus, and what must never happen belongs here.
+
+  **APL rotate is not J rotate.** `x⌽y` moves ONE axis and reads one amount
+  for each vector along it, so `⍴x` must be `⍴y` with that axis removed
+  unless x is a scalar. libjay had been treating x as J's one amount per
+  axis and building a bigger array for sentences the language rejects —
+  `0 1 1 0⌽5` answered `5 5 5 5` where GNU APL raises RANK ERROR, the
+  largest single cluster in the APL sweep and the worst kind, a silent
+  wrong shape. `⌽` and `⊖` now carry a primitive of their own
+  (`DyadOp::RotateApl`) that picks its axis and checks conformability
+  itself, rather than borrowing the rank operator's framing, which extends
+  a scalar right argument where APL will not. GNU APL accepts a ONE-ITEM
+  VECTOR as a scalar there and rejects a one-item matrix; libjay follows,
+  because the oracle wins. The old "⊖ reads per axis" divergence is
+  therefore gone, and with it the claim that `⌽` already followed APL.
+
+  **A large rotate amount is where GNU APL is wrong, and libjay says so.**
+  `9223372036854775806⌽1 2 3` is `2 3 1` there. It is not an f64 artefact:
+  `3|9223372036854775806` is exactly 0, so the value is held exactly. The
+  amount is truncated to a SIGNED 32-BIT integer before the modulo — the
+  low 32 bits are ¯2, and ¯2 modulo 3 is 1. Sixteen magnitudes around
+  2⋆52, 2⋆53 and 2⋆63 fit that and nothing else. Recorded as a divergence
+  with the reasoning, not copied.
+
+  **An APL literal is read as an integer, not through a double.** Every
+  i64 above 2^53 rounds on the way through an f64, which is why
+  `9223372036854775806⌽1 2 3` used to be refused as non-integral and
+  `(⍳5)|9223372036854775806` answered from the rounded value. The lexer now
+  parses the digits straight into an i64 and falls back to the double only
+  where the text needs one. J's lexer already did this. NOT fixed, and
+  reported as still open: `#:` and `#.` compute their digits in f64
+  throughout, so `5 #: 9223372036854775806` is still 0 where jconsole says
+  1 — the same demotion, but a redesign of the encode path rather than a
+  line.
+
+  **A column-major RESULT is a value like any other.** The runtime's rule
+  is that a value reaching a verb has been made row-major; `|:` flips the
+  layout flag instead of moving the buffer, and nothing had extended the
+  rule to what a verb hands BACK. Framing cells spliced their raw buffers
+  end to end, so `|:;._1 i. 3 4` came back with the shape transposed and
+  the data untouched, and `|:"2` was wrong at every rank; opening a box and
+  walking the leaves of a nested value read them the same way, so `∊⍉¨` had
+  the wrong order and `; |:&.>` asserted outright. Three readers — the
+  framing, `open_cell`, `leaves` — now take the rows. Normalising at the
+  WRITE side was considered and rejected: boxes are built in forty-odd
+  places and results in more, while the readers are countable.
+
+  **The reduce identity table reads the language.** APL keeps no infinity
+  among its neutral cells: over an empty axis `⌈` yields the low extreme of
+  the representable range and `⌊` the high one. GNU APL's is not `f64::MAX`
+  but exactly 1.7976e308 — a rounded constant, confirmed by arithmetic on
+  the answer rather than by its printed digits — and libjay takes it,
+  because the oracle wins on the value as well as on the rule. J's `>./`
+  and `<./` keep `__` and `_`. Every other entry of the table is shared and
+  is now pinned as such.
+
+  **The nub sieve is two functions, not one.** APL's `≠` runs over the
+  ELEMENTS in ravel order and keeps the argument's own shape (`≠2 3⍴⍳6` is
+  a 2 by 3 table); J's `~:` runs over ITEMS and answers one bit each. Ours
+  had been J's in both languages, which silently poisoned everything
+  downstream of an APL `≠` — two of the sweep's "they refuse" rows were GNU
+  APL rejecting OUR shape.

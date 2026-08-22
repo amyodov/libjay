@@ -17,13 +17,14 @@
 // `⍟0` is the same disagreement one function along.
 ⍟0
 ? log 0 is ¯∞ here, DOMAIN ERROR there
-// Dyadic `⊖` with a vector left argument: libjay reads it as one amount
-// per AXIS (J's `|.` rule), APL as one amount per column of the leading
-// axis. `⌽` follows APL in both valences, so only `⊖` diverges.
-1 2⊖3 4⍴⍳12
-? left argument is per-axis here, per-column there
-1 ¯1 2 0⊖3 4⍴⍳12
-? left argument is per-axis here, per-column there
+// GNU APL truncates a rotate amount to a signed 32-bit integer before it
+// reduces it modulo the axis, so a large one rotates by the wrong amount:
+// the low 32 bits of 9223372036854775806 are ¯2, and ¯2 modulo 3 is 1.
+// libjay reduces the amount the program wrote. Probed over sixteen
+// magnitudes around 2⋆52, 2⋆53 and 2⋆63; the truncation explains all of
+// them and nothing else does.
+9223372036854775806⌽1 2 3
+? the whole amount is reduced here, its low 32 bits there
 // `∪` is nub over ITEMS here, so a matrix is legal; GNU APL restricts
 // the monad to vectors.
 ∪2 3⍴1 2 3 1 2 3
@@ -66,13 +67,6 @@
 // other axis length, and `⌽`/`⌿` on the same shapes, are fine there.
 +\\2 1⍴⍳12
 ? scan keeps the shape here, drops a length-1 axis there
-// The neutral cell of `⌈` and `⌊` over no items: J's infinities against
-// GNU APL's largest representable magnitudes. Every other entry of the
-// identity table matches.
-⌈/⍳0
-? the neutral cell of ⌈ is ¯∞ here, ¯1.7976E308 there
-⌊/⍳0
-? the neutral cell of ⌊ is ∞ here, 1.7976E308 there
 // Both continue their functions past the reals the way J does — the
 // gamma pole and artanh 1 are signed infinities — where GNU APL stops
 // at DOMAIN ERROR.

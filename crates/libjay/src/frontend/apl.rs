@@ -459,12 +459,15 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         // `⊖` works on the leading axis; `⌽` is the same primitive applied to
-        // rows, which `verb_for` wraps in the rank that does it.
+        // rows, which `verb_for` wraps in the rank that does it. The DYAD
+        // takes its argument whole in both spellings: APL's rotate reads
+        // one amount per vector along the axis it moves, and picking the
+        // axis is the primitive's own job.
         '⊖' | '⌽' => Prim {
             name: if ch == '⊖' { "⊖" } else { "⌽" },
             monad: M::Reverse,
-            dyad: D::Rotate,
-            ranks: [RANK_INF, 1, RANK_INF],
+            dyad: D::RotateApl { last: ch == '⌽' },
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '⍪' => Prim {
             name: "⍪",
@@ -635,8 +638,10 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
 /// of rank 1 on the right, atoms on the left.
 fn verb_for(ch: char, d: Rules) -> Option<Verb> {
     let p = prim_for(ch, d)?;
+    // Monadic `⌽` is `⊖` on rows, which the rank operator supplies. The
+    // dyad picks its own axis, so it keeps its whole arguments.
     if ch == '⌽' {
-        return Some(Verb::Rank(Box::new(Verb::Prim(p)), [1, 0, 1]));
+        return Some(Verb::Rank(Box::new(Verb::Prim(p)), [1, RANK_INF, RANK_INF]));
     }
     Some(Verb::Prim(p))
 }
@@ -1087,9 +1092,14 @@ fn num_start(text: &str, i: usize) -> bool {
     false
 }
 
-/// One numeric literal. Returns its value, whether it needs floating point,
-/// and the byte index just past it.
-fn lex_number(text: &str, start: usize, offset: usize) -> Result<(f64, bool, usize)> {
+/// One numeric literal. Returns its value, the machine integer it is
+/// exactly (None where it needs floating point), and the byte index just
+/// past it.
+///
+/// The exact integer is not `value as i64`: every i64 above 2^53 rounds
+/// when it passes through a double, and `9223372036854775806⌽1 2 3` is a
+/// sentence the language answers.
+fn lex_number(text: &str, start: usize, offset: usize) -> Result<(f64, Option<i64>, usize)> {
     let mut i = start;
     let mut buf = String::new();
     let mut saw_dot = false;
@@ -1123,9 +1133,19 @@ fn lex_number(text: &str, start: usize, offset: usize) -> Result<(f64, bool, usi
             Span::new(offset + start, offset + i),
         )
     })?;
-    // `1e3` is the integer 1000; `1e¯3` and `2.5` are floats.
-    let float = saw_dot || v.fract() != 0.0 || v.abs() >= 9.0e18;
-    Ok((v, float, i))
+    // `1e3` is the integer 1000; `1e¯3` and `2.5` are floats. Digits alone
+    // are read as an integer straight from the text, so a value the double
+    // cannot hold exactly still arrives exact.
+    let exact = if saw_dot {
+        None
+    } else if let Ok(k) = buf.parse::<i64>() {
+        Some(k)
+    } else if v.fract() == 0.0 && v.abs() < 9.0e18 {
+        Some(v as i64)
+    } else {
+        None
+    };
+    Ok((v, exact, i))
 }
 
 fn take_digits(text: &str, mut i: usize, buf: &mut String) -> usize {
@@ -1144,12 +1164,13 @@ fn take_digits(text: &str, mut i: usize, buf: &mut String) -> usize {
 /// unless some literal needs floating point; a single literal is a scalar.
 fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, usize)> {
     let mut vals: Vec<crate::complex::Cx> = Vec::new();
+    let mut exacts: Vec<i64> = Vec::new();
     let mut any_float = false;
     let mut any_complex = false;
     let mut i = start;
     let mut end;
     loop {
-        let (v, float, mut next) = lex_number(text, i, offset)?;
+        let (v, exact, mut next) = lex_number(text, i, offset)?;
         let mut imag = 0.0;
         if let Some(c) = text[next..].chars().next() {
             // `3J4` is the rectangular form; `J` is not otherwise a
@@ -1162,7 +1183,10 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
             }
         }
         vals.push([v, imag]);
-        any_float |= float;
+        match exact {
+            Some(k) => exacts.push(k),
+            None => any_float = true,
+        }
         end = next;
         i = next;
         let mut k = i;
@@ -1180,7 +1204,7 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
     } else if any_float {
         Data::F64(vals.iter().map(|&v| v[0]).collect())
     } else {
-        Data::I64(vals.iter().map(|&v| v[0] as i64).collect())
+        Data::I64(exacts.into())
     };
     let shape = if data.len() == 1 { vec![] } else { vec![data.len()] };
     let tok = Token {
@@ -1820,8 +1844,16 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
 fn leading_axis_form(v: &Verb) -> Option<Verb> {
     match v {
         // `⌽` is `⊖` applied to rows; with an axis given the two agree.
-        Verb::Rank(inner, [1, 0, 1]) => leading_axis_form(inner),
-        Verb::Prim(p) if matches!(p.monad, MonadOp::Reverse) => Some(v.clone()),
+        Verb::Rank(inner, [1, RANK_INF, RANK_INF]) => leading_axis_form(inner),
+        // `AlongAxis` brings the named axis to the front, so the form under
+        // it always rotates the LEADING one, whichever glyph was written.
+        Verb::Prim(p) if matches!(p.monad, MonadOp::Reverse) => {
+            let mut p = *p;
+            if matches!(p.dyad, DyadOp::RotateApl { .. }) {
+                p.dyad = DyadOp::RotateApl { last: false };
+            }
+            Some(Verb::Prim(p))
+        }
         _ => None,
     }
 }
@@ -3206,7 +3238,7 @@ mod tests {
     #[case('∨', MonadOp::None, DyadOp::Scalar(ScalarDyad::Gcd))]
     #[case('⍟', MonadOp::Scalar(ScalarMonad::Ln), DyadOp::Scalar(ScalarDyad::Log))]
     #[case('~', MonadOp::Scalar(ScalarMonad::Not), DyadOp::Less)]
-    #[case('⊖', MonadOp::Reverse, DyadOp::Rotate)]
+    #[case('⊖', MonadOp::Reverse, DyadOp::RotateApl { last: false })]
     #[case('⍋', MonadOp::GradeUp { origin: 1 }, DyadOp::CollateGrade { down: false, origin: 1 })]
     #[case('⍒', MonadOp::GradeDown { origin: 1 }, DyadOp::CollateGrade { down: true, origin: 1 })]
     #[case('⊢', MonadOp::Same, DyadOp::Right)]
@@ -3265,13 +3297,14 @@ mod tests {
 
     #[test]
     fn reverse_and_rotate_pick_their_axis() {
-        // `⌽` is `⊖` on rows: the rank operator supplies the axis.
+        // `⌽` is `⊖` on rows: the rank operator supplies the axis for the
+        // MONAD, and the dyad picks the last axis itself.
         let e = one("⌽2 3⍴⍳6");
         match verb_of(&e) {
             Verb::Rank(f, ranks) => {
-                assert_eq!(*ranks, [1, 0, 1]);
+                assert_eq!(*ranks, [1, RANK_INF, RANK_INF]);
                 assert_eq!(as_prim(f).monad, MonadOp::Reverse);
-                assert_eq!(as_prim(f).dyad, DyadOp::Rotate);
+                assert_eq!(as_prim(f).dyad, DyadOp::RotateApl { last: true });
             }
             other => panic!("expected a ranked verb, got {other:?}"),
         }

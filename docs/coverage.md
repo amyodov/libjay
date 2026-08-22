@@ -1365,9 +1365,9 @@ oracle directly, one entry per line of
 
 - Monadic `÷` (APL reciprocal) of 0 currently follows J's rule (infinity)
   instead of raising a domain error like dyadic `÷`.
-- APL dyadic `⊖` with a vector left argument reads it as one amount per axis
-  (J's rule) rather than one amount per column. Scalar amounts, and `⌽` in
-  both valences, follow APL.
+- APL dyadic `⌽` and `⊖` reduce a large rotate amount whole; GNU APL
+  truncates it to a signed 32-bit integer first, so `9223372036854775806⌽1 2 3`
+  is `1 2 3` here and `2 3 1` there.
 - Grade puts NaN wherever the comparison lands rather than at a defined end.
 - A moving window of an associative verb (`+`, `*`, `<.`, `>.`) is folded in
   blocks rather than strictly right to left, which reorders the float
@@ -1428,9 +1428,6 @@ libjay follows J where APL2 stops at DOMAIN ERROR:
 
 - monadic `÷0` is `∞` and `⍟0` is `¯∞` (the first is already listed above).
 - `!¯1` is `∞` (the gamma pole) and `¯7○1` — artanh 1 — is `∞`.
-- the neutral cell of `⌈` and `⌊` over no items is `¯∞`/`∞`, where GNU APL
-  uses the largest representable magnitudes. Every other entry of the
-  identity table now matches both references exactly.
 
 libjay is more permissive:
 
@@ -1440,8 +1437,6 @@ libjay is more permissive:
 - monadic `↓`, monadic `⌷`, `⎕A`, `⎕D`, `∘`, `⍥`, `⍢` and `⌺` are not in
   GNU APL at all — no oracle, tested against hand-written expectations in
   tests/wave4.rs and tests/wave7.rs instead; see "Which APL" above.
-- dyadic `⊖` reads a vector left argument per axis, GNU APL per column
-  (already listed above).
 - `⍺←v` inside a dfn, and what a dfn's return value is — both in "Which
   APL" above, with the oracle-verified numbers.
 - a negative replication count inside a VECTOR left argument — see "Which
@@ -1449,6 +1444,13 @@ libjay is more permissive:
 
 libjay is stricter, or simply elsewhere:
 
+- a large rotate amount is reduced whole. GNU APL truncates the amount to a
+  signed 32-bit integer before reducing it modulo the axis, so
+  `9223372036854775806⌽1 2 3` is `1 2 3` here — the amount divides 3 — and
+  `2 3 1` there, which is the low 32 bits (`¯2`) reduced instead. Probed
+  over sixteen magnitudes around 2⋆52, 2⋆53 and 2⋆63; the truncation
+  accounts for every one and nothing else does. Everything the amount is
+  used for otherwise, `3|9223372036854775806` included, agrees exactly.
 - the nested DISPLAY is libjay's own: one space between items and one
   around the whole, where GNU APL spaces items more widely. Only the
   length of `⍕` makes the difference visible to the comparison, which

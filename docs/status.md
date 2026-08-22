@@ -282,7 +282,7 @@ conjunctions above:
 | `,` | 🟢 ravel | 🟢 catenate (last axis); a simple side joined to a nested one has its items enclosed |
 | `⍪` | 🟢 table | 🟢 catenate (leading axis); same |
 | `⌽` | 🟢 reverse | 🟢 rotate |
-| `⊖` | 🟢 reverse first | 🟡 rotate first; a vector left argument reads per axis |
+| `⊖` | 🟢 reverse first | 🟢 rotate first; one amount per column, as `⌽` takes one per row |
 | `⍉` | 🟢 transpose | 🟢 dyadic transpose; x says which axis of the result each axis of y becomes, and a repeated destination runs those axes together |
 | `↑` | 🟢 first | 🟢 take; overtaking a nested array fills with the first item's prototype |
 | `↓` | 🟡 no oracle: GNU APL has no monadic `↓`; Dyalog's split | 🟢 drop |

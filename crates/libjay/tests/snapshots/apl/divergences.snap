@@ -34,22 +34,10 @@
 < ¯∞
 > gnu: <error>
 > dyalog: <error>
-= 1 2⊖3 4⍴⍳12
-? left argument is per-axis here, per-column there
-<  7  8 5  6
-< 11 12 9 10
-<  3  4 1  2
-> gnu: <error>
-> dyalog: <error>
-= 1 ¯1 2 0⊖3 4⍴⍳12
-? left argument is per-axis here, per-column there
-< <error>
-> gnu: 5 10 11  4
-> gnu: 9  2  3  8
-> gnu: 1  6  7 12
-> dyalog: 5 10 11  4
-> dyalog: 9  2  3  8
-> dyalog: 1  6  7 12
+= 9223372036854775806⌽1 2 3
+? the whole amount is reduced here, its low 32 bits there
+< 1 2 3
+> gnu: 2 3 1
 = ∪2 3⍴1 2 3 1 2 3
 ? nub takes items of any rank here, vectors only there
 < 1 2 3
@@ -109,16 +97,6 @@
 > gnu: 1 2
 > dyalog: 1
 > dyalog: 2
-= ⌈/⍳0
-? the neutral cell of ⌈ is ¯∞ here, ¯1.7976E308 there
-< ¯∞
-> gnu: ¯1.7976E308
-> dyalog: ¯1.797693135E308
-= ⌊/⍳0
-? the neutral cell of ⌊ is ∞ here, 1.7976E308 there
-< ∞
-> gnu: 1.7976E308
-> dyalog: 1.797693135E308
 = !¯1
 ? the factorial of a negative integer is ∞ here, DOMAIN ERROR there
 < ∞
