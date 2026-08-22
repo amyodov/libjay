@@ -13,9 +13,11 @@
 //! key. `--impl` chooses which of them a run records, and recording one
 //! never disturbs another's answers.
 
+mod coverage;
 mod dyalog;
 mod fuzz;
 mod generate;
+mod inventory;
 mod oracle;
 
 use std::path::{Path, PathBuf};
@@ -41,6 +43,12 @@ jay-corpus — record what the reference interpreters answer to the corpus.
       --compare    run libjay and the oracle over them, report the mismatches
       --quiet      with --compare, the summary only
       --exprs FILE read the expressions from a corpus file instead
+  jay-corpus coverage <j|apl>           which primitive × operand cells the
+                                        recorded corpus exercises, and which
+                                        are empty
+      --top N      how many rows each section of the report prints
+      --json FILE  the whole measurement, machine-readable
+      --tsv FILE   the empty cells alone, one per line
   jay-corpus stats [j|apl]              corpus and snapshot sizes
       --dialect-diff  every expression whose recorded Dyalog answer differs
                       from libjay: the backlog of a future Dyalog dialect
@@ -68,6 +76,7 @@ fn run(args: &[String]) -> Result<(), String> {
         "record" => record(rest),
         "gen" => generate_corpus(rest),
         "fuzz" => fuzz_command(rest),
+        "coverage" => coverage_command(rest),
         "stats" => stats(rest),
         "-h" | "--help" | "help" => {
             println!("{USAGE}");
@@ -481,6 +490,52 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     println!("\n{total} expressions, {mismatches} mismatches ({:.1}%)", ratio(mismatches, total));
     for (label, n) in counts {
         println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));
+    }
+    Ok(())
+}
+
+/// Measure the corpus against the primitive × operand grid and report it.
+/// Nothing is run but libjay itself: no oracle, and nothing is written to
+/// the corpus or the snapshots.
+fn coverage_command(args: &[String]) -> Result<(), String> {
+    let mut positional: Vec<&String> = Vec::new();
+    let mut top = coverage::DEFAULT_TOP;
+    let mut json: Option<String> = None;
+    let mut tsv: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--top" => {
+                let value = it.next().ok_or("--top needs a number")?;
+                top = value.parse().map_err(|_| format!("--top {value:?}"))?;
+            }
+            "--json" => json = Some(it.next().ok_or("--json needs a file")?.clone()),
+            "--tsv" => tsv = Some(it.next().ok_or("--tsv needs a file")?.clone()),
+            other if other.starts_with("--") => return Err(format!("unknown option {other:?}")),
+            _ => positional.push(arg),
+        }
+    }
+    let lang = parse_lang(positional.first().copied())?;
+    // Classifying means running every operand subtree, and a subtree that
+    // panics is a measurement that stops rather than a run that ends. The
+    // panic is caught where it happens; the hook only keeps the noise off
+    // the report.
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let cov = coverage::measure_corpus(lang);
+    std::panic::set_hook(previous);
+
+    let inv = coverage::inventory_of(lang);
+    print!("{}", coverage::report(lang, &cov, &inv, top));
+    if let Some(path) = json {
+        std::fs::write(&path, coverage::json(lang, &cov, &inv))
+            .map_err(|e| format!("writing {path}: {e}"))?;
+        println!("\nthe whole measurement: {path}");
+    }
+    if let Some(path) = tsv {
+        std::fs::write(&path, coverage::tsv(lang, &cov))
+            .map_err(|e| format!("writing {path}: {e}"))?;
+        println!("the empty cells: {path}");
     }
     Ok(())
 }

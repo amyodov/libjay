@@ -13,5 +13,6 @@ name = "jay-corpus"
 path = "src/main.rs"
 
 [dependencies]
+libjay = { path = "../libjay" }
 libjay-testkit = { path = "../libjay-testkit" }
 rayon = "1.12.0"

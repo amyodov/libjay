@@ -519,6 +519,7 @@ dependencies = [
 name = "libjay-devtools"
 version = "0.2.1"
 dependencies = [
+ "libjay",
  "libjay-testkit",
  "rayon",
 ]

@@ -1904,3 +1904,69 @@ line": the queue of Dyalog features libjay does not ship (`⊇`, dfn
 error-guards `::`, `f⍣¯n`, namespaces, the utility quads), with two
 diagnostics gaps recorded — `⊇` parses as "unknown symbol" and `::` as a
 bare syntax error where the contract wants the named promise.
+
+## 2026-08-22 — Corpus coverage: measured, not assumed
+
+The corpus is a sample of a combinatoric space — verb × valence × operand
+type × operand rank × modifier — and nothing said which part of the space
+it sampled. `jay-corpus coverage <j|apl>` measures it.
+
+**Classified by evaluation, not by reading the text.** Each expression is
+compiled by libjay, the fusion pass is undone (`jay::fuse::unfused`, which
+leaves the tree the frontend built), and every operand subtree is RUN — as
+a program made of the sentences before it plus that subtree — so the class
+recorded is the class the primitive actually met. A lexical classifier
+would have had to call every computed operand "derived", which is most of
+them; running one costs a second over both corpora, and the numbers mean
+something. The price is that libjay is the instrument: a sentence libjay
+refuses is one the measurement cannot see into, and the count of those is
+printed (3 of 4665 in J, 1 of 1363 in APL).
+
+**Attribution is conservative on purpose.** A site is attributed only to
+primitives that provably receive the site's own arguments: through forks
+(both tines), `@:`, commute, fit, memo, obverse, adverse, and a power of
+at least one. Two modifiers carve a piece whose shape is still computable
+and are followed as such — a reduction hands its verb ITEMS, and `u"r`
+hands it r-cells — and those attributions are marked `on cells` rather
+than direct. Everything else (scan, each, key, cut, under, hooks, bonds)
+hands its operand something this measurement cannot name, so the site is
+counted as unattributable and appears in the operator table alone: 2344 of
+9224 sites in J, 205 of 2785 in APL. Claiming those cells would have been
+guessing.
+
+**The taxonomy.** 14 type-classes (bool, int, int-big, i64-edge, float,
+float-tol, float-inf, complex, extended, rational, char, box, box-nested,
+symbol) and 10 rank-classes (scalar, and vector/matrix/rank3+ each in a
+plain, a singleton-axis and an empty form), plus `refused` and `unknown`
+for what could not be run. There is no `mixed`: libjay's arrays are
+homogeneous and a heterogeneous value in either language is a box. An
+empty array of a type is the cross product of the two axes rather than a
+class of its own.
+
+**The denominator is the corpus's own reach**, not the full cross product.
+A cell counts as reachable when SOME primitive in the corpus is applied to
+it; J builds 53 distinct monadic operand classes and 169 dyadic pairs, APL
+30 and 125. The full product (140 monadic, 19 600 dyadic per valence) would
+have made every row look empty and said nothing about what the corpus could
+have covered. `docs/status.md` supplies the second denominator — the
+published vocabulary, one row per spelling — read by the tool, so a
+spelling the corpus never mentions is still counted. Parsing a document
+means the tool reports how many rows it read, and a format drift shows up
+as a number rather than as silence.
+
+**Blind spots, stated in the report rather than hidden.** Spellings the
+frontend rewrites into another form carry no node of their own — J's `&.`,
+`&.:`, `f.`, `!:`, `$.` — and are listed as not visible rather than as
+unexercised. The IR merges families that differ only by valence or by
+context (`@`/`@:`, `/`/`∘.`), so an operator row can answer for more than
+one spelling and says which. A definition body is walked once per place it
+is applied, and its operands are `unknown` because nothing can be run
+there.
+
+**What the first measurement said.** J: 68 primitives with an attributed
+monadic application and 64 with a dyadic one; `i.` is applied 1671 times
+and meets three of the 53 operand classes; `i64-edge` is reached by 2
+primitives, `int-big` by 3, `bool` by 4. APL: five type-classes — extended,
+rational, symbol, i64-edge, float-inf — are reached by NO primitive, and
+`rank3+-empty` by none either. 13 409 empty cells in J and 7381 in APL,
+written out by `--tsv` for a generation stage to consume.

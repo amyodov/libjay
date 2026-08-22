@@ -217,6 +217,36 @@ whose recorded answer is `<error>` on the reference side is a claim that the
 sentence is illegal in that language — check that it is, rather than pinning a
 typo.
 
+## Measuring the corpus
+
+The corpus is a sample of a combinatoric space, and `jay-corpus coverage`
+says which part of it the sample reaches:
+
+```
+cargo run -p libjay-devtools -- coverage j
+cargo run -p libjay-devtools -- coverage apl --tsv /tmp/empty.tsv
+```
+
+It runs no interpreter and writes nothing to the corpus. Every expression
+is compiled by libjay, the fusion pass is undone, and each operand subtree
+is run so that the type-class and rank-class recorded are the ones the
+primitive actually met. The report has four parts: the published
+vocabulary from `docs/status.md` with the spellings the corpus never
+mentions; a grid per valence, ordered so the primitives used often and
+narrowly come first; the classes fewest primitives ever reach; and the
+operator layer — for each modifier, the operand verbs and the noun classes
+it was applied to.
+
+A cell is one primitive in one valence meeting one operand class (a pair,
+for a dyad). The denominator is the corpus's own reach — the cells it
+builds for some primitive — not the full cross product, which would make
+every row look empty. `--json` writes the whole measurement and `--tsv`
+the empty cells alone, one per line, for a generation stage to read. What
+the measurement cannot see is printed rather than assumed: sentences
+libjay refuses, sites whose modifier hands its operand something not
+nameable here, and the spellings the frontend rewrites into another form.
+The reasoning is in `docs/decisions.md`.
+
 ## The rest of the suite
 
 `tests/eval.rs`, `coverage.rs`, `boxes.rs`, `definitions.rs`, `fuse.rs`,
@@ -253,5 +283,6 @@ What runs where, and why the split matters:
   and the replay. Shared by the tests and the recorder, so neither has a
   private copy of it. Not published.
 - `crates/libjay-devtools` — the `jay-corpus` binary: the subprocess logic for
-  both interpreters, the generators, and the recording commands. Not
-  published.
+  both interpreters, the generators, the recording commands, and the
+  coverage measurement (`coverage.rs`, with the vocabulary reader in
+  `inventory.rs`). Not published.
