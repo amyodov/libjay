@@ -77,9 +77,10 @@ Plain, factual prose everywhere. A docstring states the attached thing's
 contract and purpose — not design history, not its callers. Few meaningful
 commits. Linear history: a branch lands by rebase onto main and
 fast-forward (squash multi-commit work first) — never a merge commit.
-Self-contained work (docs, CI, devtools, corpus recording, SIMD, audits)
-runs in its own git worktree; engine core (verb.rs, frontends, fuse.rs)
-stays in the shared tree with at most two agents. A branch must pass the
+Every agent runs in its own git worktree on its own branch — dozens in
+parallel is fine when their scopes are disjoint; the orchestrator assigns
+non-overlapping scopes and lands branches serially (rebase resolves the
+rest). A branch must pass the
 full gate on its own before it lands — and ONLY THE ORCHESTRATOR LANDS IT:
 a subagent never merges, rebases onto main, fast-forwards main, or pushes;
 it reports its branch name and final commit. Decisions with reasoning go to docs/decisions.md, not here.

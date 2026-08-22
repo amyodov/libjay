@@ -2136,3 +2136,13 @@ is now the same on every run (72 of 295).
   had been J's in both languages, which silently poisoned everything
   downstream of an APL `≠` — two of the sweep's "they refuse" rows were GNU
   APL rejecting OUR shape.
+
+## 2026-08-22 — Every agent in its own worktree
+
+The "engine core stays in the shared tree, at most two agents" rule is
+retired. It was never truly parallel — one checkout holds one branch, as
+the day's own work proved when a second engine agent had to take a
+worktree anyway and landed cleanly. The real constraint is scope overlap,
+which is the same in any tree; the orchestrator assigns disjoint scopes,
+agents work in worktrees under .claude/worktrees/, and landing stays
+serial and orchestrator-only.
