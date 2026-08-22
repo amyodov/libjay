@@ -20,6 +20,7 @@ pub mod limits;
 mod par;
 mod rng;
 pub mod simd;
+pub mod symbol;
 pub mod verb;
 
 pub use array::{joins_made, layouts_made, Array, Buf, Data, Layout, Owner};

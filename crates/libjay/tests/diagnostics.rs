@@ -198,7 +198,7 @@ const J_PROMISES: &[Case] = &[
     j("+/ . * i. 17 17", ErrorKind::NotYet, "+/ . * i. 17 17", &["determinant"]),
     j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign 9!:18"]),
     j("m =. /\nm", ErrorKind::NotYet, "m", &["displaying a modifier"]),
-    j("s: 'a'", ErrorKind::NotYet, "s: 'a'", &["symbols"]),
+    j("0 s: s: <'a'", ErrorKind::NotYet, "0 s: s: <'a'", &["symbol-table form"]),
     j(
         "(0;(2 2 2 $ 0 0 1 4 0 1 1 0);(' ' = a.)) ;: 'a b'",
         ErrorKind::NotYet,

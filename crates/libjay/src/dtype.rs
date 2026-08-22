@@ -13,6 +13,9 @@ pub enum DType {
     /// A complex number, held as an interleaved `[re, im]` pair.
     Complex,
     Char,
+    /// An interned name (J `s:`). The element is an index into the
+    /// process-wide symbol table, not the text itself.
+    Symbol,
     /// A box: every element is itself an array (J `<`, APL `⊂`).
     Box,
 }
@@ -27,6 +30,7 @@ impl DType {
             DType::F64 => "float",
             DType::Complex => "complex",
             DType::Char => "character",
+            DType::Symbol => "symbol",
             DType::Box => "boxed",
         }
     }
@@ -55,6 +59,8 @@ impl DType {
             (Box, _) | (_, Box) => None,
             (Char, Char) => Some(Char),
             (Char, _) | (_, Char) => None,
+            (Symbol, Symbol) => Some(Symbol),
+            (Symbol, _) | (_, Symbol) => None,
             (Complex, _) | (_, Complex) => Some(Complex),
             (F64, _) | (_, F64) => Some(F64),
             (Rat, _) | (_, Rat) => Some(Rat),
@@ -85,5 +91,8 @@ mod tests {
     fn characters_and_boxes_mix_with_nothing() {
         assert_eq!(super::DType::promote(Char, Ext), None);
         assert_eq!(super::DType::promote(Box, Rat), None);
+        assert_eq!(super::DType::promote(Symbol, Char), None);
+        assert_eq!(super::DType::promote(Symbol, I64), None);
+        assert_eq!(super::DType::promote(Symbol, Symbol), Some(Symbol));
     }
 }

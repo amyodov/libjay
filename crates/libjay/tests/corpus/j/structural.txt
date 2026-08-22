@@ -161,3 +161,12 @@ $ 1 ,: 2
 1 2 ,: 3 4 5
 1 2 ,: i. 0
 'ab' ,: 'cd'
+
+// Dyadic `I.` searches an ordered list, and characters have an order.
+'ace' I. 'b'
+'ace' I. 'bd'
+'ace' I. 'a'
+'ace' I. 'z'
+'' I. 'a'
+'ace' I. 2 2 $ 'abcd'
+'ace' I. 1

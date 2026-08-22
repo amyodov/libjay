@@ -7,6 +7,20 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- J's symbols, `s:`. A symbol is an atom whose value is a name, and the same
+  text always gives the same symbol: `(s: <'a') = (s: <'a')` is 1 wherever
+  the two sentences stand. ``s: '`red`green`blue'`` makes three of them from a
+  delimited string, `s: ;: 'red green blue'` from boxed words, and a
+  character table gives one name per row. They compare, sort (by name, in
+  codepoint order), nub, search and index like any other data — `/:~`,
+  `~.`, `i.`, `e.`, `I.`, `{`, `#`, `,` and the rest — print as `` `red
+  `green `blue ``, and go into boxes. `4 s:` gives the names back as a
+  character table and `5 s:` as boxes; `3!:0` reports 65536. Python gets the
+  names as strings. Arithmetic on a symbol is a type error that names `5 s:`
+  as the way to its characters, and the `s:` forms that report on an
+  interpreter's own symbol table are named rather than guessed at.
+- Dyadic `I.` now searches character and symbol lists as well as numeric
+  ones: `'ace' I. 'bd'` is `1 2`.
 - The inner product: J's `u . v` and APL's `f.g`. `+/ . *` and `+.×` are
   the matrix product, `*./ . =` and `∧.=` ask which rows match, `<./ . +`
   and `⌊.+` take a shortest-path step, and any pair of functions works at

@@ -436,6 +436,10 @@ pub enum Data {
     /// pair of Arrow float columns all share.
     Complex(Buf<Cx>),
     Char(Buf<char>),
+    /// Symbols: every element is an index into the process-wide symbol
+    /// table (see [`crate::symbol`]), so the buffer is as flat and as
+    /// cheap to copy as one of integers and the names live once each.
+    Symbol(Buf<crate::symbol::Id>),
     /// Boxes: every element is a whole array. Foreign memory never holds
     /// these, so a boxed buffer is always owned and cloning it is a
     /// refcount bump like any other.
@@ -452,6 +456,7 @@ impl Data {
             Data::F64(_) => DType::F64,
             Data::Complex(_) => DType::Complex,
             Data::Char(_) => DType::Char,
+            Data::Symbol(_) => DType::Symbol,
             Data::Box(_) => DType::Box,
         }
     }
@@ -465,6 +470,7 @@ impl Data {
             Data::F64(v) => v.len(),
             Data::Complex(v) => v.len(),
             Data::Char(v) => v.len(),
+            Data::Symbol(v) => v.len(),
             Data::Box(v) => v.len(),
         }
     }
@@ -483,6 +489,7 @@ impl Data {
             Data::F64(v) => v.is_foreign(),
             Data::Complex(v) => v.is_foreign(),
             Data::Char(v) => v.is_foreign(),
+            Data::Symbol(v) => v.is_foreign(),
             Data::Box(v) => v.is_foreign(),
         }
     }
@@ -498,6 +505,7 @@ impl Data {
             Data::F64(v) => v.owner(),
             Data::Complex(v) => v.owner(),
             Data::Char(v) => v.owner(),
+            Data::Symbol(v) => v.owner(),
             Data::Box(v) => v.owner(),
         }
     }
@@ -511,6 +519,7 @@ impl Data {
             Data::F64(v) => Data::F64(v.slice(start, end)),
             Data::Complex(v) => Data::Complex(v.slice(start, end)),
             Data::Char(v) => Data::Char(v.slice(start, end)),
+            Data::Symbol(v) => Data::Symbol(v.slice(start, end)),
             Data::Box(v) => Data::Box(v.slice(start, end)),
         }
     }
@@ -524,6 +533,7 @@ impl Data {
             DType::F64 => Data::F64(Buf::new()),
             DType::Complex => Data::Complex(Buf::new()),
             DType::Char => Data::Char(Buf::new()),
+            DType::Symbol => Data::Symbol(Buf::new()),
             DType::Box => Data::Box(Buf::new()),
         }
     }
@@ -539,6 +549,7 @@ impl Data {
             Data::F64(v) => v.push(0.0),
             Data::Complex(v) => v.push(crate::complex::ZERO),
             Data::Char(v) => v.push(' '),
+            Data::Symbol(v) => v.push(crate::symbol::EMPTY),
             Data::Box(v) => v.push(Array::box_fill()),
         }
     }
@@ -554,6 +565,7 @@ impl Data {
             (Data::F64(a), Data::F64(b)) => a.push(b[i]),
             (Data::Complex(a), Data::Complex(b)) => a.push(b[i]),
             (Data::Char(a), Data::Char(b)) => a.push(b[i]),
+            (Data::Symbol(a), Data::Symbol(b)) => a.push(b[i]),
             (Data::Box(a), Data::Box(b)) => a.push(b[i].clone()),
             _ => {}
         }
@@ -568,6 +580,7 @@ impl Data {
             (Data::F64(a), Data::F64(b)) => a.extend_from_slice(b),
             (Data::Complex(a), Data::Complex(b)) => a.extend_from_slice(b),
             (Data::Char(a), Data::Char(b)) => a.extend_from_slice(b),
+            (Data::Symbol(a), Data::Symbol(b)) => a.extend_from_slice(b),
             (Data::Box(a), Data::Box(b)) => a.extend_from_slice(b),
             _ => return false,
         }
@@ -605,6 +618,7 @@ impl Data {
             DType::F64 => by!(F64, Buf::join_fast),
             DType::Complex => by!(Complex, Buf::join_fast),
             DType::Char => by!(Char, Buf::join),
+            DType::Symbol => by!(Symbol, Buf::join_fast),
             DType::Ext => by!(Ext, Buf::join),
             DType::Rat => by!(Rat, Buf::join),
             DType::Box => by!(Box, Buf::join),
@@ -703,6 +717,7 @@ impl Data {
             DType::F64 => by!(F64, weave),
             DType::Complex => by!(Complex, weave),
             DType::Char => by!(Char, weave),
+            DType::Symbol => by!(Symbol, weave),
             DType::Ext => by!(Ext, weave_cloned),
             DType::Rat => by!(Rat, weave_cloned),
             DType::Box => by!(Box, weave_cloned),
@@ -1035,7 +1050,7 @@ impl Array {
             Data::Rat(v) => Some(v.iter().map(|x| [x.to_f64(), 0.0]).collect()),
             Data::F64(v) => Some(v.iter().map(|&x| [x, 0.0]).collect()),
             Data::Complex(v) => Some(v.to_vec()),
-            Data::Char(_) | Data::Box(_) => None,
+            Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
 
@@ -1049,7 +1064,7 @@ impl Array {
             Data::F64(v) => Some(v.to_vec()),
             // A complex value is not a real one, even when its imaginary
             // part is zero: the caller wants a real and must ask for it.
-            Data::Complex(_) | Data::Char(_) | Data::Box(_) => None,
+            Data::Complex(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
 
@@ -1074,7 +1089,7 @@ impl Array {
                 }
                 Some(out)
             }
-            Data::Complex(_) | Data::Char(_) | Data::Box(_) => None,
+            Data::Complex(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
 }

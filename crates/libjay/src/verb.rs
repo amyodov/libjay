@@ -608,6 +608,10 @@ pub enum MonadOp {
     /// their codepoints. `pass_chars` is J's monad, which answers characters
     /// with themselves rather than converting them.
     Unicode { pass_chars: bool },
+    /// J `s:`: the argument's text as interned symbols. A character list
+    /// is cut on its own leading delimiter; a character table gives one
+    /// name per row; a boxed argument gives one name per box.
+    Symbols,
     /// J `;:`: J's own tokeniser over a character list, one box per word.
     Words,
     /// APL `⊆` (Dyalog): nest — enclose y unless it is already nested, or
@@ -791,6 +795,9 @@ pub enum DyadOp {
     /// J `x q: y`: the exponents of the first x primes in y, or, for `__`,
     /// the distinct primes over their exponents as a 2-row table.
     PrimeExponents,
+    /// J `x s:`: the numbered symbol forms. 4 gives the names as a padded
+    /// character table, 5 gives them as boxes.
+    SymbolForm,
     /// APL `x ⊃ y`: pick — follow the path x into y, opening a level a step.
     Pick { origin: i64 },
     /// APL `x \ y` and `x ⍀ y`: expand — a 1 in x takes the next item of y,
@@ -1744,6 +1751,7 @@ fn push_elem(dst: &mut Data, src: &Data, i: usize) {
         (Data::F64(a), Data::F64(b)) => a.push(b[i]),
         (Data::Complex(a), Data::Complex(b)) => a.push(b[i]),
         (Data::Char(a), Data::Char(b)) => a.push(b[i]),
+        (Data::Symbol(a), Data::Symbol(b)) => a.push(b[i]),
         (Data::Box(a), Data::Box(b)) => a.push(b[i].clone()),
         _ => debug_assert!(false, "push_elem across dtypes"),
     }
@@ -2130,6 +2138,14 @@ fn char_arith(span: Span) -> Error {
     Error::new(ErrorKind::Type, "cannot do arithmetic on characters", Some(span))
 }
 
+fn symbol_arith(span: Span) -> Error {
+    Error::new(
+        ErrorKind::Type,
+        "cannot do arithmetic on symbols; `5 s:` gives their names back",
+        Some(span),
+    )
+}
+
 fn box_arith(span: Span) -> Error {
     Error::new(
         ErrorKind::Type,
@@ -2143,6 +2159,7 @@ fn box_arith(span: Span) -> Error {
 fn wrong_type(d: DType, span: Span) -> Error {
     match d {
         DType::Box => box_arith(span),
+        DType::Symbol => symbol_arith(span),
         _ => char_arith(span),
     }
 }
@@ -2338,6 +2355,9 @@ fn as_f64<'a>(d: &'a Data, tmp: &'a mut Vec<f64>, span: Span) -> Result<&'a [f64
 fn arith_type(a: DType, b: DType, span: Span) -> Result<DType> {
     if a == DType::Box || b == DType::Box {
         return Err(box_arith(span));
+    }
+    if a == DType::Symbol || b == DType::Symbol {
+        return Err(symbol_arith(span));
     }
     match DType::promote(a, b) {
         Some(DType::Char) => Err(char_arith(span)),
@@ -3214,11 +3234,39 @@ fn float_dyad_data(
 /// always meet somewhere, however far apart the widths are.
 fn crossed_types(a: DType, b: DType) -> bool {
     let class = |d: DType| match d {
-        DType::Box => 2,
+        DType::Box => 3,
+        DType::Symbol => 2,
         DType::Char => 1,
         _ => 0,
     };
     class(a) != class(b)
+}
+
+/// `x <. y` and `x >. y` over symbols: the smaller or larger NAME of the
+/// pair, which is the only arithmetic a symbol has.
+#[allow(clippy::too_many_arguments)]
+fn symbol_min_max(
+    op: ScalarDyad,
+    x: &Data,
+    xoff: usize,
+    xdiv: usize,
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+    span: Span,
+) -> Result<Data> {
+    let (Data::Symbol(a), Data::Symbol(b)) = (x, y) else {
+        return Err(symbol_arith(span));
+    };
+    let down = op == ScalarDyad::Min;
+    let (out, _) = par::fill(n, |start, part: &mut [crate::symbol::Id]| {
+        zip_chunk(a, xoff, xdiv, b, yoff, ydiv, start, part, |p, q, slot| {
+            *slot = if crate::symbol::cmp(p, q).is_le() == down { p } else { q };
+            true
+        })
+    });
+    Ok(Data::Symbol(out.into()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3265,6 +3313,40 @@ fn compare_data(
                 *slot = u8::from(if op == Eq { e } else { !e });
             }
             true
+        });
+        return Ok(Data::Bool(out.into()));
+    }
+    if dx == DType::Symbol || dy == DType::Symbol {
+        // Equality across the boundary answered above; anything else here
+        // is an ordering that has nothing to order against.
+        if dx != dy {
+            return Err(Error::new(
+                ErrorKind::Type,
+                "cannot compare a symbol with data that is not a symbol",
+                Some(span),
+            ));
+        }
+        let (Data::Symbol(a), Data::Symbol(b)) = (x, y) else {
+            return Err(Error::internal("symbol comparison on non-symbol data"));
+        };
+        // Ordering reads the names; equality is index against index.
+        let (out, _) = par::fill(n, |start, part: &mut [u8]| {
+            zip_chunk(a, xoff, xdiv, b, yoff, ydiv, start, part, |p, q, slot| {
+                *slot = u8::from(match op {
+                    Eq => p == q,
+                    Ne => p != q,
+                    _ => {
+                        let o = crate::symbol::cmp(p, q);
+                        match op {
+                            Lt => o.is_lt(),
+                            Le => o.is_le(),
+                            Gt => o.is_gt(),
+                            _ => o.is_ge(),
+                        }
+                    }
+                });
+                true
+            })
         });
         return Ok(Data::Bool(out.into()));
     }
@@ -3594,7 +3676,9 @@ fn to_rat_vec(d: &Data) -> Option<Vec<Rat>> {
         Data::I64(v) => v.iter().map(|&x| Rat::from_int(Ext::from(x))).collect(),
         Data::Ext(v) => v.iter().map(|x| Rat::from_int(x.clone())).collect(),
         Data::Rat(v) => v.to_vec(),
-        Data::F64(_) | Data::Complex(_) | Data::Char(_) | Data::Box(_) => return None,
+        Data::F64(_) | Data::Complex(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => {
+            return None;
+        }
     })
 }
 
@@ -3790,7 +3874,7 @@ fn to_exact(y: &Array, span: Span) -> Result<Array> {
             }
             exact_data(DType::Ext, out)
         }
-        Data::Complex(_) | Data::Char(_) | Data::Box(_) => {
+        Data::Complex(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => {
             return Err(Error::domain(
                 format!("x: needs real numbers, not {} data", y.dtype().name()),
                 span,
@@ -3894,6 +3978,18 @@ fn scalar_dyad_data(
     span: Span,
 ) -> Result<Data> {
     use ScalarDyad::*;
+    if x.dtype() == DType::Symbol || y.dtype() == DType::Symbol {
+        match op {
+            // Comparison takes the path below, which knows symbols.
+            Eq | Ne | Lt | Le | Gt | Ge => {}
+            // `<.` and `>.` are the smaller and the larger of two names,
+            // and a name has an order, so they answer a symbol.
+            Min | Max => {
+                return symbol_min_max(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
+            }
+            _ => return Err(symbol_arith(span)),
+        }
+    }
     if matches!(op, Eq | Ne | Lt | Le | Gt | Ge) {
         return compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span);
     }
@@ -4454,6 +4550,8 @@ fn elem_key(d: &Data, i: usize) -> u64 {
         }
         Data::Complex(v) => cx_key(v[i]),
         Data::Char(v) => v[i] as u64,
+        // A symbol IS its table index, so the index is the key.
+        Data::Symbol(v) => v[i] as u64,
         // Neither a box nor an exact value has a cheap key; their callers
         // compare them by content.
         Data::Ext(_) | Data::Rat(_) | Data::Box(_) => 0,
@@ -4472,6 +4570,7 @@ fn num_key(d: &Data, i: usize) -> u64 {
         }
         Data::Complex(v) => cx_key(v[i]),
         Data::Char(v) => v[i] as u64,
+        Data::Symbol(v) => v[i] as u64,
         // As in `elem_key`: never reached for boxed or exact data.
         Data::Ext(_) | Data::Rat(_) | Data::Box(_) => 0,
     }
@@ -4550,17 +4649,20 @@ impl Tao {
     }
 
     /// The type class compared before the atoms: J puts numeric first,
-    /// then symbol (which libjay has not), then character, then boxed;
-    /// APL2 puts character first, then numeric, then nested.
+    /// then symbol, then character, then boxed; APL2 puts character first,
+    /// then numeric, then nested. APL has no symbols of its own, so a
+    /// symbol that reaches an APL grade sorts with the characters it is
+    /// made of names of.
     fn class(self, dt: DType) -> u8 {
         match self {
             Tao::J => match dt {
+                DType::Symbol => 1,
                 DType::Char => 2,
                 DType::Box => 3,
                 _ => 0,
             },
             Tao::Apl2 => match dt {
-                DType::Char => 0,
+                DType::Char | DType::Symbol => 0,
                 DType::Box => 2,
                 _ => 1,
             },
@@ -4704,6 +4806,9 @@ fn cmp_items(d: &Data, i: usize, j: usize, m: usize, tao: Tao) -> std::cmp::Orde
             .unwrap_or(Equal)
             .then_with(|| v[a + k][1].partial_cmp(&v[b + k][1]).unwrap_or(Equal)),
         Data::Char(v) => v[a + k].cmp(&v[b + k]),
+        // Symbols order by the NAME behind the index, not by the order
+        // the two names happened to be interned in.
+        Data::Symbol(v) => crate::symbol::cmp(v[a + k], v[b + k]),
         // The exact types order by value, however they are spelled: `2r4`
         // grades exactly where `1r2` does.
         Data::Ext(v) => v[a + k].cmp(&v[b + k]),
@@ -4936,6 +5041,12 @@ pub(crate) fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
             (Data::Char(a), Data::Char(b)) => a.as_slice() == b.as_slice(),
             _ => false,
         },
+        // Two symbols are the same symbol exactly when they carry the same
+        // table index, which is the whole point of interning them.
+        Some(DType::Symbol) => match (&x.data, &y.data) {
+            (Data::Symbol(a), Data::Symbol(b)) => a.as_slice() == b.as_slice(),
+            _ => false,
+        },
         Some(DType::F64) => {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
             let a = borrow_f64(&x.data, &mut ta);
@@ -5010,7 +5121,9 @@ fn member_apl(x: &Array, y: &Array, tol: Tol) -> Array {
             .collect();
         return Array::new(x.shape.clone(), Data::Bool(out.into()));
     }
-    if (x.dtype() == DType::Char) != (y.dtype() == DType::Char) {
+    if x.dtype() != y.dtype()
+        && [x.dtype(), y.dtype()].iter().any(|&d| matches!(d, DType::Char | DType::Symbol))
+    {
         return Array::new(x.shape.clone(), Data::Bool(vec![0u8; n].into()));
     }
     if tol.ct != 0.0
@@ -5329,7 +5442,7 @@ fn narrow(values: Vec<f64>, integral: bool) -> Data {
 
 /// True when the array holds whole numbers only.
 fn is_integral(a: &Array) -> bool {
-    !matches!(a.dtype(), DType::F64 | DType::Rat | DType::Char)
+    !matches!(a.dtype(), DType::F64 | DType::Rat | DType::Char | DType::Symbol)
 }
 
 /// The decode of exact digits in exact radices, accumulated in the exact
@@ -6204,6 +6317,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         MonadOp::SelfClassify => Ok(self_classify(y, ctx.cfg.tol)),
         MonadOp::NubSieve => Ok(nub_sieve(y, ctx.cfg.tol)),
         MonadOp::Unicode { pass_chars } => unicode(y, pass_chars, span),
+        MonadOp::Symbols => to_symbols(y, span),
         MonadOp::Words => words(y, span),
         MonadOp::LevelOf => Ok(Array::scalar_i64(boxing_level(y))),
         MonadOp::MapPaths => Ok(map_paths(y)),
@@ -6414,7 +6528,10 @@ fn prototype_of(y: &Array) -> Option<Array> {
             let inner: Vec<Array> = items.iter().map(zeroed).collect();
             return Array::new(a.shape.clone(), Data::Box(inner.into()));
         }
-        let dtype = if a.dtype() == DType::Char { DType::Char } else { DType::I64 };
+        let dtype = match a.dtype() {
+            DType::Char | DType::Symbol => a.dtype(),
+            _ => DType::I64,
+        };
         Array::new(a.shape.clone(), fill_data(dtype, a.count()))
     }
     let first = y.as_boxes()?.first()?;
@@ -6550,6 +6667,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
             find_seq(x, y, tol, cfg.rules.lang == crate::Lang::Apl, span)
         }
         DyadOp::UnicodeForm => unicode_form(x, y, span),
+        DyadOp::SymbolForm => symbol_form(x, y, span),
         DyadOp::PrimeMeta => prime_meta(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::PrimeExponents => prime_exponents(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Pick { origin } => pick(x, y, origin, span),
@@ -6938,7 +7056,7 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
         Data::Bool(v) => Some(Data::I64(fold_i64(op, v.as_slice(), n, m)?.into())),
         // A bignum has no blockwise form: the exact types fold, scan and
         // window through the general path, one step at a time.
-        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
 }
 
@@ -7027,7 +7145,7 @@ fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> 
         )),
         // Booleans reduce as integers, and are promoted where they are read.
         Data::Bool(v) => Some(Data::I64(fold_runs_i64(op, v.as_slice(), n, m)?.into())),
-        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
 }
 
@@ -7178,7 +7296,7 @@ fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Optio
             )
             .into(),
         )),
-        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
 }
 
@@ -7304,7 +7422,7 @@ fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Optio
             )
             .into(),
         )),
-        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
 }
 
@@ -7628,7 +7746,7 @@ fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Optio
         Data::Bool(v) => Some(ints(op, v.as_slice(), n, m, back)),
         // A bignum has no blockwise form: the exact types fold, scan and
         // window through the general path, one step at a time.
-        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
 }
 
@@ -8019,7 +8137,7 @@ fn window_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, w: usize) -> Optio
         Data::Bool(v) => Some(ints(op, v.as_slice(), n, m, w)),
         // A bignum has no blockwise form: the exact types fold, scan and
         // window through the general path, one step at a time.
-        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => None,
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
 }
 
@@ -8347,6 +8465,11 @@ fn interval_index(
     tol: Tol,
     span: Span,
 ) -> Result<Array> {
+    // Characters and symbols have an order of their own, and no tolerance:
+    // the bounds are searched by that order instead of by value.
+    if !x.dtype().is_numeric() || !y.dtype().is_numeric() {
+        return ordered_interval_index(x, y, offset, closed, span);
+    }
     let bounds = x
         .to_f64_vec()
         .ok_or_else(|| Error::domain("interval index needs numeric bounds", span))?;
@@ -8363,6 +8486,47 @@ fn interval_index(
             offset + count.count() as i64
         })
         .collect();
+    Ok(Array::new(y.shape.clone(), Data::I64(out.into())))
+}
+
+/// [`interval_index`] over the element types that are ordered but not
+/// numeric. Both sides must be the same type — a character bound has
+/// nothing to say about where a symbol falls.
+fn ordered_interval_index(
+    x: &Array,
+    y: &Array,
+    offset: i64,
+    closed: bool,
+    span: Span,
+) -> Result<Array> {
+    let (xr, yr) = (x.to_row_major(), y.to_row_major());
+    let (bounds, vals) = (&xr.data, &yr.data);
+    let cmp = |i: usize, j: usize| -> Option<std::cmp::Ordering> {
+        match (bounds, vals) {
+            (Data::Char(p), Data::Char(q)) => Some(p[i].cmp(&q[j])),
+            (Data::Symbol(p), Data::Symbol(q)) => Some(crate::symbol::cmp(p[i], q[j])),
+            _ => None,
+        }
+    };
+    let mut out = Vec::with_capacity(y.count());
+    for j in 0..y.count() {
+        let mut count = 0i64;
+        for i in 0..x.count() {
+            let ord = cmp(i, j).ok_or_else(|| {
+                Error::domain(
+                    format!(
+                        "interval index compares {} bounds with {} values",
+                        x.dtype().name(),
+                        y.dtype().name()
+                    ),
+                    span,
+                )
+            })?;
+            // APL counts a bound EQUAL to the value, J does not.
+            count += i64::from(if closed { ord.is_le() } else { ord.is_lt() });
+        }
+        out.push(offset + count);
+    }
     Ok(Array::new(y.shape.clone(), Data::I64(out.into())))
 }
 
@@ -11868,6 +12032,112 @@ fn unicode_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
     }
 }
 
+/// `s: y`: the argument's text, interned.
+///
+/// A character list carries its own delimiter in its first position, so
+/// the two names of a list that begins with a backtick are what stands
+/// between the backticks, and `s: 'a b'` is the one name `" b"`; the empty
+/// list has no delimiter and no names. A character table gives one name per
+/// row, trailing blanks trimmed, and its leading axes are the result's
+/// shape. A boxed argument gives one name per box, the characters taken
+/// exactly as they stand — a box is where a name with a trailing blank
+/// comes from.
+fn to_symbols(y: &Array, span: Span) -> Result<Array> {
+    if let Some(boxes) = y.as_boxes() {
+        let mut ids = Vec::with_capacity(boxes.len());
+        for b in boxes {
+            if b.rank() > 1 {
+                return Err(Error::new(
+                    ErrorKind::Rank,
+                    "a boxed symbol name is a character list",
+                    Some(span),
+                ));
+            }
+            let row_major = b.to_row_major();
+            let Data::Char(v) = &row_major.data else {
+                if b.count() == 0 {
+                    ids.push(crate::symbol::EMPTY);
+                    continue;
+                }
+                return Err(Error::domain("a symbol is made from characters", span));
+            };
+            ids.push(crate::symbol::intern(&v.as_slice().iter().collect::<String>()));
+        }
+        return Ok(Array::new(y.shape.clone(), Data::Symbol(ids.into())));
+    }
+    let row_major = y.to_row_major();
+    let Data::Char(v) = &row_major.data else {
+        return Err(Error::domain(
+            format!("s: makes symbols from characters, not {} data", y.dtype().name()),
+            span,
+        ));
+    };
+    let chars = v.as_slice();
+    if y.rank() >= 2 {
+        let width = y.shape[y.rank() - 1];
+        let mut ids = Vec::with_capacity(chars.len() / width.max(1));
+        for row in chars.chunks(width) {
+            let name: String = row.iter().collect();
+            ids.push(crate::symbol::intern(name.trim_end_matches(' ')));
+        }
+        return Ok(Array::new(y.shape[..y.rank() - 1].to_vec(), Data::Symbol(ids.into())));
+    }
+    let Some((&delim, rest)) = chars.split_first() else {
+        return Ok(Array::new(vec![0], Data::empty(DType::Symbol)));
+    };
+    let mut ids = Vec::new();
+    let mut name = String::new();
+    for &c in rest {
+        if c == delim {
+            ids.push(crate::symbol::intern(&name));
+            name.clear();
+        } else {
+            name.push(c);
+        }
+    }
+    ids.push(crate::symbol::intern(&name));
+    Ok(Array::new(vec![ids.len()], Data::Symbol(ids.into())))
+}
+
+/// `x s: y`: the numbered symbol forms. 4 lays the names out as a character
+/// table, blank-padded to the longest, and 5 boxes them one apiece. The
+/// remaining numbers J defines report on its own symbol table — how many
+/// slots it holds, which are in use, how it hashes them — and describe an
+/// interpreter's internals rather than the language.
+fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let form = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a symbol form is an integer", span))?
+        .first()
+        .copied()
+        .unwrap_or(0);
+    if !matches!(form, 4 | 5) {
+        return Err(Error::not_yet(format!("the symbol-table form ({form} s:)"), span));
+    }
+    let row_major = y.to_row_major();
+    let Data::Symbol(ids) = &row_major.data else {
+        return Err(Error::domain(
+            format!("{form} s: reads symbols, not {} data", y.dtype().name()),
+            span,
+        ));
+    };
+    let names = crate::symbol::names(ids.as_slice());
+    if form == 5 {
+        let boxes: Vec<Array> =
+            names.iter().map(|n| Array::from_chars(n.chars().collect())).collect();
+        return Ok(Array::new(y.shape.clone(), Data::Box(boxes.into())));
+    }
+    let width = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
+    let mut out: Vec<char> = Vec::with_capacity(names.len() * width);
+    for n in &names {
+        out.extend(n.chars());
+        out.resize(out.len() + width - n.chars().count(), ' ');
+    }
+    let mut shape = y.shape.clone();
+    shape.push(width);
+    Ok(Array::new(shape, Data::Char(out.into())))
+}
+
 /// `L. y`: how deep the boxing goes. Anything unboxed is level 0.
 fn boxing_level(y: &Array) -> i64 {
     match y.as_boxes() {
@@ -12166,6 +12436,7 @@ fn type_code(y: &Array) -> i64 {
         DType::Box => 32,
         DType::Ext => 64,
         DType::Rat => 128,
+        DType::Symbol => 65536,
     }
 }
 

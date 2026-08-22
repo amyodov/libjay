@@ -341,7 +341,8 @@ fn check_agreement(columns: &[Column]) -> PyResult<()> {
             DType::F64 => 4,
             DType::Complex => 5,
             DType::Char => 6,
-            DType::Box => 7,
+            DType::Symbol => 7,
+            DType::Box => 8,
         })
         .expect("at least one column");
     let Some(odd) = columns.iter().position(|c| c.data.dtype() != widest) else {
@@ -371,6 +372,7 @@ fn arrow_name_for(dtype: DType) -> &'static str {
         DType::Ext => "an arbitrary-precision integer column",
         DType::Rat => "a rational column",
         DType::Char => "Utf8",
+        DType::Symbol => "a symbol column, which Arrow has no carrier for",
         DType::Box => "a nested column",
     }
 }
@@ -801,6 +803,12 @@ pub fn export_capsules<'py>(
     py: Python<'py>,
     array: &Array,
 ) -> PyResult<(Bound<'py, PyCapsule>, Bound<'py, PyCapsule>)> {
+    if array.dtype() == DType::Symbol {
+        return Err(JayError::new_err(
+            "Arrow has no carrier for symbols; use .tolist() for their names, \
+             or convert with `5 s:` first",
+        ));
+    }
     if array.dtype().is_exact() {
         return Err(JayError::new_err(format!(
             "Arrow has no carrier for {} values; use .tolist() for exact \
@@ -844,7 +852,7 @@ pub fn export_capsules<'py>(
                 .map_err(arrow_err)?,
             )
         }
-        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Box(_) => {
+        Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => {
             unreachable!("refused above")
         }
     };

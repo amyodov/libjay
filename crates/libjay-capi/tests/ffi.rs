@@ -275,6 +275,17 @@ fn a_runtime_error_points_at_the_source() {
 }
 
 #[test]
+fn a_symbol_result_is_refused_by_name() {
+    // A symbol is an index into a table this ABI cannot hand over; the
+    // refusal names the conversion that does cross.
+    let prog = compile_ok("s: ;: 'a b'", "j");
+    let msg = run(prog, &[]).unwrap_err();
+    assert!(msg.contains("symbol results are not in the C ABI yet"), "{msg}");
+    assert!(msg.contains("5 s:"), "{msg}");
+    unsafe { jay_program_free(prog) };
+}
+
+#[test]
 fn an_unknown_language_is_named() {
     let msg = compile("1 + 1", "k", -1).unwrap_err();
     assert!(msg.contains("unknown language: k"), "{msg}");

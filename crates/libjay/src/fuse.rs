@@ -1257,7 +1257,7 @@ fn dyad_type(op: ScalarDyad, a: DType, b: DType) -> Option<DType> {
         DivJ => Some(DType::F64),
         Add | Sub | Mul | Min | Max | Residue => match DType::promote(a, b)? {
             DType::Bool => Some(DType::I64),
-            DType::Char => None,
+            DType::Char | DType::Symbol => None,
             t => Some(t),
         },
         _ => None,
@@ -2320,7 +2320,12 @@ fn splat_f64(a: &Array, w: usize) -> Option<Vec<f64>> {
         Data::Bool(d) => d[0] as f64,
         Data::I64(d) => d[0] as f64,
         Data::F64(d) => d[0],
-        Data::Ext(_) | Data::Rat(_) | Data::Complex(_) | Data::Char(_) | Data::Box(_) => {
+        Data::Ext(_)
+        | Data::Rat(_)
+        | Data::Complex(_)
+        | Data::Char(_)
+        | Data::Symbol(_)
+        | Data::Box(_) => {
             return Some(Vec::new());
         }
     };

@@ -441,3 +441,18 @@
 = 'ab' ,: 'cd'
 > j: ab
 > j: cd
+= 'ace' I. 'b'
+> j: 1
+= 'ace' I. 'bd'
+> j: 1 2
+= 'ace' I. 'a'
+> j: 0
+= 'ace' I. 'z'
+> j: 3
+= '' I. 'a'
+> j: 0
+= 'ace' I. 2 2 $ 'abcd'
+> j: 0 1
+> j: 1 2
+= 'ace' I. 1
+> j: <error>

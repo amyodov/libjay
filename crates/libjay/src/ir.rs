@@ -513,6 +513,9 @@ fn is_true(a: &Array, span: Span) -> Result<bool> {
         Data::Ext(v) => Ok(v.as_slice()[0] != crate::exact::Ext::default()),
         Data::Rat(v) => Ok(!v.as_slice()[0].is_zero()),
         Data::Box(_) => Err(Error::domain("a condition must be numeric, not boxed", span)),
+        Data::Symbol(_) => {
+            Err(Error::domain("a condition must be numeric, not a symbol", span))
+        }
     }
 }
 

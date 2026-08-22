@@ -75,13 +75,14 @@ feature — that is a promise, not a refusal.
 | `\|:` | transpose (reverse axes) | dyadic transpose: the axes x names move to the END in that order and the rest keep their order in front; a BOXED x groups axes, and the axes of one group are run together, which is the diagonal. An axis named twice is an index error, as it is in the reference |
 | `i.` | integers (negative axis = reversed) | index of (absent gives the item count) |
 | `i:` | steps: `-y` to `y` one apart, `1 + <. 2 * \| y` of them; a negative y counts down | index of the LAST occurrence (absent gives the item count) |
-| `I.` | indices: index `i` repeated `y[i]` times (rank 1, so a table frames the rows) | interval index: how many items of the ascending x are strictly below each cell |
+| `I.` | indices: index `i` repeated `y[i]` times (rank 1, so a table frames the rows) | interval index: how many items of the ascending x are strictly below each cell. Characters and symbols have an order of their own and are searched by it; the two sides must be the same kind |
 | `e.` | raze-in: for every element of y, which items of `; y` it holds — the answer is shaped `($y), #items of the raze` | member: cells of x shaped like items of y |
 | `E.` | — | find: 1 at each position of y where a copy of x begins, shaped like y's items; a pattern longer than y matches nowhere |
 | `A.` | anagram index: where the permutation y's items RANK as stands among the permutations of that length, lexicographically | the x-th permutation of y's items; a negative x counts back from the last. Characters have no anagram index monadically, as in J |
 | `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation, and one shorter than y applies to y's leading items with the rest brought round to the front (`0 1 C. 'abcde'` is `cdeab`). An atom left argument is a named gap |
 | `u:` | codepoints become characters; characters are answered with themselves | form 3 gives codepoints, form 10 gives the characters they name; the byte-oriented forms are a named gap |
 | `;:` | words: J's own tokeniser over a string, one box per word. A run of numeric literals separated by blanks is ONE word (`;: '1 2 3'` has one), `NB.` swallows the rest of the line, and an unclosed quote is a parse error | the sequential machine — see below |
+| `s:` | symbols: the argument's text, interned. A character LIST carries its own delimiter in its first position, so ``s: '`a`b'`` is the two symbols `` `a `` and `` `b `` while `s: 'a b'` is the one name `" b"`, and the empty list has no delimiter and no names. A character TABLE gives one name per row with trailing blanks trimmed, the leading axes becoming the result's shape. A BOXED argument gives one name per box, the characters taken exactly as they stand — trailing blank and all. Anything else is a domain error; a box holding a rank-2 array is a rank error | the name forms: `4 s:` lays the names out as a character table, blank-padded to the longest (the shape gains that width as a trailing axis), and `5 s:` boxes them one apiece, keeping the shape. `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report on an interpreter's own symbol table — how many slots it holds, which are in use, how it hashes them — and are named gaps rather than guesses |
 | `L.` | the boxing level: 0 for anything unboxed, one more than the deepest content otherwise. APL's `≡` counts the array itself as well, so the two differ by one on a simple array | — |
 | `".` | do: the characters are compiled as a J program and run HERE, over the names the sentence itself can see — `". 'a =. 3'` assigns in the surrounding scope. A `{name}` hole inside the string has nothing to bind to and is refused | the numbers a line of text spells: the line is split at blanks and every word read as a J numeric literal, with the atom x standing in for a word that is not one. One word gives a scalar, as reading that line as a noun would, and several give a vector of that many. The right rank is 1, so a character matrix is read a row at a time and the rows framed with fills |
 | `%.` | matrix inverse — the least-squares pseudo-inverse of a taller matrix; a wider one is refused, a singular one is a domain error | matrix divide: the least-squares solution of `y a = x` |
@@ -92,7 +93,7 @@ feature — that is a promise, not a refusal.
 | `?` | roll: a random value below each element (`? 0` is a uniform double) | deal: x distinct values from `i. y` |
 | `?.` | roll from a fixed seed, restarted on every invocation | deal from that fixed seed |
 | `{::` | the map: y's box structure with every leaf replaced by the path that fetches it — a boxed list of one index per level descended, empty where the level is a boxed scalar | fetch: follow the path x into y, opening one level a step |
-| `/:` | grade up (stable permutation). A BOXED argument orders by J's total array ordering: the type class (numeric, then character, then boxed — and an empty array takes the lowest class whatever its type), then the rank, then the shape read with the LAST axis most significant, then the atoms in row-major order, a boxed atom recursively | x's items in the ascending order of y's |
+| `/:` | grade up (stable permutation). A BOXED argument orders by J's total array ordering: the type class (numeric, then symbol, then character, then boxed — and an empty array takes the lowest class whatever its type), then the rank, then the shape read with the LAST axis most significant, then the atoms in row-major order, a boxed atom recursively | x's items in the ascending order of y's |
 | `\:` | grade down (stable permutation), the same ordering read backwards | x's items in the descending order of y's |
 | `]` `[` | same | right / left |
 | `echo` | print (formatted) | — |
@@ -913,6 +914,48 @@ carry the argument's exactness into their answer, as J does: a count of an
 extended or rational argument is an extended integer, and a count of a
 machine one stays machine.
 
+## Symbols
+
+A symbol is an atom whose value is a NAME. `s:` is the only way to make
+one: see the `s:` row above for what each shape of argument means.
+
+Two symbols made from the same text are the same atom, whatever sentence,
+program or thread made them — `(s: <'a') = (s: <'a')` is 1 — so the text
+lives once in a process-wide table and an array of symbols is an array of
+`u32` indices into it. That makes a symbol array flat: it copies, slices,
+reshapes and indexes exactly as an integer array does, and equality is a
+comparison of indices rather than of strings. The table is append-only, so
+an index names the same text for the life of the process; it never shrinks,
+which is the same bargain J's own symbol table makes.
+
+The INDEX is opaque. Symbols order by their TEXT, in codepoint order, so
+every comparison and every grade resolves the table first: `` `A `` sorts
+before `` `a ``, `` `a `` before `` `aa ``, and the order two names were
+interned in says nothing about which comes first.
+
+**What symbols do.** `= ~: -: < <: > >: <. >.` (the orderings read the
+names; `<.` and `>.` answer the smaller and the larger name), `/: \:`,
+`~. ~: i. e. I. { # , $ |. |:` and the rest of the structural verbs, `":`,
+boxing, and `3!:0`, which reports 65536. The fill element is the EMPTY
+symbol, so `4 {. s: ;: 'a b'` is `` `a `b ` ` ``.
+
+**What they do not.** Arithmetic — a symbol is not a number, and `+` on one
+is a type error naming `5 s:` as the way to its characters. A symbol mixes
+with nothing else: catenating one to a character, a number or a box is a
+type error. Equality across the boundary is still TOTAL, as J's is:
+`(s: <'a') = 'a'` is 0, not a complaint, because nothing but a symbol is
+one. Fusion and the GPU decline symbols for the same reason they decline
+characters — there is no arithmetic to compile.
+
+**At the boundaries.** Python gets the names as `str`: a symbol atom is a
+string and `.tolist()` of a symbol array is a list of them. There is no
+carrier going the other way — a Python `str` arrives as a character array,
+and `s:` inside the expression is how one becomes a symbol. Arrow has no
+symbol type, so exporting one is refused by name. The C ABI has no
+descriptor for a table index either, and says so, naming `5 s:`.
+
+APL has no symbol of its own, and `s:` is not one of its spellings.
+
 ## Comparison tolerance
 
 Both languages compare reals with a relative tolerance, and libjay carries
@@ -1415,11 +1458,12 @@ sections above is also collected here.
   Recursion inside the derived verb's own body, by `$:` or by a verb's name,
   works as it does anywhere else. `13 : '…'` and `{{)n` are gaps too.
 - Named on their own, beyond what
-  the tables above already mark "not supported yet": J's `s:` (symbols) and
-  `$.` (sparse), which are STORAGE KINDS rather than verbs — an interned
-  string and a sparse layout — and are the 0.3 type work rather than a
-  primitive each; a determinant by minors of more than 16 rows (the
-  expansion is exponential, and only `-/ . *` over machine numbers has a
+  the tables above already mark "not supported yet": J's `$.` (sparse),
+  which is a STORAGE KIND rather than a verb — a layout, not a primitive —
+  and is the last of the 0.3 type work; the symbol-table forms of `s:`
+  (`0 s:` … `3 s:`, `6 s:`, `7 s:`, `_1 s:`), which describe an
+  interpreter's own table rather than the language; a determinant by minors
+  of more than 16 rows (the expansion is exponential, and only `-/ . *` over machine numbers has a
   direct method); the two vector output codes of the sequential machine and
   its map over a numeric argument; a NEGATIVE block size in a tessellation
   with the movement row left implicit; the atomic representation of a
@@ -1454,7 +1498,8 @@ sections above is also collected here.
   out of text (dyadic `".`). J's gerunds are boxed data now, so `` ` ``,
   `@.` and `` `: `` all read the same atomic representations. Boxes and
   complex numbers are both implemented; bigints and rationals (the exact
-  types) are too — see "The numeric tower and the exact types" above.
+  types) are too — see "The numeric tower and the exact types" above — and
+  so are symbols, see "Symbols".
 - Complex numbers reach every scalar verb, the reductions, the scans and
   the structural verbs. They do NOT reach: `!` (the gamma function of a
   complex argument), matrix inverse and matrix divide (`%.` / `⌹`, which

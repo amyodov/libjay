@@ -236,7 +236,7 @@ fn dtype_tag(d: DType) -> i32 {
         DType::Char => JAY_CHAR,
         DType::Complex => JAY_COMPLEX,
         // Refused by `jay_run` before a result is built.
-        DType::Ext | DType::Rat | DType::Box => 0,
+        DType::Ext | DType::Rat | DType::Symbol | DType::Box => 0,
     }
 }
 
@@ -551,6 +551,10 @@ unsafe fn run_impl(
                         "rational results are not in the C ABI yet; \
                          convert with `_1 x:` first",
                     ),
+                    Some(DType::Symbol) => Some(
+                        "symbol results are not in the C ABI yet; \
+                         convert with `5 s:` first",
+                    ),
                     _ => None,
                 };
                 if let Some(what) = unsupported {
@@ -647,7 +651,7 @@ pub unsafe extern "C" fn jay_result_data(result: *const jay_result) -> *const c_
             Some(Data::F64(v)) => v.as_ptr() as *const c_void,
             Some(Data::Complex(v)) => v.as_ptr() as *const c_void,
             Some(Data::Char(_)) => r.chars.as_ptr() as *const c_void,
-            Some(Data::Ext(_) | Data::Rat(_) | Data::Box(_)) => ptr::null(),
+            Some(Data::Ext(_) | Data::Rat(_) | Data::Symbol(_) | Data::Box(_)) => ptr::null(),
             None => ptr::null(),
         }
     })

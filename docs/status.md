@@ -23,7 +23,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 150 green / 22 partial / 3 red / 2 absent by design, of 177 valences
+**J: 151 green / 23 partial / 1 red / 2 absent by design, of 177 valences
 in the inventory.**
 
 **APL: 90 green / 23 partial / 3 absent by design, of 116 valences in the
@@ -123,7 +123,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `":` | 🟢 default format | 🟢 format by specification: `w j d` per column, width 0 for what the values need, a negative width for the exponential form, asterisks for what does not fit |
 | `".` | 🟢 do; the string runs over the names around it | 🟢 numbers, x standing in for a word that is not one |
 | `u:` | 🟢 unicode | 🟡 unicode; forms 3 and 10, the byte-oriented ones named |
-| `s:` | 🔴 symbol; an interned-string type libjay has no place for yet — a 0.3 storage kind, with `$.` | 🔴 symbol |
+| `s:` | 🟢 symbol: a character list cut on its own leading delimiter, a character table one name per row, a boxed argument one name per box | 🟡 the name forms `4 s:` (a blank-padded character table) and `5 s:` (boxes); the symbol-table queries `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report an interpreter's internal table and are named |
 | `[` | 🟢 same | 🟢 left |
 | `]` | 🟢 same | 🟢 right |
 | `echo` | 🟢 print | — |
@@ -183,7 +183,7 @@ conjunctions above:
 | `L:` level | 🟢 both valences; the dyad descends both arguments together |
 | `S:` spread | 🟢 both valences, as `L:` |
 | `b.` boolean / characteristics | 🟢 `m b.` (the 32 boolean and bitwise functions) and all three characteristics: `0` the ranks, `1` the identity function, `_1` the obverse |
-| `$.` sparse | 🔴 a storage kind rather than a verb: the 0.3 type work, with `s:` |
+| `$.` sparse | 🔴 a storage kind rather than a verb, and the last of them |
 | `H.` hypergeometric | 🟢 the series, with the shared parameters cancelled; a series that neither converges nor overflows is refused by name |
 | `t.` task | ⚪ the reference spells `t.` the TASK conjunction — it runs a verb in one of J's thread pools and answers with a pyx. The sandbox does not open those threads, as it does not for `T.` |
 | `t:` | — the reference rejects the spelling as an invalid inflection, as it does `d.`, `D.` and `D:` |
@@ -383,6 +383,7 @@ conjunctions above:
 | u64 | 🟡 refused above 2⁶³−1 |
 | Complex | 🟢 core type, `[re, im]` pairs; numpy `complex128` zero-copy, Arrow `struct<re, im>` |
 | Extended integer, rational | 🟢 core types, heap-backed; exact arithmetic, Python `int` and `fractions.Fraction` at the boundary |
+| Symbol | 🟢 core type: one `u32` per element into a process-wide intern table, so a symbol array copies and slices like an integer one. Ordering, `~.`, `i.`, `e.`, `/:` and the structural verbs all carry it; Python gets the names as `str` |
 | Decimal128 | 🔴 |
 | float16, byte-swapped data | 🔴 |
 | Arrow string, binary, list, dictionary columns | 🔴 |
@@ -392,7 +393,7 @@ conjunctions above:
 | numpy views contiguous in neither order | ⚪ refused rather than silently copied |
 | Arrow zero-copy in (i64, f64, i64-physical temporal) | 🟢 |
 | DataFrame M×N → matrix, rows leading | 🟢 the columns cross borrowed and are folded where they lie; the shape is the logical one. A verb that reads elements in row order lays them out once, when it is applied |
-| Zero-copy out | 🟡 rank-1 machine-numeric only; rank ≥ 2, chars, boxes and the exact types go via `.tolist()` |
+| Zero-copy out | 🟡 rank-1 machine-numeric only; rank ≥ 2, chars, symbols, boxes and the exact types go via `.tolist()` |
 | Arrow carrier for the exact types | 🔴 Arrow has none; `.tolist()` gives exact Python objects, `_1 x:` machine numbers |
 | Parallel execution (own pool, `LIBJAY_THREADS`) | 🟢 |
 | Expression fusion (blockwise kernels) | 🟢 |
@@ -403,6 +404,8 @@ conjunctions above:
 | C ABI: complex (`JAY_COMPLEX`, interleaved doubles) | 🟢 |
 | C ABI: boxed results | 🔴 no descriptor for a box yet |
 | C ABI: extended and rational results | 🔴 no descriptor for a bignum yet; `_1 x:` converts |
+| C ABI: symbol results | 🔴 no descriptor for a table index yet; `5 s:` gives the names |
+| Python: a `str` argument as a symbol | 🔴 a `str` arrives as a character array; `s:` inside the expression is how one becomes a symbol |
 | Python: `jay.j`, t-strings, samples as live defaults | 🟢 |
 | Rust compile-time checking of an expression (macro) | 🔴 |
 | Sandbox: stdio open, other I/O closed | 🟢 no primitive reaches the filesystem or the network |

@@ -361,6 +361,12 @@ fn element_to_py(py: Python<'_>, data: &Data, i: usize) -> PyResult<Py<PyAny>> {
             PyComplex::from_doubles(py, v[i][0], v[i][1]).unbind().into()
         }
         Data::Char(v) => v[i].to_string().into_pyobject(py)?.unbind().into(),
+        // A symbol crosses as the name it stands for. Python has no symbol
+        // of its own, and a `str` going the other way stays a character
+        // array — `s:` is how one becomes a symbol.
+        Data::Symbol(v) => {
+            jay::symbol::name(v[i]).as_ref().into_pyobject(py)?.unbind().into()
+        }
         // A box converts to whatever its contents convert to: Python
         // holds nested data as nested lists and strings, not as wrappers.
         Data::Box(v) => contents_to_py(py, &v[i])?,

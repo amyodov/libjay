@@ -1751,3 +1751,63 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
     promotion is `#[inline(always)]` and compiles away. `+/ {x}`, `+/ {i}`,
     `+/\ {x}` and `20 +/\ {i}` at 2M and 20M, on one thread and on eight,
     all repeat within the few per cent this file quotes as the noise floor.
+
+- 2026-08-22 — Symbols (J `s:`) are a storage kind: `Data::Symbol(Buf<u32>)`
+  over a PROCESS-WIDE append-only intern table, not a per-array one.
+
+  **Why global.** The oracle settles it: `(s: <'x') = (s: <'x')` is 1 across
+  sentences, and the two symbols an expression makes from the same text
+  compare equal to symbols any other expression made. A per-array table
+  would make equality a comparison of strings and would have to re-key on
+  every catenation; a global one makes an array of symbols an array of small
+  integers, so it copies, slices, reshapes and indexes on the same paths a
+  boolean array does, and `=` is a `u32` comparison. The cost is that the
+  table never shrinks — the same bargain J's own symbol table makes, and
+  bounded by the distinct names a program actually interns.
+
+  **The index is opaque.** J sorts symbols by their TEXT, not by the order
+  they were interned in (`/:~` of the symbols made from "zzz" then "aaa"
+  puts "aaa" first), so the u32 is an identity and nothing more: every
+  ordering comparison and every grade resolves the name behind it. Equality,
+  membership, nub and index-of still run on the raw index, which is where
+  the interning pays.
+
+  **The table.** `RwLock<Vec<Arc<str>>>` plus a `HashMap` for the reverse
+  lookup, behind `symbol::intern`/`name`/`names`/`cmp`. Index 0 is the empty
+  name, which makes it the fill element as well — overtaking an array of
+  symbols needs no lookup at all. A lock-free append-only structure was
+  considered and rejected for now: interning happens once per name at `s:`,
+  and the read lock a comparison takes is uncontended in every measured
+  shape. `symbol::names` resolves a whole slice under one lock, which is
+  what display and grade use.
+
+  **The corrections the oracle made.** Monadic `s:` on a character LIST is
+  not "split on blanks": the first character is the DELIMITER, so `s: 'abc'`
+  is the single name "bc" and `s: 'a b'` is the single name " b". A
+  character TABLE is different again — one name per row, trailing blanks
+  trimmed — and a BOXED argument takes each box's characters verbatim,
+  trailing blank and all. Symbols also have an ORDER, unlike characters,
+  so `<`, `<:`, `>`, `>:`, `<.` and `>.` all work on them where J refuses
+  them on characters. `3!:0` reports 65536, and J's total array ordering
+  puts the symbol class between the numbers and the characters — the class
+  table in `verb.rs` had already reserved the slot.
+
+  **What is left named.** `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report
+  on the interpreter's own symbol table: how many slots it holds, which are
+  in use, the raw indices, the hash table. Those are an implementation's
+  internals rather than the language, and libjay names them rather than
+  inventing numbers that would describe a different table. `4 s:` (the names
+  as a padded character table) and `5 s:` (the names as boxes) are
+  implemented; they are the ones that ask about the DATA.
+
+  **The boundaries.** Python gets the names as `str`; there is no carrier
+  going in, so a Python `str` stays a character array and `s:` inside the
+  expression is how one becomes a symbol. Arrow has no symbol type and the C
+  ABI has no descriptor for a table index, so both refuse by name, pointing
+  at `5 s:`. Fusion and the GPU decline through the existing
+  `DType::is_numeric` gate.
+
+  **One thing widened on the way.** J's dyadic `I.` searches an ordered list,
+  and characters have an order it was already willing to use; libjay had
+  made it numeric-only. It now searches character and symbol lists too,
+  which is what makes `(/:~ symbols) I. symbol` the sorted lookup it is in J.

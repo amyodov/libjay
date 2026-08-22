@@ -192,6 +192,38 @@ class TestExactNumbers:
         assert pa.array(j("_1 x: 1 2 3x")).to_pylist() == [1, 2, 3]
 
 
+class TestSymbols:
+    """J's `s:` symbols across the Python boundary: names come out as str."""
+
+    def test_a_symbol_result_is_its_name(self):
+        assert j("s: <'alpha'") == "alpha"
+        assert j("s: ;: 'alpha beta'").tolist() == ["alpha", "beta"]
+
+    def test_dtype_and_shape(self):
+        v = j("s: ;: 'alpha beta gamma'")
+        assert v.dtype == "symbol"
+        assert v.shape == (3,)
+
+    def test_repr_is_the_j_display(self):
+        assert repr(j("s: ;: 'alpha beta'")) == "`alpha `beta"
+
+    def test_a_python_str_stays_a_character_array(self):
+        # There is no symbol carrier going IN; `s:` is how one is made.
+        assert j("{w}", {"w": "abc"}) == "abc"
+        assert j("3!:0 {w}", {"w": "abc"}) == 2
+        assert j("3!:0 s: <{w}", {"w": "abc"}) == 65536
+
+    def test_symbols_inside_boxes_convert_too(self):
+        assert j("(s: <'a') ; 1").tolist() == ["a", 1]
+
+    def test_arrow_has_no_carrier_for_them(self):
+        pa = pytest.importorskip("pyarrow")
+        with pytest.raises(JayError, match="no carrier for symbols"):
+            pa.array(j("s: ;: 'a b'"))
+        # .tolist() is the way out, and it gives the names.
+        assert j("s: ;: 'a b'").tolist() == ["a", "b"]
+
+
 class TestKernel:
     def test_bind_returns_new_kernel(self):
         k = j.compile("{x} * {y}")

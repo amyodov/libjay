@@ -302,7 +302,7 @@ fn take_colon_definition(
             lex_line(&text, body_span.start + 1, &mut frags)?;
             vec![frags]
         }
-        Data::Box(_) => {
+        Data::Symbol(_) | Data::Box(_) => {
             return Err(Error::parse("an explicit definition takes 0 or a string", body_span))
         }
     };
@@ -1213,12 +1213,9 @@ fn primitive(word: &str) -> Option<Prim> {
         "C." => prim("C.", M::CycleForm, D::Permute, [INF, INF, INF]),
         "E." => prim("E.", M::None, D::FindSeq, [INF, INF, INF]),
         "u:" => prim("u:", M::Unicode { pass_chars: true }, D::UnicodeForm, [INF, 0, INF]),
-        "s:" => prim(
-            "s:",
-            M::NotYet("symbols (s:)"),
-            D::NotYet("symbols (s:)"),
-            [INF, INF, INF],
-        ),
+        // The monad reads the whole argument: one delimiter governs the
+        // whole list. The dyad takes the form as an atom.
+        "s:" => prim("s:", M::Symbols, D::SymbolForm, [INF, 0, INF]),
         "]" => prim("]", M::Same, D::Right, [INF, INF, INF]),
         "[" => prim("[", M::Same, D::Left, [INF, INF, INF]),
         "echo" => prim("echo", M::Echo, D::None, [INF, INF, INF]),
@@ -1803,7 +1800,7 @@ pub(crate) fn numbers_from_text(line: &str, fallback: &Array) -> Option<Array> {
         Data::Ext(v) => Num::X(v.as_slice().first()?.clone()),
         Data::Rat(v) => Num::R(v.as_slice().first()?.clone()),
         Data::Complex(v) => Num::C(*v.as_slice().first()?),
-        Data::Char(_) | Data::Box(_) => return None,
+        Data::Char(_) | Data::Symbol(_) | Data::Box(_) => return None,
     };
     let nums: Vec<Num> = line
         .split_whitespace()
@@ -3262,8 +3259,10 @@ mod tests {
     fn unimplemented_meanings_reach_the_verb_not_the_parser() {
         let (v, _, _) = dyad_of(&one("2 $. 'a b'"));
         assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("sparse arrays ($.)"));
+        // `s:` itself is implemented; the symbol-table forms of its dyad
+        // are refused inside the verb, not at the parser.
         let (v, _, _) = dyad_of(&one("2 s: 'a b'"));
-        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("symbols (s:)"));
+        assert_eq!(prim_of(&v).dyad, DyadOp::SymbolForm);
     }
 
     #[test]

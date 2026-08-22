@@ -52,14 +52,35 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
         // rather than with a nested display's extra spacing.
         match mixed_simple_texts(a, opts) {
             Some(texts) if opts.boxes == BoxStyle::Spaced => {
-                return laid_out(&a.shape, texts, false)
+                return laid_out(&a.shape, texts, Cells::Right)
             }
             _ => return format_boxed(a, opts),
         }
     }
     let texts: Vec<String> = (0..a.count()).map(|i| format_atom(&a.data, i, opts)).collect();
-    // Characters are laid out as text lines; everything else as columns.
-    laid_out(&a.shape, texts, a.dtype() == DType::Char)
+    laid_out(&a.shape, texts, Cells::of(a.dtype()))
+}
+
+/// How the formatted elements of one row sit next to each other.
+#[derive(Clone, Copy, PartialEq)]
+enum Cells {
+    /// Numbers: one space between columns, each column right-aligned.
+    Right,
+    /// Characters: no separator at all, because the row IS the text.
+    Text,
+    /// Symbols: one space between columns, each column left-aligned and
+    /// padded on the right, which is how J prints a table of names.
+    Left,
+}
+
+impl Cells {
+    fn of(dtype: DType) -> Cells {
+        match dtype {
+            DType::Char => Cells::Text,
+            DType::Symbol => Cells::Left,
+            _ => Cells::Right,
+        }
+    }
 }
 
 /// The scalar each element of a boxed array holds, where every one of them
@@ -78,19 +99,23 @@ fn mixed_simple_texts(a: &Array, opts: &FmtOpts) -> Option<Vec<String>> {
 
 /// One formatted element per position, laid out for the shape: a vector on
 /// one line, higher ranks as aligned columns and planes.
-fn laid_out(shape: &[usize], texts: Vec<String>, text_layout: bool) -> String {
+fn laid_out(shape: &[usize], texts: Vec<String>, cells: Cells) -> String {
     let rank = shape.len();
     let a_shape = shape;
     match rank {
         0 => texts.into_iter().next().unwrap_or_default(),
-        1 if text_layout => texts.concat(),
+        1 if cells == Cells::Text => texts.concat(),
         1 => texts.join(" "),
         _ => {
             let ncols = a_shape[rank - 1];
             let nrows = a_shape[rank - 2];
             // Column widths span every plane, so planes stay aligned with
             // each other and not just internally.
-            let widths = if text_layout { vec![0; ncols] } else { column_widths(&texts, ncols) };
+            let widths = if cells == Cells::Text {
+                vec![0; ncols]
+            } else {
+                column_widths(&texts, ncols)
+            };
             let frame = &a_shape[..rank - 2];
             let plane_size = nrows * ncols;
             let planes: usize = frame.iter().product();
@@ -105,7 +130,7 @@ fn laid_out(shape: &[usize], texts: Vec<String>, text_layout: bool) -> String {
                         out.push('\n');
                     }
                     let start = p * plane_size + r * ncols;
-                    push_row(&mut out, &texts[start..start + ncols], &widths, text_layout);
+                    push_row(&mut out, &texts[start..start + ncols], &widths, cells);
                 }
             }
             out
@@ -257,19 +282,27 @@ fn column_widths(texts: &[String], ncols: usize) -> Vec<usize> {
     widths
 }
 
-fn push_row(out: &mut String, row: &[String], widths: &[usize], text_layout: bool) {
+fn push_row(out: &mut String, row: &[String], widths: &[usize], cells: Cells) {
     for (j, cell) in row.iter().enumerate() {
-        if text_layout {
+        if cells == Cells::Text {
             out.push_str(cell);
             continue;
         }
         if j > 0 {
             out.push(' ');
         }
-        for _ in 0..widths[j].saturating_sub(width(cell)) {
-            out.push(' ');
+        let pad = widths[j].saturating_sub(width(cell));
+        if cells == Cells::Right {
+            for _ in 0..pad {
+                out.push(' ');
+            }
         }
         out.push_str(cell);
+        if cells == Cells::Left {
+            for _ in 0..pad {
+                out.push(' ');
+            }
+        }
     }
 }
 
@@ -287,6 +320,8 @@ fn format_atom(data: &Data, i: usize, opts: &FmtOpts) -> String {
         Data::F64(v) => format_f64(v[i], opts),
         Data::Complex(v) => format_complex(v[i], opts),
         Data::Char(v) => v[i].to_string(),
+        // A symbol prints as its name behind the backtick that makes one.
+        Data::Symbol(v) => format!("`{}", crate::symbol::name(v[i])),
         // Boxed data takes the drawing path before reaching here.
         Data::Box(_) => String::new(),
     }

@@ -1,0 +1,138 @@
+// Symbols: `s:` makes them, they compare and sort by their names, and the
+// structural verbs carry them like any other element type. J only — APL has
+// no symbol.
+
+// The monad over a character list: the FIRST character is the delimiter,
+// and what stands between delimiters is a name.
+s: '`alpha`beta`gamma'
+$ s: '`alpha`beta`gamma'
+s: 'abc'
+$ s: 'abc'
+s: 'a b'
+$ s: 'a b'
+s: 'xaxb'
+s: '  a   b  '
+$ s: '  a   b  '
+s: 'a'
+$ s: 'a'
+s: ''
+$ s: ''
+
+// Boxes: each box holds one name, taken exactly as it stands.
+s: ;: 'alpha beta gamma'
+$ s: ;: 'alpha beta gamma'
+s: <'hello'
+$ s: <'hello'
+s: <''
+$ s: <''
+s: <'a b'
+s: <'ünï'
+s: ('a') ; ('bb')
+s: 2 2 $ (<'a'),(<'bb'),(<'c'),(<'d')
+$ s: 2 2 $ (<'a'),(<'bb'),(<'c'),(<'d')
+
+// A character table gives one name per row, trailing blanks trimmed.
+s: 2 2 $ 'abcd'
+s: 2 3 $ 'abcdef'
+s: 2 3 $ 'ab cd '
+$ s: 2 2 2 $ 'abcdefgh'
+s: 2 2 2 $ 'abcdefgh'
+
+// The type code J gives a symbol.
+3!:0 s: ;: 'a b'
+3!:0 s: ''
+
+// The same text is the same symbol, however far apart the two sentences.
+(s: <'x') = (s: <'x')
+(s: <'x') -: (s: <'x')
+(s: ;:'a b') = (s: ;:'a b')
+(s: ;:'pear apple fig apple') = 0 { s: ;:'pear apple fig apple'
+
+// Equality across the type boundary is total: nothing else is a symbol.
+(s: <'a') = 'a'
+(s: <'a') = 1
+'a' e. s: ;: 'a b'
+(s: ;:'a b') i. 'a'
+
+// Order is by NAME, not by the order the names were interned in.
+/:~ s: ;: 'pear apple fig apple'
+/: s: ;: 'pear apple fig apple'
+\\: s: ;: 'pear apple fig apple'
+\\:~ s: ;: 'a c b'
+/:~ s: ;: 'b a'
+/:~ s: ;: 'zz aa mm'
+/:~ s: ;: 'ab a b A B aa'
+/:~ s: ;: 'Zebra apple Apple'
+/: s: ;: 'a a a'
+(s: <'apple') < (s: <'pear')
+(s: <'pear') < (s: <'apple')
+(s: <'apple') <: (s: <'apple')
+(s: <'apple') > (s: <'pear')
+(s: <'a') <. (s: <'b')
+(s: <'a') >. (s: <'b')
+
+// The structural verbs carry symbols like any other element.
+~. s: ;: 'pear apple fig apple'
+# ~. s: ;: 'pear apple fig apple'
+~: s: ;: 'a b a'
+(s: ;:'pear apple fig apple') i. s: ;: 'fig apple zzz'
+i.~ s: ;: 'a b a'
+(s: ;:'fig zzz') e. s: ;: 'pear apple fig apple'
+# s: ;: 'a b c'
+2 {. s: ;: 'pear apple fig'
+_1 { s: ;: 'a b c'
+1 0 1 # s: ;: 'a b c'
+|. s: ;: 'a b c'
+(s: ;:'a b') , s: ;: 'c'
+$ (s: ;:'a b') , s: ;: 'a b'
+4 {. s: ;: 'a b'
+2 3 $ s: ;: 'a b c d e f'
+|: 2 3 $ s: ;: 'a b c d e f'
+(s: ;:'a b a') </. i. 3
+0 {. s: ;: 'a b'
+$ 0 {. s: ;: 'a b'
+(/:~ s: ;:'a c') I. s: <'b'
+
+// Display: an atom, a list, a table with columns of different widths.
+s: <'q'
+2 2 $ s: ;: 'a bbbb cc d'
+": s: ;: 'pear apple fig apple'
+$ ": s: ;: 'pear apple fig apple'
+$ ": 2 2 $ s: ;: 'a bbbb cc d'
+3!:0 ": s: ;: 'a b'
+
+// Symbols inside boxes.
+< s: ;: 'a b'
+< 0 { s: ;: 'a b'
+(0 { s: ;:'pear apple') ; (1 { s: ;:'pear apple')
+(s: ;:'aa b') ; 3
+> < s: ;: 'a b'
+; (< s: <'a') , (< s: <'b')
+
+// The names back out: 4 as a padded table, 5 as boxes.
+4 s: s: ;: 'x yy zzz'
+$ 4 s: s: ;: 'x yy zzz'
+5 s: s: ;: 'x yy zzz'
+4 s: s: <'ab'
+$ 4 s: s: <'ab'
+$ 4 s: 0 {. s: ;: 'a b'
+5 s: s: <'a'
+$ 5 s: s: <'a'
+$ 5 s: s: 2 2 $ (<'a'),(<'bb'),(<'c'),(<'d')
+5 s: s: 2 3 $ 'ab cd '
+5 s: s: <'ab '
+
+// What a symbol refuses.
+(s: <'a') + (s: <'b')
++/ s: ;: 'a b'
+(s: ;:'a b') , 'a'
+(s: ;:'a b') , 1
+(s: ;:'a b') , a:
+#: s: <'a'
+s: 1 2 3
+s: <1
+s: <<'a'
+s: s: <'a'
+s: <2 2$'abcd'
+4 s: ;: 'a b'
+5 s: 'abc'
