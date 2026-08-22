@@ -36,6 +36,10 @@ const SIG_DIGITS: usize = 6;
 
 /// Format an array for display. No trailing newline.
 pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
+    // A sparse array shows what it stores, not what it stands for.
+    if let Some(s) = a.sparse_parts() {
+        return format_sparse(a, s, opts);
+    }
     // An array with an empty axis has nothing to show.
     if a.shape.contains(&0) {
         return String::new();
@@ -59,6 +63,34 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
     }
     let texts: Vec<String> = (0..a.count()).map(|i| format_atom(&a.data, i, opts)).collect();
     laid_out(&a.shape, texts, Cells::of(a.dtype()))
+}
+
+/// A sparse array: one line per stored entry, that entry's position along
+/// the sparse axes, then `|`, then the cell it holds. Positions and values
+/// each align in their own column, over the whole display. An array with
+/// nothing stored — every position the sparse element — shows nothing, as
+/// an empty dense one does.
+fn format_sparse(a: &Array, s: &crate::sparse::Sparse, opts: &FmtOpts) -> String {
+    if s.entries == 0 {
+        return String::new();
+    }
+    let k = s.axes.len();
+    let width = s.cell_size(&a.shape);
+    let index: Vec<String> = s.indices.iter().map(|&i| format_i64(i as i64, opts)).collect();
+    let value: Vec<String> =
+        (0..s.entries * width).map(|i| format_atom(&a.data, i, opts)).collect();
+    let index_widths = column_widths(&index, k.max(1));
+    let value_widths = column_widths(&value, width.max(1));
+    let mut out = String::new();
+    for e in 0..s.entries {
+        if e > 0 {
+            out.push('\n');
+        }
+        push_row(&mut out, &index[e * k..(e + 1) * k], &index_widths, Cells::Right);
+        out.push_str(" | ");
+        push_row(&mut out, &value[e * width..(e + 1) * width], &value_widths, Cells::Right);
+    }
+    out
 }
 
 /// How the formatted elements of one row sit next to each other.

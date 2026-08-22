@@ -79,10 +79,11 @@ The two agree everywhere except 32 APL sentences where libjay diverges on
 purpose, each recorded with the reason. A 20-period Bollinger z-score written
 as one J kernel runs 20M rows in 404 ms against the equivalent Polars
 pipeline's 755, agreeing to 8.7e-10. The data model is dense numeric arrays,
-complex numbers, boxes, and J's exact types — extended-precision integers and
-rationals; what a language has and libjay does not yet (Decimal128, Arrow
-string/binary/list/dictionary columns, J's symbols and sparse arrays among
-them) fails with an explicit "not supported yet" rather than a wrong answer.
+complex numbers, boxes, J's exact types — extended-precision integers and
+rationals — and its two other storage kinds, symbols and sparse arrays; what
+a language has and libjay does not yet (Decimal128 and Arrow
+string/binary/list/dictionary columns among them) fails with an explicit
+"not supported yet" rather than a wrong answer.
 Fused kernels can be placed on a GPU (`kernel.deploy("gpu")`, wgpu over
 Metal/Vulkan/DX12, in the ordinary wheel and dormant without an adapter);
 resident data runs 1.4x to 7.3x the 8-thread CPU at 20M rows. Next on the

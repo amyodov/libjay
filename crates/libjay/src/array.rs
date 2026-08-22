@@ -793,19 +793,30 @@ pub enum Layout {
 /// honour [`Array::layout`] or take [`Array::to_row_major`] first; the
 /// runtime's rule is that a value reaching a verb has already been made
 /// row-major unless that verb asked for the other one.
+///
+/// A SPARSE array is the one exception to "the buffer holds every element":
+/// `shape` is still the logical shape, but `data` holds only the stored
+/// cells and [`crate::sparse::Sparse`] says where they sit. Only `$.`, the
+/// display and `":` read that form; every other reader takes
+/// [`Array::densified`] first.
 #[derive(Clone, Debug)]
 pub struct Array {
     pub shape: Vec<usize>,
     pub data: Data,
     layout: Layout,
+    sparse: Option<crate::sparse::Handle>,
 }
 
 /// Two arrays are equal when they hold the same elements at the same
-/// indices, whatever buffer order each of them keeps.
+/// indices, whatever buffer order — or storage kind — each of them keeps.
 impl PartialEq for Array {
     fn eq(&self, other: &Array) -> bool {
         if self.shape != other.shape {
             return false;
+        }
+        if self.sparse.is_some() || other.sparse.is_some() {
+            let (a, b) = (self.densified(), other.densified());
+            return a.to_row_major().data == b.to_row_major().data;
         }
         if self.layout == other.layout {
             return self.data == other.data;
@@ -817,7 +828,34 @@ impl PartialEq for Array {
 impl Array {
     pub fn new(shape: Vec<usize>, data: Data) -> Array {
         debug_assert_eq!(shape.iter().product::<usize>(), data.len());
-        Array { shape, data, layout: Layout::RowMajor }
+        Array { shape, data, layout: Layout::RowMajor, sparse: None }
+    }
+
+    /// A sparse array: the logical `shape`, the stored cells, and the
+    /// description of where they sit. `data` holds `entries` cells and not
+    /// one element per position, so this is the only constructor that does
+    /// not tie the buffer's length to the shape.
+    pub fn sparse(shape: Vec<usize>, data: Data, sparse: crate::sparse::Sparse) -> Array {
+        Array { shape, data, layout: Layout::RowMajor, sparse: Some(std::sync::Arc::new(sparse)) }
+    }
+
+    /// True while the array holds only its stored cells.
+    pub fn is_sparse(&self) -> bool {
+        self.sparse.is_some()
+    }
+
+    /// How this array is stored sparsely, or None for a dense one.
+    pub fn sparse_parts(&self) -> Option<&crate::sparse::Sparse> {
+        self.sparse.as_deref()
+    }
+
+    /// This array with every position materialised. A dense array is a
+    /// refcount bump; a sparse one is expanded here and nowhere else.
+    pub fn densified(&self) -> Array {
+        match &self.sparse {
+            None => self.clone(),
+            Some(s) => crate::sparse::densify(self, s),
+        }
     }
 
     /// An array whose buffer holds its first axis fastest — the columns of
@@ -825,7 +863,7 @@ impl Array {
     pub fn col_major(shape: Vec<usize>, data: Data) -> Array {
         debug_assert_eq!(shape.iter().product::<usize>(), data.len());
         let layout = if shape.len() < 2 { Layout::RowMajor } else { Layout::ColMajor };
-        Array { shape, data, layout }
+        Array { shape, data, layout, sparse: None }
     }
 
     /// The same buffer read the other way round. The caller is asserting
@@ -964,7 +1002,15 @@ impl Array {
     /// Widen the elements. A cast reads and writes the buffer as it lies,
     /// so the layout comes through untouched.
     pub fn cast(&self, to: DType) -> Option<Array> {
-        Some(Array { shape: self.shape.clone(), data: self.data.cast(to)?, layout: self.layout })
+        if self.is_sparse() {
+            return self.densified().cast(to);
+        }
+        Some(Array {
+            shape: self.shape.clone(),
+            data: self.data.cast(to)?,
+            layout: self.layout,
+            sparse: None,
+        })
     }
 
     /// Split into cells: the trailing `cell_rank` axes form the cell shape,

@@ -1,0 +1,184 @@
+// Sparse arrays: `$.` as a storage kind. J only — APL has no sparse form.
+//
+// The monad converts a dense array; the dyad's left argument names a form,
+// which either converts between the two storage kinds, builds a new sparse
+// array from a shape, or asks about one. The display is a line per stored
+// entry: its position along the sparse axes, `|`, then what it holds.
+
+// The monad: every axis sparse, zero the sparse element, and the entries in
+// ravel order.
+$. 0 0 3 0 5
+$ $. 0 0 3 0 5
+3!:0 $. 0 0 3 0 5
+$. 1 2 3
+$. 0 0 0
+$. i. 2 3
+$. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+$. 2 2 2 $ 0 0 0 7 0 0 0 9
+$. 0 _12 0 345 0
+
+// The element type comes through, and the type code is the dense one a
+// thousand and twenty-four times over. The boolean cases are computed
+// rather than written down: jconsole narrows a 0/1 LITERAL to boolean
+// storage where libjay keeps integers, a divergence of its own that this
+// theme has no reason to restate.
+$. 1 0 1 0
+$. (1 0 1 0 = 1)
+3!:0 $. (1 0 1 0 = 1)
+$. 0 1.5 0 0 _2.25
+3!:0 $. 0 1.5 0 0 _2.25
+$. 0 3j4 0 1j_2
+3!:0 $. 0 3j4 0 1j_2
+$. 0 0.5 0 _2 0 1000
+
+// A scalar has no axis to store along and stays dense; an empty array keeps
+// its shape and stores nothing.
+$. 5
+3!:0 $. 5
+$ $. 5
+$. 'a'
+3!:0 $. 'a'
+$. 1r2
+$. < 1 2
+$ $. i. 0
+3!:0 $. i. 0
+$ $. 0 3 $ 0
+$. 0 3 $ 0
+
+// Positions and values each align in their own column.
+$. 20 $ 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0
+$. 12 3 $ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7 8
+
+// The types with no sparse form at all, and the two J has a code for and
+// still refuses to make.
+$. 'ab a'
+$. 0 ; 3 ; 0
+$. 0 3x 0
+$. 0 3r4 0
+
+// `$.` on a sparse array is the array.
+3!:0 $. $. 0 0 3
+7 $. $. $. 1 0 2
+
+// `0 $.` moves to the other storage kind, whichever one the argument is in.
+0 $. $. 0 0 3 0 5
+3!:0 (0 $. $. 0 0 3 0 5)
+0 $. $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+0 $. $. 2 2 2 $ 0 0 0 7 0 0 0 9
+0 $. $. 0 1.5 0 0 _2.25
+0 $. 1 2 3
+3!:0 (0 $. 1 2 3)
+3!:0 (0 $. 0 $. 1 2 3)
+3!:0 (0 $. 5)
+0 $. 'abc'
+0.0 $. 1 2 3
+
+// `2 $.` names the sparse axes. A dense array answers with all of its own.
+2 $. $. 0 0 3 0 5
+2 $. $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+2 $. i. 3 4
+2 $. i. 2 3 4
+2 $. 5
+2 $. 'abc'
+
+// `3 $.` is the sparse element, `4 $.` the stored positions, `5 $.` the
+// stored values and `7 $.` how many there are.
+3 $. $. 0 0 3 0 5
+3!:0 (3 $. $. 0 1.5 0)
+4 $. $. 0 0 3 0 5
+$ 4 $. $. 0 0 3 0 5
+4 $. $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+$ 4 $. $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+5 $. $. 0 0 3 0 5
+5 $. $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+3!:0 (5 $. $. 0 1.5 0)
+7 $. $. 0 0 3 0 5
+7 $. $. 0 0 0
+7 $. $. i. 2 3
+
+// `_1 $.` is the shape, the sparse axes and the sparse element, boxed.
+_1 $. $. 0 0 3 0 5
+_1 $. $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+
+// The forms that ask about the storage refuse a dense argument, and the
+// numbers J does not define refuse everything.
+3 $. 1 2 3
+4 $. 1 2 3
+5 $. 1 2 3
+7 $. 1 2 3
+8 $. 1 2 3
+_1 $. 1 2 3
+6 $. $. 1 0 2
+9 $. $. 1 0 2
+(0 1) $. i. 3 4
+
+// `1 $.` builds a new sparse array from a shape, with nothing stored in it.
+1 $. 3 4
+$ 1 $. 3 4
+3!:0 (1 $. 3 4)
+2 $. 1 $. 3 4
+3 $. 1 $. 3 4
+7 $. 1 $. 3 4
+0 $. 1 $. 2 3
+$ 1 $. 3
+$ 1 $. 0
+$ 1 $. < 3 4
+$ 1 $. 0 0 3 0 5
+$ 1 $. $. 0 0 3 0 5
+
+// A second box names the sparse axes and a third the element that fills it;
+// the element's own type is the array's.
+2 $. 1 $. (2 3 4) ; 1
+$ 5 $. 1 $. (2 3 4) ; 1
+$ 4 $. 1 $. (2 3 4) ; 1
+0 $. 1 $. (3 4) ; 0 1 ; 5
+3 $. 1 $. (3 4) ; 0 1 ; 5
+3!:0 (1 $. (3 4) ; 0 1 ; (0 = 1))
+3!:0 (1 $. (3 4) ; 0 1 ; 5)
+3!:0 (1 $. (3 4) ; 0 1 ; 2.5)
+0 $. 1 $. (2 3) ; 0 1 ; 2.5
+
+// No sparse axes at all: one stored cell would be the whole array, and
+// nothing is stored.
+$ 1 $. (2 3) ; i. 0
+2 $. 1 $. (2 3) ; i. 0
+$ 4 $. 1 $. (2 3) ; i. 0
+$ 5 $. 1 $. (2 3) ; i. 0
+0 $. 1 $. (2 3) ; i. 0
+
+// What `1 $.` refuses.
+1 $. _1 3
+1 $. (2 3) ; 5
+1 $. (2 3) ; 0 0
+1 $. i. 0
+1 $. (3 4) ; 0 1 ; 0 ; 9
+
+// `8 $.` drops the entries that hold the sparse element. Nothing libjay
+// makes has any, so it is the array again.
+8 $. $. 1 0 2
+7 $. 8 $. $. 1 0 2
+8 $. $. 0 0 0
+8 $. 1 $. 3 4
+3!:0 (8 $. $. 1 0 2)
+
+// A sparse array is the array it stands for: it matches the dense one, and
+// the verbs that ask about its shape rather than its elements answer as
+// they would for that.
+($. 0 0 3 0 5) -: 0 0 3 0 5
+(0 0 3 0 5) -: $. 0 0 3 0 5
+($. 0 0 3 0 5) -: $. 0 0 3 0 5
+($. 0 0 3 0 5) -: 0 0 3 0 6
+# $. 0 0 3 0 5
+$ $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+# $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3
+
+// `":` gives the display, which is a table of lines whatever the array's
+// own rank is.
+": $. 0 0 3 0 5
+$ ": $. 0 0 3 0 5
+
+// A verb that reads the elements gets every one of them.
++/ $. 0 0 3 0 5
+3!:0 (+/ $. 0 0 3 0 5)
+($. 0 0 3 0 5) i. 3
++/ +/ $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3

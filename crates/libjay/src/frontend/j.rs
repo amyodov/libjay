@@ -1159,12 +1159,7 @@ fn primitive(word: &str) -> Option<Prim> {
         // rank machinery evaluates a whole array of points at once.
         "p." => prim("p.", M::PolyRoots, D::PolyEval, [1, 1, 0]),
         "p.." => prim("p..", M::PolyDeriv, D::PolyIntegral, [1, 0, 1]),
-        "$." => prim(
-            "$.",
-            M::NotYet("sparse arrays ($.)"),
-            D::NotYet("sparse arrays ($.)"),
-            [INF, INF, INF],
-        ),
+        "$." => prim("$.", M::Sparse, D::SparseForm, [INF, INF, INF]),
         "q:" => prim("q:", M::PrimeFactors, D::PrimeExponents, [0, 0, 0]),
         "%." => prim("%.", M::MatrixInverse, D::MatrixDivide, [2, INF, 2]),
         // The monad takes the whole argument: one invocation is one run of
@@ -3257,12 +3252,13 @@ mod tests {
 
     #[test]
     fn unimplemented_meanings_reach_the_verb_not_the_parser() {
-        let (v, _, _) = dyad_of(&one("2 $. 'a b'"));
-        assert_eq!(prim_of(&v).dyad, DyadOp::NotYet("sparse arrays ($.)"));
-        // `s:` itself is implemented; the symbol-table forms of its dyad
-        // are refused inside the verb, not at the parser.
+        // Both dyads take a numbered form as their left argument, and the
+        // numbers with no meaning here are refused inside the verb — where
+        // the number is known — rather than at the parser.
         let (v, _, _) = dyad_of(&one("2 s: 'a b'"));
         assert_eq!(prim_of(&v).dyad, DyadOp::SymbolForm);
+        let (v, _, _) = dyad_of(&one("6 $. 'a b'"));
+        assert_eq!(prim_of(&v).dyad, DyadOp::SparseForm);
     }
 
     #[test]

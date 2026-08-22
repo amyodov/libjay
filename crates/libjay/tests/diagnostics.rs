@@ -194,7 +194,7 @@ fn j_name_and_valence_errors_name_the_word() {
 const J_PROMISES: &[Case] = &[
     j("_2 <;.3 i. 5", ErrorKind::NotYet, "_2 <;.3 i. 5", &["movement row"]),
     j("* b. _1", ErrorKind::NotYet, "* b. _1", &["obverse"]),
-    j("2 $. 1 2", ErrorKind::NotYet, "2 $. 1 2", &["sparse"]),
+    j("$. 'abc'", ErrorKind::NotYet, "$. 'abc'", &["sparse"]),
     j("+/ . * i. 17 17", ErrorKind::NotYet, "+/ . * i. 17 17", &["determinant"]),
     j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign 9!:18"]),
     j("m =. /\nm", ErrorKind::NotYet, "m", &["displaying a modifier"]),

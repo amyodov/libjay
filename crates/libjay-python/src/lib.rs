@@ -399,6 +399,9 @@ fn array_to_py(py: Python<'_>, a: Array, fmt: FmtOpts) -> PyResult<Py<PyAny>> {
     // order — `tolist`, the repr, the Arrow export — so a value that was
     // computed column-major is laid out once, here, and once only.
     let a = if a.is_row_major() { a } else { a.to_row_major() };
+    // Python has no sparse carrier, so a sparse result crosses as the dense
+    // array it stands for.
+    let a = if a.is_sparse() { a.densified() } else { a };
     if a.rank() == 0 {
         // A scalar box hands back what it holds, at whatever shape that
         // has: `<1 2 3` is the vector 1 2 3, `<'abc'` the string.

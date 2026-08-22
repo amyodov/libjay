@@ -145,12 +145,14 @@ impl Device {
     pub fn upload(&self, y: &Array) -> Result<Array, DeviceError> {
         let Some(backend) = self.backend() else { return Ok(y.clone()) };
         // What goes to the device is the elements in row-major order; a
-        // column-major argument is laid out once before it leaves.
+        // column-major argument is laid out once before it leaves, and a
+        // sparse one is expanded — a device buffer is one element per
+        // position and nothing else.
         let laid_out;
-        let y = if y.is_row_major() {
+        let y = if y.is_row_major() && !y.is_sparse() {
             y
         } else {
-            laid_out = y.to_row_major();
+            laid_out = y.densified().to_row_major();
             &laid_out
         };
         // A float array is uploaded from its own buffer; anything else is

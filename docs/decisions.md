@@ -1811,3 +1811,70 @@ operative rules distilled from these live in CLAUDE.md. Newest at the end.
   and characters have an order it was already willing to use; libjay had
   made it numeric-only. It now searches character and symbol lists too,
   which is what makes `(/:~ symbols) I. symbol` the sorted lookup it is in J.
+
+- 2026-08-22 — Sparse arrays (J `$.`) are a property of the ARRAY, not a
+  variant of `Data`.
+
+  **The shape of the thing.** A sparse array has no per-element storage, so
+  it does not fit `Data`, which every buffer operation — `len`, `slice`,
+  `push_from`, `cast`, `interleave` — assumes is one element per position.
+  Adding a variant there would have meant a wrong answer in nine match arms
+  per operation across 23 000 lines. Instead `Array` grows one field,
+  `sparse: Option<Arc<Sparse>>`, and the meaning of the two it already had
+  shifts under it: `shape` stays the LOGICAL shape and `data` holds the
+  stored cells end to end. A sparse array of doubles therefore reports the
+  same dtype a dense one does and formats its values through the same code,
+  and cloning it stays a refcount bump. `Sparse` itself carries the sparse
+  axes, the index rows, the sparse element and the entry count — the count
+  because it is not derivable when there are no sparse axes at all, or when
+  a dense axis has length zero.
+
+  **Partial axes are in the representation from the start.** J's model is
+  that SOME axes are sparse and the rest are dense, so a stored entry is a
+  cell rather than an element. `$. y` only ever makes the all-axes-sparse
+  case, and `1 $. shape ; axes` is the only way to ask for the other one —
+  which builds an array with nothing stored in it. Modelling it anyway cost
+  about thirty lines (a cell size, an offset plan, a scatter instead of a
+  store) and keeps `4 $.`, `5 $.` and `0 $.` honest about their shapes,
+  which the oracle checks: `$ 5 $. 1 $. (2 3 4) ; 1` is `0 2 4`.
+
+  **Every other verb gets the dense expansion.** The alternative — teaching
+  each primitive to propagate sparseness — is a rewrite of `verb.rs`, and
+  the payoff is speed rather than meaning. So `Verb::monad` and `Verb::dyad`
+  expand a sparse argument at the top unless the verb is one of the six that
+  read the stored form: `$.` itself, `$`, `#`, `":`, `echo` and `3!:0`.
+  Expansion is exact, so every ANSWER matches J; what differs is the storage
+  kind of the result. J keeps `s + 1` sparse with a sparse element of 1,
+  where libjay hands back the dense array — the one visible divergence, and
+  the reason the row in status.md is 🟡 rather than 🟢. Those expressions
+  are deliberately absent from the corpus; the corpus covers `$.` itself,
+  the display, and the verbs whose answers do agree.
+
+  **The corrections the oracle made.** `0 $. y` is not "make dense" — it
+  converts to whichever storage kind the argument is not in, so `0 $. dense`
+  is `$. dense`. `1 $. shape` with no element given makes a sparse array of
+  DOUBLES (type 8192), not of integers. `2 $.` answers a DENSE argument with
+  all of its axes rather than refusing it, while `3 4 5 7 8 _1 $.` all
+  refuse one. `8 $.` drops the stored entries that hold the sparse element,
+  which is the only way an array acquires any: amending a stored position
+  back to the fill leaves the entry behind. A SCALAR passes through `$.`
+  unchanged whatever its type — `$. 'a'` is `'a'` and `$. 1r2` is `1r2` —
+  because there is no axis to store it along, so the type check has to come
+  after the rank check. `$.` on a sparse array is that array. `x` must be an
+  atom: `(0 1) $. y` is a rank error.
+
+  **What is left named.** A sparse array of characters or of boxes: J has a
+  type code for each and refuses to make either, so both are `NotYet` here
+  too. The exact types have no sparse form at all and are a domain error in
+  both. `1 $. shape` refuses a shape past `limits::MAX_ELEMENTS` even though
+  building it allocates nothing, because every other verb would expand it —
+  J, which propagates sparseness, holds much larger ones. Python, Arrow and
+  the C ABI have no sparse carrier, so a sparse result crosses as the array
+  it stands for.
+
+  **One thing the corpus could not restate.** `3!:0` of a sparse boolean is
+  1024, but only when the argument really is boolean: jconsole narrows a 0/1
+  LITERAL to boolean storage where libjay keeps integers — an older
+  divergence recorded in tests/input.rs. The boolean cases in the sparse
+  corpus therefore compute their booleans (`1 0 1 0 = 1`) instead of writing
+  them down.

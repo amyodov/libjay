@@ -803,6 +803,15 @@ pub fn export_capsules<'py>(
     py: Python<'py>,
     array: &Array,
 ) -> PyResult<(Bound<'py, PyCapsule>, Bound<'py, PyCapsule>)> {
+    // Arrow has no sparse carrier: the dense array the sparse one stands
+    // for is what crosses.
+    let dense;
+    let array = if array.is_sparse() {
+        dense = array.densified();
+        &dense
+    } else {
+        array
+    };
     if array.dtype() == DType::Symbol {
         return Err(JayError::new_err(
             "Arrow has no carrier for symbols; use .tolist() for their names, \

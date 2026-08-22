@@ -956,6 +956,56 @@ descriptor for a table index either, and says so, naming `5 s:`.
 
 APL has no symbol of its own, and `s:` is not one of its spellings.
 
+## Sparse arrays
+
+A sparse array has the shape of the array it stands for and holds only the
+positions that differ from ONE repeated element — the sparse element, zero
+for anything `$. y` makes. Some axes are stored sparsely and the rest are
+dense, so a stored entry is a whole cell over the dense axes: an index row
+naming its position along the sparse axes, and that cell's elements. `$. y`
+makes every axis sparse, which is the familiar list of coordinates and
+values.
+
+The display is one line per stored entry — its position, `|`, then what it
+holds — with the positions and the values each aligned in their own column.
+An array with nothing stored shows nothing, whatever its sparse element is.
+`":` gives that display as a table of lines whatever the array's own rank.
+
+**The verb.** `$. y` converts a dense array; a scalar has no axis to store
+along and comes back dense, as it does in J. `x $. y` takes a numbered
+form: `0` moves to the other storage kind in whichever direction the
+argument is not already in, `1` builds a new sparse array from a shape (or
+from a boxed `shape ; axes`, or `shape ; axes ; element`), `2` the sparse
+axes, `3` the sparse element, `4` the stored positions as a table, `5` the
+stored cells, `7` how many entries are stored, `8` the array with the
+entries that hold the sparse element dropped, and `_1` the shape, axes and
+element boxed together. `2 $.` answers a DENSE argument with all of its
+axes; every other query refuses one, as J does. `3!:0` reports the sparse
+type codes: the dense code times 1024.
+
+**Which element types.** Boolean, integer, floating and complex. J has a
+code for a sparse literal and a sparse box and makes neither — libjay names
+both as gaps — and the exact types (extended, rational) have no sparse form
+at all, which is a domain error in both.
+
+**Where sparseness stops.** A sparse array reaching any verb but `$.`,
+`$`, `#`, `":`, `echo` and `3!:0` is expanded first. The ANSWER is the
+dense array's and is therefore always right; what does not survive is the
+storage kind. J propagates it — `s + 1` there is sparse with a sparse
+element of 1 — where libjay gives back the dense array. `-:` compares
+values, so a sparse array and the dense one it stands for match. Indexed
+assignment writes into the expansion, and a fused chain reads it.
+
+**At the boundaries.** Neither Python, Arrow nor the C ABI has a sparse
+carrier, so a sparse result crosses as the array it stands for.
+
+**The ceiling.** `1 $. shape` refuses a shape past the element ceiling
+(`limits::MAX_ELEMENTS`) even though building it allocates nothing, because
+every other verb would expand it. J, which propagates sparseness, holds
+much larger ones.
+
+APL has no sparse form of its own, and `$.` is not one of its spellings.
+
 ## Comparison tolerance
 
 Both languages compare reals with a relative tolerance, and libjay carries
@@ -1458,9 +1508,10 @@ sections above is also collected here.
   Recursion inside the derived verb's own body, by `$:` or by a verb's name,
   works as it does anywhere else. `13 : '…'` and `{{)n` are gaps too.
 - Named on their own, beyond what
-  the tables above already mark "not supported yet": J's `$.` (sparse),
-  which is a STORAGE KIND rather than a verb — a layout, not a primitive —
-  and is the last of the 0.3 type work; the symbol-table forms of `s:`
+  the tables above already mark "not supported yet": a sparse array of
+  CHARACTERS or of BOXES, which J has a type code for and refuses to make
+  as well; sparseness surviving a verb (see the sparse arrays section
+  above); the symbol-table forms of `s:`
   (`0 s:` … `3 s:`, `6 s:`, `7 s:`, `_1 s:`), which describe an
   interpreter's own table rather than the language; a determinant by minors
   of more than 16 rows (the expansion is exponential, and only `-/ . *` over machine numbers has a

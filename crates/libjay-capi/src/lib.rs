@@ -215,7 +215,10 @@ impl jay_result {
     fn new(value: Option<Array>, fmt: FmtOpts) -> jay_result {
         // C reads the buffer as one row-major block, so a value computed
         // column-major is laid out once, here.
+        // The C ABI has no sparse dtype tag either, so a sparse value
+        // crosses as the dense array it stands for.
         let value = value.map(|a| if a.is_row_major() { a } else { a.to_row_major() });
+        let value = value.map(|a| if a.is_sparse() { a.densified() } else { a });
         let shape = value
             .as_ref()
             .map(|a| a.shape.iter().map(|&d| d as u64).collect())

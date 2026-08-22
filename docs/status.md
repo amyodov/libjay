@@ -23,8 +23,8 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 151 green / 23 partial / 1 red / 2 absent by design, of 177 valences
-in the inventory.**
+**J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
+inventory. No row in J's primitive tables is red.**
 
 **APL: 90 green / 23 partial / 3 absent by design, of 116 valences in the
 inventory. Nothing in APL's primitive tables is red.**
@@ -183,7 +183,7 @@ conjunctions above:
 | `L:` level | 🟢 both valences; the dyad descends both arguments together |
 | `S:` spread | 🟢 both valences, as `L:` |
 | `b.` boolean / characteristics | 🟢 `m b.` (the 32 boolean and bitwise functions) and all three characteristics: `0` the ranks, `1` the identity function, `_1` the obverse |
-| `$.` sparse | 🔴 a storage kind rather than a verb, and the last of them |
+| `$.` sparse | 🟡 the storage kind, the monad and the dyad's forms `_1 0 1 2 3 4 5 7 8`, and the display. A sparse array reaching any other verb is expanded first, so the ANSWER always matches and the storage kind does not survive the step — where J keeps `s + 1` sparse, libjay gives the dense array. Sparse characters and boxes are named gaps, as they are in J |
 | `H.` hypergeometric | 🟢 the series, with the shared parameters cancelled; a series that neither converges nor overflows is refused by name |
 | `t.` task | ⚪ the reference spells `t.` the TASK conjunction — it runs a verb in one of J's thread pools and answers with a pyx. The sandbox does not open those threads, as it does not for `T.` |
 | `t:` | — the reference rejects the spelling as an invalid inflection, as it does `d.`, `D.` and `D:` |

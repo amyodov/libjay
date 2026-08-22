@@ -612,6 +612,9 @@ pub enum MonadOp {
     /// is cut on its own leading delimiter; a character table gives one
     /// name per row; a boxed argument gives one name per box.
     Symbols,
+    /// J `$.`: the argument in sparse form — every axis sparse, zero the
+    /// sparse element. A scalar has no axis to store along and stays dense.
+    Sparse,
     /// J `;:`: J's own tokeniser over a character list, one box per word.
     Words,
     /// APL `⊆` (Dyalog): nest — enclose y unless it is already nested, or
@@ -807,6 +810,12 @@ pub enum DyadOp {
     /// newline, to the stream y; the value is x. Stream 2 is stdout, which
     /// the sandbox opens, and everything else is a file, which it does not.
     WriteStream,
+    /// J `x $.`: the numbered sparse forms. `_1` gives the shape, the
+    /// sparse axes and the sparse element boxed; 0 converts between the two
+    /// storage kinds; 1 makes a new sparse array from a shape; 2 to 5 and 7
+    /// ask about the argument; 8 drops the stored entries that hold the
+    /// sparse element.
+    SparseForm,
     NotYet(&'static str),
     None,
 }
@@ -1238,6 +1247,32 @@ impl Verb {
         }
     }
 
+    /// Whether this verb reads a sparse argument in its stored form.
+    ///
+    /// The set is small on purpose: `$.` itself, the two verbs that ask
+    /// about an array rather than about its elements, and the three that
+    /// draw it. Everything else is handed the dense expansion, which is the
+    /// same value — the storage kind is not visible in the answer, only in
+    /// how long it took to get there.
+    fn monad_reads_sparse(&self) -> bool {
+        let Verb::Prim(p) = self else { return false };
+        matches!(
+            p.monad,
+            MonadOp::Sparse
+                | MonadOp::ShapeOf
+                | MonadOp::Tally
+                | MonadOp::TypeCode
+                | MonadOp::Format
+                | MonadOp::Echo
+        )
+    }
+
+    /// Whether this verb reads a sparse RIGHT argument in its stored form.
+    /// A sparse left argument is always expanded: no dyad reads one.
+    fn dyad_reads_sparse(&self) -> bool {
+        matches!(self, Verb::Prim(p) if p.dyad == DyadOp::SparseForm)
+    }
+
     /// Full monadic application including rank/frame machinery.
     ///
     /// This is one of the two places a column-major argument is dealt with:
@@ -1245,6 +1280,15 @@ impl Verb {
     /// verb gets the rows it assumes, materialised once here.
     pub fn monad(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let _depth = Nesting::enter(span)?;
+        // A verb that does not read the stored form gets the array every
+        // position of it materialised, which is the same value.
+        let dense;
+        let y = if y.is_sparse() && !self.monad_reads_sparse() {
+            dense = y.densified();
+            &dense
+        } else {
+            y
+        };
         if y.is_row_major() {
             return self.monad_rows(y, ctx, span);
         }
@@ -1445,6 +1489,21 @@ impl Verb {
     /// as they lie and keeps the layout, and everything else is given rows.
     pub fn dyad(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let _depth = Nesting::enter(span)?;
+        // As in `monad`: only `x $. y` reads a sparse argument as it lies,
+        // and even there the left one names a form and is always dense.
+        let (dense_x, dense_y);
+        let x = if x.is_sparse() {
+            dense_x = x.densified();
+            &dense_x
+        } else {
+            x
+        };
+        let y = if y.is_sparse() && !self.dyad_reads_sparse() {
+            dense_y = y.densified();
+            &dense_y
+        } else {
+            y
+        };
         if x.is_row_major() && y.is_row_major() {
             return self.dyad_rows(x, y, ctx, span);
         }
@@ -5366,6 +5425,19 @@ fn copy_items(x: &Array, y: &Array, apl: bool, span: Span) -> Result<Array> {
 /// column widths span the whole argument, so every line has one width and the
 /// planes stay aligned with each other.
 fn format_chars(y: &Array, opts: &FmtOpts) -> Array {
+    // A sparse array's display is a table of lines whatever its own rank
+    // is: one line per stored entry.
+    if y.is_sparse() {
+        let text = crate::fmt::format_array(y, opts);
+        let lines: Vec<&str> = text.lines().collect();
+        let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        let mut chars: Vec<char> = Vec::with_capacity(lines.len() * width);
+        for line in &lines {
+            chars.extend(line.chars());
+            chars.resize(chars.len() + width - line.chars().count(), ' ');
+        }
+        return Array::new(vec![lines.len(), width], Data::Char(chars.into()));
+    }
     if y.dtype() == DType::Char {
         return y.clone();
     }
@@ -6271,6 +6343,7 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
             Ok(Array::from_chars(line.chars().collect()))
         }
         MonadOp::TypeCode => Ok(Array::scalar_i64(type_code(y))),
+        MonadOp::Sparse => crate::sparse::sparsify(y, span),
         MonadOp::Same => Ok(y.clone()),
         MonadOp::Format => Ok(format_chars(y, &ctx.cfg.fmt)),
         MonadOp::DecodeBits => decode(None, y, span).map(|r| carry_exact(r, y)),
@@ -6668,6 +6741,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         }
         DyadOp::UnicodeForm => unicode_form(x, y, span),
         DyadOp::SymbolForm => symbol_form(x, y, span),
+        DyadOp::SparseForm => sparse_form(x, y, span),
         DyadOp::PrimeMeta => prime_meta(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::PrimeExponents => prime_exponents(x, y, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Pick { origin } => pick(x, y, origin, span),
@@ -12138,6 +12212,54 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(shape, Data::Char(out.into())))
 }
 
+/// `x $. y`: the numbered sparse forms.
+///
+/// `0` moves between the two storage kinds in whichever direction the
+/// argument is not already in, and `1` builds a new sparse array from a
+/// shape. The rest ask about a sparse argument: `_1` its shape, sparse axes
+/// and sparse element boxed, `2` the sparse axes, `3` the sparse element,
+/// `4` the stored index rows, `5` the stored cells, `7` how many entries
+/// are stored, and `8` the same array with the entries that hold the sparse
+/// element dropped. `2` also answers a dense argument, which has all of its
+/// axes conceptually sparse; the others refuse one.
+fn sparse_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    if x.rank() != 0 {
+        return Err(Error::new(ErrorKind::Rank, "a sparse form is one atom", Some(span)));
+    }
+    let form = x
+        .to_i64_vec()
+        .and_then(|v| v.first().copied())
+        .ok_or_else(|| Error::domain("a sparse form is an integer", span))?;
+    match form {
+        0 if y.is_sparse() => return Ok(y.densified()),
+        0 => return crate::sparse::sparsify(y, span),
+        1 => return crate::sparse::create(y, span),
+        2 => {
+            let axes: Vec<i64> = match y.sparse_parts() {
+                Some(s) => s.axes.iter().map(|&k| k as i64).collect(),
+                None => (0..y.rank() as i64).collect(),
+            };
+            return Ok(Array::from_i64(axes));
+        }
+        _ => {}
+    }
+    let Some(s) = y.sparse_parts() else {
+        return Err(Error::domain(
+            format!("{form} $. reads a sparse array, and this one is dense"),
+            span,
+        ));
+    };
+    match form {
+        -1 => Ok(crate::sparse::attributes(y, s)),
+        3 => Ok(crate::sparse::fill_of(s)),
+        4 => Ok(crate::sparse::indices_of(s)),
+        5 => Ok(crate::sparse::values_of(y, s)),
+        7 => Ok(Array::scalar_i64(s.entries as i64)),
+        8 => Ok(crate::sparse::compress(y, s)),
+        _ => Err(Error::domain(format!("{form} is not a sparse form"), span)),
+    }
+}
+
 /// `L. y`: how deep the boxing goes. Anything unboxed is level 0.
 fn boxing_level(y: &Array) -> i64 {
     match y.as_boxes() {
@@ -12426,7 +12548,17 @@ fn stream_number(y: &Array, open: i64, what: &str, span: Span) -> Result<()> {
 
 /// `3!:0 y`: the code J gives y's element type. The numbers are J's own,
 /// and libjay's element types line up with them one for one.
+/// J's code for the argument's element type. A sparse array has a code of
+/// its own for every element type that can be stored sparsely, one factor
+/// of 1024 above the dense one.
 fn type_code(y: &Array) -> i64 {
+    if y.is_sparse() {
+        return 1024 * dense_type_code(y);
+    }
+    dense_type_code(y)
+}
+
+fn dense_type_code(y: &Array) -> i64 {
     match y.dtype() {
         DType::Bool => 1,
         DType::Char => 2,

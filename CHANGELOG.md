@@ -7,6 +7,25 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- J's sparse arrays, `$.`. `$. 0 0 3 0 5` keeps only the positions that are
+  not zero and prints them the way J does — one line per stored value, its
+  position, `|`, then the value. The dyad takes a form number: `0 $.` moves
+  to the other storage kind either way round, `1 $. 3 4` makes a new sparse
+  array from a shape (`1 $. (3 4) ; 0 1 ; 5` gives it its own sparse axes
+  and its own repeated element), `2 $.` `3 $.` `4 $.` `5 $.` and `7 $.` ask
+  for the sparse axes, the element, the stored positions, the stored values
+  and how many there are, `8 $.` drops stored values that have become the
+  element again, and `_1 $.` gives shape, axes and element boxed together.
+  `3!:0` reports the sparse type codes. Booleans, integers, floats and
+  complex numbers can be stored sparsely; a sparse array of characters or
+  boxes is named as a gap, as J refuses it too.
+
+  A sparse array is the array it stands for: `($. 0 0 3 0 5) -: 0 0 3 0 5`
+  is 1, and any verb other than `$.`, `$`, `#`, `":` and `3!:0` reads every
+  position of it, so the answer is always the dense one's. Where J keeps
+  `s + 1` sparse, libjay hands back the dense array; the value is the same
+  and the saving is not. Python, Arrow and the C ABI carry the dense array.
+
 ### Changed
 
 ### Fixed

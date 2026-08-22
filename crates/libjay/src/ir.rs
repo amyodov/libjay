@@ -501,6 +501,9 @@ pub(crate) fn empty_result() -> Array {
 /// J's truth: an empty condition is true, and otherwise the first atom
 /// decides. Characters count by their code point, as the reference does.
 fn is_true(a: &Array, span: Span) -> Result<bool> {
+    if a.is_sparse() {
+        return is_true(&a.densified(), span);
+    }
     if a.count() == 0 {
         return Ok(true);
     }
@@ -842,7 +845,9 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
                     None => None,
                 });
             }
-            let out = crate::verb::amend_at(&base, &idx, &v, *origin, *span)?;
+            // Amending a sparse array writes into its dense expansion; the
+            // stored form is not preserved across the write.
+            let out = crate::verb::amend_at(&base.densified(), &idx, &v.densified(), *origin, *span)?;
             ctx.env.assign(name.clone(), out.clone(), *scope);
             Ok(out)
         }
@@ -885,7 +890,9 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
         Expr::Fused { kernel, inputs, orig, .. } => {
             let mut vals = Vec::with_capacity(inputs.len());
             for e in inputs {
-                vals.push(eval(e, ctx, rec)?);
+                // A fused kernel reads flat buffers, so a sparse leaf is
+                // expanded before the chain sees it.
+                vals.push(eval(e, ctx, rec)?.densified());
             }
             let (ran, placement) = crate::fuse::eval_on(ctx.device, kernel, &vals);
             if let Some(t) = rec.as_mut() {

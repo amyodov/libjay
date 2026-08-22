@@ -192,6 +192,29 @@ class TestExactNumbers:
         assert pa.array(j("_1 x: 1 2 3x")).to_pylist() == [1, 2, 3]
 
 
+class TestSparse:
+    """J's `$.` sparse arrays across the Python boundary: Python has no
+    sparse carrier, so a sparse result arrives as the array it stands for."""
+
+    def test_a_sparse_result_arrives_dense(self):
+        assert j("$. 0 0 3 0 5").tolist() == [0, 0, 3, 0, 5]
+        assert j("$. 0 0 3 0 5").shape == (5,)
+        assert j("1 $. 2 3").tolist() == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+
+    def test_the_queries_answer_about_the_storage(self):
+        assert j("4 $. $. 0 0 3 0 5").tolist() == [[2], [4]]
+        assert j("5 $. $. 0 0 3 0 5").tolist() == [3, 5]
+        assert j("7 $. $. 0 0 3 0 5") == 2
+        assert j("2 $. $. 3 4 $ 0 0 1 0 0 2 0 0 0 0 0 3").tolist() == [0, 1]
+
+    def test_arrow_carries_the_dense_array(self):
+        pa = pytest.importorskip("pyarrow")
+        assert pa.array(j("$. 0 0 3 0 5")).to_pylist() == [0, 0, 3, 0, 5]
+
+    def test_a_dense_argument_can_be_made_sparse(self):
+        assert j("7 $. $. {v}", {"v": [0, 1, 0, 2]}) == 2
+
+
 class TestSymbols:
     """J's `s:` symbols across the Python boundary: names come out as str."""
 

@@ -20,6 +20,7 @@ pub mod limits;
 mod par;
 mod rng;
 pub mod simd;
+pub mod sparse;
 pub mod symbol;
 pub mod verb;
 
