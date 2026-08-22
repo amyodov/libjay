@@ -1,0 +1,140 @@
+// N-wise reduction: the DYADIC case of a `/`-derived function. `n f/ y`
+// folds every window of n items; the monadic `f/` is the plain reduce, and
+// lives in operators.txt.
+//
+// The reading of `/` is decided by what stands to its LEFT, not by the left
+// ARGUMENT: after a function it is the reduce operator, after a value it is
+// replicate. So `2+/1 2 3` is n-wise (there is an operand, `+`) and
+// `1 1/2 3` is replicate (there is none) — a boolean left argument does not
+// make the first one a compress, and a count of 2 does not make the second
+// one a window. The disambiguation block below pins that.
+// --- the windows ---------------------------------------------------
+2+/1 2 3
+⍴2+/1 2 3
+2×/1 2 3
+2-/1 2 3
+2÷/1 2 3
+3+/⍳5
+3-/1 2 3 4 5
+2⌈/1 2 3 4
+2⌊/4 3 2 1
+2|/5 3
+2*/2 3 4
+2</1 2 3
+2=/1 1 2
+2⍟/2 4 8
+2+/1 2 3.5
+2+/1J2 3J4 5J6
+// --- how long a window may be ---------------------------------------
+1+/1 2 3
+5+/1 2 3 4 5
+⍴5+/1 2 3 4 5
+6+/1 2 3 4 5
+⍴6+/1 2 3 4 5
+7+/1 2 3 4 5
+2+/1 2
+3+/1 2
+4+/1 2
+2+/,1
+⍴2+/,1
+2+/⍬
+1+/⍬
+2+/5
+⍴2+/5
+1+/5
+⍴1+/5
+⍴⍴1+/5
+⍴1+⌿5
+¯1+/5
+⍴¯1+/5
+1+/⊂1 2 3
+⍴1+/⊂1 2 3
+2+/⊂1 2 3
+// --- zero: the identity, once per gap --------------------------------
+0+/1 2 3 4 5
+⍴0+/1 2 3 4 5
+0×/1 2 3
+0-/1 2 3
+0÷/1 2 3
+0∨/1 2 3
+0∧/1 2 3
+0=/1 2 3
+0≠/1 2 3
+0+/'abc'
+0+/⍬
+⍴0+/⍬
+0+/5
+¯0+/1 2 3
+// --- a negative n reverses each window --------------------------------
+¯2+/1 2 3 4 5
+¯2-/1 2 3
+¯2÷/1 2 3
+¯1+/1 2 3
+¯3+/1 2 3 4 5
+¯5+/1 2 3 4 5
+¯6+/1 2 3 4 5
+// --- the operand decides what a window folds to ------------------------
+2,/1 2 3
+⍴2,/1 2 3
+≡2,/1 2 3
+3,/1 2 3 4 5
+¯2,/1 2 3
+¯3,/1 2 3 4
+2,/'abcd'
+2⍴/1 2 3
+2+/(1 2)(3 4)(5 6)
+2,/(1 2)(3 4)
+2{⍺+⍵}/1 2 3
+// --- which axis --------------------------------------------------------
+2+/2 3⍴⍳6
+⍴2+/2 3⍴⍳6
+2+⌿2 3⍴⍳6
+⍴2+⌿2 3⍴⍳6
+3+/2 3⍴⍳6
+⍴4+/2 3⍴⍳6
+2+/[1]2 3⍴⍳6
+2+/[2]2 3⍴⍳6
+2+⌿[2]2 3⍴⍳6
+⍴2+/2 3 4⍴⍳24
+2+/2 3 4⍴⍳24
+⍴2+⌿2 3 4⍴⍳24
+⍴2+/[2]2 3 4⍴⍳24
+2+/[2]2 3 4⍴⍳24
+0+/2 3⍴⍳6
+⍴0+/2 3⍴⍳6
+⍴0+⌿2 3⍴⍳6
+¯2+/2 3⍴⍳6
+2,/2 3⍴⍳6
+2,⌿2 3⍴⍳6
+2+/2 2⍴⍳4
+2(+/)1 2 3
+2(+⌿)1 2 3
+2+/¨(1 2 3)(4 5 6)
+2,/¨(1 2 3)(4 5)
+// --- the left argument is one number, however it is shaped -------------
+(,2)+/1 2 3
+(1 1⍴2)+/1 2 3
+(⊂2)+/1 2 3
+1 1+/2 3
+2 2+/1 2 3 4
+⍬+/1 2 3
+'a'+/1 2 3
+'ab'+/1 2 3
+2.5+/1 2 3
+// --- reduce or replicate: the token to the LEFT decides ----------------
+1 1/2 3
+1 1+/2 3
+2 2/2 3
+1 0 1/⍳3
+2+/1 2 3
+1 0 1⌿2 3⍴⍳6
+2+⌿2 3⍴⍳6
+0 1/2 3
+2/1 2 3
+1 0 1/'abc'
+// --- the index origin moves the axis number, not the windows -----------
+@ io=0
+2+/1 2 3
+2+/[0]2 3⍴⍳6
+2+/[1]2 3⍴⍳6
+⍴2+/[0]2 3⍴⍳6

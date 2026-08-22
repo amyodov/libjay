@@ -573,7 +573,13 @@ all of them by cells and leaves its boxes shut; the two languages part here
 and nowhere in between.
 
 Operators: `/` (reduce, LAST axis), `⌿` (reduce, leading axis), `\` (scan,
-last axis), `⍀` (scan, leading axis), `⍤` (rank), `⍨` (commute), `⍣`
+last axis), `⍀` (scan, leading axis), the N-WISE REDUCTION `n f/ y` and
+`n f⌿ y` (the DYADIC case of a `/`-derived function: every window of n items
+along that axis, folded by `f/` — `2+/1 2 3` is `3 5` and `2,/1 2 3` the two
+pairs; n is one number however it is shaped, a negative one reverses each
+window before folding it, zero answers `f/⍬` once per gap, a window may
+reach one item past the axis and no further, and a bracket axis names the
+axis as it does for the reduce), `⍤` (rank), `⍨` (commute), `⍣`
 (power, a nonnegative count), `¨` (each: the function runs on the contents
 of every item and its result goes back into an item — a simple scalar
 result stays simple, so `2×¨1 2 3` is flat and `⍴¨'ab' 'cde'` is nested),
@@ -659,7 +665,10 @@ names are always values in this subset, so which one is meant is decided by
 the token to the left and nothing else. Parentheses around a bare operator
 glyph are transparent, so `1 0 1(/)1 2 3` is the replication `1 0 1/1 2 3`
 — the token OUTSIDE them is what decides the reading, which is what the
-reference does with it too.
+reference does with it too. The LEFT ARGUMENT never enters into that
+choice: `1 1/2 3` is a replicate because nothing stands to the `/`'s left,
+and `1 1+/2 3` is an n-wise reduction whose n is two numbers, which is a
+length error rather than a compress.
 
 `←` assignment (incl. inline), `⎕←` output, `⋄` and newline sentence
 separators, `⍝` comments, `¯` negatives, `''` strings. Index origin is a
@@ -1498,6 +1507,23 @@ libjay is stricter, or simply elsewhere:
   as the standard and J do and as it already refuses to order a complex
   number; `=` and `≠` are defined across types and agree. This is the
   largest single slice of the APL sweep and none of it is a libjay bug.
+- the n-wise reduction of an EMPTY argument of rank 2 or more. The reduced
+  axis is `1+≢-|n|` items long there as anywhere else, so libjay's answer
+  has the argument's rank: `⍴2+/0 3⍴⍳0` is `0 2`. GNU APL drops the axis
+  instead — the shape its ORDINARY reduce gives — but only when that length
+  is not zero and only when n is not zero, so `⍴1+⌿0 3⍴⍳0` is `0 3` and
+  `⍴0+/0 3⍴⍳0` is `0 4` there with the axis kept. The three cannot come
+  from one rule; libjay applies the one rule everywhere. One step further,
+  `⍴2+/0 0⍴⍳0`: with no cells to fold there is no window to be too long for
+  one, so libjay learns the shape from a cell of fills and answers an empty
+  where GNU APL measures n against the axis first and refuses. On a
+  NON-empty argument the two agree that an over-long window is a domain
+  error.
+- `0 f/ y` is `1+≢y` copies of what `f/` answers for an empty argument, and
+  libjay gives catenation the empty list as its identity — J's rule, and the
+  one its own `,/⍬` already follows — so `0,/1 2 3` answers four of them.
+  GNU APL says catenation has no identity and refuses, though its own
+  `,/⍳0` answers a scalar 0.
 - monadic `⊣` is the identity, which is what the status table promises and
   what the Dyalog line has. GNU APL gives it no result at all: `⊣1 2 3` and
   `⍴⊣1 2 3` both display nothing.

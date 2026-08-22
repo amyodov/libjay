@@ -64,8 +64,28 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   scalar. J's `~:` still runs over items. The two spellings are not the same
   function, and the corpus now holds both.
 
+- **APL's n-wise reduction, `n f/ y`.** The dyadic case of a `/`-derived
+  function folds every window of n items along the axis the glyph chooses:
+  `2+/1 2 3` is `3 5`, `3+/⍳5` is `6 9 12`, `2,/1 2 3` builds the pairs,
+  and `2+⌿m` runs down the columns while `2+/[1]m` names the axis outright.
+  n is one number however it is shaped — two of them is a length error, not
+  a compress. A negative n reverses each window before folding it, so
+  `¯2-/1 2 3` is `1 1` where `2-/1 2 3` is `¯1 ¯1`; a zero answers what
+  `f/` gives an empty argument, once per gap, so `0+/1 2 3 4 5` is six
+  zeros. A window may be one item longer than the axis, which leaves an
+  empty; longer than that is a domain error. A positive window over
+  arithmetic runs through the same blockwise kernel as J's `n u/\ y`, and
+  fuses into a chain the same way.
+
 ### Fixed
 
+- **`2+/1 2 3` is `3 5`, not `3 4 5`.** APL's `/`-derived functions had no
+  dyadic meaning of their own: the derivation was dropped and the operand
+  applied with the left argument extended, so every moving sum, moving
+  difference and pair-building idiom answered a plausible array that was
+  wrong, with no diagnostic. `2×/`, `2-/`, `3+/`, `2+⌿`, `+/[k]` and the
+  same under `¨` were all affected. The shape was wrong too: `⍴2+/1 2 3`
+  said 3 where it is 2.
 - **A field width near the end of the integer range no longer panics.**
   `9223372036854775806 ": 1` multiplied the rows by the summed column width
   and handed the product to an allocator: a capacity overflow in a debug

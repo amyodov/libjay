@@ -241,6 +241,20 @@ const WINDOWS: &[&str] = &[
     "2 * 20 +/\\ {x}",
 ];
 
+/// The same stage under APL's spelling: `n f/ y` is the n-wise reduction,
+/// which is the moving fold J writes `n f/\ y`.
+const APL_WINDOWS: &[&str] = &[
+    "2 × 20+/{x}",
+    "1 - 0.05 × 20+/{x}",
+    "(20⌈/{x}) - 20⌊/{x}",
+    "1 + 4+/4+/{x}",
+    "+/20+/{x}×{x}",
+    "5+/{a} × 2",
+    "3+/{p} + {q}",
+    // `⌿` windows the leading axis, which over a vector is the same axis.
+    "1 + 20+⌿{x}",
+];
+
 /// Chains with a running fold in them.
 const SCANS: &[&str] = &[
     "(+/\\ {x}) % 1 + | {x}",
@@ -262,6 +276,26 @@ fn every_window_chain_computes_what_it_replaced() {
         for n in [1usize, 5, 25, 1_000, 100_000] {
             same(Lang::J, src, n);
         }
+    }
+}
+
+#[test]
+fn every_apl_n_wise_chain_computes_what_it_replaced() {
+    for src in APL_WINDOWS {
+        assert!(is_fused(&program(Lang::Apl, src)), "`{src}` did not fuse");
+        for n in [1usize, 5, 25, 1_000, 100_000] {
+            same(Lang::Apl, src, n);
+        }
+    }
+}
+
+/// A negative n reverses each window and a zero one asks for the operand's
+/// identity: neither is the plain moving fold the kernel has a stage for, so
+/// both stay outside it.
+#[test]
+fn a_reversed_or_empty_window_does_not_fuse() {
+    for src in ["¯20+/{x}", "0+/{x}", "20+/1 2 3"] {
+        assert!(!is_fused(&program(Lang::Apl, src)), "`{src}` fused");
     }
 }
 

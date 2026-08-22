@@ -2322,3 +2322,77 @@ refuse too); `∊` of an empty answers one element there and the empty here
 and stays exact here. Together they were about a third of the APL sweep's
 mismatches. A fourth was found by this wave: GNU APL's `-\` and `-⍀` drop
 an empty result to a rank-1 empty where its own `+\` keeps the shape.
+
+## 2026-08-22 — N-wise reduction: `f/` is its own node, not J's `u/`
+
+**`n f/ y` was a silent wrong answer, and the cause was one missing node.**
+APL's `+/` compiled to `Rank(Reduce(+), [1,1,1])`, so its dyad reached J's
+`Verb::Reduce` dyad, which in APL mode is the outer product `∘.` also
+derives. Applied to `2` and `1 2 3` that is `2+1 2 3` — `3 4 5`, plausible
+and wrong, with the shape wrong too (`⍴2+/1 2 3` said 3 where GNU APL says
+2). Every moving sum, moving difference and pair-building idiom answered
+like that with no diagnostic. `∘.` genuinely needs `Reduce`'s dyad to be
+the outer product, so the two spellings cannot share a node: APL's `/` and
+`⌿` now derive `Verb::NWise`, whose monad is the same insert and whose dyad
+is the n-wise reduction. J's `u/` is untouched.
+
+**The rank wrapper leaves the left cell unranked.** `+/` is
+`Rank(NWise(+), [1, RANK_INF, 1])`, not `[1,1,1]`: the monadic rank 1 is
+what makes `/` the LAST axis, and the unranked left cell is what makes n
+one number rather than a frame of window lengths the way J's infix takes
+it. `(1 1⍴2)+/1 2 3` is `3 5` because of it, and `1 1+/2 3` is the length
+error GNU APL raises rather than a two-row answer. `⌿` is a bare `NWise`
+and `+/[k]` is `AlongAxis(NWise, k)`, so all three spellings window the
+axis their glyph already reduces, and the reduced axis stays in place —
+`⍴2+/2 3⍴⍳6` is `2 2`, not `2`.
+
+**A window is `f/` applied to it, which is where every operand rule comes
+from for free.** The identity of an empty fold (so `0+/1 2 3 4 5` is six
+zeros and `0×/1 2 3` is ones), the enclosure APL's insert puts round a
+value that is not a simple scalar (so `2,/1 2 3` is two boxed pairs),
+boxes, complex numbers, a dfn operand: none of it needed code. A positive
+window takes the blockwise fold `infix` already had, so `2+/y` and J's
+`2 +/\ y` run the same kernel and fuse into a chain the same way; the
+fusion stage recognises the APL spelling through the same
+`absorbable_reduce` that unwraps the rank wrapper for the monadic reduce,
+and declines a negative or zero n, which are not plain moving windows.
+
+**What the oracle taught, against the register's paraphrase.** Three
+corrections. A window may be exactly one item longer than the axis and
+answer an empty (`6+/1 2 3 4 5`); LONGER than that is a DOMAIN error, not a
+shorter answer — so `2+/⍬` is a domain error too, not the length error the
+register recorded. A negative n reverses each window before folding it
+rather than reversing the order of the windows: `¯2-/1 2 3` is `1 1`. And a
+rank-0 argument with `|n|` of 1 keeps its rank — `⍴1+/5` is empty where
+`⍴2+/5` is `,0` and `⍴0+/5` is `,2` — because a window of one leaves the
+argument exactly as it was, axis included.
+
+**The disambiguation was never ambiguous.** `/` is the reduce operator
+after a FUNCTION and replicate after a value; nothing about the left
+argument enters into it. GNU APL agrees on every probe: `1 1/2 3` is `2 3`
+(replicate — no operand), `1 1+/2 3` is a length error (n-wise — the
+operand is `+`, and n is two numbers), `2 2/2 3` is `2 2 3 3` and
+`2+/1 2 3` is `3 5`. A boolean left argument does not make a derived
+function a compress and a count of 2 does not make a bare `/` a window.
+That was already libjay's rule for the monadic case and it needed no
+change; the corpus now pins it either way round.
+
+**Three empty-argument corners pinned as divergences rather than copied.**
+On an EMPTY argument of rank 2 or more GNU APL drops the reduced axis —
+`⍴2+/0 3⍴⍳0` is `0` there and `0 2` here — but only when the axis would
+have had a nonzero length and only when n is not zero, so its own
+`⍴1+⌿0 3⍴⍳0` (`0 3`) and `⍴0+/0 3⍴⍳0` (`0 4`) keep it. Three cases, no
+single rule; libjay applies the one rule everywhere. One step further,
+`⍴2+/0 0⍴⍳0`: with no cells there is no window to be too long for one, so
+the fill-cell probe answers an empty where GNU APL refuses — a consequence
+of the prototype work, and the two agree on every non-empty argument. And
+`0,/1 2 3` is four empty lists here, because libjay gives catenation the
+empty list as its identity (J's rule, which its own `,/⍬` already follows)
+where GNU APL refuses — though GNU APL's own `,/⍳0` answers a scalar 0, so
+that one is not self-consistent either.
+
+**Found in passing, not ours and not fixed.** GNU APL's `○` under `/`
+answers a boolean: `○/1 2 3` is 0 there and `¯0.836022` here, and
+`2○/1 2 3 4` is `0 1 0` against `0.909297 ¯0.989992 1.15782`. The MONADIC
+reduce shows it too, so it predates this wave and is not about n-wise
+reduction; `○` is kept out of the n-wise corpus for it.

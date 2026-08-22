@@ -309,3 +309,31 @@
 < 3 0
 > gnu: 0
 > dyalog: 3 0
+= ⍴2+/0 3⍴⍳0
+? the reduced axis stays here, an empty argument drops it there
+< 0 2
+> gnu: 0
+= ⍴1+/0 3⍴⍳0
+? the reduced axis stays here, an empty argument drops it there
+< 0 3
+> gnu: 0
+= ⍴2+/2 0 3⍴⍳0
+? the reduced axis stays here, an empty argument drops it there
+< 2 0 2
+> gnu: 2 0
+= ⍴2+/0 3 4⍴⍳0
+? the reduced axis stays here, an empty argument drops it there
+< 0 3 3
+> gnu: 0 3
+= ⍴2+/0 0⍴⍳0
+? an empty answer here, a domain error there
+< 0
+> gnu: <error>
+= 0,/1 2 3
+? the empty list is catenation's identity here, no identity there
+<
+> gnu: <error>
+= 0,/2 3⍴⍳6
+? the empty list is catenation's identity here, no identity there
+<
+> gnu: <error>

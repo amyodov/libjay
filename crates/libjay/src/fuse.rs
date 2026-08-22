@@ -217,11 +217,12 @@ fn fusable_dyad(v: &Verb) -> Option<ScalarDyad> {
 fn absorbable_reduce(v: &Verb) -> Option<ScalarDyad> {
     use ScalarDyad::*;
     let inner = match v {
-        Verb::Reduce(u) => u,
+        // APL's `f/` is the same fold monadically; only its dyad differs.
+        Verb::Reduce(u) | Verb::NWise(u) => u,
         // The wrapper applies the reduction to cells of rank >= 1; over the
         // rank-1 argument this kernel insists on, that is the whole array.
         Verb::Rank(u, r) if r[0] >= 1 => match &**u {
-            Verb::Reduce(inner) => inner,
+            Verb::Reduce(inner) | Verb::NWise(inner) => inner,
             _ => return None,
         },
         _ => return None,
@@ -233,21 +234,43 @@ fn absorbable_reduce(v: &Verb) -> Option<ScalarDyad> {
 
 /// The moving fold this dyad performs, if the kernel can absorb it: `k u/\ y`
 /// over an associative arithmetic `u` and a window the compiler knows the
-/// length of. A left argument of more than one number is a frame — several
-/// window lengths, several results — and stays outside.
+/// length of. APL's n-wise reduction `n f/ y` is the same fold over the same
+/// windows, so it takes the same path. A left argument of more than one
+/// number is a frame in J — several window lengths, several results — and
+/// stays outside; in APL it is not a window length at all.
 fn absorbable_window(e: &Expr) -> Option<(ScalarDyad, usize)> {
-    let Expr::Dyad { verb: Verb::Windowed(u, WindowKind::Prefix), x, .. } = e else {
-        return None;
+    let (op, x) = match e {
+        Expr::Dyad { verb: Verb::Windowed(u, WindowKind::Prefix), x, .. } => {
+            (absorbable_reduce(u)?, x)
+        }
+        // `absorbable_reduce` also unwraps the rank wrapper APL's `/` wears;
+        // over the rank-1 argument this kernel insists on it changes nothing.
+        Expr::Dyad { verb: v @ (Verb::NWise(_) | Verb::Rank(..)), x, .. }
+            if is_nwise(v) =>
+        {
+            (absorbable_reduce(v)?, x)
+        }
+        _ => return None,
     };
-    let op = absorbable_reduce(u)?;
     let Expr::Const(a, _) = &**x else { return None };
     if a.rank() != 0 {
         return None;
     }
     let k = *a.to_i64_vec()?.first()?;
-    // A negative left argument cuts the argument into chunks and a zero
-    // takes the empty runs between the items: neither is a moving window.
+    // A negative left argument reverses each window in APL and cuts the
+    // argument into chunks in J, and a zero takes the empty runs between the
+    // items: none of the three is a plain moving window.
     (1..=MAX_WINDOW as i64).contains(&k).then_some((op, k as usize))
+}
+
+/// Is this verb APL's `f/` or `f⌿` — the one whose dyad is the n-wise
+/// reduction — rather than J's `u/`, whose dyad is the table?
+fn is_nwise(v: &Verb) -> bool {
+    match v {
+        Verb::NWise(_) => true,
+        Verb::Rank(u, r) => r[0] >= 1 && matches!(&**u, Verb::NWise(_)),
+        _ => false,
+    }
 }
 
 /// The running fold this monad performs, if the kernel can absorb it. J's
@@ -626,9 +649,9 @@ fn same_verb(a: &Verb, b: &Verb) -> bool {
     match (a, b) {
         (Verb::Prim(p), Verb::Prim(q)) => p == q,
         (Verb::Rank(u, r), Verb::Rank(v, s)) => r == s && same_verb(u, v),
-        (Verb::Reduce(u), Verb::Reduce(v)) | (Verb::Commute(u), Verb::Commute(v)) => {
-            same_verb(u, v)
-        }
+        (Verb::Reduce(u), Verb::Reduce(v))
+        | (Verb::NWise(u), Verb::NWise(v))
+        | (Verb::Commute(u), Verb::Commute(v)) => same_verb(u, v),
         (Verb::Windowed(u, j), Verb::Windowed(v, k)) => j == k && same_verb(u, v),
         (Verb::PowerN(u, m), Verb::PowerN(v, n)) => m == n && same_verb(u, v),
         (Verb::Fork(f, g, h), Verb::Fork(f2, g2, h2)) => {

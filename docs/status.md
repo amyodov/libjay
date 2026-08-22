@@ -26,7 +26,7 @@ tables are listed separately and not counted.
 **J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
-**APL: 90 green / 23 partial / 3 absent by design, of 116 valences in the
+**APL: 91 green / 23 partial / 3 absent by design, of 117 valences in the
 inventory. Nothing in APL's primitive tables is red.**
 
 ## J — verbs
@@ -327,6 +327,7 @@ conjunctions above:
 |---|---|
 | `/` reduce (last axis) | 🟢 between the ELEMENTS along the axis, each disclosed and the fold's value enclosed: `,/1 2 3` is an enclosed vector |
 | `⌿` reduce (leading axis) | 🟢 the same rule down the first axis: `,⌿2 3⍴⍳6` pairs the columns |
+| `/` `⌿` n-wise reduction (dyadic) | 🟢 `n f/ y` folds every window of n items along the axis the glyph chooses: `2+/1 2 3` is `3 5`. n is one number — a negative one reverses each window, zero answers the operand's identity once per gap, and a window may reach one item past the axis before it is a domain error. A positive window shares the blockwise kernel with J's `n u/\ y`. The shape of an EMPTY argument of rank ≥2 diverges from GNU APL — see divergences |
 | `/` `⌿` replicate (after an operand) | 🟢 a negative count leaves that many prototype fills |
 | `\` `⍀` scan | 🟢 the reduce over each prefix, so it collects the same enclosures |
 | `\` `⍀` expand (after an operand) | 🟢 the gap holds the first item's prototype |

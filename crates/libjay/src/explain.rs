@@ -395,6 +395,10 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             head(out, "reduce (insert between items)");
             verb_lines(u, depth + 1, p, tr, out);
         }
+        Verb::NWise(u) => {
+            head(out, "reduce (insert between items); n-wise with a left argument");
+            verb_lines(u, depth + 1, p, tr, out);
+        }
         Verb::Fit(u, n) => {
             head(out, &format!("fit !.{n} (comparison tolerance)"));
             verb_lines(u, depth + 1, p, tr, out);

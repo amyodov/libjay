@@ -210,3 +210,33 @@ F←+/ ⋄ F 1 2 3
 ? the argument's shape here, a rank-1 empty there
 ⍴-⍀3 0⍴1
 ? the argument's shape here, a rank-1 empty there
+// The n-wise reduction of an EMPTY argument of rank 2 or more. The reduced
+// axis is `1+≢-|n|` items long, exactly as it is on a non-empty argument,
+// so libjay's answer has the argument's rank. GNU APL drops the axis
+// instead — the shape its ORDINARY reduce gives — but only when that length
+// is not zero, and not when n is 0: `⍴1+⌿0 3⍴⍳0` is `0 3` and `⍴0+/0 3⍴⍳0`
+// is `0 4` there, both with the axis kept. The three cases cannot come from
+// one rule, and libjay applies the one rule everywhere.
+⍴2+/0 3⍴⍳0
+? the reduced axis stays here, an empty argument drops it there
+⍴1+/0 3⍴⍳0
+? the reduced axis stays here, an empty argument drops it there
+⍴2+/2 0 3⍴⍳0
+? the reduced axis stays here, an empty argument drops it there
+⍴2+/0 3 4⍴⍳0
+? the reduced axis stays here, an empty argument drops it there
+// The same argument one step further: with no cells to fold there is no
+// window to be too long for one. libjay learns the answer's shape from a
+// cell of fills, and a fill cell the function refuses leaves a plain empty;
+// GNU APL measures n against the axis first and refuses. On a NON-empty
+// argument the two agree that an over-long window is a domain error.
+⍴2+/0 0⍴⍳0
+? an empty answer here, a domain error there
+// `0 f/ y` is `1+≢y` copies of what `f/` answers for an empty argument, and
+// libjay gives catenation the empty list as its identity — J's rule, and the
+// one its own `,/⍬` already follows. GNU APL says catenation has no identity
+// and refuses, though its own `,/⍳0` answers a scalar 0.
+0,/1 2 3
+? the empty list is catenation's identity here, no identity there
+0,/2 3⍴⍳6
+? the empty list is catenation's identity here, no identity there

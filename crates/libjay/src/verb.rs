@@ -907,6 +907,11 @@ pub enum Verb {
     Rank(Box<Verb>, [i64; 3]),
     /// Insert the verb between items, folding right to left (J `/`, APL `⌿`).
     Reduce(Box<Verb>),
+    /// APL `f/` and `f⌿`: the same insert monadically, and the N-WISE
+    /// REDUCTION dyadically — `n f/ y` folds each window of n items along
+    /// the leading axis. J's `u/` is the table dyadically, so the two
+    /// spellings cannot share a node.
+    NWise(Box<Verb>),
     /// Apply the verb to runs of consecutive items (J `\` and `\.`, APL
     /// `\` and `⍀`). The valence chooses the runs; see [`WindowKind`].
     Windowed(Box<Verb>, WindowKind),
@@ -1070,7 +1075,7 @@ impl Verb {
         match self {
             Verb::Prim(p) => p.name.to_string(),
             Verb::Rank(v, r) => format!("{}\"{}", v.name(), rank_str(*r)),
-            Verb::Reduce(v) => format!("{}/", v.name()),
+            Verb::Reduce(v) | Verb::NWise(v) => format!("{}/", v.name()),
             Verb::Windowed(v, WindowKind::Suffix) => format!("{}\\.", v.name()),
             Verb::Windowed(v, _) => format!("{}\\", v.name()),
             Verb::Commute(v) => format!("{}~", v.name()),
@@ -1163,6 +1168,7 @@ impl Verb {
             }
             Verb::Rank(v, _)
             | Verb::Reduce(v)
+            | Verb::NWise(v)
             | Verb::Windowed(v, _)
             | Verb::Commute(v)
             | Verb::PowerN(v, _)
@@ -1229,6 +1235,7 @@ impl Verb {
             }
             Verb::Rank(v, _)
             | Verb::Reduce(v)
+            | Verb::NWise(v)
             | Verb::Windowed(v, _)
             | Verb::Commute(v)
             | Verb::PowerN(v, _) => v.is_pure(),
@@ -1379,7 +1386,7 @@ impl Verb {
                 })?;
                 assemble(&frame, cells, span)
             }
-            Verb::Reduce(v) => reduce(v, y, ctx, span),
+            Verb::Reduce(v) | Verb::NWise(v) => reduce(v, y, ctx, span),
             Verb::Windowed(v, kind) => {
                 runs(v, y, *kind == WindowKind::Suffix, ctx, span)
             }
@@ -1503,7 +1510,7 @@ impl Verb {
             },
             // `u/ y` folds the leading axis, and in this layout the leading
             // axis is what each contiguous run holds.
-            Verb::Reduce(v) => reduce_columns(v, y).map(Ok),
+            Verb::Reduce(v) | Verb::NWise(v) => reduce_columns(v, y).map(Ok),
             // `u/"1 y` folds each row across the columns, which is one
             // elementwise pass per column and no transpose at all.
             Verb::Rank(v, r) => {
@@ -1585,6 +1592,8 @@ impl Verb {
             Verb::PowerN(v, p) => power(v, p.clone(), Some(x), y, ctx, span),
             // `x u/ y` is the table: every cell of x against every cell of y.
             Verb::Reduce(v) => table(v, x, y, ctx, span),
+            // `n f/ y` is APL's n-wise reduction, a different function.
+            Verb::NWise(v) => nwise(v, x, y, ctx, span),
             Verb::Fork(f, g, h) => {
                 let l = f.dyad(x, y, ctx, span)?;
                 let r = h.dyad(x, y, ctx, span)?;
@@ -6249,6 +6258,7 @@ pub(crate) fn with_origin(v: &Verb, origin: i64) -> Option<Verb> {
         }
         Verb::Rank(u, r) => Some(Verb::Rank(Box::new(with_origin(u, origin)?), *r)),
         Verb::Reduce(u) => Some(Verb::Reduce(Box::new(with_origin(u, origin)?))),
+        Verb::NWise(u) => Some(Verb::NWise(Box::new(with_origin(u, origin)?))),
         Verb::Windowed(u, k) => Some(Verb::Windowed(Box::new(with_origin(u, origin)?), *k)),
         Verb::Commute(u) => Some(Verb::Commute(Box::new(with_origin(u, origin)?))),
         Verb::Each(u, e) => Some(Verb::Each(Box::new(with_origin(u, origin)?), *e)),
@@ -8833,6 +8843,75 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     let work = count.saturating_mul(w).saturating_mul(m);
     let cells = each_cell(count, work, u.is_pure(), ctx, |i, c| {
         u.monad(&section(base, i, i + w), c, span)
+    })?;
+    assemble(&[count], cells, span)
+}
+
+/// `n f/ y` (APL): the reduce of every window of n items along the leading
+/// axis. `f/` itself decides what folding a window means, so the operand's
+/// own rules — the identity of an empty fold, the enclosure APL's insert
+/// puts round a non-scalar value — carry over unchanged.
+///
+/// n is one integer. A positive one takes the overlapping windows in order;
+/// a negative one takes the same windows with their items REVERSED, which
+/// only shows on a fold that is not commutative (`¯2-/1 2 3` is `1 1` where
+/// `2-/1 2 3` is `¯1 ¯1`); zero takes the `1+≢y` empty windows, so the
+/// answer is that many copies of the operand's identity. The axis loses
+/// `|n|-1` items, so `|n|` may reach `1+≢y` — one item further and there is
+/// no such window, which is an error rather than a shorter answer.
+fn nwise(f: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    // How many numbers there are is settled before what they are: a left
+    // argument of two is a length error whatever it holds, which is what
+    // keeps `1 1+/2 3` from reading as a compress.
+    if x.count() != 1 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            "the window size must be a single number",
+            Some(span),
+        ));
+    }
+    let k = window_size(x, span)?;
+    let promoted = as_items(y);
+    // A rank-0 argument has no axis to window. One item is what `≢` counts
+    // it as, and a window of one leaves it exactly as it was, rank included;
+    // any other window has to make the axis the argument never had.
+    if promoted.is_some() && k.unsigned_abs() == 1 {
+        return Ok(y.clone());
+    }
+    let base = promoted.as_ref().unwrap_or(y).to_row_major();
+    let base = &base;
+    let n = base.items();
+    let m = base.item_size();
+    let w = k.unsigned_abs() as usize;
+    if w > n + 1 {
+        return Err(Error::domain(
+            format!("a window of {w} does not fit an axis of {n}"),
+            span,
+        ));
+    }
+    let count = n + 1 - w;
+    let fold = Verb::Reduce(Box::new(f.clone()));
+    if count == 0 {
+        return Ok(empty_windows(&fold, base, w, ctx, span));
+    }
+    // The blockwise fold the infix already has. It runs over whole items at
+    // full rank, which is what folding the elements along the axis comes to
+    // for the arithmetic operands it covers, and those are all commutative,
+    // so a reversed window folds to the same value.
+    if w > 0
+        && base.dtype().is_numeric()
+        && let Some(op) = scalar_dyad_of(f)
+        && let Some(d) = window_typed(op, base.row_major_data(), n, m, w)
+    {
+        let mut shape = base.shape.clone();
+        shape[0] = count;
+        return Ok(Array::new(shape, d));
+    }
+    let work = count.saturating_mul(w.max(1)).saturating_mul(m);
+    let cells = each_cell(count, work, f.is_pure(), ctx, |i, c| {
+        let win = section(base, i, i + w);
+        let win = if k < 0 { reverse(&win) } else { win };
+        fold.monad(&win, c, span)
     })?;
     assemble(&[count], cells, span)
 }

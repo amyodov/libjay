@@ -1400,7 +1400,7 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         // it, which is what makes the two spellings the same function here.
         if let Some((k, aspan)) = take_axis(&mut it, d)? {
             let inner = match op {
-                OpGlyph::Slash | OpGlyph::SlashBar => Verb::Reduce(Box::new(f)),
+                OpGlyph::Slash | OpGlyph::SlashBar => Verb::NWise(Box::new(f)),
                 OpGlyph::Backslash | OpGlyph::BackslashBar => {
                     Verb::Windowed(Box::new(Verb::Reduce(Box::new(f))), WindowKind::Scan)
                 }
@@ -1419,9 +1419,12 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         }
         let derived = match op {
             // APL's divergence from J: `/` reduces the last axis, `⌿` the
-            // leading one. `+/` sums rows, `+⌿` sums columns.
-            OpGlyph::Slash => Verb::Rank(Box::new(Verb::Reduce(Box::new(f))), [1, 1, 1]),
-            OpGlyph::SlashBar => Verb::Reduce(Box::new(f)),
+            // leading one. `+/` sums rows, `+⌿` sums columns. The dyad is
+            // the n-wise reduction, whose left argument is one number
+            // however it is shaped, so the wrapper frames the right
+            // argument alone.
+            OpGlyph::Slash => Verb::Rank(Box::new(Verb::NWise(Box::new(f))), [1, RANK_INF, 1]),
+            OpGlyph::SlashBar => Verb::NWise(Box::new(f)),
             // The scan follows the reduce: `\` along the last axis, `⍀`
             // along the leading one. The k-th element is the reduce of the
             // first k, which is the verb applied to the k-th prefix.
@@ -3391,17 +3394,19 @@ mod tests {
 
     #[test]
     fn slash_reduces_the_last_axis() {
-        // APL `+/` is J's `+/"1`: rank 1 over the reduction.
+        // APL `+/` is J's `+/"1` monadically — rank 1 over the reduction —
+        // but a different function dyadically, so the node is its own. The
+        // left cell is unranked: n is one number, never a frame of them.
         let e = one("+/2 3⍴⍳6");
         match &e {
             Expr::Monad { verb: Verb::Rank(inner, ranks), .. } => {
-                assert_eq!(*ranks, [1, 1, 1]);
+                assert_eq!(*ranks, [1, RANK_INF, 1]);
                 match inner.as_ref() {
-                    Verb::Reduce(f) => assert_eq!(as_prim(f).name, "+"),
+                    Verb::NWise(f) => assert_eq!(as_prim(f).name, "+"),
                     other => panic!("expected a reduce, got {other:?}"),
                 }
             }
-            other => panic!("expected monadic Rank(Reduce(+)), got {other:?}"),
+            other => panic!("expected monadic Rank(NWise(+)), got {other:?}"),
         }
     }
 
@@ -3409,8 +3414,8 @@ mod tests {
     fn slashbar_reduces_the_leading_axis() {
         let e = one("+⌿2 3⍴⍳6");
         match &e {
-            Expr::Monad { verb: Verb::Reduce(f), .. } => assert_eq!(as_prim(f).name, "+"),
-            other => panic!("expected monadic Reduce(+), got {other:?}"),
+            Expr::Monad { verb: Verb::NWise(f), .. } => assert_eq!(as_prim(f).name, "+"),
+            other => panic!("expected monadic NWise(+), got {other:?}"),
         }
     }
 
@@ -3500,9 +3505,9 @@ mod tests {
         match &e {
             Expr::Monad { verb: Verb::Rank(inner, ranks), .. } => {
                 assert_eq!(*ranks, [1, 1, 1]);
-                assert!(matches!(inner.as_ref(), Verb::Rank(_, [1, 1, 1])));
+                assert!(matches!(inner.as_ref(), Verb::Rank(_, [1, RANK_INF, 1])));
             }
-            other => panic!("expected Rank(Rank(Reduce(+))), got {other:?}"),
+            other => panic!("expected Rank(Rank(NWise(+))), got {other:?}"),
         }
     }
 
@@ -3598,7 +3603,7 @@ mod tests {
         let sp = SourceParts::from_parts(&["+/", ""], &["m"]);
         let stmts = parse(&sp, rules(1)).unwrap();
         match &stmts[0] {
-            Expr::Monad { verb: Verb::Rank(_, [1, 1, 1]), y, .. } => {
+            Expr::Monad { verb: Verb::Rank(_, [1, RANK_INF, 1]), y, .. } => {
                 assert!(matches!(y.as_ref(), Expr::Param(0, _)));
             }
             other => panic!("expected a reduction over a parameter, got {other:?}"),
