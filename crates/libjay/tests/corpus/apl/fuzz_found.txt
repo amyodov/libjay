@@ -191,3 +191,50 @@
 ⍴9223372036854775806↓0
 ¯9223372036854775806+9223372036854775806
 1000000000000000001-1000000000000000000
+
+// Decode extends a SINGLE — one element, whatever rank it is written at —
+// along the other argument's axis, and an empty axis on either side weighs
+// nothing at all. A digit axis of some other length is still a length
+// error.
+1 2 3⊥5
+⍴1 2 3⊥5
+1 2 3⊥,5
+1 2 3⊥1 1⍴5
+(,2)⊥1 2 3
+(1 1⍴2)⊥1 2 3
+(2 2⍴2)⊥5
+(2 2⍴2)⊥,5
+5⊥1 2 3
+5⊥2 2⍴1 2 3 4
+2 3⊥2 2⍴1 2 3 4
+1 2⊥''
+⍴1 2⊥''
+(⍳0)⊥5
+(⍳0)⊥1 2
+2⊥⍳0
+1 2 3⊥4 5
+1 2 3⊥2 2⍴5
+1 2 3⊥2 3⍴⍳6
+
+// An empty of a non-numeric type is acceptable numeric data: it holds no
+// value to refuse.
+¯3⊥''
+2⊤''
+⍴2⊤''
+⊥⍨''
+
+// Partition extends a one-item left argument over every item, so one flag
+// opens one partition over the whole argument. Two flags for three items
+// remains a length error.
+1⊂1 2 3
+(,1)⊂1 2 3
+2⊂1 2 3
+0⊂1 2 3
+3⊂1 2 3
+1⊂'abc'
+1⊂2 3⍴⍳6
+1 0 1⊂1 2 3
+1 1 1⊂1 2 3
+2 0 1⊂1 2 3
+1 2⊂1 2 3
+1 0⊂1 2 3

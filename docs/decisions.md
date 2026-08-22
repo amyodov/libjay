@@ -2530,3 +2530,84 @@ disable it in GNU APL and `9!:19 (0)` does not disable it in jconsole, and
 its threshold sits near 1e¯10 in both, unmoved by either knob. It is a fixed
 near-integer admission rule, a separate defect, and bundling it into a
 tolerance wave would have tied it to a knob it does not answer to.
+
+## 2026-08-22 — Nine small rules, one oracle probe each
+
+A batch of independent register clusters, every one of them a rule the
+references state and libjay did not follow. They share no machinery, so
+each was probed on its own and the oracle's answer settled it — three times
+against what the brief expected.
+
+**`,.` has a rank floor, so it is not `,"_1`.** `$ ,. 5` is `1 1` in
+jconsole and was `1` here. The monad ravels each item into a row and never
+answers below rank 2; `,"_1` alone stops one axis short for a rank-0
+argument. `,.` had been spelled as the rank-wrapped `,` and now carries its
+own monad at infinite rank with the dyadic ranks `_1 _1` on the primitive,
+which is what makes `$ ,."0 (i. 3)` the `3 1 1` jconsole reports. The dyad
+is unchanged.
+
+**Dyadic `/:` refuses an over-long key, and it is an INDEX error.** The
+register said length error; jconsole says index error, because `x /: y` is
+`(/: y) { x` and the grade indexes x's items. An atom has one item, so
+`5 /: 1` is 5 and `5 /: 1 2 3` asks for an item that is not there. libjay
+returned the atom for any key at all — the A1 failure mode in J. libjay has
+no Index kind, so the existing out-of-range domain message carries it.
+
+**An outfix checks its operand's domain over the WHOLE argument.** The
+oracle's rule is stranger than "refuse chars": `_2 +/\. 'ab'` is a domain
+error although every piece it leaves behind is empty, and so is
+`4 +/\. 'abc'`, which produces no piece at all. Only an argument of one
+item or none escapes it, and then only when no piece is folded — `2 +/\.
+,'a'` answers an empty. So the check is not "did the fold apply", it is
+"does the operand mean anything for this data", and libjay asks it by
+folding the argument once before the loop. The probe is spent on characters
+and boxes only, and a one-item argument is asked with its item twice, since
+`+/ ,'a'` applies no `+` and would answer nothing. Infix needed no change:
+its numeric fast path was already guarded.
+
+**Decode extends a single, and the two languages mean different things by
+one.** `1 2 3⊥5` is 50 in GNU APL and `1 2 3 #. 5` is 50 in jconsole, but
+`1 2 3 #. ,5` is a LENGTH ERROR while `1 2 3⊥,5` is 50: J spreads a rank-0
+atom, APL2 spreads a single element at any rank. Both are implemented as
+what they are rather than as one shared rule. J's `#.` needed nothing for
+matrices — its rank-1 primitive already frames them — so `(2 2$2) #. 5`
+came out right for free. An empty axis on either side weighs nothing rather
+than raising a length error, which is what `1 2⊥''` and `(i.0) #. 5` both
+report.
+
+**Partition extends one flag, and only one.** `1⊂1 2 3` is the whole vector
+enclosed. GNU APL reads `⊂` by the rising-flag rule — `1 1 1⊂1 2 3` is ONE
+partition, not three, and `2 0 1⊂1 2 3` drops the middle item — which is
+the reading libjay already had under `Partition::Flags`, so only the
+extension was missing. The count reading, `Partition::Counts` under
+`Dialect::dyalog()`, already extends a scalar and has no oracle here (GNU
+APL cannot read `⊆`), so it was left exactly as it was rather than guessed
+at.
+
+**`E.` reads two atoms as one-item lists.** `0 E. 5` is 0, `1 E. 1` is 1,
+and the answer is a scalar. A rank-1 pattern in a rank-0 argument still
+fits nowhere.
+
+**`I.` orders boxes by J's total order.** `(1;2 3) I. (1;2;3)` is `0 1 1`,
+and the order that produces it is the one `/:` already grades boxes with —
+class, then rank, then shape, then atoms. The box arm is gated on J's TAO:
+GNU APL's `⍸` over nested bounds is its own extension, pinned in
+divergences.txt as C8, and answering it here would quietly unpin it.
+
+**A zero-imaginary complex is read at the USE, not demoted at the making.**
+The brief said to fix the constructor. `3!:0 (j. 0)` is 16 in jconsole —
+the value stays complex — while `1 <. j. 0` is 0 and `i. 3j0` is `0 1 2`.
+So J does not narrow the value; it accepts a complex with no imaginary part
+wherever a real is wanted. Demoting in the constructor would have made
+`3!:0` report a float and broken a recorded answer to fix six. The reading
+lives in `to_f64_vec`/`to_i64_vec`, which reaches `$ # {. }. |. i. | #. #:
+":` at once, and in the ordering verbs, which take the complex path before
+that coercion runs.
+
+**An empty carries no type to refuse.** `#. ''` is 0 and `¯3⊥''` is 0: an
+empty holds no value of the wrong type, so it is acceptable numeric data
+wherever numeric data is wanted. The rule covers empty characters and
+symbols and stops there — jconsole answers `#. 0$<1` but refuses
+`2 #. 0$<1`, and including empty boxes would have traded one refusal for a
+silent wrong answer in the other. Two J rows stay refused for that reason
+and are the honest residue of the cluster.

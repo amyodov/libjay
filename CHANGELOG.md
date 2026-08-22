@@ -111,6 +111,64 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`$ ,. 5` is `1 1`, not `1`.** J's `,.` ravels each item into a row of a
+  table and never answers below rank 2, so an atom becomes a one-by-one
+  table. The answer was one axis short for every rank-0 argument, and under
+  a rank conjunction every cell lost that axis with it: `$ ,."0 (i. 3)` said
+  `3 1` where it is `3 1 1`. A wrong shape with no diagnostic, so anything
+  downstream of it was wrong too.
+
+- **`5 /: 1 2 3` is refused.** `x /: y` sorts the ITEMS of x by the grade of
+  y, and an atom has one item: the only index it can answer is the first.
+  libjay handed the atom back for any key at all, so `_3 \: 0.1 0.2 0.3`
+  answered `_3` where jconsole reports an index error. `5 /: 1` and
+  `'a' /: 1` still answer, since one key needs only that one item.
+
+- **An outfix honours its operand's own domain.** `_2 +/\. 'ab'` answered 0
+  and is now refused, as jconsole refuses it: `+` has no meaning for
+  characters, and an outfix asks the question even where every piece it
+  leaves behind is empty. Boxes are refused the same way (`_1 */\. 1;2`),
+  while an operand that does have a meaning for them — `2 ,/\. 'abc'`,
+  `1 [/\. 'abc'` — is untouched.
+
+- **Decode extends a single argument.** `1 2 3 #. 5` is 50 and `1 2 3⊥5` is
+  50: one digit stands in every position the radices name. J spreads an
+  ATOM, so `1 2 3 #. ,5` stays a length error; APL extends a SINGLE — one
+  element at any rank — so `1 2 3⊥,5` and `1 2 3⊥1 1⍴5` are 50 as well, and
+  a single radix spreads the same way (`(,2)⊥1 2 3` is 11). An empty axis on
+  either side weighs nothing rather than raising a length error: `1 2⊥''`
+  and `(⍳0)#.5` are both 0.
+
+- **`1⊂1 2 3` encloses the whole vector.** One partition flag is the flag of
+  every item, so a single left argument extends along the axis: `1⊂1 2 3` is
+  one partition and `0⊂1 2 3` is none. Two flags for three items has no such
+  reading and remains a length error. The same rule reaches `⊆`, which
+  spells the partition in the Dyalog line.
+
+- **`0 E. 5` is 0.** J reads an atom as a one-item list on both sides of
+  `E.`, so a pattern of one atom has exactly one place to sit in an argument
+  of one atom; `1 E. 1` is 1. A rank-1 pattern in a rank-0 argument still
+  fits nowhere and is still a rank error.
+
+- **`I.` searches boxed bounds.** `(1;2 3) I. (1;2;3)` is `0 1 1`: J defines
+  a total order over boxed values — the order `/:` grades them with — and
+  the interval index now uses it. A boxed bound against an unboxed value has
+  nothing to compare and stays a domain error.
+
+- **A complex value with no imaginary part is ordered by its real part.**
+  `1 <. j. 0` is 0 and `3j0 < 4` is 1, where both were refused for want of
+  an order. The reading is at the USE and not at the making, which is how
+  jconsole has it: the value keeps its complex type, and `3!:0 j. 0` still
+  reports 16. A value that really is complex still has no order. The same
+  reading reaches everywhere a real is wanted, so `i. 3j0` is `0 1 2` and
+  `2 3j0 $ 1` builds the matrix.
+
+- **An empty is acceptable numeric data whatever type it was written at.**
+  `#. ''` is 0 in J and `¯3⊥''` is 0 in GNU APL: an empty holds no value of
+  the wrong type to refuse. `2 #. ''`, `#: ''` and `i. ''` answer for the
+  same reason. An empty BOX is not numeric data — jconsole refuses
+  `2 #. 0$<1` — and neither is a non-empty character array.
+
 - **`2+/1 2 3` is `3 5`, not `3 4 5`.** APL's `/`-derived functions had no
   dyadic meaning of their own: the derivation was dropped and the operand
   applied with the left argument extended, so every moving sum, moving

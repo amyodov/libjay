@@ -86,7 +86,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `$` | 🟢 shape of; extended where the argument is | 🟢 reshape, laying out ITEMS |
 | `#` | 🟢 tally; extended where the argument is | 🟢 copy; `#^:_1` is the expansion that undoes it |
 | `,` | 🟢 ravel | 🟢 append; unequal item shapes are overtaken, which fills |
-| `,.` | 🟢 ravel items | 🟢 stitch |
+| `,.` | 🟢 ravel items; never below rank 2, so `$ ,. 5` is `1 1` | 🟢 stitch |
 | `,:` | 🟢 itemize | 🟢 laminate |
 | `\|.` | 🟢 reverse | 🟢 rotate |
 | `\|:` | 🟢 transpose | 🟢 dyadic transpose; the named axes move to the end, a boxed x groups them into a diagonal |
@@ -94,7 +94,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `}.` | 🟢 behead | 🟢 drop |
 | `{:` | 🟢 tail | — |
 | `}:` | 🟢 curtail | — |
-| `#.` | 🟢 base 2 | 🟢 base; extended where an argument is |
+| `#.` | 🟢 base 2 | 🟢 base; extended where an argument is; an ATOM of digits spreads over the radices (`1 2 3 #. 5` is 50), a one-item list does not |
 | `#:` | 🟢 antibase 2 | 🟢 antibase; extended where an argument is |
 
 ### Selection, search, sort
@@ -105,11 +105,11 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `{::` | 🟢 map | 🟢 fetch |
 | `i.` | 🟢 integers | 🟢 index of |
 | `i:` | 🟢 steps | 🟢 index of last |
-| `I.` | 🟢 indices | 🟢 interval index |
+| `I.` | 🟢 indices | 🟢 interval index; boxed bounds are ordered by the total array ordering |
 | `e.` | 🟢 raze in | 🟢 member of |
-| `E.` | — | 🟢 member of interval |
-| `/:` | 🟢 grade up; boxes by the total array ordering | 🟢 sort |
-| `\:` | 🟢 grade down; boxes by the total array ordering | 🟢 sort |
+| `E.` | — | 🟢 member of interval; two atoms are read as one-item lists |
+| `/:` | 🟢 grade up; boxes by the total array ordering | 🟢 sort; the grade indexes x's ITEMS, so an atom answers only the first |
+| `\:` | 🟢 grade down; boxes by the total array ordering | 🟢 sort; same |
 | `A.` | 🟢 anagram index | 🟢 anagram |
 | `C.` | 🟢 cycle-direct | 🟡 permute; a direct or cyclic permutation, not an atom |
 
@@ -235,6 +235,7 @@ conjunctions above:
 | Base and constant literals `16b1f`, `1p1`, `1x1` | 🟢 |
 | `'strings'`, `NB.` comments, multi-sentence programs | 🟢 |
 | `{name}` host-data interpolation | 🟢 |
+| An EMPTY where numeric data is wanted (`#. ''`, `i. ''`, `¯3⊥''`) | 🟡 an empty of characters or symbols is accepted, as both references accept it; an empty of BOXES is refused, which is what jconsole does with `2 #. 0$<1` and not what it does with `#. 0$<1` |
 
 ## APL — functions
 
@@ -286,11 +287,11 @@ conjunctions above:
 | `⍉` | 🟢 transpose | 🟢 dyadic transpose; x says which axis of the result each axis of y becomes, and a repeated destination runs those axes together |
 | `↑` | 🟢 first; an empty nested argument answers the prototype it remembers | 🟢 take; overtaking a nested array fills with the first item's prototype |
 | `↓` | 🟡 no oracle: GNU APL has no monadic `↓`; Dyalog's split | 🟢 drop |
-| `⊂` | 🟢 enclose | 🟢 partitioned enclose; rank 2 and above partitions the last axis |
+| `⊂` | 🟢 enclose | 🟢 partitioned enclose; rank 2 and above partitions the last axis; a single flag extends over every item, so `1⊂1 2 3` is one partition |
 | `⊃` | 🟢 disclose / mix | 🟢 pick |
 | `⊆` | 🟡 no oracle: not in GNU APL's character set; Dyalog's nest | 🟡 no oracle; Dyalog's partition, which is GNU APL's dyadic `⊂` |
 | `⌷` | 🟡 no oracle: materialise, which Dyalog makes the identity | 🟢 index (APL2: one item of x per axis, a scalar or an enclosed vector) |
-| `⊥` | — | 🟢 decode; the inner product `+.×` over x's last axis and y's leading one |
+| `⊥` | — | 🟢 decode; the inner product `+.×` over x's last axis and y's leading one; a SINGLE on either side extends along the other's axis, and an empty axis weighs nothing |
 | `⊤` | — | 🟢 encode |
 
 ### Selection, search, sort
@@ -441,7 +442,7 @@ implemented, and the recording wins over anything a document says.
 | Boxes | 🟢 structural verbs, display, Python conversion |
 | i8/i16/i32, u8/u16/u32, f32, `Date32`, `Time32`, `Boolean` at the boundary | 🟡 widened or unpacked by one copy on entry |
 | u64 | 🟡 refused above 2⁶³−1 |
-| Complex | 🟢 core type, `[re, im]` pairs; numpy `complex128` zero-copy, Arrow `struct<re, im>` |
+| Complex | 🟢 core type, `[re, im]` pairs; numpy `complex128` zero-copy, Arrow `struct<re, im>`. A value whose imaginary part is zero is read as the real it displays as wherever a real is wanted — ordering, `i.`, `$`, `#`, `I.` — while keeping the complex type `3!:0` reports |
 | Extended integer, rational | 🟢 core types, heap-backed; exact arithmetic, Python `int` and `fractions.Fraction` at the boundary |
 | Symbol | 🟢 core type: one `u32` per element into a process-wide intern table, so a symbol array copies and slices like an integer one. Ordering, `~.`, `i.`, `e.`, `/:` and the structural verbs all carry it; Python gets the names as `str` |
 | Decimal128 | 🔴 |

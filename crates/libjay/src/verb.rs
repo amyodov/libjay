@@ -555,6 +555,9 @@ pub enum MonadOp {
     Tally,
     /// All elements as a vector (J/APL `,`).
     Ravel,
+    /// Each item raveled into a row of a table (J `,.`). The answer never
+    /// has a rank below two, so an atom becomes a one-by-one table.
+    RavelItems,
     /// Reverse the axes (J `|:`, APL `⍉`).
     TransposeAxes,
     /// `{ y`: catalogue — one element from each item of y, in every
@@ -4414,6 +4417,17 @@ fn pervade_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result
     frame_pervaded(y.shape.clone(), cells, span)
 }
 
+/// The same array with its complex values read as the reals they are, or
+/// `None` when one of them really is complex. A value that is not complex
+/// at all needs no reading and answers for itself.
+fn as_real(a: &Array) -> Option<Array> {
+    if a.dtype() != DType::Complex {
+        return Some(a.clone());
+    }
+    let real: Option<Vec<f64>> = a.to_f64_vec();
+    Some(Array::new(a.shape.clone(), Data::F64(real?.into())))
+}
+
 fn scalar_dyad(
     op: ScalarDyad,
     x: &Array,
@@ -4425,6 +4439,18 @@ fn scalar_dyad(
         && (x.dtype() == DType::Box || y.dtype() == DType::Box)
     {
         return pervade_dyad(op, x, y, cfg, span);
+    }
+    // A complex value with no imaginary part is ordered by the real it
+    // displays as: J answers `1 <. j. 0` with 0 and `3j0 < 4` with 1, while
+    // `3!:0 j. 0` still reports the complex type. Only the ordering verbs
+    // read a value that way — arithmetic keeps the complex type through its
+    // answer, which is why the demotion sits here and not in the maker.
+    if matches!(op, ScalarDyad::Min | ScalarDyad::Max | ScalarDyad::Lt
+        | ScalarDyad::Le | ScalarDyad::Gt | ScalarDyad::Ge)
+        && (x.dtype() == DType::Complex || y.dtype() == DType::Complex)
+        && let (Some(a), Some(b)) = (as_real(x), as_real(y))
+    {
+        return scalar_dyad(op, &a, &b, cfg, span);
     }
     let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
     // Nothing to apply the verb to: `'a' + ''` is an empty, not a type
@@ -5577,8 +5603,17 @@ fn grade_select(
 ) -> Result<Array> {
     check_gradable(y, rules, span)?;
     let order = grade_order(y, down, Grading::of(rules, tol));
+    // An atom is ONE item, so the only index it answers is the first: J
+    // reads `5 /: 1` as 5 and refuses `5 /: 1 2 3`, where a lenient reading
+    // would hand the atom back for any key at all.
     if x.rank() == 0 {
-        return Ok(x.clone());
+        return match order.iter().find(|&&i| i > 0) {
+            None => Ok(x.clone()),
+            Some(&past) => Err(Error::domain(
+                format!("index {past} is out of range: the argument has 1 item"),
+                span,
+            )),
+        };
     }
     if let Some(&past) = order.iter().find(|&&i| i >= x.items()) {
         return Err(Error::domain(
@@ -6060,10 +6095,18 @@ fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
     let yr = y.to_row_major();
     let digits = to_rat_vec(&yr.data)?;
     let two = Rat::from_int(Ext::from(2));
+    let mut digits = digits;
     let radix: Vec<Rat> = match x {
         None => vec![two; digits.len()],
         Some(x) => {
             let r = to_rat_vec(&x.to_row_major().data)?;
+            // An ATOM of digits is the digit in every position: J reads
+            // `2 7 1 8 #. 123x` as four 123s. A one-item LIST is not an
+            // atom and does not spread, which is why `1 2 3 #. ,5` is a
+            // length error where `1 2 3 #. 5` is 50.
+            if y.rank() == 0 && r.len() != 1 {
+                digits = vec![digits[0].clone(); r.len()];
+            }
             match r.len() {
                 1 => vec![r[0].clone(); digits.len()],
                 n if n == digits.len() => r,
@@ -6091,11 +6134,16 @@ fn decode(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
     if let Some(exact) = decode_exact(x, y) {
         return Ok(exact);
     }
-    let digits = digits_of(y, "decode", span)?;
+    let mut digits = digits_of(y, "decode", span)?;
     let radix: Vec<f64> = match x {
         None => vec![2.0; digits.len()],
         Some(x) => {
             let r = digits_of(x, "decode", span)?;
+            // An atom of digits fills every position the radices name;
+            // `(i. 0) #. 5` is the empty sum, 0.
+            if y.rank() == 0 && r.len() != 1 {
+                digits = vec![digits[0]; r.len()];
+            }
             match r.len() {
                 1 => vec![r[0]; digits.len()],
                 n if n == digits.len() => r,
@@ -6121,19 +6169,31 @@ fn decode(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
 /// the LAST axis of x and the LEADING axis of y. A scalar x is the radix
 /// for every digit, as it is for a vector argument.
 fn decode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let digits = digits_of(y, "decode", span)?;
+    let mut digits = digits_of(y, "decode", span)?;
     let radices = digits_of(x, "decode", span)?;
     // The digit axis is y's leading one; a scalar y has one digit. The
     // frames are the counts of the axes the digit axis leaves over, and a
     // count is a product of axis lengths rather than a division: an axis of
     // length zero on either side leaves no elements to divide by.
-    let k = if y.rank() == 0 { 1 } else { y.shape[0] };
-    let n: usize = if y.rank() == 0 { 1 } else { y.shape[1..].iter().product() };
+    let mut k = if y.rank() == 0 { 1 } else { y.shape[0] };
+    let mut n: usize = if y.rank() == 0 { 1 } else { y.shape[1..].iter().product() };
     let (rows, width) = match x.rank() {
         0 => (1usize, 0usize),
         r => (x.shape[..r - 1].iter().product(), x.shape[r - 1]),
     };
-    if width != 0 && width != k {
+    // A SINGLE digit stands in every position the radices name, whatever
+    // rank it is written at: `1 2 3⊥5`, `1 2 3⊥,5` and `1 2 3⊥1 1⍴5` are
+    // all 50. That is APL2's single extension, and it is why only a digit
+    // axis of some OTHER length is a length error.
+    if y.count() == 1 && width > 1 && width != k {
+        digits = vec![digits[0]; width];
+        k = width;
+        n = 1;
+    }
+    // A single radix spreads the same way (`(,2)⊥1 2 3` is 11), and an
+    // empty axis on either side weighs nothing at all: the answer is the
+    // empty sum, which is what `1 2⊥''` and `(⍳0)⊥5` both report.
+    if width > 1 && k != 0 && width != k {
         return Err(Error::new(
             ErrorKind::Length,
             format!("{width} radices for {k} digits"),
@@ -6149,7 +6209,7 @@ fn decode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
         for j in 0..n {
             let mut acc = 0.0f64;
             for d in 0..per_row {
-                let b = if width == 0 { radices[0] } else { radices[i * width + d] };
+                let b = if width <= 1 { radices[i * width] } else { radices[i * width + d] };
                 acc = acc * b + digits[d * n + j];
             }
             out[i * n + j] = acc;
@@ -6912,6 +6972,18 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         }
         MonadOp::Tally => Ok(carry_exact(Array::scalar_i64(y.items() as i64), y)),
         MonadOp::Ravel => Ok(Array::new(vec![y.count()], y.data.clone())),
+        // `,. y` is one row per item, the item raveled along it. An atom is
+        // one item whose ravel is one element, so it becomes a 1-by-1
+        // table: `$ ,. 5` is `1 1`, which is where `,"_1` alone would stop
+        // one axis short.
+        MonadOp::RavelItems => {
+            let (items, width) = if y.rank() == 0 {
+                (1usize, 1usize)
+            } else {
+                (y.shape[0], y.shape[1..].iter().product::<usize>())
+            };
+            Ok(Array::new(vec![items, width], y.to_row_major().data))
+        }
         MonadOp::TransposeAxes => Ok(transpose_axes(y)),
         MonadOp::Head => Ok(head(y)),
         MonadOp::Behead => behead(y, span),
@@ -7344,7 +7416,7 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::Link => link(x, y, span),
         DyadOp::Strand => strand(x, y, span),
         DyadOp::IntervalIndex { offset, closed } => {
-            interval_index(x, y, offset, closed, tol, span)
+            interval_index(x, y, offset, closed, tol, Grading::of(cfg.rules, tol), span)
         }
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
         DyadOp::MatrixDivide => matrix_divide(x, y, span),
@@ -9315,12 +9387,13 @@ fn interval_index(
     offset: i64,
     closed: bool,
     tol: Tol,
+    ord: Grading,
     span: Span,
 ) -> Result<Array> {
-    // Characters and symbols have an order of their own, and no tolerance:
-    // the bounds are searched by that order instead of by value.
+    // Characters, symbols and boxes have an order of their own, and no
+    // tolerance: the bounds are searched by that order instead of by value.
     if !x.dtype().is_numeric() || !y.dtype().is_numeric() {
-        return ordered_interval_index(x, y, offset, closed, span);
+        return ordered_interval_index(x, y, offset, closed, ord, span);
     }
     let bounds = x
         .to_f64_vec()
@@ -9349,6 +9422,7 @@ fn ordered_interval_index(
     y: &Array,
     offset: i64,
     closed: bool,
+    ord: Grading,
     span: Span,
 ) -> Result<Array> {
     let (xr, yr) = (x.to_row_major(), y.to_row_major());
@@ -9357,6 +9431,13 @@ fn ordered_interval_index(
         match (bounds, vals) {
             (Data::Char(p), Data::Char(q)) => Some(p[i].cmp(&q[j])),
             (Data::Symbol(p), Data::Symbol(q)) => Some(crate::symbol::cmp(p[i], q[j])),
+            // J orders boxed values against each other by the same total
+            // order `/:` grades them with, so `I.` can search among them.
+            // APL2 gives its nested values no such order, and GNU APL's own
+            // is an extension libjay does not follow: see divergences.txt.
+            (Data::Box(p), Data::Box(q)) if ord.tao == Tao::J => {
+                Some(cmp_items_total(&p[i], &q[j], ord))
+            }
             _ => None,
         }
     };
@@ -10088,11 +10169,18 @@ fn partition_enclose(x: &Array, y: &Array, span: Span) -> Result<Array> {
             Some(span),
         ));
     }
-    let flags = x
+    let mut flags = x
         .to_i64_vec()
         .ok_or_else(|| Error::domain("partition flags must be integers", span))?;
     if flags.iter().any(|&f| f < 0) {
         return Err(Error::domain("partition flags must not be negative", span));
+    }
+    // A SINGLE flag is the flag of every item, so `1⊂1 2 3` opens one
+    // partition over the whole vector and `0⊂1 2 3` opens none. Only the
+    // one-flag case extends: two flags for three items stays a length
+    // error, since there is no reading that makes them fit.
+    if flags.len() == 1 && y.shape[0] != 1 {
+        flags = vec![flags[0]; y.shape[0]];
     }
     if flags.len() != y.shape[0] {
         return Err(Error::new(
@@ -12467,6 +12555,28 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
         (0..=(n - k)).collect()
     };
     let width = k.unsigned_abs() as usize;
+    // J holds the operand to its own domain over the WHOLE argument, not
+    // only over the pieces it folds: `_2 +/\. 'ab'` is a domain error
+    // although every piece left behind is empty, and so is `4 +/\. 'abc'`,
+    // which has no piece at all. Only an argument of one item or none
+    // escapes it, and then only where no piece is folded. Numeric data
+    // never fails the check, so the probe is spent on characters and boxes
+    // alone -- and on nothing at all when the operand is not pure, since a
+    // verb that writes must not write twice.
+    if !list.dtype().is_numeric()
+        && u.is_pure()
+        && n >= 1
+        && (n >= 2 || !starts.is_empty())
+    {
+        // The question is whether the operand has a MEANING for this data,
+        // and a fold of one item answers nothing: `+/ ,'a'` is that one
+        // character, applying `+` to nothing. So an argument of one item is
+        // asked with that item twice, which is the smallest fold that
+        // really applies the operand.
+        let probe =
+            if n == 1 { select_items(&list, &[0, 0]) } else { list.clone() };
+        u.monad(&probe, ctx, span)?;
+    }
     // A width longer than the argument leaves no place for the run to sit.
     // The one run an empty argument has is the argument itself, and that is
     // the cell whose shape the answer keeps.
@@ -12742,6 +12852,13 @@ fn union_items(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
 /// pads the pattern with leading axes of one and takes any rank up to y's.
 fn find_seq(x: &Array, y: &Array, tol: Tol, apl: bool, span: Span) -> Result<Array> {
     let (xr, yr) = (x.rank(), y.rank());
+    // J reads an atom as a one-item list on BOTH sides, so a pattern of
+    // one atom has exactly one place to sit in an argument of one atom:
+    // `0 E. 5` is 0 and `1 E. 1` is 1, both of them scalars.
+    if !apl && xr == 0 && yr == 0 {
+        let hit = arrays_match(x, y, tol);
+        return Ok(Array::new(Vec::new(), Data::Bool(vec![u8::from(hit)].into())));
+    }
     if apl && xr > yr {
         // A pattern with more axes than the argument fits nowhere in it.
         return Ok(Array::new(y.shape.clone(), Data::Bool(vec![0u8; y.count()].into())));

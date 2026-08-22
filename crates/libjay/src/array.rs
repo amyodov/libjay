@@ -1128,9 +1128,20 @@ impl Array {
             Data::Ext(v) => Some(v.iter().map(crate::exact::ext_to_f64).collect()),
             Data::Rat(v) => Some(v.iter().map(Rat::to_f64).collect()),
             Data::F64(v) => Some(v.to_vec()),
-            // A complex value is not a real one, even when its imaginary
-            // part is zero: the caller wants a real and must ask for it.
-            Data::Complex(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
+            // A complex value whose imaginary part is zero IS a real one
+            // wherever a real is wanted: J answers `1 <. j. 0` with 0 and
+            // `i. 3j0` with `0 1 2`, while `3!:0 j. 0` still reports the
+            // complex type, so the demotion is at the use and not at the
+            // making.
+            Data::Complex(v) => {
+                v.iter().map(|z| (z[1] == 0.0).then_some(z[0])).collect()
+            }
+            // An EMPTY array carries no value of the wrong type, so it is
+            // acceptable numeric data whatever type it was written at:
+            // `#. ''` is 0 in J and `¯3⊥''` is 0 in GNU APL. An empty BOX
+            // is not: J refuses `2 #. 0$<1` where it answers `2 #. ''`.
+            Data::Char(_) | Data::Symbol(_) if self.count() == 0 => Some(Vec::new()),
+            Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
 
@@ -1155,7 +1166,18 @@ impl Array {
                 }
                 Some(out)
             }
-            Data::Complex(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
+            // The same two readings [`Array::to_f64_vec`] gives: a complex
+            // with no imaginary part is the real it displays as, and an
+            // empty of a non-numeric type holds no value to refuse.
+            Data::Complex(v) => v
+                .iter()
+                .map(|z| {
+                    (z[1] == 0.0 && z[0].fract() == 0.0 && z[0].abs() < i64::MAX as f64)
+                        .then_some(z[0] as i64)
+                })
+                .collect(),
+            Data::Char(_) | Data::Symbol(_) if self.count() == 0 => Some(Vec::new()),
+            Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
 }

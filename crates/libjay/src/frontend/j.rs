@@ -1121,8 +1121,10 @@ fn primitive(word: &str) -> Option<Prim> {
         "~." => prim("~.", M::Nub, D::None, [INF, INF, INF]),
         "$" => prim("$", M::ShapeOf, D::Reshape, [INF, 1, INF]),
         "," => prim(",", M::Ravel, D::AppendLeading, [INF, INF, INF]),
-        // `,.` is J's `,"_1`; `verb_for` wraps it in that rank.
-        ",." => prim(",.", M::Ravel, D::AppendLeading, [INF, INF, INF]),
+        // `,.` is J's `,"_1` dyadically. Its monad is not `,"_1`: that
+        // would leave `,. 5` a one-item list, where J answers a 1-by-1
+        // table, so the monad ravels the items itself at infinite rank.
+        ",." => prim(",.", M::RavelItems, D::AppendLeading, [INF, -1, -1]),
         ",:" => prim(",:", M::Itemize, D::Laminate, [INF, INF, INF]),
         "#" => prim("#", M::Tally, D::Copy, [INF, 1, INF]),
         "#." => prim("#.", M::DecodeBits, D::Decode, [1, 1, 1]),
@@ -1233,14 +1235,10 @@ fn noun_word(word: &str) -> Option<Array> {
     }
 }
 
-/// The verb a word denotes. Every word but `,.` is a bare primitive; J's
-/// `,.` is `,"_1`, so it carries that rank.
+/// The verb a word denotes: a bare primitive, whose own ranks carry the
+/// rank a word like `,.` is defined at.
 fn verb_for(word: &str) -> Option<Verb> {
-    let p = primitive(word)?;
-    if word == ",." {
-        return Some(Verb::Rank(Box::new(Verb::Prim(p)), [-1, -1, -1]));
-    }
-    Some(Verb::Prim(p))
+    Some(Verb::Prim(primitive(word)?))
 }
 
 /// A constant verb: the noun itself, whatever the arguments are. `3:` and
