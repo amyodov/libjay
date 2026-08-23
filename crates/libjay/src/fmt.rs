@@ -55,6 +55,9 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
         // MIXED SIMPLE array: depth 1, and drawn the way a plain array is
         // rather than with a nested display's extra spacing.
         match mixed_simple_texts(a, opts) {
+            Some(texts) if opts.boxes == BoxStyle::Spaced && a.rank() == 1 => {
+                return mixed_vector_line(a, &texts)
+            }
             Some(texts) if opts.boxes == BoxStyle::Spaced => {
                 return laid_out(&a.shape, texts, Cells::Right)
             }
@@ -127,6 +130,25 @@ fn mixed_simple_texts(a: &Array, opts: &FmtOpts) -> Option<Vec<String>> {
         texts.push(format_atom(&b.data, 0, opts));
     }
     Some(texts)
+}
+
+/// A mixed simple VECTOR on one line. A run of characters beside each
+/// other is text and runs together; every other join takes one space, so
+/// `1 2,'ab'` shows as `1 2 ab`. Higher ranks align in columns instead,
+/// and there each character is a column of its own.
+fn mixed_vector_line(a: &Array, texts: &[String]) -> String {
+    let letters: Vec<bool> = match a.as_boxes() {
+        Some(items) => items.iter().map(|e| e.dtype() == DType::Char).collect(),
+        None => vec![false; texts.len()],
+    };
+    let mut out = String::new();
+    for (i, t) in texts.iter().enumerate() {
+        if i > 0 && !(letters[i] && letters[i - 1]) {
+            out.push(' ');
+        }
+        out.push_str(t);
+    }
+    out
 }
 
 /// One formatted element per position, laid out for the shape: a vector on

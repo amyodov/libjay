@@ -1207,7 +1207,7 @@ fn primitive(word: &str) -> Option<Prim> {
             [1, INF, 1],
         ),
         "A." => prim("A.", M::AnagramIndex, D::AnagramFrom, [1, 0, INF]),
-        "C." => prim("C.", M::CycleForm, D::Permute, [INF, INF, INF]),
+        "C." => prim("C.", M::CycleForm, D::Permute, [1, 1, INF]),
         "E." => prim("E.", M::None, D::FindSeq, [INF, INF, INF]),
         "u:" => prim("u:", M::Unicode { pass_chars: true }, D::UnicodeForm, [INF, 0, INF]),
         // The monad reads the whole argument: one delimiter governs the

@@ -79,14 +79,14 @@ feature — that is a promise, not a refusal.
 | `e.` | raze-in: for every element of y, which items of `; y` it holds — the answer is shaped `($y), #items of the raze` | member: cells of x shaped like items of y |
 | `E.` | — | find: 1 at each position of y where a copy of x begins, shaped like y's items; a pattern longer than y matches nowhere |
 | `A.` | anagram index: where the permutation y's items RANK as stands among the permutations of that length, lexicographically | the x-th permutation of y's items; a negative x counts back from the last. Characters have no anagram index monadically, as in J |
-| `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation, and one shorter than y applies to y's leading items with the rest brought round to the front (`0 1 C. 'abcde'` is `cdeab`). An atom left argument is a named gap |
+| `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation. A list shorter than the permutation it names stands for one over `1 + >./ y` items | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation of y's items, ABBREVIATED where it is shorter — the items it never names come first, in ascending order, so `0 1 C. 'abcde'` is `cdeab`, `3 4 2 C. 'abcde'` is `abdec` and an atom is such a list of one |
 | `u:` | codepoints become characters; characters are answered with themselves | form 3 gives codepoints, form 10 gives the characters they name; the byte-oriented forms are a named gap |
 | `;:` | words: J's own tokeniser over a string, one box per word. A run of numeric literals separated by blanks is ONE word (`;: '1 2 3'` has one), `NB.` swallows the rest of the line, and an unclosed quote is a parse error | the sequential machine — see below |
 | `s:` | symbols: the argument's text, interned. A character LIST carries its own delimiter in its first position, so ``s: '`a`b'`` is the two symbols `` `a `` and `` `b `` while `s: 'a b'` is the one name `" b"`, and the empty list has no delimiter and no names. A character TABLE gives one name per row with trailing blanks trimmed, the leading axes becoming the result's shape. A BOXED argument gives one name per box, the characters taken exactly as they stand — trailing blank and all. Anything else is a domain error; a box holding a rank-2 array is a rank error | the name forms: `4 s:` lays the names out as a character table, blank-padded to the longest (the shape gains that width as a trailing axis), and `5 s:` boxes them one apiece, keeping the shape. `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report on an interpreter's own symbol table — how many slots it holds, which are in use, how it hashes them — and are named gaps rather than guesses |
 | `L.` | the boxing level: 0 for anything unboxed, one more than the deepest content otherwise. APL's `≡` counts the array itself as well, so the two differ by one on a simple array | — |
 | `".` | do: the characters are compiled as a J program and run HERE, over the names the sentence itself can see — `". 'a =. 3'` assigns in the surrounding scope. A `{name}` hole inside the string has nothing to bind to and is refused | the numbers a line of text spells: the line is split at blanks and every word read as a J numeric literal, with the atom x standing in for a word that is not one. One word gives a scalar, as reading that line as a noun would, and several give a vector of that many. The right rank is 1, so a character matrix is read a row at a time and the rows framed with fills |
 | `%.` | matrix inverse — the least-squares pseudo-inverse of a taller matrix; a wider one is refused, a singular one is a domain error | matrix divide: the least-squares solution of `y a = x` |
-| `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`; a boxed argument of that form converts back to coefficients | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial |
+| `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`, largest magnitude first, then largest real part, then largest imaginary part; roots that sit on top of one another are refined through the m-1st derivative, so a repeated one is exact; a boxed argument of that form converts back to coefficients | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial |
 | `p..` | the derivative of the polynomial y's ascending coefficients describe, as coefficients | the integral, with x as the constant term |
 | `p:` | the y-th prime, counting from zero | the prime queries: `_1` counts the primes below y, `0` and `1` ask whether it is composite or prime, `2` gives the factorisation as a 2-row table and `3` its top row, `4` and `_4` step to the next and previous prime |
 | `q:` | prime factors, ascending, with multiplicity (`q: 1` is empty) | the exponents of the first x primes; `__` gives the primes that divide y over their exponents, as a 2-row table. The negative forms are a named gap |
@@ -565,6 +565,19 @@ depth 1. libjay keeps one as boxed scalars — a box holding a simple scalar
 is that scalar in APL, so nothing else can be confused with it — and it
 reports depth 1, displays without a nested display's spacing, and refuses
 to be disclosed any further.
+
+Such an array is BUILT wherever two simple arrays share no one type, and
+read element for element wherever one meets a simple array: `1 2,'ab'` is a
+four-element vector, and `⍪` `∪` `∩` `~` `⍷` `∊` `⍳` `≡` and enlist all
+follow. Since the form says nothing the value did not already say, every
+APL result passes back the other way too — a boxed form whose elements turn
+out to share one type is the plain array again, which is why
+`2↓1 2,'ab'` matches `'ab'` and `+/1 2 3∩'a' 2` is 2 rather than a refusal.
+Arithmetic over a mixture is still a type error, as it is in the reference.
+In a mixed VECTOR a run of characters beside each other is text and prints
+with no separator (`1 2,'ab'` shows as `1 2 ab`); at rank 2 and above each
+character is a column of its own again. J has no such value and refuses
+`1 2 , 'ab'` outright.
 
 The missing valences in the table above are marked "not supported yet".
 The glyphs and features with no oracle at all — because GNU APL lacks the
@@ -1117,6 +1130,18 @@ differ:
 - `∨`/`∧` are GNU APL's alone: a zero argument hands its whole partner back
   with its sign, and a near-whole or vanishing argument is rounded first.
   `Dialect.gcd_rule` names Dyalog's and J's reading, which does neither.
+- The GCD of two non-integral reals is Euclid on the values, and it STOPS
+  once the remainder is no larger than the tolerance times the larger of
+  the two arguments — the scale the division sequence started at. Both
+  references answer that way and it is what makes `0.3 +. 0.1+0.2` be
+  `0.3`: grinding on gives 4e¯17 and an LCM of 2.25e15. Where the two
+  magnitudes are more than about `⎕CT` apart the references part company —
+  `1E6∨1E6+1E¯7` is 1.16e¯10 in GNU APL and `1e6 +. 1e6+1e_7` is
+  1.00001e¯7 in jconsole — and libjay follows J's reading in both
+  languages. A pair that both print as short decimals is read as those
+  decimals instead, which is what makes `123.456 +. 78.9` be `0.012`; a
+  value needing more than twelve significant digits to print back is a
+  rounding residue rather than a written decimal and is left to Euclid.
 
 A count is a different matter, and libjay follows both references there
 without consulting the tolerance at all. A float near a whole number reads

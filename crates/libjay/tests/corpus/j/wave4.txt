@@ -66,6 +66,31 @@ C. (0 1);(2 3)
 (<0 1 2) C. 'abcd'
 ((0 1);(2 3)) C. 'abcde'
 
+// A direct permutation shorter than the one it names: the items it never
+// mentions come first, so `C. 3 4 2` is a permutation of five.
+C. 3 4 2
+C. 2 3
+C. 2 4
+C. 3 1
+C. 4 2
+C. 5
+C. 0 1 2 4
+C. 3 4 2 0 1
+C. 3 3
+C. _1 2
+C. 2 2 $ 0 1 1 0
+C. 2 3 $ 0 1 2 2 1 0
+C. b. 0
+2 3 C. i.4
+2 C. i.5
+3 4 2 C. i.5
+3 4 2 C. i.6
+0 1 C. i.5
+1 0 C. i.5
+2 0 1 C. i.5
+3 1 C. ,.i.4
+(2 2$0 1 1 0) C. i.2
+
 // Member of interval.
 'ab' E. 'abcabc'
 1 2 E. 1 2 3 1 2

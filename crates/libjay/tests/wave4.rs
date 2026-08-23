@@ -130,15 +130,19 @@ fn cycles_and_direct_permutations_convert_both_ways() {
     }
     // A boxed left argument is cycles; anything unmentioned stays put.
     assert_eq!(val(Lang::J, "(<0 1) C. 'abcd'"), text(&[4], "bacd"));
-    // A short direct permutation brings the items past it to the front.
+    // A short direct permutation is abbreviated: the items it never names
+    // come first, in ascending order. An atom is such a list of one.
     assert_eq!(val(Lang::J, "0 1 C. 'abcde'"), text(&[5], "cdeab"));
-    // Not a permutation, and a permutation of more items than there are.
+    assert_eq!(val(Lang::J, "3 4 2 C. 'abcde'"), text(&[5], "abdec"));
+    assert_eq!(val(Lang::J, "2 C. 'abcde'"), text(&[5], "abdec"));
+    assert_eq!(val(Lang::J, "2 3 C. 'abcd'"), text(&[4], "abcd"));
+    // The same abbreviation on its own: `C. 3 4 2` is a permutation of five.
+    assert_eq!(val(Lang::J, "C. C. 3 4 2"), val(Lang::J, "0 1 3 4 2"));
+    // Not a permutation, and one naming an item that is not there.
     assert_eq!(err(Lang::J, "1 1 C. 'abc'").kind, ErrorKind::Domain);
-    assert_eq!(err(Lang::J, "0 1 2 C. 'ab'").kind, ErrorKind::Length);
-    // J reads an atom left argument as something libjay does not have yet.
-    let e = err(Lang::J, "2 C. i. 5");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("single atom"), "{}", e.msg);
+    assert_eq!(err(Lang::J, "0 1 2 C. 'ab'").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::J, "C. 3 3").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::J, "C. _1 2").kind, ErrorKind::Domain);
 }
 
 // --- text -----------------------------------------------------------------

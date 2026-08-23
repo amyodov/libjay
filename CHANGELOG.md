@@ -111,6 +111,47 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`0.3 *. 0.1+0.2` is `0.3`, not `2.25e15`.** Euclid on two reals cannot
+  reach a remainder of exactly zero, so it stops once the remainder is
+  within the comparison tolerance of the larger argument. Without that
+  stop, `0.3` and `0.1+0.2` ground down to a common divisor of 4e¯17 and
+  the LCM blew up with it. `0.3∧0.1+0.2` and `0.3∨0.1+0.2` in APL likewise.
+  A value needing more than twelve significant digits to print back is a
+  rounding residue rather than a decimal anyone wrote, and is no longer
+  read as one: `1.0000000000001 +. 1` is `9.99201e_14`, which is what
+  jconsole answers, where it used to be `1e_13`.
+
+- **`C. 3 4 2` is a permutation of five items.** A direct permutation
+  shorter than the one it names is ABBREVIATED: the items it never
+  mentions come first, in ascending order, and the list is the tail. So
+  `C. 3 4 2` is the cycles of `0 1 3 4 2`, `C. 2 3` is the identity on
+  four, `3 4 2 C. i.5` is `0 1 3 4 2` and `2 C. i.5` is the same
+  permutation written as an atom — which used to be refused as "not
+  supported yet". `C.` also has its ranks now (`1 1 _`), so it applies to
+  each row of a table rather than to the whole of it.
+
+- **`p. 1 2 1` is `_1 _1`, not a pair of complex values.** The root finder
+  reaches a root of multiplicity m only to about the m-th root of the
+  machine epsilon, so a double root came out as two values 1e¯9 either side
+  of the answer, each with an imaginary part that does not exist. Roots
+  that sit on top of one another are now put back on the root the m-1st
+  derivative names, which is exact: `p. 1 3 3 1` is `_1 _1 _1` and
+  `p. 1 4 6 4 1` is `_1 _1 _1 _1`. Roots also come out in jconsole's
+  order — the largest magnitude first, then the largest real part, then
+  the largest imaginary part — so `p. _6 1 1` is `_3 2`, not `2 _3`.
+
+- **`1 2,'ab'` is a mixed vector, not a type error.** APL builds a MIXED
+  SIMPLE array — depth 1, one element per position, no one type over all
+  of them — wherever two simple arrays share no type, and libjay's value
+  model already held such arrays (`1 'a'` has always evaluated). Catenate
+  `,`, catenate-first `⍪`, union `∪`, intersection `∩`, without `~`, find
+  `⍷`, member `∊`, index-of `⍳`, match `≡` and enlist `∊` all build and
+  read them now, and an answer that turns out to share a type after all is
+  the plain array again: `1 2 3∩'a' 2` is the number 2 and `+/` over it is
+  2. A run of characters beside each other in such a vector is text and
+  prints as text, so `1 2,'ab'` shows as `1 2 ab`. J has no such value and
+  still refuses the pair.
+
 - **`$ ,. 5` is `1 1`, not `1`.** J's `,.` ravels each item into a row of a
   table and never answers below rank 2, so an atom becomes a one-by-one
   table. The answer was one axis short for every rank-0 argument, and under

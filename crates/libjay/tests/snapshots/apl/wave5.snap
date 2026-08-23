@@ -88,6 +88,113 @@
 = ⌽1 'a' 2
 > gnu: 2 a 1
 > dyalog: 2 a 1
+= 1 2,'ab'
+> gnu: 1 2 ab
+= ⍴1 2,'ab'
+> gnu: 4
+= ≡1 2,'ab'
+> gnu: 1
+= ≢1 2,'ab'
+> gnu: 4
+= 1 2⍪'a'
+> gnu: 1 2 a
+= ⍴1 2⍪'a'
+> gnu: 3
+= 'ab'∪1 2
+> gnu: ab 1 2
+= 1 2∪'ab'
+> gnu: 1 2 ab
+= ∪1 2,'ab','a'
+> gnu: 1 2 ab
+= (1 'a')∩'abc'
+> gnu: a
+= 'abc'∩1 'a'
+> gnu: a
+= 1 2 3∩'a' 2
+> gnu: 2
+= +/1 2 3∩'a' 2
+> gnu: 2
+= (1 'a')~'a'
+> gnu: 1
+= (1 'a')~1
+> gnu: a
+= 'a'⍷(1 'a')
+> gnu: 0 1
+= 'ab'⍷1 2,'ab'
+> gnu: 0 0 1 0
+= (1 'a')∊'abc'
+> gnu: 0 1
+= 'abc'∊1 'a'
+> gnu: 1 0 0
+= (1 'a')⍳'a'
+> gnu: 2
+= 'abc'⍳1 'a'
+> gnu: 4 1
+= 1 2 3⍳'a' 2
+> gnu: 4 2
+= (1 2,'ab')⍳'b'
+> gnu: 4
+= 'a'=1 2,'ab'
+> gnu: 0 0 1 0
+= 0=1 2,'ab'
+> gnu: 0 0 0 0
+= ⌽1 2,'ab'
+> gnu: ba 2 1
+= 1↑1 2,'ab'
+> gnu: 1
+= 2↓1 2,'ab'
+> gnu: ab
+= 3↑1 2,'ab'
+> gnu: 1 2 a
+= ⍴3↑1 2,'ab'
+> gnu: 3
+= (1 0 1 0)/1 2,'ab'
+> gnu: 1 a
+= ⍋1 2,'ab'
+> gnu: 3 4 1 2
+= ⍒1 2,'ab'
+> gnu: 2 1 4 3
+= 2 2⍴1 2,'ab'
+> gnu: 1 2
+> gnu: a b
+= 2 3⍴1 2,'abcd'
+> gnu: 1 2 a
+> gnu: b c d
+= (2 2⍴1 2 3 4),'ab'
+> gnu: 1 2 a
+> gnu: 3 4 b
+= ⍴(2 2⍴1 2 3 4),'ab'
+> gnu: 2 3
+= (2 2⍴1 2 3 4)⍪'ab'
+> gnu: 1 2
+> gnu: 3 4
+> gnu: a b
+= 1+1 2,'ab'
+> gnu: <error>
+= (1 'a')≡1,'a'
+> gnu: 1
+= 5⍴1 2,'ab'
+> gnu: 1 2 ab 1
+= ⍕1 2,'ab'
+> gnu: 1 2 ab
+= ⍴⍕1 2,'ab'
+> gnu: 6
+= 1,'ab',2,'cd'
+> gnu: 1 ab 2 cd
+= 'ab',1 2,'cd'
+> gnu: ab 1 2 cd
+= 1 10 100,'ab'
+> gnu: 1 10 100 ab
+= 1 2,'ab',3
+> gnu: 1 2 ab 3
+= 1 2 3,'a'
+> gnu: 1 2 3 a
+= 'a',1 2 3
+> gnu: a 1 2 3
+= (,1),'a'
+> gnu: 1 a
+= 'a',,1
+> gnu: a 1
 = 5↑1 2 3 'a'
 > gnu: 1 2 3 a 0
 > dyalog: 1 2 3 a 0

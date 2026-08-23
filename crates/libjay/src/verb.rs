@@ -2363,24 +2363,34 @@ fn leaves(a: &Array, out: &mut Vec<Array>) {
     }
 }
 
-/// `∊ y` (APL): every leaf element as one vector.
-fn enlist(y: &Array, span: Span) -> Result<Array> {
+/// `∊ y` (APL): every leaf element as one vector. Leaves that share no one
+/// type make a MIXED SIMPLE vector, as catenating them would.
+fn enlist(y: &Array, _span: Span) -> Result<Array> {
     let mut parts = Vec::new();
     leaves(y, &mut parts);
     // An empty leaf contributes no elements, so it does not decide the
     // type either.
     let mut dt = None;
+    let mut mixing = false;
     for p in parts.iter().filter(|p| p.count() > 0) {
         dt = Some(match dt {
             None => p.dtype(),
-            Some(t) => DType::promote(t, p.dtype()).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Type,
-                    "cannot enlist character and numeric data into one vector",
-                    Some(span),
-                )
-            })?,
+            Some(t) => match DType::promote(t, p.dtype()) {
+                Some(t) => t,
+                None => {
+                    mixing = true;
+                    break;
+                }
+            },
         });
+    }
+    if mixing {
+        let mut cells: Vec<Array> = Vec::new();
+        for p in &parts {
+            let p = p.to_row_major();
+            cells.extend((0..p.count()).map(|i| atom(&p, i)));
+        }
+        return Ok(Array::new(vec![cells.len()], Data::Box(cells.into())));
     }
     let dt = dt.unwrap_or(DType::I64);
     let mut data = Data::empty(dt);
@@ -2461,6 +2471,80 @@ fn nest_like(a: &Array, other: &Array) -> Array {
     }
     let cells: Vec<Array> = (0..a.count()).map(|i| atom(a, i)).collect();
     Array::new(a.shape.clone(), Data::Box(cells.into()))
+}
+
+/// Every ELEMENT of `a` as a rank-0 box, keeping the shape: APL's mixed
+/// simple form, which is how libjay holds a value whose elements share no
+/// one type. Enclosing a simple scalar is no change at all in APL, so the
+/// form says nothing the value did not already say. An already boxed array
+/// is left alone.
+fn spread_scalars(a: &Array) -> Array {
+    if a.dtype() == DType::Box {
+        return a.clone();
+    }
+    let a = a.to_row_major();
+    let cells: Vec<Array> = (0..a.count()).map(|i| atom(&a, i)).collect();
+    Array::new(a.shape.clone(), Data::Box(cells.into()))
+}
+
+/// True where every element of `a` is a simple scalar: the shape libjay
+/// holds a mixed simple array in, whether or not the types still differ.
+fn holds_scalar_boxes(a: &Array) -> bool {
+    match a.as_boxes() {
+        Some(items) => {
+            !items.is_empty() && items.iter().all(|b| b.rank() == 0 && b.dtype() != DType::Box)
+        }
+        None => false,
+    }
+}
+
+/// The way back out of [`spread_scalars`]: a boxed array whose every
+/// element is a simple scalar and where one type covers them all is that
+/// simple array, and in APL always was. Anything else is returned as it is.
+///
+/// This runs over every APL result, which is what keeps the form canonical:
+/// `2↓1 2,'ab'` is the character vector `ab`, not two boxed characters.
+fn tightened_mixed(a: Array) -> Array {
+    let common = match a.as_boxes() {
+        Some(items) if holds_scalar_boxes(&a) => {
+            let mut t = items[0].dtype();
+            let mut ok = true;
+            for b in &items[1..] {
+                match DType::promote(t, b.dtype()) {
+                    Some(next) => t = next,
+                    None => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            ok.then_some(t)
+        }
+        _ => None,
+    };
+    let Some(common) = common else { return a };
+    let mut data = Data::empty(common);
+    for b in a.as_boxes().expect("checked above") {
+        match b.data.cast(common) {
+            Some(widened) => push_elem(&mut data, &widened, 0),
+            None => return a.clone(),
+        }
+    }
+    Array::new(a.shape.clone(), data)
+}
+
+/// A pair put in one form, where one of them is held as boxed scalars and
+/// the other is not: the simple one is spread into rank-0 boxes so the two
+/// compare and join element for element. APL only — J's `<2` is a value of
+/// its own and never the same as `2`.
+fn align_mixed(x: &Array, y: &Array, apl: bool) -> (Array, Array) {
+    if apl && holds_scalar_boxes(x) && y.dtype() != DType::Box {
+        return (x.clone(), spread_scalars(y));
+    }
+    if apl && holds_scalar_boxes(y) && x.dtype() != DType::Box {
+        return (spread_scalars(x), y.clone());
+    }
+    (x.clone(), y.clone())
 }
 
 /// Every item of `y` boxed; an already boxed array is left alone.
@@ -3987,6 +4071,10 @@ fn signed_gcd_i128(a: i128, b: i128) -> i128 {
 /// A finite float as `p / 10^s`, read off the shortest decimal that prints
 /// back as this value — which is the number the user wrote and the number
 /// both references show.
+///
+/// A value needing more than [`WRITTEN_DIGITS`] significant digits is not a
+/// number anyone wrote: it is the residue of an arithmetic that missed, and
+/// reading it as a decimal turns a rounding error into a divisor.
 fn decimal_parts(v: f64) -> Option<(i128, u32)> {
     if !v.is_finite() {
         return None;
@@ -3995,6 +4083,9 @@ fn decimal_parts(v: f64) -> Option<(i128, u32)> {
     let (mantissa, exponent) = text.split_once('e')?;
     let exponent: i32 = exponent.parse().ok()?;
     let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if whole.trim_start_matches('-').len() + fraction.len() > WRITTEN_DIGITS {
+        return None;
+    }
     let mut digits: i128 = format!("{whole}{fraction}").parse().ok()?;
     let mut scale = fraction.len() as i32 - exponent;
     // A negative scale is a whole number with trailing zeros; fold them in
@@ -4008,10 +4099,15 @@ fn decimal_parts(v: f64) -> Option<(i128, u32)> {
     (scale <= 34).then_some((digits, scale as u32))
 }
 
+/// How many significant digits a decimal the user typed may need. Twelve
+/// leaves every written constant intact and rejects the rounding residues:
+/// `0.1+0.2` prints back as seventeen digits, `1.0000000000001` as fourteen.
+const WRITTEN_DIGITS: usize = 12;
+
 /// The GCD of two reals read as the decimals they are printed as: `1.23`
 /// and `4.56` are 123 and 456 hundredths, so their GCD is three hundredths.
-/// That is what J answers, and a binary Euclid cannot reach it — the two
-/// have no common divisor at all in the dyadic rationals they really are.
+/// That is the value both references print — theirs is the Euclid grind
+/// that rounds to it, and a binary Euclid of our own cannot reach either.
 fn gcd_decimal(a: f64, b: f64) -> Option<f64> {
     let (pa, sa) = decimal_parts(a)?;
     let (pb, sb) = decimal_parts(b)?;
@@ -4024,15 +4120,18 @@ fn gcd_decimal(a: f64, b: f64) -> Option<f64> {
 }
 
 /// The real GCD, by Euclid on the values themselves. Floats cannot reach an
-/// exact zero remainder, so a remainder within the comparison tolerance of
-/// zero — or of the divisor, which is the same step seen from the other end
-/// — is taken to be zero. That is what makes `0.1 +. 0.2` answer `0.1`
-/// rather than grinding down to a rounding error.
+/// exact zero remainder, so a remainder is taken to be zero once it is
+/// within the comparison tolerance of the LARGER argument — the scale the
+/// whole division sequence was measured against — or of the divisor, which
+/// is the same step seen from the other end. That is what makes
+/// `0.1 +. 0.2` answer `0.1` and `0.3 +. 0.1+0.2` answer `0.3` rather than
+/// grinding down to a rounding error.
 fn gcd_f64(a: f64, b: f64, tol: Tol) -> Option<f64> {
     let (mut a, mut b) = (a.abs(), b.abs());
     if !a.is_finite() || !b.is_finite() {
         return None;
     }
+    let eps = tol.ct * a.max(b);
     // Euclid on reals converges as fast as it does on integers; the bound
     // is a guard, not the usual exit.
     for _ in 0..1000 {
@@ -4052,7 +4151,7 @@ fn gcd_f64(a: f64, b: f64, tol: Tol) -> Option<f64> {
             k += 1.0;
         }
         let mut r = a - b * k;
-        if r <= 0.0 || tol.eq(r, b) {
+        if r <= eps || tol.eq(r, b) {
             r = 0.0;
         }
         a = b;
@@ -6115,6 +6214,15 @@ pub(crate) fn catenate(
     } else {
         (xa, ya)
     };
+    // And where two SIMPLE arrays share no type, APL builds a mixed simple
+    // one rather than refusing: `1 2,'ab'` is a four-element vector of two
+    // numbers and two characters, depth 1. J has no such value.
+    let mixing = !fill
+        && xa.dtype() != DType::Box
+        && ya.dtype() != DType::Box
+        && DType::promote(xa.dtype(), ya.dtype()).is_none();
+    let (xa, ya) =
+        if mixing { (spread_scalars(&xa), spread_scalars(&ya)) } else { (xa, ya) };
     let dt = DType::promote(xa.dtype(), ya.dtype()).ok_or_else(|| {
         let boxed = xa.dtype() == DType::Box || ya.dtype() == DType::Box;
         let what = if boxed {
@@ -7196,6 +7304,14 @@ fn determinant_lu(mut a: Vec<f64>, n: usize) -> f64 {
 
 /// Monadic meaning of a primitive, applied to one cell.
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let apl = ctx.cfg.rules.lang == crate::Lang::Apl;
+    let out = monad_op_inner(p, y, ctx, span);
+    if apl { out.map(tightened_mixed) } else { out }
+}
+
+/// Every APL result passes through [`tightened_mixed`] on the way out, so
+/// the mixed simple form never outlives the mixture that called for it.
+fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     match p.monad {
         MonadOp::Scalar(op) => scalar_monad(op, y, ctx.cfg, span),
         MonadOp::ShapeOf => {
@@ -7606,7 +7722,16 @@ fn drop_(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<A
 
 /// Dyadic meaning of a primitive, applied to one pair of cells.
 fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    let apl = cfg.rules.lang == crate::Lang::Apl;
+    let out = dyad_op_inner(p, x, y, cfg, span);
+    if apl { out.map(tightened_mixed) } else { out }
+}
+
+/// Every APL result passes through [`tightened_mixed`] on the way out, so
+/// the mixed simple form never outlives the mixture that called for it.
+fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     let tol = cfg.tol;
+    let apl = cfg.rules.lang == crate::Lang::Apl;
     match p.dyad {
         // Reached only when a scalar verb is given non-zero cell ranks; the
         // cells then agree among themselves.
@@ -7633,10 +7758,14 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
             catenate(x, y, false, cfg.agreement == Agreement::LeadingPrefix, span)
         }
         DyadOp::IndexOf { origin, vector_left } => {
-            index_of(x, y, origin, vector_left, tol, span)
+            let (x, y) = align_mixed(x, y, apl);
+            index_of(&x, &y, origin, vector_left, tol, span)
         }
         DyadOp::MemberJ => Ok(member_j(x, y, tol)),
-        DyadOp::MemberApl => Ok(member_apl(x, y, tol)),
+        DyadOp::MemberApl => {
+            let (x, y) = align_mixed(x, y, apl);
+            Ok(member_apl(&x, &y, tol))
+        }
         DyadOp::From => from_index(x, y, cfg.near(), span),
         DyadOp::Match => {
             // APL tells an empty CHARACTER array from an empty numeric one
@@ -7687,20 +7816,24 @@ fn dyad_op(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<A
         DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
         DyadOp::Less => {
             set_rank(cfg, "without", x, y, span)?;
-            Ok(set_less(x, y, tol))
+            let (x, y) = align_mixed(x, y, apl);
+            Ok(set_less(&x, &y, tol))
         }
         DyadOp::Union => {
             set_rank(cfg, "union", x, y, span)?;
-            union_items(x, y, tol, span)
+            let (x, y) = align_mixed(x, y, apl);
+            union_items(&x, &y, tol, span)
         }
         DyadOp::Intersect => {
             set_rank(cfg, "intersection", x, y, span)?;
-            Ok(intersect_items(x, y, tol))
+            let (x, y) = align_mixed(x, y, apl);
+            Ok(intersect_items(&x, &y, tol))
         }
         DyadOp::AnagramFrom => anagram_from(x, y, cfg.near(), span),
         DyadOp::Permute => permute(x, y, cfg.near(), span),
         DyadOp::FindSeq => {
-            find_seq(x, y, tol, cfg.rules.lang == crate::Lang::Apl, span)
+            let (x, y) = align_mixed(x, y, apl);
+            find_seq(&x, &y, tol, apl, span)
         }
         DyadOp::UnicodeForm => unicode_form(x, y, cfg.near(), span),
         DyadOp::SymbolForm => symbol_form(x, y, span),
@@ -11752,6 +11885,7 @@ fn durand_kerner(monic: &[Cx]) -> Vec<Cx> {
             break;
         }
     }
+    let mut z = polished_repeats(monic, z);
     // A root within rounding of the real axis is a real root.
     for r in &mut z {
         if r[1].abs() < 1e-9 {
@@ -11761,19 +11895,159 @@ fn durand_kerner(monic: &[Cx]) -> Vec<Cx> {
             r[0] = 0.0;
         }
     }
-    // Two roots of a conjugate pair have the same real part up to
-    // rounding, so the ordering treats near-equal real parts as ties and
-    // the imaginary part decides — which is the order J answers in.
-    z.sort_by(|a, b| {
-        let close = (a[0] - b[0]).abs() <= 1e-9 * (a[0].abs().max(b[0].abs()) + 1.0);
-        let by_re = if close {
-            std::cmp::Ordering::Equal
-        } else {
-            b[0].partial_cmp(&a[0]).unwrap_or(std::cmp::Ordering::Equal)
-        };
-        by_re.then(b[1].partial_cmp(&a[1]).unwrap_or(std::cmp::Ordering::Equal))
-    });
+    // Order is the one J answers in: the largest magnitude first, then the
+    // largest real part, then the largest imaginary part — so ¯3 comes
+    // before 2, and a conjugate pair keeps the positive half in front. The
+    // keys are coarsened first, because two members of a pair agree only
+    // to rounding and the sort needs a total order to stand on.
+    let coarse = |v: f64| -> f64 {
+        if v == 0.0 || !v.is_finite() { v } else { format!("{v:.11e}").parse().unwrap_or(v) }
+    };
+    let mut keyed: Vec<([f64; 3], Cx)> =
+        z.into_iter().map(|r| ([coarse(cx::abs(r)), coarse(r[0]), coarse(r[1])], r)).collect();
+    keyed.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    keyed.into_iter().map(|(_, r)| r).collect()
+}
+
+/// A repeated root, put back where it belongs.
+///
+/// Durand–Kerner reaches a root of multiplicity m only to about the m-th
+/// root of the machine epsilon, so a double root of `1 2 1` comes out as
+/// two complex values 1e¯8 either side of ¯1: complex noise where the
+/// answer is a pair of exact reals. The straddle is symmetric, so the
+/// group's CENTRE carries the accuracy its members lack. Roots within reach
+/// of one another are gathered and every member of a group moves to the
+/// group's centre.
+///
+/// Reach is a guess, and a wrong one merges two roots that are merely
+/// close. So the answer is kept only when the polynomial rebuilt from it
+/// fits the coefficients at least as well as the raw roots do, and the
+/// widest reach that passes that test is the one taken.
+fn polished_repeats(monic: &[Cx], z: Vec<Cx>) -> Vec<Cx> {
+    let d = z.len();
+    if d < 2 {
+        return z;
+    }
+    let raw = coefficient_error(monic, &z);
+    let scale = monic.iter().map(|&k| cx::abs(k)).fold(1.0f64, f64::max);
+    let allowed = raw.max(1e-13 * scale);
+    for reach in [1e-3, 1e-4, 1e-5, 1e-6, 1e-7] {
+        // Single linkage: a chain of near neighbours is one group, which
+        // is what a triple root's three points around the true value are.
+        let mut group: Vec<usize> = (0..d).collect();
+        for i in 0..d {
+            for j in 0..i {
+                let apart = cx::abs(cx::sub(z[i], z[j]));
+                let span = reach * (1.0 + cx::abs(z[i]).max(cx::abs(z[j])));
+                if apart <= span {
+                    let (a, b) = (group[i], group[j]);
+                    let (keep, drop) = (a.min(b), a.max(b));
+                    for g in &mut group {
+                        if *g == drop {
+                            *g = keep;
+                        }
+                    }
+                }
+            }
+        }
+        let mut centre = vec![cx::ZERO; d];
+        let mut size = vec![0usize; d];
+        for i in 0..d {
+            centre[group[i]] = cx::add(centre[group[i]], z[i]);
+            size[group[i]] += 1;
+        }
+        if size.iter().all(|&n| n < 2) {
+            return z;
+        }
+        let mut settled: Vec<Option<Cx>> = vec![None; d];
+        for g in 0..d {
+            if size[g] == 0 {
+                continue;
+            }
+            let start = cx::div(centre[g], cx::from_real(size[g] as f64));
+            // Near a root of multiplicity m the polynomial's own value is
+            // lost to cancellation — it reads as zero over a whole ball —
+            // so refining against it can go no further. The m-1st
+            // DERIVATIVE has the same root simply, with none of that
+            // cancellation, and Newton on it lands exactly: `1 3 3 1`'s
+            // second derivative is `6 6`, whose one root is ¯1.
+            settled[g] = Some(if size[g] < 2 {
+                start
+            } else {
+                newton_at(&nth_derivative(monic, size[g] - 1), start)
+            });
+        }
+        let out: Vec<Cx> = (0..d).map(|i| settled[group[i]].unwrap_or(z[i])).collect();
+        if out.iter().all(|r| r[0].is_finite() && r[1].is_finite())
+            && coefficient_error(monic, &out) <= allowed
+        {
+            return out;
+        }
+    }
     z
+}
+
+/// Newton's method from `start`, on the coefficients as given.
+fn newton_at(poly: &[Cx], start: Cx) -> Cx {
+    let mut z = start;
+    for _ in 0..40 {
+        let (mut p, mut slope) = (cx::ZERO, cx::ZERO);
+        for &k in poly.iter().rev() {
+            slope = cx::add(cx::mul(slope, z), p);
+            p = cx::add(cx::mul(p, z), k);
+        }
+        if slope == cx::ZERO {
+            break;
+        }
+        let step = cx::div(p, slope);
+        let next = cx::sub(z, step);
+        if !next[0].is_finite() || !next[1].is_finite() {
+            break;
+        }
+        z = next;
+        if cx::abs(step) <= 1e-17 * (1.0 + cx::abs(z)) {
+            break;
+        }
+    }
+    z
+}
+
+/// The `k`-th derivative of a polynomial's ascending coefficients.
+fn nth_derivative(c: &[Cx], k: usize) -> Vec<Cx> {
+    let mut out = c.to_vec();
+    for _ in 0..k {
+        if out.len() < 2 {
+            return vec![cx::ZERO];
+        }
+        out = out
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(i, &v)| cx::mul(v, cx::from_real(i as f64)))
+            .collect();
+    }
+    out
+}
+
+/// How far the monic polynomial rebuilt from `roots` sits from the one the
+/// coefficients describe: the largest coefficient difference, relative to
+/// the coefficient it belongs to.
+fn coefficient_error(monic: &[Cx], roots: &[Cx]) -> f64 {
+    let mut built = vec![cx::ONE];
+    for &r in roots {
+        let mut next = vec![cx::ZERO; built.len() + 1];
+        for (k, &c) in built.iter().enumerate() {
+            next[k + 1] = cx::add(next[k + 1], c);
+            next[k] = cx::sub(next[k], cx::mul(c, r));
+        }
+        built = next;
+    }
+    let mut worst: f64 = 0.0;
+    for (k, &want) in monic.iter().enumerate() {
+        let got = built.get(k).copied().unwrap_or(cx::ZERO);
+        worst = worst.max(cx::abs(cx::sub(got, want)) / (1.0 + cx::abs(want)));
+    }
+    worst
 }
 
 /// `p.. y`: the derivative of the polynomial y's ascending coefficients
@@ -13276,13 +13550,16 @@ fn anagram_from(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
 
 /// `C. y`: the two directions between a direct permutation and its cycles.
 /// A boxed argument holds cycles and answers the permutation; anything else
-/// is a permutation and answers its cycles.
+/// is a permutation and answers its cycles. A list shorter than the
+/// permutation it names stands for one over `1 + >./ y` items, so
+/// `C. 3 4 2` is the cycles of `0 1 3 4 2`.
 fn cycle_form(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     if y.dtype() == DType::Box {
         let perm = cycles_to_direct(y, near, span)?;
         return Ok(Array::from_i64(perm.iter().map(|&i| i as i64).collect()));
     }
-    let perm = direct_permutation(y, near, span)?;
+    let n = permutation_span(y, near, span)?;
+    let perm = direct_permutation_of(y, n, near, span)?;
     let mut boxes: Vec<Array> = Vec::new();
     let mut done = vec![false; perm.len()];
     for start in 0..perm.len() {
@@ -13311,22 +13588,40 @@ fn cycle_form(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     Ok(Array::new(vec![n], Data::Box(inner.into())))
 }
 
-/// A direct permutation's entries, checked to be one.
-fn direct_permutation(y: &Array, near: NearInt, span: Span) -> Result<Vec<usize>> {
+/// A direct permutation of `n` items, from a list that may be shorter than
+/// one. A short list is J's ABBREVIATED permutation: the items it never
+/// mentions come first, in ascending order, and the list itself is the
+/// tail. `3 4 2` over five items is `0 1 3 4 2`; `2` over five is the same
+/// permutation again, and `2 3` over four is the identity.
+///
+/// `n` is the count the context supplies — the length of the argument being
+/// permuted, or for `C. y` one past the largest index the list names.
+fn direct_permutation_of(y: &Array, n: usize, near: NearInt, span: Span) -> Result<Vec<usize>> {
     let v = y
         .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("a permutation is a list of integers", span))?;
-    let n = v.len();
     let mut seen = vec![false; n];
-    let mut out = Vec::with_capacity(n);
+    let mut tail = Vec::with_capacity(v.len());
     for &i in &v {
         let k = usize::try_from(i).ok().filter(|&k| k < n && !seen[k]).ok_or_else(|| {
             Error::domain(format!("{i} does not belong to a permutation of {n} items"), span)
         })?;
         seen[k] = true;
-        out.push(k);
+        tail.push(k);
     }
+    let mut out: Vec<usize> = (0..n).filter(|&k| !seen[k]).collect();
+    out.append(&mut tail);
     Ok(out)
+}
+
+/// How many items a permutation list stands for on its own: one past the
+/// largest index it names, and never fewer than the indices it has.
+fn permutation_span(y: &Array, near: NearInt, span: Span) -> Result<usize> {
+    let v = y
+        .to_i64_vec_near(near)
+        .ok_or_else(|| Error::domain("a permutation is a list of integers", span))?;
+    let top = v.iter().copied().max().unwrap_or(-1).saturating_add(1).max(0) as u128;
+    Ok(crate::limits::count(top, span)?.max(v.len()))
 }
 
 /// The direct permutation a boxed list of cycles stands for. Its length is
@@ -13360,18 +13655,18 @@ fn cycles_to_direct(y: &Array, near: NearInt, span: Span) -> Result<Vec<usize>> 
 }
 
 /// `x C. y`: y's items permuted by x. A boxed x holds cycles; a numeric x
-/// is a direct permutation, and one shorter than y applies to y's last
-/// items with the leading ones brought round to the front — J's extension
-/// of a short permutation.
+/// is a direct permutation of y's items, abbreviated where it is shorter
+/// than y — the items it never names come first, in ascending order. An
+/// atom is such a list of one, so `2 C. i.5` and `3 4 2 C. i.5` are the
+/// same permutation.
 fn permute(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let ys = as_list(y);
     let n = ys.items();
-    let cyclic = x.dtype() == DType::Box;
-    if !cyclic && x.rank() == 0 {
-        return Err(Error::not_yet("permuting by a single atom (x C. y)", span));
+    if x.dtype() != DType::Box {
+        let perm = direct_permutation_of(&as_list(x), n, near, span)?;
+        return Ok(select_items(&ys, &perm));
     }
-    let mut perm =
-        if cyclic { cycles_to_direct(x, near, span)? } else { direct_permutation(&as_list(x), near, span)? };
+    let mut perm = cycles_to_direct(x, near, span)?;
     if perm.len() > n {
         return Err(Error::new(
             ErrorKind::Length,
@@ -13379,17 +13674,8 @@ fn permute(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
             Some(span),
         ));
     }
-    if perm.len() < n {
-        if cyclic {
-            // Cycles name only what moves: everything else stays put.
-            perm.extend(perm.len()..n);
-        } else {
-            // A short direct permutation applies to the items it counts,
-            // and the ones past it come round to the front.
-            let head: Vec<usize> = (perm.len()..n).collect();
-            perm.splice(0..0, head);
-        }
-    }
+    // Cycles name only what moves: everything else stays put.
+    perm.extend(perm.len()..n);
     Ok(select_items(&ys, &perm))
 }
 

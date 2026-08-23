@@ -23,7 +23,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
+**J: 152 green / 23 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
 **APL: 94 green / 20 partial / 3 absent by design, of 117 valences in the
@@ -58,7 +58,7 @@ inventory. Nothing in APL's primitive tables is red.**
 | `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
 | `j.` | 🟢 imaginary | 🟢 complex |
 | `r.` | 🟢 angle | 🟢 polar |
-| `p.` | 🟡 roots, by Durand–Kerner in f64; an exact one is not sought | 🟢 polynomial; a boxed `multiplier ; roots` left argument too |
+| `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative; jconsole answers an exact rational for some quadratics and libjay a float | 🟢 polynomial; a boxed `multiplier ; roots` left argument too |
 | `p..` | 🟢 poly. derivative | 🟢 poly. integral, x the constant term |
 | `p:` | 🟢 the y-th prime; extended where y is | 🟢 the prime queries: `_1` `0` `1` `2` `3` `4` `_4` |
 | `q:` | 🟢 prime factors; extended where y is | 🟡 prime exponents; `x>0` and `__`, the negative forms named |
@@ -111,7 +111,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `/:` | 🟢 grade up; boxes by the total array ordering | 🟢 sort; the grade indexes x's ITEMS, so an atom answers only the first |
 | `\:` | 🟢 grade down; boxes by the total array ordering | 🟢 sort; same |
 | `A.` | 🟢 anagram index | 🟢 anagram |
-| `C.` | 🟢 cycle-direct | 🟡 permute; a direct or cyclic permutation, not an atom |
+| `C.` | 🟢 cycle-direct; a short direct permutation is the abbreviated one | 🟢 permute; direct, abbreviated, an atom, or cyclic |
 
 ### Boxes, format, system
 
@@ -280,7 +280,7 @@ conjunctions above:
 | Glyph | Monad | Dyad |
 |---|---|---|
 | `⍴` | 🟢 shape | 🟢 reshape, laying out elements; an empty argument fills |
-| `,` | 🟢 ravel | 🟢 catenate (last axis); a simple side joined to a nested one has its items enclosed |
+| `,` | 🟢 ravel | 🟢 catenate (last axis); a simple side joined to a nested one has its items enclosed, and two that share no type make a mixed simple array |
 | `⍪` | 🟢 table | 🟢 catenate (leading axis); same |
 | `⌽` | 🟢 reverse | 🟢 rotate |
 | `⊖` | 🟢 reverse first | 🟢 rotate first; one amount per column, as `⌽` takes one per row |
@@ -301,9 +301,9 @@ conjunctions above:
 | `⍳` | 🟢 index generator; a shape of two lengths or more gives the nested array of coordinate vectors | 🟢 index of; the items of a left argument of any rank are searched, and `lookup_left` names Dyalog's vector-only reading |
 | `⍸` | 🟢 where | 🟢 interval index |
 | `∊` | 🟢 enlist | 🟢 membership |
-| `⍷` | — | 🟢 find |
-| `∪` | 🟢 unique | 🟢 union |
-| `∩` | — | 🟢 intersection |
+| `⍷` | — | 🟢 find; reads a mixed simple array element for element |
+| `∪` | 🟢 unique | 🟢 union; builds a mixed simple array where the two share no type |
+| `∩` | — | 🟢 intersection; reads a mixed simple array element for element |
 | `⍋` | 🟢 grade up; compares under `⎕CT`; nested by the APL2 rule (`nested_grade`) | 🟢 collating grade |
 | `⍒` | 🟢 grade down; compares under `⎕CT`; nested by the APL2 rule (`nested_grade`) | 🟢 collating grade |
 
@@ -352,7 +352,7 @@ conjunctions above:
 | Feature | Status |
 |---|---|
 | Stranding (vector notation) | 🟢 |
-| Nested arrays | 🟡 structural verbs, mixed simple arrays and prototype fills; the operators apply between items, so `∘.`, `/`, `⌿`, `\`, `⍀` and `.` disclose what they take and enclose what they collect. The arithmetic still refuses a boxed operand |
+| Nested arrays | 🟡 structural verbs, mixed simple arrays (built by `,` `⍪` `∪` `∩` `~` `⍷` `∊` `⍳` `≡`, and printed with a run of characters as text) and prototype fills; the operators apply between items, so `∘.`, `/`, `⌿`, `\`, `⍀` and `.` disclose what they take and enclose what they collect. The arithmetic still refuses a boxed operand |
 | `←` assignment, including inline | 🟢 |
 | Function assignment `F←+/`, `F←+/÷≢` | 🟡 no oracle: GNU APL rejects it; the same extension as trains, and off with it |
 | Dfns `{⍵+1}`, `⍺`/`⍵`, `⋄` bodies, nesting | 🟢 |

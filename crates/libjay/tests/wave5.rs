@@ -51,6 +51,10 @@ fn boxes(shape: &[usize], items: Vec<Array>) -> Array {
     Array::new(shape.to_vec(), Data::Box(items.into()))
 }
 
+fn bools(shape: &[usize], values: &[u8]) -> Array {
+    Array::new(shape.to_vec(), Data::Bool(values.to_vec().into()))
+}
+
 /// The values of a numeric array, as floats, for comparisons with a
 /// tolerance.
 fn floats(a: &Array) -> Vec<f64> {
@@ -267,6 +271,52 @@ fn the_monad_converts_between_coefficients_and_roots() {
     assert_eq!(err(Lang::J, "p. 5").kind, ErrorKind::Domain);
 }
 
+/// A repeated root is exact, and stays real. Durand–Kerner reaches a root
+/// of multiplicity m only to about the m-th root of the machine epsilon,
+/// so `p. 1 2 1` used to answer a pair of complex values 1e¯9 either side
+/// of ¯1 where jconsole answers `_1 _1`.
+#[test]
+fn a_repeated_root_comes_out_exact() {
+    for (src, want) in [
+        ("p. 1 2 1", vec![-1.0, -1.0]),
+        ("p. 1 _2 1", vec![1.0, 1.0]),
+        ("p. 4 4 1", vec![-2.0, -2.0]),
+        ("p. 1 3 3 1", vec![-1.0, -1.0, -1.0]),
+        ("p. 1 4 6 4 1", vec![-1.0; 4]),
+        ("p. 1 5 10 10 5 1", vec![-1.0; 5]),
+        ("p. 1 0 _2 0 1", vec![1.0, 1.0, -1.0, -1.0]),
+        ("p. 0 1 2 1", vec![-1.0, -1.0, 0.0]),
+    ] {
+        let pair = &val(Lang::J, src).as_boxes().expect("boxed")[1].clone();
+        assert_ne!(pair.dtype(), DType::Complex, "{src} kept an imaginary residue");
+        assert_eq!(floats(pair), want, "{src}");
+    }
+    // The coefficients come back from the roots unchanged.
+    close(&floats(&val(Lang::J, "p. p. 1 3 3 1")), &[1.0, 3.0, 3.0, 1.0], "round trip");
+}
+
+/// Root order is J's: the largest magnitude first, then the largest real
+/// part, then the largest imaginary part. `¯3` comes before `2`, and a
+/// conjugate pair keeps its positive half in front.
+#[test]
+fn roots_come_out_in_js_order() {
+    for (src, want) in [
+        ("p. _6 1 1", vec![-3.0, 2.0]),
+        ("p. 6 11 6 1", vec![-3.0, -2.0, -1.0]),
+        ("p. 24 _50 35 _10 1", vec![4.0, 3.0, 2.0, 1.0]),
+        ("p. 0 6 5 1", vec![-3.0, -2.0, 0.0]),
+        ("p. _4 0 1", vec![2.0, -2.0]),
+        ("p. 0 _1 0 1", vec![1.0, -1.0, 0.0]),
+    ] {
+        let pair = &val(Lang::J, src).as_boxes().expect("boxed")[1].clone();
+        close(&floats(pair), &want, src);
+    }
+    // x⁴ = 1: four roots of one magnitude, ordered by real then imaginary.
+    let quartic = val(Lang::J, "p. _1 0 0 0 1");
+    let roots = &quartic.as_boxes().expect("boxed")[1];
+    assert_eq!(jay::fmt::format_array(roots, &jay::fmt::FmtOpts::J), "1 0j1 0j_1 _1");
+}
+
 #[test]
 fn the_derivative_and_the_integral_are_coefficient_vectors() {
     assert_eq!(val(Lang::J, "p.. 1 2 3"), i64s(&[2], &[2, 6]));
@@ -352,6 +402,48 @@ fn a_mixed_simple_array_has_depth_one() {
     assert_eq!(val(Lang::Apl, "⊃1 'a'"), a);
     // It displays like a plain array, without a nested display's spacing.
     assert_eq!(val(Lang::Apl, "⍕1 'a'"), text(&[3], "1 a"));
+}
+
+/// Catenate, union, intersection, without, find, member and index-of all
+/// BUILD a mixed simple array where the two sides share no one type, and
+/// read one element for element where they do. libjay used to refuse the
+/// pair outright, though the value model already held the answer.
+#[test]
+fn the_set_and_join_verbs_build_mixed_simple_arrays() {
+    let mixed = boxes(
+        &[4],
+        vec![Array::scalar_i64(1), Array::scalar_i64(2), text(&[], "a"), text(&[], "b")],
+    );
+    assert_eq!(val(Lang::Apl, "1 2,'ab'"), mixed);
+    assert_eq!(val(Lang::Apl, "≡1 2,'ab'"), Array::scalar_i64(1));
+    assert_eq!(val(Lang::Apl, "≢1 2,'ab'"), Array::scalar_i64(4));
+    assert_eq!(val(Lang::Apl, "1 2∪'ab'"), mixed);
+    assert_eq!(val(Lang::Apl, "1 2⍪'a'"), val(Lang::Apl, "1 2,'a'"));
+    // A comparison against a mixed array reads element for element, and
+    // the answer tightens back to a simple array wherever it can.
+    assert_eq!(val(Lang::Apl, "'a'=1 2,'ab'"), bools(&[4], &[0, 0, 1, 0]));
+    assert_eq!(val(Lang::Apl, "(1 'a')∩'abc'"), text(&[1], "a"));
+    assert_eq!(val(Lang::Apl, "1 2 3∩'a' 2"), i64s(&[1], &[2]));
+    assert_eq!(val(Lang::Apl, "+/1 2 3∩'a' 2"), Array::scalar_i64(2));
+    assert_eq!(val(Lang::Apl, "'a'⍷(1 'a')"), bools(&[2], &[0, 1]));
+    assert_eq!(val(Lang::Apl, "'abc'⍳1 'a'"), i64s(&[2], &[4, 1]));
+    assert_eq!(val(Lang::Apl, "(1 'a')⍳'a'"), Array::scalar_i64(2));
+    // Arithmetic over one still has no meaning.
+    assert_eq!(err(Lang::Apl, "1+1 2,'ab'").kind, ErrorKind::Type);
+    // J has no such value and says so.
+    assert_eq!(err(Lang::J, "1 2 , 'ab'").kind, ErrorKind::Type);
+}
+
+/// A run of characters beside each other in a mixed VECTOR is text and
+/// prints as text: `1 2,'ab'` shows as `1 2 ab`, not `1 2 a b`. Higher
+/// ranks align in columns instead, and there each character is a column.
+#[test]
+fn a_run_of_characters_in_a_mixed_vector_prints_as_text() {
+    assert_eq!(val(Lang::Apl, "⍕1 2,'ab'"), text(&[6], "1 2 ab"));
+    assert_eq!(val(Lang::Apl, "⍕1,'ab',2,'cd'"), text(&[9], "1 ab 2 cd"));
+    assert_eq!(val(Lang::Apl, "⍕1 2,'a'"), text(&[5], "1 2 a"));
+    let table = jay::fmt::format_array(&val(Lang::Apl, "2 3⍴1 2,'abcd'"), &jay::fmt::FmtOpts::APL);
+    assert_eq!(table, "1 2 a\nb c d");
 }
 
 #[test]

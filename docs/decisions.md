@@ -2802,3 +2802,73 @@ preset follows GNU, so those seventeen rows are a preset gap, itemised in
 docs/status.md. Closing it is a dialect setting rather than an engine
 change now that `NearInt` is threaded, but it is a new knob on the public
 Dialect object and was left for the wave that decides it.
+
+## 2026-08-23 — Four corrections: the tolerant GCD, `C.`'s abbreviated permutation, repeated roots, and APL's mixed arrays
+
+**Euclid on reals stops at a rounding error, and the tolerance is measured
+against the LARGER argument.** `0.3 *. 0.1+0.2` was 2.25e15 because the
+remainder 5.5e¯17 was not zero and Euclid ground on to a divisor of 4e¯17.
+Both references answer 0.3. The rule that reproduces jconsole bit for bit
+over the whole probe set is: keep the tolerant floor already there, and
+treat a remainder no larger than `⎕CT × max(|a|,|b|)` — the scale the
+division sequence started at, not the current divisor — as zero.
+`1.23 +. 4.56` then grinds out 0.029999999999994476, which is the value
+jconsole prints, and `1.0000000000001 +. 1` gives 9.99201e¯14, closing a
+row the A7 tolerance wave had left as residue. GNU APL's answers agree
+except where the two magnitudes are more than about `⎕CT` apart, where its
+tolerance is relative to the current divisor instead: `1E6∨1E6+1E¯7` is
+1.16e¯10 there and 1.00001e¯7 in J. Those grind cases stay out of the
+corpus rather than being modelled twice.
+
+The decimal reading — 1.23 and 4.56 as 123 and 456 hundredths — stays,
+because it is what makes `123.456 +. 78.9` print as 0.012, but it now
+refuses a value that needs more than twelve significant digits to print
+back. Such a value is a rounding residue, not a decimal anyone wrote, and
+reading `0.1+0.2` as 30000000000000004 seventeenths of a decimal place is
+what turned the noise into a divisor in the first place.
+
+**A short direct permutation names the items it OMITS.** `C. 3 4 2`
+answers the cycles of a permutation of five, not a length error: J reads a
+direct permutation shorter than `1 + >./ y` as the abbreviation whose
+missing items come first, in ascending order, with the given list as the
+tail. One rule covers the monad and the dyad and replaces two separate
+pieces of guesswork — the monad's "a permutation of as many items as it
+has" and the dyad's "the items past it come round to the front". It also
+disposes of the atom case (`2 C. i.5`), which was a named gap and is
+simply an abbreviation of one item. `C. b. 0` reports `1 1 _`, so the
+ranks went in with it.
+
+**A repeated root is found through the derivative, not through the
+polynomial.** Durand–Kerner converges on a root of multiplicity m only to
+about the m-th root of the machine epsilon, and no refinement against the
+polynomial itself can do better: near such a root `p(z)` cancels to exactly
+zero over a ball of that radius, so Newton has nothing to divide. The m-1st
+DERIVATIVE has the same root simply and with none of that cancellation —
+`1 3 3 1`'s second derivative is `6 6`, whose one root is ¯1 — so roots
+that cluster are gathered, counted, and put back on the root their
+derivative names. The grouping radius is a guess, so the result is kept
+only if the polynomial rebuilt from it fits the coefficients at least as
+well as the raw roots do, and the widest radius that passes is the one
+taken. Order was also unspecified in libjay and is not in jconsole:
+descending magnitude, then descending real part, then descending imaginary
+part reproduces every probed answer but the tie-order within a repeated
+conjugate pair.
+
+**APL's mixed simple arrays are built, not refused.** `1 'a'` has always
+evaluated in libjay — held as rank-0 boxes, since enclosing a simple scalar
+is no change at all in APL — but every verb that would have BUILT one
+refused the pair instead. Catenate, union, intersection, without, find,
+member, index-of, match and enlist now build and read them. Two mechanisms
+carry it: a simple array beside one held as boxed scalars is spread into
+the same form before the two are compared, and every APL result passes back
+through the opposite step, so a boxed form that turns out to share one type
+is the plain array again. That second step is what makes `2↓1 2,'ab'` match
+`'ab'` and `+/1 2 3∩'a' 2` answer 2 rather than refusing. It is APL-only:
+J's `<2` is a value of its own and never the same as `2`, and J still
+refuses `1 2 , 'ab'`.
+
+The display rule came from the oracle too: in a mixed VECTOR a run of
+characters beside each other is text and prints with no separator, so
+`1 2,'ab'` shows as `1 2 ab`. At rank 2 and above each character is a
+column of its own again and the separator comes back, which is why
+`2 3⍴1 2,'abcd'` prints as `1 2 a` over `b c d`.

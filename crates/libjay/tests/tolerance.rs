@@ -224,6 +224,41 @@ fn the_apl_gcd_rounds_its_arguments(#[case] src: &str, #[case] want: &str) {
     assert_eq!(shown(Lang::Apl, src), want);
 }
 
+/// Euclid on reals stops when the remainder is a rounding error rather
+/// than when it is exactly zero, in both languages and whatever the
+/// `gcd_rule`: `0.1+0.2` divides 0.3 because what is left over is one part
+/// in 1e16 of it. Grinding on gives 4e¯17 and an LCM of 2.25e15.
+#[rstest]
+#[case(Lang::J, "0.3 +. 0.1+0.2", "0.3")]
+#[case(Lang::J, "0.3 *. 0.1+0.2", "0.3")]
+#[case(Lang::J, "0.7 +. 0.1+0.2", "0.1")]
+#[case(Lang::J, "3 +. 0.1+0.2", "0.3")]
+#[case(Lang::J, "0.2 +. 0.3", "0.1")]
+#[case(Lang::J, "2.4 +. 3.6", "1.2")]
+#[case(Lang::J, "1.23 +. 4.56", "0.03")]
+#[case(Lang::J, "123.456 +. 78.9", "0.012")]
+#[case(Lang::Apl, "0.3∧0.1+0.2", "0.3")]
+#[case(Lang::Apl, "0.3∨0.1+0.2", "0.3")]
+#[case(Lang::Apl, "0.7∨0.1+0.2", "0.1")]
+#[case(Lang::Apl, "3∨0.1+0.2", "0.3")]
+#[case(Lang::Apl, "1.23∧4.56", "186.96")]
+fn a_tolerantly_zero_remainder_ends_the_gcd(
+    #[case] lang: Lang,
+    #[case] src: &str,
+    #[case] want: &str,
+) {
+    assert_eq!(shown(lang, src), want);
+}
+
+/// A value that needs more than twelve significant digits to print back is
+/// a rounding residue, not a decimal anyone wrote, so the decimal reading
+/// stands aside for it and jconsole's own grind is what comes out.
+#[test]
+fn a_residue_is_not_read_as_the_decimal_it_prints_as() {
+    assert_eq!(shown(Lang::J, "1.0000000000001 +. 1"), "9.99201e_14");
+    assert_eq!(shown(Lang::J, "1 +. 1e_13"), "1e_13");
+}
+
 /// `gcd_rule` is the knob: Dyalog does none of the three, and its preset
 /// says so. J's `+.` grinds the same way and has no knob to turn.
 #[test]

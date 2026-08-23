@@ -145,3 +145,17 @@
 // The comparison still sees the difference the count ignored.
 (2+9E¯11)=2
 2⍳2+9E¯11
+// GCD and LCM of two values that are only tolerantly equal: Euclid stops
+// when the remainder is a rounding error, so `0.1+0.2` divides 0.3.
+0.3∧0.1+0.2
+0.3∨0.1+0.2
+0.7∨0.1+0.2
+0.1∨0.1+0.2
+3∨0.1+0.2
+0.2∨0.3
+2.4∨3.6
+1.23∨4.56
+1.23∧4.56
+123.456∨78.9
+0.001∨0.0001
+1.1∨2.2
