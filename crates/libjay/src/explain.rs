@@ -599,6 +599,10 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
         }
         Verb::SelfRef => head(out, "self-reference (the definition it stands in)"),
         Verb::Named(n) => head(out, &format!("verb named {n}, resolved when it is applied")),
+        Verb::UnderRavel(u) => {
+            head(out, "under ravel (flatten, apply, put the shape back)");
+            verb_lines(u, depth + 1, p, tr, out);
+        }
         Verb::Each(u, kind) => {
             head(
                 out,

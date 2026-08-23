@@ -319,11 +319,30 @@ reference.
 
 `u&.v`, `u&.:v` and the negative powers `u^:_n` all rest on one question:
 what undoes v? libjay answers it from a table rather than by searching, and
-the table holds exactly the verbs whose inverse is another verb it can
-already write down:
+the table holds the verbs whose inverse is another verb it can already
+write down. The reference is the whole of the specification for it: every
+row below is a row the reference names when asked `v b. _1`, and a verb it
+refuses to name is refused here too.
 
-- self-inverse: `+` `-` `%` `-.` `|.` `|:`
-- paired: `^`/`^.`, `*:`/`%:`, `+:`/`-:`, `>:`/`<:`, `<`/`>`, `#.`/`#:`
+- self-inverse: `+` `-` `%` `-.` `|.` `|:` `/:` `C.` `%.` `p.` `]` `[`.
+  Grading a permutation gives the permutation that undoes it, `C.` converts
+  between the direct and cycle forms, a matrix inverse and a set of
+  polynomial roots return where they came from, and the identity verbs are
+  identity either way round.
+- paired: `^`/`^.`, `*:`/`%:`, `+:`/`-:`, `>:`/`<:`, `<`/`>`, `#.`/`#:`,
+  `,:`/`{.` (itemise and head), `":`/`".` (format and evaluate — in APL
+  `⍕` and `⍎`).
+- built from other verbs: `\:` is `/:@|.`; `q:` is `*/"1`, since a list of
+  prime factors multiplies back into its number; `;:` puts a blank after
+  each word and razes them, less the trailing blank; `o.` multiplies by the
+  reciprocal of pi; `j.` is `-@j.` and `r.` that same quarter turn applied
+  to the logarithm; `+.` and `*.` split a complex number into a pair of
+  reals, and the pair folds back together under `j./"1` and `r./"1`.
+- carrying a form number: `x:` is `_1&x:`, `u:` is `3&u:`, `s:` is `5&s:`.
+- spelled only as a negative power, in the reference as here: `p:^:_1` is
+  how many primes stand below y (which sends the y-th prime back to y),
+  `I.^:_1` is the counting vector `I.` was given, and `$.^:_1` is the dense
+  form of a sparse array.
 - dyad only: `x # y` is undone by the expansion `x #^:_1 y`, which puts the
   items back where the ones stand and a fill where each zero was. `# y`
   counts, and a count cannot be undone, so the entry has no monad —
@@ -331,17 +350,58 @@ already write down:
   while answering `#^:_1` itself, and libjay names it.
 - bonded arithmetic: `n&+` and `+&n` are both undone by `-&n`, `n&*` and
   `*&n` by `%&n` — the noun comes off the RIGHT whichever side it was bonded
-  to — plus `^&n` (the n-th root), `n&^` (the base-n logarithm), and `n&-`
-  and `n&%`, which undo themselves
+  to — plus `^&n` (the n-th root), `n&^` (the base-n logarithm), `%:&n` and
+  `^.&n`, which pair with one another, `n&o.` (the circle functions are
+  numbered so the negative index is the inverse), and `n&-` and `n&%`,
+  which undo themselves. `u~&n` inverts as `n&u` does; `n&u~` the reference
+  gives no obverse, and neither does this.
+- bonded rearrangement: `n&|.` rotates the other way, `n&}.` takes back what
+  it dropped (the vacated places taking a fill), `n&,` and `,&n` drop as
+  many items as the noun brought, `n&#` keeps the expansion, `n&#:` is
+  `n&#.`, and `n&A.` and `n&C.` invert through the permutation they make of
+  `i. # y`. `n&#.` reads digits in base n, so undoing it writes them back —
+  in as many places as the largest value asks for, which is what makes the
+  round trip land on the width the reference chooses.
+- the running folds: `+/\` inverts into the differences between neighbours
+  (`- |.!.0`, the hook), `*/\` into the quotients, and the suffix forms `+/\.`
+  and `*/\.` into the same against the neighbour on the other side. `-/\`
+  and `%/\` alternate, so their answers carry one further pass over the
+  signs `1 _1 1 _1 …`. `*/` is undone by `q:`.
 
 Everything built out of those inverts by inverting its parts: `u@:v` and
 `u&:v` invert in the other order, `u"r` and `u!.n` keep their modifier,
-`u^:n` becomes the obverse applied n times, and `u :. v` supplies an answer
-where the table has none. A verb the table does not reach says so by name —
-"the obverse of (+/ % #) is not supported yet" — rather than guessing at a
-numerical inverse. Three things read the table besides `&.`: J's `u b. _1`,
-which answers with the obverse's SPELLING rather than the verb, APL's `⍢`
-(under), and `⍣¯1`.
+`u&.>` and `u¨` turn round only the verb inside the box, `u^:n` becomes the
+obverse applied n times, and `u :. v` supplies an answer where the table has
+none.
+
+Two unders are not built out of an inverse at all. `u&.>` is the each: open
+each box, apply u, box the result again. `u&.,` is the other — `,` has no
+obverse, since a ravel says nothing about the shape it came from, but the
+shape is in hand while the sentence runs, so `u&., y` is u over the ravel
+reshaped to y's own shape. Like the reference, it has one valence only, and
+`,^:_1`, `, b. _1` and `u&.:,` stay refusals.
+
+Two rows the reference has and libjay does not, and they say so by name:
+`!^:_1`, whose Newton iteration the reference runs in the COMPLEX plane
+(`!^:_1 _1` is `8.91115j18.2226` there) and which waits on a complex gamma
+function — the same gap as `! 3j4`; and `|.!.f`, whose obverse the
+reference answers with `]`, an identity that does not undo the shift it is
+the obverse of.
+
+A verb the table does not reach says so by name — "the obverse of (+/ % #)
+is not supported yet" — rather than guessing at a numerical inverse.
+
+Three things read the table besides `&.`: J's `u b. _1`, APL's `⍢` (under),
+and `⍣¯1`. `u b. _1` answers a SPELLING rather than the verb, and libjay
+writes its own: where the reference prints `0.318309886183790691&*` libjay
+prints `(n&*)`, because a derived verb's name says `n` for a noun operand.
+The rows whose spelling the two write alike are in
+`tests/corpus/j/obverses.txt` by name; the rest are asked there with `^:_1`
+and `&.`, which compare values.
+
+The table is one table over both languages, so a row J's `^:_1` reaches is
+reachable from APL's `⍣¯1` too. Three of them Dyalog does not hold — `⍋⍣¯1`,
+`⍒⍣¯1` and `○⍣¯1` of a zero — and `tests/expected/dyalog.txt` names them.
 
 `". y` (do) compiles the characters of y as a J program and runs it in the
 sentence's own scope: the names it can see are the names the sentence can

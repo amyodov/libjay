@@ -7,13 +7,33 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The obverse table now holds nearly every verb the reference is willing to
+  name one for, which is what `u&.v`, `u&.:v`, `u^:_1`, `u b. _1` and APL's
+  `f⍢g` and `f⍣¯1` all read. Newly reachable: `/:` `\:` `C.` `%.` `p.` `]`
+  `[` `,:` `{.` `":` `".` `o.` `j.` `r.` `+.` `*.` `q:` `;:` `x:` `u:` `s:`
+  `I.` `p:` `$.`, the running folds `+/\` `-/\` `*/\` `%/\` and their suffix
+  forms, the product `*/`, `u&.>` and `u¨` (which turn round only the verb
+  inside the box), and the bonds `n&|.` `n&}.` `n&,` `,&n` `n&#` `n&#.`
+  `n&#:` `n&o.` `n&A.` `n&C.` `u~&n` `%:&n` `^.&n`. So
+  `(+/\)^:_1 ] 1 3 6` is `1 2 3`, `(*:&.>)^:_1 ] <9` is `<3`,
+  `(2&#.)^:_1 ] 5` is `1 0 1`, `;:^:_1 ;: 'ab cd'` is `ab cd`, and
+  `p:^:_1 ] 100` is 25 — a hundred has twenty-five primes below it.
+
+- J's `u&.,`, under ravel: `,` has no obverse, since a ravel says nothing
+  about the shape it came from, but the shape is in hand while the sentence
+  runs. `+:&., i. 2 3` doubles every element and gives the 2-by-3 back. As
+  in the reference it has one valence, and `,^:_1` stays a refusal.
+
+- APL's `f⍣¯1` reaches the whole table, so `(+\)⍣¯1⊢1 3 6` is `1 2 3`,
+  `⍕⍣¯1⊢'12'` is 12 and `(2∘⌽)⍣¯1⊢3 1 2` is `1 2 3`.
+
 - The Dyalog preset is a GATE. `cargo test -p libjay --test oracle_dyalog`
-  replays all 1989 recorded Dyalog answers under `Dialect::dyalog()` and
+  replays all 2012 recorded Dyalog answers under `Dialect::dyalog()` and
   fails on any expression the preset does not match — the third differential
   battery, beside jconsole's and GNU APL's, and the same closed system: no
   subprocess, no interpreter, one case per corpus theme. What may differ is
   listed one expression at a time in `crates/libjay/tests/expected/dyalog.txt`,
-  each row carrying its reason: 21 rows are a divergence libjay keeps on
+  each row carrying its reason: 23 rows are a divergence libjay keeps on
   purpose and 48 a named gap, whose tag is the row of docs/status.md's
   Dyalog table that would close it. Nothing is exempt silently, and a row
   that has stopped differing fails the run, so closing a gap deletes its
@@ -199,6 +219,9 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   fuses into a chain the same way.
 
 ### Fixed
+
+- `(2&%:)^:_1` and `%:&.`: the obverse of the n-th root is the n-th POWER,
+  so `(2&%:)^:_1 ] 3` is 9. It raised n to the argument before.
 
 - **`(<9223372036854775806) C. 1 2 3` is an error, not a crash.** A cycle
   named an index and the permutation it asked for was allocated before the

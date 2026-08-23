@@ -2258,6 +2258,13 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             let f = verb_operand(u, span)?;
             Ok(Frag::Verb(VerbFrag::V(Verb::Each(Box::new(f), Enclose::Always)), span))
         }
+        // `u&.,` is the other one. `,` has no obverse — a ravel says
+        // nothing about the shape it came from — but the shape is in hand
+        // here, so u runs over the ravel and the shape goes back on.
+        "&." if is_ravel(&v) => {
+            let f = verb_operand(u, span)?;
+            Ok(Frag::Verb(VerbFrag::V(Verb::UnderRavel(Box::new(f))), span))
+        }
         // `u&.v` is `v^:_1 @: u &: v`: v prepares both arguments, u runs on
         // what it made, and v's obverse puts the answer back. `&.` does it
         // at v's monadic rank, `&.:` on the arguments whole — the same
@@ -2607,6 +2614,10 @@ fn bond_noun(f: &Frag, span: Span) -> Result<Array> {
 /// `&.` accepts.
 fn is_open(f: &Frag) -> bool {
     matches!(f, Frag::Verb(VerbFrag::V(Verb::Prim(p)), _) if p.monad == MonadOp::Open)
+}
+
+fn is_ravel(f: &Frag) -> bool {
+    matches!(f, Frag::Verb(VerbFrag::V(Verb::Prim(p)), _) if p.monad == MonadOp::Ravel)
 }
 
 fn verb_operand(f: Frag, span: Span) -> Result<Verb> {
@@ -3375,7 +3386,9 @@ mod tests {
     #[rstest]
     #[case("+ ^: {n} y", "computed power")]
     #[case("(+/ % #) ^: _1 y", "the obverse of")]
-    #[case("(+/ % #) &. , y", "the obverse of")]
+    // `&.,` needs no obverse — the shape is put back instead — so the
+    // verb whose obverse is missing has to be the one on the RIGHT.
+    #[case("+: &. (+/ % #) y", "the obverse of")]
     #[case("(1 + 2) & , y", "bonds over a non-literal noun")]
         fn other_conjunctions_are_not_supported_yet(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);

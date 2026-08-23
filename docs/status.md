@@ -158,8 +158,8 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `@:` at | 🟢 |
 | `&` bond / compose | 🟡 verbs compose, literal nouns bond; computed nouns not yet |
 | `&:` appose | 🟢 |
-| `&.` under | 🟢 `v^:_1 @: u &: v`, over the obverse table |
-| `&.:` under | 🟢 the same on whole arguments |
+| `&.` under | 🟢 `v^:_1 @: u &: v`, over the obverse table — docs/coverage.md's "The obverse table" lists what is in it and the two verbs still named. `&.>` and `&.,` are the two unders not built out of an inverse: box by box, and over the ravel with the shape put back |
+| `&.:` under | 🟢 the same on whole arguments, over the same table |
 | `^:` power | 🟡 a literal count, a list of them, `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives (the obverse); a computed count not yet |
 | `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
 | `:` explicit definition | 🟡 `1 :`, `2 :`, `3 :`, `4 :`, and the `m : 0` body on the lines below; `13 :` not yet |
@@ -182,7 +182,7 @@ conjunctions above:
 | `M.` memo | 🟢 the cache belongs to the derived verb and lives as long as the program |
 | `L:` level | 🟢 both valences; the dyad descends both arguments together |
 | `S:` spread | 🟢 both valences, as `L:` |
-| `b.` boolean / characteristics | 🟢 `m b.` (the 32 boolean and bitwise functions) and all three characteristics: `0` the ranks, `1` the identity function, `_1` the obverse |
+| `b.` boolean / characteristics | 🟢 `m b.` (the 32 boolean and bitwise functions) and all three characteristics: `0` the ranks, `1` the identity function, `_1` the obverse. `_1` answers a SPELLING, and libjay writes its own — a derived verb whose operand is a noun spells as `(n&+)` here where the reference writes the noun out |
 | `$.` sparse | 🟡 the storage kind, the monad and the dyad's forms `_1 0 1 2 3 4 5 7 8`, and the display. A sparse array reaching any other verb is expanded first, so the ANSWER always matches and the storage kind does not survive the step — where J keeps `s + 1` sparse, libjay gives the dense array. Sparse characters and boxes are named gaps, as they are in J |
 | `H.` hypergeometric | 🟢 the series, with the shared parameters cancelled; a series that neither converges nor overflows is refused by name |
 | `t.` task | ⚪ the reference spells `t.` the TASK conjunction — it runs a verb in one of J's thread pools and answers with a pyx. The sandbox does not open those threads, as it does not for `T.` |
@@ -336,7 +336,7 @@ conjunctions above:
 | `⍨` commute | 🟢 |
 | `∘.` outer product | 🟢 the function between every pair of ELEMENTS whatever its rank, each disclosed on the way in and the result enclosed on the way into the table: `1 2∘.,3 4` is a two-by-two of pairs, `¯1 0 1∘.⌽⊂m` rotates the matrix |
 | `⍤` rank / atop | 🟡 a rank specification, or Dyalog's atop with a function operand; no oracle for the latter |
-| `⍣` power | 🟡 literal count or a function operand (`f⍣≡`); negatives not yet |
+| `⍣` power | 🟡 literal count — negatives included, answered from the obverse table — or a function operand (`f⍣≡`); a count computed at run time is named. No oracle for the negatives: GNU APL implements no negative power at all, so they are recorded against Dyalog in `corpus/apl/dyalog-operators.txt` |
 | `∘` beside | 🟡 no oracle: GNU APL has no `∘` operator; Dyalog's `f∘g`, function operands only |
 | `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🟡 no oracle: GNU APL rejects it; Dyalog's `f⍛g` |
@@ -381,15 +381,15 @@ conjunctions above:
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
 APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
 a preset of the dialect object rather than a second engine:
-`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1920 of the
-1989 expressions Dyalog 20.0 has been recorded on — the default answers
-1771 of them — and the 69 it does not are itemised below.
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1941 of the
+2012 expressions Dyalog 20.0 has been recorded on — the default answers
+1796 of them — and the 71 it does not are itemised below.
 
 That is a GATE, not a measurement: `cargo test -p libjay --test
 oracle_dyalog` replays the recorded `dyalog:` column under the preset and
 fails on any expression not on the exemption list,
 `crates/libjay/tests/expected/dyalog.txt`. The list carries a reason per
-row — 21 of them a divergence libjay keeps on purpose, 48 a gap — and the
+row — 23 of them a divergence libjay keeps on purpose, 48 a gap — and the
 `Tag` column below is the tag those gap rows name, so closing a row here
 deletes its exemptions and tightens the gate. Nothing is exempt silently.
 `jay-corpus stats apl --dialect-diff --dialect dyalog` measures the same
@@ -433,6 +433,7 @@ keeps.
 | The empty-base `⊥` | `empty-base` | 5 | ⚪ zeros here; GNU APL agrees about the SHAPE and refuses to print the value, Dyalog refuses outright. Pinned in `corpus/apl/divergences.txt`, with the same rows in `fuzz_found.txt` |
 | A rotate amount or a modulus above 2⋆53 | `large-count` | 3 | ⚪ the count the program wrote, reduced exactly; pinned in `divergences.txt` |
 | `⍢` with a structural operand | `under-extension` | 3 | ⚪ libjay answers and the recorded Dyalog refuses; a preset chooses a dialect's rules, it does not withdraw an extension libjay ships in every dialect |
+| Rows of the obverse table Dyalog does not hold: `⍋⍣¯1`, `⍒⍣¯1`, and `○⍣¯1` of a zero | `obverse-table` | 3 | ⚪ one table over both languages — grade is its own obverse there because it is in J, and Dyalog's own inverse of `○` divides by the argument and raises DOMAIN ERROR at zero |
 | `⍠` with an option Dyalog's variant does not offer | `variant-extension` | 3 | ⚪ the same rule |
 | A `{name}` dfn whose whole body is one identifier, which libjay reads as an interpolation hole (`a←1 ⋄ F←{{a} ⍵} ⋄ F 0`) | `name-hole` | 2 | ⚪ the brace-binding syntax is a fixed point of the embedding; the collision is real APL and has no answer yet |
 | A diamond-separated sentence's value | `sequence-value` | 1 | ⚪ the block model: the last sentence's value, and nothing prints on the way |
@@ -462,7 +463,7 @@ implemented, and the recording wins over anything a document says.
 |---|---|
 | `⊇` select | 🔴 not yet — and today the parser calls it an unknown symbol rather than naming the promise, which is itself a diagnostics gap |
 | Dfn error-guards `num::expr` | 🔴 not yet — today a bare syntax error at the second `:`, same diagnostics gap |
-| `f⍣¯n` inverse powers | 🟢 the count may be negative, and the obverse table answers it |
+| `f⍣¯n` inverse powers | 🟢 the count may be negative, and the obverse table answers it — one table over both languages, so every row J's `^:_1` reaches is reachable here. Three rows Dyalog does not hold are named in `tests/expected/dyalog.txt` |
 | Namespaces (`⎕NS`, `#.`, dotted names) | 🔴 refused by name |
 | `⎕JSON`, `⎕R`/`⎕S`, `⎕CSV`, `⎕DT`, `⎕C` | 🔴 refused by name — pure computation, so the sandbox is no obstacle; they are simply not written |
 | `&` spawn | ⚪ the sandbox does not open threads, in any dialect — the row is in the operator table above |

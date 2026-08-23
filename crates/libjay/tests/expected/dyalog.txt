@@ -105,6 +105,20 @@ a←1 ⋄ F←{{a} ⍵} ⋄ F 0
 1 2 3⋄4 5
 ? divergence sequence-value: only the last sentence has a value here
 
+// --- divergence obverse-table (3) ---------------------------------------
+// libjay's obverse table is one table over both languages, so a row J's
+// `^:_1` reaches is reachable from `⍣¯1` too. Two of these Dyalog does not
+// hold: grading is its own inverse there as here only for J, and the third
+// is Dyalog's own edge — its inverse of `○` divides by the argument, so a
+// zero argument raises DOMAIN ERROR where multiplying by the reciprocal of
+// pi answers zero.
+⍋⍣¯1⊢2 0 1
+? divergence obverse-table: grade is its own obverse here
+⍒⍣¯1⊢2 0 1
+? divergence obverse-table: grade is its own obverse here
+○⍣¯1⊢0
+? divergence obverse-table: dividing by zero there, zero here
+
 // --- gap inner-product (15) ---------------------------------------------
 // An inner product `f.g` whose right operand is not a scalar function: the
 // two lines nest the intermediate differently, and libjay follows GNU APL.

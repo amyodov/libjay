@@ -817,6 +817,15 @@ pub enum MonadOp {
     /// has. Nothing else about the sandbox changes: the nested program can
     /// reach exactly what the outer one can.
     Execute { apl: bool },
+    /// J `$.^:_1`: the obverse of sparse — the argument with every position
+    /// materialised. A dense argument is already the answer.
+    Dense,
+    /// J `p:^:_1`: the obverse of the y-th prime — how many primes stand
+    /// below y, which sends a prime back to its own index.
+    PrimeCount,
+    /// J `I.^:_1`: the obverse of indices — how many times each index from
+    /// zero to the largest occurs in y.
+    IndicesInverse,
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -1167,6 +1176,12 @@ pub enum Verb {
     /// J `u&.>` and APL `u¨`: open each box, apply u, put the result back
     /// in a box. Cell rank 0 on every side, so the frames pair as usual.
     Each(Box<Verb>, Enclose),
+    /// J `u&.,`: the other under that is not built out of an inverse. `,`
+    /// has no obverse of its own — a ravel says nothing about the shape it
+    /// came from — but under a FIXED shape it has one, so `u&., y` is u
+    /// over the ravel, reshaped to y's own shape. The reference gives it
+    /// one valence only.
+    UnderRavel(Box<Verb>),
     /// J `u!.n`: apply u with the comparison tolerance replaced by n.
     Fit(Box<Verb>, f64),
     /// J `x m} y`: y with the items at the indices m replaced by x.
@@ -1319,6 +1334,7 @@ impl Verb {
             Verb::Compose(f, g) => format!("({}&:{})", f.name(), g.name()),
             Verb::BondLeft(_, v) => format!("(n&{})", v.name()),
             Verb::BondRight(v, _) => format!("({}&n)", v.name()),
+            Verb::UnderRavel(v) => format!("({}&.,)", v.name()),
             Verb::Each(v, Enclose::Always) => format!("({}&.>)", v.name()),
             Verb::Each(v, _) => format!("({}¨)", v.name()),
             Verb::Fit(v, n) => format!("{}!.{n}", v.name()),
@@ -1413,6 +1429,7 @@ impl Verb {
             | Verb::BondLeft(_, v)
             | Verb::BondRight(v, _)
             | Verb::Each(v, _)
+            | Verb::UnderRavel(v)
             | Verb::Fit(v, _)
             | Verb::Key(v)
             | Verb::Cut(v, _)
@@ -1486,9 +1503,11 @@ impl Verb {
             | Verb::Hook(g, h)
             | Verb::Atop(g, h)
             | Verb::Compose(g, h) => g.is_pure() && h.is_pure(),
-            Verb::BondLeft(_, v) | Verb::BondRight(v, _) | Verb::Each(v, _) | Verb::Fit(v, _) => {
-                v.is_pure()
-            }
+            Verb::BondLeft(_, v)
+            | Verb::BondRight(v, _)
+            | Verb::Each(v, _)
+            | Verb::UnderRavel(v)
+            | Verb::Fit(v, _) => v.is_pure(),
             Verb::Key(v) | Verb::Cut(v, _) | Verb::AlongAxis(v, _) => v.is_pure(),
             Verb::Hypergeometric { .. } => true,
             Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => v.is_pure() && w.is_pure(),
@@ -1660,6 +1679,15 @@ impl Verb {
                     Ok(enclose(&u.monad(&opened, c, span)?, *rule))
                 })?;
                 assemble(&y.shape, cells, span)
+            }
+            // `u&., y`: the shape is put back afterwards, so a ravel that
+            // says nothing about where it came from still has an inverse
+            // for as long as this one argument is in hand.
+            Verb::UnderRavel(u) => {
+                let flat = Array::new(vec![y.count()], y.data.clone());
+                let r = u.monad(&flat, ctx, span)?;
+                let shape = Array::from_i64(y.shape.iter().map(|&n| n as i64).collect());
+                reshape(&shape, &r, false, false, ctx.cfg.near(), span)
             }
             Verb::Fit(v, n) => {
                 let tol = Tol { ct: *n, ..ctx.cfg.tol };
@@ -1921,8 +1949,8 @@ impl Verb {
             Verb::Stencil(..) => {
                 Err(Error::domain("f⌺w has no dyadic meaning", span))
             }
-            // J gives a bond one valence only.
-            Verb::BondLeft(..) | Verb::BondRight(..) => {
+            // J gives a bond, and under-ravel, one valence only.
+            Verb::BondLeft(..) | Verb::BondRight(..) | Verb::UnderRavel(_) => {
                 Err(Error::domain(format!("{} has no dyadic meaning", self.name()), span))
             }
         }
@@ -7579,6 +7607,15 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         }
         MonadOp::TypeCode => Ok(Array::scalar_i64(type_code(y))),
         MonadOp::Sparse => crate::sparse::sparsify(y, span),
+        MonadOp::Dense => Ok(y.densified()),
+        MonadOp::PrimeCount => {
+            let n = y
+                .to_i64_vec_near(ctx.cfg.near())
+                .ok_or_else(|| Error::domain("the prime count needs an integer", span))?;
+            let v = n.first().copied().unwrap_or(0);
+            Ok(carry_exact(Array::scalar_i64(primes_below(v, span)?), y))
+        }
+        MonadOp::IndicesInverse => indices_inverse(y, ctx.cfg.near(), span),
         MonadOp::Same => Ok(y.clone()),
         MonadOp::Format => Ok(format_chars(y, &ctx.cfg.fmt)),
         MonadOp::DecodeBits => decode(None, y, ctx.cfg.tol, span).map(|r| carry_exact(r, y)),
@@ -9994,6 +10031,29 @@ fn where_indices(y: &Array, origin: i64, boxed: bool, near: NearInt, span: Span)
         odometer(&mut coord, &y.shape);
     }
     Ok(Array::new(vec![out.len()], Data::Box(out.into())))
+}
+
+/// `I.^:_1 y`: how many times each index from zero to the largest occurs in
+/// y, which is the counting vector `I.` was given. An empty argument counts
+/// nothing.
+fn indices_inverse(y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    if y.count() == 0 {
+        return Ok(Array::empty(DType::I64));
+    }
+    let at = y
+        .to_i64_vec_near(near)
+        .ok_or_else(|| Error::domain("the obverse of indices needs integers", span))?;
+    if at.iter().any(|&i| i < 0) {
+        return Err(Error::domain("the obverse of indices needs non-negative integers", span));
+    }
+    let Some(&top) = at.iter().max() else {
+        return Ok(Array::empty(DType::I64));
+    };
+    let mut counts = vec![0i64; top as usize + 1];
+    for &i in &at {
+        counts[i as usize] += 1;
+    }
+    Ok(Array::from_i64(counts))
 }
 
 /// `x I. y` / `x ⍸ y`: which interval of the ascending `x` each cell of `y`
@@ -13485,40 +13545,168 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
 /// it. A verb that is not here has no obverse, and the diagnostic says so
 /// by name.
 pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
-    let swap = |name: &'static str| -> Option<Verb> {
-        crate::frontend::j::verb_named(name)
-    };
     Some(match v {
-        Verb::Prim(p) => {
-            use ScalarMonad as SM;
-            // Every one of these is its own inverse, whichever language
-            // spelled it: the verb itself is the answer, so no name is
-            // looked up (an APL glyph has no entry in J's table).
-            if matches!(
-                p.monad,
-                MonadOp::Scalar(SM::Conj | SM::Neg | SM::Recip | SM::OneMinus)
-                    | MonadOp::Reverse
-                    | MonadOp::TransposeAxes
-            ) {
-                return Some(v.clone());
-            }
-            // `j. y` turns y a quarter turn about the origin; turning it
-            // back is a quarter turn the other way, which is `-@j.`.
-            if matches!(p.monad, MonadOp::Scalar(SM::Imaginary)) {
-                return Some(Verb::Atop(Box::new(swap("-")?), Box::new(swap("j.")?)));
-            }
-            // `x # y` undone with the same x is the expansion: the items
-            // come back where the ones stand and a fill takes every place a
-            // zero left. It has no monadic meaning, since `# y` counts and
-            // a count says nothing about what was counted.
-            if p.dyad == DyadOp::Copy {
-                return Some(Verb::Prim(Prim {
-                    name: "#^:_1",
-                    monad: MonadOp::None,
-                    dyad: DyadOp::Expand,
-                    ranks: [RANK_INF, 1, RANK_INF],
-                }));
-            }
+        Verb::Prim(p) => prim_obverse(v, p)?,
+        // An explicit obverse (`u :. v`) is the whole answer.
+        Verb::WithObverse(_, w) => (**w).clone(),
+        // A composition inverts by inverting its parts, in the other order.
+        Verb::Atop(f, g) => {
+            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?))
+        }
+        Verb::Compose(f, g) | Verb::Beside(f, g) => {
+            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?))
+        }
+        Verb::Rank(f, r) => Verb::Rank(Box::new(obverse(f)?), *r),
+        Verb::Fit(f, n) => Verb::Fit(Box::new(obverse(f)?), *n),
+        // `u&.>` and `u¨` undo box by box: the boxing is its own inverse,
+        // so only the verb inside one has to be turned round.
+        Verb::Each(f, rule) => Verb::Each(Box::new(obverse(f)?), *rule),
+        // `*/ y` is the product, and the product of a whole number is
+        // undone by its prime factors.
+        Verb::Reduce(f) if is_dyad(f, DyadOp::Scalar(ScalarDyad::Mul)) => named("q:")?,
+        // The running sums and products, which invert into the differences
+        // and the quotients between neighbours.
+        Verb::Windowed(f, kind) => scan_obverse(f, *kind)?,
+        // `u^:n` undone is `u^:_1` done n times.
+        Verb::PowerN(f, Power::Times(n)) => {
+            Verb::PowerN(Box::new(obverse(f)?), Power::Times(*n))
+        }
+        Verb::BondLeft(m, f) => bond_obverse(m, f, true)?,
+        Verb::BondRight(f, n) => bond_obverse(n, f, false)?,
+        _ => return None,
+    })
+}
+
+/// A J primitive by its spelling, for the obverses that are one.
+fn named(spelling: &'static str) -> Option<Verb> {
+    crate::frontend::j::verb_named(spelling)
+}
+
+/// A verb built here rather than looked up: the inverses J itself spells
+/// only as `u^:_1`, so they carry that spelling as their name.
+fn made(name: &'static str, monad: MonadOp, ranks: [i64; 3]) -> Verb {
+    Verb::Prim(Prim { name, monad, dyad: DyadOp::None, ranks })
+}
+
+fn is_dyad(v: &Verb, op: DyadOp) -> bool {
+    matches!(v, Verb::Prim(p) if p.dyad == op)
+}
+
+fn atop(f: Verb, g: Verb) -> Verb {
+    Verb::Atop(Box::new(f), Box::new(g))
+}
+
+/// The obverse of a primitive.
+fn prim_obverse(v: &Verb, p: &Prim) -> Option<Verb> {
+    use ScalarMonad as SM;
+    // Every one of these is its own inverse, whichever language spelled it:
+    // the verb itself is the answer, so no name is looked up (an APL glyph
+    // has no entry in J's table). Grade sends a permutation to the
+    // permutation that undoes it, the cycles of `C.` convert back, and a
+    // matrix inverse, a set of polynomial roots and the identity verbs all
+    // return where they came from.
+    if matches!(
+        p.monad,
+        MonadOp::Scalar(SM::Conj | SM::Neg | SM::Recip | SM::OneMinus)
+            | MonadOp::Reverse
+            | MonadOp::TransposeAxes
+            | MonadOp::GradeUp { .. }
+            | MonadOp::CycleForm
+            | MonadOp::MatrixInverse
+            | MonadOp::PolyRoots
+            | MonadOp::Same
+    ) {
+        return Some(v.clone());
+    }
+    // `x # y` undone with the same x is the expansion: the items come back
+    // where the ones stand and a fill takes every place a zero left. It has
+    // no monadic meaning, since `# y` counts and a count says nothing about
+    // what was counted.
+    if p.dyad == DyadOp::Copy {
+        return Some(expand_verb());
+    }
+    let built = match p.monad {
+        // `j. y` turns y a quarter turn about the origin; turning it back
+        // is a quarter turn the other way, which is `-@j.`.
+        MonadOp::Scalar(SM::Imaginary) => atop(named("-")?, named("j.")?),
+        // `r. y` is `^ 0j1 * y`, so the angle comes back as the logarithm
+        // turned the same quarter turn back.
+        MonadOp::Scalar(SM::Polar) => {
+            atop(atop(named("-")?, named("j.")?), named("^.")?)
+        }
+        // `o. y` multiplies by pi, and the reference undoes it by
+        // multiplying by the reciprocal rather than dividing.
+        MonadOp::Scalar(SM::Pi) => Verb::BondLeft(
+            Array::scalar_f64(std::f64::consts::FRAC_1_PI),
+            Box::new(named("*")?),
+        ),
+        // The two readings of a complex number as a pair of reals: the
+        // pair folds back together under the verb that made it.
+        MonadOp::ComplexParts { polar } => Verb::Rank(
+            Box::new(Verb::Reduce(Box::new(named(if polar { "r." } else { "j." })?))),
+            [1, RANK_INF, RANK_INF],
+        ),
+        // Grading down is grading up over the reversed argument.
+        MonadOp::GradeDown { origin } => atop(
+            Verb::Prim(Prim {
+                name: "/:",
+                monad: MonadOp::GradeUp { origin },
+                dyad: DyadOp::GradeSelect { down: false },
+                ranks: [RANK_INF, RANK_INF, RANK_INF],
+            }),
+            named("|.")?,
+        ),
+        // A list of prime factors multiplies back into its number, one row
+        // at a time.
+        MonadOp::PrimeFactors => {
+            Verb::Rank(Box::new(Verb::Reduce(Box::new(named("*")?))), [1, RANK_INF, RANK_INF])
+        }
+        // `;: y` cuts a character list into words; putting a blank after
+        // each word and razing them joins it back, less the trailing blank.
+        MonadOp::Words => atop(
+            named("}:")?,
+            atop(
+                named(";")?,
+                Verb::Each(
+                    Box::new(Verb::BondRight(
+                        Box::new(named(",")?),
+                        Array::from_chars(vec![' ']),
+                    )),
+                    Enclose::Always,
+                ),
+            ),
+        ),
+        // The forms that carry their own inverse in the same spelling.
+        MonadOp::ToExact => Verb::BondLeft(Array::scalar_i64(-1), Box::new(named("x:")?)),
+        MonadOp::Unicode { .. } => {
+            Verb::BondLeft(Array::scalar_i64(3), Box::new(named("u:")?))
+        }
+        MonadOp::Symbols => Verb::BondLeft(Array::scalar_i64(5), Box::new(named("s:")?)),
+        // The three the reference spells only as a negative power.
+        MonadOp::NthPrime => made("p:^:_1", MonadOp::PrimeCount, [0, 0, 0]),
+        MonadOp::Sparse => {
+            made("$.^:_1", MonadOp::Dense, [RANK_INF, RANK_INF, RANK_INF])
+        }
+        MonadOp::Indices { origin: 0, boxed_coords: false } => {
+            made("I.^:_1", MonadOp::IndicesInverse, [1, RANK_INF, RANK_INF])
+        }
+        // Formatting and evaluating undo one another in whichever language
+        // spelled them: `":` with `".`, `⍕` with `⍎`.
+        MonadOp::Format if p.name == "⍕" => Verb::Prim(Prim {
+            name: "⍎",
+            monad: MonadOp::Execute { apl: true },
+            dyad: DyadOp::None,
+            ranks: [1, RANK_INF, RANK_INF],
+        }),
+        MonadOp::Format => named("\".")?,
+        MonadOp::Execute { apl: true } => Verb::Prim(Prim {
+            name: "⍕",
+            monad: MonadOp::Format,
+            dyad: DyadOp::FormatSpec,
+            ranks: [RANK_INF, 1, RANK_INF],
+        }),
+        MonadOp::Execute { apl: false } => named("\":")?,
+        _ => {
             let by_monad: Option<&'static str> = match p.monad {
                 MonadOp::Scalar(SM::Exp) => Some("^."),
                 MonadOp::Scalar(SM::Ln) => Some("^"),
@@ -13532,37 +13720,96 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
                 MonadOp::Open => Some("<"),
                 MonadOp::DecodeBits => Some("#:"),
                 MonadOp::EncodeBits => Some("#."),
+                MonadOp::Itemize => Some("{."),
+                MonadOp::Head => Some(",:"),
                 _ => None,
             };
-            swap(by_monad?)?
+            named(by_monad?)?
         }
-        // An explicit obverse (`u :. v`) is the whole answer.
-        Verb::WithObverse(_, w) => (**w).clone(),
-        // A composition inverts by inverting its parts, in the other order.
-        Verb::Atop(f, g) => {
-            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?))
-        }
-        Verb::Compose(f, g) | Verb::Beside(f, g) => {
-            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?))
-        }
-        Verb::Rank(f, r) => Verb::Rank(Box::new(obverse(f)?), *r),
-        Verb::Fit(f, n) => Verb::Fit(Box::new(obverse(f)?), *n),
-        // `u^:n` undone is `u^:_1` done n times.
-        Verb::PowerN(f, Power::Times(n)) => {
-            Verb::PowerN(Box::new(obverse(f)?), Power::Times(*n))
-        }
-        Verb::BondLeft(m, f) => bond_obverse(m, f, true)?,
-        Verb::BondRight(f, n) => bond_obverse(n, f, false)?,
-        _ => return None,
+    };
+    Some(built)
+}
+
+/// `x #^:_1 y`: the expansion, which is what undoes `x # y`.
+fn expand_verb() -> Verb {
+    Verb::Prim(Prim {
+        name: "#^:_1",
+        monad: MonadOp::None,
+        dyad: DyadOp::Expand,
+        ranks: [RANK_INF, 1, RANK_INF],
     })
+}
+
+/// The obverse of a running fold — `+/\`, `-/\.` and their kin.
+///
+/// A running sum inverts into the differences between neighbours, a running
+/// product into the quotients: the argument against itself shifted one
+/// place, the fill being the operation's identity. The subtracting and
+/// dividing folds alternate, so their answers carry one further pass over
+/// the signs `1 _1 1 _1 …`.
+fn scan_obverse(f: &Verb, kind: WindowKind) -> Option<Verb> {
+    use ScalarDyad as SD;
+    let Verb::Reduce(inner) = f else { return None };
+    let Verb::Prim(p) = &**inner else { return None };
+    let DyadOp::Scalar(op) = p.dyad else { return None };
+    let suffix = match kind {
+        WindowKind::Prefix | WindowKind::Scan => false,
+        WindowKind::Suffix => true,
+    };
+    // The neighbour: one place to the right for a prefix fold, one to the
+    // left for a suffix one, the vacated place taking the fill.
+    let fill = match op {
+        SD::Add | SD::Sub => 0.0,
+        SD::Mul | SD::DivJ | SD::DivApl => 1.0,
+        _ => return None,
+    };
+    let shift = Verb::ShiftFill(Array::scalar_f64(fill));
+    let neighbour = if suffix {
+        Verb::BondLeft(Array::scalar_i64(1), Box::new(shift))
+    } else {
+        shift
+    };
+    // What takes the argument back to its neighbour: the inverse of the
+    // fold for a prefix, the fold itself for a suffix.
+    let step = match (op, suffix) {
+        (SD::Add, false) | (SD::Sub, false) => named("-")?,
+        (SD::Add, true) => named("-")?,
+        (SD::Sub, true) => named("+")?,
+        (SD::Mul, _) | (SD::DivJ | SD::DivApl, false) => named("%")?,
+        (SD::DivJ | SD::DivApl, true) => named("*")?,
+        _ => return None,
+    };
+    let differences = Verb::Hook(Box::new(step), Box::new(neighbour));
+    // A prefix fold under subtraction or division alternates, so every
+    // second answer is turned round again.
+    let alternate = matches!((op, suffix), (SD::Sub, false) | (SD::DivJ | SD::DivApl, false));
+    if !alternate {
+        return Some(differences);
+    }
+    let signs = atop(
+        Verb::BondRight(Box::new(named("$")?), Array::from_i64(vec![1, -1])),
+        named("#")?,
+    );
+    let apply = if matches!(op, SD::Sub) { named("*")? } else { named("^")? };
+    Some(Verb::Fork(Box::new(differences), Box::new(apply), Box::new(signs)))
 }
 
 /// The obverse of a bonded arithmetic verb. `left` says which side the noun
 /// was bonded to, which is what tells `n - y` (its own inverse) from
 /// `y - n` (whose inverse adds).
 fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
+    // `u~&n` is `n&u` written the other way round, so it inverts the same
+    // way. The reference gives `n&u~` no obverse, and neither does this.
+    if let Verb::Commute(g) = f {
+        if !left {
+            return bond_obverse(n, g, true);
+        }
+        return None;
+    }
+    if let Some(v) = structural_bond_obverse(n, f, left) {
+        return Some(v);
+    }
     let Verb::Prim(p) = f else { return None };
-    let named = |name: &'static str| crate::frontend::j::verb_named(name);
     let bond = |name: &'static str, arg: &Array| -> Option<Verb> {
         let g = named(name)?;
         Some(if left {
@@ -13573,6 +13820,11 @@ fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
     };
     use ScalarDyad as SD;
     let DyadOp::Scalar(op) = p.dyad else { return None };
+    if matches!(op, SD::Circle) {
+        // `n o. y` is undone by `(-n) o. y`: the circle functions are
+        // numbered so that the negative index is the inverse.
+        return left.then(|| Some(Verb::BondLeft(negated(n)?, Box::new(named("o.")?))))?;
+    }
     match (op, left) {
         // `n - y` and `n % y` undo themselves; the other side does not.
         (SD::Sub | SD::DivJ | SD::DivApl, true) => bond(p.name, n),
@@ -13586,8 +13838,121 @@ fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
         // `y ^ n` is undone by the n-th root; `n ^ y` by the base-n log.
         (SD::Pow, false) => Some(Verb::BondLeft(n.clone(), Box::new(named("%:")?))),
         (SD::Pow, true) => Some(Verb::BondLeft(n.clone(), Box::new(named("^.")?))),
+        // `n ^. y` is the logarithm to the base n, which raising n to the
+        // answer turns back; `n %: y` is the n-th root, which the n-th
+        // POWER turns back, and the noun changes sides for it.
         (SD::Log, true) => Some(Verb::BondLeft(n.clone(), Box::new(named("^")?))),
-        (SD::Root, true) => Some(Verb::BondLeft(n.clone(), Box::new(named("^")?))),
+        (SD::Root, true) => Some(Verb::BondRight(Box::new(named("^")?), n.clone())),
+        // `y ^. n` is the logarithm of n to the base y, which the y-th root
+        // of n turns back, and the other way round.
+        (SD::Log, false) => Some(Verb::BondRight(Box::new(named("%:")?), n.clone())),
+        (SD::Root, false) => Some(Verb::BondRight(Box::new(named("^.")?), n.clone())),
+        _ => None,
+    }
+}
+
+/// The noun with every value negated, for the bonds whose obverse is the
+/// same verb with the opposite parameter.
+fn negated(n: &Array) -> Option<Array> {
+    if let Some(v) = n.to_i64_vec() {
+        let out: Vec<i64> = v.iter().map(|&k| -k).collect();
+        return Some(Array::new(n.shape.clone(), Data::I64(out.into())));
+    }
+    let v = n.to_f64_vec()?;
+    let out: Vec<f64> = v.iter().map(|&k| -k).collect();
+    Some(Array::new(n.shape.clone(), Data::F64(out.into())))
+}
+
+/// The one number a bond's noun holds, for the bonds whose obverse needs
+/// its value rather than only its shape.
+fn one_number(n: &Array) -> Option<f64> {
+    match n.to_f64_vec()?[..] {
+        [v] if n.rank() <= 1 => Some(v),
+        _ => None,
+    }
+}
+
+/// The obverse of a bond whose verb rearranges rather than computes: the
+/// rotations, the drops and appends, the base conversions and the two
+/// permutation forms.
+fn structural_bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
+    // APL wraps some of its primitives in the rank that picks the axis, so
+    // the primitive is looked for under one; the rules that keep the verb
+    // and change only the noun keep that wrapper with it.
+    let p = match f {
+        Verb::Prim(p) => p,
+        Verb::Rank(inner, _) => match &**inner {
+            Verb::Prim(p) => p,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    match (p.dyad, left) {
+        // `n |. y` is undone by rotating the other way.
+        (DyadOp::Rotate | DyadOp::RotateApl { .. }, true) => {
+            Some(Verb::BondLeft(negated(n)?, Box::new(f.clone())))
+        }
+        // `x # y` bonded keeps its expansion.
+        (DyadOp::Copy, true) => Some(Verb::BondLeft(n.clone(), Box::new(expand_verb()))),
+        // Appending a fixed noun is undone by dropping as many items as it
+        // brought — off the end when it was appended there, off the front
+        // when it went in front.
+        (DyadOp::AppendLeading | DyadOp::AppendLast, _) => {
+            let items = if n.rank() == 0 { 1 } else { n.shape[0] } as i64;
+            let count = if left { items } else { -items };
+            Some(Verb::BondLeft(Array::scalar_i64(count), Box::new(named("}.")?)))
+        }
+        // `n }. y` is undone by taking back what was dropped: as many items
+        // as the argument has now plus the ones that went, from the end the
+        // drop did not touch, so the vacated places take a fill.
+        (DyadOp::Drop, true) => {
+            let k = one_number(n)?;
+            let size = Verb::Atop(
+                Box::new(Verb::BondLeft(Array::scalar_f64(k.abs()), Box::new(named("+")?))),
+                Box::new(named("#")?),
+            );
+            let width = if k >= 0.0 { atop(named("-")?, size) } else { size };
+            Some(Verb::Hook(
+                Box::new(Verb::Commute(Box::new(named("{.")?))),
+                Box::new(width),
+            ))
+        }
+        // `n #. y` reads a list of digits in base n; undoing it writes the
+        // digits back, in as many places as the largest value asks for.
+        (DyadOp::Decode, true) => {
+            let width = atop(
+                Verb::BondRight(Box::new(named("$")?), n.clone()),
+                atop(
+                    named(">:")?,
+                    atop(
+                        named("<.")?,
+                        atop(
+                            Verb::BondLeft(n.clone(), Box::new(named("^.")?)),
+                            atop(
+                                Verb::BondLeft(Array::scalar_i64(1), Box::new(named(">.")?)),
+                                atop(
+                                    Verb::Reduce(Box::new(named(">.")?)),
+                                    atop(named("|")?, named(",")?),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            );
+            Some(Verb::Fork(Box::new(width), Box::new(named("#:")?), Box::new(named("]")?)))
+        }
+        // `n #: y` writes the digits, and reading them back is `n #. y`.
+        (DyadOp::Encode, true) => Some(Verb::BondLeft(n.clone(), Box::new(named("#.")?))),
+        // `n A. y` and `n C. y` permute; the permutation that undoes them is
+        // the one they make of `i. # y`, graded.
+        (DyadOp::AnagramFrom | DyadOp::Permute, true) => {
+            let spelling = if p.dyad == DyadOp::AnagramFrom { "A." } else { "C." };
+            let inverse = atop(
+                atop(named("/:")?, Verb::BondLeft(n.clone(), Box::new(named(spelling)?))),
+                atop(named("i.")?, named("#")?),
+            );
+            Some(Verb::Fork(Box::new(inverse), Box::new(named("{")?), Box::new(named("]")?)))
+        }
         _ => None,
     }
 }

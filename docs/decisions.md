@@ -3150,3 +3150,79 @@ until the polynomial paths carry exact types. GNU's `≡` of an empty nested
 array is 2 and libjay's is 1 — the prototype is not consulted — which is
 older than this wave and is registered, not fixed here.
 
+
+## 2026-08-23 — The obverse table, from the reference outward
+
+The sweeper's round-3 log was 57% one sentence: "the obverse of X is not
+supported yet". One table answers `u&.v`, `u&.:v`, `u^:_1`, `u b. _1`,
+APL's `f⍢g` and `f⍣¯1`, and it held a dozen rows.
+
+**The reference is the whole specification for it.** Every J verb spelling,
+and the bonded and derived forms J documents as invertible, was asked
+`v b. _1` at the oracle before a line was written. Of the seventy J verb
+spellings, forty-three name an obverse there and twenty-seven refuse;
+libjay now holds every one of the forty-three but `!`, and refuses exactly
+what the oracle refuses. That is the
+only defensible rule for a feature whose content is a list: a guess here is
+a silently wrong answer, not a missing one.
+
+Probing by name was not enough on its own, and three of the corrections
+came from data:
+
+- **`(2&%:)^:_1` raised n to the argument and should have raised the
+  argument to n.** `2&%:` is the square root; its obverse is `^&2`, not
+  `2&^`. The row was already in the table and had been wrong since it was
+  written; `(2&%:)^:_1 ] 3` answered 8 where the oracle answers 9. Nothing
+  in the corpus reached it, which is the argument for asking each row on
+  data as well as by name.
+- **`n&#.`'s obverse chooses its width from the value.** The reference
+  writes `1 + <. n ^. 1 >. >./ | , y` digits, so `(2&#.)^:_1 ] 5` is
+  `1 0 1` and `(16&#.)^:_1 ] 255` is `15 15`. A fixed width would have
+  round-tripped and still disagreed with the reference everywhere else.
+- **`n&}.` pads on the side it did not drop from**, and the sign of n
+  decides which: `(2&}.)^:_1 ] 3 4` is `0 0 3 4` and `(_2&}.)^:_1 ] 1 2 3`
+  is `1 2 3 0 0`.
+
+**Two unders are not built out of an inverse.** `u&.>` was already one;
+`u&.,` is the other. `,` has no obverse — a ravel says nothing about the
+shape it came from, and `, b. _1` and `,^:_1` are domain errors in the
+reference too — but the shape is in hand while the sentence runs. It gets
+its own node rather than a fork of `$`, `$` and `u@,`, because the
+reference gives it ONE valence and a fork would have answered dyadically
+where the reference raises a valence error. In a 1200-expression sweep it
+was four of the five obverse rows still open.
+
+**What is deliberately left.** `!^:_1` is named, not implemented: the
+reference's Newton iteration runs in the complex plane (`!^:_1 _1` is
+`8.91115j18.2226`), and a real-only iteration answers where the reference
+raises a NaN error — `!^:_1 ] 1.5` and `!^:_1 ] 0` among them. It waits on
+a complex gamma function, which is the same gap as `! 3j4`. `|.!.f`'s
+obverse the reference answers with `]`, an identity that does not undo the
+shift it is the obverse of; libjay names the gap rather than copying an
+answer it can show is wrong. Both are registered.
+
+**`u b. _1` answers a spelling, and libjay writes its own.** Where the
+reference prints `0.318309886183790691&*`, libjay prints `(n&*)`: a
+derived verb's name says `n` for a noun operand, everywhere, and that name
+is what diagnostics quote. Rather than teach `Verb::name` to render nouns —
+which would rewrite every "the obverse of (n&#.)" message and the explain
+output with it — the corpus asks by name only the rows the two spell alike,
+and asks the rest with `^:_1` and `&.`, which compare values. Three
+obverses J spells only as a negative power (`p:^:_1`, `I.^:_1`, `$.^:_1`)
+carry that spelling as their primitive name, as `#^:_1` already did, so
+those rows do agree by name.
+
+**One table, two languages.** Every row is reachable from APL's `⍣¯1` and
+`⍢`, and GNU APL implements no negative power at all, so Dyalog is the only
+reference for the APL side; the rows went into `corpus/apl/dyalog-operators.txt`.
+Dyalog does not hold three of them — grading is not its own obverse there,
+and its own inverse of `○` divides by the argument and so raises DOMAIN
+ERROR at zero — and they are exempted by name in `tests/expected/dyalog.txt`
+as divergences, on the same rule as `⍢`: a preset chooses a dialect's
+rules, it does not withdraw an extension libjay ships in every dialect.
+
+**Measured.** On 1200 depth-5 generated expressions, replayed against
+jconsole before and after: 55 mismatches with 15 obverse rows became 42
+with 1. The oracle also crashes on `(*:^:2)^:_1 ] 16` — a jconsole
+segfault, not a refusal — so that expression is out of the corpus and in
+the register.
