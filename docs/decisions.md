@@ -2975,3 +2975,57 @@ threaded through every verb application) is a wave of its own. Two more
 rows are a collision rather than a gap: `{a}`, a dfn whose whole body is
 one identifier, is libjay's interpolation hole, and the brace binding is a
 fixed point of the embedding.
+
+## 2026-08-23 — The nested display's own spacing, oracle-probed
+
+The register carried one residual from the mixed-array wave: `'ab',⊂1 2`
+prints ` ab  1 2` in GNU APL and ` a b 1 2` here, and the whitespace-blind
+sweep comparator could not see the gap width, only the length of `⍕` —
+`⍴⍕(1 2)(3 4)` was the pinned entry that carried it. Probed vectors,
+matrices, character runs and depth ≥2 wrapping against GNU APL directly
+(the raw subprocess output, not the tolerant comparator) to find the rule.
+
+**The gap between two items in a nested vector is one baseline space plus
+however much the more complex neighbour's own shape asks for.** A scalar
+asks for nothing. A non-scalar item — a plain array of rank ≥1 sitting
+directly in the array, or anything under `⊂` — asks for one column per
+axis of its fully-unwrapped content: a vector costs one, a matrix two.
+A character array costs one column FEWER than its rank, because a row of
+characters already reads as text on its own — a character vector then
+costs nothing (same as a scalar) and a character matrix costs one. Two
+adjacent lone characters merge into one run with no separator at all,
+whatever box either of them sits inside. The vector's own margin, front
+and back, is how many `⊂` layers wrap its first and its last item
+respectively (never fewer than one baseline space).
+
+The rule was found by holding every other variable fixed across a probe
+grid — `1,⊂1 2` against `1,⊂2 2⍴1 2 3 4` isolates rank from character-ness,
+`'x',⊂'abc'` against `'x',⊂2 3⍴'abcdef'` isolates a character vector from a
+character matrix, `⊂⊂1 2,1` against `1,⊂1 2` isolates the margin from the
+gap — until every probed combination (16 corpus lines, plus the standalone
+depth cases and a scan over a nested vector) matched the model in one pass.
+
+One combination did NOT fit and was deliberately left alone: GNU APL's
+STRAND notation, `(⊂1 2)(⊂3 4)`, keeps its operands more deeply enclosed
+than the same value built by catenate, `(⊂1 2),(⊂3 4)` — `≡` reports 3 for
+the first and 2 for the second, though both read as "a two-item vector of
+boxed pairs" at a glance. That is a value-level quirk of GNU's `,` and `⊂`
+interacting with strand, not a display rule, and libjay's own catenate was
+found to have the mirroring gap — `1,⊂⊂1 2` collapses the double box to a
+single one on the way through `,` — a pre-existing verb.rs issue, filed for
+a future wave rather than fixed here. Nothing in the corpus exercises
+either shape, so the printer fix stands on its own.
+
+**Scope: vectors only.** A mixed array at rank 2 or above (a matrix whose
+cells mix scalars and non-scalars) still draws with libjay's own uniform
+one-space cells; GNU's column alignment for that shape was not probed
+deeply enough to be confident of a rule, and no example in the register
+needed it. `format_boxed` (J's fenced drawing, and every rank ≥2 array
+regardless of language) is untouched — only APL's rank-1 `BoxStyle::Spaced`
+path gained the new `nested_vector_line`. `mixed_simple_texts` and
+`mixed_vector_line` were both widened to peel through `⊂⊂x` box-of-box
+chains to their leaf before asking whether an item is a scalar, which is
+also what GNU does (`1,⊂⊂5` draws as `1 5`, not with box padding).
+
+`⍴⍕(1 2)(3 4)` converged and its divergences.txt entry is gone, per that
+file's own stated policy ("a signal that the note ... should go").

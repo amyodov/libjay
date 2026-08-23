@@ -1612,12 +1612,17 @@ libjay is stricter, or simply elsewhere:
   over sixteen magnitudes around 2⋆52, 2⋆53 and 2⋆63; the truncation
   accounts for every one and nothing else does. Everything the amount is
   used for otherwise, `3|9223372036854775806` included, agrees exactly.
-- the nested DISPLAY is libjay's own: one space between items and one
-  around the whole, where GNU APL spaces items more widely. Only the
-  length of `⍕` makes the difference visible to the comparison, which
-  ignores whitespace, so `⍴⍕(1 2)(3 4)` is the entry that pins it. Nested
-  DISPLAYS are kept out of the corpus for that reason; what is compared
-  there is structure — `⍴`, `≡`, `≢` and the leaves `∊` brings back.
+- the nested VECTOR display agrees now: a run of adjacent characters is
+  text with no separator, and elsewhere the gap widens by the more complex
+  neighbour's own shape — nothing extra for a scalar, one column per axis
+  for a numeric or boxed structure, one column fewer for a character array
+  (a character vector costs nothing, a character matrix one column), and
+  the outer margin follows how many `⊂` layers wrap the first and the last
+  item. `⍴⍕(1 2)(3 4)` — the entry that used to pin the gap — is gone;
+  corpus/apl/nested_display.txt carries the byte-exact cases. A mixed
+  array at rank 2 or above still draws with libjay's own uniform spacing;
+  what is compared there stays structure — `⍴`, `≡`, `≢` and the leaves
+  `∊` brings back.
 - grading a nested array is answered there and named as a gap here. Pick
   agrees now: `1 2⊃(1 2)(3 4)` is 2 on both sides, and the divergence entry
   it used to have is gone.

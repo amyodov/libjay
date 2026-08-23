@@ -391,14 +391,18 @@ fn j_draws_the_classic_box_table() {
 
 #[test]
 fn apl_spaces_a_nested_display() {
-    // GNU APL's own nested display is spaced more widely; this is the
-    // approximation recorded in docs/coverage.md.
-    assert_eq!(shown(Lang::Apl, "(1 2)(3 4)"), " 1 2 3 4 ");
+    // GNU APL's own nested display: a non-scalar item (here a vector, rank
+    // 1) widens the gap beside it by one column, so two of them get two
+    // spaces where two scalars would get one; a character vector costs
+    // nothing extra, since a run of characters already reads as text.
+    assert_eq!(shown(Lang::Apl, "(1 2)(3 4)"), " 1 2  3 4 ");
     assert_eq!(shown(Lang::Apl, "'ab' 'cd'"), " ab cd ");
     assert_eq!(shown(Lang::Apl, "⊂1 2"), " 1 2 ");
+    // A mixed array at rank 2 or above still draws with libjay's own
+    // uniform spacing (docs/coverage.md).
     assert_eq!(shown(Lang::Apl, "2 2⍴(1 2)(3 4)(5 6)(7 8)"), " 1 2 3 4 \n 5 6 7 8 ");
     // `⍕` of a nested vector is one line, so it stays a character vector.
-    assert_eq!(val(Lang::Apl, "⍴⍕(1 2)(3 4)"), i64s(&[1], &[9]));
+    assert_eq!(val(Lang::Apl, "⍴⍕(1 2)(3 4)"), i64s(&[1], &[10]));
     assert_eq!(val(Lang::Apl, "⍴⍕⊂1 2"), i64s(&[1], &[5]));
 }
 

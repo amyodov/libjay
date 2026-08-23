@@ -84,11 +84,6 @@
 ? scan keeps the shape here, drops a length-1 axis there
 ⍴+\\,5
 ? scan keeps the shape here, drops a length-1 axis there
-// GNU APL spaces a nested display more widely than libjay does, which
-// the whitespace-insensitive comparison above only sees through the
-// length of `⍕`.
-⍴⍕(1 2)(3 4)
-? one space between items here, two there
 // `⍺←v` inside a dfn is a DEFAULT here, as the published dfn model has it:
 // a left argument that arrived keeps its value. GNU APL assigns
 // unconditionally, so the default overwrites the argument.

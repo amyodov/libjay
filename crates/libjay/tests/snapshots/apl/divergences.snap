@@ -112,11 +112,6 @@
 < 1
 > gnu:
 > dyalog: 1
-= ⍴⍕(1 2)(3 4)
-? one space between items here, two there
-< 9
-> gnu: 10
-> dyalog: 10
 = F←{⍺←10 ⋄ ⍺+⍵} ⋄ 3 F 5
 ? ⍺← is a default here, an unconditional assignment there
 < 8

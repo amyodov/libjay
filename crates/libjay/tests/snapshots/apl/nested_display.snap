@@ -1,0 +1,59 @@
+# libjay reference snapshot: APL — corpus/apl/nested_display.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key is recorded data for a future dialect and
+# gates nothing.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= 'ab',⊂1 2
+> gnu:  ab  1 2
+= 1,⊂1 2
+> gnu:  1  1 2
+= (⊂1 2),1
+> gnu:  1 2  1
+= 'x',⊂3 3⍴⍳9
+> gnu:  x   1 2 3
+> gnu:      4 5 6
+> gnu:      7 8 9
+= (3 3⍴⍳9)(1 2)
+> gnu:  1 2 3   1 2
+> gnu:  4 5 6
+> gnu:  7 8 9
+= (⊂1 2),⊂3 4
+> gnu:  1 2  3 4
+= (⊂1 2),(⊂3 4),(⊂5 6)
+> gnu:  1 2  3 4  5 6
+= 'x',⊂'abc'
+> gnu:  x abc
+= (⊂'abc'),'x'
+> gnu:  abc x
+= 1,⊂2 3⍴'abcdef'
+> gnu:  1  abc
+> gnu:     def
+= 1 (2 3) 'abc'
+> gnu:  1  2 3  abc
+= 1 (2 2⍴1 2 3 4)
+> gnu:  1   1 2
+> gnu:      3 4
+= 'a',⊂'b'
+> gnu: ab
+= 'a',⊂⊂'b'
+> gnu: ab
+= 1,⊂⊂5
+> gnu: 1 5
+= ⌈\\5,(⊂1 2),(⊂3 4)
+> gnu:  5  5 5  5 5

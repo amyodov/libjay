@@ -449,6 +449,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   an operand SELECTOR (`3 u:`, `s:`, `m b.`, a cut mode) is still read
   exactly, which is what the references do.
 
+- **APL's nested VECTOR display matches GNU APL's spacing.** A run of
+  adjacent characters is text with no separator between them, so
+  `'ab',⊂1 2` shows as `ab  1 2`, not `a b 1 2`. Elsewhere the gap next to
+  an item widens by how much visual weight that item carries: nothing
+  extra for a scalar, one column per axis for a numeric or boxed
+  structure, and one column fewer for a character array, since a row of
+  characters already reads as text on its own — a character vector costs
+  nothing extra and a character matrix costs one column. How many `⊂`
+  layers wrap the first and the last item sets the vector's own margin.
+  A mixed array at rank 2 or above still draws with libjay's own uniform
+  spacing, unchanged. J's box drawing is unaffected throughout.
+
 ## 0.2.1 — 2026-08-22
 
 ### Added

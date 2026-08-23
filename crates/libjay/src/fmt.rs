@@ -9,8 +9,8 @@ use crate::dtype::DType;
 pub enum BoxStyle {
     /// J: a table of cells fenced with `+`, `-` and `|`.
     Fenced,
-    /// APL: the cells side by side, one space between them and one around
-    /// the whole. GNU APL spaces a nested display more widely than this;
+    /// APL: the cells side by side, spaced by `nested_gap` at rank 1
+    /// (matching GNU APL) or uniformly by one space at rank 2 and above;
     /// see docs/coverage.md.
     Spaced,
 }
@@ -51,15 +51,21 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
         return format_array(&a.to_row_major(), opts);
     }
     if a.dtype() == DType::Box {
-        // A boxed array whose every element is a simple scalar is APL's
-        // MIXED SIMPLE array: depth 1, and drawn the way a plain array is
-        // rather than with a nested display's extra spacing.
+        // A boxed array whose every element is a simple scalar (peeling
+        // through any number of `⊂` layers) is APL's MIXED SIMPLE array:
+        // depth 1, and drawn the way a plain array is rather than with a
+        // nested display's extra spacing.
         match mixed_simple_texts(a, opts) {
             Some(texts) if opts.boxes == BoxStyle::Spaced && a.rank() == 1 => {
                 return mixed_vector_line(a, &texts)
             }
             Some(texts) if opts.boxes == BoxStyle::Spaced => {
                 return laid_out(&a.shape, texts, Cells::Right)
+            }
+            // A mixed VECTOR with at least one non-scalar item: GNU's
+            // nested display, not the fenced/uniformly-spaced box drawing.
+            None if opts.boxes == BoxStyle::Spaced && a.rank() == 1 => {
+                return nested_vector_line(a, opts)
             }
             _ => return format_boxed(a, opts),
         }
@@ -118,16 +124,32 @@ impl Cells {
     }
 }
 
+/// Peel through scalar box wrappings (`⊂x`, `⊂⊂x`, and so on) to the value
+/// they finally hold, and how many layers were peeled. A box holding
+/// something that is itself non-scalar, or a value that was never a box,
+/// is its own leaf with zero layers.
+fn peel(a: &Array) -> (usize, &Array) {
+    let mut n = 0;
+    let mut cur = a;
+    while cur.rank() == 0 && cur.dtype() == DType::Box {
+        cur = &cur.as_boxes().expect("boxed scalar")[0];
+        n += 1;
+    }
+    (n, cur)
+}
+
 /// The scalar each element of a boxed array holds, where every one of them
-/// holds a simple scalar and nothing else.
+/// peels down to a simple scalar and nothing else — `⊂⊂5` counts, since
+/// enclosing a scalar again and again never makes it non-scalar.
 fn mixed_simple_texts(a: &Array, opts: &FmtOpts) -> Option<Vec<String>> {
     let boxes = a.as_boxes()?;
     let mut texts = Vec::with_capacity(boxes.len());
     for b in boxes {
-        if b.rank() != 0 || b.dtype() == DType::Box {
+        let (_, leaf) = peel(b);
+        if leaf.rank() != 0 {
             return None;
         }
-        texts.push(format_atom(&b.data, 0, opts));
+        texts.push(format_atom(&leaf.data, 0, opts));
     }
     Some(texts)
 }
@@ -138,7 +160,7 @@ fn mixed_simple_texts(a: &Array, opts: &FmtOpts) -> Option<Vec<String>> {
 /// and there each character is a column of its own.
 fn mixed_vector_line(a: &Array, texts: &[String]) -> String {
     let letters: Vec<bool> = match a.as_boxes() {
-        Some(items) => items.iter().map(|e| e.dtype() == DType::Char).collect(),
+        Some(items) => items.iter().map(|e| peel(e).1.dtype() == DType::Char).collect(),
         None => vec![false; texts.len()],
     };
     let mut out = String::new();
@@ -149,6 +171,63 @@ fn mixed_vector_line(a: &Array, texts: &[String]) -> String {
         out.push_str(t);
     }
     out
+}
+
+/// How much a leaf widens the gap next to it in a nested display: nothing
+/// for a scalar, one column per axis for a numeric or boxed structure, and
+/// one column fewer for a character array, because a row of characters
+/// already reads as text on its own — a character VECTOR costs nothing
+/// extra (same as a scalar), a character MATRIX costs one column.
+fn gap_extra(leaf: &Array) -> usize {
+    match leaf.rank() {
+        0 => 0,
+        r if leaf.dtype() == DType::Char => r - 1,
+        r => r,
+    }
+}
+
+/// The gap between two adjacent items of a nested vector: no separator at
+/// all when both are lone characters (a run of text), otherwise one space
+/// plus however much the more complex neighbour's own shape asks for.
+fn nested_gap(left: &Array, right: &Array) -> usize {
+    let text_run = left.rank() == 0
+        && right.rank() == 0
+        && left.dtype() == DType::Char
+        && right.dtype() == DType::Char;
+    if text_run { 0 } else { 1 + gap_extra(left).max(gap_extra(right)) }
+}
+
+/// A boxed VECTOR with at least one non-scalar item: GNU's general nested
+/// display. Each item's OWN content draws plain, with no box wrapping of
+/// its own — every space around it comes from here instead. The gap
+/// between two items is `nested_gap`; the vector's own margin, front and
+/// back, is set by how many `⊂` layers wrap its first and its last item
+/// respectively (never fewer than one).
+fn nested_vector_line(a: &Array, opts: &FmtOpts) -> String {
+    let items = a.as_boxes().expect("boxed vector");
+    let peeled: Vec<(usize, &Array)> = items.iter().map(peel).collect();
+    let cells: Vec<(Vec<String>, usize)> = peeled.iter().map(|(_, leaf)| block(leaf, opts)).collect();
+    let height = cells.iter().map(|(lines, _)| lines.len()).max().unwrap_or(1);
+    let lead = " ".repeat(peeled.first().map_or(1, |(n, _)| (*n).max(1)));
+    let trail = " ".repeat(peeled.last().map_or(1, |(n, _)| (*n).max(1)));
+    let mut rows = vec![String::new(); height];
+    for i in 0..peeled.len() {
+        if i > 0 {
+            let sep = " ".repeat(nested_gap(peeled[i - 1].1, peeled[i].1));
+            for row in &mut rows {
+                row.push_str(&sep);
+            }
+        }
+        let (lines, w) = &cells[i];
+        for (r, row) in rows.iter_mut().enumerate() {
+            let text = lines.get(r).map(String::as_str).unwrap_or("");
+            row.push_str(text);
+            for _ in 0..w.saturating_sub(width(text)) {
+                row.push(' ');
+            }
+        }
+    }
+    rows.iter().map(|r| format!("{lead}{r}{trail}")).collect::<Vec<_>>().join("\n")
 }
 
 /// One formatted element per position, laid out for the shape: a vector on
@@ -720,7 +799,57 @@ mod tests {
             ],
         );
         assert_eq!(j(&a), "+-+---+---+\n|1|2 3|abc|\n+-+---+---+");
-        assert_eq!(apl(&a), " 1 2 3 abc ");
+        // A non-scalar item (the unenclosed vector `2 3`) widens the gap
+        // beside it by one column; the character vector costs nothing
+        // extra, since a run of characters already reads as text.
+        assert_eq!(apl(&a), " 1  2 3  abc ");
+    }
+
+    // The nested display rule (GNU-taught, corpus/apl/nested_display.txt
+    // carries the oracle-checked cases): a run of adjacent characters is
+    // text with no separator; elsewhere the gap widens by the more
+    // complex neighbour's own shape, and the outer margin is set by how
+    // many boxes wrap the first and the last item.
+
+    #[test]
+    fn a_char_run_merges_through_a_box() {
+        // `'a',⊂'b'` — a boxed character beside a plain one is still text,
+        // whatever `⊂` it is wrapped in.
+        let ch = |c: char| Array::new(vec![], Data::Char(vec![c].into()));
+        let a = boxed(&[2], vec![ch('a'), boxed(&[], vec![ch('b')])]);
+        assert_eq!(apl(&a), "ab");
+    }
+
+    #[test]
+    fn a_nonscalar_item_widens_its_own_gap() {
+        // `1,⊂1 2` — a boxed vector costs one extra column beside a scalar.
+        let a = boxed(&[2], vec![Array::scalar_i64(1), Array::from_i64(vec![1, 2])]);
+        assert_eq!(apl(&a), " 1  1 2 ");
+    }
+
+    #[test]
+    fn a_boxed_matrix_costs_two_columns() {
+        // `1,⊂2 2⍴1 2 3 4` — rank widens the gap further than a vector does.
+        let a = boxed(
+            &[2],
+            vec![Array::scalar_i64(1), Array::new(vec![2, 2], Data::I64(vec![1, 2, 3, 4].into()))],
+        );
+        assert_eq!(apl(&a), " 1   1 2 \n     3 4 ");
+    }
+
+    #[test]
+    fn a_character_vector_costs_one_column_less_than_its_rank() {
+        // `1,⊂'abc'` — text needs no extra column even though it is rank 1.
+        let a = boxed(&[2], vec![Array::scalar_i64(1), Array::from_chars("abc".chars().collect())]);
+        assert_eq!(apl(&a), " 1 abc ");
+    }
+
+    #[test]
+    fn the_outer_margin_follows_the_edge_items_own_box_depth() {
+        // `⊂⊂1 2,1` — a doubly-enclosed first item widens the lead margin.
+        let inner = boxed(&[], vec![Array::from_i64(vec![1, 2])]);
+        let a = boxed(&[2], vec![boxed(&[], vec![inner]), Array::scalar_i64(1)]);
+        assert_eq!(apl(&a), "  1 2  1 ");
     }
 
     #[test]

@@ -48,14 +48,17 @@ fn err(lang: Lang, src: &str) -> jay::Error {
 /// The gap an expansion or a replication leaves in a nested argument holds
 /// the first item's shape with a zero for every number and a blank for
 /// every character — not the empty box J would use.
+// Every `⍴¨` result here is a nested vector of 1- or 2-element shape
+// vectors, so each item is itself non-scalar (rank 1) and widens the gap
+// beside it by a column, the same as any other numeric vector item would.
 #[rstest]
-#[case("⍴¨1 0 1\\(1 2)(3 4)", " 2 2 2")]
+#[case("⍴¨1 0 1\\(1 2)(3 4)", " 2  2  2")]
 #[case("≡1 0 1\\('abc')(1 2)", "2")]
-#[case("⍴¨1 0 1\\('abc')(1 2)", " 3 3 2")]
-#[case("⍴¨¯2/⊂⍳3", " 3 3")]
-#[case("⍴¨¯2/(1 2)(3 4 5)", " 2 2 2 2")]
-#[case("⍴¨3↑(1 2)(3 4)", " 2 2 2")]
-#[case("⍴¨1 0 1\\(2 2⍴⍳4)(3 4)", " 2 2 2 2 2")]
+#[case("⍴¨1 0 1\\('abc')(1 2)", " 3  3  2")]
+#[case("⍴¨¯2/⊂⍳3", " 3  3")]
+#[case("⍴¨¯2/(1 2)(3 4 5)", " 2  2  2  2")]
+#[case("⍴¨3↑(1 2)(3 4)", " 2  2  2")]
+#[case("⍴¨1 0 1\\(2 2⍴⍳4)(3 4)", " 2 2  2 2  2")]
 fn a_nested_fill_is_the_prototype_of_the_first_item(#[case] src: &str, #[case] want: &str) {
     assert_eq!(shown(Lang::Apl, src), want);
 }
@@ -63,9 +66,9 @@ fn a_nested_fill_is_the_prototype_of_the_first_item(#[case] src: &str, #[case] w
 /// The prototype's own elements are zeros and blanks, nested as deeply as
 /// the item was.
 #[rstest]
-#[case("1 0 1\\(1 2)(3 4)", " 1 2 0 0 3 4")]
-#[case("¯2/⊂⍳3", " 0 0 0 0 0 0")]
-#[case("1 0 1\\((1 2)(3 4))(5 6)", "  1 2 3 4   0 0 0 0  5 6")]
+#[case("1 0 1\\(1 2)(3 4)", " 1 2  0 0  3 4")]
+#[case("¯2/⊂⍳3", " 0 0 0  0 0 0")]
+#[case("1 0 1\\((1 2)(3 4))(5 6)", "  1 2  3 4    0 0  0 0   5 6")]
 fn the_prototype_zeroes_numbers_and_blanks_characters(#[case] src: &str, #[case] want: &str) {
     assert_eq!(shown(Lang::Apl, src), want);
 }
@@ -79,7 +82,7 @@ fn the_prototype_zeroes_numbers_and_blanks_characters(#[case] src: &str, #[case]
 #[case("⍴↑1↓,⊂2 3⍴9", "2 3")]
 #[case("⍴↑0⍴⊂'ab'", "2")]
 #[case("⍴⊃0⍴⊂2 3⍴9", "0 2 3")]
-#[case("⍴¨3↑0⍴⊂2 2⍴'a'", " 2 2 2 2 2 2")]
+#[case("⍴¨3↑0⍴⊂2 2⍴'a'", " 2 2  2 2  2 2")]
 fn an_empty_nested_array_keeps_its_prototype(#[case] src: &str, #[case] want: &str) {
     assert_eq!(shown(Lang::Apl, src), want);
 }
