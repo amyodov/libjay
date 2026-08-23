@@ -76,3 +76,26 @@
 1 2⍷3 3⍴⍳9
 'ab'⍷2 3⍴'ababab'
 (2 2⍴⍳4)⍷1 2 3
+
+// ⊥ ⊤ ⊂ — with nothing to weigh, write or partition, the argument that says
+// HOW is never read, so its type is never refused. Where there are items,
+// every check stands.
+'a'⊥(0⍴0)
+'ab'⊥(0⍴0)
+(⊂1 2)⊥(0⍴0)
+(0⍴'a')⊥(0⍴0)
+'a'⊥(0 0⍴0)
+'a'⊥1 2
+'a'⊤(0⍴0)
+'ab'⊤(0⍴0)
+(⊂1 2)⊤(0⍴0)
+'a'⊤1 2
+⍴'ab'⊥(0⍴0)
+⍴'a'⊤(0⍴0)
+⍴'ab'⊤(0⍴0)
+(0⍴⊂⍳3)⊂(0⍴0)
+(0⍴⊂⍳3)⊂(0⍴'a')
+(0⍴0.5)⊂(0⍴0)
+(0⍴0.5)⊂1 2 3
+1 0⊂(0⍴0)
+(0⍴⊂⍳3)⊂1 2 3

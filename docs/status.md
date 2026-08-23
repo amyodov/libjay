@@ -23,10 +23,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 152 green / 23 partial / 2 absent by design, of 177 valences in the
+**J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
-**APL: 94 green / 20 partial / 3 absent by design, of 117 valences in the
+**APL: 93 green / 21 partial / 3 absent by design, of 117 valences in the
 inventory. Nothing in APL's primitive tables is red.**
 
 ## J — verbs
@@ -58,8 +58,8 @@ inventory. Nothing in APL's primitive tables is red.**
 | `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
 | `j.` | 🟢 imaginary | 🟢 complex |
 | `r.` | 🟢 angle | 🟢 polar |
-| `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative; jconsole answers an exact rational for some quadratics and libjay a float | 🟢 polynomial; a boxed `multiplier ; roots` left argument too |
-| `p..` | 🟢 poly. derivative | 🟢 poly. integral, x the constant term |
+| `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative; jconsole answers an exact rational for some quadratics and libjay a float. A boxed argument is the root form and answers the coefficients; the multiplier may go unsaid, so `p. (<1 2)` is `2 _3 1` | 🟢 polynomial; a boxed `multiplier ; roots` left argument too, the multiplier optional |
+| `p..` | 🟢 poly. derivative; a boxed argument is the root form | 🟡 poly. integral, x the constant term; a boxed argument is the root form, but its coefficients come out in floats where jconsole keeps exact rationals |
 | `p:` | 🟢 the y-th prime; extended where y is | 🟢 the prime queries: `_1` `0` `1` `2` `3` `4` `_4` |
 | `q:` | 🟢 prime factors; extended where y is | 🟡 prime exponents; `x>0` and `__`, the negative forms named |
 | `?` | 🟡 roll; libjay's own stream, not J's | 🟡 deal; same |
@@ -85,7 +85,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 |---|---|---|
 | `$` | 🟢 shape of; extended where the argument is | 🟢 reshape, laying out ITEMS |
 | `#` | 🟢 tally; extended where the argument is | 🟢 copy; `#^:_1` is the expansion that undoes it |
-| `,` | 🟢 ravel | 🟢 append; unequal item shapes are overtaken, which fills |
+| `,` | 🟢 ravel | 🟢 append; unequal item shapes are overtaken, which fills, and a rank gap of any width makes the lower-ranked side one item. An operand with no elements takes the other side's type rather than clashing with it |
 | `,.` | 🟢 ravel items; never below rank 2, so `$ ,. 5` is `1 1` | 🟢 stitch |
 | `,:` | 🟢 itemize | 🟢 laminate |
 | `\|.` | 🟢 reverse | 🟢 rotate |
@@ -111,7 +111,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `/:` | 🟢 grade up; boxes by the total array ordering | 🟢 sort; the grade indexes x's ITEMS, so an atom answers only the first |
 | `\:` | 🟢 grade down; boxes by the total array ordering | 🟢 sort; same |
 | `A.` | 🟢 anagram index | 🟢 anagram |
-| `C.` | 🟢 cycle-direct; a short direct permutation is the abbreviated one | 🟢 permute; direct, abbreviated, an atom, or cyclic |
+| `C.` | 🟢 cycle-direct; a short direct permutation is the abbreviated one | 🟢 permute; direct, abbreviated, an atom, or cyclic — a cycle's element counts back from the end where it is negative, and every one is checked before the permutation is built |
 
 ### Boxes, format, system
 
@@ -144,7 +144,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 |---|---|---|
 | `/` | 🟢 insert | 🟢 table |
 | `\` | 🟢 prefix | 🟢 infix |
-| `\.` | 🟢 suffix | 🟢 outfix |
+| `\.` | 🟢 suffix | 🟢 outfix; a piece of one item applies nothing, and only the five folds J has special code for (`+/` `*/` `<./` `>./` `+./`) type the whole argument first |
 | `/.` | 🟢 oblique | 🟢 key |
 | `~` | 🟢 reflex | 🟢 passive |
 | `}` | 🟢 noun or verb operand; a boxed index specification too | 🟢 the same |
@@ -163,7 +163,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `^:` power | 🟡 a literal count, a list of them, `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives (the obverse); a computed count not yet |
 | `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
 | `:` explicit definition | 🟡 `1 :`, `2 :`, `3 :`, `4 :`, and the `m : 0` body on the lines below; `13 :` not yet |
-| `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named |
+| `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named. An empty fret list is the whole argument in one piece; a BOXED left argument — J's per-axis frets — is named |
 | `!.` fit | 🟡 the tolerance meaning, and the fill for `\|.` (the shift); a fill on any other verb is named |
 | `!:` foreign | 🟡 `1!:1` (read a line from stdin), `1!:2` (write a line to stdout), `3!:0` (type code) and `5!:1` (the atomic representation of a name); the ones that reach a file, a script, the host, the clock or a shared library are ⚪ closed by the sandbox, and the ones that only compute are 🔴 named |
 | `` ` `` tie (gerund) | 🟡 the gerund is boxed data — one atomic representation per box, so it can be named, computed and displayed; a verb the representation cannot spell (a capped fork, an explicit definition) is named |
@@ -287,12 +287,12 @@ conjunctions above:
 | `⍉` | 🟢 transpose | 🟢 dyadic transpose; x says which axis of the result each axis of y becomes, and a repeated destination runs those axes together |
 | `↑` | 🟢 first; an empty nested argument answers the prototype it remembers | 🟢 take; overtaking a nested array fills with the first item's prototype |
 | `↓` | 🟡 no oracle: GNU APL has no monadic `↓`; Dyalog's split | 🟢 drop |
-| `⊂` | 🟢 enclose | 🟢 partitioned enclose; rank 2 and above partitions the last axis; a single flag extends over every item, so `1⊂1 2 3` is one partition |
+| `⊂` | 🟢 enclose | 🟢 partitioned enclose; rank 2 and above partitions the last axis; a single flag extends over every item, so `1⊂1 2 3` is one partition, and no flag against no item is the empty nested vector |
 | `⊃` | 🟢 disclose / mix | 🟢 pick |
 | `⊆` | 🟡 no oracle: not in GNU APL's character set; Dyalog's nest | 🟡 no oracle; Dyalog's partition, which is GNU APL's dyadic `⊂` |
 | `⌷` | 🟡 no oracle: materialise, which Dyalog makes the identity | 🟢 index (APL2: one item of x per axis, a scalar or an enclosed vector) |
-| `⊥` | — | 🟢 decode; the inner product `+.×` over x's last axis and y's leading one; a SINGLE on either side extends along the other's axis, and an empty axis weighs nothing |
-| `⊤` | — | 🟢 encode |
+| `⊥` | — | 🟢 decode; the inner product `+.×` over x's last axis and y's leading one; a SINGLE on either side extends along the other's axis, and an empty axis weighs nothing — with no digit to weigh the radix is never read, so `'a'⊥(0⍴0)` is 0 |
+| `⊤` | — | 🟢 encode; with no value to write the radix is never read, so `'a'⊤(0⍴0)` is the empty |
 
 ### Selection, search, sort
 
@@ -312,7 +312,7 @@ conjunctions above:
 | Glyph | Monad | Dyad |
 |---|---|---|
 | `⍕` | 🟢 format | 🟡 format by specification: width and precision pairs; a nested argument is named |
-| `⍎` | 🟢 execute; the string runs over the names around it | — |
+| `⍎` | 🟡 execute; the string runs over the names around it. An EMPTY program yields no value at all in GNU APL, and a libjay verb has no way to answer that, so it refuses and says so | — |
 | `⊢` | 🟢 same | 🟢 right |
 | `⊣` | 🟢 same | 🟢 left |
 | `⎕←` / `⍞←` output | 🟢 `⎕←` ends the line; `⍞←` writes the characters and nothing else | — |

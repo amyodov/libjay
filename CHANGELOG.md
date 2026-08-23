@@ -200,6 +200,51 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`(<9223372036854775806) C. 1 2 3` is an error, not a crash.** A cycle
+  named an index and the permutation it asked for was allocated before the
+  index was checked, so a huge one took the process down with a capacity
+  overflow. Every element of a cycle is now checked first — against the
+  argument it is about to permute for `x C. y`, and against the value
+  ceiling for `C. y`. A negative element counts back from the end while it
+  is at it, so `(<_1 0) C. 1 2 3` is `3 2 1` and `(<_1) C. 1 2 3` is the
+  argument itself, where both used to be refused.
+
+- **`2 %/\. 'abc'` is `ca`.** An outfix piece of one item applies nothing at
+  all, so the operand's domain never comes up: the characters are never
+  divided. libjay used to type the whole argument first for every operand,
+  which refused `-`, `%`, `!`, `|`, `^`, `,` and the rest of them. The five
+  folds J has its own special code for — `+/`, `*/`, `<./`, `>./` and
+  `+./` — do type the argument up front, and go on refusing the same data.
+
+- **An empty operand takes the other side's type instead of clashing with
+  it.** `(0$'a') , 1 2 3` is `1 2 3`, `1 2 3 , (0$'a')` is `1 2 3` and an
+  empty box vanishes beside characters the same way; framing fills the empty
+  row out with the RESULT's fill, so `(0$'a') ,: 1 2 3` is a numeric table
+  of two rows. Where both sides are empty the wider container wins — a box
+  over a character, a character over a number. The table dyad answers
+  through the same rule: `(0 0$0) ,/ 'ab'` is the `ab`-shaped empty.
+
+- **J's `,` takes a rank gap of any width.** `1 2 3 , (2 1 3$1)` is a rank-3
+  answer whose first item is the vector, filled out to the other side's item
+  shape; it used to be a rank error past a gap of one. APL still holds the
+  two ranks to within one of each other, which is what GNU APL does.
+
+- **A check that applies per element vanishes when there is no element.**
+  `0.5 A. i.0` is the empty (the RANGE of an anagram index is still
+  checked, so `1.5 A. i.0` is not), `;: (0$1 2 3)` is the empty list of
+  words, `". i.0` and `0.5 ". i.0` are the empty, `(0$0) <;.1 'abc'` is the
+  whole argument in one piece, and `0.5 /: i.0` is the empty rather than the
+  atom. In APL, `'a'⊥(0⍴0)` is 0, `'a'⊤(0⍴0)` is the empty and
+  `(0⍴⊂⍳3)⊂(0⍴0)` is the empty nested vector: with nothing to weigh, write
+  or partition, the argument that says HOW is never read. Where there are
+  items, every one of those checks stands as before.
+
+- **A boxed polynomial argument is its roots.** J lets the multiplier go
+  unsaid, so `p. (<1 2)` is `2 _3 1` and `p.. (<1 2 3)` is `11 _12 3`, and
+  the derivative and the integral read the root form as well. A root list
+  with no roots is no root rather than a type to refuse: `p. (<i.0)` is
+  `,1` and `p. (0$'a')` is the zero polynomial's root form.
+
 - **`0.3 *. 0.1+0.2` is `0.3`, not `2.25e15`.** Euclid on two reals cannot
   reach a remainder of exactly zero, so it stops once the remainder is
   within the comparison tolerance of the larger argument. Without that

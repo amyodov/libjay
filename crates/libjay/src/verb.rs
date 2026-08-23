@@ -2325,8 +2325,16 @@ fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
         } else {
             cells.iter().map(Array::to_row_major).collect()
         };
-    let mut dt = cells[0].dtype();
-    for c in &cells[1..] {
+    // A cell with no elements takes the type of the cells that have some,
+    // rather than clashing with them: `(0$'a') ,: 1 2 3` frames an empty
+    // character list beside a numeric one and answers two numeric rows.
+    // Where every cell is empty the wider container wins — a box over a
+    // character, a character over a number.
+    let mut dt = cells.iter().find(|c| c.count() > 0).unwrap_or(&cells[0]).dtype();
+    for c in &cells {
+        if c.count() == 0 {
+            continue;
+        }
         dt = DType::promote(dt, c.dtype()).ok_or_else(|| {
             let boxed = dt == DType::Box || c.dtype() == DType::Box;
             let what = if boxed {
@@ -2337,7 +2345,18 @@ fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
             Error::new(ErrorKind::Type, what, Some(span))
         })?;
     }
+    if cells.iter().all(|c| c.count() == 0) {
+        for c in &cells {
+            dt = DType::promote(dt, c.dtype()).unwrap_or(match (dt, c.dtype()) {
+                (DType::Box, _) | (_, DType::Box) => DType::Box,
+                _ => DType::Char,
+            });
+        }
+    }
     let widen = |c: &Array| -> Result<Data> {
+        if c.count() == 0 {
+            return Ok(Data::empty(dt));
+        }
         c.data.cast(dt).ok_or_else(|| Error::internal("unsupported widening while framing"))
     };
 
@@ -6048,13 +6067,15 @@ fn grade_select(
     // reads `5 /: 1` as 5 and refuses `5 /: 1 2 3`, where a lenient reading
     // would hand the atom back for any key at all.
     if x.rank() == 0 {
-        return match order.iter().find(|&&i| i > 0) {
-            None => Ok(x.clone()),
-            Some(&past) => Err(Error::domain(
+        if let Some(&past) = order.iter().find(|&&i| i > 0) {
+            return Err(Error::domain(
                 format!("index {past} is out of range: the argument has 1 item"),
                 span,
-            )),
-        };
+            ));
+        }
+        // Selecting that one item as many times as the grade asks: no key
+        // at all answers the empty, which is what `0.5 /: i.0` is.
+        return Ok(select_items(&as_list(x), &order));
     }
     if let Some(&past) = order.iter().find(|&&i| i >= x.items()) {
         return Err(Error::domain(
@@ -6258,7 +6279,14 @@ fn from_index(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
 /// Bring `a` up to `rank` axes for catenation along `axis`. A scalar spreads
 /// over one cross section of the other argument; one missing axis becomes a
 /// length-1 axis at `axis`.
-fn cat_promote(a: &Array, other: &Array, rank: usize, axis: usize, span: Span) -> Result<Array> {
+fn cat_promote(
+    a: &Array,
+    other: &Array,
+    rank: usize,
+    axis: usize,
+    deep: bool,
+    span: Span,
+) -> Result<Array> {
     if a.rank() == rank {
         return Ok(a.clone());
     }
@@ -6273,9 +6301,15 @@ fn cat_promote(a: &Array, other: &Array, rank: usize, axis: usize, span: Span) -
         }
         return Ok(Array::new(shape, data));
     }
-    if a.rank() + 1 == rank {
+    // One axis short, the value is one item of the answer. J's `,` goes on
+    // taking a wider gap the same way — `1 2 3 , (2 1 3$1)` is a rank-3
+    // answer whose first item is the vector, filled out to the item shape —
+    // while APL holds the two ranks to within one of each other.
+    if a.rank() + 1 == rank || (deep && a.rank() < rank) {
         let mut shape = a.shape.clone();
-        shape.insert(axis, 1);
+        for _ in a.rank()..rank {
+            shape.insert(axis, 1);
+        }
         return Ok(Array::new(shape, a.data.clone()));
     }
     Err(Error::new(
@@ -6283,6 +6317,27 @@ fn cat_promote(a: &Array, other: &Array, rank: usize, axis: usize, span: Span) -
         format!("cannot catenate rank {} with rank {}", a.rank(), other.rank()),
         Some(span),
     ))
+}
+
+/// The type two arrays that share none take when at least one of them holds
+/// no elements.
+///
+/// J lets an empty operand join anything: `(0$'a') , 1 2 3` is `1 2 3`, and
+/// an empty box vanishes beside characters the same way, because no element
+/// of the empty side ever becomes an element of the result. Where both
+/// sides are empty the wider container wins — a box over a character, a
+/// character over a number.
+fn empty_type(x: &Array, y: &Array) -> Option<DType> {
+    match (x.count() == 0, y.count() == 0) {
+        (true, false) => Some(y.dtype()),
+        (false, true) => Some(x.dtype()),
+        (true, true) => Some(match (x.dtype(), y.dtype()) {
+            (DType::Box, _) | (_, DType::Box) => DType::Box,
+            (DType::Char, _) | (_, DType::Char) => DType::Char,
+            (a, b) => DType::promote(a, b)?,
+        }),
+        (false, false) => None,
+    }
 }
 
 /// Catenate along the leading or the last axis.
@@ -6295,8 +6350,29 @@ pub(crate) fn catenate(
 ) -> Result<Array> {
     let rank = x.rank().max(y.rank()).max(1);
     let axis = if leading { 0 } else { rank - 1 };
-    let xa = cat_promote(x, y, rank, axis, span)?;
-    let ya = cat_promote(y, x, rank, axis, span)?;
+    let deep = fill && leading;
+    let xa = cat_promote(x, y, rank, axis, deep, span)?;
+    let ya = cat_promote(y, x, rank, axis, deep, span)?;
+    // J lets an operand with no elements join anything, taking the other
+    // side's type instead of clashing with it: `(0$'a') , 1 2 3` is
+    // `1 2 3`. The retyping happens here, before any fill is worked out, so
+    // that the fill an unequal axis needs is the RESULT's — the empty
+    // planes of `(2 0 3$0) , 'hello'` come out as spaces, not as zeros.
+    let (xa, ya) = match empty_type(&xa, &ya)
+        .filter(|_| fill && DType::promote(xa.dtype(), ya.dtype()).is_none())
+    {
+        None => (xa, ya),
+        Some(dt) => {
+            let retype = |a: Array| {
+                if a.count() == 0 && a.dtype() != dt {
+                    Array::new(a.shape.clone(), Data::empty(dt))
+                } else {
+                    a
+                }
+            };
+            (retype(xa), retype(ya))
+        }
+    };
     // Axes other than the one being joined must agree. J overtakes both
     // sides to the larger length, which fills; APL insists they conform,
     // and the reference refuses the ragged case outright.
@@ -6347,18 +6423,24 @@ pub(crate) fn catenate(
         && DType::promote(xa.dtype(), ya.dtype()).is_none();
     let (xa, ya) =
         if mixing { (spread_scalars(&xa), spread_scalars(&ya)) } else { (xa, ya) };
-    let dt = DType::promote(xa.dtype(), ya.dtype()).ok_or_else(|| {
-        let boxed = xa.dtype() == DType::Box || ya.dtype() == DType::Box;
-        let what = if boxed {
-            "cannot catenate boxed and unboxed data; box the other side first"
-        } else {
-            "cannot catenate character and numeric data"
-        };
-        Error::new(ErrorKind::Type, what, Some(span))
-    })?;
+    let dt = DType::promote(xa.dtype(), ya.dtype())
+        .ok_or_else(|| {
+            let boxed = xa.dtype() == DType::Box || ya.dtype() == DType::Box;
+            let what = if boxed {
+                "cannot catenate boxed and unboxed data; box the other side first"
+            } else {
+                "cannot catenate character and numeric data"
+            };
+            Error::new(ErrorKind::Type, what, Some(span))
+        })?;
     let widen = |a: &Array| -> Result<Data> {
         if a.dtype() == dt {
             Ok(a.data.clone())
+        } else if a.count() == 0 {
+            // An empty side brings no element to convert, so it takes the
+            // result's type outright — there is no character to read as a
+            // number, which is the conversion that has no meaning.
+            Ok(Data::empty(dt))
         } else {
             a.data.cast(dt).ok_or_else(|| Error::internal("unsupported widening in catenate"))
         }
@@ -6624,8 +6706,12 @@ fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
 /// the LAST axis of x and the LEADING axis of y. A scalar x is the radix
 /// for every digit, as it is for a vector argument.
 fn decode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let mut digits = digits_of(y, "decode", span)?;
-    let radices = digits_of(x, "decode", span)?;
+    // With no digit to weigh, no radix is ever read and none is refused:
+    // `'a'⊥(0⍴0)` is the empty sum, 0. The zeros stand in for a radix list
+    // the loop below never reaches.
+    let empty = y.count() == 0;
+    let mut digits = if empty { Vec::new() } else { digits_of(y, "decode", span)? };
+    let radices = if empty { vec![0.0; x.count()] } else { digits_of(x, "decode", span)? };
     // The digit axis is y's leading one; a scalar y has one digit. The
     // frames are the counts of the axes the digit axis leaves over, and a
     // count is a product of axis lengths rather than a division: an axis of
@@ -6678,15 +6764,20 @@ fn decode_apl(x: &Array, y: &Array, span: Span) -> Result<Array> {
     if y.rank() > 0 {
         shape.extend_from_slice(&y.shape[1..]);
     }
-    let integral = is_integral(y) && is_integral(x);
+    // A radix that was never read says nothing about the answer's type: the
+    // empty sum is the integer 0 whatever the radix was written as.
+    let integral = is_integral(y) && (empty || is_integral(x));
     Ok(Array::new(shape, narrow(out, integral)))
 }
 
 /// `x ⊤ y` where x has rank 2 or more: x's LEADING axis is the radix and
 /// its remaining axes frame the answer, so the result is shaped `(⍴x), ⍴y`.
 fn encode_apl(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
-    let radices = digits_of(x, "encode", span)?;
-    let values = digits_of(y, "encode", span)?;
+    // With no value to write, no radix is ever divided by and none is
+    // refused: `'a'⊤(0⍴0)` is the empty, shaped `(⍴x),⍴y`.
+    let empty = y.count() == 0;
+    let radices = if empty { vec![0.0; x.count()] } else { digits_of(x, "encode", span)? };
+    let values = if empty { Vec::new() } else { digits_of(y, "encode", span)? };
     let k = if x.rank() == 0 { 1 } else { x.shape[0] };
     let frames = if k == 0 { 0 } else { radices.len() / k };
     let n = values.len();
@@ -6706,7 +6797,7 @@ fn encode_apl(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     }
     let mut shape = x.shape.clone();
     shape.extend_from_slice(&y.shape);
-    Ok(Array::new(shape, narrow(out, is_integral(x) && is_integral(y))))
+    Ok(Array::new(shape, narrow(out, empty || (is_integral(x) && is_integral(y)))))
 }
 
 /// The number of binary digits `#: y` uses: enough for the largest magnitude
@@ -10707,6 +10798,13 @@ fn partition_enclose(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<
             Some(span),
         ));
     }
+    // No flag and no item: nothing is ever partitioned, so nothing about
+    // the flags has to be a flag. `(0⍴⊂⍳3)⊂(0⍴0)` is the empty nested
+    // vector. Where there ARE items, the flags are read as always — an
+    // empty flag list against three items stays a length error.
+    if x.count() == 0 && y.count() == 0 {
+        return Ok(Array::new(vec![0], Data::Box(Vec::new().into())));
+    }
     let mut flags = x
         .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("partition flags must be integers", span))?;
@@ -10875,9 +10973,16 @@ fn cut(
     let tol = ctx.cfg.tol;
     let frets: Vec<bool> = match x {
         Some(x) => {
-            let flags = x
-                .to_i64_vec()
-                .ok_or_else(|| Error::domain("cut frets must be integers", span))?;
+            let flags = x.to_i64_vec().ok_or_else(|| {
+                if x.dtype() == DType::Box {
+                    // A boxed left argument is J's per-axis form, one box of
+                    // frets per leading axis. Saying so is the contract:
+                    // this is a gap, not a domain.
+                    Error::not_yet("per-axis cut frets (a boxed left argument)", span)
+                } else {
+                    Error::domain("cut frets must be integers", span)
+                }
+            })?;
             // A fret is a flag, and only 0 and 1 are flags: `2 u;.1 y` is
             // a domain error, as the reference has it.
             if let Some(&bad) = flags.iter().find(|&&f| f != 0 && f != 1) {
@@ -10887,6 +10992,9 @@ fn cut(
             // `1 u;.2 y`: one interval per item.
             if x.rank() == 0 {
                 vec![flags[0] != 0; n]
+            } else if flags.is_empty() {
+                // Marked below: no fret at all is the whole argument.
+                Vec::new()
             } else {
                 if flags.len() != n {
                     return Err(Error::new(
@@ -10909,7 +11017,21 @@ fn cut(
             }
         }
     };
-    let ranges = cut_ranges(&frets, mode);
+    // A fret list with no frets in it marks nothing, and J reads that as the
+    // whole argument in ONE piece — `(0$0) <;.1 'abc'` is one box of 'abc',
+    // and with no fret to drop the negative spellings answer the same piece.
+    // An argument with no item of its own still has no piece at all.
+    // A fret list of a higher rank is J's per-axis form, one row of frets
+    // per leading axis of y, and an empty one names no axis and no piece.
+    let empty_frets = matches!(x, Some(x) if x.rank() == 1 && x.count() == 0);
+    let no_axis = matches!(x, Some(x) if x.rank() > 1 && x.count() == 0);
+    let ranges = if empty_frets && n > 0 {
+        vec![(0, n)]
+    } else if empty_frets || no_axis {
+        Vec::new()
+    } else {
+        cut_ranges(&frets, mode)
+    };
     // No frets, so no intervals: the one interval an empty argument offers
     // is the empty itself, and the verb applied to it says what shape the
     // pieces would have had.
@@ -11766,6 +11888,48 @@ fn poly_coeffs(y: &Array, span: Span) -> Result<Vec<Cx>> {
     }
 }
 
+/// The same, where an argument with no elements is no coefficient at all
+/// rather than a type to refuse. A polynomial with no coefficients is the
+/// zero one and a root form with no roots is its multiplier, so `p. (0$'a')`
+/// and `(1;0$'a') p. 4` both answer. J keeps the strict reading for the
+/// integral's argument, which is why the two live side by side.
+fn poly_coeffs_relaxed(y: &Array, span: Span) -> Result<Vec<Cx>> {
+    if y.count() == 0 {
+        return Ok(Vec::new());
+    }
+    poly_coeffs(y, span)
+}
+
+/// The ascending coefficients a boxed root form stands for: `m × (x-r0) ×
+/// (x-r1) × …`, multiplied out.
+fn root_form_coeffs(parts: &[Array], span: Span) -> Result<Vec<Cx>> {
+    let (multiplier, roots) = root_form(parts, span)?;
+    let mut coeffs = vec![multiplier];
+    for r in poly_coeffs_relaxed(roots, span)? {
+        let mut next = vec![cx::ZERO; coeffs.len() + 1];
+        for (k, &c) in coeffs.iter().enumerate() {
+            next[k + 1] = cx::add(next[k + 1], c);
+            next[k] = cx::sub(next[k], cx::mul(c, r));
+        }
+        coeffs = next;
+    }
+    Ok(coeffs)
+}
+
+/// The multiplier and the roots a boxed polynomial argument holds. J writes
+/// the form as `multiplier ; roots` and lets the multiplier go unsaid: one
+/// box is the roots alone, with a multiplier of 1.
+fn root_form(parts: &[Array], span: Span) -> Result<(Cx, &Array)> {
+    match parts {
+        [roots] => Ok((cx::ONE, roots)),
+        [multiplier, roots] => Ok((
+            poly_coeffs_relaxed(multiplier, span)?.first().copied().unwrap_or(cx::ONE),
+            roots,
+        )),
+        _ => Err(Error::domain("the root form of a polynomial is `multiplier ; roots`", span)),
+    }
+}
+
 // --------------------------------------------------- hypergeometric series
 
 /// Terms the series is allowed before it is called divergent.
@@ -11897,21 +12061,14 @@ fn poly_eval(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let at = at.first().copied().unwrap_or(cx::ZERO);
     let value = match x.as_boxes() {
         Some(parts) => {
-            if parts.len() != 2 {
-                return Err(Error::domain(
-                    "the root form of a polynomial is `multiplier ; roots`",
-                    span,
-                ));
-            }
-            let multiplier = poly_coeffs(&parts[0], span)?;
-            let mut v = multiplier.first().copied().unwrap_or(cx::ONE);
-            for r in poly_coeffs(&parts[1], span)? {
+            let (mut v, roots) = root_form(parts, span)?;
+            for r in poly_coeffs_relaxed(roots, span)? {
                 v = cx::mul(v, cx::sub(at, r));
             }
             v
         }
         None => {
-            let c = poly_coeffs(x, span)?;
+            let c = poly_coeffs_relaxed(x, span)?;
             let mut v = cx::ZERO;
             for &k in c.iter().rev() {
                 v = cx::add(cx::mul(v, at), k);
@@ -11933,28 +12090,10 @@ fn scalar_complex_or_real(z: Cx) -> Array {
 /// as `multiplier ; roots`; a y already in that form converts back to
 /// coefficients.
 fn poly_roots(y: &Array, span: Span) -> Result<Array> {
-    if let Some(parts) = y.as_boxes() {
-        if parts.len() != 2 {
-            return Err(Error::domain(
-                "the root form of a polynomial is `multiplier ; roots`",
-                span,
-            ));
-        }
-        let multiplier = poly_coeffs(&parts[0], span)?;
-        let multiplier = multiplier.first().copied().unwrap_or(cx::ONE);
-        // Multiply out `m × (x-r0) × (x-r1) × …`, ascending.
-        let mut coeffs = vec![multiplier];
-        for r in poly_coeffs(&parts[1], span)? {
-            let mut next = vec![cx::ZERO; coeffs.len() + 1];
-            for (k, &c) in coeffs.iter().enumerate() {
-                next[k + 1] = cx::add(next[k + 1], c);
-                next[k] = cx::sub(next[k], cx::mul(c, r));
-            }
-            coeffs = next;
-        }
-        return Ok(complex_or_real(coeffs));
+    if let Some(parts) = y.as_boxes().filter(|p| !p.is_empty()) {
+        return Ok(complex_or_real(root_form_coeffs(parts, span)?));
     }
-    let mut c = poly_coeffs(y, span)?;
+    let mut c = poly_coeffs_relaxed(y, span)?;
     while c.len() > 1 && c[c.len() - 1] == cx::ZERO {
         c.pop();
     }
@@ -12185,7 +12324,12 @@ fn coefficient_error(monic: &[Cx], roots: &[Cx]) -> f64 {
 /// `p.. y`: the derivative of the polynomial y's ascending coefficients
 /// describe, again as coefficients.
 fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
-    let c = poly_coeffs(y, span)?;
+    // A boxed argument is the root form, differentiated through the
+    // coefficients it stands for: `p.. (<1 2 3)` is `11 _12 3`.
+    let c = match y.as_boxes().filter(|p| !p.is_empty()) {
+        Some(parts) => root_form_coeffs(parts, span)?,
+        None => poly_coeffs_relaxed(y, span)?,
+    };
     if c.len() < 2 {
         return Ok(Array::from_i64(vec![0]));
     }
@@ -12196,7 +12340,13 @@ fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
 
 /// `x p.. y`: the integral of y's coefficients, with x as the constant term.
 fn poly_integral(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let c = poly_coeffs(y, span)?;
+    // A boxed argument is the root form here too. What it does NOT take is
+    // an empty of another type: `1 p.. (0$'a')` is a domain error where
+    // `p.. (0$'a')` answers, and the oracle's line is the line.
+    let c = match y.as_boxes().filter(|p| !p.is_empty()) {
+        Some(parts) => root_form_coeffs(parts, span)?,
+        None => poly_coeffs(y, span)?,
+    };
     let k = poly_coeffs(x, span)?;
     let mut out = vec![k.first().copied().unwrap_or(cx::ZERO)];
     for (i, &v) in c.iter().enumerate() {
@@ -12755,9 +12905,6 @@ fn sequential_result(form: i64, words: &[(i64, i64, i64)], trace: &[i64], y: &Ar
 /// line — the verb's right rank is 1 — so a character matrix is read a row
 /// at a time and the rows are framed back together.
 fn parse_numbers(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let Data::Char(text) = &y.data else {
-        return Err(Error::domain("reading numbers from text needs characters", span));
-    };
     if x.count() != 1 {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -12765,6 +12912,14 @@ fn parse_numbers(x: &Array, y: &Array, span: Span) -> Result<Array> {
             Some(span),
         ));
     }
+    // No character to read is no word to read it as, whatever type the
+    // empty right argument was going to hold: `0.5 ". i.0` is the empty.
+    if y.count() == 0 {
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Bool)));
+    }
+    let Data::Char(text) = &y.data else {
+        return Err(Error::domain("reading numbers from text needs characters", span));
+    };
     let line: String = text.as_slice().iter().collect();
     crate::frontend::j::numbers_from_text(&line, x)
         .ok_or_else(|| Error::domain("the stand-in for an unreadable word is a number", span))
@@ -13232,6 +13387,29 @@ fn stencil(u: &Verb, w: &[i64], y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Res
     assemble(&frame, cells, span)
 }
 
+/// Whether an insert settles its domain from the whole argument before it
+/// cuts anything. J answers `2 %/\. 'abc'` with `ca` — a piece of one item
+/// applies nothing, so the characters are never divided — but refuses
+/// `2 +/\. 'abc'`, because a sum, a product, a running minimum or maximum
+/// and an or are the five folds its special code types up front. The set is
+/// the oracle's, exactly: `*./`, which looks like it belongs, answers.
+fn folds_eagerly(u: &Verb) -> bool {
+    let Verb::Reduce(inner) = u else { return false };
+    matches!(
+        **inner,
+        Verb::Prim(Prim {
+            dyad: DyadOp::Scalar(
+                ScalarDyad::Add
+                    | ScalarDyad::Mul
+                    | ScalarDyad::Min
+                    | ScalarDyad::Max
+                    | ScalarDyad::Gcd
+            ),
+            ..
+        })
+    )
+}
+
 /// `x u\. y`: u applied to y with every run of x consecutive items removed.
 /// A run of x items has `1 + (#y) - x` places to sit, and that is how many
 /// results there are.
@@ -13254,16 +13432,18 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
         (0..=(n - k)).collect()
     };
     let width = k.unsigned_abs() as usize;
-    // J holds the operand to its own domain over the WHOLE argument, not
-    // only over the pieces it folds: `_2 +/\. 'ab'` is a domain error
-    // although every piece left behind is empty, and so is `4 +/\. 'abc'`,
-    // which has no piece at all. Only an argument of one item or none
-    // escapes it, and then only where no piece is folded. Numeric data
-    // never fails the check, so the probe is spent on characters and boxes
-    // alone -- and on nothing at all when the operand is not pure, since a
-    // verb that writes must not write twice.
+    // A sum, a product, a running extremum and an or are the folds J has
+    // special code for, and that code settles its domain from the WHOLE
+    // argument before any piece is cut: `2 +/\. 'abc'` is a domain error
+    // although every piece it leaves behind holds one character, and so are
+    // `_2 +/\. 'ab'` and `4 +/\. 'abc'`, which fold nothing at all. Every
+    // other fold is asked piece by piece, so `2 %/\. 'abc'` is `ca`. The
+    // probe is spent on characters and boxes alone, since numeric data
+    // never fails it -- and on nothing at all when the operand is not pure,
+    // since a verb that writes must not write twice.
     if !list.dtype().is_numeric()
         && u.is_pure()
+        && folds_eagerly(u)
         && n >= 1
         && (n >= 2 || !starts.is_empty())
     {
@@ -13655,12 +13835,6 @@ fn anagram_index(y: &Array, rules: Rules, span: Span) -> Result<Array> {
 /// `x A. y`: y's items in the order the x-th permutation puts them. A
 /// negative x counts back from the last permutation, as J's does.
 fn anagram_from(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
-    let idx = x
-        .to_i64_vec_near(near)
-        .ok_or_else(|| Error::domain("an anagram index must be an integer", span))?;
-    let Some(&want) = idx.first() else {
-        return Err(Error::internal("anagram with no index"));
-    };
     let ys = as_list(y);
     let n = ys.items();
     let mut total: i128 = 1;
@@ -13669,16 +13843,44 @@ fn anagram_from(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
             .checked_mul(k)
             .ok_or_else(|| Error::not_yet("permuting more items than an integer counts", span))?;
     }
-    let mut at = want as i128;
-    if at < 0 {
-        at += total;
-    }
-    if at < 0 || at >= total {
-        return Err(Error::domain(
+    // The index is an integer wherever it picks an item. With no item to
+    // permute there is exactly one arrangement and no digit to read from
+    // the index, so J holds a number to the range alone: `0.5 A. i.0` is
+    // the empty and `1.5 A. i.0` is out of range. A character or a box is
+    // no index either way.
+    let out_of_range = |want: &dyn std::fmt::Display| {
+        Error::domain(
             format!("permutation {want} is out of range: {n} items have {total} of them"),
             span,
-        ));
-    }
+        )
+    };
+    let mut at: i128 = match x.to_i64_vec_near(near) {
+        Some(v) => {
+            let want = i128::from(
+                *v.first().ok_or_else(|| Error::internal("anagram with no index"))?,
+            );
+            let at = if want < 0 { want + total } else { want };
+            if at < 0 || at >= total {
+                return Err(out_of_range(&want));
+            }
+            at
+        }
+        None => {
+            if n != 0 {
+                return Err(Error::domain("an anagram index must be an integer", span));
+            }
+            let want = *x
+                .to_f64_vec()
+                .as_deref()
+                .and_then(<[f64]>::first)
+                .ok_or_else(|| Error::domain("an anagram index must be an integer", span))?;
+            let at = if want < 0.0 { want + total as f64 } else { want };
+            if !(0.0..total as f64).contains(&at) {
+                return Err(out_of_range(&want));
+            }
+            at as i128
+        }
+    };
     // The factorial number system, read most significant digit first: each
     // digit picks one of the items still unused.
     let mut pool: Vec<usize> = (0..n).collect();
@@ -13700,7 +13902,7 @@ fn anagram_from(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
 /// `C. 3 4 2` is the cycles of `0 1 3 4 2`.
 fn cycle_form(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     if y.dtype() == DType::Box {
-        let perm = cycles_to_direct(y, near, span)?;
+        let perm = cycles_to_direct(y, None, near, span)?;
         return Ok(Array::from_i64(perm.iter().map(|&i| i as i64).collect()));
     }
     let n = permutation_span(y, near, span)?;
@@ -13772,7 +13974,20 @@ fn permutation_span(y: &Array, near: NearInt, span: Span) -> Result<usize> {
 /// The direct permutation a boxed list of cycles stands for. Its length is
 /// one past the largest element any cycle mentions; everything unmentioned
 /// stays where it is.
-fn cycles_to_direct(y: &Array, near: NearInt, span: Span) -> Result<Vec<usize>> {
+///
+/// `within` is how many items the cycles are about to permute, when the
+/// caller has them: an element then counts back from the end where it is
+/// negative and names an item that exists, and the permutation is never
+/// longer than that. Without it — `C. y` alone, which answers a permutation
+/// of whatever length the cycles ask for — an element is a plain index, and
+/// the length it asks for is held to the element ceiling rather than
+/// allocated on trust.
+fn cycles_to_direct(
+    y: &Array,
+    within: Option<usize>,
+    near: NearInt,
+    span: Span,
+) -> Result<Vec<usize>> {
     let boxes = y.as_boxes().ok_or_else(|| Error::internal("cycles from a simple array"))?;
     let mut cycles: Vec<Vec<usize>> = Vec::new();
     let mut top = 0usize;
@@ -13782,8 +13997,26 @@ fn cycles_to_direct(y: &Array, near: NearInt, span: Span) -> Result<Vec<usize>> 
             .ok_or_else(|| Error::domain("a cycle is a list of integers", span))?;
         let mut cycle = Vec::with_capacity(v.len());
         for &i in &v {
-            let k = usize::try_from(i)
-                .map_err(|_| Error::domain(format!("{i} is not an index"), span))?;
+            let k = match within {
+                Some(n) => {
+                    let at = if i < 0 { i.checked_add(n as i64) } else { Some(i) };
+                    usize::try_from(at.unwrap_or(-1))
+                        .ok()
+                        .filter(|&k| k < n)
+                        .ok_or_else(|| {
+                            Error::domain(
+                                format!("{i} is not an index into {n} item(s)"),
+                                span,
+                            )
+                        })?
+                }
+                None => {
+                    let k = usize::try_from(i)
+                        .map_err(|_| Error::domain(format!("{i} is not an index"), span))?;
+                    crate::limits::count(k as u128 + 1, span)?;
+                    k
+                }
+            };
             top = top.max(k + 1);
             cycle.push(k);
         }
@@ -13811,14 +14044,7 @@ fn permute(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
         let perm = direct_permutation_of(&as_list(x), n, near, span)?;
         return Ok(select_items(&ys, &perm));
     }
-    let mut perm = cycles_to_direct(x, near, span)?;
-    if perm.len() > n {
-        return Err(Error::new(
-            ErrorKind::Length,
-            format!("a permutation of {} items applied to {n}", perm.len()),
-            Some(span),
-        ));
-    }
+    let mut perm = cycles_to_direct(x, Some(n), near, span)?;
     // Cycles name only what moves: everything else stays put.
     perm.extend(perm.len()..n);
     Ok(select_items(&ys, &perm))
@@ -14262,6 +14488,16 @@ fn expand(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<
 /// It reaches nothing the caller could not reach: the sandbox contract is
 /// about what a primitive may touch, and evaluation touches nothing new.
 fn execute(y: &Array, apl: bool, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    // An argument with no elements is the empty program, whatever type it
+    // was going to hold — there is no character in it to refuse. J answers
+    // the empty program with an empty value; APL's answers nothing at all,
+    // which every caller of a verb here has to report as a refusal.
+    if y.count() == 0 {
+        if apl {
+            return execute_source("", apl, ctx, span);
+        }
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Bool)));
+    }
     let Data::Char(v) = &y.data else {
         return Err(Error::domain("execute reads a character list", span));
     };
@@ -14359,6 +14595,11 @@ fn nested_error(e: Error, src: &str, span: Span) -> Error {
 /// of numeric literals separated by blanks is one word, which is what makes
 /// `'1 2 3'` a single number and `'i.5'` two words.
 fn words(y: &Array, span: Span) -> Result<Array> {
+    // Nothing to read is no word, whatever type the empty was going to
+    // hold: `;: (0$1 2 3)` is the empty list of boxes.
+    if y.count() == 0 {
+        return Ok(Array::new(vec![0], Data::Box(Vec::new().into())));
+    }
     let Data::Char(v) = &y.data else {
         return Err(Error::domain("words reads a character list", span));
     };

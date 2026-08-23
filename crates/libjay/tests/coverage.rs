@@ -143,8 +143,14 @@ fn j_catenate_is_leading_axis() {
         val(Lang::J, "(i. 2 3) , i. 2 2"),
         i64s(&[4, 3], &[0, 1, 2, 3, 4, 5, 0, 1, 0, 2, 3, 0])
     );
-    // Two ranks apart is a rank error.
-    assert_eq!(err(Lang::J, "1 2 3 , i. 2 2 2").kind, ErrorKind::Rank);
+    // Two ranks apart is one item of the answer as well: the vector is
+    // filled out to the other side's item shape. (APL holds the two ranks
+    // to within one of each other; J does not.)
+    assert_eq!(
+        val(Lang::J, "1 2 3 , i. 2 2 2"),
+        i64s(&[3, 2, 3], &[1, 2, 3, 0, 0, 0, 0, 1, 0, 2, 3, 0, 4, 5, 0, 6, 7, 0])
+    );
+    assert_eq!(err(Lang::Apl, "1 2 3⍪2 2 2⍴⍳8").kind, ErrorKind::Rank);
 }
 
 #[test]

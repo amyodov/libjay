@@ -3073,3 +3073,80 @@ expression for expression, and a preset change that touched the default
 fails there before it fails here. The gate was verified red by hand — with
 `depth_sign` in `dyalog()` reverted to the GNU reading, three theme cases
 fail with five newly differing `≡` rows and the APL battery stays green.
+
+## 2026-08-23 — Empty arguments, and a size checked before it is allocated
+
+Round 3 of the sweep reported one panic and a family of about twenty rows
+where libjay refuses an argument the reference answers. Every rule below
+was probed against jconsole or GNU APL first, and where the register's
+paraphrase and the oracle disagreed, the oracle won — three times.
+
+**The panic: a cycle asked for its permutation before anything checked the
+index.** `(<9223372036854775806) C. 1 2 3` built `(0..top).collect()` with
+`top` one past the largest element any cycle names, and 2⋆63 usize values
+is a capacity overflow, not an error message. The index is now checked
+first, and the check has two readings because the two valences do: with an
+argument to permute, an element is an index INTO it — negative counts back
+from the end, which is `(<_1 0) C. 1 2 3` = `3 2 1` and, since a cycle of
+one moves nothing, `(<_1) C. 1 2 3` = `1 2 3`; without one, `C. y` may name
+any length it likes and the length alone is held to the element ceiling.
+Both match jconsole, whose answers are an index error and a limit error.
+The sibling paths were audited: `permutation_span` already went through
+`limits::count`, and `direct_permutation_of` and `anagram_from` size their
+allocations from the ARGUMENT, never from a value in it.
+
+**The outfix rule was derived from one verb, and that verb was the
+exception.** The A14 wave concluded that J holds an insert's operand to its
+domain over the whole argument, from `+/\.` refusing characters. It does —
+for `+/`, `*/`, `<./`, `>./` and `+./`, which is the set of folds J has
+special code for. Every other operand is asked piece by piece: `2 %/\.
+'abc'` is `ca`, because a piece of one item applies nothing. `2 *./\. 'abc'`
+answers although `*.` looks like it belongs to that set, and `2 +./\. 'abc'`
+refuses although `*.` and `+.` are usually spoken of together — the set is
+the oracle's, taken verb by verb rather than by family resemblance. The
+probe is now spent only where the operand is one of the five.
+
+**An empty operand takes the other side's type.** J's `,` with an empty
+character list beside a numeric one answers the numeric one; so does an
+empty box. The retyping happens BEFORE the ragged fill is worked out, which
+is what makes `(2 0 3$0) , 'hello'` come out as spaces rather than zeros —
+the fill belongs to the result's type. Two empties settle it by container:
+box over character over number, probed both ways round. The same rule in
+`assemble` is what `,:` and every framing operation needs, and it can only
+turn a refusal into an answer: a cell with elements still has to agree.
+Catenate also learned J's wider rank gap (`1 2 3 , i. 2 2 2` is a rank-3
+answer of shape `3 2 3`), which the coverage test had pinned the other way
+on an assumption nobody had asked jconsole about. APL keeps the one-rank
+rule, which is GNU's.
+
+**The empty-argument family is per verb, not one flag.** Each of `A.`,
+`;:`, `".`, `p.`, `p..`, `;.n`, `/:` and `\:`, and APL's `⊥`, `⊤` and `⊂`,
+was probed on its own, and they do not agree with each other:
+
+- `0.5 A. i.0` answers, `1.5 A. i.0` does not — with nothing to permute
+  there is one arrangement and no digit to read, so only the RANGE is
+  checked, and 0.5 is in it. A character is still no index.
+- `p.. (0$'a')` answers and `1 p.. (0$'a')` refuses: the integral reads its
+  argument strictly and the derivative does not. Two functions, one
+  spelling, two rules — so libjay has a strict reader and a relaxed one
+  side by side rather than one relaxed rule.
+- An empty fret list is not "no frets": `(0$0) <;.1 'abc'` is the whole
+  argument in ONE piece, while `0 0 0 <;.1 'abc'` is no piece at all. A
+  fret list of rank 2 or more is J's per-axis form, and an empty one there
+  names no axis and answers nothing.
+- APL's `⊂` relaxes only when the flags AND the items are both empty:
+  `(0⍴0.5)⊂1 2 3` is still a length error.
+
+**What was found and deliberately left.** `(<1) <;.1 y` — a boxed left
+argument, J's per-axis frets — is a feature libjay does not have; its
+diagnostic changed from "cut frets must be integers" to a named gap, which
+is the contract. `⍎(0⍴0)` yields NO VALUE in GNU APL, and a libjay verb has
+no channel for that, so it goes on refusing with "the executed string
+yielded no value" — the honest message for what happens, and the reason
+that row is not in the corpus. `1 p.. (<1 2)` now answers where it used to
+refuse, but in floats where jconsole keeps exact rationals (`_3r2 1r3`);
+the value is right and the type is not, and it stays out of the corpus
+until the polynomial paths carry exact types. GNU's `≡` of an empty nested
+array is 2 and libjay's is 1 — the prototype is not consulted — which is
+older than this wave and is registered, not fixed here.
+

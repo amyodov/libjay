@@ -55,7 +55,7 @@ feature — that is a promise, not a refusal.
 | `~:` | nub sieve: 1 at each item that has not occurred before | ≠ |
 | `~.` | nub: distinct items, first-occurrence order | — |
 | `$` | shape of | reshape: x lays out y's ITEMS, so the result's shape is x followed by an item's shape (`$ 3 $ i. 3 4` is `3 4`) and `'' $ y` is y's first item. An empty y is refused, not filled, when the result needs an item it was not given (`2 3 $ i. 0`) |
-| `,` | ravel | catenate along the LEADING axis; axes other than that one are overtaken to the larger length, which fills (`1 2 3 , i. 2 2` is 3×3) |
+| `,` | ravel | catenate along the LEADING axis; axes other than that one are overtaken to the larger length, which fills (`1 2 3 , i. 2 2` is 3×3), and a rank gap of any width makes the lower-ranked side one item of the answer. An operand with no elements takes the other side's type instead of clashing with it: `(0$'a') , 1 2 3` is `1 2 3` |
 | `,.` | ravel items, exactly `,"_1`: each item ravelled, so a list becomes a column | stitch, exactly `,"_1` |
 | `,:` | itemize: a leading axis of 1 (`2 3` becomes `1 2 3`) | laminate: the two arguments as the items of a new leading axis (two atoms give shape `2 1`) |
 | `#` | tally; extended where the argument is | replicate: item i repeated x[i] times (a scalar x applies to every item, and a scalar y is repeated for every count, so `1 0 1 # 5` is `5 5`) |
@@ -79,15 +79,15 @@ feature — that is a promise, not a refusal.
 | `e.` | raze-in: for every element of y, which items of `; y` it holds — the answer is shaped `($y), #items of the raze` | member: cells of x shaped like items of y |
 | `E.` | — | find: 1 at each position of y where a copy of x begins, shaped like y's items; a pattern longer than y matches nowhere |
 | `A.` | anagram index: where the permutation y's items RANK as stands among the permutations of that length, lexicographically | the x-th permutation of y's items; a negative x counts back from the last. Characters have no anagram index monadically, as in J |
-| `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation. A list shorter than the permutation it names stands for one over `1 + >./ y` items | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation of y's items, ABBREVIATED where it is shorter — the items it never names come first, in ascending order, so `0 1 C. 'abcde'` is `cdeab`, `3 4 2 C. 'abcde'` is `abdec` and an atom is such a list of one |
+| `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation. A list shorter than the permutation it names stands for one over `1 + >./ y` items | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation of y's items, ABBREVIATED where it is shorter — the items it never names come first, in ascending order, so `0 1 C. 'abcde'` is `cdeab`, `3 4 2 C. 'abcde'` is `abdec` and an atom is such a list of one. An element of a cycle is an index INTO y and counts back from the end where it is negative, so `(<_1 0) C. 1 2 3` is `3 2 1`; an index y has no item for is refused before the permutation is built |
 | `u:` | codepoints become characters; characters are answered with themselves | form 3 gives codepoints, form 10 gives the characters they name; the byte-oriented forms are a named gap |
 | `;:` | words: J's own tokeniser over a string, one box per word. A run of numeric literals separated by blanks is ONE word (`;: '1 2 3'` has one), `NB.` swallows the rest of the line, and an unclosed quote is a parse error | the sequential machine — see below |
 | `s:` | symbols: the argument's text, interned. A character LIST carries its own delimiter in its first position, so ``s: '`a`b'`` is the two symbols `` `a `` and `` `b `` while `s: 'a b'` is the one name `" b"`, and the empty list has no delimiter and no names. A character TABLE gives one name per row with trailing blanks trimmed, the leading axes becoming the result's shape. A BOXED argument gives one name per box, the characters taken exactly as they stand — trailing blank and all. Anything else is a domain error; a box holding a rank-2 array is a rank error | the name forms: `4 s:` lays the names out as a character table, blank-padded to the longest (the shape gains that width as a trailing axis), and `5 s:` boxes them one apiece, keeping the shape. `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report on an interpreter's own symbol table — how many slots it holds, which are in use, how it hashes them — and are named gaps rather than guesses |
 | `L.` | the boxing level: 0 for anything unboxed, one more than the deepest content otherwise. APL's `≡` counts the array itself as well, so the two differ by one on a simple array | — |
 | `".` | do: the characters are compiled as a J program and run HERE, over the names the sentence itself can see — `". 'a =. 3'` assigns in the surrounding scope. A `{name}` hole inside the string has nothing to bind to and is refused | the numbers a line of text spells: the line is split at blanks and every word read as a J numeric literal, with the atom x standing in for a word that is not one. One word gives a scalar, as reading that line as a noun would, and several give a vector of that many. The right rank is 1, so a character matrix is read a row at a time and the rows framed with fills |
 | `%.` | matrix inverse — the least-squares pseudo-inverse of a taller matrix; a wider one is refused, a singular one is a domain error | matrix divide: the least-squares solution of `y a = x` |
-| `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`, largest magnitude first, then largest real part, then largest imaginary part; roots that sit on top of one another are refined through the m-1st derivative, so a repeated one is exact; a boxed argument of that form converts back to coefficients | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial |
-| `p..` | the derivative of the polynomial y's ascending coefficients describe, as coefficients | the integral, with x as the constant term |
+| `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`, largest magnitude first, then largest real part, then largest imaginary part; roots that sit on top of one another are refined through the m-1st derivative, so a repeated one is exact; a boxed argument of that form converts back to coefficients, and the multiplier may go unsaid — one box is the roots alone, so `p. (<1 2)` is `2 _3 1` | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial, the multiplier optional |
+| `p..` | the derivative of the polynomial y's ascending coefficients describe, as coefficients; a boxed y is the root form and is differentiated through the coefficients it stands for | the integral, with x as the constant term; a boxed y is the root form here too, though its coefficients come out in floats where jconsole keeps exact rationals |
 | `p:` | the y-th prime, counting from zero | the prime queries: `_1` counts the primes below y, `0` and `1` ask whether it is composite or prime, `2` gives the factorisation as a 2-row table and `3` its top row, `4` and `_4` step to the next and previous prime |
 | `q:` | prime factors, ascending, with multiplicity (`q: 1` is empty) | the exponents of the first x primes; `__` gives the primes that divide y over their exponents, as a 2-row table. The negative forms are a named gap |
 | `?` | roll: a random value below each element (`? 0` is a uniform double) | deal: x distinct values from `i. y` |
@@ -154,7 +154,11 @@ a pair of integers, so `17 b.` is bitwise and and `22 b.` bitwise xor.
 `u b. 0` answers u's three ranks; the other characteristics are named gaps.
 The dyad of `\.` is the outfix:
 `x u\. y` applies u to y with each run of x consecutive items left out, so
-there are `1 + (#y) - x` results.
+there are `1 + (#y) - x` results. A piece of one item applies nothing —
+`2 %/\. 'abc'` is `ca`, the characters never divided — and a piece of none
+is the fold's identity. The exception is J's own: `+/`, `*/`, `<./`, `>./`
+and `+./` have special code that types the whole argument before any piece
+is cut, so those five refuse the same characters.
 
 Conjunctions: `"` (rank, 1–3 atoms, `_` = infinite); `@:` (atop: monad
 `u v y`, dyad `u (x v y)`, at infinite rank) and `@` (the same thing at v's
@@ -179,7 +183,10 @@ blocks at the far edge, `;._3` takes only the whole ones. A negative block
 size reverses its axis there too, but only where the movement row is
 written out: given a bare vector of sizes the reference answers with
 something its magnitude plays no part in, so libjay names that gap rather
-than guessing at it); `!.` (fit: on the verbs whose
+than guessing at it. A fret list with no frets in it is the whole argument
+in ONE piece, and an empty fret list of rank 2 or more — J's per-axis form
+with no axis named — is no piece at all; a BOXED left argument, which is
+that per-axis form written out, is a named gap); `!.` (fit: on the verbs whose
 meaning uses the comparison tolerance it replaces that tolerance, so `=!.0`
 compares exactly; on `|.` it gives the FILL instead — `x |.!.f y` shifts
 rather than rotates, an item moved past an end is dropped and the place it
@@ -525,13 +532,13 @@ result.
 | `⍪` | table: one row per item, holding that item's elements (a scalar gives 1×1, a vector n×1) | catenate along the LEADING axis |
 | `!` | factorial (always float); a complex argument is a named gap | binomial, J's argument order; the same gap |
 | `⍕` | format: the characters that display the argument | format by specification: x is one width-and-precision pair per column of y's last axis, one pair for all of them, or a lone precision, which takes the width the values need plus a separating blank. A value that does not fit its field is a domain error; a nested y is a named gap |
-| `⊥` | — | mixed-radix decode |
-| `⊤` | — | mixed-radix encode |
+| `⊥` | — | mixed-radix decode; with no digit to weigh the radix is never read, so `'a'⊥(0⍴0)` is the empty sum 0 whatever the radix was written as |
+| `⊤` | — | mixed-radix encode; with no value to write the radix is never read either, so `'a'⊤(0⍴0)` is the empty |
 | `⌽` | reverse each row (last axis) | rotate each row (last axis) |
 | `⊖` | reverse the items (leading axis) | rotate the leading axis |
 | `≢` | tally | not match |
 | `∊` | enlist: every leaf element, in ravel order, as a vector | membership, element by element (an element of a nested array is a whole array) |
-| `⊂` | enclose — except that a simple scalar is its own enclosure, so `⊂5` is `5` | partitioned enclose: a partition opens where x rises (`x[i] > x[i-1]`, reading `x[¯1]` as 0) and an item flagged 0 is dropped. Rank 2 and above partitions the LAST axis, once per cross section, and the axes ahead of it frame the answer |
+| `⊂` | enclose — except that a simple scalar is its own enclosure, so `⊂5` is `5` | partitioned enclose: a partition opens where x rises (`x[i] > x[i-1]`, reading `x[¯1]` as 0) and an item flagged 0 is dropped. Rank 2 and above partitions the LAST axis, once per cross section, and the axes ahead of it frame the answer. No flag against no item is the empty nested vector, and nothing about the flags has to be a flag; where there ARE items the flags are read as always |
 | `⍸` | where: index `i` repeated `y[i]` times, from `⎕IO`; a rank-2 or higher argument gives one boxed coordinate vector per occurrence | interval index: how many items of the ascending x are at or below each cell, plus `⎕IO - 1`. The interval is closed on the left here and open in J's `I.`: `1 3 5⍸3` is 2 where `1 3 5 I. 3` is 1 |
 | `⌷` | materialise: the argument itself (no oracle — see "Which APL" above) | index: one item of x per axis of y, and the count must equal the rank. An item is a scalar, which drops its axis, or an ENCLOSED vector, which keeps it and selects that many — `(⊂1 2)⌷5 6 7 8` is `5 6` |
 | `⌹` | matrix inverse — the pseudo-inverse of a taller matrix; wider is refused, singular is a domain error | matrix divide: the least-squares solution of `y a = x` |
@@ -543,7 +550,7 @@ result.
 | `∩` | — | intersection: x's items that y also has, in x's order |
 | `⍲` `⍱` | — | nand / nor; both arguments must already be 0 or 1 |
 | `⍷` | — | find: 1 at each position of y where a copy of x begins |
-| `⍎` | execute: the characters are compiled as an APL program and run HERE, over the names the sentence itself can see | — |
+| `⍎` | execute: the characters are compiled as an APL program and run HERE, over the names the sentence itself can see. An EMPTY program — `⍎''`, or an empty of any other type — yields no value at all in GNU APL; a libjay verb has no way to answer that, so it refuses and says the executed string yielded no value | — |
 | `⎕UCS` | codepoints become characters, characters become their codepoints | — |
 | `⎕FX` | fix a definition from its lines and answer with its name; the lines must be literal text (see below) | — |
 | `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill |
