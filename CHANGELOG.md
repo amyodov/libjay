@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.3.1 — 2026-08-23
+
+### Added
+
 - SHY results in APL. A definition whose answer came from an assignment
   answers shyly: `{a←⍵×2} 5` has the value 10 and a session displays
   nothing, while `1+{a←⍵×2} 5` is 11 and displays it. The value is there
