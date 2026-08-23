@@ -841,7 +841,7 @@ fn parse_control(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Expr> {
             let body = parse_block(cur, scope, &["end."])?;
             let end = cur.expect("end.")?;
             let source = one_expr(source, Span::merge(start, end))?;
-            Control::For { name: suffix.clone(), source: Box::new(source), body }
+            Control::For { names: suffix.iter().cloned().collect(), source: Box::new(source), body }
         }
         "select." => parse_select(cur, scope, start)?,
         "try." => {
@@ -883,7 +883,7 @@ fn parse_if(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Control> {
         let test = parse_block(cur, scope, &["do."])?;
         cur.expect("do.")?;
         let body = parse_block(cur, scope, &["elseif.", "else.", "end."])?;
-        arms.push(Branch { test: Some(test), body, fall_through: false });
+        arms.push(Branch { test: Some(test), body, fall_through: false, list: false });
         match cur.peek_word() {
             Some("elseif.") => {
                 cur.at += 1;
@@ -927,7 +927,7 @@ fn parse_select(cur: &mut Cursor<'_>, scope: &mut Names, start: Span) -> Result<
         let body = parse_block(cur, scope, &["case.", "fcase.", "end."])?;
         // `case. do.` with no test is the default arm.
         let test = (!test.is_empty()).then_some(test);
-        cases.push(Branch { test, body, fall_through });
+        cases.push(Branch { test, body, fall_through, list: false });
     }
     Ok(Control::Select { subject: Box::new(subject), cases })
 }

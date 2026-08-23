@@ -111,6 +111,22 @@ class APL:
         ``|`` uses: "tolerant" (GNU APL) or "exact" (Dyalog, which leaves
         ``2 2⊤4-1E¯14`` as ``1 2`` rather than ``0 0``)."""
 
+        inner_each: str = "on-fold"
+        """Where the each in the inner product's definition sits:
+        "on-fold" (GNU APL — ``f/¨`` over the outer product, so ``g`` meets
+        one whole vector from each side and the fold's value is enclosed
+        once more) or "on-pair" (Dyalog — ``f/`` over ``g¨``, so ``g`` meets
+        one element from each side). ``1 2+.,3 4`` is ``10`` under the first
+        and an enclosed ``3 7`` under the second; every scalar ``g`` over
+        simple arguments agrees."""
+
+        control_strictness: str = "lenient"
+        """How strictly a control structure reads what it is given:
+        "lenient" (the reading both languages ship — a condition is true
+        where its first atom is, and a ``:Leave`` outside a loop leaves the
+        definition) or "strict" (Dyalog — a condition is one element and no
+        more, and ``:Leave`` belongs to a loop)."""
+
         trains: bool = True
         """Whether a function may stand where a value belongs: a run of
         functions is then a train, and ``F←+/`` names one. Ships on, as an
@@ -136,6 +152,8 @@ class APL:
         near_count="tolerant",
         floor_rule="scaled",
         encode_digits="exact",
+        inner_each="on-pair",
+        control_strictness="strict",
     )
 
     @staticmethod

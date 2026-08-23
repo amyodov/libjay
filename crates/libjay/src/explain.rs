@@ -254,12 +254,13 @@ fn control_lines(c: &Control, depth: usize, p: &Program, tr: &Trace, out: &mut S
             block("test", test, out);
             block("body", body, out);
         }
-        Control::For { name, source, body } => {
-            let _ = writeln!(
-                out,
-                "{pad}for over items{}",
-                name.as_ref().map_or(String::new(), |n| format!(", item in {n}, index in {n}_index"))
-            );
+        Control::For { names, source, body } => {
+            let bound = match names.as_slice() {
+                [] => String::new(),
+                [n] => format!(", item in {n}, index in {n}_index"),
+                many => format!(", item taken apart into {}", many.join(" ")),
+            };
+            let _ = writeln!(out, "{pad}for over items{bound}");
             block("source", std::slice::from_ref(source), out);
             block("body", body, out);
         }

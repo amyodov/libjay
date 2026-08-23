@@ -133,6 +133,46 @@ fn the_dyalog_preset_answers_the_dyalog_way() {
     // empty numeric vector and before the empty character one.
     assert_eq!(val("⍋(0⍴⊂1 2)(⍳0)", &dy), i64s(&[2], &[2, 1]));
     assert_eq!(val("⍋(0⍴⊂1 2)('')", &dy), i64s(&[2], &[1, 2]));
+    // A control structure is read strictly: a condition is one value, and
+    // `:Leave` belongs to a loop. Both are accepted under the shipped
+    // reading, which takes the first atom and lets a stray `:Leave` return.
+    let wide = "n←⎕FX 'Z←F R' ':If R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 1 1";
+    let p = compile(Lang::Apl, wide, &dy).expect("it compiles in either reading");
+    let mut sink = |_: &str| {};
+    assert_eq!(
+        p.run(&[], &mut sink).expect_err("two values where one belongs").kind,
+        ErrorKind::Domain
+    );
+    assert_eq!(val(wide, &gnu), Array::scalar_i64(1));
+    let stray = "n←⎕FX 'Z←F R' 'Z←0' ':Leave' ⋄ F 1";
+    assert_eq!(
+        compile(Lang::Apl, stray, &dy).expect_err(":Leave outside a loop").kind,
+        ErrorKind::Parse
+    );
+    assert_eq!(val(stray, &gnu), Array::scalar_i64(0));
+    // The inner product's each sits on the pairing, not on the fold: `g`
+    // meets one element from each side and the fold's own value is the
+    // cell. Every scalar `g` that ends in a number agrees, which is why the
+    // matrix product is the same sentence in both readings.
+    assert_eq!(val("1 2+.×3 4", &dy), Array::scalar_i64(11));
+    assert_eq!(val("1 2+.×3 4", &gnu), Array::scalar_i64(11));
+    assert_eq!(val("∊1 2+.,3 4", &dy), i64s(&[2], &[3, 7]));
+    assert_eq!(val("1 2+.,3 4", &gnu), Array::scalar_i64(10));
+    assert_eq!(val("≡1 2,.+3 4", &dy), Array::scalar_i64(2));
+    assert_eq!(val("≡1 2,.+3 4", &gnu), Array::scalar_i64(3));
+    assert_eq!(
+        val("∊(2 2⍴⍳4),.,2 2⍴⍳4", &dy),
+        i64s(&[16], &[1, 1, 2, 3, 1, 2, 2, 4, 3, 1, 4, 3, 3, 2, 4, 4])
+    );
+    assert_eq!(
+        val("∊(2 2⍴⍳4),.,2 2⍴⍳4", &gnu),
+        i64s(&[16], &[1, 2, 1, 3, 1, 2, 2, 4, 3, 4, 1, 3, 3, 4, 2, 4])
+    );
+    // John Scholes' Life one-liner, whose `∨.∧` folds enclosed planes: the
+    // generation is the same array, one enclosure shallower.
+    let life = "{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} 2 2⍴1 1 1 0";
+    assert_eq!(val(&format!("≡{life}"), &dy), Array::scalar_i64(1));
+    assert_eq!(val(&format!("≡{life}"), &gnu), Array::scalar_i64(2));
     // Dyadic `⍳` looks up in a VECTOR and nothing else; the APL2 line
     // searches the items of a left argument of any rank.
     assert_eq!(val("'abc'⍳'b'", &dy), Array::scalar_i64(2));

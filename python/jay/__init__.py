@@ -78,6 +78,8 @@ _DIALECT_KEYS = (
     "near_count",
     "floor_rule",
     "encode_digits",
+    "inner_each",
+    "control_strictness",
     "trains",
 )
 

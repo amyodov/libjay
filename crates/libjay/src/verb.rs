@@ -13,7 +13,9 @@ use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::exact::{self, Ext, Rat};
 use crate::fmt::FmtOpts;
-use crate::frontend::{ComplexOrder, EncodeDigits, FloorRule, NearCount, NestedGrade, Rules};
+use crate::frontend::{
+    ComplexOrder, EncodeDigits, FloorRule, InnerEach, NearCount, NestedGrade, Rules,
+};
 use crate::par;
 use crate::simd::multiversioned;
 
@@ -2472,7 +2474,7 @@ fn enclose(y: &Array, rule: Enclose) -> Array {
 /// carries whatever layout its verb left — `|:&.>` boxes column-major
 /// matrices — while everything downstream of an open reads a value the way
 /// a verb's argument is read.
-fn open_cell(y: &Array) -> Array {
+pub(crate) fn open_cell(y: &Array) -> Array {
     match &y.data {
         Data::Box(v) if !v.is_empty() => v[0].to_row_major(),
         _ => y.clone(),
@@ -7164,7 +7166,8 @@ fn enclose_elements(a: &Array) -> Array {
 /// APL's definition is `f/¨ (⊂[last]x) ∘.g (⊂[first]y)`: the each is part of
 /// it, so what the fold makes of one pair is enclosed unless it is already a
 /// simple scalar. `1 2+.×3 4` is a number either way; `1 2,.+3 4` is an
-/// enclosed vector, and only APL says so.
+/// enclosed vector, and only APL says so. Under `InnerEach::OnPair` the each
+/// sits on the pairing instead and the fold's own value stands as the cell.
 fn inner_fold(
     u: &Verb,
     apl: bool,
@@ -7173,7 +7176,12 @@ fn inner_fold(
     span: Span,
 ) -> Result<Array> {
     let folded = u.monad(inner, ctx, span)?;
-    Ok(if apl { enclose_elements(&folded) } else { folded })
+    Ok(if apl && each_on_fold(ctx) { enclose_elements(&folded) } else { folded })
+}
+
+/// Whether the dialect puts the inner product's each on the fold.
+fn each_on_fold(ctx: &Ctx<'_>) -> bool {
+    ctx.cfg.rules.inner_each == InnerEach::OnFold
 }
 
 /// The inner product by the cell machinery: x's cells at v's dyadic left
@@ -7200,17 +7208,22 @@ fn inner_cells(
     }
     let work = x.count().max(y.count());
     let pure = u.is_pure() && v.is_pure();
+    let items = apl && !each_on_fold(ctx);
     let cells = each_cell(n, work, pure, ctx, |i, c| {
         let inner = v.dyad(&x.cell_at(frame_rank, i), y, c, span)?;
         inner_fold(u, apl, &inner, c, span)
     })?;
-    assemble(&frame, cells, span)
+    if items { assemble_items(&frame, cells, span) } else { assemble(&frame, cells, span) }
 }
 
 /// APL's `f.g` where g is not a scalar function: every vector along x's
 /// LAST axis meets every vector along y's FIRST axis, and f folds each
 /// result. With a scalar g this is the same as J's reading, which is the
 /// path that runs it.
+///
+/// The two vectors meet whole under `InnerEach::OnFold` and element by
+/// element under `InnerEach::OnPair`: `(2 2⍴⍳4),.,2 2⍴⍳4` opens with
+/// `1 2 1 3` under the first and `1 1 2 3` under the second.
 fn apl_inner_product(
     u: &Verb,
     v: &Verb,
@@ -7251,14 +7264,20 @@ fn apl_inner_product(
         Array::new(vec![k], out)
     };
     let pure = u.is_pure() && v.is_pure();
+    let on_fold = each_on_fold(ctx);
+    let paired = Verb::Each(Box::new(v.clone()), Enclose::ExceptSimpleScalar);
     let cells = each_cell(n, x.count().max(y.count()), pure, ctx, |i, c| {
         let (r, col) = (i / cols, i % cols);
         let left = vector(&x.data, &|t| if x.rank() > 0 { r * k + t } else { 0 });
         let right = vector(&y.data, &|t| if y.rank() > 0 { t * cols + col } else { 0 });
-        let inner = v.dyad(&left, &right, c, span)?;
+        let inner = if on_fold {
+            v.dyad(&left, &right, c, span)?
+        } else {
+            paired.dyad(&left, &right, c, span)?
+        };
         inner_fold(u, true, &inner, c, span)
     })?;
-    assemble(&frame, cells, span)
+    if on_fold { assemble(&frame, cells, span) } else { assemble_items(&frame, cells, span) }
 }
 
 /// `+/ . *` (APL `+.×`) over real machine numbers: the matrix product, run

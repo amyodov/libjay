@@ -6,9 +6,9 @@ use std::sync::Arc;
 use crate::array::{Array, Data};
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::fmt::{format_array, FmtOpts};
-use crate::frontend::Rules;
+use crate::frontend::{ControlStrictness, Lang, Rules};
 use crate::fuse::FusedKernel;
-use crate::verb::{arrays_match, Agreement, Ctx, Env, EvalCfg, Verb};
+use crate::verb::{arrays_match, Agreement, Ctx, Env, EvalCfg, Tol, Verb};
 
 /// Where an assignment puts its name. The two differ only inside an
 /// explicit definition, which is the only thing that has a local frame.
@@ -47,8 +47,8 @@ pub enum Expr {
     },
     /// A control-flow sentence (J's control words, APL's `:If` family).
     /// Its value is the value of the last sentence the branch it chose
-    /// executed. Only an explicit definition's body holds one: neither
-    /// language allows a control word outside a definition.
+    /// executed. J holds one to an explicit definition's body, as the
+    /// reference does; APL's stands outside a definition too.
     Control(Box<Control>, Span),
     Monad { verb: Verb, y: Box<Expr>, span: Span },
     Dyad { verb: Verb, x: Box<Expr>, y: Box<Expr>, span: Span },
@@ -91,9 +91,11 @@ pub enum Control {
     /// `while.` and `whilst.`, APL's `:While` and `:Repeat`. `body_first`
     /// runs the body once before the first test; `until` inverts the test.
     While { test: Vec<Expr>, body: Vec<Expr>, body_first: bool, until: bool },
-    /// `for. y do. B end.` / `for_i.` / `:For i :In y`. `name` binds each
-    /// item and `<name>_index` its position.
-    For { name: Option<String>, source: Box<Expr>, body: Vec<Expr> },
+    /// `for. y do. B end.` / `for_i.` / `:For i :In y`. One name binds each
+    /// item and `<name>_index` its position; several — APL's `:For a b :In
+    /// y` — take the item apart and bind one of its own items each. No name
+    /// binds nothing, which is `for.` without a suffix.
+    For { names: Vec<String>, source: Box<Expr>, body: Vec<Expr> },
     /// `select. T case. S do. B end.` and `:Select`. A case with no test is
     /// the default (`case. do.`, `:Else`); `fall_through` is `fcase.`.
     Select { subject: Box<Expr>, cases: Vec<Branch> },
@@ -127,6 +129,10 @@ pub struct Branch {
     pub body: Vec<Expr>,
     /// `fcase.`: run the next arm's body too, without testing it.
     pub fall_through: bool,
+    /// APL `:CaseList`: the test yields a LIST of candidates and the arm is
+    /// taken where the subject matches any one of its items, rather than
+    /// the list as a whole.
+    pub list: bool,
 }
 
 /// The right-argument name a NILADIC APL definition carries. No sentence
@@ -405,11 +411,15 @@ impl Program {
         let mut ctx = Ctx { cfg, out, inp, env: &mut env, device };
         let mut last = None;
         for stmt in &self.stmts {
-            // A control word cannot reach the top level in either language,
-            // so a loop signal here would have nowhere to go.
+            // A loop contains its own `:Leave`, and there is no definition
+            // out here for a `:Return` or a `→` to leave.
             let (v, flow) = eval_stmt(stmt, &mut ctx, rec)?;
             if flow != Flow::Normal {
-                return Err(Error::internal("a control signal escaped to the top level"));
+                return Err(Error::new(
+                    ErrorKind::Domain,
+                    "this control word leaves a definition, and there is none here",
+                    None,
+                ));
             }
             last = if stmt.is_silent() { None } else { v };
         }
@@ -545,6 +555,63 @@ fn is_true(a: &Array, span: Span) -> Result<bool> {
     }
 }
 
+/// Bind one iteration of a `for.` loop. One name takes the item whole and
+/// `<name>_index` its position; several take the item apart, one of its own
+/// items each, and the item has to have exactly that many.
+fn bind_for_names(
+    names: &[String],
+    item: &Array,
+    i: usize,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<()> {
+    if names.len() == 1 {
+        ctx.env.assign(names[0].clone(), item.clone(), Scope::Local);
+        ctx.env.assign(
+            format!("{}_index", names[0]),
+            Array::scalar_i64(i as i64),
+            Scope::Local,
+        );
+        return Ok(());
+    }
+    let have = if item.rank() == 0 { 1 } else { item.shape[0] };
+    if have != names.len() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{} names bind an item of {have}", names.len()),
+            Some(span),
+        ));
+    }
+    for (k, name) in names.iter().enumerate() {
+        let part = if item.rank() == 0 { item.clone() } else { item.item(k) };
+        ctx.env.assign(name.clone(), crate::verb::open_cell(&part), Scope::Local);
+    }
+    Ok(())
+}
+
+/// Whether a control structure's condition holds.
+///
+/// The lenient reading is the one both languages ship: an empty condition
+/// is true and otherwise the first atom decides. Dyalog reads a condition
+/// strictly instead — one element and no more — so `:If 1 1` is an error
+/// there where it takes the first here.
+fn condition_holds(a: &Array, ctx: &Ctx<'_>, span: Span) -> Result<bool> {
+    if ctx.cfg.rules.control_strictness == ControlStrictness::Strict && a.count() != 1 {
+        return Err(Error::domain("a condition must be a single value", span));
+    }
+    is_true(a, span)
+}
+
+/// Whether a `:CaseList` arm's list holds the subject. The comparison is
+/// the one `:Case` makes, item by item.
+fn any_item_matches(subject: &Array, list: &Array, tol: Tol) -> bool {
+    if list.rank() == 0 {
+        return arrays_match(subject, &crate::verb::open_cell(list), tol);
+    }
+    (0..list.shape[0])
+        .any(|i| arrays_match(subject, &crate::verb::open_cell(&list.item(i)), tol))
+}
+
 /// Whether a dfn's guard holds. Its condition is read strictly: exactly
 /// one element, and that element 0 or 1. `{2:1 ⋄ 0}`, `{1 1:1 ⋄ 0}`,
 /// `{⍬:1 ⋄ 0}` and `{'x':1 ⋄ 0}` are all refused, where a control
@@ -612,7 +679,7 @@ fn eval_control(
                     return Ok((t, flow));
                 }
                 let taken = match &t {
-                    Some(v) => is_true(v, span)?,
+                    Some(v) => condition_holds(v, ctx, span)?,
                     None => true,
                 };
                 if taken {
@@ -634,7 +701,7 @@ fn eval_control(
                         return Ok((t, flow));
                     }
                     let mut go = match &t {
-                        Some(v) => is_true(v, span)?,
+                        Some(v) => condition_holds(v, ctx, span)?,
                         None => false,
                     };
                     if *until {
@@ -656,19 +723,22 @@ fn eval_control(
                 }
             }
         }
-        Control::For { name, source, body } => {
+        Control::For { names, source, body } => {
             let src = eval(source, ctx, rec)?;
             let n = if src.rank() == 0 { 1 } else { src.shape[0] };
             let mut last = None;
             for i in 0..n {
-                if let Some(name) = name {
+                if !names.is_empty() {
                     let item = if src.rank() == 0 { src.clone() } else { src.item(i) };
-                    ctx.env.assign(name.clone(), item, Scope::Local);
-                    ctx.env.assign(
-                        format!("{name}_index"),
-                        Array::scalar_i64(i as i64),
-                        Scope::Local,
-                    );
+                    // APL binds the item's CONTENTS — `:For p :In (1 2)(3 4)`
+                    // gives `p` a pair of numbers, not an enclosure of one —
+                    // where J leaves its boxes shut.
+                    let item = if ctx.cfg.rules.lang == Lang::Apl {
+                        crate::verb::open_cell(&item)
+                    } else {
+                        item
+                    };
+                    bind_for_names(names, &item, i, ctx, span)?;
                 }
                 let (v, flow) = run_block(body, last, ctx, rec)?;
                 last = v;
@@ -698,7 +768,15 @@ fn eval_control(
                             }
                             // The reference compares with match (`-:`), not
                             // membership: `case. 1 2` takes the list 1 2.
-                            running = t.is_some_and(|v| arrays_match(&subject, &v, tol));
+                            // `:CaseList 1 2` is the membership arm, and
+                            // takes either.
+                            running = t.is_some_and(|v| {
+                                if case.list {
+                                    any_item_matches(&subject, &v, tol)
+                                } else {
+                                    arrays_match(&subject, &v, tol)
+                                }
+                            });
                         }
                     }
                 }

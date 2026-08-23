@@ -343,7 +343,7 @@ conjunctions above:
 | `⍢` under | 🟡 no oracle, and no reference either: GNU APL rejects the glyph and Dyalog 20.0 answers `SYNTAX ERROR: Invalid token` (recorded in `corpus/apl/dyalog-operators.txt`), so ours is an extension — `g⍣¯1 ⊢ (g x) f (g y)`, over the same obverse table J's `&.:` uses |
 | `⌸` key | 🟡 no oracle: GNU APL rejects it; Dyalog's, with the operand taking the key and its group |
 | `⌺` stencil | 🟡 no oracle: GNU APL rejects it; Dyalog's monadic-window form — one size per leading axis, the windows centred and the edges filled. The two-row form that also gives the movement is named |
-| `.` inner product | 🟢 `f.g` is `f/¨` over the outer product: `+.×` is the matrix product, `∧.=` asks which rows match. Each vector along x's last axis meets each vector along y's first under g, f folds the result, and the each encloses it |
+| `.` inner product | 🟢 `f.g` is `f/¨` over the outer product: `+.×` is the matrix product, `∧.=` asks which rows match. Each vector along x's last axis meets each vector along y's first under g, f folds the result, and the each encloses it. `Dialect.inner_each` names Dyalog's reading, which puts the each on the pairing instead — g meets one element from each side and the fold's own value is the cell |
 | `⍠` variant | 🟡 one dialect setting overridden for one application: `⎕CT` (the principal option, so a bare number sets it) and `⎕IO`, as literal options — `=⍠0`, `⍳⍠('IO' 0)`. Another option, or one that is not settled when the program is compiled, is named. No oracle: GNU APL rejects the glyph, and Dyalog takes a variant only on its search-and-replace family — both `=⍠0` and `⍳⍠('IO' 0)` are a DOMAIN ERROR there, recorded in `corpus/apl/dyalog-operators.txt` |
 | `&` spawn | ⚪ starts an APL thread, which the sandbox does not open — as J's `T.` and `t.` do not |
 
@@ -368,7 +368,7 @@ conjunctions above:
 | Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟢 two presets — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default, and `Dialect::dyalog()` (`APL.Dialect.dyalog` in Python). Every point where the lineages diverge is a setting on it: `⎕CT`, `↑`/`⊃`, `⌷`, dyadic `⊂`, `≡`'s sign, the dfn result, the nested grade, dyadic `⍳`'s left rank and trains are all implemented in both readings; the nested model, `⍺←`'s laziness and the complex order are implemented in one, and asking for the other is refused as not implemented yet |
 | `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS`), read-only; the ones that read a clock or a filesystem are ⚪ closed by the sandbox (`ErrorKind::Sandbox`) |
 | `⎕FX` | 🟢 fix a definition from its lines, answering with its name — the same lines a `∇ … ∇` takes, control words included. 🟡 the lines must be literal text the compiler can read: one assembled at run time, or a `⎕FX` inside another definition's body, is named as a gap |
-| Control structures `:If :While :Repeat :For :Select` | 🟡 GNU APL rejects them, so the oracle is Dyalog's recording in `corpus/apl/dyalog-control.txt`, which `⎕FX` now reaches: 68 of its 79 expressions agree. `:AndIf`, `:OrIf`, `:CaseList` and `:For a b :In` are named gaps |
+| Control structures `:If :While :Repeat :For :Select :AndIf :OrIf :CaseList` | 🟡 GNU APL rejects them, so the oracle is Dyalog's recording in `corpus/apl/dyalog-control.txt`: all 79 of its expressions agree. `:AndIf` and `:OrIf` short-circuit the condition above them, `:CaseList` takes any one of its items, `:For a b :In` takes each item apart, `:For` binds an item's contents, a body may call a function the program fixes after it, and a control structure may stand outside a definition |
 | `:Return` `:Leave` `:Continue` | 🟡 the same recording; `:Leave` outside a loop is accepted here and refused there |
 | Exact-or-scalar conformability | 🟢 |
 | `¯` negatives, `1E3` exponents | 🟢 |
@@ -381,15 +381,15 @@ conjunctions above:
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
 APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
 a preset of the dialect object rather than a second engine:
-`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1941 of the
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1967 of the
 2012 expressions Dyalog 20.0 has been recorded on — the default answers
-1796 of them — and the 71 it does not are itemised below.
+1805 of them — and the 45 it does not are itemised below.
 
 That is a GATE, not a measurement: `cargo test -p libjay --test
 oracle_dyalog` replays the recorded `dyalog:` column under the preset and
 fails on any expression not on the exemption list,
 `crates/libjay/tests/expected/dyalog.txt`. The list carries a reason per
-row — 23 of them a divergence libjay keeps on purpose, 48 a gap — and the
+row — 23 of them a divergence libjay keeps on purpose, 22 a gap — and the
 `Tag` column below is the tag those gap rows name, so closing a row here
 deletes its exemptions and tightens the gate. Nothing is exempt silently.
 `jay-corpus stats apl --dialect-diff --dialect dyalog` measures the same
@@ -405,9 +405,13 @@ depth of an array whose items do not share one; a dfn answers with its
 first sentence that is not an assignment; a nested grade uses the total
 array ordering; dyadic `⍳` takes a vector on its left and gives a rank
 error for anything else; a near-integer count is admitted relatively,
-scaled by `⎕CT`; `⌊` and `⌈` scale their step by the magnitude; and `⊤`
-takes its digits exactly. The preset is Dyalog's default `⎕ML`, which is
-what the recording ran under.
+scaled by `⎕CT`; `⌊` and `⌈` scale their step by the magnitude; `⊤`
+takes its digits exactly; an inner product `f.g` puts the each on the
+PAIRING rather than on the fold, so `g` meets one element from each side
+and the fold's own value is the cell; and a control structure is read
+strictly, refusing a condition that is not a single value and a `:Leave`
+outside a loop. The preset is Dyalog's default `⎕ML`, which is what the
+recording ran under.
 
 Where it differs, every row of it exempted by name in
 `tests/expected/dyalog.txt`. `Tag` is the tag those rows carry: 🔴 is a
@@ -416,12 +420,9 @@ keeps.
 
 | Cause | Tag | Rows | Status |
 |---|---|---|---|
-| Inner product `f.g` where `g` is not a scalar function (`+.,`, `,.+`, `∨.∧` on nested) | `inner-product` | 15 | 🔴 the two lines nest the intermediate differently; libjay follows GNU APL. The Life idiom is the visible casualty |
-| Control words libjay does not have — `:AndIf`, `:OrIf`, `:CaseList`, `:For a b :In` — a `:For` that does not disclose its items, a definition naming one fixed after it, and a top-level `:If` | `control-words` | 9 | 🔴 the rest of `dyalog-control.txt` now that `⎕FX` reaches it |
 | `⎕R` and `⎕S` | `regex` | 5 | 🔴 refused by name; pure computation, so the sandbox is no obstacle — they are simply not written |
 | A SHY result: a dfn whose answer came from an assignment has one, and the session does not print it (`{a←⍵×2} 5` shows nothing, `⎕←F 5` shows `10`) | `shy-result` | 4 | 🔴 libjay has no channel for either — every call yields a value, every value at the top level is printed, and there is no `⎕←` |
 | Complex floor and ceiling | `complex-floor` | 2 | 🔴 Dyalog rounds to a Gaussian integer of the fundamental parallelogram; libjay takes each part |
-| Two places libjay's control structures accept what Dyalog refuses: a `:If` condition that is not a singleton, and `:Leave` outside a loop | `control-strictness` | 2 | 🔴 |
 | The obverse of a bound verb — `(2∘↑)⍣¯1` — and of an operand known only at run time | `obverse-of-bond` | 2 | 🔴 the obverse table reads the verb tree, and neither is in it |
 | An operand in PARENTHESES to the right of an operator: `=⍥(2∘|)`, `⌽HALF (2∘↑)` | `operand-parens` | 2 | 🔴 the operator folder reaches it before the `)` has closed — a parser ordering gap, not a missing meaning |
 | Two singletons of different rank conforming (`(1 1⍴5)+,3`) | `singleton-rank` | 2 | 🔴 the higher rank wins there, the first argument here |
@@ -437,7 +438,6 @@ keeps.
 | `⍠` with an option Dyalog's variant does not offer | `variant-extension` | 3 | ⚪ the same rule |
 | A `{name}` dfn whose whole body is one identifier, which libjay reads as an interpolation hole (`a←1 ⋄ F←{{a} ⍵} ⋄ F 0`) | `name-hole` | 2 | ⚪ the brace-binding syntax is a fixed point of the embedding; the collision is real APL and has no answer yet |
 | A diamond-separated sentence's value | `sequence-value` | 1 | ⚪ the block model: the last sentence's value, and nothing prints on the way |
-| `⍴⍕` of a nested array | `nested-format` | 1 | ⚪ one space between items here, two there |
 | `⍬≡0⍴⊂⍬` | `empty-prototype` | 1 | ⚪ an empty nested array carries no prototype here |
 | A derived function displayed where a value belongs (`×∘2 5`) | `function-display` | 1 | ⚪ Dyalog shows the function's source; libjay has no display for one |
 | `6 2⍕'a'` | `format-character` | 1 | ⚪ dyadic `⍕` pads a character here, as GNU APL does |

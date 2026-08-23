@@ -119,66 +119,6 @@ a←1 ⋄ F←{{a} ⍵} ⋄ F 0
 ○⍣¯1⊢0
 ? divergence obverse-table: dividing by zero there, zero here
 
-// --- gap inner-product (15) ---------------------------------------------
-// An inner product `f.g` whose right operand is not a scalar function: the
-// two lines nest the intermediate differently, and libjay follows GNU APL.
-// The Life idiom is the visible casualty. docs/status.md, the first row of
-// the Dyalog table.
-≡1 2,.+3 4
-? gap inner-product: the intermediate nests one level deeper here
-≡(2 2⍴⍳4),.+2 2⍴⍳4
-? gap inner-product: the intermediate nests one level deeper here
-(2 2⍴⍳4),.,2 2⍴⍳4
-? gap inner-product: the intermediate nests one level deeper here
-≡(2 2⍴⍳4),.,2 2⍴⍳4
-? gap inner-product: the intermediate nests one level deeper here
-∊(2 2⍴⍳4),.,2 2⍴⍳4
-? gap inner-product: the intermediate nests one level deeper here
-(1 2)(3 4)+.,(5 6)(7 8)
-? gap inner-product: the intermediate nests one level deeper here
-≡(1 2)(3 4)+.,(5 6)(7 8)
-? gap inner-product: the intermediate nests one level deeper here
-1 2+.,3 4
-? gap inner-product: the intermediate nests one level deeper here
-≡1 (2 2⍴1 0 0 1)∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 2⍴1 1 1 0
-? gap inner-product: the intermediate nests one level deeper here
-⊃↑1 (2 2⍴1 0 0 1)∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 2⍴1 1 1 0
-? gap inner-product: the intermediate nests one level deeper here
-world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⊃{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
-? gap inner-product: the intermediate nests one level deeper here
-world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⍴⊃{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
-? gap inner-product: the intermediate nests one level deeper here
-world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ≡{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
-? gap inner-product: the intermediate nests one level deeper here
-world←2 2 2 2⊤0 12 5 2 4 1 ⋄ LIFE←{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} ⋄ ⊃LIFE ⊃LIFE world
-? gap inner-product: the intermediate nests one level deeper here
-(2 2⍴1 2 3 4)+.,2 2⍴1 2 3 4
-? gap inner-product: the intermediate nests one level deeper here
-
-// --- gap control-words (9) ----------------------------------------------
-// Control words the compiler does not know — `:AndIf`, `:OrIf`, `:CaseList`,
-// `:For a b :In` — a `:For` that does not disclose the item it binds, a
-// definition naming a function fixed after it, and a control structure
-// outside a definition.
-n←⎕FX 'Z←F R' ':If R>0' ':AndIf R<10' 'Z←''in''' ':Else' 'Z←''out''' ':EndIf' ⋄ (F 5),(F 50)
-? gap control-words: a control word libjay does not have
-n←⎕FX 'Z←F R' ':If R<0' ':OrIf R>10' 'Z←''out''' ':Else' 'Z←''in''' ':EndIf' ⋄ (F 5),(F 50)
-? gap control-words: a control word libjay does not have
-n←⎕FX 'Z←F R' ':If R>0' ':AndIf 0=2|R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F¨¯2 ¯1 1 2
-? gap control-words: a control word libjay does not have
-n←⎕FX 'Z←F R' 'Z←0' ':While R>0' ':AndIf Z<3' 'Z←Z+1' 'R←R-1' ':EndWhile' ⋄ F 10
-? gap control-words: a control word libjay does not have
-n←⎕FX 'Z←F R' 'Z←⍬' ':For p :In R' 'Z←Z,+/p' ':EndFor' ⋄ F (1 2)(3 4 5)
-? gap control-words: a control word libjay does not have
-n←⎕FX 'Z←F R' 'Z←⍬' ':For a b :In R' 'Z←Z,a×b' ':EndFor' ⋄ F (1 2)(3 4)
-? gap control-words: a control word libjay does not have
-n←⎕FX 'Z←F R' ':Select R' ':CaseList 1 2 3' 'Z←''low''' ':CaseList 4 5 6' 'Z←''high''' ':Else' 'Z←''off''' ':EndSelect' ⋄ F¨1 4 9
-? gap control-words: a control word libjay does not have
-n←⎕FX 'Z←F R' ':If R>0' 'Z←G R' ':Else' 'Z←0' ':EndIf' ⋄ m←⎕FX 'Z←G R' 'Z←R×3' ⋄ F 5
-? gap control-words: a control word libjay does not have
-:If 1 ⋄ 5 ⋄ :EndIf
-? gap control-words: a control word libjay does not have
-
 // --- gap regex (5) ------------------------------------------------------
 // `⎕R` and `⎕S`. Pure computation, so the sandbox is no obstacle; they are
 // simply not written.
@@ -214,14 +154,6 @@ F←{r←⍵×2} ⋄ ⎕←F 5
 ? gap complex-floor: the complex floor is taken per part here
 ⌈3.5J4.5
 ? gap complex-floor: the complex floor is taken per part here
-
-// --- gap control-strictness (2) -----------------------------------------
-// Two places libjay's control structures accept what Dyalog refuses: a `:If`
-// condition that is not a singleton, and a `:Leave` outside a loop.
-n←⎕FX 'Z←F R' ':If R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 1 1
-? gap control-strictness: accepted here, refused there
-n←⎕FX 'Z←F R' 'Z←0' ':Leave' ⋄ F 1
-? gap control-strictness: accepted here, refused there
 
 // --- gap obverse-of-bond (2) --------------------------------------------
 // The obverse of a bound verb, and of an operand known only at run time: the

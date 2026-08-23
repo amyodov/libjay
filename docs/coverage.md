@@ -257,6 +257,17 @@ elements. Where g is a scalar function — which is every published use — the
 two readings are the same value, and libjay computes it by the J route,
 under the leading-axis pairing that route needs.
 
+The two APL lines part again over where the EACH in the definition sits,
+which `Dialect.inner_each` names. GNU APL puts it on the fold — `f/¨
+(⊂[last]x) ∘.g (⊂[first]y)` — so g meets a whole vector from each side and
+what the fold makes of a pair is enclosed once more. Dyalog puts it on the
+pairing — `f/ row g¨ column` — so g meets one ELEMENT from each side and
+the fold's own value stands as the cell. `1 2+.,3 4` is `10` under the
+first and an enclosed `3 7` under the second; `(2 2⍴⍳4),.,2 2⍴⍳4` opens
+with `1 2 1 3` there and `1 1 2 3` here. Every scalar g whose fold ends in
+a number agrees under both, which is why `+.×` is one sentence in either
+reading and John Scholes' Life one-liner differs only in depth.
+
 `+/ . *` and `+.×` over real machine numbers do not go through the cell
 machinery at all: the product runs as a blocked pass over the two buffers,
 blocked on the shared axis so that a slice of y is reused across a block of
@@ -562,11 +573,14 @@ than within an absolute `1E¯10`), `Dialect.floor_rule` (`⌊` and `⌈` scale
 their step by the magnitude) and `Dialect.encode_digits` (`⊤` takes its
 digits exactly rather than as tolerant residues).
 
+Two more are structural: `Dialect.inner_each` (an inner product puts
+the each on the PAIRING rather than on the fold — see "The inner product"
+above) and `Dialect.control_strictness` (a control structure's condition is
+a single value, and `:Leave` belongs to a loop).
+
 What the preset still leaves at the GNU reading, and what that costs
 against the recording, is the table in [status.md](status.md), "APL — the
-Dyalog line". The largest items are the inner product with a non-scalar
-right operand, the control words libjay has not written, and a dfn's SHY
-result.
+Dyalog line". The largest items are `⎕R`/`⎕S` and a dfn's SHY result.
 
 | Glyph | Monadic | Dyadic |
 |---|---|---|
@@ -1370,13 +1384,30 @@ atom `1`.
 supported yet" — goes straight through it: swallowing a promise would turn
 it into a wrong answer.
 
-APL's `:If :ElseIf :Else :EndIf`, `:While :EndWhile`, `:Repeat :Until`,
-`:For … :In … :EndFor`, `:Select :Case :Else :EndSelect`, `:Return`,
-`:Leave` and `:Continue` work inside a `∇`-definition; `:End` closes any of
-them. There is no oracle for any of this — GNU APL raises a SYNTAX ERROR for
-every one of these words — so they follow the published specification and
-are tested in `crates/libjay/tests/definitions.rs` rather than in the
-corpus.
+APL's `:If :ElseIf :Else :EndIf`, `:AndIf`, `:OrIf`, `:While :EndWhile`,
+`:Repeat :Until`, `:For … :In … :EndFor`, `:Select :Case :CaseList :Else
+:EndSelect`, `:Return`, `:Leave` and `:Continue` work inside a
+`∇`-definition and outside one alike; `:End` closes any of them. GNU APL
+raises a SYNTAX ERROR for every one of these words, so the oracle is
+Dyalog's recording in `corpus/apl/dyalog-control.txt`, and
+`crates/libjay/tests/definitions.rs` carries the rest.
+
+`:AndIf` and `:OrIf` continue the `:If`, `:ElseIf`, `:While` or `:Until`
+line above them, and both short-circuit: the second test does not run where
+the first has settled the answer. `:CaseList` takes the arm where the
+subject matches ANY ONE of the list's items, where `:Case` compares the
+list as a whole. `:For` binds an item's CONTENTS — `:For p :In (1 2)(3 4)`
+gives `p` a pair of numbers, not an enclosure of one — and several names
+take each item apart between them, one of its own items each. A body may
+call a function the program fixes AFTER it: APL settles a name's class when
+the line runs, so every name a `∇` or `⎕FX` in the program gives a function
+stands for a verb resolved when it is applied.
+
+`Dialect.control_strictness` names how strictly a structure reads what it
+is given. The shipped reading is lenient: a condition is true where its
+first atom is, and a `:Leave` outside a loop leaves the definition. Dyalog
+reads both strictly and says so instead — `:If 1 1` is an error there, and
+a `:Leave` needs its loop.
 
 APL's own control flow, the one the reference does have, is the BRANCH. A
 line of a `∇`-definition may begin with a label — `L1:` — and `→` takes a

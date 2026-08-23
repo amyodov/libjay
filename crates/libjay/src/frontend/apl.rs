@@ -12,8 +12,8 @@ use std::sync::Arc;
 use crate::array::{Array, Data};
 use crate::error::{Error, Result, Span};
 use crate::frontend::{
-    DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, LookupLeft, NestedModel, Partition,
-    Rules, Segment, SourceParts,
+    ControlStrictness, DefaultArg, DepthSign, DfnResult, FirstDisclose, IndexForm, LookupLeft,
+    NestedModel, Partition, Rules, Segment, SourceParts,
 };
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
@@ -28,12 +28,31 @@ use crate::verb::{
 pub fn parse(src: &SourceParts, d: Rules) -> Result<Vec<Expr>> {
     let sentences = lex(src, d)?;
     let mut verbs: HashMap<String, Verb> = HashMap::new();
+    for name in fixed_names(&sentences, d) {
+        verbs.entry(name.clone()).or_insert_with(|| Verb::Named(name.clone()));
+    }
     let mut stmts = Vec::with_capacity(sentences.len());
     let mut i = 0usize;
     while i < sentences.len() {
         if matches!(sentences[i].first().map(|t| &t.kind), Some(Tok::Del)) {
             let stmt = parse_tradfn(&sentences, &mut i, d, &mut verbs)?;
             stmts.push(stmt);
+            continue;
+        }
+        // A control structure standing on its own, outside any definition:
+        // its sentences are the lines of a body with nothing around them.
+        if let Some(Tok::Control(w)) = sentences[i].first().map(|t| &t.kind)
+            && matches!(*w, "If" | "While" | "Repeat" | "For" | "Select")
+        {
+            let end = control_block_end(&sentences, i).unwrap_or(sentences.len());
+            let mut items = Vec::with_capacity(end - i);
+            for line in &sentences[i..end] {
+                let mut label = None;
+                items.push(to_item(line.clone(), d, &mut verbs, &mut label)?);
+            }
+            let mut cursor = AplCursor { items: &items, at: 0, d, loops: 0 };
+            stmts.push(parse_apl_control(&mut cursor)?);
+            i = end;
             continue;
         }
         let mut sentence = sentences[i].clone();
@@ -55,6 +74,67 @@ pub fn parse(src: &SourceParts, d: Rules) -> Result<Vec<Expr>> {
         }
     }
     Ok(stmts)
+}
+
+/// The functions the program fixes anywhere in it, by name.
+///
+/// APL settles a name's class when the line runs; libjay compiles first, so
+/// a definition whose body calls a function fixed AFTER it would have
+/// nothing to call. The names every `∇` and `⎕FX` in the program gives a
+/// function are therefore collected before anything is parsed, and each
+/// stands as a verb resolved when it is applied — the definition it names
+/// has been fixed by then. A header this cannot read is skipped: parsing
+/// the definition itself reports the fault.
+fn fixed_names(sentences: &[Vec<Token>], d: Rules) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in sentences {
+        let head = match line.first().map(|t| &t.kind) {
+            Some(Tok::Del) => line[1..].to_vec(),
+            _ => {
+                let Some(at) = line.iter().position(|t| matches!(t.kind, Tok::QuadFx)) else {
+                    continue;
+                };
+                let Some(Tok::Value(a)) = line.get(at + 1).map(|t| &t.kind) else {
+                    continue;
+                };
+                let Data::Char(cs) = &a.data else { continue };
+                if a.rank() > 1 {
+                    continue;
+                }
+                let text: String = cs.iter().collect();
+                let src = SourceParts::from_parts(&[&text], &[]);
+                match lex(&src, d) {
+                    Ok(mut lexed) if lexed.len() == 1 => lexed.pop().unwrap_or_default(),
+                    _ => continue,
+                }
+            }
+        };
+        let Some(first) = head.first() else { continue };
+        if let Ok((name, ..)) = parse_header(&head, first.span) {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// The sentence after the one that closes the control structure opening at
+/// `at`. None where nothing closes it, which the block parser reports.
+fn control_block_end(sentences: &[Vec<Token>], at: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (k, line) in sentences.iter().enumerate().skip(at) {
+        let Some(Tok::Control(w)) = line.first().map(|t| &t.kind) else { continue };
+        match *w {
+            "If" | "While" | "Repeat" | "For" | "Select" => depth += 1,
+            "EndIf" | "EndWhile" | "EndFor" | "EndSelect" | "Until" | "End" => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(k + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Where a `⎕FX` stands in a sentence of its own rather than inside a dfn's
@@ -195,11 +275,11 @@ fn parse_statement(
         }
         return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
     }
+    // A control word that opens a structure is taken before the sentence
+    // is; anything left here continues or closes one that never opened.
     if let Some(t) = toks.iter().find(|t| matches!(t.kind, Tok::Control(_))) {
-        return Err(Error::parse(
-            "control structures are only meaningful inside a ∇ definition",
-            t.span,
-        ));
+        let Tok::Control(w) = t.kind else { unreachable!() };
+        return Err(Error::parse(format!(":{w} has no matching opening word"), t.span));
     }
     if let Some(t) = toks.iter().find(|t| matches!(t.kind, Tok::Arrow)) {
         return Err(Error::parse(
@@ -2434,9 +2514,10 @@ fn match_lparen(toks: &[Token], lo: usize, rparen: usize) -> Result<usize> {
 /// APL's control words, without their colon. `:End` closes any of the
 /// structures, which is the spelling GNU APL's manual gives as an
 /// alternative to the named closers.
-const CONTROL_WORDS: [&str; 18] = [
-    "If", "ElseIf", "Else", "EndIf", "While", "EndWhile", "Repeat", "Until", "For", "In",
-    "EndFor", "Select", "Case", "EndSelect", "Return", "Leave", "Continue", "End",
+const CONTROL_WORDS: [&str; 21] = [
+    "If", "ElseIf", "Else", "EndIf", "AndIf", "OrIf", "While", "EndWhile", "Repeat", "Until",
+    "For", "In", "EndFor", "Select", "Case", "CaseList", "EndSelect", "Return", "Leave",
+    "Continue", "End",
 ];
 
 /// The control word a `:name` spells, case-insensitively as the references
@@ -2812,7 +2893,7 @@ fn build_tradfn(
         items.push(item);
     }
     let item_count = items.len();
-    let mut cursor = AplCursor { items: &items, at: 0, d };
+    let mut cursor = AplCursor { items: &items, at: 0, d, loops: 0 };
     let mut body = parse_apl_block(&mut cursor, &[])?;
     // A label is the number of a LINE, so the statements have to be the
     // lines: a control structure folds several of them into one and the
@@ -2968,6 +3049,9 @@ struct AplCursor<'a> {
     at: usize,
     /// The dialect, for the sentences a control word carries.
     d: Rules,
+    /// How many loops enclose the position being parsed, which is what
+    /// decides whether a `:Leave` has one to leave.
+    loops: usize,
 }
 
 impl<'a> AplCursor<'a> {
@@ -2983,6 +3067,14 @@ impl<'a> AplCursor<'a> {
         self.items
             .get(self.at.saturating_sub(1))
             .map_or_else(|| Span::new(0, 0), AplItem::span)
+    }
+
+    /// Parse a loop's body, with the loop counted around it.
+    fn in_loop<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.loops += 1;
+        let out = f(self);
+        self.loops -= 1;
+        out
     }
 
     /// Consume the closing word, which may also be spelled `:End`.
@@ -3031,8 +3123,14 @@ fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
             let mut test = rest;
             loop {
                 let test_expr = condition(test, start, cur.d)?;
+                let test_expr = continued_condition(cur, test_expr)?;
                 let body = parse_apl_block(cur, &["ElseIf", "Else", "EndIf"])?;
-                arms.push(Branch { test: Some(vec![test_expr]), body, fall_through: false });
+                arms.push(Branch {
+                    test: Some(vec![test_expr]),
+                    body,
+                    fall_through: false,
+                    list: false,
+                });
                 match cur.peek_word() {
                     Some("ElseIf") => {
                         let Some(AplItem::Word { rest, .. }) = cur.peek() else { unreachable!() };
@@ -3055,7 +3153,8 @@ fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
         }
         "While" => {
             let test = condition(rest, start, cur.d)?;
-            let body = parse_apl_block(cur, &["EndWhile"])?;
+            let test = continued_condition(cur, test)?;
+            let body = cur.in_loop(|cur| parse_apl_block(cur, &["EndWhile"]))?;
             cur.close("EndWhile")?;
             Control::While { test: vec![test], body, body_first: false, until: false }
         }
@@ -3063,40 +3162,50 @@ fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
             if !rest.is_empty() {
                 return Err(Error::parse(":Repeat takes no condition", start));
             }
-            let body = parse_apl_block(cur, &["Until"])?;
+            let body = cur.in_loop(|cur| parse_apl_block(cur, &["Until"]))?;
             let Some(AplItem::Word { rest, span, .. }) = cur.peek() else {
                 return Err(Error::parse("this :Repeat needs an :Until", cur.last_span()));
             };
-            let test = condition(rest.clone(), *span, cur.d)?;
+            let (rest, span) = (rest.clone(), *span);
+            let test = condition(rest, span, cur.d)?;
             cur.at += 1;
+            let test = continued_condition(cur, test)?;
             Control::While { test: vec![test], body, body_first: true, until: true }
         }
         "For" => {
-            // `:For name :In source`.
-            let (name, source) = for_header(&rest, start, cur.d)?;
-            let body = parse_apl_block(cur, &["EndFor"])?;
+            // `:For name… :In source`.
+            let (names, source) = for_header(&rest, start, cur.d)?;
+            let body = cur.in_loop(|cur| parse_apl_block(cur, &["EndFor"]))?;
             cur.close("EndFor")?;
-            Control::For { name: Some(name), source: Box::new(source), body }
+            Control::For { names, source: Box::new(source), body }
         }
         "Select" => {
             let subject = condition(rest, start, cur.d)?;
             let mut cases = Vec::new();
             loop {
                 match cur.peek() {
-                    Some(AplItem::Word { word: "Case", rest, span }) => {
+                    Some(AplItem::Word { word: w @ ("Case" | "CaseList"), rest, span }) => {
+                        let list = *w == "CaseList";
                         let test = condition(rest.clone(), *span, cur.d)?;
                         cur.at += 1;
-                        let body = parse_apl_block(cur, &["Case", "Else", "EndSelect"])?;
+                        let body =
+                            parse_apl_block(cur, &["Case", "CaseList", "Else", "EndSelect"])?;
                         cases.push(Branch {
                             test: Some(vec![test]),
                             body,
                             fall_through: false,
+                            list,
                         });
                     }
                     Some(AplItem::Word { word: "Else", .. }) => {
                         cur.at += 1;
                         let body = parse_apl_block(cur, &["EndSelect"])?;
-                        cases.push(Branch { test: None, body, fall_through: false });
+                        cases.push(Branch {
+                            test: None,
+                            body,
+                            fall_through: false,
+                            list: false,
+                        });
                         cur.close("EndSelect")?;
                         break;
                     }
@@ -3109,13 +3218,59 @@ fn parse_apl_control(cur: &mut AplCursor<'_>) -> Result<Expr> {
             Control::Select { subject: Box::new(subject), cases }
         }
         "Return" => Control::Return,
-        "Leave" => Control::Break,
-        "Continue" => Control::Continue,
+        // Dyalog wants a loop around `:Leave` and `:Continue`; the lenient
+        // reading lets a stray one leave the definition instead.
+        "Leave" | "Continue" => {
+            if cur.loops == 0 && cur.d.control_strictness == ControlStrictness::Strict {
+                return Err(Error::parse(format!(":{word} belongs inside a loop"), start));
+            }
+            if word == "Leave" { Control::Break } else { Control::Continue }
+        }
         other => {
             return Err(Error::parse(format!(":{other} has no matching opening word"), start));
         }
     };
     Ok(Expr::Control(Box::new(control), Span::merge(start, cur.last_span())))
+}
+
+/// The `:AndIf` and `:OrIf` lines that continue the condition above them.
+///
+/// Both SHORT-CIRCUIT: the second test does not run where the first has
+/// settled the answer. A test is a block, whose value is its last
+/// sentence's, so the two cannot simply be listed; the continuation is an
+/// `:If` of its own instead, answering with the next test where the first
+/// leaves the question open and with the settled truth value where it does
+/// not. They chain left to right, `:AndIf` and `:OrIf` alike.
+fn continued_condition(cur: &mut AplCursor<'_>, mut test: Expr) -> Result<Expr> {
+    loop {
+        let (word, rest, span) = match cur.peek() {
+            Some(AplItem::Word { word: w @ ("AndIf" | "OrIf"), rest, span }) => {
+                (*w, rest.clone(), *span)
+            }
+            _ => return Ok(test),
+        };
+        cur.at += 1;
+        let next = condition(rest, span, cur.d)?;
+        let settled = Expr::Const(Array::scalar_bool(word == "OrIf"), span);
+        let (body, otherwise) = if word == "AndIf" {
+            (vec![next], vec![settled])
+        } else {
+            (vec![settled], vec![next])
+        };
+        let whole = Span::merge(test.span(), span);
+        test = Expr::Control(
+            Box::new(Control::If {
+                arms: vec![Branch {
+                    test: Some(vec![test]),
+                    body,
+                    fall_through: false,
+                    list: false,
+                }],
+                otherwise: Some(otherwise),
+            }),
+            whole,
+        );
+    }
 }
 
 /// The tokens after a control word, as one expression.
@@ -3135,23 +3290,28 @@ fn condition(rest: Vec<Token>, span: Span, d: Rules) -> Result<Expr> {
     }
 }
 
-/// `:For name :In source`.
-fn for_header(rest: &[Token], span: Span, d: Rules) -> Result<(String, Expr)> {
-    let Some(Tok::Name(name)) = rest.first().map(|t| &t.kind) else {
-        return Err(Error::parse(":For needs a name to bind", span));
-    };
+/// `:For name… :In source`. Several names take each item apart between
+/// them, one of its own items each.
+fn for_header(rest: &[Token], span: Span, d: Rules) -> Result<(Vec<String>, Expr)> {
     let Some(k) = rest.iter().position(|t| matches!(t.kind, Tok::Control("In"))) else {
         return Err(Error::parse(":For needs an :In", span));
     };
-    if k != 1 {
-        return Err(Error::not_yet("several :For names", span));
+    let mut names = Vec::with_capacity(k);
+    for t in &rest[..k] {
+        match &t.kind {
+            Tok::Name(n) => names.push(n.clone()),
+            _ => return Err(Error::parse(":For binds names, one per item", t.span)),
+        }
+    }
+    if names.is_empty() {
+        return Err(Error::parse(":For needs a name to bind", span));
     }
     let source = &rest[k + 1..];
     let Some(first) = source.first() else {
         return Err(Error::parse(":In needs a value", span));
     };
     let hint = Span::merge(first.span, source[source.len() - 1].span);
-    Ok((name.clone(), parse_prepared(source, hint, d)?))
+    Ok((names, parse_prepared(source, hint, d)?))
 }
 
 /// Parse a token run that has already had its names and dfns folded.

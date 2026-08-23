@@ -3226,3 +3226,59 @@ jconsole before and after: 55 mismatches with 15 obverse rows became 42
 with 1. The oracle also crashes on `(*:^:2)^:_1 ] 16` — a jconsole
 segfault, not a refusal — so that expression is out of the corpus and in
 the register.
+
+- 2026-08-23 — Dyalog wave 4: the inner product's each, and the control
+  words. Twenty-six of the preset's 71 exempt rows, in two groups.
+
+  **The each moves from the fold to the pairing.** libjay's `f.g` is the
+  GNU reading `f/¨ (⊂[last]x) ∘.g (⊂[first]y)`, and the each in it is
+  load-bearing: `1 2,.+3 4` is an enclosed `4 6`, one level deeper than the
+  fold alone would leave it. The recorded Dyalog answers say the each is on
+  the other half. Derived from the rows rather than from a definition:
+  `1 2+.,3 4` is `3 7` there and `10` here, so the `,` is not meeting the
+  two whole vectors but the two ELEMENTS at each position; and
+  `≡1 2,.+3 4` is 2 there and 3 here, so the fold's value is the cell
+  rather than something enclosed for an each to collect. Both differences
+  are one statement: Dyalog's is `f/ row g¨ column`, GNU's is
+  `f/¨ (row g column)`. `(2 2⍴⍳4),.,2 2⍴⍳4` opens with `1 1 2 3` under the
+  first and `1 2 1 3` under the second, and every one of the 15 rows —
+  including the four Life rows, where the `∨.∧` folds enclosed planes —
+  follows from it. Since a scalar `g` pervades, the two readings agree
+  wherever `g` is scalar AND the fold ends in a number, which is every
+  published use: `+.×` is one sentence in both, and the blocked matrix
+  product needed no change. `Dialect.inner_each` names the choice, and only
+  the general cell path reads it.
+
+  **`:AndIf` and `:OrIf` are an `:If` in the test.** A test is a block
+  whose value is its last sentence's, so a continuation cannot simply be
+  appended: `[A, B]` would run B whatever A answered and then take B's
+  value. The desugaring is an `If` node standing where the test was —
+  `:If A :AndIf B` becomes `if A then B else 0`, `:OrIf` becomes
+  `if A then 1 else B` — which short-circuits by construction and chains
+  left to right without a precedence rule. `:While`'s test is desugared the
+  same way and re-evaluated each iteration, which is what
+  `':While R>0' ':AndIf Z<3'` needs.
+
+  **The rest of the control group, and where each rule lives.** `:CaseList`
+  is a flag on `Branch` (`list`), read where `Select` compares; `:For a b
+  :In` turns `Control::For`'s one optional name into a list, and several
+  names take an item apart between them. Two rules are the LANGUAGE and not
+  the dialect: `:For` binds an item's contents in APL and its cell in J —
+  the same items-versus-cells fork `↑`, `↓` and `≡` already turn on — and a
+  control structure may stand outside a definition in APL, where J's
+  reference calls one at the top level a spelling error. Two are the
+  dialect, because Dyalog refuses what libjay answers:
+  `Dialect.control_strictness` makes a condition a single value and gives
+  `:Leave` a loop to belong to. And one is neither: a body calling a
+  function fixed AFTER it works because the names every `∇` and `⎕FX` in
+  the program will define are now collected before anything is parsed, each
+  standing as a `Verb::Named` resolved when it is applied. APL settles a
+  name's class when the line runs; libjay compiles first, and this is the
+  cheapest honest way to keep the two agreeing.
+
+  **What did not move.** GNU APL has no control structures at all — every
+  one of these words is a SYNTAX ERROR there — so nothing the GNU column
+  records could turn on them, and `record apl --check` confirms it. The
+  inner-product change is a dialect setting, so the shipped reading is
+  untouched: `--dialect-diff` with no flag went from 216 to 207, and all
+  nine are the control words the language now has in both presets.

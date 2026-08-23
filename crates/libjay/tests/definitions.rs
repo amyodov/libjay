@@ -365,7 +365,8 @@ fn a_del_definition_writes_globals_unless_the_header_declares_them() {
 }
 
 #[rstest]
-#[case(":If 1", "inside a ∇ definition")]
+#[case(":If 1", ":EndIf")]
+#[case(":Else ⋄ 5", "no matching opening word")]
 #[case("∇Z←F R\n:If R\nZ←1\n∇\nF 1", ":EndIf")]
 #[case("∇Z←F R\nZ←1\n:EndIf\n∇\nF 1", "no matching opening word")]
 #[case("∇Z←F R\nZ←1", "no closing ∇")]
@@ -389,7 +390,36 @@ fn apl_definition_diagnostics(#[case] src: &str, #[case] msg: &str) {
 #[case("N←⎕FX 'Z←F R' ':Select R' ':Case 1' 'Z←10' ':Else' 'Z←0' ':EndSelect' ⋄ F 1", 10)]
 #[case("N←⎕FX 'Z←F N' 'Z←0' 'L1:' '→(N=0)/E' 'Z←Z+N' 'N←N-1' '→L1' 'E:' ⋄ F 5", 15)]
 #[case("N←⎕FX 'Z←G R' 'Z←R×3' ⋄ M←⎕FX 'Z←F R' 'Z←G R' ⋄ F 5", 15)]
+// A body may call a function the program fixes AFTER it: the name stands
+// for a verb resolved when the line runs, and by then it has one.
+#[case("N←⎕FX 'Z←F R' 'Z←G R' ⋄ M←⎕FX 'Z←G R' 'Z←R×3' ⋄ F 5", 15)]
+// `:AndIf` and `:OrIf` continue the condition above them, and stop as soon
+// as it is settled: a second test that would fail never runs.
+#[case("N←⎕FX 'Z←F R' ':If R>0' ':AndIf R<10' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 5", 1)]
+#[case("N←⎕FX 'Z←F R' ':If R>0' ':AndIf R<10' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 50", 0)]
+#[case("N←⎕FX 'Z←F R' ':If R>0' ':AndIf R<0' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 5", 0)]
+#[case("N←⎕FX 'Z←F R' ':If R<0' ':OrIf R>10' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 50", 1)]
+#[case("N←⎕FX 'Z←F R' ':If 0' ':OrIf 0' ':OrIf 1' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 0", 1)]
+#[case("N←⎕FX 'Z←F R' 'Z←0' ':While R>0' ':AndIf Z<3' 'Z←Z+1' 'R←R-1' ':EndWhile' ⋄ F 10", 3)]
+// `:CaseList` takes any one of its items.
+#[case("N←⎕FX 'Z←F R' ':Select R' ':CaseList 1 2 3' 'Z←1' ':Else' 'Z←0' ':EndSelect' ⋄ F 2", 1)]
+#[case("N←⎕FX 'Z←F R' ':Select R' ':CaseList 1 2 3' 'Z←1' ':Else' 'Z←0' ':EndSelect' ⋄ F 9", 0)]
+// `:For` binds the item's CONTENTS, and several names take it apart.
+#[case("N←⎕FX 'Z←F R' 'Z←0' ':For P :In R' 'Z←Z++/P' ':EndFor' ⋄ F (1 2)(3 4 5)", 15)]
+#[case("N←⎕FX 'Z←F R' 'Z←⍬' ':For A B :In R' 'Z←Z,A×B' ':EndFor' ⋄ +/F (1 2)(3 4)", 14)]
 fn quad_fx_fixes_a_definition_from_its_lines(#[case] src: &str, #[case] want: i64) {
+    assert_eq!(apl(src), vec![want]);
+}
+
+/// A control structure standing on its own, outside any definition. Its
+/// value is the value of the last sentence the branch it chose ran, which
+/// is the block model every other sequence follows.
+#[rstest]
+#[case(":If 1 ⋄ 5 ⋄ :EndIf", 5)]
+#[case(":If 0 ⋄ 5 ⋄ :Else ⋄ 7 ⋄ :EndIf", 7)]
+#[case("T←0 ⋄ :For I :In 1 2 3 4 ⋄ T←T+I ⋄ :EndFor ⋄ T", 10)]
+#[case("T←1 ⋄ N←5 ⋄ :While N>1 ⋄ T←T×N ⋄ N←N-1 ⋄ :EndWhile ⋄ T", 120)]
+fn a_control_structure_stands_outside_a_definition(#[case] src: &str, #[case] want: i64) {
     assert_eq!(apl(src), vec![want]);
 }
 

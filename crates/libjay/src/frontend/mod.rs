@@ -219,6 +219,43 @@ pub enum EncodeDigits {
     Exact,
 }
 
+/// How strictly a control structure reads what it is given.
+///
+/// The lenient reading is the one both languages ship: a condition is true
+/// where its first atom is, whatever else it holds, and a `:Leave` outside
+/// a loop leaves the definition. Dyalog reads both strictly — a condition
+/// is one element and no more, and `:Leave` belongs to a loop — and says so
+/// rather than answering. GNU APL has no control structures at all, so
+/// nothing it records turns on this.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlStrictness {
+    /// The first atom decides, and a stray `:Leave` is a return.
+    #[default]
+    Lenient,
+    /// Dyalog: a condition is a single value, and `:Leave` needs its loop.
+    Strict,
+}
+
+/// Where the each in the inner product's definition sits.
+///
+/// `f.g` is a fold over a pairing, and the two lines put the each on
+/// different halves of it. GNU APL puts it on the FOLD — `f/¨ (⊂[last]x)
+/// ∘.g (⊂[first]y)` — so `g` meets one whole vector from each side and what
+/// the fold makes of a pair is enclosed once more. Dyalog puts it on the
+/// PAIRING — `f/ row g¨ column` — so `g` meets one element from each side
+/// and the fold's own value stands as the cell. `1 2+.,3 4` is `10` under
+/// the first and an enclosed `3 7` under the second. The two agree wherever
+/// `g` is a scalar function and the fold ends in a number, which is every
+/// published use, so `+.×` and the Life idiom's `∨.∧` differ only in depth.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InnerEach {
+    /// GNU APL: `f/¨` over the outer product.
+    #[default]
+    OnFold,
+    /// Dyalog: `f/` over `g¨`.
+    OnPair,
+}
+
 /// Dialect settings supplied by the host.
 ///
 /// This is what a host asks for; [`Rules`] is what the compiler and the
@@ -252,6 +289,8 @@ pub struct Dialect {
     pub near_count: NearCount,
     pub floor_rule: FloorRule,
     pub encode_digits: EncodeDigits,
+    pub inner_each: InnerEach,
+    pub control_strictness: ControlStrictness,
     /// Whether a function may stand where a value belongs: a run of
     /// functions is then a train, and `F←+/` names one. Both readings are
     /// implemented, so this is a choice and not a gap. It ships on, as an
@@ -290,6 +329,8 @@ impl Dialect {
             near_count: NearCount::Absolute,
             floor_rule: FloorRule::Shift,
             encode_digits: EncodeDigits::Tolerant,
+            inner_each: InnerEach::OnFold,
+            control_strictness: ControlStrictness::Lenient,
             trains: true,
         }
     }
@@ -320,6 +361,8 @@ impl Dialect {
             near_count: NearCount::Tolerant,
             floor_rule: FloorRule::Scaled,
             encode_digits: EncodeDigits::Exact,
+            inner_each: InnerEach::OnPair,
+            control_strictness: ControlStrictness::Strict,
             trains: true,
         }
     }
@@ -395,6 +438,8 @@ impl Dialect {
             near_count: self.near_count,
             floor_rule: self.floor_rule,
             encode_digits: self.encode_digits,
+            inner_each: self.inner_each,
+            control_strictness: self.control_strictness,
             trains: self.trains,
         })
     }
@@ -427,6 +472,8 @@ pub struct Rules {
     pub near_count: NearCount,
     pub floor_rule: FloorRule,
     pub encode_digits: EncodeDigits,
+    pub inner_each: InnerEach,
+    pub control_strictness: ControlStrictness,
     pub trains: bool,
 }
 
@@ -456,6 +503,8 @@ impl Rules {
             near_count: self.near_count,
             floor_rule: self.floor_rule,
             encode_digits: self.encode_digits,
+            inner_each: self.inner_each,
+            control_strictness: self.control_strictness,
             trains: self.trains,
         }
     }

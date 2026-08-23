@@ -7,7 +7,56 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- APL's control words `:AndIf`, `:OrIf` and `:CaseList`, and `:For a b :In`.
+  `:AndIf` and `:OrIf` continue the `:If`, `:ElseIf`, `:While` or `:Until`
+  line above them and short-circuit — the second test does not run where the
+  first has settled the answer. `:CaseList 1 2 3` takes its arm where the
+  subject matches any one of the list's items, where `:Case` compares the
+  list as a whole. `:For a b :In (1 2)(3 4)` takes each item apart between
+  the names, one of its own items each. All three are the language, not a
+  dialect setting, so both presets answer them.
+
+- A control structure may stand OUTSIDE a definition:
+  `:If 1 ⋄ 5 ⋄ :EndIf` is 5, and `T←0 ⋄ :For I :In 1 2 3 4 ⋄ T←T+I ⋄
+  :EndFor ⋄ T` is 10. Its value is the value of the last sentence the branch
+  it chose ran, which is the block model every other sequence follows. J
+  still holds its control words to a definition's body, as the reference
+  does.
+
+- A definition's body may call a function the program fixes AFTER it:
+  `N←⎕FX 'Z←F R' 'Z←G R' ⋄ M←⎕FX 'Z←G R' 'Z←R×3' ⋄ F 5` is 15. APL settles a
+  name's class when the line runs, so every name a `∇` or a `⎕FX` anywhere
+  in the program gives a function now stands for a verb resolved when it is
+  applied.
+
+- `Dialect.inner_each`: where the each in the inner product's definition
+  sits. GNU APL puts it on the FOLD — `f/¨ (⊂[last]x) ∘.g (⊂[first]y)` — so
+  `g` meets a whole vector from each side and the fold's answer is enclosed
+  once more; Dyalog puts it on the PAIRING — `f/ row g¨ column` — so `g`
+  meets one element from each side and the fold's own value is the cell.
+  `1 2+.,3 4` is `10` under the first and an enclosed `3 7` under the
+  second. Every scalar `g` whose fold ends in a number agrees, so `+.×` is
+  one sentence in either reading and John Scholes' Life one-liner differs
+  only in depth. `Dialect::dyalog()` carries the second reading.
+
+- `Dialect.control_strictness`: how strictly a control structure reads what
+  it is given. The shipped reading is lenient — a condition is true where
+  its first atom is, and a `:Leave` outside a loop leaves the definition.
+  Dyalog reads both strictly and says so instead; `Dialect::dyalog()`
+  carries that.
+
 ### Changed
+
+- `:For` binds an item's CONTENTS in APL, as Dyalog does:
+  `:For p :In (1 2)(3 4 5)` gives `p` a pair and then a triple, not an
+  enclosure of each. J's `for.` still leaves its boxes shut.
+
+- The Dyalog preset now answers 1967 of the 2012 recorded expressions, up
+  from 1941; `tests/expected/dyalog.txt` is down from 71 exempt rows to 45,
+  23 of them a divergence and 22 a gap. The whole `inner-product` group (15
+  rows, the Life idiom), the whole `control-words` group (9) and the
+  `control-strictness` group (2) are closed. GNU APL's column is unchanged,
+  expression for expression.
 
 ### Fixed
 

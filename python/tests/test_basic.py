@@ -430,6 +430,18 @@ class TestDialect:
         # A nested grade is the total array ordering.
         assert dy("⍋1 'a'").tolist() == [1, 2]
         assert apl("⍋1 'a'").tolist() == [2, 1]
+        # The inner product's each sits on the pairing, not on the fold.
+        assert dy("∊1 2+.,3 4").tolist() == [3, 7]
+        assert apl("1 2+.,3 4") == 10
+        assert dy("≡1 2,.+3 4") == 2
+        assert apl("≡1 2,.+3 4") == 3
+        # `+.×` is one sentence in either reading.
+        assert dy("1 2+.×3 4") == apl("1 2+.×3 4") == 11
+        # A control structure is read strictly.
+        wide = "n←⎕FX 'Z←F R' ':If R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 1 1"
+        assert apl(wide) == 1
+        with pytest.raises(JayError):
+            dy(wide)
         # The preset is a Dialect like any other, so a setting overrides it.
         import dataclasses
 
