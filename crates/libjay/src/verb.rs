@@ -13,7 +13,7 @@ use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::exact::{self, Ext, Rat};
 use crate::fmt::FmtOpts;
-use crate::frontend::{ComplexOrder, NestedGrade, Rules};
+use crate::frontend::{ComplexOrder, EncodeDigits, FloorRule, NearCount, NestedGrade, Rules};
 use crate::par;
 use crate::simd::multiversioned;
 
@@ -45,15 +45,19 @@ pub struct Tol {
     pub ct: f64,
     /// Scale by the smaller magnitude (J) rather than the larger (APL).
     pub by_smaller: bool,
+    /// Which reading `⌊` and `⌈` take. Unread under J, whose floor is
+    /// the tolerant comparison itself.
+    pub floor_rule: FloorRule,
 }
 
 impl Tol {
     /// No tolerance at all — J's `u!.0`.
-    pub const EXACT: Tol = Tol { ct: 0.0, by_smaller: true };
+    pub const EXACT: Tol = Tol { ct: 0.0, by_smaller: true, floor_rule: FloorRule::Shift };
     /// J's default comparison tolerance, 2^-44.
-    pub const J: Tol = Tol { ct: 5.684_341_886_080_802e-14, by_smaller: true };
+    pub const J: Tol =
+        Tol { ct: 5.684_341_886_080_802e-14, by_smaller: true, floor_rule: FloorRule::Shift };
     /// GNU APL's default `⎕CT`.
-    pub const APL: Tol = Tol { ct: 1e-13, by_smaller: false };
+    pub const APL: Tol = Tol { ct: 1e-13, by_smaller: false, floor_rule: FloorRule::Shift };
 
     /// Tolerant equality.
     #[inline(always)]
@@ -119,30 +123,42 @@ impl Tol {
     /// `<. y`: the largest integer not above y, with a value just under an
     /// integer counting as that integer.
     ///
-    /// The two references read "just under" differently, and both were
-    /// probed. J scales the gap by the magnitude, so `<. 99.999999999995`
-    /// is 100 and `<. _1e_14` is `_1`. GNU APL shifts by the tolerance
-    /// itself, so `⌊99.999999999995` is 99 — the gap of 5e¯12 is larger
-    /// than `⎕CT` however big the value is — while `⌊¯1E¯13` is 0.
+    /// The three readings were each probed. J scales the gap by the
+    /// magnitude, so `<. 99.999999999995` is 100 and `<. _1e_14` is `_1`.
+    /// GNU APL shifts by the tolerance itself, so `⌊99.999999999995` is 99
+    /// — the gap of 5e¯12 is larger than `⎕CT` however big the value is —
+    /// while `⌊¯1E¯13` is 0. Dyalog scales the shift by the magnitude but
+    /// never below 1, which keeps `⌊¯1E¯14` at 0 and lifts
+    /// `⌊9.9999999999999` to 10.
     #[inline(always)]
     pub fn floor(self, y: f64) -> f64 {
         if self.is_j() {
             let c = y.ceil();
             if self.eq(y, c) { c } else { y.floor() }
-        } else {
+        } else if self.floor_rule == FloorRule::Shift {
             (y + self.ct).floor()
+        } else {
+            // The gap is compared against the step rather than added to
+            // the value: `999.99999999999 + 9.9999999999999E¯12` rounds up
+            // to a clean 1000 in double arithmetic where the exact sum is
+            // still below it, and Dyalog answers 999.
+            let c = y.ceil();
+            if c - y <= self.ct * y.abs().max(1.0) { c } else { y.floor() }
         }
     }
 
     /// `>. y`: the ceiling, with a value just over an integer counting as
-    /// that integer. The two readings are [`Tol::floor`]'s, mirrored.
+    /// that integer. The three readings are [`Tol::floor`]'s, mirrored.
     #[inline(always)]
     pub fn ceil(self, y: f64) -> f64 {
         if self.is_j() {
             let f = y.floor();
             if self.eq(y, f) { f } else { y.ceil() }
-        } else {
+        } else if self.floor_rule == FloorRule::Shift {
             (y - self.ct).ceil()
+        } else {
+            let f = y.floor();
+            if y - f <= self.ct * y.abs().max(1.0) { f } else { y.ceil() }
         }
     }
 
@@ -267,10 +283,16 @@ impl EvalCfg {
     /// of these, and an explicit definition — the only thing that reads
     /// names — is never pure.
     /// The near-integer admission counts, lengths and indices are read
-    /// with here. It is the language's, not the dialect's: no setting
-    /// moves it in either reference.
+    /// with here. In J and in GNU APL it is the language's and no setting
+    /// moves it; Dyalog's follows `⎕CT`, so the dialect names which.
     pub(crate) fn near(self) -> NearInt {
-        NearInt::of(self.rules.lang)
+        match self.rules.lang {
+            crate::Lang::J => NearInt::J,
+            crate::Lang::Apl => match self.rules.near_count {
+                NearCount::Absolute => NearInt::Apl,
+                NearCount::Tolerant => NearInt::Tolerant(self.rules.tol()),
+            },
+        }
     }
 
     pub(crate) fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
@@ -322,6 +344,22 @@ impl Env {
         if let Some(frame) = self.frames.last() && let Some(v) = frame.get(name) {
             return Some(v.clone());
         }
+        // A dfn written inside another reads the names the enclosing one
+        // made local: `{a←10 ⋄ {a+⍵} ⍵} 5` is 15. Only a LEXICAL parent
+        // counts, so an unrelated caller's locals stay its own — the
+        // frames below are searched, and only those whose definition this
+        // one is written inside are read.
+        if let Some(def) = self.running.last()
+            && !def.enclosing.is_empty()
+        {
+            for i in (0..self.frames.len().saturating_sub(1)).rev() {
+                if def.enclosing.contains(&self.running[i].id)
+                    && let Some(v) = self.frames[i].get(name)
+                {
+                    return Some(v.clone());
+                }
+            }
+        }
         self.globals.get(name).cloned()
     }
 
@@ -338,6 +376,21 @@ impl Env {
 
     pub fn define(&mut self, name: String, verb: Verb) {
         self.verbs.insert(name, verb);
+    }
+
+    /// A global by name, reached past any frame. An operator's array
+    /// operand lives here for as long as its body runs, so that the body's
+    /// own frame does not hide it.
+    pub fn global(&self, name: &str) -> Option<Array> {
+        self.globals.get(name).cloned()
+    }
+
+    pub fn set_global(&mut self, name: String, value: Array) {
+        self.globals.insert(name, value);
+    }
+
+    pub fn unset_global(&mut self, name: &str) {
+        self.globals.remove(name);
     }
 
     pub fn undefine(&mut self, name: &str) {
@@ -1012,6 +1065,67 @@ const CONVERGE_LIMIT: usize = 1 << 20;
 /// makes the cache survive from one application to the next.
 pub type MemoCache = Arc<std::sync::Mutex<HashMap<Vec<u64>, Array>>>;
 
+/// What a user-written operator was given for an operand.
+///
+/// Dyalog lets an ARRAY stand where a function operand belongs, and the
+/// body then reads `⍺⍺` or `⍵⍵` as that array: `2{⍺⍺+⍵}3` is 5.
+#[derive(Clone, Debug)]
+pub enum Operand {
+    Func(Box<Verb>),
+    Value(Box<Array>),
+}
+
+impl Operand {
+    /// Name for diagnostics.
+    pub fn name(&self) -> String {
+        match self {
+            Operand::Func(v) => v.name(),
+            Operand::Value(_) => "n".to_string(),
+        }
+    }
+
+    fn is_value(&self) -> bool {
+        matches!(self, Operand::Value(_))
+    }
+}
+
+/// An operator dfn's body, parsed once for each reading of its operands.
+///
+/// Whether `⍺⍺` names a function or an array decides how the body PARSES,
+/// not merely what it computes: `⍺⍺+⍵` is a train under the first reading
+/// and a sum under the second. The body is therefore parsed both ways —
+/// four ways when it takes a right operand as well — when the dfn is
+/// defined, and the operands choose the reading when they arrive.
+#[derive(Debug)]
+pub struct OpDef {
+    /// Indexed by `(⍺⍺ is an array) + 2 × (⍵⍵ is an array)`. `Err` holds
+    /// what the body said when it would not parse that way, so choosing
+    /// that reading reports the body's own complaint.
+    pub readings: [std::result::Result<Verb, String>; 4],
+}
+
+impl OpDef {
+    /// The one reading with a body under every combination of operands:
+    /// what a dfn that mentions neither `⍺⍺` nor `⍵⍵` would need, and the
+    /// shape a frontend uses before it has parsed the alternatives.
+    pub fn uniform(v: Verb) -> OpDef {
+        OpDef { readings: [Ok(v.clone()), Ok(v.clone()), Ok(v.clone()), Ok(v)] }
+    }
+
+    /// The body as it parses for these operands.
+    pub fn pick(&self, alpha: &Operand, omega: Option<&Operand>) -> Result<&Verb> {
+        let i = usize::from(alpha.is_value())
+            | (usize::from(omega.is_some_and(Operand::is_value)) << 1);
+        self.readings[i].as_ref().map_err(|msg| Error::new(ErrorKind::Parse, msg.clone(), None))
+    }
+
+    /// Every reading that parsed, for the questions asked of the derived
+    /// verb before its operands have chosen one.
+    fn bodies(&self) -> impl Iterator<Item = &Verb> {
+        self.readings.iter().filter_map(|r| r.as_ref().ok())
+    }
+}
+
 /// A verb: primitive or derived. Language-agnostic; frontends decide which
 /// combinations their syntax produces (e.g. APL `+/` becomes
 /// `Rank(Reduce(+), [1,1,1])` — reduce the last axis).
@@ -1080,7 +1194,7 @@ pub enum Verb {
     /// APL `f OP` and `f OP g`: a dfn that mentions `⍺⍺` or `⍵⍵` is an
     /// OPERATOR, and this is that operator with its operands supplied. They
     /// are bound under those two names for as long as the body runs.
-    UserDerived { def: Box<Verb>, alpha: Box<Verb>, omega: Option<Box<Verb>> },
+    UserDerived { def: Arc<OpDef>, alpha: Operand, omega: Option<Operand> },
     /// APL `f⌸` (key, Dyalog): the major cells are grouped by value, and f
     /// is applied to each key and the group that shares it. Monadically the
     /// group is the positions the key occupies; dyadically it is the items
@@ -1214,9 +1328,9 @@ impl Verb {
             Verb::Characteristics(v) => format!("{} b.", v.name()),
             Verb::Before(f, g) => format!("({}⍛{})", f.name(), g.name()),
             Verb::KeyPairs(v) => format!("{}⌸", v.name()),
-            Verb::UserDerived { def, alpha, omega } => match omega {
-                Some(g) => format!("({} {} {})", alpha.name(), def.name(), g.name()),
-                None => format!("({} {})", alpha.name(), def.name()),
+            Verb::UserDerived { alpha, omega, .. } => match omega {
+                Some(g) => format!("({} {{…}} {})", alpha.name(), g.name()),
+                None => format!("({} {{…}})", alpha.name()),
             },
             Verb::Memo(v, _) => format!("{} M.", v.name()),
             Verb::Level { u, level, spread } => {
@@ -1323,9 +1437,13 @@ impl Verb {
             }
             Verb::KeyPairs(v) => v.uses_tolerance(),
             Verb::UserDerived { def, alpha, omega } => {
-                def.uses_tolerance()
-                    || alpha.uses_tolerance()
-                    || omega.as_ref().is_some_and(|g| g.uses_tolerance())
+                let operand = |o: &Operand| match o {
+                    Operand::Func(v) => v.uses_tolerance(),
+                    Operand::Value(_) => false,
+                };
+                def.bodies().any(Verb::uses_tolerance)
+                    || operand(alpha)
+                    || omega.as_ref().is_some_and(operand)
             }
             Verb::Agenda(vs, w) => {
                 w.uses_tolerance() || vs.iter().any(Verb::uses_tolerance)
@@ -1576,7 +1694,8 @@ impl Verb {
             }
             Verb::KeyPairs(u) => key_pairs(u, y, None, ctx, span),
             Verb::UserDerived { def, alpha, omega } => {
-                with_operands(alpha, omega.as_deref(), ctx, |c| def.monad(y, c, span))
+                let body = def.pick(alpha, omega.as_ref())?.clone();
+                with_operands(alpha, omega.as_ref(), ctx, |c| body.monad(y, c, span))
             }
             Verb::Level { u, level, spread } => {
                 at_level(u, *level, *spread, y, ctx, span)
@@ -1763,7 +1882,8 @@ impl Verb {
             }
             Verb::KeyPairs(u) => key_pairs(u, x, Some(y), ctx, span),
             Verb::UserDerived { def, alpha, omega } => {
-                with_operands(alpha, omega.as_deref(), ctx, |c| def.dyad(x, y, c, span))
+                let body = def.pick(alpha, omega.as_ref())?.clone();
+                with_operands(alpha, omega.as_ref(), ctx, |c| body.dyad(x, y, c, span))
             }
             Verb::Level { u, level, spread } => {
                 at_level_dyad(u, *level, *spread, x, y, ctx, span)
@@ -5486,7 +5606,11 @@ struct Grading {
 impl Grading {
     fn of(rules: Rules, tol: Tol) -> Grading {
         let tao = Tao::of(rules);
-        Grading { tao, tol: if tao == Tao::J { Tol::EXACT } else { tol } }
+        // J's grade is exact, and so is Dyalog's: `⍋2 (1+1E¯14) 1` is
+        // `3 2 1` there, the two near-equal keys separated rather than
+        // tied. Only the APL2 line reads `⎕CT` here.
+        let exact = tao == Tao::J || tao == Tao::Dyalog;
+        Grading { tao, tol: if exact { Tol { ct: 0.0, ..tol } } else { tol } }
     }
 
     fn class(self, dt: DType) -> u8 {
@@ -7786,7 +7910,15 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::TransposeJ => transpose_j(x, y, cfg.near(), span),
         DyadOp::TransposeApl => transpose_apl(x, y, cfg.rules.origin, cfg.near(), span),
         DyadOp::DecodeApl => decode_apl(x, y, span).map(|r| carry_exact2(r, x, y)),
-        DyadOp::EncodeApl => encode_apl(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::EncodeApl => {
+            // Dyalog takes the digits exactly, so the tolerance the rest of
+            // the sentence runs under is set aside for this one reading.
+            let tol = match cfg.rules.encode_digits {
+                EncodeDigits::Tolerant => cfg.tol,
+                EncodeDigits::Exact => Tol { ct: 0.0, ..cfg.tol },
+            };
+            encode_apl(x, y, tol, span).map(|r| carry_exact2(r, x, y))
+        }
         DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Encode => encode(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, span),
@@ -12134,25 +12266,38 @@ fn identity_spelling(d: &Data) -> String {
 
 /// Run `f` with `⍺⍺` and `⍵⍵` naming the operands a user-written operator
 /// was given, and with whatever they named before put back afterwards.
+///
+/// An operand that is an array is bound as a NAME rather than as a verb,
+/// which is how the body's `⍺⍺` reads as a value. Both slots are saved and
+/// restored, so an operator applied inside another operator's body leaves
+/// the outer names as it found them.
 fn with_operands<R>(
-    alpha: &Verb,
-    omega: Option<&Verb>,
+    alpha: &Operand,
+    omega: Option<&Operand>,
     ctx: &mut Ctx<'_>,
     f: impl FnOnce(&mut Ctx<'_>) -> Result<R>,
 ) -> Result<R> {
-    let saved = (ctx.env.verb("⍺⍺").cloned(), ctx.env.verb("⍵⍵").cloned());
-    ctx.env.define("⍺⍺".to_string(), alpha.clone());
-    if let Some(g) = omega {
-        ctx.env.define("⍵⍵".to_string(), g.clone());
+    let names = ["⍺⍺", "⍵⍵"];
+    let operands = [Some(alpha), omega];
+    let saved: Vec<(Option<Verb>, Option<Array>)> =
+        names.iter().map(|n| (ctx.env.verb(n).cloned(), ctx.env.global(n))).collect();
+    for (name, operand) in names.iter().zip(operands) {
+        match operand {
+            Some(Operand::Func(v)) => ctx.env.define((*name).to_string(), (**v).clone()),
+            Some(Operand::Value(a)) => ctx.env.set_global((*name).to_string(), (**a).clone()),
+            None => {}
+        }
     }
     let out = f(ctx);
-    match saved.0 {
-        Some(v) => ctx.env.define("⍺⍺".to_string(), v),
-        None => ctx.env.undefine("⍺⍺"),
-    }
-    match saved.1 {
-        Some(v) => ctx.env.define("⍵⍵".to_string(), v),
-        None => ctx.env.undefine("⍵⍵"),
+    for (name, (verb, value)) in names.iter().zip(saved) {
+        match verb {
+            Some(v) => ctx.env.define((*name).to_string(), v),
+            None => ctx.env.undefine(name),
+        }
+        match value {
+            Some(a) => ctx.env.set_global((*name).to_string(), a),
+            None => ctx.env.unset_global(name),
+        }
     }
     out
 }

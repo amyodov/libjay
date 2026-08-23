@@ -110,6 +110,13 @@ pub enum Control {
     Branch(Box<Expr>),
     /// `continue.` / `:Continue`: start the innermost loop's next iteration.
     Continue,
+    /// A dfn's guard, `cond:expr`: the body is the dfn's answer when the
+    /// condition holds, and the definition returns there.
+    ///
+    /// It is not an `:If` with one arm, because it reads its condition
+    /// more strictly: Dyalog wants exactly one 0 or 1, and refuses `2`,
+    /// `1 1`, `⍬` and a character alike.
+    Guard { test: Vec<Expr>, body: Vec<Expr> },
 }
 
 /// One arm of an `if.` or `select.`: a test (absent for the default arm) and
@@ -142,6 +149,11 @@ pub struct ExplicitDef {
     /// that mentions `x` are dyads and nothing else, while an APL dfn that
     /// names `⍺` still runs monadically and finds `⍺` undefined.
     pub dyad_only: bool,
+    /// True where a left argument the definition has NO name for is simply
+    /// dropped rather than refused: a dfn is ambivalent whatever its body
+    /// mentions, so `3 {⍵×2} 5` is 10, while a `∇`-definition or a J
+    /// `3 : '…'` refuses the argument it cannot bind.
+    pub spare_left: bool,
     /// The name the result is read from when the body does not yield one
     /// (an APL `∇`-definition's `Z←`); None means the body's own value.
     pub result: Option<String>,
@@ -154,6 +166,17 @@ pub struct ExplicitDef {
     /// A label's value is its line number, which is one more than its
     /// position here, and `→` takes one of those numbers.
     pub labels: Vec<(String, usize)>,
+    /// The dfns this one is written INSIDE, outermost first, by
+    /// [`ExplicitDef::id`]. A dfn's body reads the names its enclosing
+    /// dfns made local — `{a←10 ⋄ {a+⍵} ⍵} 5` is 15 — and this is what
+    /// tells a running body which frames on the stack are its own
+    /// lexical parents rather than an unrelated caller's. Empty for
+    /// everything that is not a nested dfn.
+    pub enclosing: Vec<u64>,
+    /// This definition's identity among the dfns of one compilation, so
+    /// that a nested one can name it in `enclosing`. Zero where nothing
+    /// is nested inside.
+    pub id: u64,
     /// True when running the body can have no effect beyond its result.
     pub pure: bool,
 }
@@ -522,6 +545,25 @@ fn is_true(a: &Array, span: Span) -> Result<bool> {
     }
 }
 
+/// Whether a dfn's guard holds. Its condition is read strictly: exactly
+/// one element, and that element 0 or 1. `{2:1 ⋄ 0}`, `{1 1:1 ⋄ 0}`,
+/// `{⍬:1 ⋄ 0}` and `{'x':1 ⋄ 0}` are all refused, where a control
+/// structure's `:If` takes the first element of whatever it is given.
+fn guard_holds(a: &Array, span: Span) -> Result<bool> {
+    if a.is_sparse() {
+        return guard_holds(&a.densified(), span);
+    }
+    let refuse = || Error::domain("a guard's condition must be a single 0 or 1", span);
+    if a.count() != 1 {
+        return Err(refuse());
+    }
+    match a.to_i64_vec().as_deref() {
+        Some([0]) => Ok(false),
+        Some([1]) => Ok(true),
+        _ => Err(refuse()),
+    }
+}
+
 fn eval_control(
     c: &Control,
     span: Span,
@@ -549,6 +591,19 @@ fn eval_control(
         }
         Control::Break => Ok((None, Flow::Break)),
         Control::Continue => Ok((None, Flow::Continue)),
+        Control::Guard { test, body } => {
+            let (t, flow) = run_block(test, None, ctx, rec)?;
+            if flow != Flow::Normal {
+                return Ok((t, flow));
+            }
+            let Some(v) = &t else {
+                return Err(Error::domain("a guard's condition produced no value", span));
+            };
+            if guard_holds(v, span)? {
+                return run_block(body, None, ctx, rec);
+            }
+            Ok((None, Flow::Normal))
+        }
         Control::If { arms, otherwise } => {
             for arm in arms {
                 let test = arm.test.as_deref().unwrap_or(&[]);
@@ -683,7 +738,7 @@ pub(crate) fn call_explicit(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
-    if x.is_some() && def.left.is_none() {
+    if x.is_some() && def.left.is_none() && !def.spare_left {
         return Err(Error::new(
             ErrorKind::Domain,
             format!("{} has no dyadic definition", def.name),

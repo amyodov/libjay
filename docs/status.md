@@ -381,14 +381,12 @@ conjunctions above:
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
 APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
 a preset of the dialect object rather than a second engine:
-`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1848 of the
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1915 of the
 1989 expressions Dyalog 20.0 has been recorded on — the default answers
-1725 of them — and the 141 it does not are itemised below. The count is
+1771 of them — and the 74 it does not are itemised below. The count is
 `jay-corpus stats apl --dialect-diff --dialect dyalog`, which replays the
-recorded column and runs no interpreter; it now includes the four
-Dyalog-only theme files, which the earlier figure of 61 did not, and the
-tolerance theme, whose Dyalog column raised the figure from 124 by
-exposing the two rows below.
+recorded column and runs no interpreter; it includes the four Dyalog-only
+theme files and the tolerance theme.
 
 What the preset changes, each of it verified against the recording:
 `⎕CT` is `1e¯14`; `↑` is mix and `⊃` is first; `⌷` names the leading axes,
@@ -397,24 +395,30 @@ vector keeps its axis; a dyadic `⊂` counts partitions (partitioned
 enclose) while `⊆` stays the partition both lines share; `≡` negates the
 depth of an array whose items do not share one; a dfn answers with its
 first sentence that is not an assignment; a nested grade uses the total
-array ordering; and dyadic `⍳` takes a vector on its left and gives a rank
-error for anything else. The preset is Dyalog's default `⎕ML`, which is
+array ordering; dyadic `⍳` takes a vector on its left and gives a rank
+error for anything else; a near-integer count is admitted relatively,
+scaled by `⎕CT`; `⌊` and `⌈` scale their step by the magnitude; and `⊤`
+takes its digits exactly. The preset is Dyalog's default `⎕ML`, which is
 what the recording ran under.
 
 What it does not change yet, measured against the recording:
 
 | Cause | Rows | Status |
 |---|---|---|
-| An ARRAY where a function operand belongs: `2∘×` and `×∘2`, and an `⍺⍺` or `⍵⍵` bound to a value (`2{⍺⍺+⍵}3`) | 31 | 🔴 libjay's `∘` and its dfn operators take function operands only. The single largest item, and the one that unblocks most of `dyalog-dops.txt` |
-| A dfn's locals and its result: a nested dfn closing over the enclosing one's names (8), a body whose last sentence is an assignment answering shy (7), a guard's condition needing a boolean singleton (5), and four smaller edges | 24 | 🔴 the dfn scope and result rules are the next dfn wave |
 | Inner product `f.g` where `g` is not a scalar function (`+.,`, `,.+`, `∨.∧` on nested) | 15 | 🔴 the two lines nest the intermediate differently; libjay follows GNU APL. The Life idiom is the visible casualty |
 | Control words libjay does not have — `:AndIf`, `:OrIf`, `:CaseList`, `:For a b :In` — a `:For` that does not disclose its items, a definition naming one fixed after it, a top-level `:If`, and two places libjay answers where Dyalog refuses | 11 | 🔴 the rest of `dyalog-control.txt` now that `⎕FX` reaches it |
-| `⎕R`/`⎕S` (5), `⌸` with the operand libjay does not take (3), `⍣¯n` inverse powers (2), `⍥`/`⍢`/`⍛` (4), `⍠` where libjay extends and Dyalog refuses (3), `⌺` on an empty (1), a derived function as a user operator's operand (3) | 21 | 🔴 named gaps and extensions, itemised in `dyalog-operators.txt` and `dyalog-dops.txt` |
-| The empty-base `⊥` (5), an index or a modulus above 2^53 (3), a diamond-separated sentence's value, `⍴⍕` of a nested array, and `⍬≡0⍴⊂⍬` | 11 | ⚪ pinned divergences from BOTH references, in `corpus/apl/divergences.txt`, plus the `(⍳0)⊥y` rows in `fuzz_found.txt`. `÷0`, `⍟0`, `!¯1` and GNU APL's overflow policy used to be here and now agree |
-| The near-integer admission where a count belongs: Dyalog's is RELATIVE and follows `⎕CT`, GNU APL's is a flat `1E¯10`, so `⍴⍳2+9E¯11` answers here and is refused there while `⍴⍳1000000+1E¯9` is the other way about | 17 | 🔴 a dialect setting, not an engine change: the rule is already threaded, and this is the third GNU/Dyalog split in one family |
-| Tolerance readings the preset does not carry yet: `⊤` taking its digits with its own residue (2), a tolerant `⌊` scaled by the magnitude (1), a total-array-ordering grade that ignores `⎕CT` (1), and the exact GCD grinding on a non-integral float (1) | 5 | 🔴 the rest of `tolerance.txt`, now that its Dyalog column is recorded |
+| `⎕R`/`⎕S` (5), `⌸` with the operand libjay does not take (3), `⍠` where libjay extends and Dyalog refuses (3), `⌺` on an empty (1) | 12 | 🔴 named gaps and extensions, itemised in `dyalog-operators.txt` |
+| The empty-base `⊥` (5), an index or a modulus above 2^53 (3), a diamond-separated sentence's value, `⍴⍕` of a nested array, and `⍬≡0⍴⊂⍬` | 11 | ⚪ pinned divergences from BOTH references, in `corpus/apl/divergences.txt`, plus the `(⍳0)⊥y` rows in `fuzz_found.txt` |
+| A SHY result: a dfn whose answer came from an assignment has one, and the session does not print it (`{a←⍵×2} 5` shows nothing, `⎕←F 5` shows `10`); a dfn that falls off its end has no result at all | 6 | 🔴 libjay has no channel for either — every call yields a value and every value at the top level is printed. `⍺←⊢`, a FUNCTION default for the left argument, is the sixth row and the same shape of gap |
+| `⍢` where libjay answers and Dyalog refuses (3), and an operand in PARENTHESES to the right of an operator — `=⍥(2∘|)`, `⌽HALF (2∘↑)` — which the operator folder reaches before the `)` has closed (2) | 5 | 🔴 the parenthesised operand is a parser ordering gap, not a missing meaning |
 | Complex floor and ceiling, and the `¯7○` branch cut | 3 | 🔴 |
+| A `{name}` dfn whose whole body is one identifier, which libjay reads as an interpolation hole (`a←1 ⋄ F←{{a} ⍵} ⋄ F 0`) | 2 | ⚪ the brace-binding syntax is a fixed point of the embedding; the collision is real APL and has no answer yet |
 | Two singletons of different rank conforming (`(1 1⍴5)+,3`) | 2 | 🔴 the higher rank wins there, the first argument here |
+| A COMPUTED array where a function operand belongs: `(⍳3)∘+`, `(⍳3){⍺⍺+⍵}0`. A literal one binds | 1 | 🔴 nothing in the IR holds an operand's expression to evaluate when the derived function is built |
+| The obverse of a bound verb: `(2∘↑)⍣¯1`, and `⍵⍵⍣¯1` where the operand is only known at run time | 2 | 🔴 the obverse table reads the verb tree, and a bond is not in it |
+| The exact GCD grinding on a non-integral float (`1.0000000000001∧5`) | 1 | 🔴 the last row of `tolerance.txt` |
+| `'xyz',3`: a mixed simple array from catenation | 1 | 🔴 libjay refuses to mix characters and numbers in one array here |
+| A derived function displayed where a value belongs (`×∘2 5`) | 1 | ⚪ Dyalog shows the function's source; libjay has no display for one |
 | `6 2⍕'a'` | 1 | ⚪ a display edge |
 
 The extensions libjay already ships (marked "no oracle" against GNU APL in
@@ -422,7 +426,12 @@ the tables above — `⊆`, `∘`, `⍥`, `⌺`, `f⍤g`, `⌸`, dfn guards and 
 `⍺⍺`/`⍵⍵`, the control structures, trains and function assignment) now
 have Dyalog's own answers recorded in `corpus/apl/dyalog-dfns.txt`,
 `dyalog-dops.txt`, `dyalog-control.txt` and `dyalog-operators.txt` —
-reference data under the `dyalog:` key alone, gating nothing.
+reference data under the `dyalog:` key alone, gating nothing. Where those
+extensions had no APL2 reading to follow they now follow Dyalog's recorded
+one in EVERY dialect, the shipped one included: a dfn is ambivalent, its
+guard wants a single 0 or 1, a dfn written inside another reads the
+enclosing one's locals, an array binds where a function operand belongs,
+and `f⍣¯n` runs the inverse.
 
 `⊇` and the other Dyalog features libjay does not implement at all are
 below; they are the queue for a later wave, not counted in the APL totals.
@@ -433,7 +442,7 @@ implemented, and the recording wins over anything a document says.
 |---|---|
 | `⊇` select | 🔴 not yet — and today the parser calls it an unknown symbol rather than naming the promise, which is itself a diagnostics gap |
 | Dfn error-guards `num::expr` | 🔴 not yet — today a bare syntax error at the second `:`, same diagnostics gap |
-| `f⍣¯n` inverse powers | 🔴 the `⍣` row above carries it: a literal count must be non-negative today |
+| `f⍣¯n` inverse powers | 🟢 the count may be negative, and the obverse table answers it |
 | Namespaces (`⎕NS`, `#.`, dotted names) | 🔴 refused by name |
 | `⎕JSON`, `⎕R`/`⎕S`, `⎕CSV`, `⎕DT`, `⎕C` | 🔴 refused by name — pure computation, so the sandbox is no obstacle; they are simply not written |
 | `&` spawn | ⚪ the sandbox does not open threads, in any dialect — the row is in the operator table above |

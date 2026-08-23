@@ -635,7 +635,7 @@ impl Walker<'_> {
                     block(self, b);
                 }
             }
-            Control::While { test, body, .. } => {
+            Control::While { test, body, .. } | Control::Guard { test, body } => {
                 block(self, test);
                 block(self, body);
             }
@@ -1004,9 +1004,17 @@ fn modifier(v: &Verb, lang: Lang) -> Option<(Mod, Vec<String>)> {
         }
         Verb::InnerProduct { u, v, .. } => (m("inner product", &["."]), verbs(&[u, v])),
         Verb::UserDerived { def, alpha, omega } => {
-            let mut ops = vec![verb_class(def), verb_class(alpha)];
+            let operand = |o: &jay::verb::Operand| match o {
+                jay::verb::Operand::Func(v) => verb_class(v),
+                jay::verb::Operand::Value(_) => "an array operand".to_string(),
+            };
+            let mut ops = Vec::new();
+            if let Ok(body) = def.pick(alpha, omega.as_ref()) {
+                ops.push(verb_class(body));
+            }
+            ops.push(operand(alpha));
             if let Some(g) = omega {
-                ops.push(verb_class(g));
+                ops.push(operand(g));
             }
             (m("a user-defined operator", &[]), ops)
         }
@@ -1061,10 +1069,15 @@ fn operand_verbs(v: &Verb) -> Vec<&Verb> {
         Verb::Agenda(gs, w) => gs.iter().chain(std::iter::once(&**w)).collect(),
         Verb::Evoke(gs, _) => gs.iter().collect(),
         Verb::UserDerived { def, alpha, omega } => {
-            let mut vs = vec![&**def, &**alpha];
-            if let Some(g) = omega {
-                vs.push(g);
+            fn func(o: &jay::verb::Operand) -> Option<&Verb> {
+                match o {
+                    jay::verb::Operand::Func(v) => Some(&**v),
+                    jay::verb::Operand::Value(_) => None,
+                }
             }
+            let mut vs: Vec<&Verb> = def.pick(alpha, omega.as_ref()).into_iter().collect();
+            vs.extend(func(alpha));
+            vs.extend(omega.as_ref().and_then(func));
             vs
         }
         _ => Vec::new(),

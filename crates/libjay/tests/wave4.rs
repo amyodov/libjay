@@ -331,8 +331,13 @@ fn apl_beside_and_over_follow_dyalog() {
     assert_eq!(val(Lang::Apl, "(⌽∘⍳) 5"), i64s(&[5], &[5, 4, 3, 2, 1]));
     assert_eq!(val(Lang::Apl, "2 -⍥| ¯5"), Array::scalar_i64(-3));
     assert_eq!(val(Lang::Apl, "+/∘⍳ 5"), Array::scalar_i64(15));
-    // A value operand is a separate gap, and says so.
-    let e = err(Lang::Apl, "1∘×2");
+    // A LITERAL array binds where an operand belongs, on either side.
+    assert_eq!(val(Lang::Apl, "2∘× 5"), Array::scalar_i64(10));
+    assert_eq!(val(Lang::Apl, "(1∘-) 10"), Array::scalar_i64(-9));
+    assert_eq!(val(Lang::Apl, "(-∘1) 10"), Array::scalar_i64(9));
+    assert_eq!(val(Lang::Apl, "(1∘↓)⍣2⊢1 2 3 4 5"), i64s(&[3], &[3, 4, 5]));
+    // A computed one is a separate gap, and says so.
+    let e = err(Lang::Apl, "(⍳3)∘×2");
     assert_eq!(e.kind, ErrorKind::NotYet);
     assert!(e.msg.contains("value operand"), "{}", e.msg);
 }
@@ -437,4 +442,19 @@ fn catenation_fills_in_j_and_conforms_in_apl() {
     // APL's conformability rule refuses what J fills, as GNU APL does.
     let e = err(Lang::Apl, "(2 2⍴⍳4) ⍪ 1 2 3");
     assert_eq!(e.kind, ErrorKind::Length);
+}
+
+/// `f⍣¯n` runs f's inverse n times, over the same obverse table J's
+/// `u^:_n` reads. A verb with no inverse names itself rather than
+/// answering wrongly.
+#[test]
+fn apl_inverse_powers_run_the_obverse() {
+    assert_eq!(val(Lang::Apl, "⌽⍣¯1⊢1 2 3"), i64s(&[3], &[3, 2, 1]));
+    assert_eq!(val(Lang::Apl, "(1∘+)⍣¯1⊢5"), Array::scalar_i64(4));
+    // The inverse of a bonded times is a bonded divide, so the answer is
+    // the quotient it computes rather than the integer it prints as.
+    assert_eq!(val(Lang::Apl, "(2∘×)⍣¯1⊢8").to_f64_vec(), Some(vec![4.0]));
+    let e = err(Lang::Apl, "⍴⍣¯1⊢5");
+    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert!(e.msg.contains("obverse"), "{}", e.msg);
 }

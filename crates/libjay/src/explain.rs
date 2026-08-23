@@ -226,6 +226,11 @@ fn control_lines(c: &Control, depth: usize, p: &Program, tr: &Trace, out: &mut S
             let _ = writeln!(out, "{pad}branch →");
             expr_lines(target, depth + 1, p, tr, out);
         }
+        Control::Guard { test, body } => {
+            let _ = writeln!(out, "{pad}guard — the dfn's answer when it holds");
+            block("test", test, out);
+            block("body", body, out);
+        }
         Control::If { arms, otherwise } => {
             let _ = writeln!(out, "{pad}if — {} arm(s)", arms.len());
             for (i, arm) in arms.iter().enumerate() {
@@ -377,6 +382,23 @@ fn source_of(p: &Program, e: &Expr) -> String {
 
 // ------------------------------------------------------------------- verbs
 
+/// One operand of a user-written operator: the function's own tree, or the
+/// one line an array operand needs.
+fn operand_lines(
+    o: &crate::verb::Operand,
+    depth: usize,
+    p: &Program,
+    tr: &Trace,
+    out: &mut String,
+) {
+    match o {
+        crate::verb::Operand::Func(v) => verb_lines(v, depth, p, tr, out),
+        crate::verb::Operand::Value(_) => {
+            let _ = writeln!(out, "{}an array operand", " ".repeat(depth * STEP));
+        }
+    }
+}
+
 fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String) {
     let pad = " ".repeat(depth * STEP);
     let head = |out: &mut String, what: &str| {
@@ -437,10 +459,12 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
         }
         Verb::UserDerived { def, alpha, omega } => {
             head(out, "a user-written operator with its operands");
-            verb_lines(def, depth + 1, p, tr, out);
-            verb_lines(alpha, depth + 1, p, tr, out);
+            if let Ok(body) = def.pick(alpha, omega.as_ref()) {
+                verb_lines(body, depth + 1, p, tr, out);
+            }
+            operand_lines(alpha, depth + 1, p, tr, out);
             if let Some(g) = omega {
-                verb_lines(g, depth + 1, p, tr, out);
+                operand_lines(g, depth + 1, p, tr, out);
             }
         }
         Verb::KeyPairs(u) => {

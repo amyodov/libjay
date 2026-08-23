@@ -80,7 +80,79 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   the `∇` editor cannot be driven over a pipe, and libjay now agrees with 68
   of its 79 expressions where it agreed with 8.
 
+- APL's `∘` binds an ARRAY where a function operand belongs: `A∘f y` is
+  `A f y` and `f∘A y` is `y f A`, so `2∘× 5` is 10, `(÷∘2) 7` is 3.5 and
+  `(1∘↓)⍣2⊢1 2 3 4 5` is `3 4 5`. Both are monadic only, as J's `m&v` and
+  `u&n` are. The array has to be written out; a computed operand
+  (`(⍳3)∘+`) is still named as not implemented yet.
+
+- A dfn operator takes an ARRAY operand too, and the body reads `⍺⍺` or
+  `⍵⍵` as that array rather than as a function: `2{⍺⍺+⍵}3` is 5,
+  `'ab'{⍺⍺,⍵}'cd'` is `abcd`, and `BOTHARR←{⍺⍺,⍵⍵,⍵} ⋄ (1 BOTHARR 2) 3`
+  is `1 2 3`. Which of the two an operand is decides how the body parses —
+  `⍺⍺+⍵` is a train under one reading and a sum under the other — so the
+  body is read both ways when the dfn is defined and the operands choose
+  when they arrive. The operand binds tighter than the argument, so the
+  array to the right of an operator is its operand.
+
+- APL's `f⍣¯n` runs f's inverse n times: `⌽⍣¯1⊢1 2 3` is `3 2 1`,
+  `(1∘+)⍣¯1⊢5` is 4, `⍟⍣¯1⊢1` is `e`. It reads the same obverse table J's
+  `u^:_n` reads, and a function with no known inverse is named rather than
+  answered wrongly.
+
+- A dfn written INSIDE another reads the names the enclosing one made
+  local: `F←{a←10 ⋄ {a+⍵} ⍵} ⋄ F 5` is 15 and
+  `F←{n←⍵ ⋄ +/{n×⍵}¨1 2 3} ⋄ F 10` is 60. Its own assignments stay its
+  own, so `F←{a←1 ⋄ G←{a←2 ⋄ a} ⋄ (G 0),a} ⋄ F 0` is `2 1`. Only a
+  lexically enclosing dfn's names are reachable: a dfn named elsewhere and
+  called from inside one still sees the globals and nothing of its caller.
+
+- A dfn may name a function of its own and use it in the sentences after:
+  `F←{G←{⍵×2} ⋄ G ⍵} ⋄ F 5` is 10. The name does not escape the dfn.
+
+- Three more APL dialect settings, all of them recorded Dyalog readings
+  that `Dialect::dyalog()` now carries:
+
+  - `near_count`: how a float merely NEAR a whole number is admitted where
+    a count, a length or an index belongs. `"absolute"` (the shipped
+    default, GNU APL's) is a flat `1E¯10` at every magnitude; `"tolerant"`
+    (Dyalog's) is relative and follows `⎕CT`, so `⍴⍳1000000+1E¯9` answers
+    under it and `⍳2+9E¯11` is a domain error. Neither window is a superset
+    of the other, and neither is the comparison tolerance.
+  - `floor_rule`: `"shift"` (the default) is `⌊y+⎕CT`, an absolute step;
+    `"scaled"` is `⌊y+⎕CT×1⌈|y`, so `⌊9.9999999999999` is 10 and
+    `⌊¯1E¯13` is `¯1`.
+  - `encode_digits`: whether `⊤` takes its digits with the tolerant
+    residue `|` uses. `"tolerant"` is the default; under `"exact"`,
+    `2 2⊤4-1E¯14` is `1 2` rather than `0 0`.
+
 ### Changed
+
+- An APL dfn is ambivalent whatever its body mentions: a left argument it
+  has no name for is dropped rather than refused, so `3 {⍵×2} 5` is 10 and
+  `F←{⍵} ⋄ 1 F 2` is 2. A `∇` definition still binds its arguments by the
+  names its header gives and refuses the one it cannot bind. This is the
+  recorded Dyalog answer, and dfns have no other reference.
+
+- A dfn guard reads its condition strictly: exactly one element, and that
+  element 0 or 1. `{2:1 ⋄ 0} 5`, `{1 1:1 ⋄ 0} 5`, `{⍬:1 ⋄ 0} 5` and
+  `{'x':1 ⋄ 0} 5` are domain errors where they used to take the first
+  element of whatever they were given. A control structure's `:If` keeps
+  the loose reading.
+
+- A `:` inside a dfn always opens a guard, whatever follows it, so
+  `{a←⍵×2 ⋄ a>10:a ⋄ a+100}` reads as it should instead of complaining
+  about an unknown control word. A dfn has no control words to confuse it
+  with.
+
+- Under the Dyalog dialect's "the first sentence that is not an
+  assignment" rule, naming a function or an indexed assignment counts as an
+  assignment, so `{G←{⍵×2} ⋄ 7} 5` is 7.
+
+- `Dialect` gained three fields (`near_count`, `floor_rule`,
+  `encode_digits`) and `Tol` gained one (`floor_rule`). A host that builds
+  either struct literally has to name them; `Dialect::default()`,
+  `Dialect::gnu_apl()` and the Python keywords are unchanged in behaviour.
 
 - APL's `⌈/` and `⌊/` over an empty axis answer the extremes of the
   representable range rather than the infinities. The reduce identity table

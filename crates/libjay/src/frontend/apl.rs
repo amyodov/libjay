@@ -17,7 +17,8 @@ use crate::frontend::{
 };
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
-    BoolDyad, DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind,
+    BoolDyad, DyadOp, Enclose, MonadOp, OpDef, Operand, Power, Prim, ScalarDyad, ScalarMonad,
+    Verb, WindowKind,
     RANK_INF,
 };
 
@@ -142,7 +143,12 @@ fn parse_statement(
     sentence: Vec<Token>,
     d: Rules,
     verbs: &mut HashMap<String, Verb>,
-    in_def: bool,
+    // True where `verbs` is the ENCLOSING program's map rather than this
+    // definition's own, so that a function this sentence names must not be
+    // registered in it. A dfn body parses against a clone of its own and
+    // registers there, which is what lets `G←{⍵×2} ⋄ G ⍵` read `G` as the
+    // function it named.
+    shared_verbs: bool,
 ) -> Result<Option<Expr>> {
     // A `⎕FX` that reaches here is inside another definition's body: the
     // one that stands on its own was fixed and rewritten away before the
@@ -166,7 +172,7 @@ fn parse_statement(
         };
         if let Some(v) = named {
             let span = Span::merge(name.span, func.span);
-            if !in_def {
+            if !shared_verbs {
                 verbs.insert(n.clone(), v.clone());
             }
             return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
@@ -184,7 +190,7 @@ fn parse_statement(
         && let Some(v) = tine_run(rest, d)?
     {
         let span = Span::merge(name.span, toks[toks.len() - 1].span);
-        if !in_def {
+        if !shared_verbs {
             verbs.insert(n.clone(), v.clone());
         }
         return Ok(Some(Expr::VerbDef { name: n.clone(), verb: v, span }));
@@ -338,7 +344,7 @@ enum Tok {
     Niladic(Verb),
     /// A dfn that mentions `⍺⍺` or `⍵⍵`: an operator, waiting for its
     /// operands. `omega` says whether it wants one on its right too.
-    UserOp { def: Verb, omega: bool },
+    UserOp { def: Arc<OpDef>, omega: bool },
     /// `∇`: a definition's bracket outside a dfn, a self-reference inside.
     Del,
     /// A control word, `:If` and its family, without the colon.
@@ -378,23 +384,24 @@ fn is_operand_end(k: &Tok) -> bool {
 /// A user-written operator with no operands yet: the two names stand in
 /// for them until it is applied, which is how a NAMED operator survives
 /// from the sentence that defined it to the one that uses it.
-fn unapplied_op(def: Verb, omega: bool) -> Verb {
+fn unapplied_op(def: Arc<OpDef>, omega: bool) -> Verb {
+    let named = |n: &str| Operand::Func(Box::new(Verb::Named(n.to_string())));
     Verb::UserDerived {
-        def: Box::new(def),
-        alpha: Box::new(Verb::Named("⍺⍺".to_string())),
-        omega: omega.then(|| Box::new(Verb::Named("⍵⍵".to_string()))),
+        def,
+        alpha: named("⍺⍺"),
+        omega: omega.then(|| named("⍵⍵")),
     }
 }
 
 /// The definition and right-operand appetite of an operator that is still
 /// waiting for its operands.
-fn as_user_op(v: &Verb) -> Option<(Verb, bool)> {
-    match v {
-        Verb::UserDerived { def, alpha, omega }
-            if matches!(&**alpha, Verb::Named(n) if n == "⍺⍺") =>
-        {
-            Some(((**def).clone(), omega.is_some()))
-        }
+fn as_user_op(v: &Verb) -> Option<(Arc<OpDef>, bool)> {
+    let Verb::UserDerived { def, alpha, omega } = v else { return None };
+    // A left operand still standing under its own name is what marks an
+    // operator that has not been applied to anything yet.
+    let Operand::Func(f) = alpha else { return None };
+    match &**f {
+        Verb::Named(n) if n == "⍺⍺" => Some((def.clone(), omega.is_some())),
         _ => None,
     }
 }
@@ -962,6 +969,16 @@ fn lex_text(
                 i = end;
             }
             // `:If` and its family are one word; a bare `:` is a dfn guard.
+            // A dfn has no control words at all, so inside braces the `:`
+            // is a guard however its condition's answer is spelled —
+            // `a>10:a` names no control word and never could.
+            ':' if *braces > 0 => {
+                cur.push(Token {
+                    kind: Tok::Colon,
+                    span: Span::new(offset + i, offset + i + 1),
+                });
+                i += 1;
+            }
             ':' => {
                 let mut j = i + 1;
                 while let Some(c) = text[j..].chars().next() {
@@ -1334,6 +1351,38 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
 // Operator folding
 // ---------------------------------------------------------------------------
 
+/// `A∘f` and `f∘A`: the array bound where the other operand belongs, or
+/// None where both sides are functions and the ordinary composition runs.
+///
+/// The array has to be a LITERAL. A computed operand — `(⍳3)∘+` — is a
+/// named gap rather than a wrong answer: it would have to be evaluated
+/// when the derived function is built, and nothing in the IR holds an
+/// operand's expression yet.
+fn bind_value(
+    it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
+    out: &mut Vec<Token>,
+) -> Option<Token> {
+    let left_is_value = out.last().map(|t| &t.kind).and_then(literal).is_some();
+    let left_is_func = matches!(out.last().map(|t| &t.kind), Some(Tok::Func(_)));
+    let right_is_value = it.peek().map(|t| &t.kind).and_then(literal).is_some();
+    let right_is_func = matches!(it.peek().map(|t| &t.kind), Some(Tok::Func(_)));
+    if !((left_is_value && right_is_func) || (left_is_func && right_is_value)) {
+        return None;
+    }
+    let ltok = out.pop().expect("checked above");
+    let rtok = it.next().expect("peeked");
+    let span = Span::merge(ltok.span, rtok.span);
+    // `A∘f y` is `A f y`; `f∘A y` is `y f A`.
+    let derived = if left_is_value {
+        let Tok::Func(g) = rtok.kind else { unreachable!("checked above") };
+        Verb::BondLeft(literal(&ltok.kind).expect("checked above").clone(), Box::new(g))
+    } else {
+        let Tok::Func(f) = ltok.kind else { unreachable!("checked above") };
+        Verb::BondRight(Box::new(f), literal(&rtok.kind).expect("checked above").clone())
+    };
+    Some(Token { kind: Tok::Func(derived), span })
+}
+
 /// Fold monadic and dyadic operators into derived-function tokens, left to
 /// right. After this the sentence holds only values, names, functions, `←`,
 /// `⎕` and parentheses.
@@ -1355,27 +1404,42 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         if let Tok::UserOp { def, omega } = &t.kind {
             let (def, omega) = (def.clone(), *omega);
             let right = if omega {
-                match it.peek() {
-                    Some(tok) if matches!(tok.kind, Tok::Func(_)) => {
+                match it.peek().map(|tok| &tok.kind) {
+                    Some(Tok::Func(_)) => {
                         let g = it.next().expect("peeked");
                         let Tok::Func(g) = g.kind else { unreachable!("checked above") };
-                        Some(Box::new(g))
+                        Some(Operand::Func(Box::new(g)))
+                    }
+                    // Dyalog lets an ARRAY stand where a function operand
+                    // belongs, and the body reads `⍵⍵` as that array.
+                    Some(k) if literal(k).is_some() => {
+                        let a = it.next().expect("peeked");
+                        Some(Operand::Value(Box::new(literal(&a.kind).expect("checked").clone())))
                     }
                     _ => {
-                        return Err(Error::parse("⍵⍵ needs a function on the operator's right", t.span));
+                        return Err(Error::parse(
+                            "⍵⍵ needs an operand on the operator's right",
+                            t.span,
+                        ));
                     }
                 }
             } else {
                 None
             };
-            let Some(Token { kind: Tok::Func(f), span: fspan }) = out.pop() else {
-                return Err(Error::parse("⍺⍺ needs a function on the operator's left", t.span));
+            let alpha = match out.pop() {
+                Some(Token { kind: Tok::Func(f), span }) => (Operand::Func(Box::new(f)), span),
+                Some(tok) if literal(&tok.kind).is_some() => {
+                    (Operand::Value(Box::new(literal(&tok.kind).expect("checked").clone())), tok.span)
+                }
+                _ => {
+                    return Err(Error::parse(
+                        "⍺⍺ needs an operand on the operator's left",
+                        t.span,
+                    ));
+                }
             };
-            let derived = Verb::UserDerived {
-                def: Box::new(def),
-                alpha: Box::new(f),
-                omega: right,
-            };
+            let (alpha, fspan) = alpha;
+            let derived = Verb::UserDerived { def, alpha, omega: right };
             out.push(Token { kind: Tok::Func(derived), span: Span::merge(fspan, t.span) });
             continue;
         }
@@ -1398,6 +1462,16 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             let span = Span::merge(t.span, ftok.span);
             let Tok::Func(f) = ftok.kind else { unreachable!("checked above") };
             out.push(Token { kind: Tok::Func(Verb::Reduce(Box::new(f))), span });
+            continue;
+        }
+        // `A∘f` and `f∘A` bind an array where the other operand belongs:
+        // `A∘f` supplies it on the left (`2∘× 5` is `2×5`) and `f∘A` on
+        // the right (`(÷∘2) 7` is `7÷2`). Both are monadic only, as J's
+        // `m&v` and `u&n` are. The other compositions take functions.
+        if op == OpGlyph::Jot
+            && let Some(bound) = bind_value(&mut it, &mut out)
+        {
+            out.push(bound);
             continue;
         }
         // `f∘g` and `f⍥g` need a function on both sides; the right one is
@@ -1577,7 +1651,10 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     }
                 };
                 let arr = literal(&spec.kind).expect("checked above");
-                let p = power_spec(arr, spec.span)?;
+                let (p, inverse) = power_spec(arr, spec.span)?;
+                // `f⍣¯n` runs f's inverse n times, over the same obverse
+                // table J's `u^:_n` reads.
+                let f = if inverse { crate::frontend::j::obverse_of(&f, span)? } else { f };
                 let f = Verb::PowerN(Box::new(f), p);
                 out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
                 continue;
@@ -1987,19 +2064,17 @@ fn select_axis_verb(axis: usize, rank: usize, d: Rules) -> Verb {
     })
 }
 
-/// `f⍣n`: one nonnegative integer atom. APL spells convergence `f⍣≡`, a
-/// function right operand, which is a separate gap.
-fn power_spec(a: &Array, span: Span) -> Result<Power> {
+/// `f⍣n`: one integer atom. APL spells convergence `f⍣≡`, a function right
+/// operand, which is a separate gap. A NEGATIVE count runs f's inverse
+/// that many times, and the second answer says so.
+fn power_spec(a: &Array, span: Span) -> Result<(Power, bool)> {
     let ints = a
         .to_i64_vec()
         .ok_or_else(|| Error::parse("⍣ needs a whole number on its right", span))?;
     let [n] = ints[..] else {
         return Err(Error::not_yet("power over a list of counts (f⍣n)", span));
     };
-    if n < 0 {
-        return Err(Error::not_yet("inverse power (f⍣¯1 and other negative powers)", span));
-    }
-    Ok(Power::Times(n as u64))
+    Ok((Power::Times(n.unsigned_abs()), n < 0))
 }
 
 /// `⍤` rank specification: `n` → [n,n,n]; `a b` → [b,a,b]; `a b c` → [a,b,c].
@@ -2399,11 +2474,10 @@ fn fold_dfns(
     let close = match_close(&toks, open, &Tok::LBrace, &Tok::RBrace)
         .ok_or_else(|| Error::parse("unmatched {", toks[open].span))?;
     let span = Span::merge(toks[open].span, toks[close].span);
-    let (verb, omega) = build_dfn(&toks[open + 1..close], d, verbs)?;
     let mut out: Vec<Token> = toks[..open].to_vec();
-    let kind = match omega {
-        Some(omega) => Tok::UserOp { def: verb, omega },
-        None => Tok::Func(verb),
+    let kind = match build_dfn(&toks[open + 1..close], d, verbs)? {
+        Dfn::Func(verb) => Tok::Func(*verb),
+        Dfn::Op { def, omega } => Tok::UserOp { def, omega },
     };
     out.push(Token { kind, span });
     out.extend_from_slice(&toks[close + 1..]);
@@ -2432,15 +2506,32 @@ fn split_statements(toks: &[Token]) -> Vec<&[Token]> {
     out.into_iter().filter(|s| !s.is_empty()).collect()
 }
 
+/// What a `{ … }` defines: a plain function, or an operator still waiting
+/// for its operands.
+enum Dfn {
+    Func(Box<Verb>),
+    Op { def: Arc<OpDef>, omega: bool },
+}
+
+// The dfns being built on this thread, outermost first, and the counter
+// that hands each one its identity.
+//
+// A dfn's body is parsed by a nested call, so this chain is exactly the
+// run of `{` the parser is inside. It lives here rather than in a
+// parameter because every step between one `build_dfn` and the next — the
+// statement splitter, the guard reader, the sentence parser — would
+// otherwise carry it through untouched.
+thread_local! {
+    static ENCLOSING: std::cell::RefCell<Vec<u64>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static NEXT_DFN_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
+}
+
 /// `{ … }`: the body's own words decide the valence, and `∇` in it names
 /// the dfn itself.
 /// The verb a dfn defines, and — when it mentions `⍺⍺` or `⍵⍵` — whether
 /// it is an operator wanting a right operand as well as a left one.
-fn build_dfn(
-    body: &[Token],
-    d: Rules,
-    verbs: &HashMap<String, Verb>,
-) -> Result<(Verb, Option<bool>)> {
+fn build_dfn(body: &[Token], d: Rules, verbs: &HashMap<String, Verb>) -> Result<Dfn> {
     let mut depth = 0usize;
     let mut dyadic = false;
     let mut alpha_op = false;
@@ -2455,47 +2546,97 @@ fn build_dfn(
             _ => {}
         }
     }
-    let mut inner = verbs.clone();
-    // The operand names are functions inside the body; what they stand for
-    // is bound when the derived function runs.
-    if alpha_op || omega_op {
-        inner.insert("⍺⍺".to_string(), Verb::Named("⍺⍺".to_string()));
-        inner.insert("⍵⍵".to_string(), Verb::Named("⍵⍵".to_string()));
-    }
-    let mut stmts = parse_dfn_body(body, d, &mut inner)?;
-    // The body is a sequence, and the dialect says which of its sentences
-    // is the answer. libjay's block model gives the last one; the other
-    // reading stops at the first sentence that is not an assignment.
-    match d.dfn_result {
-        DfnResult::LastSentence => {}
-        DfnResult::FirstNonAssignment => {
-            // A guard is a control structure that returns when it holds, so
-            // it is not the sentence looked for; the sentences after the
-            // one that is never run.
-            let plain = |e: &Expr| !matches!(e, Expr::Assign { .. } | Expr::Control(..));
-            if let Some(k) = stmts.iter().position(plain) {
-                stmts.truncate(k + 1);
+    // An operand name is a FUNCTION inside the body unless this reading
+    // has an array standing there, in which case it is an ordinary name
+    // and the body's `⍺⍺+⍵` is a sum rather than a train.
+    let reading = |alpha_value: bool, omega_value: bool| -> Result<Verb> {
+        let mut inner = verbs.clone();
+        if alpha_op && !alpha_value {
+            inner.insert("⍺⍺".to_string(), Verb::Named("⍺⍺".to_string()));
+        }
+        if (alpha_op || omega_op) && !omega_value {
+            inner.insert("⍵⍵".to_string(), Verb::Named("⍵⍵".to_string()));
+        }
+        // The body is parsed with this dfn on the enclosing chain, so that
+        // a dfn written inside it records this one as a lexical parent.
+        let id = NEXT_DFN_ID.with(|c| {
+            let id = c.get();
+            c.set(id.wrapping_add(1));
+            id
+        });
+        let enclosing = ENCLOSING.with(|e| e.borrow().clone());
+        ENCLOSING.with(|e| e.borrow_mut().push(id));
+        let parsed = parse_dfn_body(body, d, &mut inner);
+        ENCLOSING.with(|e| {
+            e.borrow_mut().pop();
+        });
+        let mut stmts = parsed?;
+        // The body is a sequence, and the dialect says which of its
+        // sentences is the answer. libjay's block model gives the last
+        // one; the other reading stops at the first sentence that is not
+        // an assignment.
+        match d.dfn_result {
+            DfnResult::LastSentence => {}
+            DfnResult::FirstNonAssignment => {
+                // A guard is a control structure that returns when it
+                // holds, so it is not the sentence looked for; the
+                // sentences after the one that is are never run.
+                let plain = |e: &Expr| {
+                    !matches!(
+                        e,
+                        Expr::Assign { .. }
+                            | Expr::AmendIndex { .. }
+                            | Expr::Control(..)
+                            | Expr::VerbDef { .. }
+                            | Expr::ModDef { .. }
+                    )
+                };
+                if let Some(k) = stmts.iter().position(plain) {
+                    stmts.truncate(k + 1);
+                }
             }
         }
+        let pure = stmts.iter().all(is_pure_stmt);
+        Ok(Verb::Explicit(Arc::new(ExplicitDef {
+            name: "{…}".to_string(),
+            left: dyadic.then(|| "⍺".to_string()),
+            right: "⍵".to_string(),
+            // A dfn runs in either valence; a monadic call simply leaves
+            // `⍺` without a value, unless `⍺←` gives it one, and a left
+            // argument it has no name for is dropped rather than refused.
+            dyad_only: false,
+            spare_left: true,
+            result: None,
+            locals: Vec::new(),
+            body: stmts,
+            // A dfn that reaches its end without a value has no result.
+            empty: None,
+            labels: Vec::new(),
+            enclosing,
+            id,
+            pure,
+        })))
+    };
+    if !(alpha_op || omega_op) {
+        return Ok(Dfn::Func(Box::new(reading(false, false)?)));
     }
-    let pure = stmts.iter().all(is_pure_stmt);
-    let operator = (alpha_op || omega_op).then_some(omega_op);
-    let verb = Verb::Explicit(Arc::new(ExplicitDef {
-        name: "{…}".to_string(),
-        left: dyadic.then(|| "⍺".to_string()),
-        right: "⍵".to_string(),
-        // A dfn runs in either valence; a monadic call simply leaves `⍺`
-        // without a value, unless `⍺←` gives it one.
-        dyad_only: false,
-        result: None,
-        locals: Vec::new(),
-        body: stmts,
-        // A dfn that reaches its end without a value has no result to give.
-        empty: None,
-        labels: Vec::new(),
-        pure,
-    }));
-    Ok((verb, operator))
+    // Every reading is parsed here, and the operands choose one when they
+    // arrive. A reading that does not parse keeps its diagnostic instead of
+    // failing the definition: the body only has to make sense under the
+    // operands it is actually given.
+    let mut readings: [std::result::Result<Verb, String>; 4] =
+        [const { Err(String::new()) }; 4];
+    for (i, slot) in readings.iter_mut().enumerate() {
+        *slot = reading(i & 1 != 0, i & 2 != 0).map_err(|e| e.msg);
+    }
+    // The reading with function operands throughout is the one every
+    // existing spelling uses; if it will not parse, nothing will.
+    if let Err(msg) = &readings[0]
+        && readings.iter().all(|r| r.is_err())
+    {
+        return Err(Error::parse(msg.clone(), body.first().map_or(Span::new(0, 0), |t| t.span)));
+    }
+    Ok(Dfn::Op { def: Arc::new(OpDef { readings }), omega: omega_op })
 }
 
 fn parse_dfn_body(
@@ -2542,13 +2683,11 @@ fn parse_guarded(
         let test = one_statement(stmt[..k].to_vec(), d, verbs, stmt[k].span)?;
         let body = one_statement(stmt[k + 1..].to_vec(), d, verbs, stmt[k].span)?;
         // A guard that holds is the dfn's answer: the value, then out.
-        let arm = Branch {
-            test: Some(vec![test]),
-            body: vec![body, Expr::Control(Box::new(Control::Return), span)],
-            fall_through: false,
-        };
         return Ok(Expr::Control(
-            Box::new(Control::If { arms: vec![arm], otherwise: None }),
+            Box::new(Control::Guard {
+                test: vec![test],
+                body: vec![body, Expr::Control(Box::new(Control::Return), span)],
+            }),
             span,
         ));
     }
@@ -2579,7 +2718,7 @@ fn one_statement(
     verbs: &mut HashMap<String, Verb>,
     hint: Span,
 ) -> Result<Expr> {
-    parse_statement(stmt, d, verbs, true)?
+    parse_statement(stmt, d, verbs, false)?
         .ok_or_else(|| Error::parse("this needs an expression", hint))
 }
 
@@ -2611,6 +2750,7 @@ fn is_pure_control(c: &Control) -> bool {
                 && cases.iter().all(|c| c.test.as_ref().is_none_or(all) && all(&c.body))
         }
         Control::Try { body, catch } => all(body) && all(catch),
+        Control::Guard { test, body } => all(test) && all(body),
     }
 }
 
@@ -2701,6 +2841,12 @@ fn build_tradfn(
         left: def_left,
         right: def_right,
         dyad_only: false,
+        // A `∇` definition binds its arguments by the names its header
+        // gives, and refuses one it has no name for. Only a dfn nests
+        // lexically inside another.
+        spare_left: false,
+        enclosing: Vec::new(),
+        id: 0,
         result,
         locals,
         body,
@@ -3102,7 +3248,7 @@ fn set_scopes(e: &mut Expr, own: &[String]) {
                         walk(b);
                     }
                 }
-                Control::While { test, body, .. } => {
+                Control::While { test, body, .. } | Control::Guard { test, body } => {
                     walk(test);
                     walk(body);
                 }
@@ -3598,9 +3744,15 @@ mod tests {
             Expr::Monad { verb: Verb::PowerUntil(..), .. } => {}
             other => panic!("expected a power until, got {other:?}"),
         }
-        let e = err("+⍣¯1⊢5");
+        // A negative count is the inverse applied that many times, over
+        // the obverse table; a verb with no inverse says which one.
+        match one("⌽⍣¯1⊢5") {
+            Expr::Monad { verb: Verb::PowerN(_, p), .. } => assert_eq!(p, Power::Times(1)),
+            other => panic!("expected a power, got {other:?}"),
+        }
+        let e = err("⍴⍣¯1⊢5");
         assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("inverse power"), "{}", e.msg);
+        assert!(e.msg.contains("obverse"), "{}", e.msg);
     }
 
     #[rstest]

@@ -569,11 +569,14 @@ fn dialect_of(
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     gcd_rule: Option<&str>,
+    near_count: Option<&str>,
+    floor_rule: Option<&str>,
+    encode_digits: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Dialect> {
     use jay::frontend::{
-        ComplexOrder, DefaultArg, DepthSign, DfnResult, FirstDisclose, GcdRule, IndexForm,
-        LookupLeft, NestedGrade, NestedModel, Partition,
+        ComplexOrder, DefaultArg, DepthSign, DfnResult, EncodeDigits, FirstDisclose, FloorRule,
+        GcdRule, IndexForm, LookupLeft, NearCount, NestedGrade, NestedModel, Partition,
     };
     let d = Dialect::default();
     Ok(Dialect {
@@ -657,6 +660,24 @@ fn dialect_of(
             &[("tolerant", GcdRule::Tolerant), ("exact", GcdRule::Exact)],
         )?
         .unwrap_or(d.gcd_rule),
+        near_count: setting(
+            near_count,
+            "near_count",
+            &[("absolute", NearCount::Absolute), ("tolerant", NearCount::Tolerant)],
+        )?
+        .unwrap_or(d.near_count),
+        floor_rule: setting(
+            floor_rule,
+            "floor_rule",
+            &[("shift", FloorRule::Shift), ("scaled", FloorRule::Scaled)],
+        )?
+        .unwrap_or(d.floor_rule),
+        encode_digits: setting(
+            encode_digits,
+            "encode_digits",
+            &[("tolerant", EncodeDigits::Tolerant), ("exact", EncodeDigits::Exact)],
+        )?
+        .unwrap_or(d.encode_digits),
         trains: trains.unwrap_or(d.trains),
     })
 }
@@ -678,6 +699,9 @@ fn dialect_of(
     nested_grade=None,
     lookup_left=None,
     gcd_rule=None,
+    near_count=None,
+    floor_rule=None,
+    encode_digits=None,
     trains=None,
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -697,6 +721,9 @@ fn compile(
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     gcd_rule: Option<&str>,
+    near_count: Option<&str>,
+    floor_rule: Option<&str>,
+    encode_digits: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
@@ -714,6 +741,9 @@ fn compile(
         nested_grade,
         lookup_left,
         gcd_rule,
+        near_count,
+        floor_rule,
+        encode_digits,
         trains,
     )?;
     let program = jay::compile(lang, source, &dialect).map_err(|e| jay_err(source, &e))?;
@@ -748,6 +778,9 @@ fn devices() -> Vec<(String, String, String, bool)> {
     nested_grade=None,
     lookup_left=None,
     gcd_rule=None,
+    near_count=None,
+    floor_rule=None,
+    encode_digits=None,
     trains=None,
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -768,6 +801,9 @@ fn compile_parts(
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     gcd_rule: Option<&str>,
+    near_count: Option<&str>,
+    floor_rule: Option<&str>,
+    encode_digits: Option<&str>,
     trains: Option<bool>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
@@ -785,6 +821,9 @@ fn compile_parts(
         nested_grade,
         lookup_left,
         gcd_rule,
+        near_count,
+        floor_rule,
+        encode_digits,
         trains,
     )?;
     let part_refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();

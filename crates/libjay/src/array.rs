@@ -1190,8 +1190,9 @@ impl Array {
     /// `⎕CT←0` and `9!:19 (0)` leave both exactly where they are. The two
     /// admissions differ in shape. [`NearInt::J`] is relative, a value
     /// within `2^-44` of a whole number's magnitude; [`NearInt::Apl`] is
-    /// absolute, `1e-10`, whatever the magnitude. Everything a full
-    /// integer apart is still a refusal in both.
+    /// absolute, `1e-10`, whatever the magnitude; [`NearInt::Tolerant`] is
+    /// relative and follows the comparison tolerance in force. Everything a
+    /// full integer apart is still a refusal in all three.
     pub fn to_i64_vec_near(&self, near: NearInt) -> Option<Vec<i64>> {
         let Data::F64(v) = &self.data else {
             // Every other type is exact or is refused outright; only a
@@ -1204,16 +1205,21 @@ impl Array {
 
 /// The near-integer admission a count, a length or an index position uses.
 ///
-/// It is a language constant, not a setting: neither reference lets a
-/// program move it, and it is unrelated to the comparison tolerance the
-/// same program can set.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// In J and in GNU APL it is a language constant: neither lets a program
+/// move it, and neither is the comparison tolerance the same program can
+/// set. Dyalog's is the exception — relative and scaled by `⎕CT` — so the
+/// rule is a dialect setting there, and [`NearInt::Tolerant`] carries the
+/// tolerance in force with it.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NearInt {
     /// J: `|x - n| ≤ 2^-44 × max(|x|, |n|)`, so the window grows with the
     /// magnitude and closes completely at zero.
     J,
     /// APL: `|x - n| < 1e-10` at every magnitude.
     Apl,
+    /// Dyalog: the dialect's own tolerant equality against the whole
+    /// number, so the window grows with the magnitude and `⎕CT` moves it.
+    Tolerant(crate::verb::Tol),
 }
 
 impl NearInt {
@@ -1224,7 +1230,7 @@ impl NearInt {
     /// APL's absolute admission.
     pub const APL_ABSOLUTE: f64 = 1e-10;
 
-    /// The rule for a language.
+    /// The rule for a language, at that language's shipped dialect.
     pub fn of(lang: crate::Lang) -> NearInt {
         match lang {
             crate::Lang::J => NearInt::J,
@@ -1241,6 +1247,7 @@ impl NearInt {
         let within = match self {
             NearInt::J => (x - n).abs() <= Self::J_RELATIVE * x.abs().max(n.abs()),
             NearInt::Apl => (x - n).abs() < Self::APL_ABSOLUTE,
+            NearInt::Tolerant(tol) => tol.eq(x, n),
         };
         (within && n.abs() < i64::MAX as f64).then_some(n as i64)
     }

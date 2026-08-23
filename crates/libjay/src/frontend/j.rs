@@ -502,6 +502,11 @@ fn build_definition(
         // J decides a definition's valence from its header (or, for a
         // `{{ }}`, from its words): one that takes `x` is a dyad only.
         dyad_only: dyadic,
+        // A J explicit definition binds both arguments by name or refuses
+        // the one it cannot bind, and nothing in J nests lexically.
+        spare_left: false,
+        enclosing: Vec::new(),
+        id: 0,
         result: None,
         locals: Vec::new(),
         body: stmts,
@@ -709,7 +714,11 @@ fn control_is_pure(c: &Control) -> bool {
                 a.test.as_ref().is_none_or(all) && all(&a.body)
             }) && otherwise.as_ref().is_none_or(all)
         }
-        Control::While { test, body, .. } => all(test) && all(body),
+        // A dfn guard is APL's; the variant reaches this frontend only
+        // through the shared IR.
+        Control::While { test, body, .. } | Control::Guard { test, body } => {
+            all(test) && all(body)
+        }
         Control::For { source, body, .. } => block_is_pure(source) && all(body),
         Control::Select { subject, cases } => {
             block_is_pure(subject)

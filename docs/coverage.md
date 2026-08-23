@@ -382,8 +382,8 @@ Dyalog IS recorded: Dyalog 20.0 (the official Docker image, run as a
 quarantined black box like every oracle, on the recording machine only)
 answered the whole corpus on 2026-08-22 into its own `dyalog:` column of
 the same snapshots (docs/testing.md). Under the shipped dialect libjay
-agrees with it on 1329 of 1479 expressions; under `Dialect::dyalog()`, on
-1418. `jay-corpus stats apl --dialect-diff [--dialect gnu|dyalog]` replays
+agrees with it on 1771 of 1989 expressions; under `Dialect::dyalog()`, on
+1915. `jay-corpus stats apl --dialect-diff [--dialect gnu|dyalog]` replays
 the recorded column under either preset and lists every disagreement — it
 runs no interpreter, so it needs no Docker. Neither number is a gate: the
 gate is GNU APL. `corpus/apl/dyalog-probe.txt` is the theme aimed at the
@@ -489,11 +489,17 @@ One more row is the preset's: dyadic `⍳` takes a VECTOR on its left and
 gives a rank error for anything else, scalars included, where the APL2 line
 searches the items of a left argument of any rank (`Dialect.lookup_left`).
 
+Three more are the tolerance readings: `Dialect.near_count` (a float near
+a whole number is admitted as a count relatively, scaled by `⎕CT`, rather
+than within an absolute `1E¯10`), `Dialect.floor_rule` (`⌊` and `⌈` scale
+their step by the magnitude) and `Dialect.encode_digits` (`⊤` takes its
+digits exactly rather than as tolerant residues).
+
 What the preset still leaves at the GNU reading, and what that costs
 against the recording, is the table in [status.md](status.md), "APL — the
-Dyalog line". The largest items are an array where a function operand
-belongs (`2∘×`, and an `⍺⍺` bound to a value) and the inner product with a
-non-scalar right operand.
+Dyalog line". The largest items are the inner product with a non-scalar
+right operand, the control words libjay has not written, and a dfn's SHY
+result.
 
 | Glyph | Monadic | Dyadic |
 |---|---|---|
@@ -601,7 +607,9 @@ pairs; n is one number however it is shaped, a negative one reverses each
 window before folding it, zero answers `f/⍬` once per gap, a window may
 reach one item past the axis and no further, and a bracket axis names the
 axis as it does for the reduce), `⍤` (rank), `⍨` (commute), `⍣`
-(power, a nonnegative count), `¨` (each: the function runs on the contents
+(power; a NEGATIVE count runs the inverse that many times, over the same
+obverse table J's `u^:_n` reads, and a verb with no inverse says so), `¨`
+(each: the function runs on the contents
 of every item and its result goes back into an item — a simple scalar
 result stays simple, so `2×¨1 2 3` is flat and `⍴¨'ab' 'cde'` is nested),
 `∘.f` (outer product — the table J spells `x u/ y`, but read between the
@@ -618,7 +626,10 @@ fold: `-\1 2 3` is `1 ¯1 2`. `⍣` also takes a FUNCTION right operand:
 
 A bare `∘` is Dyalog's beside `f∘g` — monadically `f g y`, dyadically
 `x f (g y)`, so g prepares the RIGHT argument and the left one arrives
-untouched. `⍥` (over) prepares both: `x f⍥g y` is `(g x) f (g y)`, which is
+untouched. It also BINDS an array where an operand belongs: `A∘f y` is
+`A f y` and `f∘A y` is `y f A`, so `2∘× 5` is 10 and `(÷∘2) 7` is 3.5.
+Both are monadic only, as J's `m&v` and `u&n` are, and the array has to
+be a literal — a computed operand (`(⍳3)∘+`) is a named gap. `⍥` (over) prepares both: `x f⍥g y` is `(g x) f (g y)`, which is
 the composition J spells `&:`. `⍛` (before) is the mirror of beside: `f⍛g`
 prepares the LEFT argument, so `x f⍛g y` is `(f x) g y` and `f⍛g y` is
 `(f y) g y`. `f⍤g` with a FUNCTION on the right is Dyalog's atop —
@@ -651,10 +662,29 @@ compiled, is named. GNU APL rejects the glyph outright, so `⍠` has no
 oracle: tests/wave9.rs holds its rules instead.
 
 A dfn that names `⍺⍺` or `⍵⍵` is an OPERATOR rather than a function: it
-takes the function on its left, and one on its right where it named `⍵⍵`.
+takes the operand on its left, and one on its right where it named `⍵⍵`.
 `+{⍺⍺/⍵}1 2 3` is 6, and naming the operator keeps it one, so
-`TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ -TWICE 5` is 5. The operands are bound under those two
-names for as long as the body runs. GNU APL has no dfn operators either.
+`TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ -TWICE 5` is 5. An operand may be an ARRAY, and the
+body then reads the name as that array: `2{⍺⍺+⍵}3` is 5. Which of the two
+it is decides how the body PARSES, not merely what it computes — `⍺⍺+⍵` is
+a train under one reading and a sum under the other — so the body is
+parsed under every reading when the dfn is defined and the operands choose
+one when they arrive. The operands are bound under those two names for as
+long as the body runs. GNU APL has no dfn operators either.
+
+A dfn is AMBIVALENT whatever its body mentions: a left argument it has no
+name for is dropped rather than refused, so `3 {⍵×2} 5` is 10, where a `∇`
+definition binds its arguments by the names its header gives. A guard's
+condition is read strictly — exactly one element, and that element 0 or 1
+— so `{2:1 ⋄ 0} 5` and `{1 1:1 ⋄ 0} 5` are domain errors where a control
+structure's `:If` takes the first element of whatever it is given. A dfn
+written INSIDE another reads the names the enclosing one made local
+(`{a←10 ⋄ {a+⍵} ⍵} 5` is 15) while its own assignments stay its own; only
+a lexical parent's locals are reachable, so a dfn named elsewhere and
+called from inside one sees the globals and nothing of its caller. A
+function named inside a dfn is a function to the sentences after it, and
+the name does not escape the dfn. All of that is the recorded Dyalog
+answer, which is the only reference these extensions have.
 
 The `⎕`-names are read-only and pure: `⎕A` and `⎕D` are the ISO constants
 (GNU APL has no value for either), `⎕IO` and `⎕CT` report the dialect the
@@ -1108,9 +1138,14 @@ J answers — `3j4 = 3.0000000000001j4` is 1 — and GNU APL is far looser here
 The tolerance reaches `=` `~:` `<` `<:` `>` `>:` `-:` `e.` `i.` `i:` `~.`
 `I.` in J, the same family plus `≡` `∊` `⍳` `∪` `⍸` in APL, the residue
 `|` and the encode `#:`/`⊤` whose digits are residues, and the two roundings
-`<.`/`⌊` and `>.`/`⌈`. Grade reads it in APL and NOT in J: `⍋1.0000000000001
-1` is `1 2` — the keys tie and the stable sort leaves them where they were —
-while `/: 1 1.0000000000001 1` is `0 2 1`, both as the references answer.
+`<.`/`⌊` and `>.`/`⌈`. Dyalog's `⊤` is the exception: it takes its digits
+exactly, so `2 2⊤4-1E¯14` is `1 2` there and `0 0` here —
+`Dialect.encode_digits` names it. Grade reads the tolerance in the APL2
+line and NOT in J or in Dyalog: `⍋1.0000000000001 1` is `1 2` — the keys
+tie and the stable sort leaves them where they were — while
+`/: 1 1.0000000000001 1` is `0 2 1`, both as the references answer, and
+`⍋2 (1+1E¯14) 1` is `3 2 1` under the total array ordering, which reads no
+tolerance at all.
 A tolerant comparison is not transitive, so a non-transitive triple leaves
 the order to the sort; the ties that matter in practice are the ordinary
 two-key ones.
@@ -1120,7 +1155,10 @@ differ:
 
 - `<.`/`>.` scale the gap to the integer by the magnitude in J, so
   `<. 99.999999999995` is 100. `⌊`/`⌈` shift by `⎕CT` outright in APL, so
-  `⌊99.999999999995` is 99 and `⌊¯1E¯13` is 0.
+  `⌊99.999999999995` is 99 and `⌊¯1E¯13` is 0. Dyalog's is a third
+  reading, `⌊y+⎕CT×1⌈|y` — scaled by the magnitude but never below the
+  tolerance itself, so `⌊9.9999999999999` is 10 and `⌊¯1E¯13` is `¯1`;
+  `Dialect.floor_rule` names it.
 - `x | y` rounds the quotient in both. J then answers an exact zero wherever
   the product is tolerantly the DIVIDEND, so `2 | 1e_14` keeps its `1e_14`.
   APL reads the remainder against the MODULUS, so `2|1E¯14` is 0 and a large
@@ -1166,7 +1204,8 @@ a float a real distance from any whole number is refused as before. An
 operand SELECTOR is not part of it: jconsole refuses `3 u:`, `s:`, `m b.`
 and a cut mode on a near-integer, and libjay reads those exactly too.
 Dyalog's admission is a third reading again — relative, and moving with
-`⎕CT` — which docs/status.md carries as a dialect gap.
+`⎕CT`, so `⍴⍳1000000+1E¯9` answers there and `⍳2+9E¯11` is a domain error.
+`Dialect.near_count` names it, and the Dyalog preset carries it.
 
 J's `!.` sets it per verb: `=!.0` compares bit for bit, and any tolerance
 above 2⁻³⁴ is refused, as J refuses it. APL's `⍠('CT' n)` does the same for

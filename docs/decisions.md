@@ -2872,3 +2872,106 @@ characters beside each other is text and prints with no separator, so
 `1 2,'ab'` shows as `1 2 ab`. At rank 2 and above each character is a
 column of its own again and the separator comes back, which is why
 `2 3⍴1 2,'abcd'` prints as `1 2 a` over `b c d`.
+## 2026-08-23 — Dyalog wave 3: an array as an operand, a dfn's scope, and the third tolerance family
+
+The recording said 141 of 1989 rows still differed under `Dialect::dyalog()`.
+Four causes were taken; the residue is 74, itemised in docs/status.md.
+Every answer below is the recorded Dyalog one — no oracle was run, and
+where a guess disagreed with the recording the recording won.
+
+**The near-integer count is Dyalog's third rule, and it is a dialect
+setting.** The previous entry left it named and unimplemented. It is
+`Dialect.near_count`: `Absolute` (GNU APL's flat `1E¯10`) or `Tolerant`
+(Dyalog's, the dialect's own tolerant equality against the whole number).
+`NearInt` gained a `Tolerant(Tol)` arm rather than a bare relative
+constant, because the window MOVES with `⎕CT` — `⎕CT←0` closes it — and
+carrying the `Tol` is how `EvalCfg::near()` hands the tolerance in force to
+a reader thirty signatures away. Seventeen rows.
+
+**The floor is a third rule too, and the obvious formula loses to
+rounding.** Dyalog's `⌊` is documented as `⌊y+⎕CT×1⌈|y`, and every recorded
+row agrees with it — except `⌊999.99999999999`, which Dyalog answers 999
+and the formula, evaluated in doubles, answers 1000: adding `9.9999999999999E¯12`
+to it rounds up to a clean `1000.0` where the exact sum is still below. So
+the `Scaled` arm compares the GAP against the step instead of adding it,
+and the `Shift` arm keeps the addition GNU APL's answers were verified
+against. Two arms, one field, no shared code path.
+
+**`⊤` does not round in Dyalog.** `2 2⊤4-1E¯14` is `1 2` there and `0 0`
+here, the last digit being `1.99999999999999` rather than a tolerant zero.
+`Dialect.encode_digits` sets the tolerance aside for that one reading;
+nothing else in the sentence changes.
+
+**Dyalog's grade reads no tolerance at all.** `⍋2 (1+1E¯14) 1` is `3 2 1`
+there and `2 3 1` under the APL2 comparator, where the two near-equal keys
+tie. That rides on `NestedGrade::TotalOrder` rather than a field of its
+own: the ordering and the tolerance it reads are one comparator, and the
+preset already selects it.
+
+**An array where a function operand belongs.** `2∘×` is the bond J already
+has (`Verb::BondLeft`/`BondRight`), so `∘` with a literal array on either
+side lowers to it and nothing new runs. A COMPUTED operand — `(⍳3)∘+` —
+stays a named gap: the IR holds an operand's ARRAY, not its expression, and
+giving it one would mean deciding when an operand is evaluated. J has the
+same gap under the same name ("bonds over a non-literal noun").
+
+**A dfn operator's array operand changes how the BODY PARSES.** `⍺⍺+⍵` is a
+train when `⍺⍺` is a function and a sum when it is an array, and the body is
+parsed once, at definition, while the operands arrive later — possibly in
+another sentence (`BOTHARR←{⍺⍺,⍵⍵,⍵} ⋄ (1 BOTHARR 2) 3`). So the body is
+parsed under all four readings and `OpDef` keeps them, indexed by which
+operands are arrays; a reading that will not parse keeps its diagnostic
+instead of failing the definition, because a body only has to make sense
+under the operands it is given. The alternative — deferring the parse until
+the operands are known — would have meant carrying tokens in the IR.
+
+**A dfn is ambivalent, and its guard is strict.** Two rules libjay had
+guessed, both wrong against the recording: `3 {⍵×2} 5` is 10 (a left
+argument the dfn has no name for is dropped, not refused) and `{2:1 ⋄ 0} 5`
+is a DOMAIN ERROR (a guard wants exactly one 0 or 1). The first is
+`ExplicitDef.spare_left`, false for `∇` definitions and for J's; the second
+is a `Control::Guard` node of its own, because `:If` keeps the loose
+reading and the two cannot share one. Neither is behind a dialect setting:
+dfns are a Dyalog-only extension with no APL2 reading to be the other arm,
+so the recording is simply the rule, in every dialect.
+
+**A dfn has no control words, so `:` inside one is always a guard.**
+`{a←⍵×2 ⋄ a>10:a ⋄ a+100}` used to fail on "unknown control word: :a". The
+lexer already counts braces; inside them the `:` is a guard whatever
+follows.
+
+**Lexical scope, by lexical ancestry rather than by frame depth.** A dfn
+written inside another reads the enclosing one's locals. Walking the frame
+stack outward would give DYNAMIC scoping, which agrees with the recording
+on every row but is a different language: a dfn named elsewhere and called
+from inside one would see its caller's locals. So each dfn gets an id and
+the ids of the dfns it is written inside, and a name not in the top frame
+is looked for in the frames below whose definition this one is written
+INSIDE. The chain is collected while the body is parsed, in a thread-local
+stack, because the parse of a nested dfn is reached through the statement
+splitter, the guard reader and the sentence parser, none of which has any
+other reason to carry it.
+
+**A dfn may name a function of its own.** `F←{G←{⍵×2} ⋄ G ⍵}` answered 0,
+because the flag that stops a `∇` body from registering a name in the
+ENCLOSING program's verb table also stopped a dfn body from registering one
+in its own — and a dfn body parses against a clone. The flag now says what
+it means (`shared_verbs`), and a dfn registers. The Dyalog result rule
+needed the same correction: naming a function is an assignment, so it is
+not the "first sentence that is not an assignment".
+
+**`f⍣¯n` is J's `u^:_n`.** The obverse table was already there and already
+shared; only the APL parser refused a negative count. Four of the five
+recorded rows now answer. The two that do not are obverse gaps: a bond
+(`(2∘↑)⍣¯1`) is not in the table, and `⍵⍵⍣¯1` names a verb that is only
+known when the operator runs, where the obverse is taken at parse time.
+
+**What was left, and why.** A SHY result — a dfn whose answer came from an
+assignment has a value the session does not print — needs a channel libjay
+does not have: every call yields a value and every top-level value is
+printed. So does a dfn that falls off its end with no result at all. Six
+rows, and the shape of the change (a third state beside `Some`/`None`
+threaded through every verb application) is a wave of its own. Two more
+rows are a collision rather than a gap: `{a}`, a dfn whose whole body is
+one identifier, is libjay's interpolation hole, and the brace binding is a
+fixed point of the embedding.

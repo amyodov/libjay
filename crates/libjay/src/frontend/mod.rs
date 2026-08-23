@@ -169,6 +169,56 @@ pub enum GcdRule {
     Exact,
 }
 
+/// How a float that is merely NEAR a whole number is admitted where a
+/// count, a length or an index belongs (`⍳2+9E¯11`, `(2+9E¯11)⍴5`).
+///
+/// This is not the comparison tolerance — `(2+9E¯11)=2` is 0 under both
+/// readings — and the two APL lines part company over it. GNU APL takes an
+/// absolute `1E¯10` at every magnitude, so a large count buys no room and
+/// `1E¯11` reads as 0. Dyalog's window is relative and follows `⎕CT`, so
+/// `⍴⍳1000000+1E¯9` answers there and is refused here, while every
+/// `2±9E¯11` case is the other way about. Neither is a superset.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NearCount {
+    /// GNU APL: an absolute `1E¯10`, whatever the magnitude.
+    #[default]
+    Absolute,
+    /// Dyalog: the dialect's own tolerant equality against the whole
+    /// number, so `⎕CT` moves it and zero admits nothing.
+    Tolerant,
+}
+
+/// How `⌊` and `⌈` read a value that is merely near the integer above or
+/// below it.
+///
+/// GNU APL shifts by `⎕CT` outright, so `⌊99.999999999995` is 99 — a gap
+/// of 5E¯12 is larger than the tolerance however big the value is — while
+/// `⌊¯1E¯13` is 0. Dyalog scales the shift by the magnitude but never
+/// below 1, so `⌊9.9999999999999` is 10 and `⌊¯1E¯13` is `¯1`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FloorRule {
+    /// GNU APL: `⌊y+⎕CT`, an absolute shift.
+    #[default]
+    Shift,
+    /// Dyalog: `⌊y+⎕CT×1⌈|y`, a shift that grows with the magnitude.
+    Scaled,
+}
+
+/// Whether `⊤` reads its digits tolerantly.
+///
+/// GNU APL takes each digit with the same tolerant residue `|` uses, so
+/// `2 2⊤4-1E¯14` is `0 0`. Dyalog takes them exactly, and the difference
+/// survives into the digits: the same sentence is `1 2` there, the last
+/// digit being 1.99999999999999 rather than a rounded 0.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EncodeDigits {
+    /// GNU APL: the digits are tolerant residues.
+    #[default]
+    Tolerant,
+    /// Dyalog: the digits are exact residues, `⎕CT` unread.
+    Exact,
+}
+
 /// Dialect settings supplied by the host.
 ///
 /// This is what a host asks for; [`Rules`] is what the compiler and the
@@ -199,6 +249,9 @@ pub struct Dialect {
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
     pub gcd_rule: GcdRule,
+    pub near_count: NearCount,
+    pub floor_rule: FloorRule,
+    pub encode_digits: EncodeDigits,
     /// Whether a function may stand where a value belongs: a run of
     /// functions is then a train, and `F←+/` names one. Both readings are
     /// implemented, so this is a choice and not a gap. It ships on, as an
@@ -234,6 +287,9 @@ impl Dialect {
             nested_grade: NestedGrade::Apl2,
             lookup_left: LookupLeft::AnyRank,
             gcd_rule: GcdRule::Tolerant,
+            near_count: NearCount::Absolute,
+            floor_rule: FloorRule::Shift,
+            encode_digits: EncodeDigits::Tolerant,
             trains: true,
         }
     }
@@ -261,6 +317,9 @@ impl Dialect {
             nested_grade: NestedGrade::TotalOrder,
             lookup_left: LookupLeft::VectorOnly,
             gcd_rule: GcdRule::Exact,
+            near_count: NearCount::Tolerant,
+            floor_rule: FloorRule::Scaled,
+            encode_digits: EncodeDigits::Exact,
             trains: true,
         }
     }
@@ -333,6 +392,9 @@ impl Dialect {
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
             gcd_rule: self.gcd_rule,
+            near_count: self.near_count,
+            floor_rule: self.floor_rule,
+            encode_digits: self.encode_digits,
             trains: self.trains,
         })
     }
@@ -362,13 +424,16 @@ pub struct Rules {
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
     pub gcd_rule: GcdRule,
+    pub near_count: NearCount,
+    pub floor_rule: FloorRule,
+    pub encode_digits: EncodeDigits,
     pub trains: bool,
 }
 
 impl Rules {
     /// The dialect's comparison tolerance, with the language's scale.
     pub fn tol(&self) -> Tol {
-        Tol { ct: self.ct, by_smaller: self.lang == Lang::J }
+        Tol { ct: self.ct, by_smaller: self.lang == Lang::J, floor_rule: self.floor_rule }
     }
 
     /// The host-facing form, for a nested compilation (`⍎`, `".`) that has
@@ -388,6 +453,9 @@ impl Rules {
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
             gcd_rule: self.gcd_rule,
+            near_count: self.near_count,
+            floor_rule: self.floor_rule,
+            encode_digits: self.encode_digits,
             trains: self.trains,
         }
     }

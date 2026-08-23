@@ -527,7 +527,7 @@ fn a_dfn_that_names_an_operand_is_an_operator() {
     // The operand names are gone once the derived function has run.
     let e = err(Lang::Apl, "{⍺⍺ ⍵}5");
     assert_eq!(e.kind, ErrorKind::Parse);
-    assert!(e.msg.contains("⍺⍺ needs a function"), "{}", e.msg);
+    assert!(e.msg.contains("⍺⍺ needs an operand"), "{}", e.msg);
 }
 
 // --- APL: format by specification -----------------------------------------

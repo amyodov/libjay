@@ -532,9 +532,11 @@ fn table_pairs_every_cell_with_every_cell() {
     assert_eq!(val(Lang::J, "(i.2 3) (,\"1)/ 1 2"), i64s(&[2, 5], &[0, 1, 2, 1, 2, 3, 4, 5, 1, 2]));
     // Two scalars leave no frame at all.
     assert_eq!(val(Lang::J, "2 +/ 3"), Array::scalar_i64(5));
-    // `∘` on its own is Dyalog's beside; a value operand is a separate gap.
+    // `∘` on its own is Dyalog's beside; a LITERAL array binds as an
+    // operand, and a computed one is still a gap.
     assert_eq!(val(Lang::Apl, "1 2 3+∘×1 2 3"), i64s(&[3], &[2, 3, 4]));
-    assert_eq!(err(Lang::Apl, "1∘×2").kind, ErrorKind::NotYet);
+    assert_eq!(val(Lang::Apl, "1∘×2"), Array::scalar_i64(2));
+    assert_eq!(err(Lang::Apl, "(⍳3)∘×2").kind, ErrorKind::NotYet);
 }
 
 // --- factorial and binomial ---------------------------------------------
@@ -687,7 +689,7 @@ fn newly_spelled_words_name_what_they_still_lack() {
         (Lang::J, "$. 'abc'", "sparse array of character"),
         (Lang::J, "2 s: s: <'a'", "symbol-table form"),
         (Lang::J, "+ &. (+/ % #) 1 2", "obverse"),
-        (Lang::Apl, "1∘×2", "∘ with a value operand"),
+        (Lang::Apl, "(⍳3)∘×2", "∘ with a value operand"),
     ];
     for (lang, src, what) in cases {
         let e = err(lang, src);

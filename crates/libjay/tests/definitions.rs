@@ -259,9 +259,14 @@ fn a_dfn_that_produces_no_result_says_so() {
     assert!(e.msg.contains("no result"), "{}", e.msg);
 }
 
+/// A dfn is ambivalent whatever its body mentions: a left argument it has
+/// no name for is dropped, which is the recorded Dyalog answer. A `∇`
+/// definition binds its arguments by name and refuses the spare one.
 #[test]
-fn a_monadic_dfn_refuses_a_left_argument_it_has_no_name_for() {
-    let e = fails(Lang::Apl, "F←{⍵} ⋄ 1 F 2");
+fn a_dfn_drops_a_left_argument_it_has_no_name_for() {
+    assert_eq!(apl("F←{⍵} ⋄ 1 F 2"), vec![2]);
+    assert_eq!(apl("3 {⍵×2} 5"), vec![10]);
+    let e = fails(Lang::Apl, "∇Z←F Y\nZ←Y\n∇\n1 F 2");
     assert_eq!(e.kind, ErrorKind::Domain);
     assert!(e.msg.contains("no dyadic"), "{}", e.msg);
 }
@@ -274,9 +279,17 @@ fn a_dfn_that_mentions_the_operand_names_is_an_operator() {
     // A named operator is still an operator in the sentences that follow.
     assert_eq!(apl("TWICE←{⍺⍺ ⍺⍺ ⍵} ⋄ -TWICE 5"), vec![5]);
     assert_eq!(apl("BOTH←{(⍺⍺ ⍵),⍵⍵ ⍵} ⋄ -BOTH+ 3"), vec![-3, 3]);
+    // Dyalog lets an ARRAY stand where an operand belongs, and the body
+    // reads the name as that array rather than as a function.
+    assert_eq!(apl("2{⍺⍺+⍵}3"), vec![5]);
+    assert_eq!(apl("1 2 3{⍺⍺+⍵}10"), vec![11, 12, 13]);
+    assert_eq!(apl("BOTHARR←{⍺⍺,⍵⍵,⍵} ⋄ (1 BOTHARR 2) 3"), vec![1, 2, 3]);
+    // The operand binds tighter than the argument, so the array to the
+    // right of the operator is the operand and not the argument.
+    assert_eq!(apl("2{⍺⍺+⍵}¨1 2 3"), vec![3, 4, 5]);
     // An operator that asks for a right operand and is given none says so.
-    let e = fails(Lang::Apl, "-{⍺⍺ ⍵⍵ ⍵}5");
-    assert!(e.msg.contains("⍵⍵ needs a function"), "{}", e.msg);
+    let e = fails(Lang::Apl, "-{⍺⍺ ⍵⍵ ⍵}");
+    assert!(e.msg.contains("⍵⍵ needs an operand"), "{}", e.msg);
 }
 
 #[test]
@@ -491,4 +504,70 @@ fn explain_shows_an_indexed_assignment() {
     let text = explain(Lang::Apl, "A←1 2 3 ⋄ A[2]←9 ⋄ A");
     assert_has(&text, "amend A[i]");
     assert_has(&text, "value:");
+}
+
+// --- dfn scope, guards and function names ---------------------------------
+
+/// A dfn written inside another reads the names the enclosing one made
+/// local, and its own assignments stay its own. Every answer here is the
+/// recorded Dyalog one.
+#[rstest]
+#[case("F←{a←10 ⋄ {a+⍵} ⍵} ⋄ F 5", vec![15])]
+#[case("F←{a←⍵ ⋄ {b←⍵ ⋄ a+b} 100} ⋄ F 1", vec![101])]
+#[case("F←{n←⍵ ⋄ +/{n×⍵}¨1 2 3} ⋄ F 10", vec![60])]
+#[case("F←{a←10 ⋄ G←{a+⍵} ⋄ G ⍵} ⋄ F 5", vec![15])]
+#[case("F←{a←10 ⋄ G←{a×⍵} ⋄ (G 2),(G 3)} ⋄ F 0", vec![20, 30])]
+#[case("F←{a←1 ⋄ G←{a←2 ⋄ a} ⋄ (G 0),a} ⋄ F 0", vec![2, 1])]
+fn a_nested_dfn_reads_the_enclosing_ones_locals(
+    #[case] src: &str,
+    #[case] want: Vec<i64>,
+) {
+    assert_eq!(apl(src), want);
+}
+
+/// Only a LEXICAL parent's locals are reachable: a dfn named elsewhere and
+/// called from inside one sees the globals and nothing of its caller.
+#[test]
+fn a_called_dfn_does_not_see_its_callers_locals() {
+    let e = fails(Lang::Apl, "G←{a+⍵} ⋄ F←{a←10 ⋄ G ⍵} ⋄ F 5");
+    assert!(e.msg.contains("undefined name: a"), "{}", e.msg);
+    assert_eq!(apl("a←1 ⋄ G←{a+⍵} ⋄ F←{a←10 ⋄ G ⍵} ⋄ F 5"), vec![6]);
+}
+
+/// A function named inside a dfn is a function to the sentences after it,
+/// and the name does not escape into the program around it.
+#[test]
+fn a_dfn_may_name_a_function_of_its_own() {
+    assert_eq!(apl("F←{G←{⍵×2} ⋄ G ⍵} ⋄ F 5"), vec![10]);
+    let e = fails(Lang::Apl, "F←{G←{⍵×2} ⋄ G ⍵} ⋄ G 5");
+    assert!(e.msg.contains('G'), "{}", e.msg);
+}
+
+/// A dfn has no control words, so `:` inside one always opens a guard —
+/// whatever the answer beside it is spelled like.
+#[test]
+fn a_guard_reads_its_colon_whatever_follows_it() {
+    assert_eq!(apl("F←{a←⍵×2 ⋄ a>10:a ⋄ a+100} ⋄ F 6"), vec![12]);
+    assert_eq!(apl("F←{a←⍵×2 ⋄ a>10:a ⋄ a+100} ⋄ F 2"), vec![104]);
+}
+
+/// A guard's condition is read strictly: one element, and that element 0
+/// or 1. A control structure's `:If` is the loose reading and keeps it.
+#[rstest]
+#[case("{1:1 ⋄ 0} 5", Some(1))]
+#[case("{0:1 ⋄ 2} 5", Some(2))]
+#[case("{2:1 ⋄ 0} 5", None)]
+#[case("{⍵:1 ⋄ 0} 2", None)]
+#[case("{1 1:1 ⋄ 0} 5", None)]
+#[case("{⍬:1 ⋄ 0} 5", None)]
+#[case("{'x':1 ⋄ 0} 5", None)]
+fn a_guard_wants_one_zero_or_one(#[case] src: &str, #[case] want: Option<i64>) {
+    match want {
+        Some(v) => assert_eq!(apl(src), vec![v]),
+        None => {
+            let e = fails(Lang::Apl, src);
+            assert_eq!(e.kind, ErrorKind::Domain, "{src}: {}", e.msg);
+            assert!(e.msg.contains("single 0 or 1"), "{src}: {}", e.msg);
+        }
+    }
 }

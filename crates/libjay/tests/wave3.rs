@@ -659,7 +659,7 @@ fn the_fixed_seed_roll_repeats() {
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
         (Lang::J, "2 s: s: <'a'", "symbol-table form"),
-        (Lang::Apl, "1∘×2", "∘ with a value operand"),
+        (Lang::Apl, "(⍳3)∘×2", "∘ with a value operand"),
     ];
     for (lang, src, what) in cases {
         let e = err(*lang, src);

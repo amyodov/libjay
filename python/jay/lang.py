@@ -93,6 +93,24 @@ class APL:
         ``¯3``, and a near-whole or vanishing argument is rounded first) or
         "exact" (Dyalog and J — the magnitude, and the values as given)."""
 
+        near_count: str = "absolute"
+        """How a float merely NEAR a whole number is admitted where a
+        count, a length or an index belongs: "absolute" (GNU APL — a flat
+        ``1E¯10`` at every magnitude) or "tolerant" (Dyalog — relative, and
+        scaled by ``⎕CT``). It is not the comparison tolerance: ``⎕CT←0``
+        leaves either window where it is."""
+
+        floor_rule: str = "shift"
+        """How ``⌊`` and ``⌈`` read a value just short of an integer:
+        "shift" (GNU APL — ``⌊y+⎕CT``, an absolute step) or "scaled"
+        (Dyalog — ``⌊y+⎕CT×1⌈|y``, a step that grows with the
+        magnitude)."""
+
+        encode_digits: str = "tolerant"
+        """Whether ``⊤`` takes its digits with the tolerant residue
+        ``|`` uses: "tolerant" (GNU APL) or "exact" (Dyalog, which leaves
+        ``2 2⊤4-1E¯14`` as ``1 2`` rather than ``0 0``)."""
+
         trains: bool = True
         """Whether a function may stand where a value belongs: a run of
         functions is then a train, and ``F←+/`` names one. Ships on, as an
@@ -115,6 +133,9 @@ class APL:
         nested_grade="total-order",
         lookup_left="vector-only",
         gcd_rule="exact",
+        near_count="tolerant",
+        floor_rule="scaled",
+        encode_digits="exact",
     )
 
     @staticmethod

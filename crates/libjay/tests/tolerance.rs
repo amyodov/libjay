@@ -16,7 +16,7 @@
 //! - Grade consults the tolerance in APL and never in J.
 
 use jay::fmt::{format_array, FmtOpts};
-use jay::frontend::GcdRule;
+use jay::frontend::{EncodeDigits, FloorRule, GcdRule, NearCount};
 use jay::{compile, Array, Dialect, Lang};
 use rstest::rstest;
 
@@ -312,4 +312,91 @@ fn a_local_tolerance_reaches_the_new_rules(
     #[case] want: &str,
 ) {
     assert_eq!(shown(lang, src), want);
+}
+
+// -------------------------------------------- the Dyalog readings, by knob
+
+/// `near_count` is where a float merely NEAR a whole number is admitted as
+/// a count. GNU APL's window is an absolute `1E¯10`, so a large count buys
+/// no room; Dyalog's is relative and follows `⎕CT`, so it is the other way
+/// about at every magnitude. Neither is a superset of the other, and the
+/// recorded Dyalog answers are what these expectations are.
+#[rstest]
+#[case("⍴⍳2+9E¯11", Some("2"), None)]
+#[case("⍴⍳1E¯11", Some("0"), None)]
+#[case("(2+9E¯11)⍴5", Some("5 5"), None)]
+#[case("⍴⍳1000000+1E¯9", None, Some("1000000"))]
+fn the_near_count_knob_moves_the_admission(
+    #[case] src: &str,
+    #[case] gnu: Option<&str>,
+    #[case] dyalog: Option<&str>,
+) {
+    let check = |want: Option<&str>, d: &Dialect| match want {
+        Some(want) => assert_eq!(shown_as(Lang::Apl, src, d), want),
+        None => assert!(run(Lang::Apl, src, d).is_err(), "{src:?} should be refused"),
+    };
+    check(gnu, &Dialect::gnu_apl());
+    check(dyalog, &Dialect::dyalog());
+    assert_eq!(Dialect::dyalog().near_count, NearCount::Tolerant);
+    assert_eq!(Dialect::gnu_apl().near_count, NearCount::Absolute);
+}
+
+/// The admission is not the comparison tolerance under either knob: a
+/// count that rounds still compares unequal, and `⎕CT←0` leaves the GNU
+/// window exactly where it was.
+#[test]
+fn the_near_count_is_not_the_comparison_tolerance() {
+    assert_eq!(shown(Lang::Apl, "(2+9E¯11)=2"), "0");
+    let exact = Dialect { comparison_tolerance: Some(0.0), ..Dialect::default() };
+    assert_eq!(shown_as(Lang::Apl, "⍴⍳2+9E¯11", &exact), "2");
+}
+
+/// `floor_rule` is the step `⌊` and `⌈` take before rounding. GNU APL's is
+/// `⎕CT` outright, so a gap of 5E¯12 is too wide however big the value;
+/// Dyalog's grows with the magnitude but never falls below the tolerance
+/// itself, which is what keeps `⌊¯1E¯14` at 0.
+#[rstest]
+#[case("⌊9.9999999999999", "10", "10")]
+#[case("⌊999.99999999999", "999", "999")]
+#[case("⌊99.999999999995", "99", "99")]
+#[case("⌊2.9999999999999", "3", "2")]
+#[case("⌈3.0000000000001", "3", "4")]
+#[case("⌊¯1E¯14", "0", "0")]
+#[case("⌊¯1E¯13", "0", "¯1")]
+#[case("⌈1E¯13", "0", "1")]
+fn the_floor_rule_knob_scales_the_step(
+    #[case] src: &str,
+    #[case] gnu: &str,
+    #[case] dyalog: &str,
+) {
+    assert_eq!(shown(Lang::Apl, src), gnu);
+    assert_eq!(shown_as(Lang::Apl, src, &Dialect::dyalog()), dyalog);
+    assert_eq!(Dialect::dyalog().floor_rule, FloorRule::Scaled);
+    assert_eq!(Dialect::gnu_apl().floor_rule, FloorRule::Shift);
+}
+
+/// `encode_digits` says whether `⊤` takes its digits with the tolerant
+/// residue `|` uses. Dyalog does not, and the untouched remainder shows up
+/// in the digits themselves.
+#[rstest]
+#[case("2 2⊤4-1E¯14", "0 0", "1 2")]
+#[case("2 2 2⊤8-1E¯14", "0 0 0", "1 1 2")]
+#[case("2 2⊤4-1E¯10", "1 2", "1 2")]
+fn the_encode_digits_knob_stops_the_rounding(
+    #[case] src: &str,
+    #[case] gnu: &str,
+    #[case] dyalog: &str,
+) {
+    assert_eq!(shown(Lang::Apl, src), gnu);
+    assert_eq!(shown_as(Lang::Apl, src, &Dialect::dyalog()), dyalog);
+    assert_eq!(Dialect::dyalog().encode_digits, EncodeDigits::Exact);
+    assert_eq!(Dialect::gnu_apl().encode_digits, EncodeDigits::Tolerant);
+}
+
+/// Dyalog's grade reads no tolerance at all — the total array ordering is
+/// exact — where the APL2 line ties two keys within `⎕CT`.
+#[test]
+fn the_dyalog_grade_is_exact() {
+    assert_eq!(shown(Lang::Apl, "⍋2 (1+1E¯14) 1"), "2 3 1");
+    assert_eq!(shown_as(Lang::Apl, "⍋2 (1+1E¯14) 1", &Dialect::dyalog()), "3 2 1");
 }
