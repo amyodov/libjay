@@ -152,7 +152,3 @@ world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⊃{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0
 world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⍴⊃{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
 world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ≡{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
 world←2 2 2 2⊤0 12 5 2 4 1 ⋄ LIFE←{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} ⋄ ⊃LIFE ⊃LIFE world
-
-// The depth of a whole generation: the two lines part on ↑ (first vs mix)
-// AND on the inner product's nesting — GNU 2, Dyalog 1.
-world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ≡{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
