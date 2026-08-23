@@ -1,5 +1,9 @@
 # Testing
 
+How many expressions the corpus holds right now is a question for
+`jay-corpus stats j` and `jay-corpus stats apl` — the per-theme and total
+counts live there, not in prose that would go stale.
+
 Two activities, and keeping them apart is the point.
 
 **Collecting** takes a list of expressions, runs a reference interpreter on
