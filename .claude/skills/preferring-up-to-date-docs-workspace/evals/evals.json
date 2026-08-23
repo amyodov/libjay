@@ -1,0 +1,23 @@
+{
+  "skill_name": "preferring-up-to-date-docs",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "In this Rust workspace, bump the pyo3 dependency in crates/binding/Cargo.toml from 0.22 to the latest 0.2x and fix everything that breaks in crates/binding/src/lib.rs. The crate is an abi3 extension module.",
+      "expected_output": "Consults Context7 for the pyo3 migration guide BEFORE editing; applies renames in one coherent pass; mentions behavioral changes, not only compile fixes.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Add a supply-chain check to this repo: a cargo-deny config that denies yanked crates and explicitly bans lodepng@3.11.0, plus a CI job for it.",
+      "expected_output": "Consults Context7 (or current docs) for the deny.toml schema and the cargo-deny-action usage instead of writing both from memory; current field names.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Our data pipeline needs each polars DataFrame column written out as a separate parquet file, with zstd compression, in parallel. Write the helper function.",
+      "expected_output": "Checks polars' current API surface via Context7 before writing (write_parquet options, partitioning helpers) rather than hand-rolling from remembered API; notes if polars already provides the piece.",
+      "files": []
+    }
+  ]
+}
