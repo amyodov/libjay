@@ -27,6 +27,11 @@ def main(argv: list[str] | None = None) -> int:
         help="language; default: by file extension, or J for -e",
     )
     parser.add_argument(
+        "--dialect",
+        choices=["gnu", "dyalog"],
+        help="APL dialect: the APL2/GNU line (default) or Dyalog's; APL only",
+    )
+    parser.add_argument(
         "--explain",
         action="store_true",
         help="print what the expression became instead of running it",
@@ -59,8 +64,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 1
 
+    if args.dialect and lang is not apl:
+        parser.error("--dialect applies to APL only")
     try:
-        kernel = lang.compile(source)
+        if args.dialect == "dyalog":
+            from .lang import APL
+
+            compiler = APL.create_compiler(APL.Dialect.dyalog)
+            kernel = compiler.compile(source)
+        else:
+            kernel = lang.compile(source)
         if args.explain:
             print(kernel.explain().rstrip("\n"))
             return 0

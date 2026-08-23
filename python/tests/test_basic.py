@@ -547,6 +547,23 @@ class TestCli:
         assert main(["-e", "(+/ % #) 1 2 3 4"]) == 0
         assert capsys.readouterr().out.strip() == "2.5"
 
+    def test_the_dialect_flag_selects_the_dyalog_reading(self, capsys):
+        from jay._cli import main
+
+        assert main(["-e", "\u2191(1 2)(3 4)", "--lang", "apl"]) == 0
+        assert capsys.readouterr().out.strip() == "1 2"
+        assert main(["-e", "\u2191(1 2)(3 4)", "--lang", "apl", "--dialect", "dyalog"]) == 0
+        out = capsys.readouterr().out
+        assert "3 4" in out  # the mix has a second row; first (gnu) answered the atom
+
+    def test_the_dialect_flag_is_apl_only(self, capsys):
+        import pytest
+
+        from jay._cli import main
+
+        with pytest.raises(SystemExit):
+            main(["-e", "2+2", "--lang", "j", "--dialect", "dyalog"])
+
     def test_an_expression_reads_the_process_stdin(self, capsys, monkeypatch):
         import io
 

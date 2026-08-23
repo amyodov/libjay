@@ -7,6 +7,8 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The command line takes `--dialect gnu|dyalog` for APL, so `uvx libjay` can answer in either line: `uvx libjay --lang apl --dialect dyalog -e '↑(1 2)(3 4)'` is the 2×2 mix.
+
 - J's `#^:_1`, the obverse of copy: `1 0 1 #^:_1 ] 1 3` is `1 0 3`, putting
   the items back where the ones stand and a fill in the place of every
   zero. It is the expansion APL spells `\`, and it fills as J does.
