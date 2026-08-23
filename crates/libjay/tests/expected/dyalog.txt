@@ -133,20 +133,6 @@ a←1 ⋄ F←{{a} ⍵} ⋄ F 0
 ('B' ⎕S 0⍠('IC' 1)) 'abcb'
 ? gap regex: ⎕R and ⎕S are refused by name
 
-// --- gap shy-result (4) -------------------------------------------------
-// A SHY result: a dfn whose answer came from an assignment has one, and the
-// session does not print it. libjay has no channel for either half — every
-// call yields a value, every value at the top level is printed, and there is
-// no `⎕←` to display one on purpose.
-{a←⍵×2} 5
-? gap shy-result: a shy result prints here
-F←{r←⍵×2} ⋄ F 5
-? gap shy-result: a shy result prints here
-F←{r←⍵×2} ⋄ ⎕←F 5
-? gap shy-result: a shy result prints here
-{a←⍵ ⋄ b←a+1} 5
-? gap shy-result: a shy result prints here
-
 // --- gap complex-floor (2) ----------------------------------------------
 // Complex floor and ceiling. Dyalog rounds to a Gaussian integer of the
 // fundamental parallelogram; libjay takes the floor of each part.

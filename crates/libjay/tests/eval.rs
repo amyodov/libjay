@@ -23,6 +23,13 @@ fn run_capture(lang: Lang, src: &str) -> (Option<Array>, String) {
     (result, out)
 }
 
+/// Whether a session would keep this program's answer to itself.
+fn shy(lang: Lang, src: &str) -> bool {
+    let program = compile(lang, src, &Dialect::default()).expect("compile");
+    let mut sink = |_: &str| {};
+    program.run_detail(&[], &mut sink).expect("run").shy
+}
+
 fn err(lang: Lang, src: &str) -> jay::Error {
     let program = match compile(lang, src, &Dialect::default()) {
         Err(e) => return e,
@@ -299,6 +306,40 @@ fn apl_sequence_assignment_and_quad() {
     let (result, out) = run_capture(Lang::Apl, "⎕←2+2");
     assert_eq!(out, "4\n");
     assert_eq!(result, None); // explicit output is not re-displayed
+    // Inside an expression the value still passes through.
+    assert_eq!(run(Lang::Apl, "1+⎕←2+2"), Some(Array::scalar_i64(5)));
+}
+
+/// A dfn whose answer came from an assignment answers SHYLY: the value
+/// flows wherever it is used, and the sentence that only applied the
+/// definition displays nothing.
+#[test]
+fn apl_shy_results() {
+    assert_eq!(run(Lang::Apl, "{a←⍵×2} 5"), Some(Array::scalar_i64(10)));
+    assert!(shy(Lang::Apl, "{a←⍵×2} 5"));
+    assert!(shy(Lang::Apl, "F←{r←⍵×2} ⋄ F 5"));
+    assert!(shy(Lang::Apl, "{a←⍵ ⋄ b←a+1} 5"));
+    // A guard chooses the sentence the answer comes from, so shyness is
+    // the chosen one's.
+    assert!(shy(Lang::Apl, "F←{⍵>0:r←'pos' ⋄ r←'neg'} ⋄ F 3"));
+    assert!(!shy(Lang::Apl, "F←{a←⍵×2 ⋄ a} ⋄ F 3"));
+    // Consuming the value is what makes it visible again: as an argument,
+    // or through a name.
+    assert_eq!(run(Lang::Apl, "1+{a←⍵×2} 5"), Some(Array::scalar_i64(11)));
+    assert!(!shy(Lang::Apl, "1+{a←⍵×2} 5"));
+    assert!(!shy(Lang::Apl, "F←{r←⍵×2} ⋄ x←F 5 ⋄ x"));
+    assert!(!shy(Lang::Apl, "F←{r←⍵×2} ⋄ (F 5)+F 6"));
+    assert!(!shy(Lang::Apl, "F←{r←⍵×2} ⋄ ⌽F 5 6"));
+    // An operator that ends by applying the definition keeps its shyness;
+    // one that ends by applying a primitive does not.
+    assert!(shy(Lang::Apl, "{a←⍵×2}¨1 2 3"));
+    assert!(shy(Lang::Apl, "F←{r←⍵×2} ⋄ F⍣2⊢5"));
+    assert!(!shy(Lang::Apl, "F←{r←⍵×2} ⋄ +/F¨1 2 3"));
+    // J has no shy results: an explicit definition ending in an
+    // assignment answers with the assigned value, displayed like any
+    // other.
+    assert!(!shy(Lang::J, "f =. 3 : 'a =. y*2'\nf 5"));
+    assert_eq!(run(Lang::J, "f =. 3 : 'a =. y*2'\nf 5"), Some(Array::scalar_i64(10)));
 }
 
 #[test]

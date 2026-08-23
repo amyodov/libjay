@@ -3282,3 +3282,50 @@ the register.
   inner-product change is a dialect setting, so the shipped reading is
   untouched: `--dialect-diff` with no flag went from 216 to 207, and all
   nine are the control words the language now has in both presets.
+
+- 2026-08-23 — Dyalog wave 5: shy results. Four of the preset's 45 exempt
+  rows, and one rule.
+
+  **A shy result is a flag on an APPLICATION, not a third value state.**
+  The earlier deferral asked for a value that is neither present nor
+  absent, threaded through every verb; the recordings ask for much less.
+  `Ctx` carries one bool, `shy`. Every application clears it on the way in,
+  `call_explicit` sets it on the way out to whether the body's last
+  value-producing sentence was an assignment, and `eval_stmt` reads it back
+  for a sentence that is an application. `Program::run` is unchanged;
+  `run_detail` returns the new `Outcome { value, shy }`. Nothing in the IR
+  gained a state, no verb signature moved, and the value itself is exactly
+  what it always was: `1+{a←⍵×2} 5` is 11, `x←F 5 ⋄ x` is 10, and the
+  sentence that only applied the definition displays nothing.
+
+  **The oracle moved the rule, twice.** The first design cleared shyness
+  at the sentence, keeping it only where the sentence was SYNTACTICALLY a
+  definition applied at its root, on the reading that an operator collects
+  answers into a value of its own. Recording six new probe rows said
+  otherwise: `{a←⍵×2}¨1 2 3` and `F⍣2⊢5` are shy in Dyalog, while
+  `+/F¨1 2 3`, `⊢F 5` and `⌽F 5 6` are not. So the rule is the
+  application's and not the sentence's — an operator that ENDS by applying
+  the definition keeps what the definition left, a primitive over the same
+  value does not — and clearing the flag at the entry of `Verb::monad` and
+  `Verb::dyad` says exactly that, in two lines, with no list of which
+  operators are transparent.
+
+  **What the sequence rule keeps.** Assignments still yield nothing at the
+  top level and `⎕←` still yields nothing there: that is the 2026-08-20
+  decision and this wave does not touch it. Inside a definition's body an
+  assignment is a value, which is where shyness starts, and `⎕←`'s value is
+  shy for the same reason — it has displayed itself already. That is what
+  closes `F←{r←⍵×2} ⋄ ⎕←F 5`, whose recorded answer is `10`: the sentence
+  has no value, so what a session shows is what the program printed. The
+  testkit now reads a recorded answer as the LINE A SESSION WOULD SHOW —
+  the displayed value, or the printed text where the value is shy or
+  absent — which is what the recordings always were, and every existing row
+  is unmoved by it because nothing else in the corpus prints.
+
+  **What did not move.** J has no shy results — `Program::exec` gates the
+  flag on `Rules::lang`, and `f =. 3 : 'a =. y*2' ⋄ f 5` still displays 10.
+  GNU APL has no dfns beyond the lambda, so no `gnu:` row could turn on
+  this; `record apl --check` and `oracle_apl` confirm it. The shipped
+  dialect gains the rule with everything else Dyalog is the only reference
+  for: `--dialect-diff` with no flag went from 207 to 203, which is the
+  four rows.

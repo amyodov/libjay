@@ -269,6 +269,23 @@ impl Expr {
                 | Expr::ModDef { .. }
         )
     }
+
+    /// Sentences whose value is SHY: it flows to whatever consumes it, and
+    /// a session does not display it. An assignment has one — inside a
+    /// definition, where an assignment is a value rather than nothing —
+    /// and so does `⎕←`, which has displayed the value already. At the top
+    /// level `is_silent` gets to those two first: there the sequence keeps
+    /// no value at all.
+    fn is_shy(&self) -> bool {
+        matches!(self, Expr::Assign { .. } | Expr::AmendIndex { .. } | Expr::PrintPass { .. })
+    }
+
+    /// Whether this sentence ends by APPLYING a verb, so that the
+    /// application's own shyness is the sentence's. Everything else — a
+    /// name, a constant, a fused chain — answers with a value of its own.
+    fn is_application(&self) -> bool {
+        matches!(self, Expr::Monad { .. } | Expr::Dyad { .. })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -316,6 +333,24 @@ pub(crate) fn key(e: &Expr) -> usize {
     std::ptr::from_ref(e) as usize
 }
 
+/// What a run produced: the value of the last sentence, and whether a
+/// session would display it.
+///
+/// A SHY value is one an APL session keeps to itself: the answer of a
+/// definition that came from an assignment. The value is the same either
+/// way — it flows to whatever consumes it, is assigned, is printed by a
+/// caller that asks — and only a caller that displays results unasked
+/// needs the flag.
+#[derive(Clone, Debug)]
+pub struct Outcome {
+    /// None when the last sentence yields no value at all: an assignment,
+    /// `⎕←`, a definition of a name.
+    pub value: Option<Array>,
+    /// Meaningful only where there is a value; false for J, which has no
+    /// shy results.
+    pub shy: bool,
+}
+
 impl Program {
     /// Execute with one value per parameter, in `params` order.
     /// Returns None when the last sentence yields no value.
@@ -324,6 +359,13 @@ impl Program {
     /// `⍞` and `⎕`, J's `1!:1` — says so rather than reading anything.
     /// [`Program::run_io`] is the same run with a source attached.
     pub fn run(&self, args: &[Array], out: &mut dyn FnMut(&str)) -> Result<Option<Array>> {
+        Ok(self.exec(args, out, None, &mut None, None)?.value)
+    }
+
+    /// [`Program::run`], keeping what the value alone does not say: whether
+    /// a session would display it. Only a caller that prints results —
+    /// a REPL, a transcript — needs the difference.
+    pub fn run_detail(&self, args: &[Array], out: &mut dyn FnMut(&str)) -> Result<Outcome> {
         self.exec(args, out, None, &mut None, None)
     }
 
@@ -336,7 +378,7 @@ impl Program {
         out: &mut dyn FnMut(&str),
         inp: &mut dyn FnMut() -> Option<String>,
     ) -> Result<Option<Array>> {
-        self.exec(args, out, Some(inp), &mut None, None)
+        Ok(self.exec(args, out, Some(inp), &mut None, None)?.value)
     }
 
     /// [`Program::run_io`] with the fused kernels placed on `device`.
@@ -347,7 +389,7 @@ impl Program {
         out: &mut dyn FnMut(&str),
         inp: &mut dyn FnMut() -> Option<String>,
     ) -> Result<Option<Array>> {
-        self.exec(args, out, Some(inp), &mut None, Some(device))
+        Ok(self.exec(args, out, Some(inp), &mut None, Some(device))?.value)
     }
 
     /// Execute with the fused kernels placed on `device`.
@@ -361,7 +403,7 @@ impl Program {
         args: &[Array],
         out: &mut dyn FnMut(&str),
     ) -> Result<Option<Array>> {
-        self.exec(args, out, None, &mut None, Some(device))
+        Ok(self.exec(args, out, None, &mut None, Some(device))?.value)
     }
 
     /// Execute and record every node's result shape and dtype. The trace is
@@ -374,7 +416,7 @@ impl Program {
         device: Option<&crate::device::Device>,
     ) -> (Result<Option<Array>>, Trace) {
         let mut rec = Some(Trace::new());
-        let r = self.exec(args, out, None, &mut rec, device);
+        let r = self.exec(args, out, None, &mut rec, device).map(|o| o.value);
         (r, rec.expect("the recorder stays in place"))
     }
 
@@ -385,7 +427,7 @@ impl Program {
         inp: crate::verb::InputFn<'_>,
         rec: &mut Option<Trace>,
         device: Option<&crate::device::Device>,
-    ) -> Result<Option<Array>> {
+    ) -> Result<Outcome> {
         if args.len() != self.params.len() {
             let names: Vec<&str> = self.params.iter().map(|p| p.name.as_str()).collect();
             let wanted = if names.is_empty() {
@@ -408,8 +450,12 @@ impl Program {
         let mut env = Env::new(args.to_vec());
         let mut inp = inp;
         let inp = crate::verb::reborrow_input(&mut inp);
-        let mut ctx = Ctx { cfg, out, inp, env: &mut env, device };
-        let mut last = None;
+        let mut ctx = Ctx { cfg, out, inp, env: &mut env, device, shy: false };
+        // Only APL has shy results. A J definition whose last sentence is
+        // an assignment answers with the assigned value, displayed like
+        // any other.
+        let shyness = self.rules.lang == Lang::Apl;
+        let mut last = Outcome { value: None, shy: false };
         for stmt in &self.stmts {
             // A loop contains its own `:Leave`, and there is no definition
             // out here for a `:Return` or a `→` to leave.
@@ -421,7 +467,11 @@ impl Program {
                     None,
                 ));
             }
-            last = if stmt.is_silent() { None } else { v };
+            last = if stmt.is_silent() {
+                Outcome { value: None, shy: false }
+            } else {
+                Outcome { value: v, shy: shyness && ctx.shy }
+            };
         }
         Ok(last)
     }
@@ -476,17 +526,23 @@ pub(crate) fn run_block(
     rec: &mut Option<Trace>,
 ) -> Result<(Option<Array>, Flow)> {
     let mut last = last;
+    // The value handed in was produced by the caller's own last sentence,
+    // and `ctx.shy` still describes it.
+    let mut shy = last.is_some() && ctx.shy;
     for stmt in stmts {
         let (v, flow) = eval_stmt(stmt, ctx, rec)?;
         // `return.` and its relatives produce nothing of their own: the
         // value in hand is what the definition hands back.
         if let Some(v) = v {
             last = Some(v);
+            shy = ctx.shy;
         }
         if flow != Flow::Normal {
+            ctx.shy = shy;
             return Ok((last, flow));
         }
     }
+    ctx.shy = shy;
     Ok((last, Flow::Normal))
 }
 
@@ -498,8 +554,15 @@ fn eval_stmt(
     rec: &mut Option<Trace>,
 ) -> Result<(Option<Array>, Flow)> {
     let Expr::Control(c, span) = e else {
-        return Ok((Some(eval(e, ctx, rec)?), Flow::Normal));
+        let v = eval(e, ctx, rec)?;
+        // An application hands out the shyness the verb left behind; every
+        // other sentence's is the shape of the sentence itself.
+        if !e.is_application() {
+            ctx.shy = e.is_shy();
+        }
+        return Ok((Some(v), Flow::Normal));
     };
+    ctx.shy = false;
     let (v, flow) = eval_control(c, *span, ctx, rec)?;
     // A branch that ran and produced nothing yields whatever the language
     // gives an untaken branch: J's empty `i. 0 0`, and nothing at all in
@@ -507,8 +570,15 @@ fn eval_stmt(
     // early yields nothing either way, so the value in hand survives.
     let v = match (v, flow) {
         (Some(v), _) => Some(v),
-        (None, Flow::Normal) => ctx.env.current_def().and_then(|d| d.empty.clone()),
-        (None, _) => None,
+        (None, Flow::Normal) => {
+            // Nothing ran, so nothing is being kept quiet.
+            ctx.shy = false;
+            ctx.env.current_def().and_then(|d| d.empty.clone())
+        }
+        (None, _) => {
+            ctx.shy = false;
+            None
+        }
     };
     if let (Some(t), Some(v)) = (rec.as_mut(), v.as_ref()) {
         t.insert(
@@ -848,6 +918,11 @@ pub(crate) fn call_explicit(
     let out = run_body(&def.body, ctx, &mut rec);
     let frame = ctx.env.leave();
     let value = out?;
+    // The body's shyness, which `run_body` left in the context, is the
+    // call's: a definition whose answer came from an assignment answers
+    // shyly, and the sentence that applied it does not display it.
+    let body_shy = ctx.shy;
+    ctx.shy = false;
     // An APL `∇`-definition names its result; the body's own value is not
     // it, and a definition that never assigned the name has no result.
     if let Some(name) = &def.result {
@@ -860,7 +935,10 @@ pub(crate) fn call_explicit(
         });
     }
     match value {
-        Some(v) => Ok(v),
+        Some(v) => {
+            ctx.shy = body_shy;
+            Ok(v)
+        }
         None => def.empty.clone().ok_or_else(|| {
             Error::new(
                 ErrorKind::Value,
@@ -883,6 +961,7 @@ fn run_body(
     rec: &mut Option<Trace>,
 ) -> Result<Option<Array>> {
     let mut last = None;
+    let mut shy = false;
     let mut at = 0usize;
     let mut steps = 0usize;
     while at < stmts.len() {
@@ -898,6 +977,7 @@ fn run_body(
         let (v, flow) = eval_stmt(&stmts[at], ctx, rec)?;
         if let Some(v) = v {
             last = Some(v);
+            shy = ctx.shy;
         }
         match flow {
             Flow::Normal => at += 1,
@@ -905,6 +985,7 @@ fn run_body(
             _ => break,
         }
     }
+    ctx.shy = shy;
     Ok(last)
 }
 

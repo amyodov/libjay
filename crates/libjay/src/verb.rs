@@ -300,7 +300,7 @@ impl EvalCfg {
     pub(crate) fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let mut sink = |_: &str| debug_assert!(false, "a pure verb wrote to the output sink");
         let mut env = Env::new(Vec::new());
-        f(&mut Ctx { cfg: self, out: &mut sink, inp: None, env: &mut env, device: None })
+        f(&mut Ctx { cfg: self, out: &mut sink, inp: None, env: &mut env, device: None, shy: false })
     }
 }
 
@@ -476,6 +476,13 @@ pub struct Ctx<'a> {
     /// Where the run was placed. None is the CPU, which is also what every
     /// path that cannot use a device does; only a fused node reads it.
     pub device: Option<&'a crate::device::Device>,
+    /// Whether the value most recently produced by a SENTENCE is shy: a
+    /// value that flows to whatever consumes it and that a session does
+    /// not display. An APL definition whose answer came from an assignment
+    /// has one, and so does `⎕←`, which has displayed it already. Every
+    /// application clears it on the way in, an explicit definition sets it
+    /// on the way out, and [`crate::ir::Program::run_detail`] reads it.
+    pub shy: bool,
 }
 
 /// How deep one application may sit inside another before libjay stops.
@@ -543,6 +550,7 @@ impl Ctx<'_> {
             inp: reborrow_input(&mut self.inp),
             env: &mut *self.env,
             device: self.device,
+            shy: self.shy,
         })
     }
 
@@ -1572,6 +1580,12 @@ impl Verb {
     /// verb gets the rows it assumes, materialised once here.
     pub fn monad(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let _depth = Nesting::enter(span)?;
+        // Every application decides its own shyness, and only an explicit
+        // definition's last sentence makes it shy. An operator that ends
+        // by applying its operand therefore keeps what the operand left —
+        // `{a←⍵}¨1 2 3` is shy — and a primitive over the same value does
+        // not.
+        ctx.shy = false;
         // A verb that does not read the stored form gets the array every
         // position of it materialised, which is the same value.
         let dense;
@@ -1805,6 +1819,8 @@ impl Verb {
     /// as they lie and keeps the layout, and everything else is given rows.
     pub fn dyad(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let _depth = Nesting::enter(span)?;
+        // As in `monad`, the application starts out not shy.
+        ctx.shy = false;
         // As in `monad`: only `x $. y` reads a sparse argument as it lies,
         // and even there the left one names a form and is always dense.
         let (dense_x, dense_y);
@@ -15088,6 +15104,7 @@ mod tests {
                 inp: None,
                 env: &mut env,
                 device: None,
+                shy: false,
             };
         };
         ($name:ident) => {
@@ -16157,6 +16174,7 @@ mod tests {
             inp: None,
             env: &mut env,
             device: None,
+            shy: false,
         };
         v.monad(&y, &mut c, sp()).unwrap();
         assert_eq!(seen, (0..16).map(|i| i * 8192).collect::<Vec<i64>>());

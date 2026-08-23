@@ -7,6 +7,21 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- SHY results in APL. A definition whose answer came from an assignment
+  answers shyly: `{a←⍵×2} 5` has the value 10 and a session displays
+  nothing, while `1+{a←⍵×2} 5` is 11 and displays it. The value is there
+  either way — it is an argument, it is assigned, it is printed by a caller
+  that asks for it — and what shyness settles is only whether a session
+  that prints results unasked prints this one. Shyness belongs to the
+  application: every application starts out not shy, only a definition's
+  own last sentence makes it shy, and so an operator that ends by applying
+  that definition passes it on — `{a←⍵×2}¨1 2 3` and `F⍣2⊢5` are shy —
+  while a primitive over the same value is not: `+/F¨1 2 3` and `⌽F 5 6`
+  display. `Program::run_detail` returns the flag beside the value;
+  `Program::run` is unchanged and returns the value alone. J has no shy
+  results: a definition ending in an assignment answers with the assigned
+  value, displayed like any other.
+
 - APL's control words `:AndIf`, `:OrIf` and `:CaseList`, and `:For a b :In`.
   `:AndIf` and `:OrIf` continue the `:If`, `:ElseIf`, `:While` or `:Until`
   line above them and short-circuit — the second test does not run where the

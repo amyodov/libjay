@@ -359,6 +359,7 @@ conjunctions above:
 | Dfn assignment `F←{⍵×2}` | 🟢 |
 | Dfn guards `cond:expr`, `⍺←default`, `∇` self-reference | 🟡 guards and `∇` have no oracle (absent from GNU APL); `⍺←` follows the published default-only rule where GNU APL assigns unconditionally (recorded divergence) |
 | Dfn operators `⍺⍺` / `⍵⍵` | 🟡 no oracle: GNU APL has neither; a dfn naming one is an operator, and naming the operator keeps it one |
+| SHY results | 🟡 no oracle: GNU APL has no dfns to have them; a definition whose answer came from an assignment answers shyly, `Program::run_detail` reports it, and an operator that ends by applying the definition passes it on (`{a←⍵×2}¨1 2 3`) |
 | Tradfns `∇ Z←L F R;locals` … `∇` | 🟢 including APL's global-by-default scope rule, and the niladic form, which naming calls |
 | Trains (forks and atops) | 🟡 no oracle: GNU APL rejects them; Dyalog's rules, shipped as an extension (`Dialect.trains`, on by default) — 2-train atop, 3-train fork, a value left tine, longer trains grouped from the right |
 | Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included |
@@ -381,15 +382,15 @@ conjunctions above:
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
 APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
 a preset of the dialect object rather than a second engine:
-`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1967 of the
-2012 expressions Dyalog 20.0 has been recorded on — the default answers
-1805 of them — and the 45 it does not are itemised below.
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 1984 of the
+2025 expressions Dyalog 20.0 has been recorded on — the default answers
+1822 of them — and the 41 it does not are itemised below.
 
 That is a GATE, not a measurement: `cargo test -p libjay --test
 oracle_dyalog` replays the recorded `dyalog:` column under the preset and
 fails on any expression not on the exemption list,
 `crates/libjay/tests/expected/dyalog.txt`. The list carries a reason per
-row — 23 of them a divergence libjay keeps on purpose, 22 a gap — and the
+row — 23 of them a divergence libjay keeps on purpose, 18 a gap — and the
 `Tag` column below is the tag those gap rows name, so closing a row here
 deletes its exemptions and tightens the gate. Nothing is exempt silently.
 `jay-corpus stats apl --dialect-diff --dialect dyalog` measures the same
@@ -421,7 +422,6 @@ keeps.
 | Cause | Tag | Rows | Status |
 |---|---|---|---|
 | `⎕R` and `⎕S` | `regex` | 5 | 🔴 refused by name; pure computation, so the sandbox is no obstacle — they are simply not written |
-| A SHY result: a dfn whose answer came from an assignment has one, and the session does not print it (`{a←⍵×2} 5` shows nothing, `⎕←F 5` shows `10`) | `shy-result` | 4 | 🔴 libjay has no channel for either — every call yields a value, every value at the top level is printed, and there is no `⎕←` |
 | Complex floor and ceiling | `complex-floor` | 2 | 🔴 Dyalog rounds to a Gaussian integer of the fundamental parallelogram; libjay takes each part |
 | The obverse of a bound verb — `(2∘↑)⍣¯1` — and of an operand known only at run time | `obverse-of-bond` | 2 | 🔴 the obverse table reads the verb tree, and neither is in it |
 | An operand in PARENTHESES to the right of an operator: `=⍥(2∘|)`, `⌽HALF (2∘↑)` | `operand-parens` | 2 | 🔴 the operator folder reaches it before the `)` has closed — a parser ordering gap, not a missing meaning |
@@ -452,7 +452,8 @@ extensions had no APL2 reading to follow they now follow Dyalog's recorded
 one in EVERY dialect, the shipped one included: a dfn is ambivalent, its
 guard wants a single 0 or 1, a dfn written inside another reads the
 enclosing one's locals, an array binds where a function operand belongs,
-and `f⍣¯n` runs the inverse.
+`f⍣¯n` runs the inverse, and an answer that came from an assignment is
+shy.
 
 `⊇` and the other Dyalog features libjay does not implement at all are
 below; they are the queue for a later wave, not counted in the APL totals.

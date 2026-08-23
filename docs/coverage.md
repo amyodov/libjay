@@ -22,7 +22,9 @@ feature — that is a promise, not a refusal.
   pairs with a 2-vector row-wise), APL exact-shape-or-scalar.
 - A sequence's value is its last sentence's; a sentence that is an
   assignment (or `⎕←`) yields no value. Inline assignment inside an
-  expression yields the assigned value.
+  expression yields the assigned value. An APL definition whose answer came
+  from an assignment answers SHYLY: the value is there for whatever
+  consumes it, and a session displays nothing.
 - Errors carry the source span; shape errors report both shapes and the
   first diverging axis.
 
@@ -580,7 +582,7 @@ a single value, and `:Leave` belongs to a loop).
 
 What the preset still leaves at the GNU reading, and what that costs
 against the recording, is the table in [status.md](status.md), "APL — the
-Dyalog line". The largest items are `⎕R`/`⎕S` and a dfn's SHY result.
+Dyalog line". The largest item is `⎕R`/`⎕S`.
 
 | Glyph | Monadic | Dyadic |
 |---|---|---|
@@ -764,7 +766,20 @@ written INSIDE another reads the names the enclosing one made local
 a lexical parent's locals are reachable, so a dfn named elsewhere and
 called from inside one sees the globals and nothing of its caller. A
 function named inside a dfn is a function to the sentences after it, and
-the name does not escape the dfn. All of that is the recorded Dyalog
+the name does not escape the dfn.
+
+A dfn whose answer came from an ASSIGNMENT answers SHYLY: `{a←⍵×2} 5` has
+the value 10 and displays nothing, while `1+{a←⍵×2} 5` is 11 and displays
+it. Shyness belongs to the application, not to the value: every
+application starts out not shy, only a definition's own last sentence
+makes it shy, and so an operator that ends by applying that definition
+passes it on (`{a←⍵×2}¨1 2 3` and `F⍣2⊢5` are shy) while a primitive over
+the same value does not (`+/F¨1 2 3`, `⌽F 5 6`). Assigning it, naming it,
+or handing it to any verb is consuming it. `Program::run_detail` reports
+the flag beside the value; `Program::run` returns the value alone, since a
+caller that asked for it is consuming it. J has no shy results: an
+explicit definition ending in an assignment answers with the assigned
+value, displayed like any other. All of that is the recorded Dyalog
 answer, which is the only reference these extensions have.
 
 The `⎕`-names are read-only and pure: `⎕A` and `⎕D` are the ISO constants

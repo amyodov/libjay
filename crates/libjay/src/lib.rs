@@ -31,4 +31,4 @@ pub use dtype::DType;
 pub use error::{Error, ErrorKind, Result, Span};
 pub use exact::{Ext, Rat};
 pub use frontend::{compile, compile_parts, Dialect, Lang};
-pub use ir::{ParamSpec, Program};
+pub use ir::{Outcome, ParamSpec, Program};

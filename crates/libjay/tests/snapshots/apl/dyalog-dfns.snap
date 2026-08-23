@@ -171,6 +171,32 @@
 > dyalog:
 = 1+{a←⍵ ⋄ b←a+1} 5
 > dyalog: 7
+= 2 {a←⍺+⍵} 3
+> dyalog:
+= F←{⍵>0:r←'pos' ⋄ r←'neg'} ⋄ F 3
+> dyalog:
+= F←{⍵>0:r←'pos' ⋄ r←'neg'} ⋄ F ¯3
+> dyalog:
+= {a←⍵×2 ⋄ a} 5
+> dyalog: 10
+= {a←⍵ ⋄ ⍵} 5
+> dyalog: 5
+= F←{r←{s←⍵×2} ⍵} ⋄ F 5
+> dyalog:
+= F←{r←{s←⍵×2} ⍵} ⋄ 1+F 5
+> dyalog: 11
+= {a←⍵×2}¨1 2 3
+> dyalog:
+= F←{r←⍵×2} ⋄ F¨1 2 3
+> dyalog:
+= F←{r←⍵×2} ⋄ +/F¨1 2 3
+> dyalog: 12
+= F←{r←⍵×2} ⋄ ⊢F 5
+> dyalog: 10
+= F←{r←⍵×2} ⋄ F⍣2⊢5
+> dyalog:
+= F←{r←⍵×2} ⋄ ⌽F 5 6
+> dyalog: 12 10
 = F←{a←10 ⋄ {a+⍵} ⍵} ⋄ F 5
 > dyalog: 15
 = F←{a←10 ⋄ G←{a+⍵} ⋄ G ⍵} ⋄ F 5
