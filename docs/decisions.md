@@ -3029,3 +3029,47 @@ also what GNU does (`1,⊂⊂5` draws as `1 5`, not with box padding).
 
 `⍴⍕(1 2)(3 4)` converged and its divergences.txt entry is gone, per that
 file's own stated policy ("a signal that the note ... should go").
+## 2026-08-23 — The Dyalog preset becomes a gate, and the exemptions are named
+
+The `dyalog:` column had been recorded data for three waves: measured by
+`jay-corpus stats apl --dialect-diff --dialect dyalog`, reported by the
+replay, and asserted by nothing. A number a run prints and no test enforces
+drifts, and the direction it drifts in is silent — the preset could lose an
+answer between waves and only the next reading would notice. So the preset
+is now held to the recording the way the shipped dialects are held to
+theirs: `tests/oracle_dyalog.rs` replays every one of the 1989 recorded
+Dyalog answers under `Dialect::dyalog()` and fails on any that differs.
+
+**The exemption list is data, not a skip.** A gate over a preset that does
+not implement the whole line needs a way to say "not this one, and here is
+why", and the two ways it could have been said are an attribute in the code
+and a file the gate reads. The file wins: it is reviewable in a diff, it
+lives beside the corpus it talks about, and it cannot be spelled without a
+reason. `crates/libjay/tests/expected/dyalog.txt` is in the corpus format
+with the `? ` note REQUIRED rather than forbidden — the same reader, one
+flag apart — so the format learned nothing new and a reader who knows
+`divergences.txt` knows this file. A note is `KIND TAG: reason`. The kind
+is a promise: `divergence` says libjay keeps answering this way, `gap` says
+the work is queued and the TAG names the row of docs/status.md's Dyalog
+table that would close it. Fixing that row deletes these rows, which the
+gate then insists on — a listed expression that has stopped differing is a
+failure of its own, exactly as a converged divergence record is. The list
+can only shrink by being edited, and the gate tightens by itself.
+
+**The 69 rows, classified.** 48 are gaps and 21 divergences. The largest
+gaps: the inner product `f.g` with a non-scalar right operand (15 rows, the
+Life idiom), the control words libjay does not have (9), `⎕R`/`⎕S` (5) and
+the shy result (4). The divergences are mostly already pinned against GNU
+APL too — the empty-base `⊥` (5), a count above 2⋆53 (3), the value of a
+diamond-separated program — plus two rules this wave stated: a preset
+chooses a dialect's rules, it does not WITHDRAW an extension libjay ships
+in every dialect (so `⍢` and `⍠` answering where the recorded Dyalog
+refuses is a divergence, not a gap), and a `{name}` collision is the
+embedding's fixed point rather than a queue item.
+
+**What is deliberately not in this wave.** No default moved. The gate is
+additive: `oracle_apl.rs` still holds `Dialect::default()` to GNU APL
+expression for expression, and a preset change that touched the default
+fails there before it fails here. The gate was verified red by hand — with
+`depth_sign` in `dyalog()` reverted to the GNU reading, three theme cases
+fail with five newly differing `≡` rows and the APL battery stays green.

@@ -13,7 +13,9 @@
 //!   marked is reference DATA: nothing holds libjay to it.
 //! - `? TEXT` after an expression is a note about it, and only
 //!   `divergences.txt` may carry one: elsewhere `?` is roll, so a line
-//!   starting with it is an expression.
+//!   starting with it is an expression. The expected-different list of a
+//!   dialect gate is read by [`read_annotated`], which is the same format
+//!   with the note required rather than forbidden.
 //!
 //! The comment marker is `//`, not `#`, because `#` is J's tally: `# i. 5 2`
 //! is one of the expressions below. `//` opens no sentence in either
@@ -106,11 +108,22 @@ pub fn gate_of(lang: crate::Lang, path: &Path) -> Option<&'static str> {
 
 /// Read a corpus file. Panics with the line number on a malformed one.
 pub fn read(path: &Path) -> Vec<Entry> {
+    read_lines(path, is_divergences(path))
+}
+
+/// Read a list in the corpus format whose entries all carry a `? ` note:
+/// the expected-different list a dialect gate reads. The file holds no
+/// inputs of its own — every line names an expression recorded elsewhere —
+/// so the note is the point of it and nothing forbids one.
+pub fn read_annotated(path: &Path) -> Vec<Entry> {
+    read_lines(path, true)
+}
+
+fn read_lines(path: &Path, notes_allowed: bool) -> Vec<Entry> {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
     let mut entries: Vec<Entry> = Vec::new();
     let mut io = 1u8;
-    let notes_allowed = is_divergences(path);
     for (i, line) in text.lines().enumerate() {
         let line_no = i + 1;
         let trimmed = line.trim_end();

@@ -5,11 +5,12 @@
 //! into `tests/snapshots/apl/*.snap`. This is a replay: no subprocess, no
 //! external binary, nothing outside the repository.
 //!
-//! A record holds one answer per implementation. libjay is held to `gnu:`,
-//! the line its shipped dialect follows; a `dyalog:` answer is recorded
-//! data for a future Dyalog dialect, and the battery COUNTS the expressions
-//! where it differs rather than failing on them —
-//! `jay-corpus stats apl --dialect-diff` lists them.
+//! A record holds one answer per implementation. This battery holds libjay
+//! to `gnu:`, the line its shipped dialect follows, and only COUNTS the
+//! expressions where the `dyalog:` answer differs —
+//! `jay-corpus stats apl --dialect-diff` lists them. The `dyalog:` column
+//! is gated by `oracle_dyalog.rs`, which replays it under
+//! `Dialect::dyalog()`; nothing there changes what this file asserts.
 //!
 //! Recording is the other activity, and the only one that runs the
 //! reference: `cargo run -p libjay-devtools -- record apl`

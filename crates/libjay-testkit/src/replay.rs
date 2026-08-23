@@ -6,10 +6,11 @@
 //! binary, nothing outside the repository. Collecting the recordings is the
 //! other half, and lives in `jay-corpus` (docs/testing.md).
 //!
-//! A snapshot may hold answers from other implementations too. Those gate
-//! nothing: a recorded Dyalog answer that differs from libjay is the
-//! backlog a future Dyalog dialect would have to explain, and the replay
-//! only counts it.
+//! A snapshot may hold answers from other implementations too. This replay
+//! only counts those — a recorded Dyalog answer that differs from the
+//! shipped dialect is the backlog a Dyalog dialect has to explain, not a
+//! regression in this one. The preset aimed at that implementation is
+//! gated separately, in [`crate::dialect`].
 
 use std::path::Path;
 
@@ -57,8 +58,9 @@ pub fn corpus_file(lang: Lang, path: &Path) {
             }
         }
         // A theme recorded against an implementation libjay does not follow
-        // gates nothing: the loop above has already counted it, and there
-        // is no side to hold libjay to.
+        // holds the SHIPPED dialect to nothing: the loop above has already
+        // counted it, there is no side to compare this dialect with, and
+        // the preset aimed at that implementation has its own gate.
         if gate.is_none() {
             continue;
         }

@@ -16,10 +16,14 @@ no external binaries, predictable runtime — and it is what CI runs.
 ```
 crates/libjay/tests/corpus/j/arithmetic.txt        the inputs
 crates/libjay/tests/snapshots/j/arithmetic.snap    what jconsole answered
+crates/libjay/tests/expected/dyalog.txt            what a preset may differ on
 ```
 
 One snapshot per corpus file, so a theme's inputs and recordings sit side by
-side and a recording touches only the files whose corpus changed. A theme is
+side and a recording touches only the files whose corpus changed. The third
+file is per DIALECT rather than per theme, and only a dialect that follows
+an implementation libjay does not ship as its default has one ("The third
+gate"). A theme is
 whatever keeps a diff reviewable — `arithmetic`, `structural`, `boxes`,
 `definitions`, `divergences`, `generated` and so on; `ls tests/corpus/j` is
 the list, and a new one is a new `.txt` with its snapshot beside it.
@@ -32,7 +36,7 @@ marker no sentence of either language can begin with:
 @ io=0                 ⎕IO for the lines after it (APL; 1 unless said)
 @ reference=dyalog     the whole theme is that implementation's data
 2 + 2                  an expression
-? why the two differ   a note (divergences.txt only)
+? why the two differ   a note (divergences.txt and an expected list only)
 ```
 
 The comment marker is `//`, not `#`, because `#` is J's tally: `# i. 5 2` is
@@ -127,6 +131,12 @@ agreement; error texts are never compared.
 An expression in a corpus file with no record in the snapshot is a failure:
 `unrecorded: run jay-corpus record`.
 
+Three batteries replay those recordings: `oracle.rs` holds libjay to
+jconsole, `oracle_apl.rs` holds it to GNU APL, and `oracle_dyalog.rs` holds
+`Dialect::dyalog()` to the `dyalog:` column of the same APL snapshots. The
+first two gate the dialects libjay ships; the third gates a preset, and has
+an exemption list ("The third gate").
+
 ## Divergences
 
 `corpus/apl/divergences.txt` is where libjay answers differently from GNU APL
@@ -139,11 +149,15 @@ entry in docs/coverage.md) should go.
 ## Dyalog
 
 Dyalog is a second APL, recorded under the `dyalog:` key beside GNU APL's.
-It is not a gate and never will be while `Dialect::default()` is the
-APL2/ISO line: an expression where libjay and Dyalog differ is the BACKLOG
-of the Dyalog dialect — the work that dialect still has to do — not a
-regression in this one. The replay counts those expressions and says so in
-its per-theme line; nothing fails.
+The shipped dialect is not held to it — an expression where the APL2/ISO
+line and Dyalog differ is not a regression in this one — so `oracle_apl.rs`
+counts those expressions and says so in its per-theme line and fails on
+none of them.
+
+The PRESET aimed at that line is held to it. `oracle_dyalog.rs` is the
+third gate, beside jconsole's and GNU APL's: it replays every recorded
+`dyalog:` answer under `Dialect::dyalog()`, in the same closed system, and
+fails on any difference that is not listed. See "The third gate" below.
 
 ```sh
 # what the two disagree about, expression by expression
@@ -163,11 +177,11 @@ the two numbers is what a wave of dialect work bought. The closing line
 names the dialect it ran under, so the two runs are told apart by their own
 output.
 
-Neither number is a gate — the gate is GNU APL's column, replayed by
-`cargo test` — but the `gnu` number is a useful guard beside it. Dialect
-work is meant to change what the preset answers and nothing else, so the
-`gnu` figure moving means the default moved with it, which is a regression
-whether or not a corpus expression happens to catch it. Run both.
+The `dyalog` number is what the gate below enforces; the `gnu` number is a
+guard beside it. Dialect work is meant to change what the preset answers
+and nothing else, so the `gnu` figure moving means the default moved with
+it, which is a regression whether or not a corpus expression happens to
+catch it. Run both.
 
 `corpus/apl/dyalog-probe.txt` is the theme aimed at that question: every
 line is a place docs/coverage.md's "Which APL" table says the two lines
@@ -192,13 +206,16 @@ that says so:
 @ reference=dyalog
 ```
 
-A theme marked that way is reference DATA. The recorder writes only that
-key into it and skips the file when asked for another; the replay evaluates
-every line, counts how many libjay already matches, and fails on none of
-them — the same treatment a `dyalog:` answer gets anywhere else, applied to
-a whole file. `every_corpus_file_is_recorded` holds such a file to having a
+A theme marked that way is reference DATA for the SHIPPED dialect: the
+recorder writes only that key into it and skips the file when asked for
+another, and `oracle_apl.rs` evaluates every line, counts how many the
+default already matches, and fails on none of them —
+the same treatment a `dyalog:` answer gets anywhere else, applied to a
+whole file. `every_corpus_file_is_recorded` holds such a file to having a
 `dyalog:` answer per line rather than a `gnu:` one, so a line added and
-never recorded is still caught.
+never recorded is still caught. The Dyalog preset IS held to those lines,
+by the gate below, exactly as it is held to a `dyalog:` answer in an
+ordinary theme.
 
 Control structures belong to a defined function, and in `dyalog-control.txt`
 that function is fixed with `⎕FX` rather than written between two `∇`s. The
@@ -218,6 +235,50 @@ the same function. `⎕FX`'s result is shy, so it displays nothing of its own.
 A `∇` the rewrite is not sure of — one that never closes, or a body line
 that opens another definition — is passed through untouched, so whatever
 Dyalog says about it is still what gets recorded.
+
+### The third gate
+
+`cargo test -p libjay --test oracle_dyalog` replays every recorded
+`dyalog:` answer under `Dialect::dyalog()` and fails on any expression the
+preset does not match. It is the same closed system as the other two
+batteries — one case per corpus theme, every mismatch in a theme reported
+at once, no interpreter — asked of a different dialect. Where it lives:
+
+```
+crates/libjay/tests/expected/dyalog.txt    what may differ, and why
+```
+
+Nothing else may. A difference the file does not carry fails the run, and a
+row of the file that has STOPPED differing fails it too, so closing a gap
+means deleting its rows and the gate tightens by itself. The file is in the
+corpus format, with the `? ` note required rather than forbidden:
+
+```
+⍴(1 1⍴5)+,3
+? gap singleton-rank: the first argument's rank wins here
+1 2 3⋄4 5
+? divergence sequence-value: only the last sentence has a value here
+```
+
+A note reads `KIND TAG: reason`. The kind is the promise:
+
+- `divergence` is a decision — a rule libjay keeps in every dialect, or a
+  place the recorded answer is the reference's own edge. Nothing is queued.
+- `gap` is a not-yet. Its TAG names a row of docs/status.md's Dyalog table,
+  which is the queue, so a reader can go from an exempted expression to the
+  work that would stop exempting it.
+
+The tag groups rows by cause, and the battery prints the split — how many
+rows are a divergence, how many a gap, and the largest causes — so the
+shape of the backlog is one line of test output rather than a re-derivation.
+
+`jay-corpus stats apl --dialect-diff --dialect dyalog` measures the same
+set from the outside and lists the differing expressions with both answers,
+which is how a row's text is obtained when one has to be added.
+
+The default dialect is untouched by any of this. `oracle_apl.rs` still
+holds it to GNU APL expression for expression, and a preset that changed
+what the default answers fails there.
 
 ### Installing Dyalog and recording it
 

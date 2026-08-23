@@ -1,0 +1,261 @@
+// Where the Dyalog PRESET does not answer what Dyalog answered.
+//
+// `cargo test -p libjay --test oracle_dyalog` replays every recorded
+// `dyalog:` answer under `Dialect::dyalog()` and fails on any difference.
+// This file is the whole of the exemption: nothing here is silent, and
+// nothing that is not here may differ.
+//
+// A row is one expression, exactly as the corpus spells it, under a `? `
+// note classifying it:
+//
+//   ? divergence TAG: why libjay keeps answering this way
+//   ? gap TAG: what is missing
+//
+// A DIVERGENCE is a decision — a rule libjay keeps in every dialect, or a
+// place the recorded answer is the reference's own edge. A GAP is a
+// promise: its tag names a row of docs/status.md's Dyalog table. Closing a
+// gap deletes its rows, and the gate then requires them, because a row
+// that has stopped differing is a failure of its own: the list shrinks and
+// the gate tightens.
+//
+// The rows are grouped by cause, and the comment above each group says
+// what the cause is. Order carries nothing — a row is looked up by its
+// sentence, as a snapshot record is — and `@ io=N` sets the index origin a
+// row was recorded under, exactly as in a corpus file.
+
+// --- divergence empty-base (5) ------------------------------------------
+// An empty base decodes to zeros here and is refused by both references —
+// GNU APL agrees about the SHAPE and refuses to print the value, Dyalog
+// refuses outright. The rule is libjay's, pinned in
+// corpus/apl/divergences.txt, and the same rows appear in fuzz_found.txt.
+(⍳0)⊥2 3⍴⍳6
+? divergence empty-base: zeros here, a RANK ERROR there
+(⍳0)⊥1 2 3
+? divergence empty-base: zeros here, a RANK ERROR there
+(⍳0)⊥1.5 2.5 ¯0.5
+? divergence empty-base: zeros here, a RANK ERROR there
+⍴(⍳0)⊥1 2 3
+? divergence empty-base: zeros here, a RANK ERROR there
+×⍀(÷\\((⍳0)⊥(1.5 2.5 ¯0.5)))
+? divergence empty-base: zeros here, a RANK ERROR there
+
+// --- divergence large-count (3) -----------------------------------------
+// A rotate amount or a modulus above 2⋆53: libjay reduces the count the
+// program wrote, exactly. GNU APL truncates it to 32 bits, Dyalog raises a
+// LIMIT ERROR or computes with the float. Pinned in divergences.txt.
+9223372036854775806⌽1 2 3
+? divergence large-count: the count the program wrote is used here
+9223372036854775806|2 3⍴⍳6
+? divergence large-count: the count the program wrote is used here
+9223372036854775806⌽¯2 0 2
+? divergence large-count: the count the program wrote is used here
+
+// --- divergence under-extension (3) -------------------------------------
+// `⍢` with a structural operand, which libjay answers and the recorded
+// Dyalog refuses. A preset chooses a dialect's rules; it does not withdraw
+// an extension libjay ships in every dialect.
+(1∘+)⍢⌽ 1 2 3
+? divergence under-extension: libjay's ⍢ takes this operand
+⌽⍢⊂ 1 2 3
+? divergence under-extension: libjay's ⍢ takes this operand
+⌽⍢⍉ 2 3⍴⍳6
+? divergence under-extension: libjay's ⍢ takes this operand
+
+// --- divergence variant-extension (3) -----------------------------------
+// `⍠` with an option Dyalog's variant does not offer. The same rule: the
+// preset does not withdraw an extension.
+1(=⍠0)1.0000001
+? divergence variant-extension: libjay's ⍠ takes this option
+'abc'(⍳⍠('IO' 0))'b'
+? divergence variant-extension: libjay's ⍠ takes this option
+(⍸⍠('IO' 0))0 1 0 1
+? divergence variant-extension: libjay's ⍠ takes this option
+
+// --- divergence name-hole (2) -------------------------------------------
+// A dfn whose whole body is one identifier, which libjay reads as a `{name}`
+// interpolation hole. Braces binding data and never code is a fixed point of
+// the embedding; the collision is real APL and has no answer yet.
+a←1 ⋄ F←{a←2 ⋄ {a} ⍵} ⋄ (F 0),a
+? divergence name-hole: a one-name body is an interpolation hole
+a←1 ⋄ F←{{a} ⍵} ⋄ F 0
+? divergence name-hole: a one-name body is an interpolation hole
+
+// --- divergence empty-prototype (1) -------------------------------------
+// An empty nested array carries no prototype here, so `≡` compares two
+// empties equal. Pinned in divergences.txt.
+⍬≡0⍴⊂⍬
+? divergence empty-prototype: empty prototypes are not compared here
+
+// --- divergence format-character (1) ------------------------------------
+// Dyadic `⍕` of a character, which libjay pads as GNU APL does and Dyalog
+// refuses. The shipped dialect's reading, kept in both presets.
+6 2⍕'a'
+? divergence format-character: dyadic ⍕ pads a character here
+
+// --- divergence function-display (1) ------------------------------------
+// A derived function displayed where a value belongs: Dyalog shows the
+// function's source.
+×∘2 5
+? divergence function-display: libjay has no display for a function
+
+// --- divergence sequence-value (1) --------------------------------------
+// A diamond-separated program has the value of its last sentence and prints
+// nothing on the way — Rust's block model, a fixed point of the design.
+// Pinned in divergences.txt.
+1 2 3⋄4 5
+? divergence sequence-value: only the last sentence has a value here
+
+// --- gap inner-product (15) ---------------------------------------------
+// An inner product `f.g` whose right operand is not a scalar function: the
+// two lines nest the intermediate differently, and libjay follows GNU APL.
+// The Life idiom is the visible casualty. docs/status.md, the first row of
+// the Dyalog table.
+≡1 2,.+3 4
+? gap inner-product: the intermediate nests one level deeper here
+≡(2 2⍴⍳4),.+2 2⍴⍳4
+? gap inner-product: the intermediate nests one level deeper here
+(2 2⍴⍳4),.,2 2⍴⍳4
+? gap inner-product: the intermediate nests one level deeper here
+≡(2 2⍴⍳4),.,2 2⍴⍳4
+? gap inner-product: the intermediate nests one level deeper here
+∊(2 2⍴⍳4),.,2 2⍴⍳4
+? gap inner-product: the intermediate nests one level deeper here
+(1 2)(3 4)+.,(5 6)(7 8)
+? gap inner-product: the intermediate nests one level deeper here
+≡(1 2)(3 4)+.,(5 6)(7 8)
+? gap inner-product: the intermediate nests one level deeper here
+1 2+.,3 4
+? gap inner-product: the intermediate nests one level deeper here
+≡1 (2 2⍴1 0 0 1)∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 2⍴1 1 1 0
+? gap inner-product: the intermediate nests one level deeper here
+⊃↑1 (2 2⍴1 0 0 1)∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂2 2⍴1 1 1 0
+? gap inner-product: the intermediate nests one level deeper here
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⊃{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
+? gap inner-product: the intermediate nests one level deeper here
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ⍴⊃{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
+? gap inner-product: the intermediate nests one level deeper here
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ ≡{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} world
+? gap inner-product: the intermediate nests one level deeper here
+world←2 2 2 2⊤0 12 5 2 4 1 ⋄ LIFE←{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} ⋄ ⊃LIFE ⊃LIFE world
+? gap inner-product: the intermediate nests one level deeper here
+(2 2⍴1 2 3 4)+.,2 2⍴1 2 3 4
+? gap inner-product: the intermediate nests one level deeper here
+
+// --- gap control-words (9) ----------------------------------------------
+// Control words the compiler does not know — `:AndIf`, `:OrIf`, `:CaseList`,
+// `:For a b :In` — a `:For` that does not disclose the item it binds, a
+// definition naming a function fixed after it, and a control structure
+// outside a definition.
+n←⎕FX 'Z←F R' ':If R>0' ':AndIf R<10' 'Z←''in''' ':Else' 'Z←''out''' ':EndIf' ⋄ (F 5),(F 50)
+? gap control-words: a control word libjay does not have
+n←⎕FX 'Z←F R' ':If R<0' ':OrIf R>10' 'Z←''out''' ':Else' 'Z←''in''' ':EndIf' ⋄ (F 5),(F 50)
+? gap control-words: a control word libjay does not have
+n←⎕FX 'Z←F R' ':If R>0' ':AndIf 0=2|R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F¨¯2 ¯1 1 2
+? gap control-words: a control word libjay does not have
+n←⎕FX 'Z←F R' 'Z←0' ':While R>0' ':AndIf Z<3' 'Z←Z+1' 'R←R-1' ':EndWhile' ⋄ F 10
+? gap control-words: a control word libjay does not have
+n←⎕FX 'Z←F R' 'Z←⍬' ':For p :In R' 'Z←Z,+/p' ':EndFor' ⋄ F (1 2)(3 4 5)
+? gap control-words: a control word libjay does not have
+n←⎕FX 'Z←F R' 'Z←⍬' ':For a b :In R' 'Z←Z,a×b' ':EndFor' ⋄ F (1 2)(3 4)
+? gap control-words: a control word libjay does not have
+n←⎕FX 'Z←F R' ':Select R' ':CaseList 1 2 3' 'Z←''low''' ':CaseList 4 5 6' 'Z←''high''' ':Else' 'Z←''off''' ':EndSelect' ⋄ F¨1 4 9
+? gap control-words: a control word libjay does not have
+n←⎕FX 'Z←F R' ':If R>0' 'Z←G R' ':Else' 'Z←0' ':EndIf' ⋄ m←⎕FX 'Z←G R' 'Z←R×3' ⋄ F 5
+? gap control-words: a control word libjay does not have
+:If 1 ⋄ 5 ⋄ :EndIf
+? gap control-words: a control word libjay does not have
+
+// --- gap regex (5) ------------------------------------------------------
+// `⎕R` and `⎕S`. Pure computation, so the sandbox is no obstacle; they are
+// simply not written.
+('B' ⎕R 'X'⍠('IC' 1)) 'abcb'
+? gap regex: ⎕R and ⎕S are refused by name
+('B' ⎕R 'X'⍠('IC' 0)) 'abcb'
+? gap regex: ⎕R and ⎕S are refused by name
+('b' ⎕R 'X') 'abcb'
+? gap regex: ⎕R and ⎕S are refused by name
+('b' ⎕S 0) 'abcb'
+? gap regex: ⎕R and ⎕S are refused by name
+('B' ⎕S 0⍠('IC' 1)) 'abcb'
+? gap regex: ⎕R and ⎕S are refused by name
+
+// --- gap shy-result (4) -------------------------------------------------
+// A SHY result: a dfn whose answer came from an assignment has one, and the
+// session does not print it. libjay has no channel for either half — every
+// call yields a value, every value at the top level is printed, and there is
+// no `⎕←` to display one on purpose.
+{a←⍵×2} 5
+? gap shy-result: a shy result prints here
+F←{r←⍵×2} ⋄ F 5
+? gap shy-result: a shy result prints here
+F←{r←⍵×2} ⋄ ⎕←F 5
+? gap shy-result: a shy result prints here
+{a←⍵ ⋄ b←a+1} 5
+? gap shy-result: a shy result prints here
+
+// --- gap complex-floor (2) ----------------------------------------------
+// Complex floor and ceiling. Dyalog rounds to a Gaussian integer of the
+// fundamental parallelogram; libjay takes the floor of each part.
+⌊3.5J4.5
+? gap complex-floor: the complex floor is taken per part here
+⌈3.5J4.5
+? gap complex-floor: the complex floor is taken per part here
+
+// --- gap control-strictness (2) -----------------------------------------
+// Two places libjay's control structures accept what Dyalog refuses: a `:If`
+// condition that is not a singleton, and a `:Leave` outside a loop.
+n←⎕FX 'Z←F R' ':If R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 1 1
+? gap control-strictness: accepted here, refused there
+n←⎕FX 'Z←F R' 'Z←0' ':Leave' ⋄ F 1
+? gap control-strictness: accepted here, refused there
+
+// --- gap obverse-of-bond (2) --------------------------------------------
+// The obverse of a bound verb, and of an operand known only at run time: the
+// obverse table reads the verb tree, and neither is in it.
+UNDER←{⍵⍵⍣¯1⊢(⍵⍵ ⍺) ⍺⍺ (⍵⍵ ⍵)} ⋄ 1 2 3 (+UNDER ⌽) 10 20 30
+? gap obverse-of-bond: the obverse table does not hold this verb
+(2∘↑)⍣¯1⊢1 2
+? gap obverse-of-bond: the obverse table does not hold this verb
+
+// --- gap operand-parens (2) ---------------------------------------------
+// An operand in PARENTHESES to the right of an operator, which the operator
+// folder reaches before the `)` has closed. A parser ordering gap, not a
+// missing meaning.
+HALF←{⍺⍺ ⍵⍵ ⍵} ⋄ (⌽HALF (2∘↑)) 1 2 3 4
+? gap operand-parens: the operand's ) has not closed yet
+2 =⍥(2∘|) 4
+? gap operand-parens: the operand's ) has not closed yet
+
+// --- gap singleton-rank (2) ---------------------------------------------
+// Two singletons of different rank conforming: the higher rank wins there,
+// the first argument here.
+⍴(1 1⍴5)+,3
+? gap singleton-rank: the first argument's rank wins here
+⍴(1 1 1⍴5)+1 1⍴3
+? gap singleton-rank: the first argument's rank wins here
+
+// --- gap circle-branch (1) ----------------------------------------------
+¯7○2
+? gap circle-branch: the branch cut of ¯7○ runs the other way here
+
+// --- gap computed-operand (1) -------------------------------------------
+// A COMPUTED array where a function operand belongs. Nothing in the IR holds
+// the operand's expression to evaluate when the derived function is built; a
+// literal array binds.
+(⍳3){⍺⍺+⍵}0
+? gap computed-operand: an operand's expression is not evaluated
+
+// --- gap function-default (1) -------------------------------------------
+// `⍺←` with a FUNCTION as the default left argument.
+F←{⍺←⊢ ⋄ ⍺ ⍵} 7
+? gap function-default: ⍺← takes an array alone here
+
+// --- gap no-result (1) --------------------------------------------------
+// A dfn that falls off its end has NO result there.
+{⍵>0:1} ¯5
+? gap no-result: every call yields a value here
+
+// --- gap stencil-empty (1) ----------------------------------------------
+// `⌺` over an empty, which Dyalog refuses.
+{+/,⍵}⌺3⊢⍬
+? gap stencil-empty: ⌺ over an empty answers here

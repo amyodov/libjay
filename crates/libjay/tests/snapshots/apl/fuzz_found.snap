@@ -13,8 +13,8 @@
 #   `# TEXT`      a comment.
 # The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
 # Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
-# `gnu` for APL; any other key is recorded data for a future dialect and
-# gates nothing.
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
 # A side whose single line is `<error>` refused the sentence. An empty answer
 # is one empty line. Trailing spaces are not recorded: the comparison is
 # whitespace-insensitive within a line, but the number of lines is not.

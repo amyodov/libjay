@@ -7,6 +7,21 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The Dyalog preset is a GATE. `cargo test -p libjay --test oracle_dyalog`
+  replays all 1989 recorded Dyalog answers under `Dialect::dyalog()` and
+  fails on any expression the preset does not match — the third differential
+  battery, beside jconsole's and GNU APL's, and the same closed system: no
+  subprocess, no interpreter, one case per corpus theme. What may differ is
+  listed one expression at a time in `crates/libjay/tests/expected/dyalog.txt`,
+  each row carrying its reason: 21 rows are a divergence libjay keeps on
+  purpose and 48 a named gap, whose tag is the row of docs/status.md's
+  Dyalog table that would close it. Nothing is exempt silently, and a row
+  that has stopped differing fails the run, so closing a gap deletes its
+  rows and the gate tightens by itself.
+
+  The shipped dialects are untouched: `Dialect::default()` is still the
+  APL2/ISO line, held to GNU APL expression for expression as before.
+
 - The command line takes `--dialect gnu|dyalog` for APL, so `uvx libjay` can answer in either line: `uvx libjay --lang apl --dialect dyalog -e '↑(1 2)(3 4)'` is the 2×2 mix.
 
 - J's `#^:_1`, the obverse of copy: `1 0 1 #^:_1 ] 1 3` is `1 0 3`, putting

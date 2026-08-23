@@ -13,6 +13,7 @@
 
 pub mod compare;
 pub mod corpus;
+pub mod dialect;
 pub mod eval;
 pub mod replay;
 pub mod snapshot;
