@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.3.0 — 2026-08-23
+
+### Added
+
 - The obverse table now holds nearly every verb the reference is willing to
   name one for, which is what `u&.v`, `u&.:v`, `u^:_1`, `u b. _1` and APL's
   `f⍢g` and `f⍣¯1` all read. Newly reachable: `/:` `\:` `C.` `%.` `p.` `]`
