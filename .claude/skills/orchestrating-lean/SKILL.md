@@ -27,3 +27,13 @@ When an inline command is unavoidable, filter at the source: `| grep 'test resul
 ## Interrupted agents
 
 Agents die from session limits, server errors (529), machine sleep, auth expiry. Their worktree/branch state survives. Resume with a message ("take stock: git status, git log, cargo check — then continue your brief"), never relaunch from scratch; a relaunch re-pays the whole ramp-up. If an agent stalls parked on a background notification that never fired, resume it with explicit foreground instructions.
+
+## The "quick check" trap (2026-08-23)
+
+A read-only check is orchestrator work; the FIX it uncovers is not. The
+incident: three legitimate inline checks (grep corpus, run two oracles)
+slid into inline recording, exemption edits, a broken gate pushed red, and
+a revert — a full fix-cycle on Fable with worse discipline than any
+subagent brief. The rule: the moment a check wants a third follow-up
+action, or ANY mutation of code/corpus/snapshots — even one line — spawn
+the subagent. Fable answers, routes, and lands; it does not edit.
