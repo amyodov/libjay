@@ -172,9 +172,9 @@ fn record(args: &[String]) -> Result<(), String> {
 
     let mut complaints: Vec<String> = Vec::new();
     let mut agreement = (0usize, 0usize);
-    // Sentences the interpreter never finished, gathered across the files
+    // Sentences the interpreter never answered, gathered across the files
     // and reported as complaints: a corpus line has to be recordable.
-    let timed_out: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let unrecordable: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
     for path in &paths {
         let label = corpus::label(path);
         // A theme marked `@ reference=NAME` is that implementation's alone:
@@ -206,15 +206,17 @@ fn record(args: &[String]) -> Result<(), String> {
                 });
                 record.note = entry.note.clone();
                 if !(missing_only && record.answer(&key).is_some()) {
-                    match oracle.eval(&entry.expr, entry.io) {
-                        // A corpus line the reference cannot finish is one
-                        // no recording can hold: the previous answer stays
-                        // and the run says which line it was.
-                        oracle::Reply::TimedOut => timed_out
+                    let reply = oracle.eval(&entry.expr, entry.io);
+                    // A corpus line the reference cannot answer — it never
+                    // finished, or it printed more than one run may hold —
+                    // is one no recording can hold: the previous answer
+                    // stays and the run says which line it was.
+                    match reply.cut_short() {
+                        Some(why) => unrecordable
                             .lock()
-                            .expect("the timeout list")
-                            .push(entry.expr.clone()),
-                        reply => record.set(&key, Side::of(reply.answer())),
+                            .expect("the unanswered list")
+                            .push(format!("{:?} {why}", entry.expr)),
+                        None => record.set(&key, Side::of(reply.answer())),
                     }
                 }
                 if divergences {
@@ -242,8 +244,8 @@ fn record(args: &[String]) -> Result<(), String> {
             }
         }
 
-        for expr in timed_out.lock().expect("the timeout list").drain(..) {
-            complaints.push(format!("{label}: {expr:?} did not finish (LIBJAY_ORACLE_TIMEOUT)"));
+        for line in unrecordable.lock().expect("the unanswered list").drain(..) {
+            complaints.push(format!("{label}: {line}"));
         }
 
         if !followed {
@@ -481,9 +483,12 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
                 libjay_testkit::eval::eval_detail(lang, expr, io)
             }));
             let theirs = oracle.eval(expr, io);
-            let timed_out = matches!(theirs, oracle::Reply::TimedOut);
+            // A run the oracle never answered — killed at the limit, or cut
+            // off for printing more than one run may hold — was not
+            // compared, and neither side is at fault for it.
+            let unanswered = !theirs.is_comparable();
             let theirs = theirs.answer();
-            let verdict = match (&ours, timed_out) {
+            let verdict = match (&ours, unanswered) {
                 (Err(_), _) => fuzz::Verdict::Panicked,
                 (_, true) => fuzz::Verdict::Unfinished,
                 (Ok(ours), false) => fuzz::triage(lang, ours, theirs.as_deref()),
@@ -495,7 +500,7 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
                 Ok(libjay_testkit::eval::Answer::Refused(e)) => format!("<error> {e}"),
             };
             let theirs_text = theirs.unwrap_or_else(|| {
-                if timed_out { "<unfinished>".to_string() } else { "<error>".to_string() }
+                if unanswered { "<unfinished>".to_string() } else { "<error>".to_string() }
             });
             (expr.to_string(), io, verdict, ours_text, theirs_text)
         })

@@ -9,9 +9,11 @@
 //! APL (whose invocation lives in `dyalog.rs`). Adding an implementation is
 //! adding an arm here and a key to `libjay_testkit::impls`.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use libjay_testkit::{IMPL_DYALOG, IMPL_GNU, IMPL_J, Lang};
 
@@ -51,6 +53,10 @@ pub enum Reply {
     /// reference for work measured in hours, and nothing about it is
     /// recorded.
     TimedOut,
+    /// It printed past the capture cap and was killed. Neither an answer
+    /// nor a refusal either: what came back is the front of an answer, and
+    /// an abbreviation recorded as an answer is a wrong answer.
+    Overflowed,
 }
 
 impl Reply {
@@ -66,7 +72,23 @@ impl Reply {
     pub fn answer(self) -> Option<String> {
         match self {
             Reply::Answer(text) => Some(text),
-            Reply::Refused | Reply::TimedOut => None,
+            Reply::Refused | Reply::TimedOut | Reply::Overflowed => None,
+        }
+    }
+
+    /// Whether what came back is comparable at all: an answer or a
+    /// refusal, rather than a run cut short.
+    pub fn is_comparable(&self) -> bool {
+        matches!(self, Reply::Answer(_) | Reply::Refused)
+    }
+
+    /// How a run cut short is named where a recording would otherwise say
+    /// what the reference answered.
+    pub fn cut_short(&self) -> Option<&'static str> {
+        match self {
+            Reply::TimedOut => Some("did not finish (LIBJAY_ORACLE_TIMEOUT)"),
+            Reply::Overflowed => Some("printed past the capture cap (LIBJAY_ORACLE_CAPTURE)"),
+            Reply::Answer(_) | Reply::Refused => None,
         }
     }
 }
@@ -81,37 +103,130 @@ fn limit() -> Option<std::time::Duration> {
     (secs > 0).then(|| std::time::Duration::from_secs(secs))
 }
 
+/// How much one run may print on one stream before it is cut off, in
+/// bytes. An interpreter asked for a large array prints it — the J
+/// preamble sets a 4096-column page — and a composed sentence reaches such
+/// a request readily, so a recorder that buffers whatever comes back is one
+/// sentence away from holding gigabytes. `LIBJAY_ORACLE_CAPTURE` overrides
+/// it; 0 lifts the cap. Every answer a corpus holds is orders of magnitude
+/// under it — the whole of the largest snapshot is a fifth of a megabyte —
+/// so no recording changes because of it.
+const CAPTURE_CAP: usize = 4 << 20;
+
+fn capture_cap() -> Option<usize> {
+    let bytes: usize = std::env::var("LIBJAY_ORACLE_CAPTURE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(CAPTURE_CAP);
+    (bytes > 0).then_some(bytes)
+}
+
+/// One pipe being read in a thread of its own, and the flag it raises when
+/// it has had to drop bytes.
+struct Drain {
+    reader: std::thread::JoinHandle<Vec<u8>>,
+    over_cap: Arc<AtomicBool>,
+}
+
+/// Read one pipe until it ends or the cap is reached. On reaching the cap
+/// the thread raises its flag and RETURNS, which drops the read end: the
+/// interpreter's next write fails and it dies, instead of printing into a
+/// buffer nobody will use.
+fn drain<R: Read + Send + 'static>(reader: R, cap: Option<usize>) -> Drain {
+    let over_cap = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&over_cap);
+    let reader = std::thread::spawn(move || {
+        let mut reader = reader;
+        let mut buf: Vec<u8> = Vec::new();
+        let mut chunk = [0u8; 64 * 1024];
+        loop {
+            let read = match reader.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            let room = cap.map_or(read, |cap| read.min(cap.saturating_sub(buf.len())));
+            buf.extend_from_slice(&chunk[..room]);
+            if room < read {
+                flag.store(true, Ordering::Relaxed);
+                break;
+            }
+        }
+        buf
+    });
+    Drain { reader, over_cap }
+}
+
+/// Kill the child and everything it started. The child leads a process
+/// group of its own (see `own_group`), and the signal goes to the group:
+/// killing the child alone would leave a grandchild holding the pipes open,
+/// and the drain threads waiting on them.
+fn kill_group(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // Negative pid is the group, by `kill(2)`. The child is its own
+        // group leader, so the group is the child and its descendants.
+        let group = -(child.id() as i32);
+        unsafe { libc::kill(group, libc::SIGKILL) };
+    }
+    let _ = child.kill();
+}
+
+/// Start a child in a process group of its own, so that `kill_group` can
+/// reach whatever it starts. jconsole and GNU APL are one process each
+/// today, but an oracle reached through a wrapper script is not.
+fn own_group(command: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+}
+
 /// Wait for a child that has already been written to, draining both pipes
 /// in threads of their own so neither can fill and block, and killing it if
-/// it outstays the limit. `None` is a kill.
-fn wait_within(mut child: std::process::Child) -> Option<(String, String)> {
-    fn drain<R: std::io::Read + Send + 'static>(r: R) -> std::thread::JoinHandle<Vec<u8>> {
-        std::thread::spawn(move || {
-            let mut r = r;
-            let mut buf = Vec::new();
-            let _ = r.read_to_end(&mut buf);
-            buf
-        })
-    }
-    let out = drain(child.stdout.take().expect("piped stdout"));
-    let err = drain(child.stderr.take().expect("piped stderr"));
+/// it outstays the limit or prints past the cap. `Err` names why what came
+/// back is not an answer.
+///
+/// Both drain threads are joined on EVERY path. A thread left running after
+/// a kill still holds its buffer, and a recording of thousands of sentences
+/// leaks one such buffer per sentence it cut short.
+fn wait_within(mut child: Child) -> Result<(String, String), Reply> {
+    let cap = capture_cap();
+    let out = drain(child.stdout.take().expect("piped stdout"), cap);
+    let err = drain(child.stderr.take().expect("piped stderr"), cap);
     let deadline = limit().map(|d| std::time::Instant::now() + d);
+    let mut cut_short = None;
     loop {
         match child.try_wait() {
             Ok(Some(_)) | Err(_) => break,
             Ok(None) => {}
         }
-        if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-            let _ = child.kill();
+        let over_cap =
+            out.over_cap.load(Ordering::Relaxed) || err.over_cap.load(Ordering::Relaxed);
+        if over_cap || deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            kill_group(&mut child);
             let _ = child.wait();
-            return None;
+            cut_short = Some(if over_cap { Reply::Overflowed } else { Reply::TimedOut });
+            break;
         }
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     let text = |h: std::thread::JoinHandle<Vec<u8>>| {
         String::from_utf8_lossy(&h.join().unwrap_or_default()).into_owned()
     };
-    Some((text(out), text(err)))
+    let Drain { reader: out_reader, over_cap: out_over } = out;
+    let Drain { reader: err_reader, over_cap: err_over } = err;
+    let (text_out, text_err) = (text(out_reader), text(err_reader));
+    if let Some(reply) = cut_short {
+        return Err(reply);
+    }
+    // A child that reached the cap and then died of the closed pipe on its
+    // own is over the cap too, and the wait loop never saw it happen.
+    if out_over.load(Ordering::Relaxed) || err_over.load(Ordering::Relaxed) {
+        return Err(Reply::Overflowed);
+    }
+    Ok((text_out, text_err))
 }
 
 /// Where the interpreter is, which implementation it is, and where its
@@ -203,23 +318,24 @@ impl Oracle {
 const J_PREAMBLE: &str = "0 0 $ 9!:37 ] 0 4096 0 4096";
 
 fn eval_j(jconsole: &Path, expr: &str) -> Reply {
-    let mut child = Command::new(jconsole)
+    let mut command = Command::new(jconsole);
+    command
         .args(["-jprofile", "/dev/null"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         // jconsole reports a failed sentence on stderr, so discarding it
         // would turn an error into an empty result.
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn jconsole");
+        .stderr(Stdio::piped());
+    let mut child = own_group(&mut command).spawn().expect("spawn jconsole");
     child
         .stdin
         .take()
         .unwrap()
         .write_all(format!("{J_PREAMBLE}\n{expr}\n").as_bytes())
         .expect("write to jconsole");
-    let Some((text, complaint)) = wait_within(child) else {
-        return Reply::TimedOut;
+    let (text, complaint) = match wait_within(child) {
+        Ok(streams) => streams,
+        Err(reply) => return reply,
     };
     if (text.contains("error") && text.contains('|')) || !complaint.trim().is_empty() {
         return Reply::Refused;
@@ -241,13 +357,12 @@ fn eval_apl(apl: &Path, cwd: &Path, expr: &str, index_origin: u8) -> Reply {
     if !multiline {
         command.args(["--eval", &line]);
     }
-    let mut child = command
+    command
         .current_dir(cwd)
         .stdin(if multiline { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn GNU APL");
+        .stderr(Stdio::piped());
+    let mut child = own_group(&mut command).spawn().expect("spawn GNU APL");
     if multiline {
         child
             .stdin
@@ -256,8 +371,9 @@ fn eval_apl(apl: &Path, cwd: &Path, expr: &str, index_origin: u8) -> Reply {
             .write_all(format!("{line}\n)OFF\n").as_bytes())
             .expect("write to GNU APL");
     }
-    let Some((stdout, stderr)) = wait_within(child) else {
-        return Reply::TimedOut;
+    let (stdout, stderr) = match wait_within(child) {
+        Ok(streams) => streams,
+        Err(reply) => return reply,
     };
     // GNU APL always exits 0; a failed sentence is reported on stderr as a
     // named error plus a caret line under the offending glyphs.

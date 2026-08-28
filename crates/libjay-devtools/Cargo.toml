@@ -16,3 +16,8 @@ path = "src/main.rs"
 libjay = { path = "../libjay" }
 libjay-testkit = { path = "../libjay-testkit" }
 rayon = "1.12.0"
+
+# `kill(2)` on a process group, so that killing an oracle that outstays its
+# limit kills whatever that oracle started.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
