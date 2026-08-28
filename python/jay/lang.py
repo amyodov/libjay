@@ -85,6 +85,14 @@ class APL:
         """How a grade orders complex values: "real-then-imaginary" or
         "magnitude-then-angle"."""
 
+        order_domain: str = "total"
+        """What ``<``, ``≤``, ``≥`` and ``>`` are allowed to order: "total"
+        (GNU APL — characters order by codepoint, a character stands below
+        every number, and a complex value orders by its real part then its
+        imaginary one) or "numeric" (Dyalog and J, where each of the three
+        is a domain error). ``⌈`` and ``⌊`` keep the narrow reading in
+        both."""
+
         nested_grade: str = "apl2"
         """How a grade orders nested items: "apl2" (rank, then shape, then
         the atoms, characters before numbers before nested values) or
@@ -154,6 +162,7 @@ class APL:
         partition="counts",
         depth_sign="signed",
         dfn_result="first-non-assignment",
+        order_domain="numeric",
         nested_grade="total-order",
         lookup_left="vector-only",
         gcd_rule="exact",

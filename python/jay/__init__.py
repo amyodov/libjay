@@ -94,6 +94,7 @@ _DIALECT_KEYS = (
     "dfn_result",
     "default_arg",
     "complex_order",
+    "order_domain",
     "nested_grade",
     "lookup_left",
     "gcd_rule",

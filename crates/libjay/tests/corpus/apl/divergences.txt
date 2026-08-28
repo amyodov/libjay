@@ -53,15 +53,6 @@
 ? principal branch here, the lower one there
 ¯2○2
 ? principal branch here, the lower one there
-// Ordering a complex number. GNU APL extends `< ≤ > ≥` to complex operands
-// as a lexicographic order on (real, imaginary); libjay refuses, as the
-// standard and J both do — a complex number has no order, only equality.
-3J4<1J2
-? no order on complex here, lexicographic there
-0J1<1
-? no order on complex here, lexicographic there
-3J4≤3J4
-? no order on complex here, lexicographic there
 // Grading is a permutation, not a claim about size, so libjay grades a
 // complex vector by (real, imaginary) — J's `/:` answers the same way.
 // GNU APL refuses it.
@@ -117,18 +108,6 @@ F←+/÷≢ ⋄ F 1 2 3 4
 ? a named tacit function here, a SYNTAX ERROR there
 F←+/ ⋄ F 1 2 3
 ? a named derived function here, a SYNTAX ERROR there
-// GNU APL extends `< ≤ > ≥` to characters, ordering them among themselves
-// and before every number. libjay refuses, as the standard and J both do —
-// a character has no magnitude, only identity — which is the same stance
-// the complex rows above take.
-'a'<'b'
-? no order on characters here, the collating order there
-'a'≤'b'
-? no order on characters here, the collating order there
-'a'<5
-? no order between a character and a number here, one there
-5<'a'
-? no order between a character and a number here, one there
 // A decode whose radix axis is EMPTY: every answer is the empty sum, which
 // is zero, and GNU APL agrees about the SHAPE of the result — `⍴(⍳0)⊥2 3⍴⍳6`
 // is 3 there — but raises DOMAIN ERROR when asked to print the value. Its
@@ -148,28 +127,49 @@ F←+/ ⋄ F 1 2 3
 +/⍤1⊢2 3⍴⍳6
 ? a derived left operand here, a SYNTAX ERROR there
 // Monadic `⊣` is the identity here, as the Dyalog line has it and as the
-// status table promises. GNU APL gives it no result at all: the sentence
-// displays nothing and `⍴⊣1 2 3` is as blank as `⊣1 2 3` is.
+// status table promises. GNU APL answers a COMMITTED integer scalar 0
+// instead — the sentence displays nothing, `⍴⊣1 2 3` is as blank as
+// `⊣1 2 3` is, and `(⊣5),9` is `0 9` there where it is `5 9` here. The
+// display half and the value half are both this one choice.
 ⊣1 2 3
-? identity here, no result at all there
+? identity here, a committed 0 there
 ⊣'abc'
-? identity here, no result at all there
+? identity here, a committed 0 there
 ⊣2 3⍴⍳6
-? identity here, no result at all there
+? identity here, a committed 0 there
+(⊣5),9
+? identity here, a committed 0 there
+(⊣'ab'),'c'
+? identity here, a committed 0 there
+// Bracket indexing binds tighter than a strand item in the APL2 line, so
+// `1 2 3[2]` there indexes the scalar 3 alone and is a RANK ERROR. The
+// manual calls that an unfortunate consequence of the binding strengths
+// and keeps it for compatibility; libjay reads the strand first, which is
+// what the spelling looks like it means and what every other bracket in
+// the language does. `(1 2 3)[2]` agrees.
+1 2 3[2]
+? the strand is indexed here, its last item there
+1 2 3 4[2 3]
+? the strand is indexed here, its last item there
+// A `{…}` with neither `⍺` nor `⍵` in it. GNU APL runs the body where it
+// stands and leaves a VALUE, so `{42}` is 42 and `N←{42} ⋄ N 5` is the
+// pair `42 5`; the manual lists it as a pitfall. libjay keeps `{…}` a
+// FUNCTION whatever its body mentions, which is the Dyalog reading its
+// dfn support is built on and the one `corpus/apl/dyalog-dfns.txt`
+// records.
+{42}
+? a function here, the value 42 there
+N←{42} ⋄ N 5
+? a function here, the value 42 there
 // A named gap: matching two EMPTY nested arrays compares their prototypes
 // in APL2, and libjay compares only shape and whether the type is
 // character. `⍬≡0⍴⊂1` agrees; `⍬≡0⍴⊂⍬` is where the prototype would decide.
 ⍬≡0⍴⊂⍬
 ? prototypes of empty nested arrays are not compared here
-// The same order of GNU APL's reaches ⍸ and the rest of the relational
-// family: a boxed or character bound is placed among the numbers there and
-// refused here. `=` and `≠` are defined across types and agree.
-'a'≥'b'
-? no order on characters here, the collating order there
-'a'>5
-? no order between a character and a number here, one there
-1 2<'ab'
-? no order between a character and a number here, one there
+// GNU APL's total order reaches ⍸ and the rest of the relational family
+// too: a boxed or character bound is placed among the numbers there and
+// refused here. The COMPARISONS themselves now follow it (see
+// doc-crawl.txt); `⍸` and `⌈`/`⌊` do not.
 'a'⍸1 1
 ? no order between a character and a number here, one there
 (⊂⍳3)⍸¯2 0 2

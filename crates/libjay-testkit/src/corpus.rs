@@ -21,7 +21,8 @@
 //! is one of the expressions below. `//` opens no sentence in either
 //! language.
 //!
-//! Inside an expression `\n` is a newline and `\\` a backslash.
+//! Inside an expression `\n` is a newline, `\t` a tab and `\\` a
+//! backslash. Any other escape is a malformed line, reported by name.
 
 use std::path::{Path, PathBuf};
 
@@ -149,7 +150,9 @@ fn read_lines(path: &Path, notes_allowed: bool) -> Vec<Entry> {
             entry.note = Some(note.to_string());
             continue;
         }
-        entries.push(Entry { expr: unescape(trimmed, line_no), io, note: None });
+        let expr = try_unescape(trimmed)
+            .unwrap_or_else(|e| panic!("{}: line {line_no}: {e}", path.display()));
+        entries.push(Entry { expr, io, note: None });
     }
     entries
 }
@@ -184,21 +187,57 @@ pub fn append(path: &Path, exprs: &[String]) -> usize {
 }
 
 /// A sentence as one line: the newlines in a multi-sentence program become
-/// `\n`, and a literal backslash `\\`.
+/// `\n`, a tab `\t`, and a literal backslash `\\`.
 pub fn escape(expr: &str) -> String {
     let mut out = String::with_capacity(expr.len());
     for c in expr.chars() {
         match c {
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
             _ => out.push(c),
         }
     }
     out
 }
 
-/// The inverse of [`escape`].
+/// What an escape in a corpus line can be wrong in: the two ways
+/// [`unescape`] can be handed something it cannot read.
+///
+/// The reader reports this rather than panicking, so a hand-written corpus
+/// line naming an escape the format does not have is a diagnostic about
+/// that line and not a crash in the middle of a recording.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EscapeError {
+    /// A `\` followed by a character the format does not spell that way.
+    Unknown(char),
+    /// A `\` at the very end of the line, with nothing to escape.
+    Dangling,
+}
+
+impl std::fmt::Display for EscapeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EscapeError::Unknown(c) => {
+                write!(f, "unknown escape \\{c}: a corpus line spells only \\n, \\t and \\\\")
+            }
+            EscapeError::Dangling => {
+                write!(f, "a line ends in a lone \\, which escapes nothing")
+            }
+        }
+    }
+}
+
+impl std::error::Error for EscapeError {}
+
+/// The inverse of [`escape`], with the line number in the diagnostic.
+/// Panics on a malformed escape, which is a malformed corpus file.
 pub fn unescape(text: &str, line_no: usize) -> String {
+    try_unescape(text).unwrap_or_else(|e| panic!("line {line_no}: {e}"))
+}
+
+/// The inverse of [`escape`], reporting a malformed escape by name.
+pub fn try_unescape(text: &str) -> std::result::Result<String, EscapeError> {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
     while let Some(c) = chars.next() {
@@ -209,8 +248,10 @@ pub fn unescape(text: &str, line_no: usize) -> String {
         match chars.next() {
             Some('\\') => out.push('\\'),
             Some('n') => out.push('\n'),
-            other => panic!("line {line_no}: bad escape \\{}", other.unwrap_or(' ')),
+            Some('t') => out.push('\t'),
+            Some(other) => return Err(EscapeError::Unknown(other)),
+            None => return Err(EscapeError::Dangling),
         }
     }
-    out
+    Ok(out)
 }

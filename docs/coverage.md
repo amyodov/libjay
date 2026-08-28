@@ -519,21 +519,23 @@ read off an old note:
 | `⎕CT` default | `1e¯13`, scaled by the LARGER magnitude — verified against the oracle | `1e¯14`, the same scaling: no recorded answer separates the two rules, and both references scale by the larger | BOTH — the value is what the preset changes |
 | dfn return value | the LAST statement — verified against the oracle (`2×{⍵+1⋄⍵+2}5` is `14`, i.e. `2×7`, not `2×6`) | the first statement that is not an assignment | BOTH — `Dialect.dfn_result`. A guard is not that statement: it answers only when it holds, and neither is `⎕←`, which assigns to `⎕` — `{⎕←⍵⋄⍵+1}5` prints `5` and answers `6` in both readings, verified against Dyalog. GNU APL also *echoes* every unassigned statement's value to stdout on its way through, which is a separate display quirk, not a different return value |
 | `⍺←` inside a dfn | assigns UNCONDITIONALLY — verified against the oracle (`F←{⍺←10⋄⍺+⍵}⋄3 F 5` is `15` there) | a DEFAULT: fills `⍺` only where no left argument arrived | neither running oracle — the published dfn model, which is `8` here, not `15` |
-| ordering `< ≤ > ≥` on complex numbers | extends them to a lexicographic order on (real, imaginary) — verified against the oracle (`2J3<2J5` is `1` there) | refuses, as the standard does | neither running oracle — refused, matching the standard |
+| ordering `< ≤ > ≥` over characters, mixed pairs and complex numbers | TOTAL: a character orders by its codepoint and stands below every number, and a complex value orders by its real part then its imaginary one — verified against the oracle (`2J3<2J5` and `'a'<1` are both `1` there) | refuses all three, as the standard does | BOTH — `Dialect.order_domain`. `'b'<'c'` is `1` by default and a DOMAIN ERROR under `Dialect::dyalog()`. `⌈` and `⌊` are not comparisons and stay numeric in either reading, as both references have them |
 | negative replication count in a VECTOR (`¯1 2/1 2`) | a LENGTH ERROR — restricts a negative count to a scalar left argument, verified against the oracle | legal: a run of fills, the general rule | neither running oracle — the general APL2/Dyalog rule, which is `0 2 2` here |
 | trains `(f g h)` | not in APL2, not in GNU APL — a SYNTAX ERROR, verified against the oracle | a Dyalog 14+ feature | DYALOG, as an extension shipped on by default (`Dialect.trains`); `Dialect(trains=False)` gives GNU APL's refusal back |
 | tacit / function assignment `F←+/` | a SYNTAX ERROR, verified against the oracle | supported | DYALOG, under the same `trains` setting: a function may stand where a value belongs, or it may not, and one flag decides both |
 
-Three of the rows above are where libjay follows neither running reference:
+Two of the rows above are where libjay follows neither running reference:
 GNU APL's own implementation departs from the ISO/APL2 line it otherwise
-embodies (`⍺←`, complex ordering, the vector replication count), and libjay
-follows the published rule — which happens to be Dyalog's rule too in all
-three cases — over the oracle's quirk. Everywhere else in this codebase,
-GNU APL wins: these three are pinned as deliberate exceptions in
+embodies (`⍺←` and the vector replication count), and libjay follows the
+published rule — which happens to be Dyalog's rule too in both cases —
+over the oracle's quirk. Everywhere else in this codebase, GNU APL wins:
+these two are pinned as deliberate exceptions in
 `crates/libjay/tests/corpus/apl/divergences.txt` precisely so a silent
-convergence gets noticed. The 2026-08-22 recording confirms all three:
-Dyalog answers `8` to the `⍺←` sentence, `0 2 2` to `¯1 2/1 2`, and
-refuses to order complex numbers — libjay's own three answers. The dyadic `⌷` divergence between GNU APL and
+convergence gets noticed. The 2026-08-22 recording confirms both: Dyalog
+answers `8` to the `⍺←` sentence and `0 2 2` to `¯1 2/1 2` — libjay's own
+two answers. Ordering was a third such row until the 2026-08-28 manual
+crawl; it is now a dialect setting instead, with GNU APL's total order the
+shipped reading and the narrow one a preset away. The dyadic `⌷` divergence between GNU APL and
 Dyalog runs the other way from what the glyph table might suggest: it is
 GNU APL, not libjay, that refuses Dyalog's enclosed-index-vector form.
 
@@ -629,21 +631,22 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `⌈` | ceiling | max |
 | `⌊` | floor | min |
 | `\|` | magnitude | residue |
-| `=` `<` `≤` `>` `≥` | — | comparisons (0/1) |
+| `=` `<` `≤` `>` `≥` | — | comparisons (0/1). `< ≤ > ≥` are TOTAL in this line: a character orders by its codepoint and stands below every number, and a complex value orders by its real part then its imaginary one. `Dialect.order_domain` names the narrow reading, where each of the three is a domain error. `⌈` and `⌊` are not comparisons and stay numeric under either |
+| `⊤∧` `⊤∨` `⊤⍲` `⊤⍱` `⊤=` `⊤≠` | the argument as the integer it stands for (`⊤∧`, `⊤∨`) or every bit of it complemented (`⊤⍱`); the other three have no monad | the logical operation on every bit of two 64-bit two's-complement integers, so `12 ⊤∧ 10` is 8. `⊤` and the glyph after it are one function, blanks between them included; an argument that is not a whole number within `⎕CT`, or does not fit in 64 bits, is a domain error |
 | `≠` | nub sieve: 1 at each item that has not occurred before | not equal (0/1) |
 | `∧` | — | LCM (logical and on booleans; the Gaussian one on complex) |
 | `∨` | — | GCD (logical or on booleans; the Gaussian one on complex) |
 | `~` | not (the argument must be 0 or 1) | without: x's items that y has not |
 | `⍴` | shape of | reshape: x lays out y's ELEMENTS, cyclically, which is where APL and J part company above rank 1. An empty y fills with the type's fill |
-| `⍳` | index generator (respects `⎕IO`): one length gives the counting vector, two or more give an array of that shape whose elements are the boxed coordinate vectors | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`). The items of a left argument of ANY rank are searched; `Dialect.lookup_left` names Dyalog's reading, where the left argument must be a vector and anything else is a rank error |
+| `⍳` | index generator (respects `⎕IO`): one length gives the counting vector, two or more give an array of that shape whose elements are the boxed coordinate vectors | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`). The items of a left argument of ANY rank are searched; above rank 1 that search is per ELEMENT and each answer is the enclosed coordinate vector that finds it, or the enclosed empty vector where it is absent, so `(2 2⍴⍳4)⍳3` is the enclosed `2 1`. `Dialect.lookup_left` names Dyalog's reading, where the left argument must be a vector and anything else is a rank error |
 | `⍉` | transpose | dyadic transpose: x says, for each axis of y in turn, which axis of the RESULT it becomes; a destination two axes share runs them together, which is the diagonal, and every axis of the result must be named |
 | `↓` | split: the vectors along the LAST axis, each enclosed, laid out in the remaining axes' shape (no oracle — see "Which APL" above) | drop |
 | `,` | ravel | catenate along the LAST axis. Axes other than that one must conform: APL refuses the ragged case that J fills, which is where the two rules part company |
 | `⍪` | table: one row per item, holding that item's elements (a scalar gives 1×1, a vector n×1) | catenate along the LEADING axis |
-| `!` | factorial (always float); a complex argument is a named gap | binomial, J's argument order; the same gap |
+| `!` | factorial (always float); a value with an imaginary part is a named gap, and one without is the real it displays as | binomial, J's argument order; the same gap |
 | `⍕` | format: the characters that display the argument | format by specification: x is one width-and-precision pair per column of y's last axis, one pair for all of them, or a lone precision, which takes the width the values need plus a separating blank. A value that does not fit its field is a domain error; a nested y is a named gap |
 | `⊥` | — | mixed-radix decode; with no digit to weigh the radix is never read, so `'a'⊥(0⍴0)` is the empty sum 0 whatever the radix was written as |
-| `⊤` | — | mixed-radix encode; with no value to write the radix is never read either, so `'a'⊤(0⍴0)` is the empty |
+| `⊤` | — | mixed-radix encode; with no value to write the radix is never read either, so `'a'⊤(0⍴0)` is the empty. `A⊤[N]B` encodes to N copies of the single radix A, N counted from one whatever `⎕IO` is; `A⊤[0]B` works the width out — the smallest that reaches the largest value, and one digit more when any value is negative |
 | `⌽` | reverse each row (last axis) | rotate each row (last axis) |
 | `⊖` | reverse the items (leading axis) | rotate the leading axis |
 | `≢` | tally | not match |
@@ -662,10 +665,11 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `⍷` | — | find: 1 at each position of y where a copy of x begins |
 | `⍎` | execute: the characters are compiled as an APL program and run HERE, over the names the sentence itself can see. An EMPTY program — `⍎''`, or an empty of any other type — yields no value at all in GNU APL; a libjay verb has no way to answer that, so it refuses and says the executed string yielded no value | — |
 | `⎕UCS` | codepoints become characters, characters become their codepoints | — |
+| `⎕CC` | the characters of the numbered class — the digits (1, 10), the two cases of the Latin (2, 26, 3, ¯26, 52) and Greek (48) alphabets, ASCII (4, 128), the printable range (95), the octal (8) and hexadecimal (16, ¯16, 17) digits, and the RFC 4648 alphabets (33, 65). Several numbers give one class per item, nested. The four classes GNU APL states as its own glyph repertoire — 5, 6, 7 and 9 — are named gaps | — |
 | `⎕FX` | fix a definition from its lines and answer with its name; the lines must be literal text (see below) | — |
 | `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill |
 | `⍋` `⍒` | grade up / down (stable; respects `⎕IO`). A NESTED argument orders by the APL2 rule: the rank, then the shape read from the FIRST axis, then the atoms in row-major order — a character before a number before a nested value, a nested one recursively — and two arrays with no atoms are separated by their types instead. It is a different comparator from J's at every step; `Dialect.nested_grade` names Dyalog's total array ordering as the other reading | collating grade: every character of y is keyed by where it FIRST occurs in the collating array x — the coordinate read with the last axis most significant, and one past the end for a character x does not hold — and the items of y are ordered by those keys read left to right |
-| `⊢` `⊣` | same | right / left |
+| `⊢` `⊣` | same | right / left. `A⊢[M]B` is the selection function: a 1 in M takes the element of B that stands there, a 0 the element of A, and M, A and B agree by the ordinary scalar rule. M is settled before the program runs |
 | `○` | pi times y | circle function k (see below) |
 | `/` `⌿` | — | replicate, after an operand: `/` counts the LAST axis, `⌿` the leading one |
 
@@ -1862,21 +1866,20 @@ libjay is stricter, or simply elsewhere:
   `¯8○3`, `¯2○2`): GNU APL carries a negative zero into the square root and
   lands on the lower branch, libjay takes the principal one — which is what
   J answers.
-- ordering a complex number — see "Which APL" above. Grading goes the other
-  way: libjay grades a complex vector by (real, imaginary), which is what
-  J's `/:` answers, and GNU APL refuses.
+- grading a complex vector: libjay orders it by (real, imaginary), which is
+  what J's `/:` answers, and GNU APL refuses. The COMPARISONS now follow
+  GNU APL's total order — see "Which APL" above — so the two have swapped
+  which of them is the permissive one here.
 - complex equality. libjay compares the magnitude of the difference against
   `⎕CT`, as its real comparison does; GNU APL's complex comparison is looser
   by roughly the square root of `⎕CT`, so `1J1=1.0000000001J1` is 1 there.
 - a sequence yields its last sentence and prints nothing on the way, so
   `1 2 3⋄4 5` is `4 5`; GNU APL prints the value of every statement.
-- `< ≤ > ≥` need numbers, and so does `⍸`. GNU APL extends them all to
-  characters and to nested values with one internal total order, ordering
-  characters among themselves and before every number, so `'a'<'b'`,
-  `'a'<5`, `'a'⍸1 1` and `(⊂⍳3)⍸¯2 0 2` all answer there. libjay refuses,
-  as the standard and J do and as it already refuses to order a complex
-  number; `=` and `≠` are defined across types and agree. This is the
-  largest single slice of the APL sweep and none of it is a libjay bug.
+- `⍸` needs numbers. GNU APL extends its one internal total order to `⍸`
+  and to nested values as well as to the comparisons, so `'a'⍸1 1` and
+  `(⊂⍳3)⍸¯2 0 2` answer there and are refused here. `< ≤ > ≥` themselves
+  follow that order now (`Dialect.order_domain`, "Which APL" above); `⌈`
+  and `⌊` do not, in either reference.
 - the n-wise reduction of an EMPTY argument of rank 2 or more. The reduced
   axis is `1+≢-|n|` items long there as anywhere else, so libjay's answer
   has the argument's rank: `⍴2+/0 3⍴⍳0` is `0 2`. GNU APL drops the axis
@@ -1895,8 +1898,21 @@ libjay is stricter, or simply elsewhere:
   GNU APL says catenation has no identity and refuses, though its own
   `,/⍳0` answers a scalar 0.
 - monadic `⊣` is the identity, which is what the status table promises and
-  what the Dyalog line has. GNU APL gives it no result at all: `⊣1 2 3` and
-  `⍴⊣1 2 3` both display nothing.
+  what the Dyalog line has. GNU APL answers a COMMITTED integer scalar 0
+  instead: `⊣1 2 3` and `⍴⊣1 2 3` both display nothing, and `(⊣5),9` is
+  `0 9` there where it is `5 9` here. The display and the value are the one
+  choice, not two.
+- bracket indexing binds tighter than a strand item in the APL2 line, so
+  `1 2 3[2]` there indexes the scalar `3` alone and is a RANK ERROR. The
+  manual calls that an unfortunate consequence of the binding strengths and
+  keeps it for compatibility; libjay reads the strand first, which is what
+  the spelling looks like it means and what every other bracket in the
+  language does. `(1 2 3)[2]` agrees.
+- a `{…}` whose body mentions neither `⍺` nor `⍵`. GNU APL runs the body
+  where it stands and leaves a VALUE — `{42}` is 42, and `N←{42} ⋄ N 5` is
+  the pair `42 5`; the manual lists it as a pitfall. libjay keeps `{…}` a
+  FUNCTION whatever its body mentions, which is the Dyalog reading its dfn
+  support is built on and the one `corpus/apl/dyalog-dfns.txt` records.
 - matching two EMPTY nested arrays compares their prototypes in APL2, and
   libjay compares only the shape and whether the type is character — it
   now CARRIES an empty nested array's prototype, which is what `↑0⍴⊂2 3⍴9`
@@ -1985,6 +2001,17 @@ sections above is also collected here.
   not settled when the program is compiled; a nested argument to dyadic
   `⍕`; a stencil with a movement row; and a label sharing a definition with
   a control structure.
+- Five GNU APL features the 2026-08-28 manual crawl found and this wave did
+  not implement, each of them a named refusal rather than a wrong answer:
+  a `[X]` axis in a `∇`-definition header (`∇Z←AV[X] B`) and the lambda
+  axis variable `χ`; structured variables and associative arrays (`P.x←3`,
+  with intermediate members created implicitly); dyadic `⎕CR`, which is a
+  family of conversions — bytes to hex, UTF-8 either way, cell types, the
+  boxed display — rather than one function; `⌹[X]`, whose bracket selects a
+  QR factorization or one of the polynomial sub-functions rather than an
+  axis; and `⎕SYL`, `⎕AV` and `⎕PP`, which describe an interpreter's own
+  limits, glyph repertoire and printing rather than the language. Each is a
+  release-sized piece of work on its own.
   The APL glyphs are reported by NAME rather than as unknown
   characters: a glyph the language has and libjay has not reached is a
   queue position, and the diagnostic says which one. Three spellings are

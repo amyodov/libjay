@@ -721,6 +721,8 @@ fn control_is_pure(c: &Control) -> bool {
         // J has no branch; the variant only reaches this frontend through
         // the shared IR, and reading its target is as pure as any read.
         Control::Branch(target) => block_is_pure(target),
+        Control::BranchBy { by, test } => block_is_pure(by) && block_is_pure(test),
+        Control::Cond { test, body, otherwise } => all(test) && all(body) && all(otherwise),
         Control::If { arms, otherwise } => {
             arms.iter().all(|a| {
                 a.test.as_ref().is_none_or(all) && all(&a.body)

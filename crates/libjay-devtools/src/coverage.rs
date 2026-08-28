@@ -657,6 +657,15 @@ impl Walker<'_> {
                 block(self, catch);
             }
             Control::Branch(e) => self.expr(e, None),
+            Control::BranchBy { by, test } => {
+                self.expr(by, None);
+                self.expr(test, None);
+            }
+            Control::Cond { test, body, otherwise } => {
+                block(self, test);
+                block(self, body);
+                block(self, otherwise);
+            }
             Control::Return | Control::Break | Control::Continue => {}
         }
     }

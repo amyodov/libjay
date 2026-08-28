@@ -189,3 +189,286 @@ V←1 2 ⋄ 3 V
 ⍴'Q'
 ⎕UCS 65 66
 ⎕UCS 'AB'
+
+// --- 2.5 Comparison Rules, the ordering half ------------------------------
+// `< ≤ ≥ >` are total here: characters order by codepoint, a character
+// stands below every number, and a complex value orders by its real part
+// and then its imaginary one. `⌈` and `⌊` are not part of that and refuse
+// a character, which the block above already records.
+'b'<'c'
+'a'>'A'
+'z'≤'z'
+'q'≥'r'
+'a'≥'a'
+'ab'<'ac'
+(2 2⍴'ab')<'b'
+'a'<1
+1<'a'
+'a'≤7
+2>'x'
+'a'<¯5
+'a'<1J2
+1J2<'a'
+1J2<1J3
+1J1<1J1
+1J1<2J0
+2J5>2J4
+0J1<0J2
+1J¯1<1J1
+1J0<2
+'a'=1
+'a'≠1
+
+// --- 2.20 bit-wise logical functions --------------------------------------
+// `⊤` with one of six logical glyphs after it is one function, and the
+// operation runs on every bit of two 64-bit two's-complement integers.
+12 ⊤∧ 10
+12 ⊤∨ 10
+12 ⊤⍲ 10
+12 ⊤⍱ 10
+12 ⊤= 10
+12 ⊤≠ 10
+12 ⊤ ∧ 10
+12⊤∧10
+12 (⊤∧) 10
+12 ⊤∧ 10 6
+2 3 ⊤∧ 6 5
+3 ⊤∧ 5 6 7
+(2 2⍴⍳4) ⊤∧ 3
+¯12 ⊤∧ 10
+¯1 ⊤∧ ¯1
+0 ⊤⍱ 0
+1 ⊤∧ 2 ⊤∨ 4
+⍴12 ⊤∧ 10
+12 ⊤∧ 10.0
+12 ⊤∧ 10.5
+⊤⍱ 5
+⊤⍱ 0
+⊤⍱ 1 2 3
+⊤⍱ 3.0
+⊤∧ 5
+⊤∧ ¯3
+⊤∨ 3.0
+⊤∧ 4.0
+⊤∧ 3.1
+⊤∧ 0.5
+⊤∧ 3.0000000000001
+⊤∧ 3.000000000001
+⊤∧ 1e18
+⊤∧ 1e19
+'a' ⊤∧ 3
+⍴⊤⍱ 5
+⊤∧/ 3 5 7
+12 ⊤∧¨ 10
+
+// --- 2.21 ⊤ with a width --------------------------------------------------
+// `A⊤[N]B` encodes to N copies of the single radix A, counted from one
+// whatever ⎕IO is; `[0]` works the width out — one digit more when a value
+// is negative, since the encoding is then two's complement.
+2⊤[4]13
+2⊤[0]13
+2⊤[5]¯13
+2⊤[0]¯13
+16⊤[2]255
+10⊤[3]4321
+10⊤[0]4321
+2⊥2⊤[0]777
+2⊤[0]0
+2⊤[0]1
+2⊤[0]2
+2⊤[0]3
+2⊤[0]4
+2⊤[0]7
+2⊤[0]8
+2⊤[0]16
+2⊤[0]255
+10⊤[0]9
+10⊤[0]10
+10⊤[0]99
+10⊤[0]100
+2⊤[0]¯1
+2⊤[0]¯2
+2⊤[0]¯3
+2⊤[0]¯4
+2⊤[0]¯5
+10⊤[0]¯1
+10⊤[0]¯5
+10⊤[0]¯10
+10⊤[0]¯50
+10⊤[0]¯100
+2⊤[0]1 ¯1
+2⊤[4]13 5
+⍴2⊤[4]13 5
+10⊤[0]4321 7
+2⊤[1]13
+2⊤[2.0]13
+2⊤[0]2 2⍴1 2 3 4
+⍴2⊤[0]2 2⍴1 2 3 4
+2 3⊤[4]13
+2.5⊤[3]13
+2⊤[0]0.5
+2⊤[0]1e19
+'a'⊤[2]13
+(2 2⍴2)⊤[2]13
+
+// --- 2.19 ⊢ with a selection ----------------------------------------------
+// `A⊢[M]B` is the selection function: a 1 in M takes the element of B that
+// stands there, a 0 the element of A, and the three agree by the ordinary
+// scalar rule.
+'ab'⊢[1]'cd'
+'ab'⊢[0]'cd'
+5⊢[0]6
+5⊢[1]6
+(1 2)⊢[1](3 4)
+(1 2)⊢[0](3 4)
+1 2 3⊢[1 0 1]4 5 6
+'Q'⊢[1 0 1](1 2 3)
+(1 2 3)⊢[1 0 1]'Q'
+(2 2⍴'wxyz')⊢[2 2⍴0 1 1 0](2 2⍴⍳4)
+(1 2)⊢[2](3 4)
+'Q'⊢[1 0 1 0](1 2 3)
+
+// --- 2.22.2 dyadic ⍳ with a table on the left -----------------------------
+// A left argument of rank 2 or more is looked up element by element, and
+// each answer is the enclosed coordinate vector that finds it.
+(2 2⍴⍳4)⍳3
+≡(2 2⍴⍳4)⍳3
+⍴(2 2⍴⍳4)⍳3
+(2 3⍴⍳6)⍳4 9
+⍴(2 3⍴⍳6)⍳4 9
+(2 2⍴'abcd')⍳'cb'
+(2 2⍴⍳4)⍳9
+⍴(2 2⍴⍳4)⍳9
+(2 2⍴⍳4)⍳3 4
+(2 2 2⍴⍳8)⍳5
+(2 2⍴⍳4)⍳⍬
+(1 4⍴⍳4)⍳3
+
+// --- 2.47 the matrix product ----------------------------------------------
+// `A∘B` between two values is `+.×`: a left vector is a row and a right one
+// a column, a scalar operand makes it the element-wise `×`, and inner
+// lengths that differ are padded with zeros rather than refused.
+(3 2⍴⍳6)∘(2 4⍴⍳8)
+(1 2 3)∘(3 2⍴⍳6)
+⍴(1 2 3)∘(3 2⍴⍳6)
+(2 2⍴⍳4)∘(1 2)
+⍴(2 2⍴⍳4)∘(1 2)
+5∘(2 2⍴⍳4)
+(2 2⍴⍳4)∘5
+⍴5∘(2 2⍴⍳4)
+(2 3⍴⍳6)∘(2 2⍴⍳4)
+(2 2⍴⍳4)∘(3 3⍴⍳9)
+(1 2)∘(3 4)
+⍴(1 2)∘(3 4)
+5∘6
+⍴5∘6
+1.5∘2
+(1 2)∘5
+⍴(1 2)∘5
+⍬∘⍬
+⍴⍬∘⍬
+(1 2)∘⍬
+⍴(1 2)∘⍬
+1 0 1∘(3 3⍴⍳9)
+(2 2⍴1 2 3 4)∘(2 2⍴1 0 0 1)
+(1 1⍴5)∘6
+⍴(1 1⍴5)∘6
+⍴(1 1⍴5)∘(1 1⍴6)
+⍴(2 2⍴⍳4)∘(2 3⍴⍳6)
+(2 2⍴⍳4)∘(2 2⍴⍳4)∘(2 2⍴⍳4)
+(2 2 2⍴⍳8)∘(2 2⍴⍳4)
+'ab'∘(2 2⍴⍳4)
+
+// --- 2.16 hexadecimal literals --------------------------------------------
+$ff
+$FF
+$b
+$0
+1+$10
+$10 $20
+⍴$1f
+2 $10
+
+// --- 2.1.7 double-quoted strings ------------------------------------------
+// A double-quoted string is always a vector, and it reads the C escapes.
+// Two quotation marks in a row close one string and open the next, so
+// `"a""b"` is a two-item strand rather than one string.
+⍴"Q"
+"ab"≡'ab'
+⍴"a\\nb"
+⎕UCS "x\\ty"
+"one" "two"
+⍴"one" "two"
+""
+⍴""
+"a\\\\b"
+⎕UCS "\\\\"
+"a""b"
+⎕UCS "a\\qb"
+⎕UCS "\\a\\b\\f\\v\\r\\0"
+⎕UCS "\\"x"
+
+// --- 2.46 the conditional →→ ←→ ←← ----------------------------------------
+(1=1) →→ 7 ←←
+(1=2) →→ 7 ←←
+(2>1) →→ 'yes' ←→ 'no' ←←
+(2<1) →→ 'yes' ←→ 'no' ←←
+X←9 ⋄ (X>5) →→ X×2 ←→ X÷2 ←←
+2 →→ 3 ←←
+
+// --- 2.23 labels and the relative branch ----------------------------------
+// A label names its own line number, and `A→B` branches A lines on from
+// the line it stands on when B holds.
+∇Z←C1\nZ←0\nL:Z←Z+1\n→(Z<4)/L\n∇\nC1
+∇Z←C5\nZ←0\nL:Z←Z+1\n¯1→Z<4\n∇\nC5
+∇Z←C6 X\nZ←1\n1→X<0\nZ←2\n∇\n(C6 1)(C6 ¯1)
+∇Z←C7 X\nZ←1\n2→X\nZ←2\n∇\n(C7 0)(C7 1)
+∇Z←C4\nZ←0\nL:Z←Z+1\nL→Z<4\n∇\nC4
+∇Z←SGN X\nZ←'neg'\n2→X<0\nZ←'pos'\n∇\n(SGN 5)(SGN ¯5)
+∇Z←C9\nZ←1\n2→⍬\nZ←2\n∇\nC9
+∇Z←CB X\nZ←1\n2→X\nZ←2\n∇\nCB 'a'
+∇Z←TH X\nX>0 →→\nZ←'p' ←→\nZ←'n' ←←\n∇\n(TH 3)(TH ¯3)
+
+// --- 5.5–5.7 stranding an assignment's result -----------------------------
+// Specification binds tighter than a strand item, so the assignment's
+// value becomes one item of the vector.
+3 V←1 2
+⍴3 V←1 2
+3 4 V←1 2
+A←5 ⋄ 3A
+
+// --- 2.25 ⎕CC character classes -------------------------------------------
+⎕CC 1
+⎕CC 2
+⎕CC 3
+⍴⎕CC 1
+⍴⎕CC 2
+⎕CC 1 2
+≡⎕CC 1 2
+'5'∊⎕CC 1
+⎕CC 8
+⎕CC 10
+⎕CC 16
+⎕CC ¯16
+⎕CC 17
+⎕CC 26
+⎕CC ¯26
+⎕CC 33
+⎕CC 48
+⎕CC 52
+⎕CC 65
+⎕CC 95
+⍴⎕CC 4
+⍴⎕CC 95
+⍴⎕CC 48
+⎕CC 0
+⎕CC 11
+⎕CC 100
+⎕CC 127
+⎕CC ¯1
+⎕CC 1.5
+
+// --- 2.6 the factorial of a complex number --------------------------------
+// A complex value with no imaginary part is the real it displays as.
+!2j0
+!3j0

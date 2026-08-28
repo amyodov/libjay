@@ -226,10 +226,21 @@ fn control_lines(c: &Control, depth: usize, p: &Program, tr: &Trace, out: &mut S
             let _ = writeln!(out, "{pad}branch →");
             expr_lines(target, depth + 1, p, tr, out);
         }
+        Control::BranchBy { by, test } => {
+            let _ = writeln!(out, "{pad}branch → this many lines on, when the test holds");
+            expr_lines(by, depth + 1, p, tr, out);
+            expr_lines(test, depth + 1, p, tr, out);
+        }
         Control::Guard { test, body } => {
             let _ = writeln!(out, "{pad}guard — the dfn's answer when it holds");
             block("test", test, out);
             block("body", body, out);
+        }
+        Control::Cond { test, body, otherwise } => {
+            let _ = writeln!(out, "{pad}conditional →→ … ←→ … ←←");
+            block("test", test, out);
+            block("body", body, out);
+            block("otherwise", otherwise, out);
         }
         Control::If { arms, otherwise } => {
             let _ = writeln!(out, "{pad}if — {} arm(s)", arms.len());
@@ -433,6 +444,7 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Amend(m) => head(out, &format!("amend at {} index(es)", m.count())),
+        Verb::Choose(m) => head(out, &format!("select between two arguments by a {}-position mask", m.count())),
         Verb::AmendVerb(u) => {
             head(out, "amend at the indices a verb computes");
             verb_lines(u, depth + 1, p, tr, out);

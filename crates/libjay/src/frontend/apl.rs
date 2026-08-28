@@ -17,8 +17,8 @@ use crate::frontend::{
 };
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
-    BoolDyad, DyadOp, Enclose, MonadOp, OpDef, Operand, Power, Prim, ScalarDyad, ScalarMonad,
-    Verb, WindowKind,
+    BitDyad, BitMonad, BoolDyad, DyadOp, Enclose, MonadOp, OpDef, Operand, Power, Prim, ScalarDyad,
+    ScalarMonad, Verb, WindowKind,
     RANK_INF,
 };
 
@@ -55,6 +55,13 @@ pub fn parse(src: &SourceParts, d: Rules) -> Result<Vec<Expr>> {
             i = end;
             continue;
         }
+        // `test →→ … ←→ … ←←`: the markers may end a line, so the whole
+        // conditional is taken before the sentence parser sees any of it.
+        if sentences[i].iter().any(|t| matches!(t.kind, Tok::CondThen)) {
+            let stmt = parse_conditional(&sentences, &mut i, d, &mut verbs)?;
+            stmts.push(stmt);
+            continue;
+        }
         let mut sentence = sentences[i].clone();
         i += 1;
         // `⎕FX` defines a function where it stands; the sentence keeps only
@@ -74,6 +81,79 @@ pub fn parse(src: &SourceParts, d: Rules) -> Result<Vec<Expr>> {
         }
     }
     Ok(stmts)
+}
+
+/// `test →→ body ←→ otherwise ←←`, from the sentence the `→→` stands in to
+/// the one the `←←` closes.
+///
+/// The three markers each break a statement, and so does the end of a
+/// line, so a clause may hold several statements written either way. The
+/// `←→` clause is optional; without it a test that fails yields nothing.
+fn parse_conditional(
+    sentences: &[Vec<Token>],
+    i: &mut usize,
+    d: Rules,
+    verbs: &mut HashMap<String, Verb>,
+) -> Result<Expr> {
+    let open = sentences[*i].first().map_or(Span::new(0, 0), |t| t.span);
+    let mut parts: [Vec<Vec<Token>>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    let mut phase = 0usize;
+    let mut closed = false;
+    let mut last = open;
+    while *i < sentences.len() && !closed {
+        let line = &sentences[*i];
+        *i += 1;
+        let mut cur: Vec<Token> = Vec::new();
+        let mut depth = 0i32;
+        for t in line {
+            last = t.span;
+            match t.kind {
+                Tok::LParen | Tok::LBracket | Tok::LBrace => depth += 1,
+                Tok::RParen | Tok::RBracket | Tok::RBrace => depth -= 1,
+                Tok::CondThen | Tok::CondElse | Tok::CondEnd if depth == 0 => {
+                    parts[phase].push(std::mem::take(&mut cur));
+                    match t.kind {
+                        Tok::CondThen => phase = 1,
+                        Tok::CondElse => phase = 2,
+                        _ => {
+                            closed = true;
+                            continue;
+                        }
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            if closed {
+                return Err(Error::parse("←← ends the conditional", t.span));
+            }
+            cur.push(t.clone());
+        }
+        parts[phase].push(cur);
+    }
+    if !closed {
+        return Err(Error::parse("this conditional has no closing ←←", open));
+    }
+    let span = Span::merge(open, last);
+    let mut block = |toks: &Vec<Vec<Token>>| -> Result<Vec<Expr>> {
+        let mut out = Vec::new();
+        for stmt in toks {
+            if stmt.is_empty() {
+                continue;
+            }
+            if let Some(e) = parse_statement(stmt.clone(), d, verbs, true)? {
+                out.push(e);
+            }
+        }
+        Ok(out)
+    };
+    let test = block(&parts[0])?;
+    if test.is_empty() {
+        return Err(Error::parse("→→ needs a test on its left", span));
+    }
+    let body = block(&parts[1])?;
+    let otherwise = block(&parts[2])?;
+    Ok(Expr::Control(Box::new(Control::Cond { test, body, otherwise }), span))
 }
 
 /// The functions the program fixes anywhere in it, by name.
@@ -419,6 +499,12 @@ enum Tok {
     Colon,
     /// `→` — the branch, which only a `∇` definition's line may open with.
     Arrow,
+    /// `→→`, `←→` and `←←`: the three markers of a conditional. The test
+    /// stands before the first, the two clauses between them, and the last
+    /// closes the whole thing.
+    CondThen,
+    CondElse,
+    CondEnd,
     /// A niladic `∇` definition named where a value belongs: naming it is
     /// what calls it.
     Niladic(Verb),
@@ -841,6 +927,30 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
 /// The function a glyph denotes. Every glyph but `⌽` is a bare primitive;
 /// `⌽` is `⊖` applied to rows, so it carries the rank that does that: cells
 /// of rank 1 on the right, atoms on the left.
+/// The bit-wise logical function `⊤` spells with the glyph after it, and
+/// how far past the `⊤` that glyph ends.
+///
+/// GNU APL reads `⊤` followed by one of six logical glyphs as one
+/// function: `12 ⊤∧ 10` is 8. None of the six has a monadic meaning of its
+/// own, so the pair is never ambiguous with `⊤` applied to a monad, and
+/// the interpreter allows blanks between the two glyphs.
+fn bitwise_prim(text: &str, after_top: usize) -> Option<(Prim, usize)> {
+    let rest = text[after_top..].trim_start_matches([' ', '\t', '\r']);
+    let gap = text.len() - after_top - rest.len();
+    let ch = rest.chars().next()?;
+    let (name, monad, dyad) = match ch {
+        '∧' | '^' => ("⊤∧", MonadOp::Bitwise(BitMonad::Integer), BitDyad::And),
+        '∨' => ("⊤∨", MonadOp::Bitwise(BitMonad::Integer), BitDyad::Or),
+        '⍲' => ("⊤⍲", MonadOp::None, BitDyad::Nand),
+        '⍱' => ("⊤⍱", MonadOp::Bitwise(BitMonad::Not), BitDyad::Nor),
+        '=' => ("⊤=", MonadOp::None, BitDyad::Eq),
+        '≠' => ("⊤≠", MonadOp::None, BitDyad::Ne),
+        _ => return None,
+    };
+    let end = after_top + gap + ch.len_utf8();
+    Some((Prim { name, monad, dyad: DyadOp::Bitwise(dyad), ranks: [0, 0, 0] }, end))
+}
+
 fn verb_for(ch: char, d: Rules) -> Option<Verb> {
     let p = prim_for(ch, d)?;
     // Monadic `⌽` is `⊖` on rows, which the rank operator supplies. The
@@ -864,6 +974,12 @@ fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
         "IO" => Tok::Value(Array::scalar_i64(d.origin)),
         "CT" => Tok::Value(Array::scalar_f64(d.ct)),
         "FX" => Tok::QuadFx,
+        "CC" => Tok::Func(Verb::Prim(Prim {
+            name: "⎕CC",
+            monad: MonadOp::CharClass,
+            dyad: DyadOp::None,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        })),
         "UCS" => Tok::Func(Verb::Prim(Prim {
             name: "⎕UCS",
             monad: MonadOp::Unicode { pass_chars: false },
@@ -1025,6 +1141,23 @@ fn lex_text(
                 });
                 i = next;
             }
+            '"' => {
+                let (arr, next) = lex_escaped_string(text, i, offset)?;
+                cur.push(Token {
+                    kind: Tok::Value(arr),
+                    span: Span::new(offset + i, offset + next),
+                });
+                i = next;
+            }
+            // `$ff` is a hexadecimal number, in either case of letter.
+            '$' => {
+                let (arr, next) = lex_hex(text, i, offset)?;
+                cur.push(Token {
+                    kind: Tok::Nums(arr),
+                    span: Span::new(offset + i, offset + next),
+                });
+                i = next;
+            }
             '{' => {
                 *braces += 1;
                 cur.push(Token { kind: Tok::LBrace, span: Span::new(offset + i, offset + i + 1) });
@@ -1062,6 +1195,13 @@ fn lex_text(
                 });
                 i += 1;
             }
+            // `L:` at the head of a line is a label: the name stands for
+            // that line's number and `→` branches to it. A control word
+            // never follows a name, so the two never compete.
+            ':' if matches!(cur.as_slice(), [t] if matches!(t.kind, Tok::Name(_))) => {
+                cur.push(Token { kind: Tok::Colon, span: Span::new(offset + i, offset + i + 1) });
+                i += 1;
+            }
             ':' => {
                 let mut j = i + 1;
                 while let Some(c) = text[j..].chars().next() {
@@ -1088,11 +1228,13 @@ fn lex_text(
                 i = j;
             }
             '→' => {
+                let two = text[i + clen..].starts_with('→');
+                let end = if two { i + 2 * clen } else { i + clen };
                 cur.push(Token {
-                    kind: Tok::Arrow,
-                    span: Span::new(offset + i, offset + i + clen),
+                    kind: if two { Tok::CondThen } else { Tok::Arrow },
+                    span: Span::new(offset + i, offset + end),
                 });
-                i += clen;
+                i = end;
             }
             // `⍬` is the empty numeric vector, written as a constant.
             '⍬' => {
@@ -1129,11 +1271,16 @@ fn lex_text(
                 i += 1;
             }
             '←' => {
-                cur.push(Token {
-                    kind: Tok::Assign,
-                    span: Span::new(offset + i, offset + i + clen),
-                });
-                i += clen;
+                let rest = &text[i + clen..];
+                let (kind, end) = if rest.starts_with('→') {
+                    (Tok::CondElse, i + clen + '→'.len_utf8())
+                } else if rest.starts_with('←') {
+                    (Tok::CondEnd, i + 2 * clen)
+                } else {
+                    (Tok::Assign, i + clen)
+                };
+                cur.push(Token { kind, span: Span::new(offset + i, offset + end) });
+                i = end;
             }
             // `⍞` has no system-name form: it is always the whole token.
             '⍞' => {
@@ -1203,6 +1350,19 @@ fn lex_text(
             }
             _ => {
                 let mut end = i + clen;
+                // `⊤` with a logical glyph after it is one bit-wise
+                // function, and the glyph is not the monad it would be on
+                // its own — none of the six has one.
+                if ch == '⊤'
+                    && let Some((p, next)) = bitwise_prim(text, end)
+                {
+                    cur.push(Token {
+                        kind: Tok::Func(Verb::Prim(p)),
+                        span: Span::new(offset + i, offset + next),
+                    });
+                    i = next;
+                    continue;
+                }
                 if let Some(v) = verb_for(ch, d) {
                     cur.push(Token {
                         kind: Tok::Func(v),
@@ -1279,6 +1439,63 @@ fn lex_string(text: &str, start: usize, offset: usize) -> Result<(Array, usize)>
     }
     let shape = if chars.len() == 1 { vec![] } else { vec![chars.len()] };
     Ok((Array::new(shape, Data::Char(chars.into())), i))
+}
+
+/// `"…"` with C escapes. A double-quoted string is always a VECTOR, where
+/// `'Q'` is a scalar, and `"` has no doubling rule: two of them in a row
+/// close one string and open the next, which strands them.
+///
+/// The escapes are `\a \b \f \n \r \t \v`, `\\`, `\"` and `\0`; `\`
+/// before anything else is a backslash and that character, which is what
+/// the reference answers.
+fn lex_escaped_string(text: &str, start: usize, offset: usize) -> Result<(Array, usize)> {
+    let unterminated =
+        || Error::parse("unterminated string", Span::new(offset + start, offset + text.len()));
+    let mut chars: Vec<char> = Vec::new();
+    let mut i = start + 1;
+    loop {
+        let c = text[i..].chars().next().ok_or_else(unterminated)?;
+        i += c.len_utf8();
+        match c {
+            '"' => break,
+            '\\' => {
+                let e = text[i..].chars().next().ok_or_else(unterminated)?;
+                i += e.len_utf8();
+                match e {
+                    'a' => chars.push('\u{7}'),
+                    'b' => chars.push('\u{8}'),
+                    'f' => chars.push('\u{c}'),
+                    'n' => chars.push('\n'),
+                    'r' => chars.push('\r'),
+                    't' => chars.push('\t'),
+                    'v' => chars.push('\u{b}'),
+                    '\\' | '"' | '0' => chars.push(e),
+                    _ => {
+                        chars.push('\\');
+                        chars.push(e);
+                    }
+                }
+            }
+            _ => chars.push(c),
+        }
+    }
+    Ok((Array::new(vec![chars.len()], Data::Char(chars.into())), i))
+}
+
+/// `$ff`: a hexadecimal integer, in either case of letter. It is one
+/// scalar, so a run of them strands as a run of decimal numbers does.
+fn lex_hex(text: &str, start: usize, offset: usize) -> Result<(Array, usize)> {
+    let mut i = start + 1;
+    while text[i..].chars().next().is_some_and(|c| c.is_ascii_hexdigit()) {
+        i += 1;
+    }
+    let span = Span::new(offset + start, offset + i.max(start + 1));
+    if i == start + 1 {
+        return Err(Error::parse("$ opens a hexadecimal number and needs a digit", span));
+    }
+    let v = i64::from_str_radix(&text[start + 1..i], 16)
+        .map_err(|_| Error::parse("this hexadecimal number is too large for 64 bits", span))?;
+    Ok((Array::scalar_i64(v), i))
 }
 
 /// True if a numeric literal starts at byte `i`.
@@ -1555,6 +1772,23 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             && let Some(bound) = bind_value(&mut it, &mut out)
         {
             out.push(bound);
+            continue;
+        }
+        // `A∘B` with a function on neither side is not a composition at
+        // all: it is GNU APL's matrix product, a function of two values.
+        if op == OpGlyph::Jot
+            && !matches!(it.peek().map(|x| &x.kind), Some(Tok::Func(_)))
+            && !matches!(out.last().map(|x| &x.kind), Some(Tok::Func(_)))
+        {
+            out.push(Token {
+                kind: Tok::Func(Verb::Prim(Prim {
+                    name: "∘",
+                    monad: MonadOp::None,
+                    dyad: DyadOp::MatrixProduct,
+                    ranks: [RANK_INF, RANK_INF, RANK_INF],
+                })),
+                span: t.span,
+            });
             continue;
         }
         // `f∘g` and `f⍥g` need a function on both sides; the right one is
@@ -2092,6 +2326,46 @@ fn tine_run(toks: &[Token], d: Rules) -> Result<Option<Verb>> {
     train(toks)
 }
 
+/// The value a whole `[…]` holds, taken from the token stream. The
+/// brackets may hold any expression whose value is settled before the
+/// program runs; one that reads a name is a named gap.
+fn bracket_value(
+    it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
+    d: Rules,
+) -> Result<(Array, Span)> {
+    let open = it.next().expect("the caller peeked a [");
+    let mut inner: Vec<Token> = Vec::new();
+    let mut depth = 0usize;
+    let close = loop {
+        let Some(tok) = it.next() else {
+            return Err(Error::parse("unterminated axis specification", open.span));
+        };
+        match tok.kind {
+            Tok::RBracket if depth == 0 => break tok,
+            Tok::LBracket => depth += 1,
+            Tok::RBracket => depth -= 1,
+            _ => {}
+        }
+        inner.push(tok);
+    };
+    let span = Span::merge(open.span, close.span);
+    if let [only] = inner.as_slice()
+        && let Some(a) = literal(&only.kind)
+    {
+        return Ok((a.clone(), span));
+    }
+    let e = parse_prepared(&inner, span, d)?;
+    let cfg = crate::verb::EvalCfg {
+        agreement: crate::verb::Agreement::ExactOrScalar,
+        fmt: crate::fmt::FmtOpts::APL,
+        tol: d.tol(),
+        rules: d,
+    };
+    crate::ir::fold_const(&e, cfg)
+        .map(|a| (a, span))
+        .ok_or_else(|| Error::not_yet("a computed selection (⊢[m])", span))
+}
+
 /// `f[k]` where `f` is a plain function rather than a derived one.
 fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
     let mut out: Vec<Token> = Vec::new();
@@ -2101,6 +2375,42 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             out.push(t);
             continue;
         };
+        // `⊢[m]` is not an axis at all: m is a mask that says, position by
+        // position, which of the two arguments to take. It may be any
+        // expression, so the whole bracket is read and settled here.
+        if matches!(f, Verb::Prim(p) if p.name == "⊢")
+            && matches!(it.peek().map(|x| &x.kind), Some(Tok::LBracket))
+        {
+            let (mask, aspan) = bracket_value(&mut it, d)?;
+            out.push(Token {
+                kind: Tok::Func(Verb::Choose(mask)),
+                span: Span::merge(t.span, aspan),
+            });
+            continue;
+        }
+        // `⊤[N]` is not an axis either: N is how many digits the answer
+        // has, counted from one whatever `⎕IO` is, and `[0]` asks `⊤` to
+        // work the width out for itself.
+        if matches!(f, Verb::Prim(p) if p.name == "⊤")
+            && matches!(it.peek().map(|x| &x.kind), Some(Tok::LBracket))
+        {
+            let (n, aspan) = bracket_value(&mut it, d)?;
+            let width = match n.to_i64_vec().as_deref() {
+                Some([w]) if *w >= 0 => *w as u32,
+                _ => return Err(Error::parse("⊤[N] takes one width at or above zero", aspan)),
+            };
+            let p = Prim {
+                name: "⊤",
+                monad: MonadOp::None,
+                dyad: DyadOp::EncodeWidth(width),
+                ranks: [RANK_INF, RANK_INF, RANK_INF],
+            };
+            out.push(Token {
+                kind: Tok::Func(Verb::Prim(p)),
+                span: Span::merge(t.span, aspan),
+            });
+            continue;
+        }
         let Some((k, aspan)) = take_axis(&mut it, d)? else {
             out.push(t);
             continue;
@@ -2234,6 +2544,15 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, d: Rules) -> Re
                     }
                 }
                 start -= 2;
+                // Specification binds tighter than a strand item, so an
+                // operand still standing to the left makes the whole
+                // assignment ONE item of a vector: `3 V←1 2` is the pair
+                // `3` and `1 2`.
+                if start > lo && is_operand_end(&toks[start - 1].kind) {
+                    let (e, s) = strand_onto(acc, toks, lo, start, end, d)?;
+                    acc = e;
+                    start = s;
+                }
             }
             // Adjacent operands are vector notation, which `parse_operand`
             // has already taken as one operand by the time we get here.
@@ -2289,6 +2608,33 @@ fn parse_operand(
         acc = Expr::Dyad { verb: strand_verb(), x: Box::new(item), y: Box::new(acc), span };
     }
     Ok((acc, start))
+}
+
+/// `first` as the LAST item of a strand whose earlier items stand in
+/// `toks[lo..start]`. The answer is the whole strand and where it begins.
+fn strand_onto(
+    first: Expr,
+    toks: &[Token],
+    lo: usize,
+    start: usize,
+    end: usize,
+    d: Rules,
+) -> Result<(Expr, usize)> {
+    let mut items: Vec<Expr> = vec![first];
+    let mut s = start;
+    while s > lo && is_operand_end(&toks[s - 1].kind) {
+        let (e, ns) = parse_primary(toks, lo, s, toks[s - 1].span, d)?;
+        push_items(&mut items, e, &toks[ns]);
+        s = ns;
+    }
+    let span = Span::new(toks[s].span.start, end);
+    let mut it = items.into_iter();
+    let last = it.next().expect("a strand has at least one item");
+    let mut acc = Expr::Monad { verb: strand_seed(d), y: Box::new(last), span };
+    for item in it {
+        acc = Expr::Dyad { verb: strand_verb(), x: Box::new(item), y: Box::new(acc), span };
+    }
+    Ok((acc, s))
 }
 
 /// The items one primary contributes to a strand, appended right to left.
@@ -2382,6 +2728,10 @@ fn parse_primary(
         )),
         Tok::Arrow => Err(Error::parse(
             "→ branches, and only a line of a ∇ definition may begin with it",
+            t.span,
+        )),
+        Tok::CondThen | Tok::CondElse | Tok::CondEnd => Err(Error::parse(
+            "→→, ←→ and ←← mark a conditional, and this one is not whole",
             t.span,
         )),
         Tok::Del => Err(Error::parse("∇ opens a definition; it is not a value", t.span)),
@@ -2823,6 +3173,8 @@ fn is_pure_control(c: &Control) -> bool {
     match c {
         Control::Return | Control::Break | Control::Continue => true,
         Control::Branch(target) => is_pure_stmt(target),
+        Control::BranchBy { by, test } => is_pure_stmt(by) && is_pure_stmt(test),
+        Control::Cond { test, body, otherwise } => all(test) && all(body) && all(otherwise),
         Control::If { arms, otherwise } => {
             arms.iter().all(|a| a.test.as_ref().is_none_or(all) && all(&a.body))
                 && otherwise.as_ref().is_none_or(all)
@@ -2887,7 +3239,17 @@ fn build_tradfn(
     inner.insert(name.clone(), Verb::Named(name.clone()));
     let mut items = Vec::new();
     let mut labels: Vec<(String, usize)> = Vec::new();
-    for line in body_lines {
+    let mut at = 0usize;
+    while at < body_lines.len() {
+        // A conditional's three markers may each end a line, so one spans
+        // as many lines as it needs and becomes one statement.
+        if body_lines[at].iter().any(|t| matches!(t.kind, Tok::CondThen)) {
+            let e = parse_conditional(body_lines, &mut at, d, &mut inner)?;
+            items.push(AplItem::Sentence(e));
+            continue;
+        }
+        let line = &body_lines[at];
+        at += 1;
         let mut label = None;
         let item = to_item(line.clone(), d, &mut inner, &mut label)?;
         if let Some(name) = label {
@@ -2895,7 +3257,7 @@ fn build_tradfn(
         }
         items.push(item);
     }
-    let item_count = items.len();
+    let item_count = if items.len() == body_lines.len() { items.len() } else { usize::MAX };
     let mut cursor = AplCursor { items: &items, at: 0, d, loops: 0 };
     let mut body = parse_apl_block(&mut cursor, &[])?;
     // A label is the number of a LINE, so the statements have to be the
@@ -2963,6 +3325,15 @@ fn parse_header(toks: &[Token], span: Span) -> Result<Header> {
             Tok::Semi => in_locals = true,
             Tok::Name(n) if in_locals => locals.push(n.clone()),
             Tok::Name(n) => names.push(n.clone()),
+            // `∇Z←AV[X] B` gives the definition an axis, bound to the name
+            // in the brackets. That is a feature, not a malformed header,
+            // so it is named as a gap rather than reported as a fault.
+            Tok::LBracket => {
+                return Err(Error::not_yet(
+                    "a [X] axis in a ∇ definition header",
+                    toks[k].span,
+                ));
+            }
             _ => {
                 return Err(Error::parse("this is not a ∇ definition header", toks[k].span));
             }
@@ -3000,6 +3371,22 @@ impl AplItem {
     }
 }
 
+/// Where a `→` stands in this line outside every bracket, when one does
+/// and something precedes it. That is the dyadic branch; a `→` inside
+/// parentheses belongs to the expression around it.
+fn top_level_arrow(line: &[Token]) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, t) in line.iter().enumerate() {
+        match t.kind {
+            Tok::LParen | Tok::LBracket | Tok::LBrace => depth += 1,
+            Tok::RParen | Tok::RBracket | Tok::RBrace => depth -= 1,
+            Tok::Arrow if depth == 0 && i > 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn to_item(
     line: Vec<Token>,
     d: Rules,
@@ -3027,6 +3414,19 @@ fn to_item(
         let span = Span::merge(span, target.span());
         return Ok(AplItem::Sentence(Expr::Control(
             Box::new(Control::Branch(Box::new(target))),
+            span,
+        )));
+    }
+    // `A→B` is the relative branch: A lines on from here when B holds.
+    if let Some(at) = top_level_arrow(&line) {
+        let span = line[at].span;
+        let by = parse_statement(line[..at].to_vec(), d, verbs, true)?
+            .ok_or_else(|| Error::parse("→ needs a line count on its left", span))?;
+        let test = parse_statement(line[at + 1..].to_vec(), d, verbs, true)?
+            .ok_or_else(|| Error::parse("→ needs a condition on its right", span))?;
+        let span = Span::merge(by.span(), test.span());
+        return Ok(AplItem::Sentence(Expr::Control(
+            Box::new(Control::BranchBy { by: Box::new(by), test: Box::new(test) }),
             span,
         )));
     }
@@ -3400,6 +3800,15 @@ fn set_scopes(e: &mut Expr, own: &[String]) {
             let walk = |b: &mut Vec<Expr>| b.iter_mut().for_each(|s| set_scopes(s, own));
             match &mut **c {
                 Control::Branch(target) => set_scopes(target, own),
+                Control::BranchBy { by, test } => {
+                    set_scopes(by, own);
+                    set_scopes(test, own);
+                }
+                Control::Cond { test, body, otherwise } => {
+                    walk(test);
+                    walk(body);
+                    walk(otherwise);
+                }
                 Control::If { arms, otherwise } => {
                     for arm in arms {
                         if let Some(t) = &mut arm.test {

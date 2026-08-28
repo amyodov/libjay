@@ -288,16 +288,16 @@ fn equality_is_tolerant_on_the_magnitude_of_the_difference() {
     assert_eq!(val(Lang::Apl, "3J4=3J4"), Array::scalar_bool(true));
 }
 
-/// Ordering. A complex number has no order, so `< <: > >:` and the
-/// dyadic `<. >.` all refuse it — in both languages, which is a deliberate
-/// divergence from GNU APL (tests/corpus/apl/divergences.txt).
+/// Ordering. In J a complex number has no order, so `< <: > >:` and the
+/// dyadic `<. >.` all refuse it. APL's comparisons are total in the GNU
+/// line — real part, then imaginary — but `⌈` and `⌊` are not part of
+/// that and refuse a complex operand there too.
 #[rstest]
 #[case(Lang::J, "3j4 < 1j2")]
 #[case(Lang::J, "3 < 3j4")]
 #[case(Lang::J, "3j4 >: 1j2")]
 #[case(Lang::J, "3j4 <. 1j2")]
 #[case(Lang::J, "3j4 >. 1j2")]
-#[case(Lang::Apl, "3J4<1J2")]
 #[case(Lang::Apl, "3J4⌈1J2")]
 #[case(Lang::Apl, "3J4⌊1J2")]
 fn ordering_a_complex_number_is_refused(#[case] lang: Lang, #[case] src: &str) {
@@ -305,6 +305,35 @@ fn ordering_a_complex_number_is_refused(#[case] lang: Lang, #[case] src: &str) {
     assert_eq!(e.kind, ErrorKind::Domain, "{src}: {}", e.msg);
     assert!(e.msg.contains("no order"), "{src}: {}", e.msg);
     assert!(e.span.is_some(), "{src}: no span");
+}
+
+/// APL's comparisons order a complex value by its real part and then its
+/// imaginary one, a character by its codepoint, and a character below
+/// every number.
+#[rstest]
+#[case("3J4<1J2", "0")]
+#[case("1J2<1J3", "1")]
+#[case("1J1<1J1", "0")]
+#[case("2J5>2J4", "1")]
+#[case("0J1<1", "1")]
+#[case("'b'<'c'", "1")]
+#[case("'a'<1", "1")]
+#[case("1<'a'", "0")]
+fn apl_comparisons_are_total(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::Apl, src), want, "{src}");
+}
+
+/// Under the Dyalog dialect they are not: only real numbers have an order
+/// there, exactly as in J.
+#[rstest]
+#[case("3J4<1J2")]
+#[case("'b'<'c'")]
+#[case("'a'<1")]
+fn the_dyalog_line_orders_numbers_alone(#[case] src: &str) {
+    let p = compile(Lang::Apl, src, &Dialect::dyalog()).expect("compiles");
+    let mut sink = |_: &str| {};
+    let e = p.run(&[], &mut sink).expect_err("expected a refusal");
+    assert!(matches!(e.kind, ErrorKind::Domain | ErrorKind::Type), "{src}: {}", e.msg);
 }
 
 #[rstest]

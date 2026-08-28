@@ -14,7 +14,7 @@ use crate::error::{Error, ErrorKind, Result, Span};
 use crate::exact::{self, Ext, Rat};
 use crate::fmt::FmtOpts;
 use crate::frontend::{
-    ComplexOrder, EncodeDigits, FloorRule, InnerEach, NearCount, NestedGrade, Rules,
+    ComplexOrder, EncodeDigits, FloorRule, InnerEach, NearCount, NestedGrade, OrderDomain, Rules,
 };
 use crate::par;
 use crate::simd::multiversioned;
@@ -836,6 +836,12 @@ pub enum MonadOp {
     /// J `I.^:_1`: the obverse of indices — how many times each index from
     /// zero to the largest occurs in y.
     IndicesInverse,
+    /// GNU APL `⊤∧`, `⊤∨` and `⊤⍱` monadically: the bit-wise family's one
+    /// argument form.
+    Bitwise(BitMonad),
+    /// GNU APL `⎕CC n`: the characters of the numbered class, as a vector.
+    /// Several numbers give one class per item, nested.
+    CharClass,
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -979,6 +985,19 @@ pub enum DyadOp {
     /// J `+:` and `*:` / APL `⍱` and `⍲`: the two boolean operations that
     /// have no other reading. Both arguments must be 0 or 1.
     Boolean(BoolDyad),
+    /// GNU APL `⊤∧` and its family: the logical operation on every bit of
+    /// two 64-bit two's-complement integers.
+    Bitwise(BitDyad),
+    /// GNU APL `A⊤[N]B`: encode to a radix of N copies of the single value
+    /// A. `0` is the `[0]` form, where the width is the smallest one the
+    /// values need — one more digit when any of them is negative, since
+    /// the encoding is then two's complement.
+    EncodeWidth(u32),
+    /// GNU APL `A∘B` between two values: the matrix product `+.×`. A left
+    /// vector is a ROW and a right one a COLUMN, so the answer is always a
+    /// matrix; a scalar operand makes it the element-wise `×` instead; and
+    /// inner lengths that differ are padded with zeros rather than refused.
+    MatrixProduct,
     /// J `x -. y` / APL `x ~ y`: the items of x that are not items of y.
     Less,
     /// APL `x ∪ y`: x's items, then y's items that x does not already have.
@@ -1033,6 +1052,36 @@ pub enum BoolDyad {
     Nor,
     /// J `*:`, APL `⍲`: not both.
     Nand,
+}
+
+/// GNU APL's bit-wise logical functions, spelled `⊤` followed by a logical
+/// glyph. Both arguments are read as 64-bit two's-complement integers and
+/// the operation runs on every bit at once, so `12 ⊤∧ 10` is 8.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BitDyad {
+    /// `⊤∧`: and.
+    And,
+    /// `⊤∨`: or.
+    Or,
+    /// `⊤⍲`: nand.
+    Nand,
+    /// `⊤⍱`: nor.
+    Nor,
+    /// `⊤=`: the complement of exclusive or.
+    Eq,
+    /// `⊤≠`: exclusive or.
+    Ne,
+}
+
+/// The monadic half of the bit-wise family, which only three of the six
+/// glyphs have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BitMonad {
+    /// `⊤∧` and `⊤∨`: the argument as the integer it stands for, which is
+    /// a near-integer's conversion and a whole number's identity.
+    Integer,
+    /// `⊤⍱`: the complement of every bit, so `⊤⍱ 5` is ¯6.
+    Not,
 }
 
 /// A primitive verb: a name for diagnostics, both valence meanings, and
@@ -1203,6 +1252,10 @@ pub enum Verb {
     Fit(Box<Verb>, f64),
     /// J `x m} y`: y with the items at the indices m replaced by x.
     Amend(Array),
+    /// GNU APL `x ⊢[m] y`: the selection function — a 1 in m takes the
+    /// element of y that stands there, a 0 the element of x. m, x and y
+    /// agree by the ordinary scalar rule, so a scalar among them spreads.
+    Choose(Array),
     /// J `u}`: the same amend, with the indices computed rather than
     /// written — `u} y` is `(u y)} y` and `x u} y` is `x (x u y)} y`.
     AmendVerb(Box<Verb>),
@@ -1314,6 +1367,7 @@ impl Verb {
             // Amend reads the whole argument, and the rest run their own
             // verb over the argument as a whole.
             Verb::Amend(_)
+            | Verb::Choose(_)
             | Verb::AmendVerb(_)
             | Verb::ShiftFill(_)
             | Verb::Level { .. }
@@ -1382,6 +1436,7 @@ impl Verb {
             Verb::Each(v, _) => format!("({}¨)", v.name()),
             Verb::Fit(v, n) => format!("{}!.{n}", v.name()),
             Verb::Amend(_) => "(m})".to_string(),
+            Verb::Choose(_) => "(⊢[m])".to_string(),
             Verb::AmendVerb(v) => format!("({}}})", v.name()),
             Verb::ShiftFill(_) => "|.!.n".to_string(),
             Verb::Characteristics(v) => format!("{} b.", v.name()),
@@ -1483,6 +1538,7 @@ impl Verb {
             // An explicit definition's body is a program of its own; `!.`
             // has no reach into it.
             Verb::Amend(_)
+            | Verb::Choose(_)
             | Verb::AmendVerb(_)
             | Verb::ShiftFill(_)
             | Verb::Characteristics(_)
@@ -1566,7 +1622,9 @@ impl Verb {
             Verb::Evoke(vs, _) | Verb::Cycle(vs) => vs.iter().all(Verb::is_pure),
             Verb::Stencil(u, _) => u.is_pure(),
             Verb::InnerProduct { u, v, .. } => u.is_pure() && v.is_pure(),
-            Verb::Amend(_) | Verb::ShiftFill(_) | Verb::Characteristics(_) => true,
+            Verb::Amend(_) | Verb::Choose(_) | Verb::ShiftFill(_) | Verb::Characteristics(_) => {
+                true
+            }
             Verb::AmendVerb(v) | Verb::Level { u: v, .. } => v.is_pure(),
             // A memo answers from its cache, so the verb inside it must be
             // pure for the cache to be an optimisation rather than a change
@@ -1741,6 +1799,9 @@ impl Verb {
             Verb::Fit(v, n) => {
                 let tol = Tol { ct: *n, ..ctx.cfg.tol };
                 ctx.with_tol(tol, |c| v.monad(y, c, span))
+            }
+            Verb::Choose(_) => {
+                Err(Error::domain("⊢[m] selects between two arguments and needs both", span))
             }
             // `m} y` with one index is J's item selection.
             Verb::Amend(m) => {
@@ -1950,6 +2011,7 @@ impl Verb {
                 ctx.with_tol(tol, |c| v.dyad(x, y, c, span))
             }
             Verb::Amend(m) => amend(m, x, y, ctx.cfg.near(), span),
+            Verb::Choose(m) => choose(m, x, y, span),
             // `x u} y` is `x (x u y)} y`: u names the places to amend.
             Verb::AmendVerb(u) => {
                 let m = u.dyad(x, y, ctx, span)?;
@@ -4070,11 +4132,17 @@ fn compare_data(
     ydiv: usize,
     n: usize,
     tol: Tol,
+    rules: Rules,
     span: Span,
 ) -> Result<Data> {
     use ScalarDyad::*;
     let (dx, dy) = (x.dtype(), y.dtype());
     let equality = matches!(op, Eq | Ne);
+    // GNU APL's comparisons are total: a character orders by its
+    // codepoint, stands below every number, and a complex value orders by
+    // its real part and then its imaginary one. J and Dyalog refuse all
+    // three, so the dialect names which.
+    let total = rules.lang == crate::Lang::Apl && rules.order_domain == OrderDomain::Total;
     // Equality is TOTAL across a character and a number in both
     // references: `'a' = 1` is 0. It is total across the BOX boundary in J
     // too — `(<1) = 1` is 0 — but not in APL, where a scalar verb reaches
@@ -4147,18 +4215,46 @@ fn compare_data(
     }
     if dx == DType::Char || dy == DType::Char {
         if dx != dy {
-            return Err(Error::new(
-                ErrorKind::Type,
-                "cannot compare character and numeric data",
-                Some(span),
-            ));
+            if !total {
+                return Err(Error::new(
+                    ErrorKind::Type,
+                    "cannot compare character and numeric data",
+                    Some(span),
+                ));
+            }
+            // A character stands below every number, so the answer is the
+            // same for every pair and only the side the character is on
+            // decides it.
+            let below = dx == DType::Char;
+            let v = match op {
+                Lt | Le => below,
+                _ => !below,
+            };
+            return Ok(Data::Bool(vec![u8::from(v); n].into()));
         }
-        if !equality {
+        if !equality && !total {
             return Err(Error::new(
                 ErrorKind::Type,
                 "cannot order character data; only equality applies",
                 Some(span),
             ));
+        }
+        if !equality {
+            let (Data::Char(a), Data::Char(b)) = (x, y) else {
+                return Err(Error::internal("character comparison on non-character data"));
+            };
+            let (out, _) = par::fill(n, |start, part: &mut [u8]| {
+                zip_chunk(a, xoff, xdiv, b, yoff, ydiv, start, part, |p, q, slot| {
+                    *slot = u8::from(match op {
+                        Lt => p < q,
+                        Le => p <= q,
+                        Gt => p > q,
+                        _ => p >= q,
+                    });
+                    true
+                })
+            });
+            return Ok(Data::Bool(out.into()));
         }
         let (Data::Char(a), Data::Char(b)) = (x, y) else {
             return Err(Error::internal("character comparison on non-character data"));
@@ -4178,7 +4274,7 @@ fn compare_data(
         return Ok(d);
     }
     if dx == DType::Complex || dy == DType::Complex {
-        if !equality {
+        if !equality && !total {
             return Err(no_complex_order(span));
         }
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
@@ -4186,8 +4282,30 @@ fn compare_data(
             cx_source!(y, ty, ys, {
                 par::fill(n, |start, part: &mut [u8]| {
                     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
-                        let e = tol.eq_cx(a.widen(), b.widen());
-                        *slot = if op == Eq { e as u8 } else { !e as u8 };
+                        let (a, b) = (a.widen(), b.widen());
+                        *slot = u8::from(match op {
+                            Eq => tol.eq_cx(a, b),
+                            Ne => !tol.eq_cx(a, b),
+                            // Real part first, then imaginary, each pair
+                            // read as equal within the tolerance.
+                            _ => {
+                                let o = if tol.eq(a[0], b[0]) {
+                                    if tol.eq(a[1], b[1]) {
+                                        std::cmp::Ordering::Equal
+                                    } else {
+                                        a[1].total_cmp(&b[1])
+                                    }
+                                } else {
+                                    a[0].total_cmp(&b[0])
+                                };
+                                match op {
+                                    Lt => o.is_lt(),
+                                    Le => o.is_le(),
+                                    Gt => o.is_gt(),
+                                    _ => o.is_ge(),
+                                }
+                            }
+                        });
                         true
                     })
                 })
@@ -4864,7 +4982,7 @@ fn scalar_dyad_data(
         }
     }
     if matches!(op, Eq | Ne | Lt | Le | Gt | Ge) {
-        return compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span);
+        return compare_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, rules, span);
     }
     if matches!(op, Lcm | Gcd) {
         return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, rules, span);
@@ -5105,6 +5223,14 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
     // never comes up: `%: ''` is an empty, not a type error.
     if y.count() == 0 && !d.dtype().is_numeric() {
         return Ok(Array::new(y.shape.clone(), Data::empty(DType::I64)));
+    }
+    // The gamma function has no complex reading here, but a complex value
+    // with no imaginary part is the real it displays as: `!2j0` is 2.
+    if op == Factorial
+        && d.dtype() == DType::Complex
+        && let Some(r) = as_real(y)
+    {
+        return scalar_monad(op, &r, cfg, span);
     }
     if d.dtype() == DType::Complex || monad_leaves_reals(op, d) {
         return complex_monad(op, y, span);
@@ -6427,6 +6553,36 @@ fn index_of(
         out.push(origin + at as i64);
     }
     Ok(Array::new(frame, Data::I64(out.into())))
+}
+
+/// `x ⍳ y` where x has rank 2 or more (GNU APL's generalized form).
+///
+/// Every ELEMENT of y is looked up among the elements of x, and the answer
+/// in its place is the enclosed coordinate vector that finds it — one
+/// index per axis of x, in the index origin — or the enclosed empty vector
+/// where x does not hold it. The result has y's own shape.
+fn index_of_coords(x: &Array, y: &Array, origin: i64, tol: Tol) -> Array {
+    let (xr, yr) = (x.to_row_major(), y.to_row_major());
+    let n = x.count();
+    let mut cells = Vec::with_capacity(y.count());
+    for i in 0..y.count() {
+        let want = atom_array(&yr.data, i);
+        let at = (0..n)
+            .find(|&j| arrays_match_rule(&want, &atom_array(&xr.data, j), tol, NanRule::Search));
+        let coords = match at {
+            Some(mut k) => {
+                let mut idx = vec![0i64; x.rank()];
+                for a in (0..x.rank()).rev() {
+                    idx[a] = origin + (k % x.shape[a]) as i64;
+                    k /= x.shape[a];
+                }
+                Array::from_i64(idx)
+            }
+            None => Array::empty(DType::I64),
+        };
+        cells.push(coords);
+    }
+    Array::new(y.shape.clone(), Data::Box(cells.into()))
 }
 
 /// `x { y` for one index atom: the rank machinery supplies the framing.
@@ -7854,6 +8010,8 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         MonadOp::CycleForm => cycle_form(y, ctx.cfg.near(), span),
         MonadOp::Split => Ok(split_items(y)),
         MonadOp::Execute { apl } => execute(y, apl, ctx, span),
+        MonadOp::Bitwise(op) => bit_monad(op, y, ctx.cfg, span),
+        MonadOp::CharClass => char_class(y, ctx.cfg.near(), span),
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         MonadOp::None => {
             Err(Error::domain(format!("{} has no monadic meaning", p.name), span))
@@ -8189,6 +8347,12 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         }
         DyadOp::IndexOf { origin, vector_left } => {
             let (x, y) = align_mixed(x, y, apl);
+            // A left argument of rank 2 or more is looked up ELEMENT by
+            // element, and each answer is the coordinate vector that finds
+            // it — a lookup in a table cannot be one number.
+            if apl && !vector_left && x.rank() > 1 {
+                return Ok(index_of_coords(&x, &y, origin, tol));
+            }
             index_of(&x, &y, origin, vector_left, tol, span)
         }
         DyadOp::MemberJ => Ok(member_j(x, y, tol)),
@@ -8228,6 +8392,10 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             };
             encode_apl(x, y, tol, span).map(|r| carry_exact2(r, x, y))
         }
+        DyadOp::EncodeWidth(n) => {
+            let radix = encode_radix(x, y, n, cfg.near(), span)?;
+            encode_apl(&radix, y, cfg.tol, span).map(|r| carry_exact2(r, x, y))
+        }
         DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Encode => encode(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, span),
@@ -8255,6 +8423,8 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, cfg.near(), span),
         DyadOp::ExactForm => exact_form(x, y, cfg.near(), span),
         DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
+        DyadOp::Bitwise(op) => bit_dyad(op, x, y, cfg, span),
+        DyadOp::MatrixProduct => apl_matrix_product(x, y, cfg, span),
         DyadOp::Less => {
             set_rank(cfg, "without", x, y, span)?;
             let (x, y) = align_mixed(x, y, apl);
@@ -14518,6 +14688,277 @@ fn bool_dyad(op: BoolDyad, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         BoolDyad::Nand => u8::from(a == 0 || b == 0),
     };
     Ok(Array::new(vec![], Data::Bool(vec![v].into())))
+}
+
+/// One argument of the bit-wise family as the 64-bit integer it stands
+/// for. A whole number is itself; a near-integer within the comparison
+/// tolerance rounds to the integer it is near; anything else — a genuine
+/// fraction, a value past the 64-bit range, a character, a complex number
+/// — has no bits and says so.
+fn bit_arg(a: &Array, tol: Tol, span: Span) -> Result<i64> {
+    let refuse =
+        || Error::domain("a bit-wise function reads whole numbers that fit in 64 bits", span);
+    if let Some([v]) = a.to_i64_vec().as_deref() {
+        return Ok(*v);
+    }
+    let reals = a.to_f64_vec();
+    let Some(&[v]) = reals.as_deref() else {
+        return Err(refuse());
+    };
+    let near = v.round();
+    if !(v == near || tol.eq(v, near)) || !fits_i64(near) {
+        return Err(refuse());
+    }
+    Ok(near as i64)
+}
+
+/// `x ⊤∧ y` and the rest of the family, on one pair of atoms.
+fn bit_dyad(op: BitDyad, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    let (a, b) = (bit_arg(x, cfg.tol, span)?, bit_arg(y, cfg.tol, span)?);
+    let v = match op {
+        BitDyad::And => a & b,
+        BitDyad::Or => a | b,
+        BitDyad::Nand => !(a & b),
+        BitDyad::Nor => !(a | b),
+        BitDyad::Eq => !(a ^ b),
+        BitDyad::Ne => a ^ b,
+    };
+    Ok(Array::scalar_i64(v))
+}
+
+/// The characters of one `⎕CC` class.
+///
+/// Every class here is a set anyone can state — the digits, the two cases
+/// of the Latin and Greek alphabets, the ASCII range, the octal and
+/// hexadecimal digits, and the RFC 4648 alphabets. The four GNU APL states
+/// as its own glyph repertoire (superscripts, subscripts, line drawing and
+/// mathematical symbols) are named gaps rather than a guess at its table.
+fn char_class_chars(n: i64, span: Span) -> Result<Vec<char>> {
+    let upper = || ('A'..='Z').collect::<Vec<char>>();
+    let lower = || ('a'..='z').collect::<Vec<char>>();
+    let digits = || ('0'..='9').collect::<Vec<char>>();
+    let greek = || {
+        ('Α'..='Ω')
+            .chain('α'..='ω')
+            .filter(|c| *c != '\u{3a2}' && *c != '\u{3c2}')
+            .collect::<Vec<char>>()
+    };
+    Ok(match n {
+        1 | 10 => digits(),
+        2 | 26 => upper(),
+        3 | -26 => lower(),
+        4 | 128 => (0u8..128).map(char::from).collect(),
+        8 => ('0'..='7').collect(),
+        16 => digits().into_iter().chain('A'..='F').collect(),
+        -16 => digits().into_iter().chain('a'..='f').collect(),
+        17 => digits().into_iter().chain('A'..='F').chain('a'..='f').collect(),
+        33 => upper().into_iter().chain('2'..='7').chain(['=']).collect(),
+        48 => greek(),
+        52 => upper().into_iter().chain(lower()).collect(),
+        65 => upper()
+            .into_iter()
+            .chain(lower())
+            .chain(digits())
+            .chain(['+', '/', '='])
+            .collect(),
+        95 => (0x20u8..0x7f).map(char::from).collect(),
+        5 | 6 | 7 | 9 => {
+            return Err(Error::not_yet(
+                format!("the ⎕CC glyph-repertoire class {n}"),
+                span,
+            ));
+        }
+        _ => return Err(Error::domain(format!("{n} names no ⎕CC character class"), span)),
+    })
+}
+
+/// `⎕CC y`: the characters of every class y names. One number gives one
+/// character vector; several give one per item, nested.
+fn char_class(y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    let ns = y
+        .to_i64_vec_near(near)
+        .ok_or_else(|| Error::domain("⎕CC takes the whole number of a character class", span))?;
+    if y.rank() == 0 {
+        let chars = char_class_chars(ns[0], span)?;
+        return Ok(Array::from_chars(chars));
+    }
+    let mut cells = Vec::with_capacity(ns.len());
+    for n in ns {
+        cells.push(Array::from_chars(char_class_chars(n, span)?));
+    }
+    Ok(Array::new(y.shape.clone(), Data::Box(cells.into())))
+}
+
+/// The radix list `A⊤[N]B` encodes to: N copies of the one value A.
+///
+/// `N` of zero is the `[0]` form, which works the width out from the
+/// values themselves — the smallest width whose place values reach the
+/// largest of them, and one digit more when any is negative, because the
+/// encoding of a negative value is its two's complement.
+fn encode_radix(x: &Array, y: &Array, n: u32, near: NearInt, span: Span) -> Result<Array> {
+    if x.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "⊤[N] encodes to one repeated radix, and this one is not a single value",
+            Some(span),
+        ));
+    }
+    let one = x.to_i64_vec_near(near);
+    let Some(&[base]) = one.as_deref() else {
+        return Err(match x.count() {
+            1 => Error::domain("⊤[N] repeats one whole number as its radix", span),
+            _ => Error::new(
+                ErrorKind::Length,
+                format!("⊤[N] repeats ONE radix, and this one has {} values", x.count()),
+                Some(span),
+            ),
+        });
+    };
+    let width = if n > 0 {
+        n as usize
+    } else {
+        if base.abs() < 2 {
+            return Err(Error::domain("⊤[0] works its width out, and needs a radix above 1", span));
+        }
+        let values = y
+            .to_i64_vec_near(near)
+            .ok_or_else(|| Error::domain("⊤[0] works its width out from whole numbers", span))?;
+        let r = base.unsigned_abs();
+        let places = |m: u64| {
+            let (mut k, mut p) = (0usize, 1u64);
+            while p < m {
+                p = p.saturating_mul(r);
+                k += 1;
+            }
+            k
+        };
+        values
+            .iter()
+            .map(|&v| places(v.unsigned_abs()) + usize::from(v < 0))
+            .max()
+            .unwrap_or(0)
+    };
+    Ok(Array::new(vec![width], Data::I64(vec![base; width].into())))
+}
+
+/// `x ⊢[m] y`: GNU APL's selection function.
+///
+/// A 1 in the mask takes the element of y that stands in that position, a
+/// 0 the element of x. The three agree by the ordinary scalar rule: a
+/// scalar spreads over the others, and two non-scalars must have the same
+/// shape. The two sides need not have the same type — the answer is then
+/// mixed, exactly as a strand of a character and a number is.
+fn choose(mask: &Array, x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let bits = mask
+        .to_i64_vec()
+        .filter(|v| v.iter().all(|&b| b == 0 || b == 1))
+        .ok_or_else(|| Error::domain("⊢[m] selects with a mask of 0s and 1s", span))?;
+    let mut shape: Option<&Vec<usize>> = None;
+    for a in [mask, x, y] {
+        if a.rank() == 0 {
+            continue;
+        }
+        match shape {
+            None => shape = Some(&a.shape),
+            Some(s) if *s == a.shape => {}
+            Some(s) => {
+                let kind =
+                    if s.len() == 1 && a.rank() == 1 { ErrorKind::Length } else { ErrorKind::Shape };
+                return Err(Error::new(
+                    kind,
+                    format!(
+                        "⊢[m] selects between arguments that do not agree: {} and {}",
+                        show_shape(s),
+                        show_shape(&a.shape)
+                    ),
+                    Some(span),
+                ));
+            }
+        }
+    }
+    let shape = shape.cloned().unwrap_or_default();
+    let n: usize = shape.iter().product();
+    let (xr, yr) = (x.to_row_major(), y.to_row_major());
+    let pick = |a: &Array, i: usize| atom_array(&a.data, if a.rank() == 0 { 0 } else { i });
+    let mut cells = Vec::with_capacity(n);
+    for i in 0..n {
+        let bit = if mask.rank() == 0 { bits[0] } else { bits[i] };
+        cells.push(if bit == 1 { pick(&yr, i) } else { pick(&xr, i) });
+    }
+    // Characters beside numbers make APL's MIXED SIMPLE array, which is
+    // held as boxed scalars; one type throughout stays a plain array.
+    let simple = cells.iter().all(|c| c.rank() == 0 && c.dtype() != DType::Box)
+        && cells.windows(2).all(|w| DType::promote(w[0].dtype(), w[1].dtype()).is_some());
+    if simple {
+        return assemble(&shape, cells, span);
+    }
+    Ok(Array::new(shape, Data::Box(cells.into())))
+}
+
+/// `A∘B` between two values: GNU APL's matrix product.
+///
+/// A scalar on either side is the element-wise product. Otherwise both
+/// sides are read as matrices — a left vector is one ROW, a right vector
+/// one COLUMN, so the answer always has rank two — and the two inner
+/// lengths are brought to the larger of them with zeros, which is what
+/// makes a mismatched pair an answer rather than a length error.
+fn apl_matrix_product(x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    if x.rank() == 0 || y.rank() == 0 {
+        return scalar_dyad(ScalarDyad::Mul, x, y, cfg, span);
+    }
+    if x.rank() > 2 || y.rank() > 2 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "a matrix product reads arguments of rank 2 and below",
+            Some(span),
+        ));
+    }
+    if !x.dtype().is_numeric() || !y.dtype().is_numeric() {
+        return Err(Error::domain("a matrix product reads numbers", span));
+    }
+    let (rows, xk) = match x.rank() {
+        1 => (1, x.shape[0]),
+        _ => (x.shape[0], x.shape[1]),
+    };
+    let (yk, cols) = match y.rank() {
+        1 => (y.shape[0], 1),
+        _ => (y.shape[0], y.shape[1]),
+    };
+    let k = xk.max(yk);
+    // The inner axis is the left's last and the right's first; `↑` fills
+    // whichever is short with the type's zero.
+    let square = |a: &Array, shape: [usize; 2]| -> Array {
+        Array::new(vec![shape[0], shape[1]], a.to_row_major().data.clone())
+    };
+    let grow = |a: Array, shape: [usize; 2]| -> Result<Array> {
+        let want = Array::from_i64(vec![shape[0] as i64, shape[1] as i64]);
+        take(&want, &a, false, true, cfg.near(), span)
+    };
+    let left = grow(square(x, [rows, xk]), [rows, k])?;
+    let right = grow(square(y, [yk, cols]), [k, cols])?;
+    let plus = Verb::Prim(Prim {
+        name: "+",
+        monad: MonadOp::Scalar(ScalarMonad::Conj),
+        dyad: DyadOp::Scalar(ScalarDyad::Add),
+        ranks: [0, 0, 0],
+    });
+    let times = Verb::Prim(Prim {
+        name: "×",
+        monad: MonadOp::Scalar(ScalarMonad::Signum),
+        dyad: DyadOp::Scalar(ScalarDyad::Mul),
+        ranks: [0, 0, 0],
+    });
+    let fold = Verb::Reduce(Box::new(plus));
+    cfg.pure(|ctx| inner_product(&fold, &times, true, &left, &right, ctx, span))
+}
+
+/// `⊤∧ y`, `⊤∨ y` and `⊤⍱ y` on one atom.
+fn bit_monad(op: BitMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    let v = bit_arg(y, cfg.tol, span)?;
+    Ok(Array::scalar_i64(match op {
+        BitMonad::Integer => v,
+        BitMonad::Not => !v,
+    }))
 }
 
 // ------------------------------------------------------------ permutations

@@ -123,6 +123,23 @@ pub enum ComplexOrder {
     MagnitudeThenAngle,
 }
 
+/// What `<`, `≤`, `≥` and `>` are allowed to order.
+///
+/// GNU APL's comparison rules are total: characters order by their
+/// codepoint, a character stands below every number, and a complex value
+/// orders by its real part and then its imaginary one. Dyalog and J refuse
+/// all three — an order there is a claim about size, and only a real
+/// number has one. `⌈` and `⌊` keep the narrow reading in both, so the
+/// setting names the comparisons alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OrderDomain {
+    /// Characters, mixed pairs and complex values all have an order.
+    #[default]
+    Total,
+    /// Only real numbers do; anything else is a type error.
+    Numeric,
+}
+
 /// How a grade orders NESTED items.
 ///
 /// The APL2 line, which GNU APL implements and the oracle verifies, orders
@@ -293,6 +310,7 @@ pub struct Dialect {
     pub dfn_result: DfnResult,
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
+    pub order_domain: OrderDomain,
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
     pub gcd_rule: GcdRule,
@@ -334,6 +352,7 @@ impl Dialect {
             dfn_result: DfnResult::LastSentence,
             default_arg: DefaultArg::Eager,
             complex_order: ComplexOrder::RealThenImaginary,
+            order_domain: OrderDomain::Total,
             nested_grade: NestedGrade::Apl2,
             lookup_left: LookupLeft::AnyRank,
             gcd_rule: GcdRule::Tolerant,
@@ -367,6 +386,7 @@ impl Dialect {
             dfn_result: DfnResult::FirstNonAssignment,
             default_arg: DefaultArg::Eager,
             complex_order: ComplexOrder::RealThenImaginary,
+            order_domain: OrderDomain::Numeric,
             nested_grade: NestedGrade::TotalOrder,
             lookup_left: LookupLeft::VectorOnly,
             gcd_rule: GcdRule::Exact,
@@ -445,6 +465,7 @@ impl Dialect {
             dfn_result: self.dfn_result,
             default_arg: self.default_arg,
             complex_order: self.complex_order,
+            order_domain: self.order_domain,
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
             gcd_rule: self.gcd_rule,
@@ -482,6 +503,7 @@ pub struct Rules {
     pub dfn_result: DfnResult,
     pub default_arg: DefaultArg,
     pub complex_order: ComplexOrder,
+    pub order_domain: OrderDomain,
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
     pub gcd_rule: GcdRule,
@@ -514,6 +536,7 @@ impl Rules {
             dfn_result: self.dfn_result,
             default_arg: self.default_arg,
             complex_order: self.complex_order,
+            order_domain: self.order_domain,
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
             gcd_rule: self.gcd_rule,

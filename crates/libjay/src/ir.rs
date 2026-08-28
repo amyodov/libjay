@@ -110,6 +110,11 @@ pub enum Control {
     /// through to the next line; anything that is not a line of this
     /// definition — `→0` above all — leaves it.
     Branch(Box<Expr>),
+    /// APL `A → B`: branch RELATIVE to the line this stands on, by A lines,
+    /// when B holds. `1→cond` reaches the next line, `¯1→cond` the one
+    /// before, `0→cond` runs this line again, and a step that leaves the
+    /// body ends the definition. An empty or false B falls through.
+    BranchBy { by: Box<Expr>, test: Box<Expr> },
     /// `continue.` / `:Continue`: start the innermost loop's next iteration.
     Continue,
     /// A dfn's guard, `cond:expr`: the body is the dfn's answer when the
@@ -119,6 +124,10 @@ pub enum Control {
     /// more strictly: Dyalog wants exactly one 0 or 1, and refuses `2`,
     /// `1 1`, `⍬` and a character alike.
     Guard { test: Vec<Expr>, body: Vec<Expr> },
+    /// GNU APL's conditional, `test →→ body ←→ otherwise ←←`. The test is
+    /// read as strictly as a guard's — exactly one 0 or 1 — and a clause
+    /// that is not taken yields nothing at all.
+    Cond { test: Vec<Expr>, body: Vec<Expr>, otherwise: Vec<Expr> },
 }
 
 /// One arm of an `if.` or `select.`: a test (absent for the default arm) and
@@ -514,6 +523,8 @@ pub(crate) enum Flow {
     Continue,
     /// APL `→`: continue at this statement of the definition's body.
     Goto(usize),
+    /// APL `A→B`: continue this many statements from the one that branched.
+    GotoBy(i64),
 }
 
 /// Run a block of sentences: the value is the last sentence's, and an
@@ -726,6 +737,27 @@ fn eval_control(
             }
             Ok((None, Flow::Return))
         }
+        // `A→B`: A lines on from here when B holds, and nothing when it
+        // does not. B is the condition, so an empty one is no branch.
+        Control::BranchBy { by, test } => {
+            let cond = eval(test, ctx, rec)?;
+            if cond.count() == 0 {
+                return Ok((None, Flow::Normal));
+            }
+            let holds = cond
+                .to_i64_vec()
+                .and_then(|v| v.first().copied())
+                .ok_or_else(|| Error::domain("a branch's condition is a number", span))?;
+            if holds == 0 {
+                return Ok((None, Flow::Normal));
+            }
+            let step = eval(by, ctx, rec)?;
+            let step = step
+                .to_i64_vec()
+                .and_then(|v| v.first().copied())
+                .ok_or_else(|| Error::domain("a branch's step is a line count", span))?;
+            Ok((None, Flow::GotoBy(step)))
+        }
         Control::Break => Ok((None, Flow::Break)),
         Control::Continue => Ok((None, Flow::Continue)),
         Control::Guard { test, body } => {
@@ -740,6 +772,23 @@ fn eval_control(
                 return run_block(body, None, ctx, rec);
             }
             Ok((None, Flow::Normal))
+        }
+        Control::Cond { test, body, otherwise } => {
+            let (t, flow) = run_block(test, None, ctx, rec)?;
+            if flow != Flow::Normal {
+                return Ok((t, flow));
+            }
+            let Some(v) = &t else {
+                return Err(Error::domain("a conditional's test produced no value", span));
+            };
+            let taken = if guard_holds(v, span)? { body } else { otherwise };
+            // A conditional with no clause to run has nothing to show: the
+            // sentence answers shyly rather than with a value of its own.
+            if taken.is_empty() {
+                ctx.shy = true;
+                return Ok((Some(Array::empty(crate::dtype::DType::I64)), Flow::Normal));
+            }
+            run_block(taken, None, ctx, rec)
         }
         Control::If { arms, otherwise } => {
             for arm in arms {
@@ -982,6 +1031,12 @@ fn run_body(
         match flow {
             Flow::Normal => at += 1,
             Flow::Goto(to) => at = to,
+            // A relative step that lands outside the body ends the
+            // definition, exactly as `→0` does.
+            Flow::GotoBy(by) => match at.checked_add_signed(by as isize) {
+                Some(to) if to < stmts.len() => at = to,
+                _ => break,
+            },
             _ => break,
         }
     }

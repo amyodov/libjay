@@ -18,6 +18,49 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `jay_compile_ext` — so an embedded libjay is never at the mercy of its
   host process's environment. They are not dialect settings, and
   docs/extensions.md says why and lists what there is.
+- APL's bit-wise logical functions, `⊤∧ ⊤∨ ⊤⍲ ⊤⍱ ⊤= ⊤≠`. Each reads its
+  arguments as 64-bit two's-complement integers and runs the operation on
+  every bit at once, so `12 ⊤∧ 10` is 8 and `12 ⊤≠ 10` is 6. `⊤` and the
+  glyph after it are one function, blanks between them included. Three of
+  the six have a monad: `⊤∧` and `⊤∨` give the argument as the integer it
+  stands for, and `⊤⍱ 5` is ¯6.
+
+- `A⊤[N]B`, which encodes to N copies of the single radix A — `2⊤[4]13` is
+  `1 1 0 1` — and `A⊤[0]B`, which works the width out for itself. N counts
+  digits and is not an axis, so `⎕IO` does not move it.
+
+- `A⊢[M]B`, APL's selection function: a 1 in the mask takes the element of
+  B that stands there, a 0 the element of A, and the three agree by the
+  ordinary scalar rule. `'Q'⊢[1 0 1](1 2 3)` is `1 Q 3`.
+
+- `A∘B` between two values is the matrix product. A left vector is read as
+  a row and a right one as a column, so the answer is always a matrix; a
+  scalar operand makes it the element-wise `×`; and inner lengths that
+  differ are padded with zeros rather than refused.
+
+- Hexadecimal literals, `$ff`, in either case of letter. Each is one scalar
+  and strands as a decimal literal does: `$10 $20` is `16 32`.
+
+- Double-quoted strings with C escapes, `"a\nb"`. A double-quoted string is
+  always a vector where `'Q'` is a scalar, `\a \b \f \n \r \t \v`, `\\`,
+  `\"` and `\0` are read, and a backslash before anything else keeps
+  itself.
+
+- APL's conditional, `test →→ body ←→ otherwise ←←`. The test is read as
+  strictly as a dfn guard's — one 0 or one 1 — and each of the three
+  markers may end a line, so a conditional written down a `∇` definition's
+  lines works as one written on a single line does.
+
+- `A→B` inside a `∇` definition: branch A lines on from the line it stands
+  on when B holds. `1→cond` reaches the next line, `¯1→cond` the one
+  before, `0→cond` runs the line again, and a step that leaves the body
+  ends the definition.
+
+- `⎕CC`, the numbered character classes: the digits, the two cases of the
+  Latin and Greek alphabets, ASCII, the printable range, the octal and
+  hexadecimal digits, and the RFC 4648 alphabets. Several numbers give one
+  class per item, nested. Four classes are one implementation's own glyph
+  repertoire and are refused by name.
 
 - A gerund may be the operand of `/`, `\`, `\.` and `/.` in J, and every
   one of them cycles through its verbs. `` (+`-)/ 1 2 3 `` inserts them
@@ -47,6 +90,34 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   verb over non-ASCII text used to disagree with it. The old reading, one
   item per character, is the `j_unicode_strings` extension. APL is
   unchanged: its characters were always Unicode, and GNU APL agrees.
+- A label at the head of a `∇` definition's line parses. `L:` used to be
+  read as a control word and reported as an unknown one, which blocked
+  every loop written the classical way; `∇Z←C1 ⋄ Z←0 ⋄ L:Z←Z+1 ⋄ →(Z<4)/L`
+  now runs.
+
+- APL's `< ≤ ≥ >` are total, as the line libjay follows has them:
+  characters order by their codepoint, a character stands below every
+  number, and a complex value orders by its real part and then its
+  imaginary one. `'b'<'c'`, `'a'<1` and `1J2<1J3` all answer 1 where each
+  was a type or domain error before. `Dialect.order_domain` (Python:
+  `order_domain="numeric"`) is the other reading, where only real numbers
+  have an order — that is what the Dyalog preset uses, and what J does.
+  `⌈` and `⌊` are not comparisons and stay numeric in both.
+
+- Dyadic `⍳` with a left argument of rank 2 or more answers coordinates:
+  `(2 2⍴⍳4)⍳3` is the enclosed `2 1`, and a value the table does not hold
+  gives the enclosed empty vector. It used to ravel the left argument and
+  answer one number.
+
+- An assignment stranded with a value beside it is one item of the vector:
+  `3 V←1 2` is the two-item nested vector `3` and `1 2`. It used to be a
+  syntax error.
+
+- `!` of a complex value with no imaginary part is the real it displays as,
+  so `!2j0` is 2. A value with an imaginary part is still a named gap.
+
+- A `[X]` axis in a `∇` definition header is named as a feature libjay does
+  not have yet, rather than reported as a malformed header.
 
 - J's `b` numeric literal takes any number for its base, and every letter
   after the `b` is a digit. `3r4b11` counts in three quarters (1.75),

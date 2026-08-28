@@ -567,6 +567,7 @@ fn dialect_of(
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
+    order_domain: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     gcd_rule: Option<&str>,
@@ -581,7 +582,8 @@ fn dialect_of(
     use jay::frontend::{
         ComplexOrder, ControlStrictness, DefaultArg, DepthSign, DfnResult, EncodeDigits,
         FirstDisclose, FloorRule,
-        GcdRule, IndexForm, InnerEach, LookupLeft, NearCount, NestedGrade, NestedModel, Partition,
+        GcdRule, IndexForm, InnerEach, LookupLeft, NearCount, NestedGrade, NestedModel,
+        OrderDomain, Partition,
     };
     let d = Dialect::default();
     // Extensions are not a dialect setting — they are departures from every
@@ -657,6 +659,12 @@ fn dialect_of(
             ],
         )?
         .unwrap_or(d.complex_order),
+        order_domain: setting(
+            order_domain,
+            "order_domain",
+            &[("total", OrderDomain::Total), ("numeric", OrderDomain::Numeric)],
+        )?
+        .unwrap_or(d.order_domain),
         nested_grade: setting(
             nested_grade,
             "nested_grade",
@@ -726,6 +734,7 @@ fn dialect_of(
     dfn_result=None,
     default_arg=None,
     complex_order=None,
+    order_domain=None,
     nested_grade=None,
     lookup_left=None,
     gcd_rule=None,
@@ -751,6 +760,7 @@ fn compile(
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
+    order_domain: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     gcd_rule: Option<&str>,
@@ -774,6 +784,7 @@ fn compile(
         dfn_result,
         default_arg,
         complex_order,
+        order_domain,
         nested_grade,
         lookup_left,
         gcd_rule,
@@ -824,6 +835,7 @@ fn devices() -> Vec<(String, String, String, bool)> {
     dfn_result=None,
     default_arg=None,
     complex_order=None,
+    order_domain=None,
     nested_grade=None,
     lookup_left=None,
     gcd_rule=None,
@@ -850,6 +862,7 @@ fn compile_parts(
     dfn_result: Option<&str>,
     default_arg: Option<&str>,
     complex_order: Option<&str>,
+    order_domain: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     gcd_rule: Option<&str>,
@@ -873,6 +886,7 @@ fn compile_parts(
         dfn_result,
         default_arg,
         complex_order,
+        order_domain,
         nested_grade,
         lookup_left,
         gcd_rule,

@@ -26,7 +26,7 @@ tables are listed separately and not counted.
 **J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
-**APL: 93 green / 21 partial / 3 absent by design, of 117 valences in the
+**APL: 103 green / 21 partial / 3 absent by design, of 127 valences in the
 inventory. Nothing in APL's primitive tables is red.**
 
 ## J — verbs
@@ -252,7 +252,7 @@ conjunctions above:
 | `⌈` | 🟢 ceiling | 🟢 maximum |
 | `⌊` | 🟢 floor | 🟢 minimum |
 | `\|` | 🟢 magnitude | 🟢 residue; the quotient is rounded with the tolerance |
-| `!` | 🟡 factorial; a complex argument is a named gap | 🟡 binomial; same |
+| `!` | 🟡 factorial; a value with an imaginary part is a named gap, and one without is the real it displays as | 🟡 binomial; same |
 | `○` | 🟢 pi times | 🟢 circle; `¯12` to `12`, real and complex |
 | `?` | 🟡 roll; libjay's own stream, not GNU APL's | 🟡 deal; same |
 | `⌹` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
@@ -263,10 +263,10 @@ conjunctions above:
 |---|---|---|
 | `=` | — | 🟢 equal |
 | `≠` | 🟢 nub sieve | 🟢 not equal |
-| `<` | — | 🟢 less than |
-| `≤` | — | 🟢 less or equal |
-| `>` | — | 🟢 greater than |
-| `≥` | — | 🟢 greater or equal |
+| `<` | — | 🟢 less than; total, so characters order by codepoint, a character stands below every number and a complex value orders by its real part then its imaginary one. `Dialect.order_domain` names the narrow reading Dyalog and J take |
+| `≤` | — | 🟢 less or equal; total, so characters order by codepoint, a character stands below every number and a complex value orders by its real part then its imaginary one. `Dialect.order_domain` names the narrow reading Dyalog and J take |
+| `>` | — | 🟢 greater than; total, so characters order by codepoint, a character stands below every number and a complex value orders by its real part then its imaginary one. `Dialect.order_domain` names the narrow reading Dyalog and J take |
+| `≥` | — | 🟢 greater or equal; total, so characters order by codepoint, a character stands below every number and a complex value orders by its real part then its imaginary one. `Dialect.order_domain` names the narrow reading Dyalog and J take |
 | `≡` | 🟢 depth | 🟢 match |
 | `≢` | 🟢 tally | 🟢 not match |
 | `∧` | — | 🟢 LCM / and; the ASCII `^` is read as the same glyph |
@@ -274,6 +274,12 @@ conjunctions above:
 | `⍲` | — | 🟢 nand |
 | `⍱` | — | 🟢 nor |
 | `~` | 🟢 not | 🟢 without |
+| `⊤∧` | 🟢 the argument as the integer it stands for | 🟢 bit-wise and |
+| `⊤∨` | 🟢 the same | 🟢 bit-wise or |
+| `⊤⍲` | — | 🟢 bit-wise nand |
+| `⊤⍱` | 🟢 bit-wise not | 🟢 bit-wise nor |
+| `⊤=` | — | 🟢 bit-wise complement of exclusive or |
+| `⊤≠` | — | 🟢 bit-wise exclusive or |
 
 ### Structural
 
@@ -292,13 +298,13 @@ conjunctions above:
 | `⊆` | 🟡 no oracle: not in GNU APL's character set; Dyalog's nest | 🟡 no oracle; Dyalog's partition, which is GNU APL's dyadic `⊂` |
 | `⌷` | 🟡 no oracle: materialise, which Dyalog makes the identity | 🟢 index (APL2: one item of x per axis, a scalar or an enclosed vector) |
 | `⊥` | — | 🟢 decode; the inner product `+.×` over x's last axis and y's leading one; a SINGLE on either side extends along the other's axis, and an empty axis weighs nothing — with no digit to weigh the radix is never read, so `'a'⊥(0⍴0)` is 0 |
-| `⊤` | — | 🟢 encode; with no value to write the radix is never read, so `'a'⊤(0⍴0)` is the empty |
+| `⊤` | — | 🟢 encode; with no value to write the radix is never read, so `'a'⊤(0⍴0)` is the empty. `A⊤[N]B` encodes to N copies of the single radix A — N counted from one whatever `⎕IO` is — and `A⊤[0]B` works the width out, one digit more when a value is negative |
 
 ### Selection, search, sort
 
 | Glyph | Monad | Dyad |
 |---|---|---|
-| `⍳` | 🟢 index generator; a shape of two lengths or more gives the nested array of coordinate vectors | 🟢 index of; the items of a left argument of any rank are searched, and `lookup_left` names Dyalog's vector-only reading |
+| `⍳` | 🟢 index generator; a shape of two lengths or more gives the nested array of coordinate vectors | 🟢 index of; a left argument of rank 2 or more is searched element by element and each answer is the enclosed coordinate vector that finds it, or the enclosed empty vector where it is absent. `lookup_left` names Dyalog's vector-only reading |
 | `⍸` | 🟢 where | 🟢 interval index |
 | `∊` | 🟢 enlist | 🟢 membership |
 | `⍷` | — | 🟢 find; reads a mixed simple array element for element |
@@ -313,12 +319,12 @@ conjunctions above:
 |---|---|---|
 | `⍕` | 🟢 format | 🟡 format by specification: width and precision pairs; a nested argument is named |
 | `⍎` | 🟡 execute; the string runs over the names around it. An EMPTY program yields no value at all in GNU APL, and a libjay verb has no way to answer that, so it refuses and says so | — |
-| `⊢` | 🟢 same | 🟢 right |
+| `⊢` | 🟢 same | 🟢 right; `A⊢[M]B` is the selection function — a 1 in M takes the element of B, a 0 the element of A, and the three agree by the scalar rule |
 | `⊣` | 🟢 same | 🟢 left |
 | `⎕←` / `⍞←` output | 🟢 `⎕←` ends the line; `⍞←` writes the characters and nothing else. Both assign, so both pass their value on and neither ends the definition they stand in — a dfn body may print and go on computing under either reading of `Dialect.dfn_result` | — |
 | `⍞` character input | 🟢 one line from the input source, terminator dropped | — |
 | `⎕` evaluated input | 🟢 one line, run as APL over the program's own names | — |
-| `→` branch | 🟡 inside a `∇` definition: labels, `→0`, `→(cond)/L`, `→⍬`; a label and a control structure in one definition is named | — |
+| `→` branch | 🟡 inside a `∇` definition: labels, `→0`, `→(cond)/L`, `→⍬`; a label and a control structure in one definition is named | 🟢 `A→B` branches A lines on from the line it stands on when B holds — `0→B` runs the line again and a step past the body ends the definition |
 | `⍬` zilde | 🟢 | — |
 | `⌶` I-beam | ⚪ implementation-defined | ⚪ the same |
 
@@ -337,7 +343,7 @@ conjunctions above:
 | `∘.` outer product | 🟢 the function between every pair of ELEMENTS whatever its rank, each disclosed on the way in and the result enclosed on the way into the table: `1 2∘.,3 4` is a two-by-two of pairs, `¯1 0 1∘.⌽⊂m` rotates the matrix |
 | `⍤` rank / atop | 🟡 a rank specification, or Dyalog's atop with a function operand; no oracle for the latter |
 | `⍣` power | 🟡 literal count — negatives included, answered from the obverse table, and a dyadic `x f⍣¯n y` undoes the bond `x∘f` — or a function operand (`f⍣≡`); a count computed at run time is named. GNU APL implements no negative MONADIC power, so those rows are recorded against Dyalog in `corpus/apl/dyalog-operators.txt`; it does answer the dyadic ones, and reads `x-⍣¯1 y` differently, pinned in `corpus/apl/divergences.txt` |
-| `∘` beside | 🟡 no oracle: GNU APL has no `∘` operator; Dyalog's `f∘g`, function operands only |
+| `∘` beside | 🟡 Dyalog's `f∘g`, and `A∘f`/`f∘A` with an array bound, have no oracle: GNU APL reads `∘` between two VALUES as the matrix product instead, which libjay also answers — a left vector is a row and a right one a column, a scalar operand makes it the element-wise `×`, and inner lengths that differ are padded with zeros |
 | `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🟡 no oracle: GNU APL rejects it; Dyalog's `f⍛g` |
 | `⍢` under | 🟡 no oracle, and no reference either: GNU APL rejects the glyph and Dyalog 20.0 answers `SYNTAX ERROR: Invalid token` (recorded in `corpus/apl/dyalog-operators.txt`), so ours is an extension — `g⍣¯1 ⊢ (g x) f (g y)`, over the same obverse table J's `&.:` uses |
@@ -364,16 +370,20 @@ conjunctions above:
 | Trains (forks and atops) | 🟡 no oracle: GNU APL rejects them; Dyalog's rules, shipped as an extension (`Dialect.trains`, on by default) — 2-train atop, 3-train fork, a value left tine, longer trains grouped from the right |
 | Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included |
 | Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
-| Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`; the rest named |
+| Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` `⌽` `⊖`, plus the two brackets that are not axes at all — `⊤[N]`, a digit count, and `⊢[M]`, a selection mask, both settled before the program runs; the rest named |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
-| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟢 two presets — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default, and `Dialect::dyalog()` (`APL.Dialect.dyalog` in Python). Every point where the lineages diverge is a setting on it: `⎕CT`, `↑`/`⊃`, `⌷`, dyadic `⊂`, `≡`'s sign, the dfn result, the nested grade, dyadic `⍳`'s left rank and trains are all implemented in both readings; the nested model, `⍺←`'s laziness and the complex order are implemented in one, and asking for the other is refused as not implemented yet |
-| `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS`), read-only; the ones that read a clock or a filesystem are ⚪ closed by the sandbox (`ErrorKind::Sandbox`) |
+| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟢 two presets — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default, and `Dialect::dyalog()` (`APL.Dialect.dyalog` in Python). Every point where the lineages diverge is a setting on it: `⎕CT`, `↑`/`⊃`, `⌷`, dyadic `⊂`, `≡`'s sign, the dfn result, the nested grade, dyadic `⍳`'s left rank, what `< ≤ ≥ >` may order and trains are all implemented in both readings; the nested model, `⍺←`'s laziness and the complex order are implemented in one, and asking for the other is refused as not implemented yet |
+| `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS` `⎕CC`), read-only. `⎕CC` answers every class that is a set anyone can state; its four glyph-repertoire classes (5, 6, 7, 9) are named gaps; the ones that read a clock or a filesystem are ⚪ closed by the sandbox (`ErrorKind::Sandbox`) |
 | `⎕FX` | 🟢 fix a definition from its lines, answering with its name — the same lines a `∇ … ∇` takes, control words included. 🟡 the lines must be literal text the compiler can read: one assembled at run time, or a `⎕FX` inside another definition's body, is named as a gap |
 | Control structures `:If :While :Repeat :For :Select :AndIf :OrIf :CaseList` | 🟡 GNU APL rejects them, so the oracle is Dyalog's recording in `corpus/apl/dyalog-control.txt`: all 79 of its expressions agree. `:AndIf` and `:OrIf` short-circuit the condition above them, `:CaseList` takes any one of its items, `:For a b :In` takes each item apart, `:For` binds an item's contents, a body may call a function the program fixes after it, and a control structure may stand outside a definition |
 | `:Return` `:Leave` `:Continue` | 🟡 the same recording; `:Leave` outside a loop is accepted here and refused there |
 | Exact-or-scalar conformability | 🟢 |
 | `¯` negatives, `1E3` exponents | 🟢 |
 | Complex literal `2J3` | 🟢 |
+| `"strings"` with C escapes | 🟢 always a vector, where `'Q'` is a scalar; `\a \b \f \n \r \t \v`, `\\`, `\"` and `\0` are read, and `\` before anything else keeps its backslash |
+| `$ff` hexadecimal literals | 🟢 one scalar in either case of letter, stranding as a decimal literal does |
+| Conditional `test →→ body ←→ otherwise ←←` | 🟢 the test is read as strictly as a dfn guard's, each marker may end a line, and a clause that is not taken shows nothing. Only the block model divides us from GNU APL there: a clause of several statements displays the last one's value, not every one |
+| Stranding a specification (`3 V←1 2`) | 🟢 specification binds tighter than a strand item, so the assignment's value is one item |
 | `'strings'`, `⍝` comments, `⋄` and newline separators | 🟢 |
 | `{name}` host-data interpolation | 🟢 |
 

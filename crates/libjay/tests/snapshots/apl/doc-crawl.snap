@@ -291,3 +291,489 @@
 > gnu: AB
 = ⎕UCS 'AB'
 > gnu: 65 66
+= 'b'<'c'
+> gnu: 1
+= 'a'>'A'
+> gnu: 1
+= 'z'≤'z'
+> gnu: 1
+= 'q'≥'r'
+> gnu: 0
+= 'a'≥'a'
+> gnu: 1
+= 'ab'<'ac'
+> gnu: 0 1
+= (2 2⍴'ab')<'b'
+> gnu: 1 0
+> gnu: 1 0
+= 'a'<1
+> gnu: 1
+= 1<'a'
+> gnu: 0
+= 'a'≤7
+> gnu: 1
+= 2>'x'
+> gnu: 1
+= 'a'<¯5
+> gnu: 1
+= 'a'<1J2
+> gnu: 1
+= 1J2<'a'
+> gnu: 0
+= 1J2<1J3
+> gnu: 1
+= 1J1<1J1
+> gnu: 0
+= 1J1<2J0
+> gnu: 1
+= 2J5>2J4
+> gnu: 1
+= 0J1<0J2
+> gnu: 1
+= 1J¯1<1J1
+> gnu: 1
+= 1J0<2
+> gnu: 1
+= 'a'=1
+> gnu: 0
+= 'a'≠1
+> gnu: 1
+= 12 ⊤∧ 10
+> gnu: 8
+= 12 ⊤∨ 10
+> gnu: 14
+= 12 ⊤⍲ 10
+> gnu: ¯9
+= 12 ⊤⍱ 10
+> gnu: ¯15
+= 12 ⊤= 10
+> gnu: ¯7
+= 12 ⊤≠ 10
+> gnu: 6
+= 12 ⊤ ∧ 10
+> gnu: 8
+= 12⊤∧10
+> gnu: 8
+= 12 (⊤∧) 10
+> gnu: 8
+= 12 ⊤∧ 10 6
+> gnu: 8 4
+= 2 3 ⊤∧ 6 5
+> gnu: 2 1
+= 3 ⊤∧ 5 6 7
+> gnu: 1 2 3
+= (2 2⍴⍳4) ⊤∧ 3
+> gnu: 1 2
+> gnu: 3 0
+= ¯12 ⊤∧ 10
+> gnu: 0
+= ¯1 ⊤∧ ¯1
+> gnu: ¯1
+= 0 ⊤⍱ 0
+> gnu: ¯1
+= 1 ⊤∧ 2 ⊤∨ 4
+> gnu: 0
+= ⍴12 ⊤∧ 10
+> gnu:
+= 12 ⊤∧ 10.0
+> gnu: 8
+= 12 ⊤∧ 10.5
+> gnu: <error>
+= ⊤⍱ 5
+> gnu: ¯6
+= ⊤⍱ 0
+> gnu: ¯1
+= ⊤⍱ 1 2 3
+> gnu: ¯2 ¯3 ¯4
+= ⊤⍱ 3.0
+> gnu: ¯4
+= ⊤∧ 5
+> gnu: 5
+= ⊤∧ ¯3
+> gnu: ¯3
+= ⊤∨ 3.0
+> gnu: 3
+= ⊤∧ 4.0
+> gnu: 4
+= ⊤∧ 3.1
+> gnu: <error>
+= ⊤∧ 0.5
+> gnu: <error>
+= ⊤∧ 3.0000000000001
+> gnu: 3
+= ⊤∧ 3.000000000001
+> gnu: <error>
+= ⊤∧ 1e18
+> gnu: 1E18
+= ⊤∧ 1e19
+> gnu: <error>
+= 'a' ⊤∧ 3
+> gnu: <error>
+= ⍴⊤⍱ 5
+> gnu:
+= ⊤∧/ 3 5 7
+> gnu: 1
+= 12 ⊤∧¨ 10
+> gnu: 8
+= 2⊤[4]13
+> gnu: 1 1 0 1
+= 2⊤[0]13
+> gnu: 1 1 0 1
+= 2⊤[5]¯13
+> gnu: 1 0 0 1 1
+= 2⊤[0]¯13
+> gnu: 1 0 0 1 1
+= 16⊤[2]255
+> gnu: 15 15
+= 10⊤[3]4321
+> gnu: 3 2 1
+= 10⊤[0]4321
+> gnu: 4 3 2 1
+= 2⊥2⊤[0]777
+> gnu: 777
+= 2⊤[0]0
+> gnu:
+= 2⊤[0]1
+> gnu:
+= 2⊤[0]2
+> gnu: 0
+= 2⊤[0]3
+> gnu: 1 1
+= 2⊤[0]4
+> gnu: 0 0
+= 2⊤[0]7
+> gnu: 1 1 1
+= 2⊤[0]8
+> gnu: 0 0 0
+= 2⊤[0]16
+> gnu: 0 0 0 0
+= 2⊤[0]255
+> gnu: 1 1 1 1 1 1 1 1
+= 10⊤[0]9
+> gnu: 9
+= 10⊤[0]10
+> gnu: 0
+= 10⊤[0]99
+> gnu: 9 9
+= 10⊤[0]100
+> gnu: 0 0
+= 2⊤[0]¯1
+> gnu: 1
+= 2⊤[0]¯2
+> gnu: 1 0
+= 2⊤[0]¯3
+> gnu: 1 0 1
+= 2⊤[0]¯4
+> gnu: 1 0 0
+= 2⊤[0]¯5
+> gnu: 1 0 1 1
+= 10⊤[0]¯1
+> gnu: 9
+= 10⊤[0]¯5
+> gnu: 9 5
+= 10⊤[0]¯10
+> gnu: 9 0
+= 10⊤[0]¯50
+> gnu: 9 5 0
+= 10⊤[0]¯100
+> gnu: 9 0 0
+= 2⊤[0]1 ¯1
+> gnu: 1 1
+= 2⊤[4]13 5
+> gnu: 1 0
+> gnu: 1 1
+> gnu: 0 0
+> gnu: 1 1
+= ⍴2⊤[4]13 5
+> gnu: 4 2
+= 10⊤[0]4321 7
+> gnu: 4 0
+> gnu: 3 0
+> gnu: 2 0
+> gnu: 1 7
+= 2⊤[1]13
+> gnu: 1
+= 2⊤[2.0]13
+> gnu: 0 1
+= 2⊤[0]2 2⍴1 2 3 4
+> gnu: 0 1
+> gnu: 1 0
+> gnu:
+> gnu: 1 0
+> gnu: 1 0
+= ⍴2⊤[0]2 2⍴1 2 3 4
+> gnu: 2 2 2
+= 2 3⊤[4]13
+> gnu: <error>
+= 2.5⊤[3]13
+> gnu: <error>
+= 2⊤[0]0.5
+> gnu: <error>
+= 2⊤[0]1e19
+> gnu: <error>
+= 'a'⊤[2]13
+> gnu: <error>
+= (2 2⍴2)⊤[2]13
+> gnu: <error>
+= 'ab'⊢[1]'cd'
+> gnu: cd
+= 'ab'⊢[0]'cd'
+> gnu: ab
+= 5⊢[0]6
+> gnu: 5
+= 5⊢[1]6
+> gnu: 6
+= (1 2)⊢[1](3 4)
+> gnu: 3 4
+= (1 2)⊢[0](3 4)
+> gnu: 1 2
+= 1 2 3⊢[1 0 1]4 5 6
+> gnu: 4 2 6
+= 'Q'⊢[1 0 1](1 2 3)
+> gnu: 1 Q 3
+= (1 2 3)⊢[1 0 1]'Q'
+> gnu: Q 2 Q
+= (2 2⍴'wxyz')⊢[2 2⍴0 1 1 0](2 2⍴⍳4)
+> gnu: w 2
+> gnu: 3 z
+= (1 2)⊢[2](3 4)
+> gnu: <error>
+= 'Q'⊢[1 0 1 0](1 2 3)
+> gnu: <error>
+= (2 2⍴⍳4)⍳3
+> gnu:  2 1
+= ≡(2 2⍴⍳4)⍳3
+> gnu: 2
+= ⍴(2 2⍴⍳4)⍳3
+> gnu:
+= (2 3⍴⍳6)⍳4 9
+> gnu:  2 1
+= ⍴(2 3⍴⍳6)⍳4 9
+> gnu: 2
+= (2 2⍴'abcd')⍳'cb'
+> gnu:  2 1  1 2
+= (2 2⍴⍳4)⍳9
+> gnu:
+= ⍴(2 2⍴⍳4)⍳9
+> gnu:
+= (2 2⍴⍳4)⍳3 4
+> gnu:  2 1  2 2
+= (2 2 2⍴⍳8)⍳5
+> gnu:  2 1 1
+= (2 2⍴⍳4)⍳⍬
+> gnu:
+= (1 4⍴⍳4)⍳3
+> gnu:  1 3
+= (3 2⍴⍳6)∘(2 4⍴⍳8)
+> gnu: 11 14 17 20
+> gnu: 23 30 37 44
+> gnu: 35 46 57 68
+= (1 2 3)∘(3 2⍴⍳6)
+> gnu: 22 28
+= ⍴(1 2 3)∘(3 2⍴⍳6)
+> gnu: 1 2
+= (2 2⍴⍳4)∘(1 2)
+> gnu:  5
+> gnu: 11
+= ⍴(2 2⍴⍳4)∘(1 2)
+> gnu: 2 1
+= 5∘(2 2⍴⍳4)
+> gnu:  5 10
+> gnu: 15 20
+= (2 2⍴⍳4)∘5
+> gnu:  5 10
+> gnu: 15 20
+= ⍴5∘(2 2⍴⍳4)
+> gnu: 2 2
+= (2 3⍴⍳6)∘(2 2⍴⍳4)
+> gnu:  7 10
+> gnu: 19 28
+= (2 2⍴⍳4)∘(3 3⍴⍳9)
+> gnu:  9 12 15
+> gnu: 19 26 33
+= (1 2)∘(3 4)
+> gnu: 11
+= ⍴(1 2)∘(3 4)
+> gnu: 1 1
+= 5∘6
+> gnu: 30
+= ⍴5∘6
+> gnu:
+= 1.5∘2
+> gnu: 3
+= (1 2)∘5
+> gnu: 5 10
+= ⍴(1 2)∘5
+> gnu: 2
+= ⍬∘⍬
+> gnu: 0
+= ⍴⍬∘⍬
+> gnu: 1 1
+= (1 2)∘⍬
+> gnu: 0
+= ⍴(1 2)∘⍬
+> gnu: 1 1
+= 1 0 1∘(3 3⍴⍳9)
+> gnu: 8 10 12
+= (2 2⍴1 2 3 4)∘(2 2⍴1 0 0 1)
+> gnu: 1 2
+> gnu: 3 4
+= (1 1⍴5)∘6
+> gnu: 30
+= ⍴(1 1⍴5)∘6
+> gnu: 1 1
+= ⍴(1 1⍴5)∘(1 1⍴6)
+> gnu: 1 1
+= ⍴(2 2⍴⍳4)∘(2 3⍴⍳6)
+> gnu: 2 3
+= (2 2⍴⍳4)∘(2 2⍴⍳4)∘(2 2⍴⍳4)
+> gnu: 37  54
+> gnu: 81 118
+= (2 2 2⍴⍳8)∘(2 2⍴⍳4)
+> gnu: <error>
+= 'ab'∘(2 2⍴⍳4)
+> gnu: <error>
+= $ff
+> gnu: 255
+= $FF
+> gnu: 255
+= $b
+> gnu: 11
+= $0
+> gnu: 0
+= 1+$10
+> gnu: 17
+= $10 $20
+> gnu: 16 32
+= ⍴$1f
+> gnu:
+= 2 $10
+> gnu: 2 16
+= ⍴"Q"
+> gnu: 1
+= "ab"≡'ab'
+> gnu: 1
+= ⍴"a\\nb"
+> gnu: 3
+= ⎕UCS "x\\ty"
+> gnu: 120 9 121
+= "one" "two"
+> gnu:  one two
+= ⍴"one" "two"
+> gnu: 2
+= ""
+> gnu:
+= ⍴""
+> gnu: 0
+= "a\\\\b"
+> gnu: a\b
+= ⎕UCS "\\\\"
+> gnu: 92
+= "a""b"
+> gnu:  a b
+= ⎕UCS "a\\qb"
+> gnu: 97 92 113 98
+= ⎕UCS "\\a\\b\\f\\v\\r\\0"
+> gnu: 7 8 12 11 13 48
+= ⎕UCS "\\"x"
+> gnu: 34 120
+= (1=1) →→ 7 ←←
+> gnu: 7
+= (1=2) →→ 7 ←←
+> gnu:
+= (2>1) →→ 'yes' ←→ 'no' ←←
+> gnu: yes
+= (2<1) →→ 'yes' ←→ 'no' ←←
+> gnu: no
+= X←9 ⋄ (X>5) →→ X×2 ←→ X÷2 ←←
+> gnu: 18
+= 2 →→ 3 ←←
+> gnu: <error>
+= ∇Z←C1\nZ←0\nL:Z←Z+1\n→(Z<4)/L\n∇\nC1
+> gnu: 4
+= ∇Z←C5\nZ←0\nL:Z←Z+1\n¯1→Z<4\n∇\nC5
+> gnu: 4
+= ∇Z←C6 X\nZ←1\n1→X<0\nZ←2\n∇\n(C6 1)(C6 ¯1)
+> gnu: 2 2
+= ∇Z←C7 X\nZ←1\n2→X\nZ←2\n∇\n(C7 0)(C7 1)
+> gnu: 2 1
+= ∇Z←C4\nZ←0\nL:Z←Z+1\nL→Z<4\n∇\nC4
+> gnu: 1
+= ∇Z←SGN X\nZ←'neg'\n2→X<0\nZ←'pos'\n∇\n(SGN 5)(SGN ¯5)
+> gnu:  pos neg
+= ∇Z←C9\nZ←1\n2→⍬\nZ←2\n∇\nC9
+> gnu: 2
+= ∇Z←CB X\nZ←1\n2→X\nZ←2\n∇\nCB 'a'
+> gnu: <error>
+= ∇Z←TH X\nX>0 →→\nZ←'p' ←→\nZ←'n' ←←\n∇\n(TH 3)(TH ¯3)
+> gnu: pn
+= 3 V←1 2
+> gnu:  3  1 2
+= ⍴3 V←1 2
+> gnu: 2
+= 3 4 V←1 2
+> gnu:  3 4  1 2
+= A←5 ⋄ 3A
+> gnu: 3 5
+= ⎕CC 1
+> gnu: 0123456789
+= ⎕CC 2
+> gnu: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+= ⎕CC 3
+> gnu: abcdefghijklmnopqrstuvwxyz
+= ⍴⎕CC 1
+> gnu: 10
+= ⍴⎕CC 2
+> gnu: 26
+= ⎕CC 1 2
+> gnu:  0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ
+= ≡⎕CC 1 2
+> gnu: 2
+= '5'∊⎕CC 1
+> gnu: 1
+= ⎕CC 8
+> gnu: 01234567
+= ⎕CC 10
+> gnu: 0123456789
+= ⎕CC 16
+> gnu: 0123456789ABCDEF
+= ⎕CC ¯16
+> gnu: 0123456789abcdef
+= ⎕CC 17
+> gnu: 0123456789ABCDEFabcdef
+= ⎕CC 26
+> gnu: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+= ⎕CC ¯26
+> gnu: abcdefghijklmnopqrstuvwxyz
+= ⎕CC 33
+> gnu: ABCDEFGHIJKLMNOPQRSTUVWXYZ234567=
+= ⎕CC 48
+> gnu: ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρστυφχψω
+= ⎕CC 52
+> gnu: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+= ⎕CC 65
+> gnu: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=
+= ⎕CC 95
+> gnu:  !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+= ⍴⎕CC 4
+> gnu: 128
+= ⍴⎕CC 95
+> gnu: 95
+= ⍴⎕CC 48
+> gnu: 48
+= ⎕CC 0
+> gnu: <error>
+= ⎕CC 11
+> gnu: <error>
+= ⎕CC 100
+> gnu: <error>
+= ⎕CC 127
+> gnu: <error>
+= ⎕CC ¯1
+> gnu: <error>
+= ⎕CC 1.5
+> gnu: <error>
+= !2j0
+> gnu: 2
+= !3j0
+> gnu: 6

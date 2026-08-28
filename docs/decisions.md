@@ -3562,3 +3562,104 @@ the register.
   text can hold. Items, codes and everything computed from them agree, and
   every code at 256 or above displays alike. A second character type would
   buy back four sentences and cost a type tag on every array.
+- 2026-08-28 — The GNU APL manual crawl, wave one. Eleven of the crawl's
+  nineteen findings are implemented; the reasoning that is not obvious from
+  the code follows.
+
+  The bit-wise family (`⊤∧ ⊤∨ ⊤⍲ ⊤⍱ ⊤= ⊤≠`) had to come first because one
+  of the six was a SILENT wrong answer: `12 ⊤≠ 10` parsed as `12 ⊤ (≠10)`
+  and answered 1 where the oracle answers 6. The other five refuse, because
+  their second glyph has no monadic meaning; `≠` has one — the nub sieve —
+  so it alone found a reading. `⊤` and the glyph after it are lexed as one
+  function, blanks between them included, which is what the oracle accepts
+  (`12 ⊤ ∧ 10` is 8 there). Only three of the six have a monad: `⊤∧` and
+  `⊤∨` are the argument as the integer it stands for and `⊤⍱` is the
+  complement; `⊤⍲`, `⊤=` and `⊤≠` are a valence error there and have no
+  monadic meaning here. A near-integer is admitted under `⎕CT`, probed at
+  the boundary (`⊤∧3.0000000000001` is 3, `⊤∧3.000000000001` is refused).
+
+  Ordering (`< ≤ ≥ >`) over characters, mixed pairs and complex numbers is
+  now a DIALECT setting, `Dialect.order_domain`, rather than the flat
+  refusal it was. GNU APL's rules are total — a character orders by its
+  codepoint and stands below every number, and a complex value orders by
+  its real part then its imaginary one — and Dyalog and J refuse all three,
+  verified against both oracles. The old note called the refusal a
+  deliberate divergence "matching the standard"; with both readings
+  implemented it is a choice instead, and the shipped one follows the
+  oracle this APL is measured against. Ten pinned divergence rows converged
+  and are gone. `⌈` and `⌊` are NOT part of it: both references keep them
+  numeric, and so does libjay in either reading.
+
+  Two brackets that are not axes. `A⊤[N]B` is an encode to N copies of the
+  single radix A, and N is a COUNT — `⎕IO←0` does not move it, and `[0]`
+  asks `⊤` to work the width out. That width is the smallest whose place
+  values reach the largest value, one digit more when any value is
+  negative, which is why `2⊤[0]4` is `0 0` rather than the reversible
+  `1 0 0`: the rule is the reference's, not a rounding of ours. `A⊢[M]B` is
+  the selection function, where M is a mask of the answer's own shape.
+  Neither bracket goes through the axis machinery: both read the whole
+  bracket as an expression and settle it before the program runs, so
+  `(2 2⍴'wxyz')⊢[2 2⍴0 1 1 0](2 2⍴⍳4)` — which does not even scan under the
+  axis reader — works. A bracket that cannot be settled at compile time is
+  a named gap.
+
+  Dyadic `⍳` with a left argument of rank 2 or more answers COORDINATES:
+  one enclosed index vector per element of the right argument, or the
+  enclosed empty vector where the value is absent. libjay used to ravel the
+  left argument and answer a scalar, which is a wrong answer rather than a
+  gap. `Dialect.lookup_left` already names Dyalog's rule, where such a left
+  argument is a rank error, so nothing had to move there.
+
+  `∘` between two VALUES is GNU APL's matrix product. It is not a
+  composition and does not go through the operator path at all: where
+  neither side is a function the glyph becomes a function of its own.
+  Vectors are promoted — a left one to a row, a right one to a column — so
+  the answer always has rank two, a scalar operand makes it the
+  element-wise `×` at the other argument's shape, and mismatched inner
+  lengths are padded with zeros rather than refused. The implementation
+  pads and then reuses the existing inner product, so the types and the
+  exactness rules are the ones `+.×` already had.
+
+  `⎕CC` answers every class that is a set anyone can state — the digits,
+  the two cases of the Latin and Greek alphabets, ASCII, the printable
+  range, the octal and hexadecimal digits, and the RFC 4648 alphabets. Its
+  classes 5, 6, 7 and 9 are GNU APL's own glyph repertoire (superscripts,
+  subscripts, line drawing, mathematical symbols), and libjay names them as
+  gaps rather than guessing at another implementation's table.
+
+  Three findings are pinned as deliberate divergences instead of fixed.
+  `1 2 3[2]` is a RANK ERROR there — bracket indexing binds tighter than a
+  strand item, so the brackets index the scalar `3` alone — and the manual
+  itself calls that an unfortunate consequence of the binding strengths,
+  kept for compatibility. libjay reads the strand first, which is what the
+  spelling looks like it means and what every other bracket in the language
+  does. A `{…}` mentioning neither `⍺` nor `⍵` is a VALUE there (`{42}` is
+  42, and the manual lists it as a pitfall); libjay keeps `{…}` a function
+  whatever its body mentions, which is the Dyalog reading its whole dfn
+  support and `corpus/apl/dyalog-dfns.txt` are built on. And monadic `⊣`
+  answers a committed integer scalar 0 there, so `(⊣5),9` is `0 9`; the
+  existing divergence note recorded only the display half of that and now
+  records the value half too.
+
+  What the conditional `→→ ←→ ←←` cost is one IR node with a guard's
+  strictness, not an `:If` with one arm: `2 →→ 3 ←←` is a DOMAIN ERROR on
+  both sides, where a control structure's condition would have taken the
+  2. Its markers may each end a line, so it spans sentences the way a `∇`
+  definition does, and it is read before the sentence parser sees any of
+  it. One case still parts company, and it is the block model rather than
+  the conditional: a clause of several statements displays every one of
+  them there and only the last one here, which `1 ⋄ 2` already does.
+
+  Five findings are release-sized on their own and stay named gaps: a `[X]`
+  axis in a `∇` header (with the lambda axis `χ`), structured variables
+  (`P.x`), dyadic `⎕CR`, `⌹[X]`, and the three system names that describe
+  an interpreter rather than the language (`⎕SYL`, `⎕AV`, `⎕PP`). The `∇`
+  header one used to report a malformed header; it now names the feature.
+
+  Two smaller notes. `!2j0` answers 2: a complex value with no imaginary
+  part is the real it displays as, which is the rule the ordering verbs
+  already followed. And `$10.5` is refused there and read as `$10` then
+  `.5` here — GNU APL writes that refusal to STDOUT rather than stderr, so
+  the recorder cannot see it as one, and the two lines are left out of the
+  corpus rather than pinned against a diagnostic that arrives on the wrong
+  channel.
