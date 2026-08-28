@@ -1,0 +1,137 @@
+// What a NaN counts as when values are compared for SAMENESS rather than
+// for size. `nan` next door holds the arithmetic; this file holds the
+// question of whether a NaN is a value at all, and the reference answers it
+// three different ways depending on which family is asking.
+//
+// - The set verbs `~.`, `~:` and `-.` say a NaN is no value: two of them
+//   are two items, and neither is the other.
+// - `-:` says a NaN is the same value as a NaN and as nothing else.
+// - The search family — `i.`, `i:`, `e.` and the `=` monad built on them —
+//   compares by magnitude of difference, and no difference from a NaN is
+//   ever large enough to separate the two, so a NaN is FOUND wherever it
+//   looks and is found by whatever looks for it. Only where the comparison
+//   is of one element: a longer cell is compared whole and matches
+//   nothing. Inside a box the contents are compared whole, and there the
+//   loose reading holds however long they are.
+// - `/:` places a NaN after every number, so `\:` leads with it.
+//
+// A complex value with a NaN part is a value of its own throughout, never
+// the same as another and never found.
+//
+// Where the reference contradicts itself the sentence is NOT here: its
+// vectorised comparison answers `(2 $ _.) = (2 $ _.)` with `1 1` where its
+// own scalar `_. = _.` is 0, and its `/:~` sorts to an order its own `/:`
+// does not give. Those are tickets, not corpus lines.
+
+// /: \: — a NaN comes last going up and first coming down
+/: _. , 1 , 2
+\\: _. , 1 , 2
+/: 1 , _. , 2
+/: _. , _. , 1
+/: 2 1 _. 0
+\\: 2 1 _. 0
+/: _. , 1 , _. , 0
+\\: _. , 1 , _. , 0
+/: 1 0 _.
+\\: 1 0 _.
+/: _. , _.
+/: _. , __ , _ , 0
+\\: _. , __ , _ , 0
+/: _.j1 , 1 , 2
+1 2 3 /: _. , 1 , 2
+(_. , 1 , 2) /: _. , 1 , 2
+/: 2 2 $ _. , 1 , 0 , 2
+
+// -: — a NaN matches a NaN
+_. -: _.
+(1 $ _.) -: (1 $ _.)
+(2 $ _.) -: (2 $ _.)
+1 2 _. -: 1 2 _.
+(_. , 1) -: (_. , 1)
+-. _. -: _.
+(2 2 $ _.) -: (2 2 $ _.)
+(_. ; 1) -: (_. ; 1)
+_. -: 'a'
+_.j1 -: _.j1
+(2 $ _.) -: (2 $ _.j0)
+(< _.) -: (< _.)
+
+// = < <: > >: ~: — the comparisons themselves find no NaN equal
+_. ~: _.
+_. = _.
+(1 $ _.) = (1 $ _.)
+_. = 1
+_. < _.
+_. > _.
+_. <: _.
+_. >: _.
+_. = _
+_. = _.j0
+_. (= !. 0) _.
+(< _.) = (< _.)
+
+// = monad — the classes are the ones the search finds, so an item the
+// search does not find has no class at all
+= _. , _. , 0
+= _. , 1 , 2
+$ = _. , _. , 0
+$ = 2 3 $ _.
+= 1 , _. , 2
+= 1 , 2 , _.
+$ = 1 , 2 , _.
+= _. , _.
+= 2 2 $ _. , 1 , 0 , 2
+$ = 2 2 $ _. , 1 , 0 , 2
+= 2 2 $ 1 , 2 , _. , 4
+= (< _.) , (< _.)
+= (< _.) , (< 1)
+
+// i. i: e. — a NaN is found wherever it looks
+i.~ _. , _. , 0
+i.~ 1 , _. , 2
+i.~ 1 , 2 , _.
+(_. , 0) i. _.
+(1 , _. , 2) i. 1 2 _.
+1 2 3 i. _.
+(_. , 1) i. 1
+(1 , _.) i. 1
+1 2 3 i. _. , _.
+(1 , 2 , _.) i. 5
+(1 , 2 , _.) i: 5
+1 2 3 i: _.
+(_. , 1) i. 1 2 3
+(2 1 $ _.) i. 1 $ _.
+(2 2 $ _.) i. 2 $ _.
+(2 2 $ _. , 1 , 0 , 2) i. _. , 1
+(2 3 $ _.) i.~ 2 3 $ _.
+(_.j1 , 1) i. _.j1
+_. e. 1 2 3
+1 2 3 e. _. , 1
+1 2 3 e. _.
+(2 $ _.) e. 1 2 3
+(2 2 $ _.) e.~ 2 2 $ _.
+(< _.) e. < _.
+(< 2 $ _.) e. < 2 $ _.
+_. e. ''
+'' i. _.
+
+// ~. ~: -. — the set verbs keep every NaN apart
+~. _. , _. , 0
+~. _. , 1 , 2
+~. 3 $ _.
+$ ~. 2 3 $ _.
+~. _. , 1 , _.
+~. _.j1 , _.j1
+# ~. (< _.) , (< _.)
+# ~. (< _.) , (< 1)
+# ~. (< 2 $ _.) , (< 2 $ _.)
+# ~.!.0 (2 $ _.)
+~: _. , 1 , 2
+~: 1 , _. , 2
+~: (< _.) , (< _.)
+~: _.j1 , _.j1
+(_. , 1) -. 1
+1 2 3 -. _.
+(_. , 1 , 2) -. 1
+((< _.) , (< _.)) -. < _.
+# ~. 100 $ _.

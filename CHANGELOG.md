@@ -9,8 +9,26 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- J's grade now gives a NaN a place of its own: `/:` puts it after every
+  number, so `/: _. , 1 , 2` is `1 2 0`, and `\:` leads with it. It used to
+  tie with everything, which left the permutation to chance.
+- J's `-:` (match) answers 1 for a NaN against a NaN: `_. -: _.`,
+  `1 2 _. -: 1 2 _.` and `(_. ; 1) -: (_. ; 1)` are all 1. `=` is
+  unchanged — a NaN still equals nothing, `-.` and `~.` still keep two
+  NaNs apart.
+- J's `i.`, `i:`, `e.` and the `=` monad follow the reference in reading a
+  NaN as indistinguishable from any single number: `1 2 3 i. _.` is 0,
+  `_. e. 1 2 3` is 1, and `= _. , 1 , 2` is the single row `1 1 1`. A cell
+  of two or more numbers is still compared as a whole, where a NaN matches
+  nothing.
+
 ### Fixed
 
+- `+//. i. 0 0` crashed. An oblique or a key with no cells to work on —
+  `u/.` over a table with no rows or no columns, or over an empty list —
+  now answers the empty array the reference does, with the axes `u` would
+  have given a cell: `+//. i. 0 3` is an empty list and `,//. i. 0 3` a
+  0 by 0 table.
 - `⎕←` and `⍞←` inside a dfn body under the Dyalog dialect. There, a dfn
   answers with its first sentence that is not an assignment — and printing
   IS an assignment, to `⎕`. libjay was treating it as an ordinary

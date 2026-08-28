@@ -3357,3 +3357,62 @@ the register.
   its output carries no newline, and the two references disagree about
   where the line it left open ends. It is unit-tested in
   `tests/definitions.rs` instead.
+
+- 2026-08-28 — What a NaN counts as, per family (J). jconsole answers the
+  question "is this NaN the same value as that one" four different ways,
+  depending on which primitive asks and — in two of them — on how many
+  elements are compared at once. The four readings were probed one by one,
+  and libjay now implements the three that the reference gives
+  consistently, keeping its own answer where the reference contradicts
+  itself:
+
+  - The set verbs `~.`, `~:` and `-.` say a NaN is no value at all: `~. 3 $
+    _.` has three items and `~. _.j1 , _.j1` has two. Followed as given.
+    The nub's hash path had been collapsing two NaNs into one wherever it
+    was reached (a complex NaN, or `~.!.0`), because identical bits hash
+    alike; an argument holding a NaN now goes down the comparison path
+    instead.
+  - `-:` says a NaN is the SAME value as a NaN. Followed. The reference
+    also matches a NaN with any number (`_. -: 1` and `_. -: _` are 1
+    there) — that is the "no difference large enough to separate them"
+    reading of a comparison that a NaN can never fail, and it is not
+    followed: a match is an identity, and `_.` is not the number 1.
+  - The search family — `i.`, `i:`, `e.` and the `=` monad — takes exactly
+    that loose reading, and there it IS followed, on the owner's decision
+    that oracle fidelity wins by default: `1 2 3 i. _.` is 0 and
+    `_. e. 1 2 3` is 1, because the NaN is not measurably different from
+    the first thing it is compared with. The reading holds only where the
+    comparison is of one element; a longer cell is compared as a whole and
+    a NaN in it matches nothing, not even itself (`(2 2 $ _.) i. 2 $ _.`
+    finds nothing). Inside a BOX the contents are compared whole and the
+    loose reading holds however long they are. `= y` follows from the
+    search rather than from the nub, which is why `= _. , 1 , 2` is the
+    single row `1 1 1` while `~.` of the same argument keeps all three, and
+    why `= 2 3 $ _.` — whose rows match nothing, so no item is the first of
+    its own class — has NO rows. An opt-in flag for an IEEE-strict reading
+    of this family may follow; nothing implements one today.
+  - The comparisons `= < <: > >: ~:` say a NaN equals nothing at length 1
+    and equals everything from length 2 up. The two cannot both be right;
+    libjay keeps the scalar answer at every length, which is also what the
+    Dictionary's tolerant-comparison paragraph describes, and the split is
+    recorded as a divergence in docs/coverage.md.
+
+  A grade places a NaN AFTER every number, so `/: _. , 1 , 2` is `1 2 0`
+  and `\:`, sorting by the same order reversed, leads with it. That is the
+  reference's answer for every vector probed, and it replaces libjay's
+  earlier reading of a NaN as tying with everything, which left the
+  permutation to whatever the stable sort happened to do. The BOXED total
+  order keeps the tie: `/: (< _.) , (< 1)` leaves the two boxes where they
+  were, which is what the reference answers there.
+
+- 2026-08-28 — `u/.` with no cells. An oblique over a table with no rows or
+  no columns has no diagonals, and a key with no groups has no groups; the
+  count `rows + cols - 1` was neither, and at 0 by 0 it underflowed and
+  panicked. The frame is empty, and the frame alone would drop whatever
+  axes a cell carried, so the cell shape comes from running `u` once on a
+  cell holding no items and keeping the shape of the answer — J's rule for
+  an empty frame everywhere else. `+//. i. 0 3` is therefore an empty list
+  and `,//. i. 0 3` a 0 by 0 table. Where `u` REFUSES the empty cell — `]/`
+  and `#/` have no identity element to answer with — one zero axis is left
+  standing, which is what the reference answers and is not what the general
+  rank machinery does with the same refusal (it leaves the frame alone).

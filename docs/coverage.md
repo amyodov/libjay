@@ -1633,7 +1633,23 @@ oracle directly, one entry per line of
 - APL dyadic `⌽` and `⊖` reduce a large rotate amount whole; GNU APL
   truncates it to a signed 32-bit integer first, so `9223372036854775806⌽1 2 3`
   is `1 2 3` here and `2 3 1` there.
-- Grade puts NaN wherever the comparison lands rather than at a defined end.
+- J's comparisons answer a NaN pair from the SCALAR rule at every length,
+  and jconsole does not: its vectorised pass compares by "no difference
+  large enough", which a NaN never has, so `(2 $ _.) = (2 $ _.)` is `1 1`
+  there and `0 0` here — while its own `_. = _.` is 0, as ours is. `<:`,
+  `>:` and `~:` split the same way. libjay keeps one answer at every length,
+  which is also the one the Dictionary's tolerant-comparison rule gives.
+- `/:~` and `\:~` sort by the grade. jconsole special-cases the reflexive
+  sort into a routine that puts a NaN somewhere its own `/:` does not:
+  `/:~ 2 1 _. 0` is `0 1 _. 2` there, `0 1 2 _.` here, while
+  `(2 1 _. 0) /: (2 1 _. 0)` is `0 1 2 _.` on both sides.
+- `\:` on a TABLE whose rows hold a NaN orders the rows by the same total
+  order `/:` uses, a NaN greatest. jconsole answers the reversal of that for
+  some such tables (`\: 2 2 $ _. , 1 , 0 , 2`), agreeing with itself neither
+  across valences nor across ranks.
+- `-:` matches a NaN with a NaN and with nothing else. jconsole also matches
+  a NaN with any NUMBER — `_. -: 1` and `_. -: _` are 1 there — which is the
+  same "no difference large enough" reading as the comparison above.
 - A moving window of an associative verb (`+`, `*`, `<.`, `>.`) is folded in
   blocks rather than strictly right to left, which reorders the float
   rounding — the same regrouping reduction already takes (§5.9). A PREFIX

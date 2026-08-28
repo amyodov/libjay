@@ -4057,7 +4057,12 @@ fn compare_data(
         let (out, _) = par::fill(n, |start, part: &mut [u8]| {
             for (k, slot) in part.iter_mut().enumerate() {
                 let i = start + k;
-                let e = arrays_match(&a[xoff + i / xdiv], &b[yoff + i / ydiv], tol);
+                let e = arrays_match_rule(
+                    &a[xoff + i / xdiv],
+                    &b[yoff + i / ydiv],
+                    tol,
+                    NanRule::Same,
+                );
                 *slot = u8::from(if op == Eq { e } else { !e });
             }
             true
@@ -4199,7 +4204,8 @@ pub(crate) fn tol_cmp(op: ScalarDyad, a: f64, b: f64, tol: Tol) -> bool {
 
 /// Two floats ordered under a tolerance: values that are tolerantly equal
 /// tie, which is what leaves them in their original order in a stable sort.
-/// A NaN ties with everything, which keeps the sort total.
+/// A NaN ties with everything, which keeps the order total. [`grade_ord`]
+/// is the variant a grade uses, where a NaN has a place of its own.
 #[inline]
 pub(crate) fn tol_ord(a: f64, b: f64, tol: Tol) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
@@ -4207,6 +4213,21 @@ pub(crate) fn tol_ord(a: f64, b: f64, tol: Tol) -> std::cmp::Ordering {
         return Equal;
     }
     a.partial_cmp(&b).unwrap_or(Equal)
+}
+
+/// Two floats ordered for a GRADE: tolerantly equal values tie, and a NaN
+/// comes after every number, which is where the reference's `/:` puts it —
+/// `/: _. , 1 , 2` is `1 2 0`. The descending grade sorts by the same
+/// order reversed, so a NaN leads there.
+#[inline]
+pub(crate) fn grade_ord(a: f64, b: f64, tol: Tol) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => Equal,
+        (true, false) => Greater,
+        (false, true) => Less,
+        (false, false) => tol_ord(a, b, tol),
+    }
 }
 
 /// Turn an ordering (None for NaN) into a comparison result.
@@ -5580,6 +5601,15 @@ fn nub(y: &Array, tol: Tol) -> Array {
                 keep.push(i);
             }
         }
+    } else if holds_nan(y) {
+        // A NaN is its own bit pattern, so a hash would make two of them
+        // one item; the nub keeps them apart, as the reference does for
+        // `~. _.j1 , _.j1` and for `~.!.0 (2 $ _.)`.
+        for i in 0..n {
+            if !keep.iter().any(|&j| arrays_match(&y.item(i), &y.item(j), tol)) {
+                keep.push(i);
+            }
+        }
     } else {
         let mut seen: HashSet<Vec<u64>> = HashSet::with_capacity(n);
         for i in 0..n {
@@ -5887,23 +5917,23 @@ fn cmp_numbers(dx: &Data, dy: &Data, n: usize, tol: Tol) -> std::cmp::Ordering {
 }
 
 /// Compare items `i` and `j` (of `m` elements each) elementwise, left to
-/// right. Characters order by codepoint; a NaN compares equal to anything,
-/// which keeps the sort total.
+/// right. Characters order by codepoint; a NaN sorts after every number,
+/// which keeps the sort total and puts it where the reference's grade does.
 fn cmp_items(d: &Data, i: usize, j: usize, m: usize, ord: Grading) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
     let (a, b) = (i * m, j * m);
     let ord = |k: usize| match d {
         Data::Bool(v) => v[a + k].cmp(&v[b + k]),
         Data::I64(v) => v[a + k].cmp(&v[b + k]),
-        Data::F64(v) => tol_ord(v[a + k], v[b + k], ord.tol),
+        Data::F64(v) => grade_ord(v[a + k], v[b + k], ord.tol),
         // Grading a complex array orders it by real part then imaginary,
         // which is the order J's `/:` puts it in and the dialect's
         // `ComplexOrder::RealThenImaginary`; `check_gradable` has already
         // refused the other reading. The ordering VERBS still refuse
         // complex outright: a grade is a permutation, not a claim about
         // size.
-        Data::Complex(v) => tol_ord(v[a + k][0], v[b + k][0], ord.tol)
-            .then_with(|| tol_ord(v[a + k][1], v[b + k][1], ord.tol)),
+        Data::Complex(v) => grade_ord(v[a + k][0], v[b + k][0], ord.tol)
+            .then_with(|| grade_ord(v[a + k][1], v[b + k][1], ord.tol)),
         Data::Char(v) => v[a + k].cmp(&v[b + k]),
         // Symbols order by the NAME behind the index, not by the order
         // the two names happened to be interned in.
@@ -6132,16 +6162,49 @@ fn grade_select(
     Ok(select_items(x, &order))
 }
 
+/// What a NaN counts as when two whole arrays are compared.
+///
+/// The reference answers each family differently, and every reading is
+/// kept as it stands rather than averaged into one: `~. _. , _.` holds two
+/// items, `_. -: _.` is 1, and `1 2 3 i. _.` is 0.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum NanRule {
+    /// A NaN is no value at all, not even its own — the reading of the set
+    /// verbs `~.`, `~:` and `-.`.
+    Distinct,
+    /// A NaN is the same value as a NaN and as nothing else — the reading
+    /// of `-:` and of equality between two boxes.
+    Same,
+    /// A NaN is indistinguishable from every number, which is what a
+    /// comparison by magnitude of difference makes of it. This is the
+    /// reading of the search family — `i.`, `i:`, `e.` and the `=` monad
+    /// built on them — and only where the comparison is of ONE element: a
+    /// longer cell is compared as a whole, and a NaN in it matches
+    /// nothing.
+    Search,
+    /// The same reading where the search has reached INSIDE a box. There
+    /// the reference compares the contents as whole arrays, by magnitude
+    /// of difference, so a NaN is indistinguishable from every number
+    /// however many elements are compared: `(< 2 $ _.) e. < 2 $ _.` is 1
+    /// where the same two values unboxed find nothing.
+    SearchBoxed,
+}
+
 /// Whole-array equality: same shape and same values. Characters never equal
-/// numbers; `1` equals `1.0`; NaN equals nothing.
+/// numbers; `1` equals `1.0`; a NaN answers to [`NanRule::Distinct`].
 pub(crate) fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
+    arrays_match_rule(x, y, tol, NanRule::Distinct)
+}
+
+/// Whole-array equality under one of the NaN readings.
+pub(crate) fn arrays_match_rule(x: &Array, y: &Array, tol: Tol, rule: NanRule) -> bool {
     if x.shape != y.shape {
         return false;
     }
     // The comparison is element against element in buffer order, so two
     // values laid out differently are compared in the one order.
     if x.layout() != y.layout() {
-        return arrays_match(&x.to_row_major(), &y.to_row_major(), tol);
+        return arrays_match_rule(&x.to_row_major(), &y.to_row_major(), tol, rule);
     }
     // Two empty arrays of the same shape match whatever their types are,
     // which is what both references answer for `'' -: i. 0`.
@@ -6149,7 +6212,16 @@ pub(crate) fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
         return true;
     }
     if let (Data::Box(a), Data::Box(b)) = (&x.data, &y.data) {
-        return a.iter().zip(b.iter()).all(|(p, q)| arrays_match(p, q, tol));
+        // Inside a box the reference compares contents, and there it finds
+        // a NaN identical to itself whatever the outer reading was: `~.`
+        // keeps two bare NaNs and collapses two boxed ones. A search
+        // inside a box compares the contents by magnitude of difference
+        // instead, whatever their length.
+        let inner = match rule {
+            NanRule::Search | NanRule::SearchBoxed => NanRule::SearchBoxed,
+            _ => NanRule::Same,
+        };
+        return a.iter().zip(b.iter()).all(|(p, q)| arrays_match_rule(p, q, tol, inner));
     }
     let (dx, dy) = (x.dtype(), y.dtype());
     match DType::promote(dx, dy) {
@@ -6168,7 +6240,23 @@ pub(crate) fn arrays_match(x: &Array, y: &Array, tol: Tol) -> bool {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
             let a = borrow_f64(&x.data, &mut ta);
             let b = borrow_f64(&y.data, &mut tb);
-            a.iter().zip(b).all(|(p, q)| tol.eq(*p, *q))
+            // One element compared for a search is compared by magnitude
+            // of difference, and no difference from a NaN is ever large
+            // enough to separate the two: `1 2 3 i. _.` is 0, and so is
+            // `(_. , 1) i. 1`.
+            let loose = match rule {
+                NanRule::Search => a.len() == 1,
+                NanRule::SearchBoxed => true,
+                _ => false,
+            };
+            if loose && tol.is_j() {
+                return a
+                    .iter()
+                    .zip(b)
+                    .all(|(p, q)| p.is_nan() || q.is_nan() || tol.eq(*p, *q));
+            }
+            let same = rule == NanRule::Same;
+            a.iter().zip(b).all(|(p, q)| tol.eq(*p, *q) || (same && p.is_nan() && q.is_nan()))
         }
         Some(DType::Complex) => {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
@@ -6205,7 +6293,9 @@ fn member_j(x: &Array, y: &Array, tol: Tol) -> Array {
     let mut out = Vec::with_capacity(nf);
     for i in 0..nf {
         let cell = x.cell_at(frame_rank, i);
-        out.push((0..items).any(|j| arrays_match(&cell, &item_or_self(y, j), tol)) as u8);
+        let found = (0..items)
+            .any(|j| arrays_match_rule(&cell, &item_or_self(y, j), tol, NanRule::Search));
+        out.push(found as u8);
     }
     Array::new(frame, Data::Bool(out.into()))
 }
@@ -6290,7 +6380,7 @@ fn index_of(
     for i in 0..nf {
         let cell = y.cell_at(frame_rank, i);
         let at = (0..items)
-            .find(|&j| arrays_match(&cell, &item_or_self(x, j), tol))
+            .find(|&j| arrays_match_rule(&cell, &item_or_self(x, j), tol, NanRule::Search))
             .unwrap_or(items);
         out.push(origin + at as i64);
     }
@@ -8062,9 +8152,12 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
                 && x.count() == 0
                 && y.count() == 0
                 && (x.dtype() == DType::Char) != (y.dtype() == DType::Char);
-            Ok(Array::scalar_bool(!empties_differ && arrays_match(x, y, tol)))
+            let same = arrays_match_rule(x, y, tol, NanRule::Same);
+            Ok(Array::scalar_bool(!empties_differ && same))
         }
-        DyadOp::NotMatch => Ok(Array::scalar_bool(!arrays_match(x, y, tol))),
+        DyadOp::NotMatch => {
+            Ok(Array::scalar_bool(!arrays_match_rule(x, y, tol, NanRule::Same)))
+        }
         DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules, cfg.tol, span),
         DyadOp::Copy => {
             copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, cfg.near(), span)
@@ -10213,7 +10306,7 @@ fn index_of_last(x: &Array, y: &Array, origin: i64, tol: Tol) -> Array {
         let cell = y.cell_at(frame_rank, i);
         let at = (0..items)
             .rev()
-            .find(|&j| arrays_match(&cell, &item_or_self(x, j), tol))
+            .find(|&j| arrays_match_rule(&cell, &item_or_self(x, j), tol, NanRule::Search))
             .unwrap_or(items);
         out.push(origin + at as i64);
     }
@@ -10958,11 +11051,44 @@ fn key(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
     }
     let groups = group_positions(&keys, ctx.cfg.tol);
     let items = if y.rank() == 0 { Array::new(vec![1], y.data.clone()) } else { y.clone() };
+    if groups.is_empty() {
+        return Ok(no_cells(u, &items.shape[1..], items.dtype(), ctx, span));
+    }
     let mut cells = Vec::with_capacity(groups.len());
     for (_, at) in &groups {
         cells.push(u.monad(&select_items(&items, at), ctx, span)?);
     }
     assemble(&[groups.len()], cells, span)
+}
+
+/// The answer `u/.` gives where there are no groups or no diagonals to
+/// apply `u` to.
+///
+/// The frame alone would drop whatever axes a cell carried, so the missing
+/// axes come from running `u` once on a cell holding no items and keeping
+/// the shape of the answer: `,//. i. 0 3` is a 0 by 0 table where
+/// `+//. i. 0 3` is an empty list, because `,/` of no items is a list and
+/// `+/` of no items is an atom. A `u` that refuses the empty cell — `]/`
+/// and `#/` have no identity element to answer with — leaves one zero axis
+/// standing, which is what the reference answers for `]//. i. 0 0`.
+fn no_cells(
+    u: &Verb,
+    item_shape: &[usize],
+    dtype: DType,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Array {
+    let mut cell_shape = vec![0usize];
+    cell_shape.extend_from_slice(item_shape);
+    let cell = Array::new(cell_shape, Data::empty(dtype));
+    if u.is_pure()
+        && let Ok(answer) = u.monad(&cell, ctx, span)
+    {
+        let mut shape = vec![0usize];
+        shape.extend_from_slice(&answer.shape);
+        return Array::new(shape, Data::empty(answer.dtype()));
+    }
+    Array::new(vec![0, 0], Data::empty(dtype))
 }
 
 /// `u/. y` (J): `u` over each anti-diagonal of a table, starting at the
@@ -10971,6 +11097,9 @@ fn oblique(u: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> 
     if y.rank() < 2 {
         let items = if y.rank() == 0 { Array::new(vec![1], y.data.clone()) } else { y.clone() };
         let n = items.items();
+        if n == 0 {
+            return Ok(no_cells(u, &[], items.dtype(), ctx, span));
+        }
         let mut cells = Vec::with_capacity(n);
         for i in 0..n {
             cells.push(u.monad(&select_items(&items, &[i]), ctx, span)?);
@@ -10981,6 +11110,12 @@ fn oblique(u: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> 
         return Err(Error::not_yet("oblique (u/.) on a rank-3 or higher argument", span));
     }
     let (rows, cols) = (y.shape[0], y.shape[1]);
+    // A table with no rows or no columns has no diagonals at all — not the
+    // `rows + cols - 1` a table with both has, which at 0 by 0 would not
+    // even be a count.
+    if rows == 0 || cols == 0 {
+        return Ok(no_cells(u, &[], y.dtype(), ctx, span));
+    }
     let mut cells = Vec::with_capacity(rows + cols - 1);
     for d in 0..rows + cols - 1 {
         let mut data = Data::empty(y.dtype());
@@ -13997,17 +14132,64 @@ fn structural_bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
 /// `= y`: one row per distinct item, marking where that item stands. A
 /// scalar has one item, so it answers a 1×1 table.
 fn self_classify(y: &Array, tol: Tol) -> Array {
-    let items = if y.rank() == 0 { 1 } else { y.items() };
-    let keys = nub(&as_list(y), tol);
+    let ys = as_list(y);
+    let items = ys.items();
+    if tol.is_j() && holds_nan(&ys) {
+        return self_classify_by_search(&ys, tol);
+    }
+    let keys = nub(&ys, tol);
     let rows = keys.items();
     let mut out = Vec::with_capacity(rows * items);
     for i in 0..rows {
         let key = item_or_self(&keys, i);
         for j in 0..items {
-            out.push(arrays_match(&key, &item_or_self(y, j), tol) as u8);
+            out.push(arrays_match(&key, &item_or_self(&ys, j), tol) as u8);
         }
     }
     Array::new(vec![rows, items], Data::Bool(out.into()))
+}
+
+/// `= y` where the argument holds a NaN, which the nub and the search
+/// answer differently.
+///
+/// The reference classifies by the SEARCH: `= y` is the table `(i.~ y)` and
+/// `i. # y` compare to, so an item the search does not find falls out of
+/// the classification altogether and a NaN drags every item it is found for
+/// into one class. `= _. , 1 , 2` is therefore the single row `1 1 1`, and
+/// `= 2 3 $ _.` — whose rows are three atoms wide and so match nothing, not
+/// even themselves — has NO rows at all.
+fn self_classify_by_search(ys: &Array, tol: Tol) -> Array {
+    let items = ys.items();
+    let first: Vec<usize> = (0..items)
+        .map(|j| {
+            let item = item_or_self(ys, j);
+            (0..items)
+                .find(|&k| {
+                    arrays_match_rule(&item, &item_or_self(ys, k), tol, NanRule::Search)
+                })
+                .unwrap_or(items)
+        })
+        .collect();
+    let mut out = Vec::new();
+    let mut rows = 0;
+    for k in 0..items {
+        if first[k] != k {
+            continue;
+        }
+        rows += 1;
+        out.extend(first.iter().map(|&f| u8::from(f == k)));
+    }
+    Array::new(vec![rows, items], Data::Bool(out.into()))
+}
+
+/// Whether any element of `y` is a NaN, in either part of a complex one.
+fn holds_nan(y: &Array) -> bool {
+    match y.row_major_data() {
+        Data::F64(v) => v.iter().any(|x| x.is_nan()),
+        Data::Complex(v) => v.iter().any(|z| z[0].is_nan() || z[1].is_nan()),
+        Data::Box(v) => v.iter().any(holds_nan),
+        _ => false,
+    }
 }
 
 /// `~: y` / `≠ y`: 1 where a value has not been seen before.
