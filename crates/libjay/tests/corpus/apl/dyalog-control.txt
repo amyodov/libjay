@@ -103,6 +103,14 @@ n←⎕FX 'F R' ':If R>0' '⎕←''pos''' ':Else' '⎕←''neg''' ':EndIf' ⋄ F
 n←⎕FX 'Z←F' 'Z←0' ':For i :In ⍳5' 'Z←Z+i' ':EndFor' ⋄ F
 n←⎕FX 'Z←F R' ':If R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 1 1
 
+// --- ⎕← inside a control structure ---------------------------------------
+// A line that prints is a line like any other: the branch or the loop
+// carries on past it. The call is wrapped in `⎕←` so that the recorded
+// answer holds what the body printed as well as what it returned.
+n←⎕FX 'Z←F R' ':If R>0' '⎕←''pos''' 'Z←1' ':Else' '⎕←''neg''' 'Z←0' ':EndIf' ⋄ ⎕←F 1
+n←⎕FX 'Z←F R' 'Z←0' ':For i :In ⍳R' '⎕←i' 'Z←Z+i' ':EndFor' ⋄ ⎕←F 3
+n←⎕FX 'Z←F R' 'Z←0' ':While R>0' '⎕←R' 'Z←Z+R' 'R←R-1' ':EndWhile' ⋄ ⎕←F 3
+
 // --- what Dyalog refuses -------------------------------------------------
 n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ⋄ F 1
 n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ':EndWhile' ⋄ F 1

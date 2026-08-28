@@ -11,6 +11,16 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `⎕←` and `⍞←` inside a dfn body under the Dyalog dialect. There, a dfn
+  answers with its first sentence that is not an assignment — and printing
+  IS an assignment, to `⎕`. libjay was treating it as an ordinary
+  expression, so the first `⎕←` in a body became the dfn's answer and every
+  sentence after it was dropped: `{⎕←⍵ ⋄ ⍵+1} 5` printed 5 and answered 5
+  instead of printing 5 and answering 6. A body may now print and go on
+  computing, in guards, in nested dfns and in operator bodies alike. The
+  default dialect, which answers with a body's last sentence, was never
+  affected.
+
 ## 0.3.1 — 2026-08-23
 
 ### Added

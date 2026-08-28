@@ -147,3 +147,100 @@
 = A←'abcd' ⋄ A[2]←'x' ⋄ A
 > gnu: axcd
 > dyalog: axcd
+= ⎕←{⎕←⍵ ⋄ ⍵+1} 5
+> gnu: 5
+> gnu: 6
+> dyalog: 5
+> dyalog: 6
+= ⎕←{⎕←⍵} 5
+> gnu: 5
+> gnu: 5
+> dyalog: 5
+> dyalog: 5
+= ⎕←{⎕←⍵ ⋄ ⎕←⍵+1 ⋄ ⍵+2} 5
+> gnu: 5
+> gnu: 6
+> gnu: 7
+> dyalog: 5
+> dyalog: 6
+> dyalog: 7
+= ⎕←{⎕←⍵×2 ⋄ ⍵+1} 5
+> gnu: 10
+> gnu: 6
+> dyalog: 10
+> dyalog: 6
+= ⎕←{⎕←≢⍵ ⋄ +/⍵} 1 2 3
+> gnu: 3
+> gnu: 6
+> dyalog: 3
+> dyalog: 6
+= ⎕←{a←⎕←⍵ ⋄ a+1} 5
+> gnu: 5
+> gnu: 6
+> dyalog: 5
+> dyalog: 6
+= ⎕←{(⎕←⍵)+1} 5
+> gnu: 5
+> gnu: 6
+> dyalog: 5
+> dyalog: 6
+= ⎕←{⎕←⎕←⍵ ⋄ ⍵+1} 5
+> gnu: 5
+> gnu: 5
+> gnu: 6
+> dyalog: 5
+> dyalog: 5
+> dyalog: 6
+= ⎕←1+{⎕←⍵} 5
+> gnu: 5
+> gnu: 6
+> dyalog: 5
+> dyalog: 6
+= ⎕←2 {⎕←⍺ ⋄ ⍺+⍵} 3
+> gnu: 2
+> gnu: 5
+> dyalog: 2
+> dyalog: 5
+= ⎕←{⎕←1 2 3 ⋄ ≢⍵} 1 2
+> gnu: 1 2 3
+> gnu: 2
+> dyalog: 1 2 3
+> dyalog: 2
+= ⎕←{⎕←'ab' ⋄ ⍵} 5
+> gnu: ab
+> gnu: 5
+> dyalog: ab
+> dyalog: 5
+= ⎕←{⎕←⍵ ⋄ ⍵×2}¨1 2 3
+> gnu: 1
+> gnu: 2
+> gnu: 3
+> gnu: 2 4 6
+> dyalog: 1
+> dyalog: 2
+> dyalog: 3
+> dyalog: 2 4 6
+= ⎕←{⎕←⍵ ⋄ ⍵+1}¨1 2
+> gnu: 1
+> gnu: 2
+> gnu: 2 3
+> dyalog: 1
+> dyalog: 2
+> dyalog: 2 3
+= ⎕←+/{⎕←⍵ ⋄ ⍵×2}¨1 2
+> gnu: 1
+> gnu: 2
+> gnu: 6
+> dyalog: 1
+> dyalog: 2
+> dyalog: 6
+= F←{⎕←⍵ ⋄ ⍵+1} ⋄ ⎕←F 5
+> gnu: 5
+> gnu: 6
+> dyalog: 5
+> dyalog: 6
+= F←{⎕←⍵ ⋄ r←⍵×2} ⋄ ⎕←F 5
+> gnu: 5
+> gnu: 10
+> dyalog: 5
+> dyalog: 10

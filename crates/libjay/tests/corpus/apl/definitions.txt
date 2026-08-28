@@ -47,3 +47,26 @@ A←3 3⍴⍳9 ⋄ A[;2]←0 ⋄ A
 A←3 3⍴⍳9 ⋄ A[1 2;1 2]←0 ⋄ A
 A←1 2 3 ⋄ A[3]←4 ⋄ +/A
 A←'abcd' ⋄ A[2]←'x' ⋄ A
+
+// --- ⎕← inside a dfn body ------------------------------------------------
+// `⎕←` prints and passes its value on, so a body may print and go on
+// computing. The whole sentence is wrapped in one more `⎕←` because what
+// the recording compares is a VALUE: with the result printed as well, the
+// answer is the transcript the body produced, line for line.
+⎕←{⎕←⍵ ⋄ ⍵+1} 5
+⎕←{⎕←⍵} 5
+⎕←{⎕←⍵ ⋄ ⎕←⍵+1 ⋄ ⍵+2} 5
+⎕←{⎕←⍵×2 ⋄ ⍵+1} 5
+⎕←{⎕←≢⍵ ⋄ +/⍵} 1 2 3
+⎕←{a←⎕←⍵ ⋄ a+1} 5
+⎕←{(⎕←⍵)+1} 5
+⎕←{⎕←⎕←⍵ ⋄ ⍵+1} 5
+⎕←1+{⎕←⍵} 5
+⎕←2 {⎕←⍺ ⋄ ⍺+⍵} 3
+⎕←{⎕←1 2 3 ⋄ ≢⍵} 1 2
+⎕←{⎕←'ab' ⋄ ⍵} 5
+⎕←{⎕←⍵ ⋄ ⍵×2}¨1 2 3
+⎕←{⎕←⍵ ⋄ ⍵+1}¨1 2
+⎕←+/{⎕←⍵ ⋄ ⍵×2}¨1 2
+F←{⎕←⍵ ⋄ ⍵+1} ⋄ ⎕←F 5
+F←{⎕←⍵ ⋄ r←⍵×2} ⋄ ⎕←F 5

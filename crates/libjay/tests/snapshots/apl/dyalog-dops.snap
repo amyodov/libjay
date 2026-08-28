@@ -189,6 +189,12 @@
 > dyalog: 10
 = F←{⍺⍺ ⍵} ⋄ G←⌽F ⋄ G 'abc'
 > dyalog: cba
+= ⎕←+{⎕←⍺⍺ ⍵ ⋄ 1+⍺⍺ ⍵} 5
+> dyalog: 5
+> dyalog: 6
+= ⎕←(⌽{⎕←⍺⍺ ⍵ ⋄ ⍵⍵ ⍵}≢) 1 2 3
+> dyalog: 3 2 1
+> dyalog: 3
 = {⍺⍺ ⍵} 5
 > dyalog: <error>
 = 2 3{⍺⍺+⍵}4 5 6 7

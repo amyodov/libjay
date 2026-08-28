@@ -3329,3 +3329,31 @@ the register.
   dialect gains the rule with everything else Dyalog is the only reference
   for: `--dialect-diff` with no flag went from 207 to 203, which is the
   four rows.
+
+- 2026-08-28 — `⎕←` is an assignment for the Dyalog dfn-result rule. Under
+  `DfnResult::FirstNonAssignment` the frontend truncated a dfn body at its
+  first sentence that was not an assignment, and the list of what counts as
+  one named `Expr::Assign`, `Expr::AmendIndex`, control structures and
+  definitions — but not `Expr::PrintPass`, which is what `⎕←` and `⍞←`
+  compile to. The first printing sentence therefore became the dfn's answer
+  and everything after it was dropped: `{⎕←⍵ ⋄ ⍵+1} 5` printed 5 and
+  answered 5. Dyalog answers 6, and so does GNU APL under its own rule.
+
+  The fix is not a case for `⎕←` but one list instead of two. The runtime
+  already knew which sentences yield a SHY value — an assignment to a name,
+  to a part of one, or to `⎕` — in `Expr::is_shy`; the frontend now asks it
+  rather than repeating a subset of it, and adds only the forms that are
+  not expressions at all: a guard, a named verb, a named modifier. A
+  sentence whose value is shy is by that definition one the dfn passes
+  over, which is the rule the reference implements and the reason the two
+  lists were meant to agree.
+
+  Recorded: 17 rows in `corpus/apl/definitions.txt` (both references), 10
+  in `dyalog-dfns.txt`, 2 in `dyalog-dops.txt` and 3 in
+  `dyalog-control.txt`. Each is wrapped in one more `⎕←` so that the
+  recorded answer is the whole transcript — what the body printed and what
+  it returned — because the recording compares a value and the printed
+  text is only kept where there is none. `⍞←` stays out of the corpus:
+  its output carries no newline, and the two references disagree about
+  where the line it left open ends. It is unit-tested in
+  `tests/definitions.rs` instead.

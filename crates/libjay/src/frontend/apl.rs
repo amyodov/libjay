@@ -2659,18 +2659,19 @@ fn build_dfn(body: &[Token], d: Rules, verbs: &HashMap<String, Verb>) -> Result<
         match d.dfn_result {
             DfnResult::LastSentence => {}
             DfnResult::FirstNonAssignment => {
-                // A guard is a control structure that returns when it
-                // holds, so it is not the sentence looked for; the
-                // sentences after the one that is are never run.
+                // The sentences passed over are the ones whose value is
+                // shy — an assignment in any of its spellings, to a name,
+                // to a part of one, or to `⎕` — and the ones that are not
+                // an expression at all: a guard, which is a control
+                // structure that returns when it holds, and a definition.
+                // `⎕←` belongs to the first group because it assigns; a
+                // body that prints and then computes goes on to compute.
                 let plain = |e: &Expr| {
-                    !matches!(
-                        e,
-                        Expr::Assign { .. }
-                            | Expr::AmendIndex { .. }
-                            | Expr::Control(..)
-                            | Expr::VerbDef { .. }
-                            | Expr::ModDef { .. }
-                    )
+                    !e.is_shy()
+                        && !matches!(
+                            e,
+                            Expr::Control(..) | Expr::VerbDef { .. } | Expr::ModDef { .. }
+                        )
                 };
                 if let Some(k) = stmts.iter().position(plain) {
                     stmts.truncate(k + 1);

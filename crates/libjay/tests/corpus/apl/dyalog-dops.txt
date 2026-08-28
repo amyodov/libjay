@@ -103,6 +103,13 @@ COUNT←{+/⍺⍺ ⍵} ⋄ (0∘=)COUNT 0 1 0 2 0
 F←{⍺⍺ ⍵} ⋄ G←+/F ⋄ G 1 2 3 4
 F←{⍺⍺ ⍵} ⋄ G←⌽F ⋄ G 'abc'
 
+// --- ⎕← in an operator's body --------------------------------------------
+// An operator body follows the same rule a function body does: `⎕←`
+// assigns, so the sentences after it still run. The wrapping `⎕←` makes
+// the recorded answer the whole transcript.
+⎕←+{⎕←⍺⍺ ⍵ ⋄ 1+⍺⍺ ⍵} 5
+⎕←(⌽{⎕←⍺⍺ ⍵ ⋄ ⍵⍵ ⍵}≢) 1 2 3
+
 // --- what Dyalog refuses -------------------------------------------------
 {⍺⍺ ⍵} 5
 2 3{⍺⍺+⍵}4 5 6 7

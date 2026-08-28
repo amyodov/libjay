@@ -601,3 +601,62 @@ fn a_guard_wants_one_zero_or_one(#[case] src: &str, #[case] want: Option<i64>) {
         }
     }
 }
+
+// --- ⎕← and ⍞← inside a definition ----------------------------------------
+
+/// Run an APL sentence under a dialect, keeping what it printed.
+fn printing(dialect: Dialect, src: &str) -> (Vec<i64>, String) {
+    let program = compile(Lang::Apl, src, &dialect)
+        .unwrap_or_else(|e| panic!("compile failed:\n{}", e.render(src)));
+    let mut out = String::new();
+    let value = program
+        .run(&[], &mut |s| out.push_str(s))
+        .unwrap_or_else(|e| panic!("run failed:\n{}", program.render_error(&e)));
+    let value = value.unwrap_or_else(|| panic!("{src:?} yielded no value"));
+    let ints = value.to_i64_vec().unwrap_or_else(|| panic!("{src:?} is not integral"));
+    (ints, out)
+}
+
+/// `⎕←` is an assignment — to `⎕` — so the sentences after one still run,
+/// in either reading of what a dfn's result is. Under the Dyalog reading,
+/// where the result is the first sentence that is NOT an assignment, a
+/// body that prints and then computes answers what it computed.
+#[rstest]
+#[case("{⎕←⍵ ⋄ ⍵+1} 5", vec![6], "5\n")]
+#[case("{⍞←⍵ ⋄ ⍵+1} 5", vec![6], "5")]
+#[case("{⎕←⍵ ⋄ ⎕←⍵+1 ⋄ ⍵+2} 5", vec![7], "5\n6\n")]
+#[case("{⎕←⍵ ⋄ ⍵>3: ⍵ ⋄ 0} 5", vec![5], "5\n")]
+#[case("{⍵>9: ⎕←⍵ ⋄ ⍵+1} 5", vec![6], "")]
+#[case("{a←⎕←⍵ ⋄ a+1} 5", vec![6], "5\n")]
+#[case("+{⎕←⍵ ⋄ ⍺⍺ ⍵+1} 5", vec![6], "5\n")]
+#[case("F←{⍵<1: 0 ⋄ ⎕←⍵ ⋄ ∇⍵-1} ⋄ F 3", vec![0], "3\n2\n1\n")]
+fn a_printing_sentence_does_not_end_a_dfn(
+    #[case] src: &str,
+    #[case] want: Vec<i64>,
+    #[case] printed: &str,
+) {
+    for dialect in [Dialect::gnu_apl(), Dialect::dyalog()] {
+        assert_eq!(printing(dialect, src), (want.clone(), printed.to_string()), "{src}");
+    }
+}
+
+/// The two readings still part company where the printing sentence is not
+/// the one in question: the last sentence is the answer here, the first
+/// non-assignment there.
+#[rstest]
+#[case("{⍵+1 ⋄ ⎕←⍵} 5", vec![5], "5\n", vec![6], "")]
+#[case("{⎕←⍵ ⋄ {⎕←⍵+1 ⋄ ⍵} ⍵ ⋄ ⍵+3} 5", vec![8], "5\n6\n", vec![5], "5\n6\n")]
+fn the_dialects_still_disagree_about_which_sentence_answers(
+    #[case] src: &str,
+    #[case] gnu: Vec<i64>,
+    #[case] gnu_printed: &str,
+    #[case] dyalog: Vec<i64>,
+    #[case] dyalog_printed: &str,
+) {
+    assert_eq!(printing(Dialect::gnu_apl(), src), (gnu, gnu_printed.to_string()), "{src}");
+    assert_eq!(
+        printing(Dialect::dyalog(), src),
+        (dyalog, dyalog_printed.to_string()),
+        "{src}"
+    );
+}

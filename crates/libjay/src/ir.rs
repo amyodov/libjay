@@ -276,7 +276,7 @@ impl Expr {
     /// and so does `⎕←`, which has displayed the value already. At the top
     /// level `is_silent` gets to those two first: there the sequence keeps
     /// no value at all.
-    fn is_shy(&self) -> bool {
+    pub(crate) fn is_shy(&self) -> bool {
         matches!(self, Expr::Assign { .. } | Expr::AmendIndex { .. } | Expr::PrintPass { .. })
     }
 

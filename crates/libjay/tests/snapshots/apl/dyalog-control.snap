@@ -167,6 +167,19 @@
 > dyalog: 15
 = n←⎕FX 'Z←F R' ':If R' 'Z←1' ':Else' 'Z←0' ':EndIf' ⋄ F 1 1
 > dyalog: <error>
+= n←⎕FX 'Z←F R' ':If R>0' '⎕←''pos''' 'Z←1' ':Else' '⎕←''neg''' 'Z←0' ':EndIf' ⋄ ⎕←F 1
+> dyalog: pos
+> dyalog: 1
+= n←⎕FX 'Z←F R' 'Z←0' ':For i :In ⍳R' '⎕←i' 'Z←Z+i' ':EndFor' ⋄ ⎕←F 3
+> dyalog: 1
+> dyalog: 2
+> dyalog: 3
+> dyalog: 6
+= n←⎕FX 'Z←F R' 'Z←0' ':While R>0' '⎕←R' 'Z←Z+R' 'R←R-1' ':EndWhile' ⋄ ⎕←F 3
+> dyalog: 3
+> dyalog: 2
+> dyalog: 1
+> dyalog: 6
 = n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ⋄ F 1
 > dyalog: <error>
 = n←⎕FX 'Z←F R' ':If R>0' 'Z←1' ':EndWhile' ⋄ F 1

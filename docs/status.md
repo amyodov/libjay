@@ -315,7 +315,7 @@ conjunctions above:
 | `⍎` | 🟡 execute; the string runs over the names around it. An EMPTY program yields no value at all in GNU APL, and a libjay verb has no way to answer that, so it refuses and says so | — |
 | `⊢` | 🟢 same | 🟢 right |
 | `⊣` | 🟢 same | 🟢 left |
-| `⎕←` / `⍞←` output | 🟢 `⎕←` ends the line; `⍞←` writes the characters and nothing else | — |
+| `⎕←` / `⍞←` output | 🟢 `⎕←` ends the line; `⍞←` writes the characters and nothing else. Both assign, so both pass their value on and neither ends the definition they stand in — a dfn body may print and go on computing under either reading of `Dialect.dfn_result` | — |
 | `⍞` character input | 🟢 one line from the input source, terminator dropped | — |
 | `⎕` evaluated input | 🟢 one line, run as APL over the program's own names | — |
 | `→` branch | 🟡 inside a `∇` definition: labels, `→0`, `→(cond)/L`, `→⍬`; a label and a control structure in one definition is named | — |
