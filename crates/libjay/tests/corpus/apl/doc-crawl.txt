@@ -1,0 +1,191 @@
+// Behaviors read off the official GNU APL info manual
+// (https://www.gnu.org/software/apl/apl.html) during the 2026-08-28
+// documentation crawl, one block per manual section. Every expression here
+// is one this crawl invented; none is copied from the manual's own examples.
+//
+// Only agreements are recorded. Where libjay and GNU APL disagree the case
+// is a ticket in the bug register instead, and the crawl's bookmark
+// (doc-crawl-apl-gnu.nogit.md) says which section it came from. Several
+// lines below record a REFUSAL on both sides — that is the documented
+// behavior for them (a rank rule, a domain rule, a limit), so the refusal
+// is the answer worth pinning.
+
+// --- 2.5 Comparison Rules -------------------------------------------------
+// GNU APL orders values by rank, then shape, then the first differing ravel
+// element, then depth, then type, then Unicode, then numeric value. `⍋` and
+// `⍒` follow those rules; `⌈` and `⌊` do NOT — they stay numeric.
+⍋'banana'
+⍒'kiwi'
+⍒'banana'
+⍋'aA1 z'
+⍋2 4 3 1
+⍋(1 2)(1 3)(1 1)
+⍋'ab' 'aa' 'b'
+⍋(⊂1 2)(⊂1)
+⍋1 'a' 2 'b'
+⍒1 'a' 2 'b'
+'abc'⍋'cab'
+'abc'⍒'cab'
+⍋2 2⍴4 3 2 1
+⍋2 2⍴'dcba'
+⍋(2 2⍴1)(1 1)
+⍋⍬
+⌈/'abz'
+⌊/'zya'
+'b'⌈'c'
+'b'⌊3
+
+// --- 2.6 Complex Numbers --------------------------------------------------
+2j3+4j5
+2j3×1j1
+÷1j1
+|3j4
+*0j1
+⍟¯1
+9○3j4
+11○3j4
+1j2*2
+(2j2)*0.5
+⌈1.2j3.4
+⌊1.2j3.4
+2j0=2
+0j0=0
+1j0=1
+0j0
+¯0j¯0
+3j¯4
++2j5
+-2j5
+×2j3
+≠1 1.0 1j0
+
+// --- 2.8 Direct Functions (Lambdas) ---------------------------------------
+// The manual says a lambda that uses ⍺ but not ⍵ is a SYNTAX ERROR; the
+// oracle takes it and treats it as dyadic. The oracle wins.
+G←{⍵×2} ⋄ G 6
+H←{⍺-⍵} ⋄ 9 H 4
+K←{⍺+1} ⋄ 3 K 4
+F←{⍺⍶⍵} ⋄ 3(F +)4
+F←{⍶⍵} ⋄ (F ⌽)1 2 3
+
+// --- 2.20 Bit-wise logical functions / 2.21 Encode with axis --------------
+// The unextended forms both sides share.
+2 2 2 2⊥1 1 0 1
+2⊥1 1 0 1
+(4⍴2)⊤13
+2 2 2 2 2 2 2 2⊤1000
+2⊥1 1 1 0 1 0 0 0
+
+// --- 2.19 Monadic ⊢ -------------------------------------------------------
+⊢7
+⊢'xy'
+
+// --- 2.22 Generalized ⍳ ---------------------------------------------------
+// Monadic ⍳ over a shape vector yields the nested index list.
+⍳2 3
+⍴⍳2 3
+≡⍳2 3
+⊃⍳2 3
+⍳3 1
+⍴⍳3 1
+⍳0 2
+⍳2 2 2
+⍴⍳2 2 2
+⍴⍳1
+⍳⍬
+1 2 3⍳2
+'hello'⍳'l'
+
+// --- 2.24 ⌹ ---------------------------------------------------------------
+⌹2 2⍴4 7 2 6
+
+// --- 2.25 ⎕CC / 2.26 dyadic ⎕CR ------------------------------------------
+// Only the out-of-domain calls agree so far: the working ones are a gap.
+1 ⎕CC '7'
+1 ⎕CC 'z'
+2 ⎕CC 'Q'
+3 ⎕CC 'Q'
+1 ⎕CC '1a'
+16 ⎕CR 65 66 67
+
+// --- 2.46 Conditionals ----------------------------------------------------
+// The condition of `→→` must be a one-item Boolean; 2 is not.
+2 →→ 3 ←←
+
+// --- 2.47 Matrix Product --------------------------------------------------
+// Rank above 2 is a RANK ERROR, which is the documented distinction from
+// the +.× inner product.
+(2 2 2⍴⍳8)∘(2 2⍴⍳4)
+
+// --- 2.48 Monadic ≠ (Nub Sieve) -------------------------------------------
+≠'mississippi'
+≠'aardvark'
+≠4 4 5 4 6
+≠3 1 3 1 2
+≠(1 2)3(1 2)
+≠(1 2)3(1 2)5 3
+≠'a' 'b' 'a'
+≠2 2⍴1 1 2 1
+≠'a'
+≠1 1.0
+≠⍬
+≠⍳0
++/≠'committee'
+(≠'abcabc')/'abcabc'
+
+// --- 3.3 Known differences from IBM APL2 ----------------------------------
+// A number immediately followed by a name is a strand, not a syntax error;
+// selective specification of a variable assigned inside its own selector is
+// refused; an out-of-domain ⎕IO is refused at the assignment, not later.
+A←5 ⋄ 3A
+((A←2)↑A)←0
+⎕IO←5 ⋄ ⎕IO
+⎕IO
+⎕CT
+
+// --- 2.2 Axis in defined functions ----------------------------------------
+// A ∇ definition squeezed onto one line with ⋄ is a DEFN ERROR: the
+// ∇-editor wants real lines.
+∇Z←AV[X] B⋄Z←(+/[X]B)÷(⍴B)[X]⋄∇⋄AV[1]3 3⍴⍳9
+∇Z←AV[X] B⋄Z←(+/[X]B)÷(⍴B)[X]⋄∇⋄AV[2]3 3⍴⍳9
+
+// --- 2.3 Function Groups (member notation) --------------------------------
+// The member spelling is only accepted for the ⎕-functions that publish
+// members; a bare one is a SYNTAX ERROR.
+⎕FIO.errno
+⎕RE.version
+
+// --- 5.5–5.7 Vector notation and stranding --------------------------------
+// Bracket indexing binds tighter than a strand item, a symbol resolves to a
+// scalar strand item, and a parenthesised phrase is one item.
+(1 2 3)[2]
+2 3 4⍴⍳3
+1 2+3 4
+'ab' 'cd'
+(⊂1 2)(⊂3 4)
+1(2 3)4
+⍴1(2 3)4
+≡1(2 3)4
+V←7 ⋄ 1 V 3
+V←7 ⋄ ⍴1 V 3
+V←1 2 ⋄ 3 V
+2 3 4 5⍴⍨2
+2 3⍴⍨2
+(⍳3)(⍳2)
+2 2⍴'ab' 'cd' 'ef' 'gh'
++/[1]2 3⍴⍳6
++/[2]2 3⍴⍳6
+(⊂2 2)≡⊂2 2
+'abc'∊'cad'
+
+// --- 2.15 Rational Numbers ------------------------------------------------
+// The oracle is built without rational support, so quotients are floats.
+1÷3
+(1÷3)+1÷6
++1÷3
+2÷4
+
+// --- 2.1.7 strings, ⎕UCS --------------------------------------------------
+⍴'Q'
+⎕UCS 65 66
+⎕UCS 'AB'
