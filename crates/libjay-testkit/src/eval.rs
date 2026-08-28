@@ -3,10 +3,10 @@
 use jay::fmt::{FmtOpts, format_array};
 use jay::{Dialect, Error, Lang, compile};
 
-/// What libjay made of a sentence: the line a session would show, no value
-/// at all (a program ending in an assignment), or a refusal with its
-/// diagnostic. A shy answer shows the empty line, or the text the program
-/// printed for itself.
+/// What libjay made of a sentence: the lines a session would show — what
+/// the program printed, then the value it displays — no value at all (a
+/// program ending in an assignment and printing nothing), or a refusal with
+/// its diagnostic. A shy answer shows only what the program printed.
 pub enum Answer {
     Value(String),
     NoValue,
@@ -40,25 +40,37 @@ pub fn eval_detail_as(lang: Lang, expr: &str, index_origin: u8, base: Dialect) -
         Ok(p) => p,
         Err(e) => return Answer::Refused(e),
     };
-    // What is compared is the line a session would show. That is the value
-    // the session displays — except where the sentence has already shown
-    // what it had to show: a SHY value is not displayed, and a sentence
-    // with no value at all leaves only what it printed for itself.
+    // What is compared is what a session would show: everything the program
+    // printed for itself, in order, and then the value it displays. A SHY
+    // value is not displayed, and a sentence with no value at all leaves
+    // only what it printed.
     let mut printed = String::new();
     let mut sink = |s: &str| printed.push_str(s);
     match program.run_detail(&[], &mut sink) {
-        Ok(outcome) => match outcome.value {
-            None if printed.is_empty() => Answer::NoValue,
-            None => Answer::Value(printed.trim_end().to_string()),
-            Some(_) if outcome.shy => Answer::Value(printed.trim_end().to_string()),
-            Some(result) => {
-                let opts = match lang {
-                    Lang::J => FmtOpts::J,
-                    Lang::Apl => FmtOpts::APL,
-                };
-                Answer::Value(format_array(&result, &opts))
+        Ok(outcome) => {
+            let printed = printed.trim_end();
+            // A shy value is an answer the session shows as an empty line,
+            // which is not the same as a sentence that had no value at all.
+            let shy = outcome.shy && outcome.value.is_some();
+            let shown = match outcome.value {
+                None => None,
+                Some(_) if outcome.shy => None,
+                Some(result) => {
+                    let opts = match lang {
+                        Lang::J => FmtOpts::J,
+                        Lang::Apl => FmtOpts::APL,
+                    };
+                    Some(format_array(&result, &opts))
+                }
+            };
+            match (printed.is_empty(), shown) {
+                (true, None) if shy => Answer::Value(String::new()),
+                (true, None) => Answer::NoValue,
+                (true, Some(value)) => Answer::Value(value),
+                (false, None) => Answer::Value(printed.to_string()),
+                (false, Some(value)) => Answer::Value(format!("{printed}\n{value}")),
             }
-        },
+        }
         Err(e) => Answer::Refused(e),
     }
 }

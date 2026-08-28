@@ -604,7 +604,10 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
             dyad: D::Intersect,
             ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
-        '∧' => Prim { name: "∧", monad: M::None, dyad: D::Scalar(SD::Lcm), ranks: [0, 0, 0] },
+        // `^` is the ASCII spelling of `∧`, which is what a program typed
+        // on a keyboard without an APL layout holds. It reads as the same
+        // primitive and reports itself under the glyph.
+        '∧' | '^' => Prim { name: "∧", monad: M::None, dyad: D::Scalar(SD::Lcm), ranks: [0, 0, 0] },
         '∨' => Prim { name: "∨", monad: M::None, dyad: D::Scalar(SD::Gcd), ranks: [0, 0, 0] },
         '⍱' => Prim {
             name: "⍱",
@@ -1731,10 +1734,9 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     }
                 };
                 let arr = literal(&spec.kind).expect("checked above");
-                let (p, inverse) = power_spec(arr, spec.span)?;
                 // `f⍣¯n` runs f's inverse n times, over the same obverse
                 // table J's `u^:_n` reads.
-                let f = if inverse { crate::frontend::j::obverse_of(&f, span)? } else { f };
+                let p = power_spec(arr, spec.span)?;
                 let f = Verb::PowerN(Box::new(f), p);
                 out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
                 continue;
@@ -2145,16 +2147,16 @@ fn select_axis_verb(axis: usize, rank: usize, d: Rules) -> Verb {
 }
 
 /// `f⍣n`: one integer atom. APL spells convergence `f⍣≡`, a function right
-/// operand, which is a separate gap. A NEGATIVE count runs f's inverse
-/// that many times, and the second answer says so.
-fn power_spec(a: &Array, span: Span) -> Result<(Power, bool)> {
+/// operand, which is a separate gap. A NEGATIVE count runs f's inverse that
+/// many times.
+fn power_spec(a: &Array, span: Span) -> Result<Power> {
     let ints = a
         .to_i64_vec()
         .ok_or_else(|| Error::parse("⍣ needs a whole number on its right", span))?;
     let [n] = ints[..] else {
         return Err(Error::not_yet("power over a list of counts (f⍣n)", span));
     };
-    Ok((Power::Times(n.unsigned_abs()), n < 0))
+    Ok(if n < 0 { Power::Inverse(n.unsigned_abs()) } else { Power::Times(n as u64) })
 }
 
 /// `⍤` rank specification: `n` → [n,n,n]; `a b` → [b,a,b]; `a b c` → [a,b,c].
@@ -3905,15 +3907,15 @@ mod tests {
             Expr::Monad { verb: Verb::PowerUntil(..), .. } => {}
             other => panic!("expected a power until, got {other:?}"),
         }
-        // A negative count is the inverse applied that many times, over
-        // the obverse table; a verb with no inverse says which one.
+        // A negative count is the inverse applied that many times, over the
+        // obverse table. Which inverse that is waits for the arguments —
+        // `x f⍣¯1 y` undoes `x∘f` — so the count keeps its sign here and a
+        // function with no inverse is named when it runs, in
+        // tests/wildhunt.rs.
         match one("⌽⍣¯1⊢5") {
-            Expr::Monad { verb: Verb::PowerN(_, p), .. } => assert_eq!(p, Power::Times(1)),
+            Expr::Monad { verb: Verb::PowerN(_, p), .. } => assert_eq!(p, Power::Inverse(1)),
             other => panic!("expected a power, got {other:?}"),
         }
-        let e = err("⍴⍣¯1⊢5");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("obverse"), "{}", e.msg);
     }
 
     #[rstest]

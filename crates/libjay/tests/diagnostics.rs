@@ -205,7 +205,10 @@ const J_PROMISES: &[Case] = &[
         "(0;(2 2 2 $ 0 0 1 4 0 1 1 0);(' ' = a.)) ;: 'a b'",
         &["sequential machine"],
     ),
-    j("(+/ % #) ^: _1 [ 1 2 3", ErrorKind::NotYet, "(+/ % #) ^: _1", &["obverse"]),
+    // Which obverse `^:_1` needs is settled by the arguments — monadically
+    // u's own, dyadically the bond's — so the missing one is named when the
+    // sentence runs, and a run points at the sentence.
+    j("(+/ % #) ^: _1 [ 1 2 3", ErrorKind::NotYet, "(+/ % #) ^: _1 [ 1 2 3", &["obverse"]),
 ];
 
 #[test]

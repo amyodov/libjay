@@ -238,3 +238,17 @@ F←+/ ⋄ F 1 2 3
 ? the empty list is catenation's identity here, no identity there
 0,/2 3⍴⍳6
 ? the empty list is catenation's identity here, no identity there
+// `x f⍣¯n y` undoes the bond `x∘f`, which is the rule libjay's obverse
+// table follows in both languages: `3-⍣¯1⊢10` undoes `3-⍵`, whose inverse
+// is itself, so it answers ¯7. GNU APL answers 13 and 16, undoing `⍵-3`
+// instead — for subtraction alone, since its `3÷⍣¯1⊢10` and `3*⍣¯1⊢8`
+// agree with the bond rule. The reference J reads it as libjay does.
+3(-⍣¯1)10
+? the inverse of the bond here, of the flipped bond there
+3(-⍣¯2)10
+? the inverse of the bond here, of the flipped bond there
+// libjay's obverse table reaches past GNU APL's: the reversals, the drops
+// and the base conversions all have inverses here, where `⍣¯1` on them is
+// a DOMAIN ERROR there.
+⌽⍣¯1⊢1 2 3
+? an obverse here, no inverse known there

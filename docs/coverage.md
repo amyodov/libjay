@@ -91,7 +91,7 @@ feature — that is a promise, not a refusal.
 | `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`, largest magnitude first, then largest real part, then largest imaginary part; roots that sit on top of one another are refined through the m-1st derivative, so a repeated one is exact; a boxed argument of that form converts back to coefficients, and the multiplier may go unsaid — one box is the roots alone, so `p. (<1 2)` is `2 _3 1` | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial, the multiplier optional |
 | `p..` | the derivative of the polynomial y's ascending coefficients describe, as coefficients; a boxed y is the root form and is differentiated through the coefficients it stands for | the integral, with x as the constant term; a boxed y is the root form here too, though its coefficients come out in floats where jconsole keeps exact rationals |
 | `p:` | the y-th prime, counting from zero | the prime queries: `_1` counts the primes below y, `0` and `1` ask whether it is composite or prime, `2` gives the factorisation as a 2-row table and `3` its top row, `4` and `_4` step to the next and previous prime |
-| `q:` | prime factors, ascending, with multiplicity (`q: 1` is empty) | the exponents of the first x primes; `__` gives the primes that divide y over their exponents, as a 2-row table. The negative forms are a named gap |
+| `q:` | prime factors, ascending, with multiplicity (`q: 1` is empty), exact however many digits the number has. The whole argument is read at once — one row per item, padded with 1s | the exponents of the first x primes; a NEGATIVE x gives the last `\|x\|` primes that divide y over their exponents, as a 2-row table, and `__` gives all of them |
 | `?` | roll: a random value below each element (`? 0` is a uniform double) | deal: x distinct values from `i. y` |
 | `?.` | roll from a fixed seed, restarted on every invocation | deal from that fixed seed |
 | `{::` | the map: y's box structure with every leaf replaced by the path that fetches it — a boxed list of one index per level descended, empty where the level is a boxed scalar | fetch: follow the path x into y, opening one level a step |
@@ -154,6 +154,13 @@ again for the same arguments, in a cache that belongs to the derived verb.
 tables on two bits, and sixteen higher is the same function on every bit of
 a pair of integers, so `17 b.` is bitwise and and `22 b.` bitwise xor.
 `u b. 0` answers u's three ranks; the other characteristics are named gaps.
+The ranks a derived verb reports are what everything that frames by it
+reads, so they are part of its meaning and not a report about it: `u~` has
+u's dyadic ranks EXCHANGED and an infinite monadic one — it takes on the
+left what u takes on the right — which is what makes `(>.~)/~ 5 2 9` the
+table rather than one elementwise pass, and `u :: v` has infinite ranks,
+since which of the two will run is not settled until one of them fails.
+`u :. v` runs u and so reports u's.
 The dyad of `\.` is the outfix:
 `x u\. y` applies u to y with each run of x consecutive items left out, so
 there are `1 + (#y) - x` results. A piece of one item applies nothing —
@@ -185,7 +192,12 @@ blocks at the far edge, `;._3` takes only the whole ones. A negative block
 size reverses its axis there too, but only where the movement row is
 written out: given a bare vector of sizes the reference answers with
 something its magnitude plays no part in, so libjay names that gap rather
-than guessing at it. A fret list with no frets in it is the whole argument
+than guessing at it. The cut's LEFT RANK is finite — 2 for the rectangle
+and tessellation forms, whose cell is two rows of origins and sizes, and 1
+for the interval forms, whose cell is one list of frets — so a longer left
+argument is an ordinary frame of cuts, one cut per cell:
+`(2 2 2$…) <;.0 i.5 5` is two blocks and `(2 3$…) <;.1 i.3 3` two
+cuttings. A fret list with no frets in it is the whole argument
 in ONE piece, and an empty fret list of rank 2 or more — J's per-axis form
 with no axis named — is no piece at all; a BOXED left argument, which is
 that per-axis form written out, is a named gap); `!.` (fit: on the verbs whose
@@ -229,6 +241,19 @@ left as insert does (`` ((+`*)`:3) 1 2 3 4 `` is `1 + 2 * 3 + 4`), and
 `` `:6 `` is the TRAIN the gerund spells — a hook of two, a fork of three,
 and longer ones grouped from the right. Any other number is a domain error,
 as it is in the reference, and `` `: `` reads data and not a verb.
+
+Four ADVERBS read a gerund too, and every one of them cycles through its
+verbs left to right. `` u`v/ `` is `` `:3 `` written the short way: the
+verbs go between the items and the fold runs right to left, so
+`` (+`-)/ 1 2 3 `` is `1 + (2 - 3)`. With no items there is no insertion at
+all and the answer is the identity element of the verb the fold would have
+reached first (`` (*`-)/ i.0 `` is 1). The other three give one verb to
+each PIECE, monadically: `` u`v\ `` to each prefix, `` u`v\. `` to each
+suffix, and `` u`v/. `` to each diagonal of the oblique or, dyadically, to
+each group of the key. The pieces have different lengths, so the answers
+are framed and padded as any other list of cells is — `` (+`-)\ 1 2 3 ``
+is a three-by-three whose rows are `+1`, `-(1 2)` and `+(1 2 3)`. Under any
+other adverb a gerund is still a named gap.
 
 The representation is reconstructed from the verb tree rather than kept
 from the source, so the spellings that differ only by the rank they set are
@@ -384,8 +409,17 @@ refuses to name is refused here too.
 Everything built out of those inverts by inverting its parts: `u@:v` and
 `u&:v` invert in the other order, `u"r` and `u!.n` keep their modifier,
 `u&.>` and `u¨` turn round only the verb inside the box, `u^:n` becomes the
-obverse applied n times, and `u :. v` supplies an answer where the table has
-none.
+obverse applied n times (and `u^:_n` becomes `u^:n`), and `u :. v` supplies
+an answer where the table has none.
+
+Which row a NEGATIVE power reads depends on the valence it is applied in,
+so the table is consulted when the arguments arrive and not when the
+sentence compiles. `u^:_1 y` undoes u. `x u^:_1 y` undoes the BOND `x&u`,
+which is a different verb and often a different answer: `2 *^:_1 6` is 3
+because `2&*` is undone by `%&2`, though `*` itself — signum — has no
+obverse at all, and `3 |.^:_1 y` rotates back rather than reversing. A verb
+neither reading can turn round is named when the sentence runs, which is
+where the reference names it too.
 
 Two unders are not built out of an inverse at all. `u&.>` is the each: open
 each box, apply u, box the result again. `u&.,` is the other — `,` has no
@@ -834,6 +868,14 @@ separators, `⍝` comments, `¯` negatives, `''` strings. Index origin is a
 dialect setting of the compiler instance (`⎕IO` as a variable is
 deliberately not runtime state).
 
+`^` reads as `∧`, which is what a program typed on a keyboard without an
+APL layout holds and what both references accept. It is one alias in the
+tokeniser and nothing else: the primitive reports itself under the glyph,
+so a diagnostic about `4^6` names `∧`. The other ASCII substitutes the
+question raises are already the language's own spellings — `~` IS the
+glyph for not and without in both references — so there is nothing else to
+alias.
+
 Function assignment (`F←+/`, `F←+/÷≢`) and trains are extensions under the
 `trains` dialect setting, which ships on — see "Which APL" above.
 
@@ -861,9 +903,16 @@ a fractional one, is a domain error.
 
 J's base and constant forms: `16b1f` is 31, `2b101` is 5, a fractional or
 negative base works (`2.5b10`, `_16b11`), a `_` in front of the digits
-negates the value (`16b_1`), and digits run `0`–`9` then `a`–`z`. `1p1` is
-π and `1p2` is π², `1x1` is e and `2x1` is 2e — `apb` is a×π^b and `axb` is
+negates the value (`16b_1`), a `.` among them starts the negative powers
+(`2b11.1` is 3.5), and digits run `0`–`9` then `a`–`z`. `1p1` is π and
+`1p2` is π², `1x1` is e and `2x1` is 2e — `apb` is a×π^b and `axb` is
 a×e^b, with either part allowed a sign, a fraction or an exponent.
+
+The `b` binds looser than the whole of the rest of that grammar, on both
+sides. Its left part is a number in its own right, so `3r4b11` counts in
+three quarters (1.75), `3j4b11` in a complex base and `2e1b11` in twenty;
+and every letter to its right is a DIGIT, so `36bj` is 19, `36bxyz` is
+44027 and `2b11p1` is 63 rather than a multiple of π.
 
 `1x` with nothing after it is an extended-precision integer and `1r2` a
 rational — the two exact types, described below. The `x` reads as the
@@ -884,8 +933,8 @@ also has the polar ones — `1ad45` takes the angle in degrees, `1ar1` in
 radians — and both are exact on the quadrant boundaries, so `2ad90` is
 `0j2` and not a cosine's rounding of it. The exponent letters bind loosest
 of all, so `1ar1p1` is the polar value `1ar1` scaled by π and `1p1j1` is π
-raised to the power `1j1`. A `b` earlier in the word makes the `j` or the
-`a` a base-literal digit instead (`36bj` is 19).
+raised to the power `1j1` — except where a `b` splits the word first, since
+its own binding is looser still.
 
 ## Random numbers
 
@@ -1115,6 +1164,14 @@ machine. `i.` carries an extended length into extended indices, so
 carry the argument's exactness into their answer, as J does: a count of an
 extended or rational argument is an extended integer, and a count of a
 machine one stays machine.
+
+`q:` factors exactly rather than through a machine integer: what admits a
+value is that it IS a whole number, not that it fits sixty-four bits, so
+`q: 2^70x` and `q: 6.5e19` both answer. Small factors come off by trial
+division, and what is left is tested for primality (Miller–Rabin over the
+first twelve prime bases) and split by Pollard's rho until every factor is
+prime — the same shape of work the reference does, and as slow as the
+reference on a number whose factors are genuinely hard.
 
 ## Symbols
 
@@ -1820,6 +1877,13 @@ libjay is stricter, or simply elsewhere:
   here: `9223372036854775806⍕1` names the request instead of allocating for
   it. GNU APL falls back to its exponential form and answers ` 1.0E0` as
   though no width had been asked for.
+- `x f⍣¯n y` undoes the BOND `x∘f`, one table over both languages, so
+  `3-⍣¯1⊢10` undoes `3-⍵` — its own inverse — and answers ¯7. GNU APL
+  answers 13, undoing `⍵-3` instead, and only for subtraction: its own
+  `3÷⍣¯1⊢10` and `3*⍣¯1⊢8` agree with the bond rule, and the reference J
+  reads all three as libjay does.
+- libjay's obverse table reaches past GNU APL's, so `⌽⍣¯1`, and the rest of
+  the rearranging rows above, answer here and are a DOMAIN ERROR there.
 
 Two entries are GNU APL's bug rather than a dialect difference, pinned so
 that a later release fixing them is noticed. A scan over an EMPTY argument keeps the
@@ -1900,7 +1964,9 @@ sections above is also collected here.
   `u . v` works in both valences, and so do the sequential machine
   (dyadic `;:`), format by specification (dyadic `":`) and reading numbers
   out of text (dyadic `".`). J's gerunds are boxed data now, so `` ` ``,
-  `@.` and `` `: `` all read the same atomic representations. Boxes and
+  `@.` and `` `: `` all read the same atomic representations, and `/`,
+  `\`, `\.` and `/.` cycle through one; any OTHER adverb over a noun
+  operand still says "noun-operand adverbs is not supported yet". Boxes and
   complex numbers are both implemented; bigints and rationals (the exact
   types) are too — see "The numeric tower and the exact types" above — and
   so are symbols, see "Symbols".

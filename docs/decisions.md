@@ -3416,3 +3416,80 @@ the register.
   and `#/` have no identity element to answer with — one zero axis is left
   standing, which is what the reference answers and is not what the general
   rank machinery does with the same refusal (it leaves the frame alone).
+
+- 2026-08-28 — The ranks a DERIVED verb reports are part of its meaning.
+  `Verb::ranks` is what the frame machinery reads, so a wrong triple is a
+  wrong answer and not a wrong report. Three arms were missing and all
+  three fell through to the infinite default. `u~` reports u's dyadic ranks
+  EXCHANGED and an infinite monadic one — it takes on the left what u takes
+  on the right — which is what makes `(>.~)/~ 5 2 9` a table rather than
+  one elementwise pass. `u;.n` reports a finite left rank, 2 for the
+  rectangle and tessellation forms and 1 for the interval ones, so a longer
+  left argument frames instead of being refused; the cut's dyad therefore
+  goes through the rank machinery like any other framed verb. `u :: v`
+  reports infinite ranks, because which of the two will run is not settled
+  until one of them fails; `u :. v`, which runs u, keeps u's. All three
+  triples are the reference's answers to `b. 0`.
+
+- 2026-08-28 — A negative power is resolved when the arguments arrive, not
+  when the sentence compiles. `u^:_n` and `f⍣¯n` used to substitute u's
+  monadic obverse into the verb at parse time, which is right for the monad
+  and silently wrong for the dyad: `x u^:_1 y` is defined as the inverse of
+  the BOND `x&u`, a different verb. The sign is now carried in the power
+  itself (`Power::Inverse`) and the obverse is looked up with the arguments
+  in hand — u's own where the derived verb is applied monadically, the
+  bond's where it is applied dyadically. Two consequences follow. A verb
+  whose monad has no obverse may still invert dyadically, so `2 (*^:_1) 6`
+  is 3 where it used to be refused; and a verb neither reading can turn
+  round is named when the sentence RUNS rather than when it compiles, which
+  is where the reference names it too. The diagnostic then points at the
+  sentence rather than at the conjunction, because a verb carries no span.
+  A list of counts may mix the signs, walking forward from y for the
+  non-negative ones and backward over the obverse for the rest.
+
+- 2026-08-28 — `b` binds looser than the whole of J's numeric-literal
+  grammar, on both sides. The tokeniser used to split at `p`/`x`, then
+  `j`, then `ad`/`ar`, then `r`, and only then at `b`, with a guard on each
+  to stop a `b` earlier in the word claiming its letter. That reads `36bj`
+  correctly and `3r4b11` not at all. Splitting at the FIRST `b` before
+  anything else settles both directions at once: the left part is a number
+  in its own right (`3r4b11` is 1.75, `3j4b11` is `4j4`, `2e1b11` is 21)
+  and every letter to the right is a digit (`36bxyz` is 44027, and
+  `2b11p1` is 63 rather than a multiple of π). The digits also take a `.`,
+  which starts the negative powers. Every reading here is the reference's.
+
+- 2026-08-28 — `q:` factors exactly. The admission test was a range check
+  on a machine integer, so a value an extended type carries perfectly was
+  refused as "not an integer" — which refuses most of what an extended type
+  is for. What admits a value now is that it IS a whole number: an extended
+  argument keeps every digit, and a float is admitted when the double
+  really holds an integer (`q: 6.5e19`). Factoring is trial division by
+  every candidate up to 2²⁰, then Miller–Rabin over the first twelve prime
+  bases and Pollard's rho on whatever is left. That is as slow as the
+  reference on a number whose factors are genuinely hard, and no slower on
+  the numbers programs actually factor. Two neighbouring readings were
+  wrong and are corrected with it: `q:` has INFINITE monadic rank, so a
+  list is factored item by item and the rows are padded with 1s (not with
+  the frame's zeros) so that each row still multiplies back to its item;
+  and `3 p: y` answers the factors with multiplicity, not the distinct
+  ones.
+
+- 2026-08-28 — A gerund under `/ \ \. /.` cycles through its verbs.
+  `` u`v/ `` is `` `:3 `` written the short way — the verbs go between the
+  items, left to right, and the fold runs right to left — and with no items
+  the answer is the identity element of the verb the fold would have
+  reached first. The other three give one verb to each PIECE, monadically:
+  a prefix, a suffix, a diagonal of the oblique, a group of the key. One
+  internal verb (`Verb::Cycle`) holds the gerund and the four existing
+  adverbs ask it for the verb of the piece they are on, so the framing,
+  padding and empty-frame rules stay the ones those adverbs already had. A
+  gerund under any OTHER adverb is still a named gap.
+
+- 2026-08-28 — The testkit's answer is the whole transcript. `eval_detail`
+  used to drop what a program printed whenever it also had a value, so any
+  probe of the shape "print a report, then answer something" compared
+  libjay's value against the reference's report-plus-value and mismatched
+  for a reason that was not a defect in either. It now returns what was
+  printed and then the value, in that order, which is what a session shows.
+  A SHY value still displays as an empty line, which is not the same as a
+  sentence with no value at all.

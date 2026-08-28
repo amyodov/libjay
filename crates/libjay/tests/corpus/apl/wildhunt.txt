@@ -1,0 +1,32 @@
+// What the first wild-hunt pass turned up on the APL side: the ASCII
+// spelling of `∧`, the negative power's inverse when the function is
+// applied dyadically, and a sentence that both prints and answers.
+
+// --- `^` is `∧` -----------------------------------------------------
+4^6
+1^1
+0^0
+1 0^0 1
+12^18
+^/1 1 1
+^/1 0 1
+3^4^5
+2 3 4^6 8 10
+(4^6)+1
+
+// --- `f⍣¯n` inverts the BOND, not the function ----------------------
+4(+⍣¯3)20
+2(×⍣¯1)6
+2(+⍣¯1)10
+2(*⍣¯1)16
+5(+⍣¯2)20
++⍣¯1⊢5
+3(÷⍣¯1)10
+2(+⍣3)20
+2(×⍣2)3
+
+// --- a sentence that prints and then answers ------------------------
+⍬⊣{⎕←⍵}¨1 2 3
+5⊣⎕←'hi'
+⎕←1 2 3
+(⎕←5)+1

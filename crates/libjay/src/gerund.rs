@@ -105,9 +105,10 @@ fn power_noun(p: &Power) -> Option<Array> {
     Some(match p {
         Power::Times(n) => Array::scalar_i64(*n as i64),
         Power::Converge => Array::scalar_f64(f64::INFINITY),
-        Power::Each(ns) => Array::from_i64(ns.iter().map(|&n| n as i64).collect()),
+        Power::Each(ns) => Array::from_i64(ns.clone()),
         // `u^:a:` is the ace, which is what `` ` `` would have to write out.
         Power::ConvergeTrace => Array::boxed(Array::empty(crate::dtype::DType::I64)),
+        Power::Inverse(n) => Array::scalar_i64(-(*n as i64)),
     })
 }
 

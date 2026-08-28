@@ -1069,11 +1069,18 @@ pub enum Power {
     Times(u64),
     /// Iterate until a result matches the one before it (J `u^:_`).
     Converge,
-    /// A list of counts: one answer per count, framed (`u^:(0 1 2)`). A
-    /// boxed count is spelled this way too — `u^:(<n)` is `u^:(i.n)`.
-    Each(Vec<u64>),
+    /// A list of counts: one answer per count, framed (`u^:(0 1 2)`), and
+    /// a negative count walks the other way. A boxed count is spelled this
+    /// way too — `u^:(<n)` is `u^:(i.n)`, downwards where n is negative.
+    Each(Vec<i64>),
     /// Every result on the way to convergence, framed (`u^:a:`).
     ConvergeTrace,
+    /// `u^:_n` and `f⍣¯n`: n applications of the verb's obverse. Which
+    /// obverse that is depends on how the derived verb is applied —
+    /// monadically it is u's, dyadically the obverse of the bond `x&u` —
+    /// so the sign is carried here and resolved when the arguments are in
+    /// hand rather than substituted at compile time.
+    Inverse(u64),
 }
 
 /// Iterations `Power::Converge` allows before giving up.
@@ -1275,6 +1282,12 @@ pub enum Verb {
     /// left to right and folding right to left. `` `:6 `` is a train and is
     /// built at parse time, so it never reaches here.
     Evoke(Vec<Verb>, i64),
+    /// The gerund an adverb cycles through, one verb per piece: `` u`v\ ``
+    /// gives the first prefix to u, the second to v, the third to u again,
+    /// and `` u`v/. `` does the same over the groups or the diagonals. It
+    /// exists only inside those adverbs, which ask it for the verb of a
+    /// given piece; applied on its own it is the first verb of the cycle.
+    Cycle(Vec<Verb>),
     /// J `u . v` and APL `f.g`: the inner product, of which `+/ . *` and
     /// `+.×` are the matrix product. Dyadically each cell of x at v's
     /// dyadic LEFT rank — 1 where that rank is smaller — meets the whole
@@ -1308,12 +1321,28 @@ impl Verb {
             | Verb::UserDerived { .. }
             | Verb::KeyPairs(_)
             | Verb::Key(_)
-            | Verb::Cut(..)
             | Verb::PowerV(..)
             | Verb::PowerUntil(..)
             | Verb::AlongAxis(..) => [RANK_INF, RANK_INF, RANK_INF],
+            // `u~` takes on the left what u takes on the right: its dyadic
+            // ranks are u's, exchanged. Its monadic rank is infinite —
+            // the argument goes to both sides whole and u frames it itself.
+            Verb::Commute(v) => {
+                let r = v.ranks();
+                [RANK_INF, r[2], r[1]]
+            }
+            // A cut's left argument is one rectangle (two rows of origins
+            // and sizes) for `;.0` and `;.3`, and one list of frets for the
+            // interval cuts; a longer left argument is a frame of cuts.
+            Verb::Cut(_, n) => {
+                let left = if matches!(n, 1 | -1 | 2 | -2) { 1 } else { 2 };
+                [RANK_INF, left, RANK_INF]
+            }
             Verb::Memo(v, _) => v.ranks(),
-            Verb::WithObverse(v, _) | Verb::Adverse(v, _) => v.ranks(),
+            // `u :. v` runs u, so it has u's ranks; `u :: v` cannot know
+            // which of the two will run until one of them fails.
+            Verb::WithObverse(v, _) => v.ranks(),
+            Verb::Adverse(..) => [RANK_INF, RANK_INF, RANK_INF],
             Verb::Beside(..) => [RANK_INF, RANK_INF, RANK_INF],
             // The series is summed for one value at a time.
             Verb::Hypergeometric { .. } => [0, 0, 0],
@@ -1328,6 +1357,9 @@ impl Verb {
     pub fn name(&self) -> String {
         match self {
             Verb::Prim(p) => p.name.to_string(),
+            Verb::Cycle(vs) => {
+                vs.iter().map(Verb::name).collect::<Vec<_>>().join("`")
+            }
             Verb::Rank(v, r) => format!("{}\"{}", v.name(), rank_str(*r)),
             Verb::Reduce(v) | Verb::NWise(v) => format!("{}/", v.name()),
             Verb::Windowed(v, WindowKind::Suffix) => format!("{}\\.", v.name()),
@@ -1336,6 +1368,7 @@ impl Verb {
             Verb::PowerN(v, Power::Converge) => format!("{}^:_", v.name()),
             Verb::PowerN(v, Power::Times(n)) => format!("{}^:{n}", v.name()),
             Verb::PowerN(v, Power::Each(_)) => format!("{}^:n", v.name()),
+            Verb::PowerN(v, Power::Inverse(n)) => format!("{}^:_{n}", v.name()),
             Verb::PowerN(v, Power::ConvergeTrace) => format!("{}^:a:", v.name()),
             Verb::Fork(f, g, h) => format!("({} {} {})", f.name(), g.name(), h.name()),
             Verb::NounFork(_, g, h) => format!("(n {} {})", g.name(), h.name()),
@@ -1475,7 +1508,7 @@ impl Verb {
             Verb::Agenda(vs, w) => {
                 w.uses_tolerance() || vs.iter().any(Verb::uses_tolerance)
             }
-            Verb::Evoke(vs, _) => vs.iter().any(Verb::uses_tolerance),
+            Verb::Evoke(vs, _) | Verb::Cycle(vs) => vs.iter().any(Verb::uses_tolerance),
             Verb::Stencil(u, _) => u.uses_tolerance(),
             Verb::InnerProduct { u, v, .. } => u.uses_tolerance() || v.uses_tolerance(),
             Verb::Fork(f, g, h) => {
@@ -1530,7 +1563,7 @@ impl Verb {
             // definition called any other way does.
             Verb::UserDerived { .. } => false,
             Verb::Agenda(vs, w) => w.is_pure() && vs.iter().all(Verb::is_pure),
-            Verb::Evoke(vs, _) => vs.iter().all(Verb::is_pure),
+            Verb::Evoke(vs, _) | Verb::Cycle(vs) => vs.iter().all(Verb::is_pure),
             Verb::Stencil(u, _) => u.is_pure(),
             Verb::InnerProduct { u, v, .. } => u.is_pure() && v.is_pure(),
             Verb::Amend(_) | Verb::ShiftFill(_) | Verb::Characteristics(_) => true,
@@ -1769,6 +1802,10 @@ impl Verb {
                 agenda_pick(vs, w, None, y, ctx, span)?.monad(y, ctx, span)
             }
             Verb::Evoke(vs, n) => evoke(vs, *n, None, y, ctx, span),
+            Verb::Cycle(vs) => match vs.first() {
+                Some(v) => v.monad(y, ctx, span),
+                None => Err(Error::domain("an adverb's gerund is empty", span)),
+            },
             Verb::Stencil(u, w) => stencil(u, w, y, ctx, span),
             Verb::InnerProduct { u, v, apl } => determinant(u, v, *apl, y, ctx, span),
         }
@@ -1872,8 +1909,9 @@ impl Verb {
                 self.dyad_ranked(x, y, ctx, span)
             }
             // `x u\ y` and `x u\. y` need the frame machinery: their left
-            // cell is an atom.
-            Verb::Windowed(_, WindowKind::Prefix | WindowKind::Suffix) => {
+            // cell is an atom. So does the cut, whose left cell is one
+            // rectangle or one list of frets.
+            Verb::Windowed(_, WindowKind::Prefix | WindowKind::Suffix) | Verb::Cut(..) => {
                 self.dyad_ranked(x, y, ctx, span)
             }
             Verb::Windowed(_, WindowKind::Scan) => {
@@ -1935,7 +1973,6 @@ impl Verb {
                 at_level_dyad(u, *level, *spread, x, y, ctx, span)
             }
             Verb::Key(u) => key(u, x, y, ctx, span),
-            Verb::Cut(u, n) => cut(u, Some(x), y, *n, ctx, span),
             Verb::PowerV(u, v) => power_v(u, v, Some(x), y, ctx, span),
             Verb::PowerUntil(..) => {
                 Err(Error::not_yet("dyadic power with a function operand (x f⍣g y)", span))
@@ -1963,6 +2000,10 @@ impl Verb {
                 agenda_pick(vs, w, Some(x), y, ctx, span)?.dyad(x, y, ctx, span)
             }
             Verb::Evoke(vs, n) => evoke(vs, *n, Some(x), y, ctx, span),
+            Verb::Cycle(vs) => match vs.first() {
+                Some(v) => v.dyad(x, y, ctx, span),
+                None => Err(Error::domain("an adverb's gerund is empty", span)),
+            },
             Verb::InnerProduct { u, v, apl } => inner_product(u, v, *apl, x, y, ctx, span),
             Verb::Stencil(..) => {
                 Err(Error::domain("f⌺w has no dyadic meaning", span))
@@ -2028,6 +2069,7 @@ impl Verb {
                 let r = u.dyad(&open_cell(x), &open_cell(y), ctx, span)?;
                 Ok(enclose(&r, *rule))
             }
+            Verb::Cut(u, n) => cut(u, Some(x), y, *n, ctx, span),
             _ => Err(Error::internal("dyad_cell on a verb without cell ranks")),
         }
     }
@@ -7775,12 +7817,23 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             let v = n.first().copied().unwrap_or(0);
             Ok(carry_exact(Array::scalar_i64(nth_prime(v, span)?), y))
         }
+        // `q:` reads the whole argument: one row of factors per item, every
+        // row padded to the longest with 1s so that each row still
+        // multiplies back to the item it came from.
         MonadOp::PrimeFactors => {
-            let n = y
-                .to_i64_vec_near(ctx.cfg.near())
-                .ok_or_else(|| Error::domain("prime factors need an integer", span))?;
-            let v = n.first().copied().unwrap_or(0);
-            Ok(carry_exact(Array::from_i64(prime_factors(v, span)?), y))
+            let ns = all_ext(y, "prime factors", ctx.cfg.near(), span)?;
+            let rows: Vec<Vec<Ext>> =
+                ns.iter().map(|n| prime_factors(n, span)).collect::<Result<_>>()?;
+            let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+            let mut all = Vec::with_capacity(rows.len() * width);
+            for row in rows {
+                let pad = width - row.len();
+                all.extend(row);
+                all.extend(std::iter::repeat_n(Ext::from(1), pad));
+            }
+            let mut shape = y.shape.clone();
+            shape.push(width);
+            Ok(Array::new(shape, whole_data(all, y)))
         }
         MonadOp::MatrixInverse => matrix_inverse(y, span),
         MonadOp::Roll { origin, fixed, float_at_zero } => {
@@ -9769,6 +9822,15 @@ fn window_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, w: usize) -> Optio
 }
 
 /// `u\ y` and `u\. y`: the verb applied to every prefix, or to every suffix.
+/// The verb an adverb applies to its `i`-th piece: one member of a gerund
+/// cycle, or the operand itself where there is no cycle to walk.
+fn cycled(u: &Verb, i: usize) -> &Verb {
+    match u {
+        Verb::Cycle(vs) if !vs.is_empty() => &vs[i % vs.len()],
+        other => other,
+    }
+}
+
 fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     let promoted = as_items(y);
     let base = promoted.as_ref().unwrap_or(y);
@@ -9823,7 +9885,7 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
     let apl = ctx.cfg.rules.lang == crate::Lang::Apl;
     let cells = each_cell(n, n * m, u.is_pure(), ctx, |i, c| {
         let part = if back { section(base, i, n) } else { section(base, 0, i + 1) };
-        u.monad(&part, c, span)
+        cycled(u, i).monad(&part, c, span)
     })?;
     if apl { assemble_items(&[n], cells, span) } else { assemble(&[n], cells, span) }
 }
@@ -9993,6 +10055,18 @@ fn power(
             }
             Ok(acc)
         }
+        // A negative count runs the obverse, and which obverse that is
+        // depends on the arguments: `x u^:_1 y` undoes `x&u`, not u.
+        // Resolving it here is what makes the dyad the inverse of the dyad,
+        // and the obverse of `x&u` already carries x, so it runs monadically.
+        Power::Inverse(n) => {
+            let back = inverse_of(u, x, span)?;
+            let mut acc = y.clone();
+            for _ in 0..n {
+                acc = back.monad(&acc, ctx, span)?;
+            }
+            Ok(acc)
+        }
         Power::Converge => {
             let mut acc = y.clone();
             for _ in 0..CONVERGE_LIMIT {
@@ -10005,20 +10079,35 @@ fn power(
             Err(Error::domain("the iteration did not converge", span))
         }
         // One answer per count. The counts are taken in the order given and
-        // the walk is shared: the applications are counted from 0 upwards
-        // and an answer is kept wherever a count asks for it.
+        // each walk is shared: the applications are counted away from 0 and
+        // an answer is kept wherever a count asks for it. A negative count
+        // walks the other way, over the obverse.
         Power::Each(ref counts) => {
-            let mut acc = y.clone();
-            let mut done = 0u64;
-            let mut order: Vec<usize> = (0..counts.len()).collect();
-            order.sort_by_key(|&i| counts[i]);
             let mut cells: Vec<Option<Array>> = vec![None; counts.len()];
-            for i in order {
+            let mut up: Vec<usize> = (0..counts.len()).filter(|&i| counts[i] >= 0).collect();
+            up.sort_by_key(|&i| counts[i]);
+            let mut acc = y.clone();
+            let mut done = 0i64;
+            for i in up {
                 while done < counts[i] {
                     acc = step(&acc, ctx)?;
                     done += 1;
                 }
                 cells[i] = Some(acc.clone());
+            }
+            let mut down: Vec<usize> = (0..counts.len()).filter(|&i| counts[i] < 0).collect();
+            if !down.is_empty() {
+                down.sort_by_key(|&i| -counts[i]);
+                let back = inverse_of(u, x, span)?;
+                let mut acc = y.clone();
+                let mut done = 0i64;
+                for i in down {
+                    while done > counts[i] {
+                        acc = back.monad(&acc, ctx, span)?;
+                        done -= 1;
+                    }
+                    cells[i] = Some(acc.clone());
+                }
             }
             let cells: Vec<Array> = cells.into_iter().map(|c| c.expect("every count filled")).collect();
             assemble(&[cells.len()], cells, span)
@@ -10037,6 +10126,20 @@ fn power(
             Err(Error::domain("the iteration did not converge", span))
         }
     }
+}
+
+/// The verb a negative power runs: u's obverse where the power is applied
+/// monadically, and the obverse of the bond `x&u` where it is applied
+/// dyadically — `x u^:_1 y` is defined as the inverse of `x&u`, which is a
+/// different verb from u's own obverse.
+fn inverse_of(u: &Verb, x: Option<&Array>, span: Span) -> Result<Verb> {
+    let target = match x {
+        Some(x) => Verb::BondLeft(x.clone(), Box::new(u.clone())),
+        None => u.clone(),
+    };
+    obverse(&target).ok_or_else(|| {
+        Error::not_yet(format!("the obverse of {} (no inverse is known)", target.name()), span)
+    })
 }
 
 /// `u^:v y` and `x u^:v y` (J): the verb `v` says how many times to apply
@@ -10447,25 +10550,50 @@ fn nth_prime(n: i64, span: Span) -> Result<i64> {
     Err(Error::internal("the prime sieve was too small"))
 }
 
-/// `q: n`: the prime factors of n, ascending, with multiplicity.
-fn prime_factors(n: i64, span: Span) -> Result<Vec<i64>> {
-    if n < 1 {
-        return Err(Error::domain("prime factors need a positive integer", span));
+/// `q: n`: the prime factors of n, ascending, with multiplicity. The value
+/// is factored exactly however many digits it has, which is what an
+/// extended argument is for.
+fn prime_factors(n: &Ext, span: Span) -> Result<Vec<Ext>> {
+    crate::exact::ext_prime_factors(n)
+        .ok_or_else(|| Error::domain("prime factors need a positive integer", span))
+}
+
+/// The one whole number a prime query is about, exactly. An extended
+/// argument keeps every digit it has, and a float is admitted when the
+/// double really holds a whole number — which is a different test from
+/// fitting a machine integer.
+fn one_ext(a: &Array, what: &str, near: NearInt, span: Span) -> Result<Ext> {
+    all_ext(a, what, near, span)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::domain(format!("{what} need an integer"), span))
+}
+
+/// Every whole number an argument holds, exactly, in ravel order.
+fn all_ext(a: &Array, what: &str, near: NearInt, span: Span) -> Result<Vec<Ext>> {
+    let missing = || Error::domain(format!("{what} need an integer"), span);
+    if let Some(v) = a.as_ext_slice() {
+        return Ok(v.to_vec());
     }
-    let mut out = Vec::new();
-    let mut m = n;
-    let mut d = 2i64;
-    while d.saturating_mul(d) <= m {
-        while m % d == 0 {
-            out.push(d);
-            m /= d;
+    if let Some(v) = a.to_i64_vec_near(near) {
+        return Ok(v.into_iter().map(Ext::from).collect());
+    }
+    let v = a.to_f64_vec().ok_or_else(missing)?;
+    v.into_iter()
+        .map(|x| crate::exact::f64_to_ext(near.round(x).map_or(x, |k| k as f64)).ok_or_else(missing))
+        .collect()
+}
+
+/// A list of whole numbers as the narrowest type that holds it, widened to
+/// extended where the argument it came from was exact.
+fn whole_data(values: Vec<Ext>, y: &Array) -> Data {
+    if !matches!(y.dtype(), DType::Ext | DType::Rat) {
+        let small: Option<Vec<i64>> = values.iter().map(crate::exact::ext_to_i64).collect();
+        if let Some(small) = small {
+            return Data::I64(small.into());
         }
-        d += if d == 2 { 1 } else { 2 };
     }
-    if m > 1 {
-        out.push(m);
-    }
-    Ok(out)
+    Data::Ext(values.into())
 }
 
 // --------------------------------------------------------- matrix division
@@ -11055,8 +11183,8 @@ fn key(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         return Ok(no_cells(u, &items.shape[1..], items.dtype(), ctx, span));
     }
     let mut cells = Vec::with_capacity(groups.len());
-    for (_, at) in &groups {
-        cells.push(u.monad(&select_items(&items, at), ctx, span)?);
+    for (i, (_, at)) in groups.iter().enumerate() {
+        cells.push(cycled(u, i).monad(&select_items(&items, at), ctx, span)?);
     }
     assemble(&[groups.len()], cells, span)
 }
@@ -11102,7 +11230,7 @@ fn oblique(u: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> 
         }
         let mut cells = Vec::with_capacity(n);
         for i in 0..n {
-            cells.push(u.monad(&select_items(&items, &[i]), ctx, span)?);
+            cells.push(cycled(u, i).monad(&select_items(&items, &[i]), ctx, span)?);
         }
         return assemble(&[n], cells, span);
     }
@@ -11126,7 +11254,7 @@ fn oblique(u: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> 
                 len += 1;
             }
         }
-        cells.push(u.monad(&Array::new(vec![len], data), ctx, span)?);
+        cells.push(cycled(u, d).monad(&Array::new(vec![len], data), ctx, span)?);
     }
     assemble(&[rows + cols - 1], cells, span)
 }
@@ -11289,7 +11417,7 @@ fn rectangle(x: &Array, span: Span) -> Result<(Option<Vec<i64>>, Vec<i64>)> {
             Ok((Some(values[..n].to_vec()), values[n..].to_vec()))
         }
         _ => Err(Error::new(
-            ErrorKind::Rank,
+            ErrorKind::Length,
             "a cut rectangle is a vector of sizes, or two rows of origins and sizes",
             Some(span),
         )),
@@ -13551,7 +13679,13 @@ fn evoke(
     }
     let items = if y.rank() == 0 { vec![y.clone()] } else { y.cells(1) };
     let Some((last, rest)) = items.split_last() else {
-        return Err(Error::domain("m`:3 needs an argument with items", span));
+        // No items, so no insertion: the answer is the identity element of
+        // the verb the fold would have reached first, as an ordinary
+        // insert's is.
+        let Some(first) = vs.first() else {
+            return Err(Error::domain("an evoked gerund is empty", span));
+        };
+        return Verb::Reduce(Box::new(first.clone())).monad(y, ctx, span);
     };
     let mut acc = last.clone();
     for (i, item) in rest.iter().enumerate().rev() {
@@ -13737,9 +13871,13 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
         // The running sums and products, which invert into the differences
         // and the quotients between neighbours.
         Verb::Windowed(f, kind) => scan_obverse(f, *kind)?,
-        // `u^:n` undone is `u^:_1` done n times.
+        // `u^:n` undone is `u^:_1` done n times, and `u^:_n` undone is
+        // `u^:n` — the sign turns round and the verb stays as it was.
         Verb::PowerN(f, Power::Times(n)) => {
             Verb::PowerN(Box::new(obverse(f)?), Power::Times(*n))
+        }
+        Verb::PowerN(f, Power::Inverse(n)) => {
+            Verb::PowerN(f.clone(), Power::Times(*n))
         }
         Verb::BondLeft(m, f) => bond_obverse(m, f, true)?,
         Verb::BondRight(f, n) => bond_obverse(n, f, false)?,
@@ -13996,8 +14134,12 @@ fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
         return left.then(|| Some(Verb::BondLeft(negated(n)?, Box::new(named("o.")?))))?;
     }
     match (op, left) {
-        // `n - y` and `n % y` undo themselves; the other side does not.
-        (SD::Sub | SD::DivJ | SD::DivApl, true) => bond(p.name, n),
+        // `n - y` and `n % y` undo themselves; the other side does not. The
+        // verb comes back as it was rather than by its spelling, so an APL
+        // `÷` inverts as readily as a J `%`.
+        (SD::Sub | SD::DivJ | SD::DivApl, true) => {
+            Some(Verb::BondLeft(n.clone(), Box::new(f.clone())))
+        }
         // Adding or multiplying is undone by taking the noun off the
         // RIGHT, whichever side it was bonded to: `2&+` is undone by `-&2`
         // and not by `2&-`.
@@ -14910,16 +15052,20 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
         0 => Ok(Array::scalar_bool(!is_prime(n))),
         1 => Ok(Array::scalar_bool(is_prime(n))),
         // The factorisation as a table, and its top row on its own.
-        2 | 3 => {
-            let (ps, es) = factor_table(n, span)?;
+        2 => {
+            let (ps, es) = factor_table(&Ext::from(n), span)?;
             let k = ps.len();
-            if form == 3 {
-                return Ok(Array::from_i64(ps));
-            }
-            let mut all = ps;
+            let mut all: Vec<i64> = ps.iter().filter_map(crate::exact::ext_to_i64).collect();
             all.extend(es);
             Ok(Array::new(vec![2, k], Data::I64(all.into())))
         }
+        // The factors with multiplicity, which is `q:` written the other way.
+        3 => Ok(Array::from_i64(
+            prime_factors(&Ext::from(n), span)?
+                .iter()
+                .filter_map(crate::exact::ext_to_i64)
+                .collect(),
+        )),
         // The neighbouring primes.
         4 => Ok(Array::scalar_i64(next_prime(n, span)?)),
         -4 => Ok(Array::scalar_i64(previous_prime(n, span)?)),
@@ -14928,37 +15074,42 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
 }
 
 /// `x q: y`: the exponents of the primes in y — of the first x of them, or,
-/// for `__`, of the ones that actually divide y over a second row.
+/// over two rows, of the LAST `|x|` that actually divide y, all of them for
+/// `__`.
 fn prime_exponents(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
-    let n = one_int(y, "prime exponents", near, span)?;
+    let n = one_ext(y, "prime exponents", near, span)?;
     let count = x.to_f64_vec().and_then(|v| v.first().copied()).unwrap_or(0.0);
-    let (ps, es) = factor_table(n, span)?;
-    if count == f64::NEG_INFINITY {
-        let k = ps.len();
-        let mut all = ps;
-        all.extend(es);
-        return Ok(Array::new(vec![2, k], Data::I64(all.into())));
+    let (ps, es) = factor_table(&n, span)?;
+    if count < 0.0 {
+        // `_k q:` keeps the last k columns of the table, and asking for more
+        // columns than the number has keeps the whole of it.
+        let keep = if count == f64::NEG_INFINITY {
+            ps.len()
+        } else {
+            (ps.len() as f64).min(-count) as usize
+        };
+        let from = ps.len() - keep;
+        let mut all = ps[from..].to_vec();
+        all.extend(es[from..].iter().map(|&e| Ext::from(e)));
+        return Ok(Array::new(vec![2, keep], whole_data(all, y)));
     }
     let want = one_int(x, "prime exponents", near, span)?;
-    if want < 0 {
-        return Err(Error::not_yet(format!("the prime exponent form ({want} q:)"), span));
-    }
     let mut out = Vec::with_capacity(want as usize);
     for i in 0..want {
-        let p = nth_prime(i, span)?;
-        out.push(ps.iter().position(|&q| q == p).map_or(0, |at| es[at]));
+        let p = Ext::from(nth_prime(i, span)?);
+        out.push(ps.iter().position(|q| *q == p).map_or(0, |at| es[at]));
     }
     Ok(Array::from_i64(out))
 }
 
 /// y's distinct prime factors, ascending, and how often each divides it.
-fn factor_table(n: i64, span: Span) -> Result<(Vec<i64>, Vec<i64>)> {
+fn factor_table(n: &Ext, span: Span) -> Result<(Vec<Ext>, Vec<i64>)> {
     let factors = prime_factors(n, span)?;
-    let mut ps: Vec<i64> = Vec::new();
+    let mut ps: Vec<Ext> = Vec::new();
     let mut es: Vec<i64> = Vec::new();
     for f in factors {
         if ps.last() == Some(&f) {
-            *es.last_mut().unwrap() += 1;
+            *es.last_mut().expect("a prime before its exponent") += 1;
         } else {
             ps.push(f);
             es.push(1);

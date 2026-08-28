@@ -7,7 +7,38 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A gerund may be the operand of `/`, `\`, `\.` and `/.` in J, and every
+  one of them cycles through its verbs. `` (+`-)/ 1 2 3 `` inserts them
+  between the items and folds right to left, so it is `1 + (2 - 3)`; with
+  no items at all the answer is the identity element of the verb the fold
+  would have reached first. The other three give one verb to each piece in
+  turn — `` (+`-)\ 1 2 3 `` applies `+` to the first prefix, `-` to the
+  second and `+` to the third, and `` 1 0 1 (+`-)/. 1 2 3 `` does the same
+  over the key's groups. Under any other adverb a gerund is still refused
+  by name.
+
+- J's `_k q:` for a negative k: the last `|k|` primes that divide y, over
+  their exponents, as a two-row table — `_1 q: 2310` is `11` over `1`.
+  Asking for more columns than the number has keeps the whole table.
+
+- APL reads the ASCII `^` as `∧`, which is what a program typed on a
+  keyboard without an APL layout holds: `4^6` is 12.
+
 ### Changed
+
+- J's `b` numeric literal takes any number for its base, and every letter
+  after the `b` is a digit. `3r4b11` counts in three quarters (1.75),
+  `1r10b12` is 2.1, `3j4b11` counts in a complex base, `36bxyz` is 44027
+  and `2b11p1` is 63. A `.` among the digits starts the negative powers, so
+  `2b11.1` is 3.5. All four used to be rejected as invalid numbers.
+
+- J's `q:` reads its whole argument at once rather than one number at a
+  time: `q: 2 3 4 5` is a four-by-two whose rows are padded with 1s, so
+  each row still multiplies back to the item it came from. It used to pad
+  with zeros.
+
+- J's `3 p: y` answers the prime factors with multiplicity, as the
+  reference does — `3 p: 12` is `2 2 3`. It used to drop the repeats.
 
 - J's grade now gives a NaN a place of its own: `/:` puts it after every
   number, so `/: _. , 1 , 2` is `1 2 0`, and `\:` leads with it. It used to
@@ -23,6 +54,41 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   nothing.
 
 ### Fixed
+
+- `x u^:_n y` applied u forward n times instead of undoing it, in both
+  languages, and answered the opposite of what was asked with no
+  diagnostic. A negative power is now settled when the arguments arrive:
+  applied monadically it runs u's obverse, and applied dyadically the
+  obverse of the bond `x&u`, which is what `x u^:_1 y` means. `7 (+^:_2) 20`
+  is 6, `3 (|.^:_1) 1 2 3 4 5` is `3 4 5 1 2`, `2 (#.^:_1) 9` is `1 0 0 1`,
+  and `4(+⍣¯3)20` is 8. Two verbs that used to refuse now answer, because
+  the bond has an inverse where the monad has none: `2 (*^:_1) 6` is 3.
+  A list of counts may mix the signs — `2 (+^:_1 2 3) 20` is `18 24 26`.
+  A verb neither reading can turn round is still named, now when the
+  sentence runs rather than when it compiles.
+
+- `u~` reported infinite ranks, so anything that framed by them framed
+  wrongly. Its ranks are u's with the two argument ranks exchanged, and an
+  infinite monadic one. The visible consequence was the table: `(>.~)/~ 5 2 9`
+  answered the unframed `5 2 9` instead of the three-by-three, and
+  `3 4 (%~)/ 10 20 30` was a length error rather than a two-by-three.
+
+- `u;.n` reported infinite ranks too, so a left argument holding SEVERAL
+  cuts was refused instead of framed. The left rank is 2 for the rectangle
+  and tessellation forms and 1 for the interval ones, so
+  `(2 2 2$1 1 2 2 0 0 2 2) <;.0 i.5 5` now answers two blocks and
+  `(2 3$1 0 0 0 1 0) <;.1 i.3 3` two cuttings.
+
+- `u :: v` (adverse) reported u's ranks; they are infinite, since which of
+  the two verbs will run is not known until one of them fails. `u :. v`,
+  which runs u, is unchanged.
+
+- `q:` and `x q:` refused every integer above 2⋆63, extended type and all:
+  the value was put through a machine integer before anything else
+  happened. They now factor exactly however many digits the number has, so
+  `q: 2^70x` and `q: 999999999999999999999x` answer, and a float is
+  admitted on being a whole number rather than on fitting a machine word
+  (`q: 6.5e19`).
 
 - `+//. i. 0 0` crashed. An oblique or a key with no cells to work on —
   `u/.` over a table with no rows or no columns, or over an empty list —

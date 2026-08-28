@@ -321,3 +321,15 @@
 ? the empty list is catenation's identity here, no identity there
 <
 > gnu: <error>
+= 3(-⍣¯1)10
+? the inverse of the bond here, of the flipped bond there
+< ¯7
+> gnu: 13
+= 3(-⍣¯2)10
+? the inverse of the bond here, of the flipped bond there
+< 10
+> gnu: 16
+= ⌽⍣¯1⊢1 2 3
+? an obverse here, no inverse known there
+< 3 2 1
+> gnu: <error>

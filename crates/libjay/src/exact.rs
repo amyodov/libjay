@@ -371,6 +371,119 @@ pub fn ext_pow(base: &BigInt, exp: u64) -> Option<BigInt> {
     Some(base.pow(exp as u32))
 }
 
+/// How far `ext_prime_factors` divides by every candidate in turn before it
+/// changes method. Beyond this the cofactor is tested for primality and
+/// split by Pollard's rho, which is what makes a large factor reachable.
+const TRIAL_LIMIT: u64 = 1 << 20;
+
+/// The prime factors of a whole number, ascending, with multiplicity.
+/// `None` for anything that is not a positive integer; the factors of 1 are
+/// none at all.
+pub fn ext_prime_factors(n: &BigInt) -> Option<Vec<BigInt>> {
+    if n.sign() != Sign::Plus {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut m = n.clone();
+    let mut d = 2u64;
+    while d <= TRIAL_LIMIT {
+        let big = BigInt::from(d);
+        if &big * &big > m {
+            break;
+        }
+        loop {
+            let (q, r) = m.div_rem(&big);
+            if !r.is_zero() {
+                break;
+            }
+            out.push(big.clone());
+            m = q;
+        }
+        d += if d == 2 { 1 } else { 2 };
+    }
+    if !m.is_one() {
+        split(m, &mut out);
+    }
+    out.sort();
+    Some(out)
+}
+
+/// One composite, factored into `out` by primality test and Pollard's rho.
+fn split(m: BigInt, out: &mut Vec<BigInt>) {
+    if is_probable_prime(&m) {
+        out.push(m);
+        return;
+    }
+    let d = pollard_rho(&m);
+    let rest = &m / &d;
+    split(d, out);
+    split(rest, out);
+}
+
+/// A strong probable-prime test over the first twelve prime bases, which is
+/// a proof below 3.3e24 and has no known counterexample above it.
+fn is_probable_prime(n: &BigInt) -> bool {
+    if *n < BigInt::from(2) {
+        return false;
+    }
+    for p in [2u32, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+        let p = BigInt::from(p);
+        if *n == p {
+            return true;
+        }
+        if (n % &p).is_zero() {
+            return false;
+        }
+    }
+    let one = BigInt::one();
+    let n_minus_1 = n - &one;
+    let mut d = n_minus_1.clone();
+    let mut s = 0u32;
+    while d.is_even() {
+        d /= 2;
+        s += 1;
+    }
+    'base: for p in [2u32, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+        let mut x = BigInt::from(p).modpow(&d, n);
+        if x == one || x == n_minus_1 {
+            continue;
+        }
+        for _ in 1..s {
+            x = x.modpow(&BigInt::from(2u32), n);
+            if x == n_minus_1 {
+                continue 'base;
+            }
+        }
+        return false;
+    }
+    true
+}
+
+/// A non-trivial divisor of a composite, by Pollard's rho with Floyd's
+/// cycle detection. The polynomial's offset is changed until one splits.
+fn pollard_rho(n: &BigInt) -> BigInt {
+    if n.is_even() {
+        return BigInt::from(2);
+    }
+    let one = BigInt::one();
+    let mut c = one.clone();
+    loop {
+        let step = |v: &BigInt| (v * v + &c) % n;
+        let mut x = BigInt::from(2);
+        let mut y = x.clone();
+        let mut d = one.clone();
+        while d.is_one() {
+            x = step(&x);
+            y = step(&step(&y));
+            d = (&x - &y).abs().gcd(n);
+        }
+        if d != *n {
+            return d;
+        }
+        c += 1;
+    }
+}
+
 /// `! y` on a whole number: the exact factorial. None for a negative
 /// argument (a pole) or one large enough to exhaust the machine.
 pub fn ext_factorial(v: &BigInt) -> Option<BigInt> {

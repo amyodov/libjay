@@ -210,8 +210,11 @@ fn the_prime_queries_answer_what_their_left_argument_asks() {
     let e = err(Lang::J, "5 p: 10");
     assert_eq!(e.kind, ErrorKind::Domain);
     assert!(e.msg.contains("prime query"), "{}", e.msg);
-    // The negative exponent forms are named.
-    assert_eq!(err(Lang::J, "_1 q: 12").kind, ErrorKind::NotYet);
+    // A negative left argument keeps the LAST that many columns of the
+    // table, and asking for more than there are keeps the whole of it.
+    assert_eq!(val(Lang::J, "_1 q: 12"), i64s(&[2, 1], &[3, 1]));
+    assert_eq!(val(Lang::J, "_2 q: 360"), i64s(&[2, 2], &[3, 5, 2, 1]));
+    assert_eq!(val(Lang::J, "_9 q: 360"), i64s(&[2, 3], &[2, 3, 5, 3, 2, 1]));
 }
 
 // --- under and the obverse -----------------------------------------------

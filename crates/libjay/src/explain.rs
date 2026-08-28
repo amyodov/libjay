@@ -418,6 +418,12 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             head(out, "reduce (insert between items)");
             verb_lines(u, depth + 1, p, tr, out);
         }
+        Verb::Cycle(vs) => {
+            head(out, &format!("gerund ({} verbs, one per piece)", vs.len()));
+            for u in vs {
+                verb_lines(u, depth + 1, p, tr, out);
+            }
+        }
         Verb::NWise(u) => {
             head(out, "reduce (insert between items); n-wise with a left argument");
             verb_lines(u, depth + 1, p, tr, out);
@@ -556,6 +562,7 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
                     Power::ConvergeTrace => "power (every result to convergence)".to_string(),
                     Power::Times(k) => format!("power ({k} times)"),
                     Power::Each(ks) => format!("power ({} counts, framed)", ks.len()),
+                    Power::Inverse(k) => format!("power (the inverse, {k} times)"),
                 },
             );
             verb_lines(u, depth + 1, p, tr, out);

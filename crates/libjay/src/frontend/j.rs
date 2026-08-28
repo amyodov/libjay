@@ -1171,7 +1171,9 @@ fn primitive(word: &str) -> Option<Prim> {
         "p." => prim("p.", M::PolyRoots, D::PolyEval, [1, 1, 0]),
         "p.." => prim("p..", M::PolyDeriv, D::PolyIntegral, [1, 0, 1]),
         "$." => prim("$.", M::Sparse, D::SparseForm, [INF, INF, INF]),
-        "q:" => prim("q:", M::PrimeFactors, D::PrimeExponents, [0, 0, 0]),
+        // `q:` reads its whole argument: the rows of factors are padded to
+        // the longest, which needs every item's factors at once.
+        "q:" => prim("q:", M::PrimeFactors, D::PrimeExponents, [RANK_INF, 0, 0]),
         "%." => prim("%.", M::MatrixInverse, D::MatrixDivide, [2, INF, 2]),
         // The monad takes the whole argument: one invocation is one run of
         // the generator, consumed in ravel order.
@@ -1588,9 +1590,17 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
     if word == "_." {
         return Ok(Num::F(f64::NAN));
     }
+    // `mbd…` is the base form, and `b` binds looser than anything: the base
+    // is itself a number, so `3r4b11` reads in base three quarters, and
+    // every letter after the `b` is a DIGIT, so `36bj` is 19 and `2b11p1`
+    // is 63. Splitting here, at the first `b`, settles both sides.
+    if let Some(k) = word.find('b') {
+        return base_literal(&word[..k], &word[k + 1..], word, span);
+    }
     // `1x` is an extended-precision integer; `1x1` is a multiple of e, and
     // `1p1` a multiple of π. The letter is the separator in both, and it
-    // binds LOOSEST: `1ar1p1` is the polar value `1ar1` scaled by π.
+    // binds loosest of what is left: `1ar1p1` is the polar value `1ar1`
+    // scaled by π.
     if let Some(k) = word.find(['p', 'x']) {
         if word[k + 1..].is_empty() {
             // A trailing `x` is the extended-precision suffix, and only a
@@ -1607,16 +1617,15 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
         let exponent = plain_number(&word[k + 1..], word, span)?;
         return Ok(scale(mantissa, base, exponent));
     }
-    // `3j4` is the rectangular form. A `b` earlier in the word makes the
-    // `j` a base-literal digit instead (`36bj` is 19).
-    if let Some(k) = word.find('j') && !word[..k].contains('b') {
+    // `3j4` is the rectangular form.
+    if let Some(k) = word.find('j') {
         let re = as_f64(plain_number(&word[..k], word, span)?);
         let im = as_f64(plain_number(&word[k + 1..], word, span)?);
         return Ok(Num::C([re, im]));
     }
     // `1ad45` and `1ar1` are the polar forms: a magnitude, then the angle
     // in degrees or in radians.
-    if let Some(k) = word.find("ad").or_else(|| word.find("ar")) && !word[..k].contains('b') {
+    if let Some(k) = word.find("ad").or_else(|| word.find("ar")) {
         let magnitude = as_f64(plain_number(&word[..k], word, span)?);
         let angle = as_f64(plain_number(&word[k + 2..], word, span)?);
         return Ok(Num::C(if word.as_bytes()[k + 1] == b'd' {
@@ -1626,13 +1635,9 @@ fn parse_number(word: &str, span: Span) -> Result<Num> {
         }));
     }
     // `3r4` is a rational, and `1r_2` spells its negative denominator with
-    // J's own negative sign. A `b` earlier in the word makes the `r` a
-    // base-literal digit instead.
-    if let Some(k) = word.find('r') && !word[..k].contains('b') {
+    // J's own negative sign.
+    if let Some(k) = word.find('r') {
         return rational_literal(&word[..k], &word[k + 1..], word, span);
-    }
-    if let Some(k) = word.find('b') {
-        return base_literal(&word[..k], &word[k + 1..], word, span);
     }
     plain_number(word, word, span)
 }
@@ -1708,11 +1713,14 @@ fn as_f64(n: Num) -> f64 {
     }
 }
 
-/// `mBd…`: the digits `d…` read in base `m`. Digits run `0`–`9` then `a`–`z`,
-/// and a `_` in front of them negates the value, as the reference does.
+/// `mbd…`: the digits `d…` read in base `m`. The base is a number in the
+/// same grammar — `3r4b11` counts in three quarters and `3j4b11` in a
+/// complex base — while every letter after the `b` is a digit, running
+/// `0`–`9` then `a`–`z`. A `.` among them starts the negative powers, and a
+/// `_` in front of them negates the value, as the reference does.
 fn base_literal(base: &str, digits: &str, word: &str, span: Span) -> Result<Num> {
     let invalid = || Error::parse(format!("invalid number: {word}"), span);
-    let base = as_f64(plain_number(base, word, span)?);
+    let base = plain_number(base, word, span)?;
     let (digits, negative) = match digits.strip_prefix('_') {
         Some(rest) => (rest, true),
         None => (digits, false),
@@ -1720,14 +1728,39 @@ fn base_literal(base: &str, digits: &str, word: &str, span: Span) -> Result<Num>
     if digits.is_empty() {
         return Err(invalid());
     }
+    let (whole, fraction) = match digits.split_once('.') {
+        Some((w, f)) => (w, f),
+        None => (digits, ""),
+    };
+    let digit = |ch: char| match ch {
+        '0'..='9' => Ok(f64::from(ch as u32 - '0' as u32)),
+        'a'..='z' => Ok(f64::from(ch as u32 - 'a' as u32 + 10)),
+        _ => Err(invalid()),
+    };
+    // A complex base multiplies as a complex number; every other base is a
+    // real one, rationals included — the reference answers `3r4b11` with a
+    // float and not with a rational.
+    if let Num::C(b) = base {
+        let mut value = [0.0, 0.0];
+        for ch in whole.chars() {
+            value = crate::complex::add(crate::complex::mul(value, b), [digit(ch)?, 0.0]);
+        }
+        let mut place = crate::complex::recip(b);
+        for ch in fraction.chars() {
+            value = crate::complex::add(value, crate::complex::mul(place, [digit(ch)?, 0.0]));
+            place = crate::complex::mul(place, crate::complex::recip(b));
+        }
+        return Ok(Num::C(if negative { crate::complex::neg(value) } else { value }));
+    }
+    let base = as_f64(base);
     let mut value = 0.0f64;
-    for ch in digits.chars() {
-        let d = match ch {
-            '0'..='9' => ch as u32 - '0' as u32,
-            'a'..='z' => ch as u32 - 'a' as u32 + 10,
-            _ => return Err(invalid()),
-        };
-        value = value * base + f64::from(d);
+    for ch in whole.chars() {
+        value = value * base + digit(ch)?;
+    }
+    let mut place = 1.0 / base;
+    for ch in fraction.chars() {
+        value += place * digit(ch)?;
+        place /= base;
     }
     if negative {
         value = -value;
@@ -2197,6 +2230,27 @@ fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
         };
         return Ok(Frag::Verb(VerbFrag::V(Verb::Prim(p)), span));
     }
+    // A gerund under one of the cycling adverbs: `` u`v/ `` inserts the
+    // verbs between the items, left to right, and `` u`v\ ``, `` u`v\. ``
+    // and `` u`v/. `` give one verb to each prefix, suffix, group or
+    // diagonal in turn.
+    if !u.is_real_verb()
+        && matches!(glyph, "/" | "\\" | "\\." | "/.")
+        && noun_in_scope(&u, scope).is_some_and(|a| a.as_boxes().is_some())
+    {
+        let vs = gerund_verbs(&u, scope, span)?;
+        if vs.is_empty() {
+            return Err(Error::domain("an adverb's gerund is empty", span));
+        }
+        let cycle = || Box::new(Verb::Cycle(vs.clone()));
+        let derived = match glyph {
+            "/" => Verb::Evoke(vs.clone(), 3),
+            "\\" => Verb::Windowed(cycle(), WindowKind::Prefix),
+            "\\." => Verb::Windowed(cycle(), WindowKind::Suffix),
+            _ => Verb::Key(cycle()),
+        };
+        return Ok(Frag::Verb(VerbFrag::V(derived), span));
+    }
     if !u.is_real_verb() {
         return Err(Error::not_yet("noun-operand adverbs", span));
     }
@@ -2290,19 +2344,10 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                 let p = Verb::PowerV(Box::new(f), Box::new(g));
                 return Ok(Frag::Verb(VerbFrag::V(p), span));
             }
-            // A negative power runs the obverse that many times, which is
-            // what makes `u^:_1` the inverse.
             // A negative count runs the obverse that many times, whether it
-            // was written plainly or in a box (`u^:(<_3)`).
-            let negative = noun_value(&v).is_some_and(|a| {
-                let inner = match a.as_boxes() {
-                    Some([b]) => b.clone(),
-                    _ => a,
-                };
-                inner.to_f64_vec().is_some_and(|n| n.len() == 1 && n[0] < 0.0)
-            });
+            // was written plainly or in a box (`u^:(<_3)`); `power_spec`
+            // marks it, and which obverse it is waits for the arguments.
             let p = power_spec(&v, span)?;
-            let f = if negative { obverse_of(&f, span)? } else { f };
             Ok(Frag::Verb(VerbFrag::V(Verb::PowerN(Box::new(f), p)), span))
         }
         ";." => {
@@ -2697,22 +2742,23 @@ fn power_spec(f: &Frag, span: Span) -> Result<Power> {
         if n == 0.0 {
             return Err(Error::domain("a boxed power traces at least one application", span));
         }
-        // A negative n counts the same way with the obverse, which the
-        // caller has already put in the verb's place.
-        return Ok(Power::Each((0..n.abs() as u64).collect()));
+        // A negative n counts the same way with the obverse.
+        let sign = if n < 0.0 { -1 } else { 1 };
+        return Ok(Power::Each((0..n.abs() as i64).map(|k| sign * k).collect()));
     }
     let Some(vals) = arr.to_f64_vec() else {
         return Err(Error::parse("power must be numeric", span));
     };
     let vals: Vec<f64> = vals.into_iter().map(near_whole).collect();
     if vals.len() > 1 {
-        // A list of counts gives one answer each, framed.
+        // A list of counts gives one answer each, framed; a negative one
+        // among them counts backwards over the obverse.
         let mut counts = Vec::with_capacity(vals.len());
         for n in &vals {
-            if n.fract() != 0.0 || *n < 0.0 || *n > 1e6 {
-                return Err(Error::not_yet("a power count outside 0 … 1e6", span));
+            if n.fract() != 0.0 || n.abs() > 1e6 {
+                return Err(Error::not_yet("a power count outside _1e6 … 1e6", span));
             }
-            counts.push(*n as u64);
+            counts.push(*n as i64);
         }
         return Ok(Power::Each(counts));
     }
@@ -2726,9 +2772,8 @@ fn power_spec(f: &Frag, span: Span) -> Result<Power> {
         return Err(Error::parse("power must be a whole number", span));
     }
     if n < 0.0 {
-        // A negative power is the obverse applied that many times; the
-        // caller substitutes the obverse for the verb.
-        return Ok(Power::Times((-n) as u64));
+        // A negative power is the obverse applied that many times.
+        return Ok(Power::Inverse((-n) as u64));
     }
     Ok(Power::Times(n as u64))
 }
@@ -3385,7 +3430,9 @@ mod tests {
 
     #[rstest]
     #[case("+ ^: {n} y", "computed power")]
-    #[case("(+/ % #) ^: _1 y", "the obverse of")]
+    // `u^:_1` names its obverse when it runs and not when it compiles:
+    // which obverse it needs depends on whether it is applied monadically
+    // or dyadically, and that is not known here. tests/wildhunt.rs pins it.
     // `&.,` needs no obverse — the shape is put back instead — so the
     // verb whose obverse is missing has to be the one on the RIGHT.
     #[case("+: &. (+/ % #) y", "the obverse of")]

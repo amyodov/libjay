@@ -23,7 +23,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
+**J: 152 green / 23 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
 **APL: 93 green / 21 partial / 3 absent by design, of 117 valences in the
@@ -61,7 +61,7 @@ inventory. Nothing in APL's primitive tables is red.**
 | `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative; jconsole answers an exact rational for some quadratics and libjay a float. A boxed argument is the root form and answers the coefficients; the multiplier may go unsaid, so `p. (<1 2)` is `2 _3 1` | 🟢 polynomial; a boxed `multiplier ; roots` left argument too, the multiplier optional |
 | `p..` | 🟢 poly. derivative; a boxed argument is the root form | 🟡 poly. integral, x the constant term; a boxed argument is the root form, but its coefficients come out in floats where jconsole keeps exact rationals |
 | `p:` | 🟢 the y-th prime; extended where y is | 🟢 the prime queries: `_1` `0` `1` `2` `3` `4` `_4` |
-| `q:` | 🟢 prime factors; extended where y is | 🟡 prime exponents; `x>0` and `__`, the negative forms named |
+| `q:` | 🟢 prime factors, exact however many digits the number has — trial division, then Miller–Rabin and Pollard's rho. The whole argument is read at once: one row per item, padded with 1s | 🟢 prime exponents: the first `x` primes' exponents, and for a negative `x` the last `\|x\|` columns of the factor table, all of them for `__` |
 | `?` | 🟡 roll; libjay's own stream, not J's | 🟡 deal; same |
 | `?.` | 🟡 roll, fixed seed; libjay's own stream | 🟡 deal, fixed seed; same |
 | `x:` | 🟢 extend precision | 🟡 to rational; forms 1, 2, `_1`, `_2` |
@@ -160,13 +160,13 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `&:` appose | 🟢 |
 | `&.` under | 🟢 `v^:_1 @: u &: v`, over the obverse table — docs/coverage.md's "The obverse table" lists what is in it and the two verbs still named. `&.>` and `&.,` are the two unders not built out of an inverse: box by box, and over the ravel with the shape put back |
 | `&.:` under | 🟢 the same on whole arguments, over the same table |
-| `^:` power | 🟡 a literal count, a list of them, `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives (the obverse); a computed count not yet |
+| `^:` power | 🟡 a literal count, a list of them (mixed signs included), `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives — which obverse a negative count runs is settled when the arguments arrive, so `x u^:_1 y` undoes the bond `x&u` and the monad undoes u; a computed count not yet |
 | `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
 | `:` explicit definition | 🟡 `1 :`, `2 :`, `3 :`, `4 :`, and the `m : 0` body on the lines below; `13 :` not yet |
-| `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named. An empty fret list is the whole argument in one piece; a BOXED left argument — J's per-axis frets — is named |
+| `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named. The left rank is finite — 2 for the rectangles, 1 for the frets — so a longer left argument is a FRAME of cuts, one per cell. An empty fret list is the whole argument in one piece; a BOXED left argument — J's per-axis frets — is named |
 | `!.` fit | 🟡 the tolerance meaning, and the fill for `\|.` (the shift); a fill on any other verb is named |
 | `!:` foreign | 🟡 `1!:1` (read a line from stdin), `1!:2` (write a line to stdout), `3!:0` (type code) and `5!:1` (the atomic representation of a name); the ones that reach a file, a script, the host, the clock or a shared library are ⚪ closed by the sandbox, and the ones that only compute are 🔴 named |
-| `` ` `` tie (gerund) | 🟡 the gerund is boxed data — one atomic representation per box, so it can be named, computed and displayed; a verb the representation cannot spell (a capped fork, an explicit definition) is named |
+| `` ` `` tie (gerund) | 🟡 the gerund is boxed data — one atomic representation per box, so it can be named, computed and displayed; a verb the representation cannot spell (a capped fork, an explicit definition) is named. As an ADVERB'S operand it cycles: `` u`v/ `` inserts the verbs between the items and `` u`v\ ``, `` u`v\. `` and `` u`v/. `` give one verb to each prefix, suffix, group or diagonal in turn; under any other adverb it is still named |
 | `` `: `` evoke gerund | 🟢 the three forms J gives it: `0` applies each verb, `3` inserts them, `6` is the train |
 | `@.` agenda | 🟢 |
 | `[:` cap | 🟢 |
@@ -232,7 +232,7 @@ conjunctions above:
 | Complex literals `1j2`, `1ad45`, `1ar1` | 🟢 |
 | Extended literal `1x` | 🟢 |
 | Rational literal `1r2` | 🟢 |
-| Base and constant literals `16b1f`, `1p1`, `1x1` | 🟢 |
+| Base and constant literals `16b1f`, `1p1`, `1x1` | 🟢 the base is a number in its own right (`3r4b11`, `3j4b11`, `2e1b11`) and every letter after the `b` is a digit (`36bxyz`, `2b11p1`); a `.` among the digits starts the negative powers |
 | `'strings'`, `NB.` comments, multi-sentence programs | 🟢 |
 | `{name}` host-data interpolation | 🟢 |
 | An EMPTY where numeric data is wanted (`#. ''`, `i. ''`, `¯3⊥''`) | 🟡 an empty of characters or symbols is accepted, as both references accept it; an empty of BOXES is refused, which is what jconsole does with `2 #. 0$<1` and not what it does with `#. 0$<1` |
@@ -269,7 +269,7 @@ conjunctions above:
 | `≥` | — | 🟢 greater or equal |
 | `≡` | 🟢 depth | 🟢 match |
 | `≢` | 🟢 tally | 🟢 not match |
-| `∧` | — | 🟢 LCM / and |
+| `∧` | — | 🟢 LCM / and; the ASCII `^` is read as the same glyph |
 | `∨` | — | 🟢 GCD / or; GNU APL's rounding and zero-sign rules (`gcd_rule`) |
 | `⍲` | — | 🟢 nand |
 | `⍱` | — | 🟢 nor |
@@ -336,7 +336,7 @@ conjunctions above:
 | `⍨` commute | 🟢 |
 | `∘.` outer product | 🟢 the function between every pair of ELEMENTS whatever its rank, each disclosed on the way in and the result enclosed on the way into the table: `1 2∘.,3 4` is a two-by-two of pairs, `¯1 0 1∘.⌽⊂m` rotates the matrix |
 | `⍤` rank / atop | 🟡 a rank specification, or Dyalog's atop with a function operand; no oracle for the latter |
-| `⍣` power | 🟡 literal count — negatives included, answered from the obverse table — or a function operand (`f⍣≡`); a count computed at run time is named. No oracle for the negatives: GNU APL implements no negative power at all, so they are recorded against Dyalog in `corpus/apl/dyalog-operators.txt` |
+| `⍣` power | 🟡 literal count — negatives included, answered from the obverse table, and a dyadic `x f⍣¯n y` undoes the bond `x∘f` — or a function operand (`f⍣≡`); a count computed at run time is named. GNU APL implements no negative MONADIC power, so those rows are recorded against Dyalog in `corpus/apl/dyalog-operators.txt`; it does answer the dyadic ones, and reads `x-⍣¯1 y` differently, pinned in `corpus/apl/divergences.txt` |
 | `∘` beside | 🟡 no oracle: GNU APL has no `∘` operator; Dyalog's `f∘g`, function operands only |
 | `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🟡 no oracle: GNU APL rejects it; Dyalog's `f⍛g` |
