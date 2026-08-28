@@ -3493,3 +3493,26 @@ the register.
   printed and then the value, in that order, which is what a session shows.
   A SHY value still displays as an empty line, which is not the same as a
   sentence with no value at all.
+
+- 2026-08-28 — The four NaN divergences are not oracle mismatches; they sit
+  inside ground the J documentation declares unreliable. The Dictionary's
+  `_.` page (Indeterminate) says that primitives which move data without
+  interpreting it are correct and consistent on an argument holding `_.`,
+  and that other primitives may not be — naming the dyads
+  `< <: = >: > ~: -: <. >.`, the verbs `/: \:`, the dyads `i. i: e. -.`,
+  the monads `~. ~:`, and anything defined in terms of them. Every
+  primitive in the four recorded divergences — the comparisons, the grades,
+  and Match — is on that list by name, so none of them has a documented
+  answer for us to have missed. J for C Programmers, chapter 3, puts it
+  informally: `_.` is hard to test for and gives wildly unpredictable
+  results. Two smaller findings came with it. The Dictionary's `=` page
+  conditions tolerant comparison on the operand being a FINITE
+  floating-point or complex number, so a NaN pair falls outside the
+  tolerant rule rather than being compared loosely by it — the earlier
+  coverage note claiming our answer follows FROM the tolerance rule was
+  backwards and is corrected. And the same page says `_.` exists to carry
+  NaN in from outside and should be removed from the data as soon as
+  possible, which is the language declining to give it semantics at all.
+  Nothing here contradicts what libjay does, so no code changed: the four
+  entries in docs/coverage.md now say which page covers them and that our
+  choice is internal consistency exercised inside a documented gap.

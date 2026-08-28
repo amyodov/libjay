@@ -1694,19 +1694,35 @@ oracle directly, one entry per line of
   and jconsole does not: its vectorised pass compares by "no difference
   large enough", which a NaN never has, so `(2 $ _.) = (2 $ _.)` is `1 1`
   there and `0 0` here — while its own `_. = _.` is 0, as ours is. `<:`,
-  `>:` and `~:` split the same way. libjay keeps one answer at every length,
-  which is also the one the Dictionary's tolerant-comparison rule gives.
+  `>:` and `~:` split the same way. libjay keeps one answer at every length.
+  The Dictionary's own `_.` page (Indeterminate) names `< <: = >: > ~: -:
+  <. >.` among the primitives that do not produce consistent results on an
+  argument holding `_.`, so there is no documented answer here to match, and
+  J for C Programmers says the same thing less formally — `_.` gives wildly
+  unpredictable results. The tolerance clause on the Dictionary's `=` page
+  is written for a FINITE floating-point or complex operand, which a NaN is
+  not, so the tolerant reading never reaches this pair and the exact
+  comparison is what remains.
 - `/:~` and `\:~` sort by the grade. jconsole special-cases the reflexive
   sort into a routine that puts a NaN somewhere its own `/:` does not:
   `/:~ 2 1 _. 0` is `0 1 _. 2` there, `0 1 2 _.` here, while
-  `(2 1 _. 0) /: (2 1 _. 0)` is `0 1 2 _.` on both sides.
+  `(2 1 _. 0) /: (2 1 _. 0)` is `0 1 2 _.` on both sides. The Dictionary's
+  `_.` page puts `/:` and `\:` on the same list of verbs that do not produce
+  consistent results on such an argument, so where a NaN lands in a sorted
+  result is not documented; agreeing with ourselves across the reflexive and
+  the dyadic spelling is the property left worth keeping.
 - `\:` on a TABLE whose rows hold a NaN orders the rows by the same total
   order `/:` uses, a NaN greatest. jconsole answers the reversal of that for
   some such tables (`\: 2 2 $ _. , 1 , 0 , 2`), agreeing with itself neither
-  across valences nor across ranks.
+  across valences nor across ranks — which is the Dictionary's "`/: \:` do
+  not produce consistent results on arguments containing `_.`" seen from the
+  inside. One total order across every rank and valence is our reading of an
+  undocumented case, not a departure from a documented one.
 - `-:` matches a NaN with a NaN and with nothing else. jconsole also matches
   a NaN with any NUMBER — `_. -: 1` and `_. -: _` are 1 there — which is the
-  same "no difference large enough" reading as the comparison above.
+  same "no difference large enough" reading as the comparison above. `-:` is
+  named on the Dictionary's `_.` list too, so this ground is undocumented as
+  well; we take the reading that leaves `-:` an equivalence relation.
 - A moving window of an associative verb (`+`, `*`, `<.`, `>.`) is folded in
   blocks rather than strictly right to left, which reorders the float
   rounding — the same regrouping reduction already takes (§5.9). A PREFIX
