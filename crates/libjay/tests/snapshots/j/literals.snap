@@ -1,0 +1,200 @@
+# libjay reference snapshot: J — corpus/j/literals.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= # ''
+> j: 0
+= $ ''
+> j: 0
+= # 'abc'
+> j: 3
+= # 'é'
+> j: 2
+= $ 'é'
+> j: 2
+= # 'héllo'
+> j: 6
+= $ 'héllo'
+> j: 6
+= # 'αβγ'
+> j: 6
+= # '日本'
+> j: 6
+= # 'naïve café'
+> j: 12
+= # 'Ω'
+> j: 2
+= # 'a☺b'
+> j: 5
+= a. i. 'é'
+> j: 195 169
+= a. i. '日'
+> j: 230 151 165
+= a. i. 'αβγ'
+> j: 206 177 206 178 206 179
+= 3 u: 'é'
+> j: 195 169
+= 3 u: 'αβγ'
+> j: 206 177 206 178 206 179
+= 3 u: '日本'
+> j: 230 151 165 230 156 172
+= # a.
+> j: 256
+= 'é' e. a.
+> j: 1 1
+= +/ 'é' e. a.
+> j: 2
+= 'é' = 'é'
+> j: 1 1
+= 'é' -: 'é'
+> j: 1
+= 'héllo' -: 'héllo'
+> j: 1
+= 'héllo' -: 'hello'
+> j: 0
+= 'ab' e. 'héllo'
+> j: 0 0
+= 'héllo' e. 'é'
+> j: 0 1 1 0 0 0
+= 0 { 'héllo'
+> j: h
+= 3 { 'héllo'
+> j: l
+= 1 3 5 { 'héllo'
+> j: �lo
+= 3 {. 'héllo'
+> j: hé
+= _3 {. 'héllo'
+> j: llo
+= 3 }. 'héllo'
+> j: llo
+= 'héllo' i. 'l'
+> j: 3
+= 'héllo' i. 'é'
+> j: 1 2
+= 'héllo' i. 'h'
+> j: 0
+= |. 'olléh'
+> j: h��llo
+= /:~ 'héllo'
+> j: hllo��
+= ~. 'héllo'
+> j: hélo
+= # ~. 'αβγαβγ'
+> j: 4
+= 'abc' , 'é'
+> j: abcé
+= # 'abc' , 'é'
+> j: 5
+= 'é' , 'é'
+> j: éé
+= # 'é' , 'é'
+> j: 4
+= # ; 'héllo' ; 'ab'
+> j: 8
+= $ 2 3 $ 'héllo!'
+> j: 2 3
+= 2 3 $ 'héllo!'
+> j: hé
+> j: llo
+= 3 4 $ 'héllo!'
+> j: hél
+> j: lo!h
+> j: éll
+= $ 3 4 $ 'héllo!'
+> j: 3 4
+= < 'héllo'
+> j: +-----+
+> j: |héllo|
+> j: +-----+
+= < 'é'
+> j: +-+
+> j: |é|
+> j: +-+
+= 'ab' ; 'héllo'
+> j: +--+-----+
+> j: |ab|héllo|
+> j: +--+-----+
+= > 'héllo' ; 'ab'
+> j: héllo
+> j: ab
+= $ > 'héllo' ; 'ab'
+> j: 2 6
+= ": 'héllo'
+> j: héllo
+= # ": 'héllo'
+> j: 6
+= $ ": 'héllo'
+> j: 6
+= $ ": < 'é'
+> j: 3 4
+= $ ": < 2 3 $ 'héllo!'
+> j: 4 6
+= # ;: 'héllo world'
+> j: 5
+= 3!:0 'é'
+> j: 2
+= ". '# ''é'''
+> j: 2
+= ". '''héllo'''
+> j: héllo
+= f =. 3 : '# y'\nf 'héllo'
+> j: 6
+= f =. 3 : '# ''é'''\nf 0
+> j: 2
+= 'héllo' ,. 'x'
+> j: hx
+> j: �x
+> j: �x
+> j: lx
+> j: lx
+> j: ox
+= $ 'héllo' ,. 'x'
+> j: 6 2
+= 2 ]\\ 'héllo'
+> j: h�
+> j: é
+> j: �l
+> j: ll
+> j: lo
+= $ 2 ]\\ 'héllo'
+> j: 5 2
+= <;._1 ' héllo world'
+> j: +-----+-----+
+> j: |héllo|world|
+> j: +-----+-----+
+= # <;._1 ' héllo world'
+> j: 2
+= s: 'héllo'
+> j: `éllo
+= # s: 'héllo'
+> j: 1
+= 5 s: s: 'héllo'
+> j: +----+
+> j: |éllo|
+> j: +----+
+= _1 |. 'héllo'
+> j: ohéll
+= 'é' i: 'é'
+> j: 0 1
+= a. i. 'naïve'
+> j: 110 97 195 175 118 101
+= (a. {~ a. i. 'é') -: 'é'
+> j: 1

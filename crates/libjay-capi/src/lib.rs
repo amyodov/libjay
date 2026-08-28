@@ -18,6 +18,7 @@ use jay::array::{Array, Buf, Data};
 use jay::dtype::DType;
 use jay::error::{Error, ErrorKind};
 use jay::fmt::{FmtOpts, format_array};
+use jay::extensions::Extensions;
 use jay::frontend::{Dialect, Lang, compile};
 use jay::ir::Program;
 
@@ -28,6 +29,18 @@ pub const JAY_I64: i32 = 2;
 pub const JAY_F64: i32 = 3;
 pub const JAY_CHAR: i32 = 4;
 pub const JAY_COMPLEX: i32 = 5;
+
+/// Extension bits, the same values `jay.h` names. Each one is a flag the
+/// core defines; the test below pins them to it.
+pub const JAY_EXT_NONE: u64 = 0;
+pub const JAY_EXT_J_UNICODE_STRINGS: u64 = 1;
+
+/// The header's bits are the core's bits, checked where they are written.
+const _: () = assert!(
+    JAY_EXT_NONE == Extensions::NONE.bits() as u64
+        && JAY_EXT_J_UNICODE_STRINGS == Extensions::J_UNICODE_STRINGS.bits() as u64,
+    "the extension bits in jay.h must be the ones the core defines"
+);
 
 /// `jay_run` return codes.
 const JAY_OK: c_int = 0;
@@ -272,6 +285,55 @@ pub unsafe extern "C" fn jay_compile(
     index_origin: i32,
     err: *mut *mut jay_error,
 ) -> *mut jay_program {
+    // SAFETY: the caller's contract for jay_compile is the one this asks
+    // for; no extensions named means the process default.
+    unsafe { compile_with(source_utf8, lang, index_origin, None, err) }
+}
+
+/// The bit an extension name spells, or 0 for a name this build has not.
+///
+/// # Safety
+///
+/// `name` must be NULL or a NUL-terminated string readable for its whole
+/// length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jay_extension_bit(name: *const c_char) -> u64 {
+    guarded(ptr::null_mut(), 0, || {
+        let Ok(name) = borrow_str(name, "name") else { return 0 };
+        Extensions::by_name(name).map_or(0, |e| u64::from(e.bits()))
+    })
+}
+
+/// `jay_compile` with the extensions named outright.
+///
+/// # Safety
+///
+/// As `jay_compile`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jay_compile_ext(
+    source_utf8: *const c_char,
+    lang: *const c_char,
+    index_origin: i32,
+    extensions: u64,
+    err: *mut *mut jay_error,
+) -> *mut jay_program {
+    // SAFETY: the caller's contract, passed through.
+    unsafe { compile_with(source_utf8, lang, index_origin, Some(extensions), err) }
+}
+
+/// The body both compile entries share. `extensions` is None where the
+/// caller named none, which is what leaves the process default in force.
+///
+/// # Safety
+///
+/// As `jay_compile`.
+unsafe fn compile_with(
+    source_utf8: *const c_char,
+    lang: *const c_char,
+    index_origin: i32,
+    extensions: Option<u64>,
+    err: *mut *mut jay_error,
+) -> *mut jay_program {
     if !err.is_null() {
         // SAFETY: non-NULL out-param owned by the caller.
         unsafe { *err = ptr::null_mut() };
@@ -287,10 +349,21 @@ pub unsafe extern "C" fn jay_compile(
                     src.to_string(),
                 )
             })?;
-            // The C ABI is stable: it names the index origin and nothing
-            // else, so every other dialect setting is the shipped default.
+            // The C ABI is stable: it names the index origin and the
+            // extensions and nothing else, so every dialect setting is the
+            // shipped default.
+            let extensions = match extensions {
+                None => None,
+                Some(bits) => Some(
+                    u32::try_from(bits)
+                        .map_err(|_| format!("unknown extension bits: {bits:#x}"))
+                        .and_then(Extensions::from_bits)
+                        .map_err(|m| (value_error(m), src.to_string()))?,
+                ),
+            };
             let dialect = Dialect {
                 index_origin: if index_origin < 0 { None } else { Some(index_origin as i64) },
+                extensions,
                 ..Dialect::default()
             };
             let prog = compile(lang, src, &dialect).map_err(|e| (e, src.to_string()))?;

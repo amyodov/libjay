@@ -61,12 +61,32 @@ them; arguments are positional.
 The third argument to `jay_compile` is APL's `⎕IO`; pass `-1` for the
 language default. J's index origin is 0 and is not configurable.
 
+### Extensions
+
+`jay_compile` compiles the languages as the reference implementations answer
+them, save for whatever the environment switched on for the process.
+`jay_compile_ext` takes the set outright instead — a mask of the
+`JAY_EXT_*` bits, `|`-combined, or `JAY_EXT_NONE` for the languages as they
+ship — so an embedded libjay is never at the mercy of its host process's
+environment, and a bit this build does not have is a refusal rather than a
+silent no-op. `jay_extension_bit("j_unicode_strings")` turns a name into a
+bit, and 0 says this build has no such flag.
+
+```c
+jay_program *p = jay_compile_ext("# 'héllo'", "j", -1,
+                                 JAY_EXT_J_UNICODE_STRINGS, &err);
+```
+
+What each flag does, and why they are kept apart from dialect settings, is
+in [extensions.md](extensions.md).
+
 ### Data
 
 Values cross as `jay_value`: a dtype tag, a rank, `rank` axis lengths, and a
 row-major element buffer. `jay_dtype` has five tags: `JAY_BOOL` (one
 `uint8_t`, 0 or 1), `JAY_I64`, `JAY_F64`, `JAY_CHAR` (`uint32_t` Unicode
-codepoints, UTF-32 in both directions), and `JAY_COMPLEX` — two `double`s
+codepoints, UTF-32 in both directions — a J literal's characters are the
+BYTES of its text, so those codes run 0–255), and `JAY_COMPLEX` — two `double`s
 per element, real then imaginary, the layout of C99's `double _Complex`.
 Anything else — a boolean byte that is not 0 or 1, an unknown tag, a NULL
 buffer for a non-empty array — is reported as an error rather than guessed

@@ -278,6 +278,23 @@ libjay --explain -e '+/ {w} * {x}'               # the structure, not a result
 ```
 
 `.ijs`/`.j` are J, `.apl` is APL; `--lang` overrides. `-e` defaults to J.
+`--extension NAME` switches on a non-standard extension, repeatably.
+
+## Non-standard extensions
+
+A few behaviours depart from what the reference implementations answer.
+Each is named, each is off unless asked for, and they are not dialect
+settings:
+
+```python
+jay.j("# 'héllo'")                                   # 6 — J counts BYTES
+jay.j("# 'héllo'", extensions="j_unicode_strings")   # 5 — one per character
+```
+
+The environment sets a process default (`LIBJAY_J_UNICODE_STRINGS=1`) and
+`extensions=` overrides it, so an embedded libjay is never at the mercy of
+its host process. The list, and the reasoning, is in
+[docs/extensions.md](https://github.com/amyodov/libjay/blob/main/docs/extensions.md).
 
 ## More
 

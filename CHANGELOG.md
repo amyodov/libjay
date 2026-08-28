@@ -7,6 +7,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Non-standard extensions: opt-in departures from what the reference
+  implementations answer, named one by one and off unless asked for. The
+  environment sets a process default (`LIBJAY_J_UNICODE_STRINGS=1`), and
+  every surface can override it for one compiler — Rust's
+  `Dialect { extensions: Some(...) }`, Python's
+  `jay.j("...", extensions="j_unicode_strings")` and
+  `J.create_compiler(extensions=...)`, the CLI's
+  `libjay --extension j_unicode_strings`, and the C ABI's
+  `jay_compile_ext` — so an embedded libjay is never at the mercy of its
+  host process's environment. They are not dialect settings, and
+  docs/extensions.md says why and lists what there is.
+
 - A gerund may be the operand of `/`, `\`, `\.` and `/.` in J, and every
   one of them cycles through its verbs. `` (+`-)/ 1 2 3 `` inserts them
   between the items and folds right to left, so it is `1 + (2 - 3)`; with
@@ -25,6 +37,16 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   keyboard without an APL layout holds: `4^6` is 12.
 
 ### Changed
+
+- A J quoted literal is a vector of BYTES, which is what J's literal type
+  holds: `# 'é'` is 2, `# '日本'` is 6, `a. i. 'é'` is `195 169`, and a
+  reshape, a take or an index can land between the bytes of one character.
+  The display writes those bytes out again, so the text still looks like
+  what was typed and a byte taken out of the middle of a character shows as
+  one that could not be read — all of it as jconsole answers. Every text
+  verb over non-ASCII text used to disagree with it. The old reading, one
+  item per character, is the `j_unicode_strings` extension. APL is
+  unchanged: its characters were always Unicode, and GNU APL agrees.
 
 - J's `b` numeric literal takes any number for its base, and every letter
   after the `b` is a digit. `3r4b11` counts in three quarters (1.75),

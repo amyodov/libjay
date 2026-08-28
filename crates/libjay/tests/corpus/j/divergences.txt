@@ -1,0 +1,25 @@
+// Where libjay answers differently from jconsole on purpose. The `? ` line
+// says why. The snapshot records BOTH answers, so `jay-corpus record`
+// re-measures the pair and fails if it has quietly converged — the signal
+// that the note (and the entry in docs/coverage.md) should go.
+
+// J has three character types — one byte per item, two, and four — and
+// libjay has one. A literal is the byte-oriented type, which is what every
+// corpus/j/literals.txt line holds libjay to; `u:` widens one, and the
+// wider type differs from the narrow one only in how it is WRITTEN OUT,
+// since the items and their codes are the same either way (`# u: 'é'` is 2
+// and `3 u: u: 'é'` is `195 169` in both). libjay writes a character below
+// 256 as that byte, so a widened literal shows the text it was written as
+// rather than the two characters its bytes name, and a character `u:` made
+// from a code between 128 and 255 shows as a byte no text can hold.
+// Everything a wide character does apart from displaying agrees, and a code
+// at 256 or above — every one that needs the wide type to exist — displays
+// alike too.
+u: 'é'
+? a widened literal writes its bytes here and its characters there
+u: 233
+? a character between 128 and 255 writes as its byte here
+10 u: 233
+? a character between 128 and 255 writes as its byte here
+3!:0 u: 'é'
+? libjay has one character type, so widening does not change it

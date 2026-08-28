@@ -143,12 +143,23 @@ an exemption list ("The third gate").
 
 ## Divergences
 
-`corpus/apl/divergences.txt` is where libjay answers differently from GNU APL
-on purpose, each expression with a `? ` note saying why. Its snapshot records
+`corpus/apl/divergences.txt` and `corpus/j/divergences.txt` are where libjay
+answers differently from GNU APL and from jconsole on purpose, each
+expression with a `? ` note saying why. Its snapshot records
 BOTH answers. The replay holds libjay to its own recorded side and fails if
 the two recorded answers have converged; `record` re-measures both and fails
 on a pair that no longer disagrees, which is the signal that the note (and the
 entry in docs/coverage.md) should go.
+
+## Extensions
+
+A non-standard extension (docs/extensions.md) is never recorded against an
+oracle: the corpus is what the reference implementations answer, and an
+extension answers something else on purpose. Flagged behaviour is pinned by
+hand in `crates/libjay/tests/extensions.rs` and
+`python/tests/test_extensions.py`, each assertion beside the spec-correct
+answer it replaces. Nothing in the corpus compiles under a flag, and the
+recorder never sets one.
 
 ## Dyalog
 

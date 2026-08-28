@@ -13,6 +13,7 @@ use pyo3::types::{
 };
 
 use jay::fmt::{format_array, FmtOpts};
+use jay::extensions::Extensions;
 use jay::{Array, Data, DType, Device, Dialect, Ext, Lang, Precision, Rat};
 
 create_exception!(_jay, JayError, PyException, "A libjay compile or run error.");
@@ -575,6 +576,7 @@ fn dialect_of(
     inner_each: Option<&str>,
     control_strictness: Option<&str>,
     trains: Option<bool>,
+    extensions: Option<Vec<String>>,
 ) -> PyResult<Dialect> {
     use jay::frontend::{
         ComplexOrder, ControlStrictness, DefaultArg, DepthSign, DfnResult, EncodeDigits,
@@ -582,8 +584,18 @@ fn dialect_of(
         GcdRule, IndexForm, InnerEach, LookupLeft, NearCount, NestedGrade, NestedModel, Partition,
     };
     let d = Dialect::default();
+    // Extensions are not a dialect setting — they are departures from every
+    // reference — but they travel with one, because a dialect is what a
+    // host hands the compiler. None leaves the process default in force.
+    let extensions = match extensions {
+        None => None,
+        Some(names) => Some(
+            Extensions::parse(&names.join("|")).map_err(JayError::new_err)?,
+        ),
+    };
     Ok(Dialect {
         index_origin,
+        extensions,
         comparison_tolerance,
         nested_model: setting(
             nested_model,
@@ -723,6 +735,7 @@ fn dialect_of(
     inner_each=None,
     control_strictness=None,
     trains=None,
+    extensions=None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn compile(
@@ -747,6 +760,7 @@ fn compile(
     inner_each: Option<&str>,
     control_strictness: Option<&str>,
     trains: Option<bool>,
+    extensions: Option<Vec<String>>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
     let dialect = dialect_of(
@@ -769,9 +783,20 @@ fn compile(
         inner_each,
         control_strictness,
         trains,
+        extensions,
     )?;
     let program = jay::compile(lang, source, &dialect).map_err(|e| jay_err(source, &e))?;
     Ok(Kernel { program: Arc::new(program), device: None })
+}
+
+/// Every non-standard extension this build has, as (name, environment
+/// variable, what switching it on does).
+#[pyfunction]
+fn extensions() -> Vec<(String, String, String)> {
+    Extensions::catalogue()
+        .into_iter()
+        .map(|(name, env, what)| (name.to_string(), env.to_string(), what.to_string()))
+        .collect()
 }
 
 /// Every adapter this machine offers, as (name, backend, kind, has f64).
@@ -808,6 +833,7 @@ fn devices() -> Vec<(String, String, String, bool)> {
     inner_each=None,
     control_strictness=None,
     trains=None,
+    extensions=None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn compile_parts(
@@ -833,6 +859,7 @@ fn compile_parts(
     inner_each: Option<&str>,
     control_strictness: Option<&str>,
     trains: Option<bool>,
+    extensions: Option<Vec<String>>,
 ) -> PyResult<Kernel> {
     let lang = parse_lang(lang)?;
     let dialect = dialect_of(
@@ -855,6 +882,7 @@ fn compile_parts(
         inner_each,
         control_strictness,
         trains,
+        extensions,
     )?;
     let part_refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
     let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
@@ -891,6 +919,7 @@ fn _jay(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compile, m)?)?;
     m.add_function(wrap_pyfunction!(compile_parts, m)?)?;
     m.add_function(wrap_pyfunction!(devices, m)?)?;
+    m.add_function(wrap_pyfunction!(extensions, m)?)?;
     m.add_function(wrap_pyfunction!(joins_made, m)?)?;
     m.add_function(wrap_pyfunction!(layouts_made, m)?)?;
     Ok(())

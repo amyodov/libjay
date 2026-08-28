@@ -3516,3 +3516,49 @@ the register.
   Nothing here contradicts what libjay does, so no code changed: the four
   entries in docs/coverage.md now say which page covers them and that our
   choice is internal consistency exercised inside a documented gap.
+
+- 2026-08-28 — A J quoted literal is a BYTE vector, and the Unicode reading
+  becomes the first NON-STANDARD EXTENSION. J's `literal` type is one byte
+  per item, so `# 'é'` is 2, `a. i. 'é'` is `195 169`, a reshape can cut a
+  character in half and the session display writes the bytes out again;
+  libjay decoded the source to Unicode scalars instead, so length, shape,
+  indexing, `a.`, `e.`, `i.`, `":` and `u:` all disagreed with jconsole on
+  any text outside ASCII (register N4). The spec and the oracle agree, so
+  the default follows them.
+
+  What the old behaviour became is the point of the entry. An EXTENSION is
+  not a dialect: a dialect setting chooses between readings that reference
+  implementations disagree about, and every arm of one is somebody's
+  specification, while an extension makes libjay answer something no
+  reference does. So extensions are their own type (`Extensions`, a set of
+  |-combinable flags), off unless asked for, never recorded against the
+  oracle corpus, tested in their own file, and documented apart in
+  docs/extensions.md. They ride on `Dialect` — one field, `Option`-shaped —
+  only because a dialect is the one thing a host hands the compiler, and
+  they follow the same cascade every other setting does: the environment
+  names the process default (`LIBJAY_J_UNICODE_STRINGS`, read once), and
+  `Dialect::extensions`, Python's `extensions=`, the CLI's `--extension`
+  and the C ABI's `jay_compile_ext` override it, so a library that embeds
+  libjay is never at the mercy of its host process's environment.
+  `LIBJAY_{LANG}_*` scopes a flag to one language; a bare `LIBJAY_*` is
+  reserved for a system- or IR-level flag and there are none yet.
+
+  The display is what made the byte reading a real change rather than a
+  lexer tweak. A byte-oriented literal is stored as one character per byte,
+  and the formatter writes those bytes and reads them back as UTF-8, so the
+  text looks like what was typed and a byte taken out of the middle of a
+  character shows as one that could not be read — which is what jconsole
+  writes too. `":` takes the text in the units it holds, so `# ": 'héllo'`
+  is 6; a box is fenced to what the text OCCUPIES rather than to what it
+  weighs, so `< 'héllo'` draws five dashes over six bytes, which is
+  jconsole's own arithmetic. `".` and a quoted definition body read their
+  bytes back as source text before lexing it.
+
+  The cost is one divergence, pinned in `corpus/j/divergences.txt`: libjay
+  has one character type where J has three, and the wider two differ from
+  the narrow one only in how they are written out, so a literal widened by
+  `u:` shows its text rather than the two characters its bytes name, and a
+  character `u:` made from a code between 128 and 255 shows as a byte no
+  text can hold. Items, codes and everything computed from them agree, and
+  every code at 256 or above displays alike. A second character type would
+  buy back four sentences and cost a type tag on every array.

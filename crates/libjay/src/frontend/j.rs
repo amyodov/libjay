@@ -27,9 +27,11 @@ use crate::verb::{
 /// into it. That is enough for the straight-line programs this frontend
 /// compiles: there is no control flow for a definition to reach backwards
 /// through, and reassigning the name simply rebinds it from there on.
-pub fn parse(src: &SourceParts) -> Result<Vec<Expr>> {
-    let mut scope = Names::default();
-    let lines = lex(src)?;
+pub fn parse(src: &SourceParts, rules: crate::frontend::Rules) -> Result<Vec<Expr>> {
+    let char_bytes =
+        !rules.extensions.has(crate::extensions::Extensions::J_UNICODE_STRINGS);
+    let mut scope = Names { char_bytes, ..Names::default() };
+    let lines = lex(src, char_bytes)?;
     let mut out = Vec::new();
     let mut i = 0usize;
     while i < lines.len() {
@@ -83,6 +85,10 @@ struct Names {
     /// `` g =. +`- `` and then `g@.1` needs what g holds; an assignment
     /// whose value is not settled at parse time takes the name back out.
     consts: HashMap<String, Array>,
+    /// Whether a quoted literal is a vector of BYTES, which is what J's
+    /// literal type holds and what the frontend does unless the
+    /// `j_unicode_strings` extension says otherwise.
+    char_bytes: bool,
 }
 
 impl Names {
@@ -295,11 +301,17 @@ fn take_colon_definition(
             take_lines_until_paren(lines, i, body_span)?
         }
         Data::Char(chars) => {
-            let text: String = chars.as_slice().iter().collect();
+            // A body written as a literal is source text again, so where a
+            // literal holds bytes they are read back as the characters they
+            // spell before the body is lexed.
+            let text = crate::fmt::text_of(
+                chars.as_slice().iter().copied(),
+                scope.char_bytes,
+            );
             let mut frags = Vec::new();
             // The body sits one character past the opening quote; a doubled
             // quote inside it shifts what follows by one column.
-            lex_line(&text, body_span.start + 1, &mut frags)?;
+            lex_line(&text, body_span.start + 1, scope.char_bytes, &mut frags)?;
             vec![frags]
         }
         Data::Symbol(_) | Data::Box(_) => {
@@ -1315,7 +1327,7 @@ fn conjunction(word: &str) -> Option<&'static str> {
 
 /// Split the source into sentences of fragments. Text segments are lexed;
 /// each interpolation hole becomes a noun fragment holding its parameter.
-fn lex(src: &SourceParts) -> Result<Vec<Vec<Frag>>> {
+fn lex(src: &SourceParts, char_bytes: bool) -> Result<Vec<Vec<Frag>>> {
     let mut sentences: Vec<Vec<Frag>> = Vec::new();
     let mut cur: Vec<Frag> = Vec::new();
     for seg in &src.segments {
@@ -1326,7 +1338,7 @@ fn lex(src: &SourceParts) -> Result<Vec<Vec<Frag>>> {
                     if n > 0 && !cur.is_empty() {
                         sentences.push(std::mem::take(&mut cur));
                     }
-                    lex_line(line, offset + pos, &mut cur)?;
+                    lex_line(line, offset + pos, char_bytes, &mut cur)?;
                     pos += line.len() + 1;
                 }
             }
@@ -1355,7 +1367,19 @@ enum Num {
     C(crate::complex::Cx),
 }
 
-fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
+/// The UTF-8 bytes of the characters a literal was written with, one
+/// `char` per byte. The inverse is the byte-decoding [`crate::fmt`] does
+/// when it writes a literal out.
+fn literal_bytes(chars: &[char]) -> Vec<char> {
+    let mut out = Vec::with_capacity(chars.len());
+    let mut buf = [0u8; 4];
+    for c in chars {
+        out.extend(c.encode_utf8(&mut buf).bytes().map(char::from));
+    }
+    out
+}
+
+fn lex_line(text: &str, base: usize, char_bytes: bool, out: &mut Vec<Frag>) -> Result<()> {
     let cs: Vec<(usize, char)> = text.char_indices().collect();
     let at = |i: usize| cs.get(i).map(|&(_, c)| c);
     let off = |i: usize| cs.get(i).map(|&(o, _)| o).unwrap_or(text.len());
@@ -1397,6 +1421,13 @@ fn lex_line(text: &str, base: usize, out: &mut Vec<Frag>) -> Result<()> {
                         i += 1;
                     }
                 }
+            }
+            // J's literal type holds one BYTE per item, so a literal
+            // outside ASCII is as long as its UTF-8 spelling: `# 'é'` is 2.
+            // Each byte becomes a character of that value, which is what
+            // `a.`, `3 u:` and indexing then answer with.
+            if char_bytes {
+                chars = literal_bytes(&chars);
             }
             // One character is an atom; anything else is a vector.
             let shape = if chars.len() == 1 { vec![] } else { vec![chars.len()] };
@@ -3011,8 +3042,13 @@ mod tests {
     use crate::error::ErrorKind;
     use rstest::rstest;
 
+    /// J's shipped rules: no extension, so a literal is bytes.
+    fn rules() -> crate::frontend::Rules {
+        crate::Dialect::j().rules(crate::Lang::J).expect("J's defaults")
+    }
+
     fn parse_str(src: &str) -> Result<Vec<Expr>> {
-        parse(&SourceParts::from_source(src).expect("source parts"))
+        parse(&SourceParts::from_source(src).expect("source parts"), rules())
     }
 
     /// Parse literal text with no interpolation. `{. ` and `}.` are J words
@@ -3020,7 +3056,7 @@ mod tests {
     /// pre-split path instead.
     fn one_literal(src: &str) -> Expr {
         let sp = SourceParts::from_parts(&[src], &[]);
-        let mut s = parse(&sp).unwrap_or_else(|e| panic!("parse of {src:?} failed: {e}"));
+        let mut s = parse(&sp, rules()).unwrap_or_else(|e| panic!("parse of {src:?} failed: {e}"));
         assert_eq!(s.len(), 1, "expected one sentence in {src:?}");
         s.pop().expect("one sentence")
     }
@@ -3870,7 +3906,7 @@ mod tests {
     fn holes_are_numbered_and_shared_by_name() {
         let sp = SourceParts::from_source("{a} + {b} + {a}").expect("source parts");
         assert_eq!(sp.param_names, vec!["a".to_string(), "b".to_string()]);
-        let e = parse(&sp).expect("parse").pop().expect("one sentence");
+        let e = parse(&sp, rules()).expect("parse").pop().expect("one sentence");
         let (_, x, y) = dyad_of(&e);
         assert!(matches!(x, Expr::Param(0, _)));
         let (_, x2, y2) = dyad_of(&y);
@@ -3902,7 +3938,7 @@ mod tests {
     fn braces_inside_a_string_are_not_holes() {
         let sp = SourceParts::from_source("'{a}'").expect("source parts");
         assert!(sp.param_names.is_empty());
-        let a = konst(&parse(&sp).expect("parse")[0]);
+        let a = konst(&parse(&sp, rules()).expect("parse")[0]);
         assert_eq!(a.data, Data::Char(vec!['{', 'a', '}'].into()));
     }
 
@@ -3911,7 +3947,7 @@ mod tests {
         // The t-string path: literal parts with a hole between them.
         let sp = SourceParts::from_parts(&["1 + ", " * 2"], &["v"]);
         assert_eq!(sp.display, "1 + {v} * 2");
-        let e = parse(&sp).expect("parse").pop().expect("one sentence");
+        let e = parse(&sp, rules()).expect("parse").pop().expect("one sentence");
         let (_, x, y) = dyad_of(&e);
         assert_eq!(ints(&x), vec![1]);
         let (_, x2, y2) = dyad_of(&y);

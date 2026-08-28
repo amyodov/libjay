@@ -4,6 +4,7 @@ pub mod apl;
 pub mod j;
 
 use crate::error::{Error, ErrorKind, Result};
+use crate::extensions::Extensions;
 use crate::fmt::FmtOpts;
 use crate::ir::{ParamSpec, Program};
 use crate::verb::{Agreement, Tol};
@@ -273,6 +274,15 @@ pub enum InnerEach {
 pub struct Dialect {
     /// APL `⎕IO`. J's index origin is 0 and is not configurable.
     pub index_origin: Option<i64>,
+    /// The non-standard extensions in force. This is NOT a dialect setting
+    /// — every other field here chooses between readings some reference
+    /// implements, while an extension is a departure from all of them — and
+    /// it rides on `Dialect` only because that is the one thing a host hands
+    /// the compiler. `None` means the process default, which the
+    /// environment names (`LIBJAY_J_*`); `Some` overrides it for this
+    /// compiler, so an embedding library is never at the mercy of the
+    /// environment. See [`crate::extensions`].
+    pub extensions: Option<Extensions>,
     /// APL `⎕CT`, J `9!:18`: the relative comparison tolerance.
     pub comparison_tolerance: Option<f64>,
     pub nested_model: NestedModel,
@@ -314,6 +324,7 @@ impl Dialect {
     pub fn gnu_apl() -> Dialect {
         Dialect {
             index_origin: None,
+            extensions: None,
             comparison_tolerance: None,
             nested_model: NestedModel::Floating,
             first_disclose: FirstDisclose::UpIsFirst,
@@ -346,6 +357,7 @@ impl Dialect {
     pub fn dyalog() -> Dialect {
         Dialect {
             index_origin: None,
+            extensions: None,
             comparison_tolerance: Some(1e-14),
             nested_model: NestedModel::Floating,
             first_disclose: FirstDisclose::UpIsMix,
@@ -424,6 +436,7 @@ impl Dialect {
             lang,
             origin,
             ct,
+            extensions: self.extensions.unwrap_or_else(Extensions::from_env),
             nested_model: self.nested_model,
             first_disclose: self.first_disclose,
             index_form: self.index_form,
@@ -452,6 +465,9 @@ impl Dialect {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rules {
     pub lang: Lang,
+    /// The non-standard extensions in force, resolved: the host's set where
+    /// it named one, the environment's default where it did not.
+    pub extensions: Extensions,
     /// The index origin in force: APL's `⎕IO`, and 0 for J.
     pub origin: i64,
     /// The comparison tolerance in force. `Rules::tol` pairs it with the
@@ -488,6 +504,7 @@ impl Rules {
     pub fn dialect(&self) -> Dialect {
         Dialect {
             index_origin: Some(self.origin),
+            extensions: Some(self.extensions),
             comparison_tolerance: Some(self.ct),
             nested_model: self.nested_model,
             first_disclose: self.first_disclose,
@@ -635,7 +652,7 @@ fn compile_source_parts(lang: Lang, sp: SourceParts, dialect: &Dialect) -> Resul
     let rules = dialect.rules(lang)?;
     let tol = rules.tol();
     let (mut stmts, agreement, fmt) = match lang {
-        Lang::J => (j::parse(&sp)?, Agreement::LeadingPrefix, FmtOpts::J),
+        Lang::J => (j::parse(&sp, rules)?, Agreement::LeadingPrefix, FmtOpts::j(rules)),
         Lang::Apl => (apl::parse(&sp, rules)?, Agreement::ExactOrScalar, FmtOpts::APL),
     };
     // Everything after this point walks the tree recursively, so a

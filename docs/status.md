@@ -23,7 +23,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 152 green / 23 partial / 2 absent by design, of 177 valences in the
+**J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
 **APL: 93 green / 21 partial / 3 absent by design, of 117 valences in the
@@ -122,7 +122,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `L.` | 🟢 level of | — |
 | `":` | 🟢 default format | 🟢 format by specification: `w j d` per column, width 0 for what the values need, a negative width for the exponential form, asterisks for what does not fit |
 | `".` | 🟢 do; the string runs over the names around it | 🟢 numbers, x standing in for a word that is not one |
-| `u:` | 🟢 unicode | 🟡 unicode; forms 3 and 10, the byte-oriented ones named |
+| `u:` | 🟡 unicode: the widened value has the same items and the same codes, and libjay has one character type where J has three, so the two differ only in DISPLAY — pinned in `corpus/j/divergences.txt` | 🟡 unicode; forms 3 and 10, the byte-oriented ones named |
 | `s:` | 🟢 symbol: a character list cut on its own leading delimiter, a character table one name per row, a boxed argument one name per box | 🟡 the name forms `4 s:` (a blank-padded character table) and `5 s:` (boxes); the symbol-table queries `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report an interpreter's internal table and are named |
 | `[` | 🟢 same | 🟢 left |
 | `]` | 🟢 same | 🟢 right |
@@ -233,7 +233,7 @@ conjunctions above:
 | Extended literal `1x` | 🟢 |
 | Rational literal `1r2` | 🟢 |
 | Base and constant literals `16b1f`, `1p1`, `1x1` | 🟢 the base is a number in its own right (`3r4b11`, `3j4b11`, `2e1b11`) and every letter after the `b` is a digit (`36bxyz`, `2b11p1`); a `.` among the digits starts the negative powers |
-| `'strings'`, `NB.` comments, multi-sentence programs | 🟢 |
+| `'strings'`, `NB.` comments, multi-sentence programs | 🟢 a quoted literal is a BYTE vector, as J's literal type is: `# 'é'` is 2, and length, shape, indexing, `a.`, `e.`, `i.` and `":` all count the UTF-8 bytes the source spells. One item per character is the opt-in `j_unicode_strings` extension ([extensions.md](extensions.md)) |
 | `{name}` host-data interpolation | 🟢 |
 | An EMPTY where numeric data is wanted (`#. ''`, `i. ''`, `¯3⊥''`) | 🟡 an empty of characters or symbols is accepted, as both references accept it; an empty of BOXES is refused, which is what jconsole does with `2 #. 0$<1` and not what it does with `#. 0$<1` |
 
@@ -492,6 +492,7 @@ implemented, and the recording wins over anything a document says.
 | Zero-copy out | 🟡 rank-1 machine-numeric only; rank ≥ 2, chars, symbols, boxes and the exact types go via `.tolist()` |
 | Arrow carrier for the exact types | 🔴 Arrow has none; `.tolist()` gives exact Python objects, `_1 x:` machine numbers |
 | Parallel execution (own pool, `LIBJAY_THREADS`) | 🟢 |
+| Non-standard extensions (`LIBJAY_{LANG}_*`, `Dialect::extensions`, `extensions=`, `--extension`, `jay_compile_ext`) | 🟢 opt-in departures from what the references answer, never on unless named and never recorded against the corpus; one flag so far, `j_unicode_strings`. Not dialect settings — see [extensions.md](extensions.md) |
 | Expression fusion (blockwise kernels) | 🟢 |
 | SIMD dispatch | 🟢 hot loops (arithmetic, reductions, fused kernels); x86-64 baseline/v2/v3/v4 and NEON, runtime-detected. The v4 (AVX-512) clone is compiled into every x86-64 artifact but not yet measured: no machine here has the features, so it is built, symbol-checked and unbenchmarked |
 | GPU / device backend | 🟡 fused kernels only, via wgpu (Metal/Vulkan/DX12), compiled into the one artifact and dormant without an adapter. f64 needs `SHADER_F64`, which Metal has not; on such an adapter an f64 chain stays on the CPU unless the caller asks for `precision="f32"`. Integer chains, non-float results and `^` in f64 stay on the CPU. The f64 path is generated and validated but has not been executed anywhere yet — see [decisions.md](decisions.md) |

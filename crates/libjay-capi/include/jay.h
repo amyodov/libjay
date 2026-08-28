@@ -70,10 +70,32 @@ typedef void (*jay_write_fn)(const char *text_utf8, size_t len, void *userdata);
  * end of the input. */
 typedef int (*jay_read_fn)(char *buf, size_t cap, void *userdata);
 
+/* Non-standard extensions: opt-in departures from what the reference
+ * implementations answer, combined with |. A dialect setting chooses between
+ * readings some reference implements; an extension is a reading none of them
+ * does, so nothing here is on unless it is asked for. */
+typedef uint64_t jay_extensions;
+#define JAY_EXT_NONE ((jay_extensions)0)
+/* A J quoted literal holds Unicode characters rather than the bytes that
+ * spell them, so `# 'e-acute'` is 1 where J answers 2. */
+#define JAY_EXT_J_UNICODE_STRINGS ((jay_extensions)1)
+
+/* The bit an extension name spells ("j_unicode_strings", or the environment
+ * spelling "LIBJAY_J_UNICODE_STRINGS"); 0 for a name this build has not. */
+jay_extensions jay_extension_bit(const char *name);
+
 /* Compile source_utf8 in lang ("j" or "apl"); index_origin sets APL's ⎕IO,
- * or -1 for the language default. NULL on failure, with *err set. */
+ * or -1 for the language default. The extensions are the process default,
+ * which the environment names (LIBJAY_J_UNICODE_STRINGS=1); jay_compile_ext
+ * overrides that for one program. NULL on failure, with *err set. */
 jay_program *jay_compile(const char *source_utf8, const char *lang, int32_t index_origin,
                          jay_error **err);
+
+/* jay_compile with the extensions named outright rather than taken from the
+ * environment, so a library that embeds libjay says what it compiles under.
+ * A bit this build does not have is a failure, not a silent no-op. */
+jay_program *jay_compile_ext(const char *source_utf8, const char *lang, int32_t index_origin,
+                             jay_extensions extensions, jay_error **err);
 
 /* Release a program. NULL is a no-op. */
 void jay_program_free(jay_program *program);

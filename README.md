@@ -63,6 +63,7 @@ uv run libjay examples/hello.apl                        # or run a file
 | Runnable examples — no APL keyboard needed | [examples/](examples/) |
 | What's implemented, feature by feature (🟢🟡🔴) | [docs/status.md](docs/status.md) |
 | What each language covers, and the data boundary | [docs/coverage.md](docs/coverage.md) |
+| Non-standard extensions: opt-in departures from the references | [docs/extensions.md](docs/extensions.md) |
 | Honest numbers against Polars, numba and numpy | [bench/README.md](bench/README.md) |
 | Whole workloads — RSI, VWAP, drawdown, RMS — four ways | [bench/workloads.md](bench/workloads.md) |
 
@@ -75,8 +76,8 @@ design of 177 J valences, 87 green / 24 partial / 4 red of 115 APL valences.
 Both primitive sets are differential-tested against the reference
 implementations: 4028 J and 1155 APL expressions, recorded as snapshots from
 black-box runs of the reference interpreters and replayed on every test run.
-The two agree everywhere except 32 APL sentences where libjay diverges on
-purpose, each recorded with the reason. A 20-period Bollinger z-score written
+The two agree everywhere except 32 APL and 4 J sentences where libjay
+diverges on purpose, each recorded with the reason. A 20-period Bollinger z-score written
 as one J kernel runs 20M rows in 404 ms against the equivalent Polars
 pipeline's 755, agreeing to 8.7e-10. The data model is dense numeric arrays,
 complex numbers, boxes, J's exact types — extended-precision integers and

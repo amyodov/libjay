@@ -24,18 +24,86 @@ pub struct FmtOpts {
     /// APL.
     pub imag: char,
     pub boxes: BoxStyle,
+    /// Whether a character is a BYTE, which is what J's literal type holds.
+    /// The formatted text then carries one `char` per byte, each holding
+    /// that byte's value: [`format_raw`] hands it over as it stands, which
+    /// is what `":` needs, and [`format_array`] writes the bytes out and
+    /// reads them back as UTF-8, which is what a session shows. A display
+    /// width is counted in characters either way, so a boxed literal is
+    /// fenced to what the text occupies rather than to what it weighs.
+    ///
+    /// False for APL, whose characters are Unicode, and for J under the
+    /// `j_unicode_strings` extension.
+    pub bytes: bool,
 }
 
 impl FmtOpts {
-    pub const J: FmtOpts = FmtOpts { neg: '_', imag: 'j', boxes: BoxStyle::Fenced };
-    pub const APL: FmtOpts = FmtOpts { neg: '¯', imag: 'J', boxes: BoxStyle::Spaced };
+    pub const J: FmtOpts =
+        FmtOpts { neg: '_', imag: 'j', boxes: BoxStyle::Fenced, bytes: true };
+    pub const APL: FmtOpts =
+        FmtOpts { neg: '¯', imag: 'J', boxes: BoxStyle::Spaced, bytes: false };
+
+    /// J's conventions under a set of rules: the extensions decide whether
+    /// a character is a byte.
+    pub fn j(rules: crate::frontend::Rules) -> FmtOpts {
+        FmtOpts {
+            bytes: !rules.extensions.has(crate::extensions::Extensions::J_UNICODE_STRINGS),
+            ..FmtOpts::J
+        }
+    }
 }
 
 /// Significant digits kept when displaying a float.
 const SIG_DIGITS: usize = 6;
 
-/// Format an array for display. No trailing newline.
+/// Format an array as a session shows it. No trailing newline.
+///
+/// Where a character is a byte (J), the text [`format_raw`] builds holds one
+/// `char` per byte; this writes those bytes out and reads the result back as
+/// UTF-8, which is exactly what a J session does with a literal. A byte that
+/// is not part of any character survives as the replacement character, as it
+/// does when a terminal is handed one.
 pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
+    let text = format_raw(a, opts);
+    if !opts.bytes {
+        return text;
+    }
+    String::from_utf8_lossy(&as_bytes(text.chars())).into_owned()
+}
+
+/// The text a character vector spells.
+///
+/// Where a character is a byte (J), the bytes are read back as UTF-8, which
+/// is what turns a literal back into the source text it was written as —
+/// what `".` compiles and what a quoted definition body is lexed from.
+/// Anywhere else, the characters are the text already.
+pub fn text_of<I: IntoIterator<Item = char>>(chars: I, bytes: bool) -> String {
+    if !bytes {
+        return chars.into_iter().collect();
+    }
+    String::from_utf8_lossy(&as_bytes(chars)).into_owned()
+}
+
+/// The bytes a character vector writes: one byte per character where it
+/// holds one, and the UTF-8 spelling of anything wider — which is what a
+/// character too wide for a byte can only have come from (`u:`).
+fn as_bytes<I: IntoIterator<Item = char>>(chars: I) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 4];
+    for c in chars {
+        match u8::try_from(c as u32) {
+            Ok(b) => out.push(b),
+            Err(_) => out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes()),
+        }
+    }
+    out
+}
+
+/// Format an array in the units it holds: one character per element, so a
+/// byte-oriented literal gives one `char` per byte. This is what `":` and
+/// `⍕` take, since the display they answer with is itself an array of the
+/// argument's own characters.
+pub fn format_raw(a: &Array, opts: &FmtOpts) -> String {
     // A sparse array shows what it stores, not what it stands for.
     if let Some(s) = a.sparse_parts() {
         return format_sparse(a, s, opts);
@@ -48,7 +116,7 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
     // column-major one is materialised first. Printing already costs more
     // than the copy does.
     if !a.is_row_major() {
-        return format_array(&a.to_row_major(), opts);
+        return format_raw(&a.to_row_major(), opts);
     }
     if a.dtype() == DType::Box {
         // A boxed array whose every element is a simple scalar (peeling
@@ -60,7 +128,7 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
                 return mixed_vector_line(a, &texts)
             }
             Some(texts) if opts.boxes == BoxStyle::Spaced => {
-                return laid_out(&a.shape, texts, Cells::Right)
+                return laid_out(&a.shape, texts, Cells::Right, opts)
             }
             // A mixed VECTOR with at least one non-scalar item: GNU's
             // nested display, not the fenced/uniformly-spaced box drawing.
@@ -71,7 +139,7 @@ pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
         }
     }
     let texts: Vec<String> = (0..a.count()).map(|i| format_atom(&a.data, i, opts)).collect();
-    laid_out(&a.shape, texts, Cells::of(a.dtype()))
+    laid_out(&a.shape, texts, Cells::of(a.dtype()), opts)
 }
 
 /// A sparse array: one line per stored entry, that entry's position along
@@ -88,16 +156,16 @@ fn format_sparse(a: &Array, s: &crate::sparse::Sparse, opts: &FmtOpts) -> String
     let index: Vec<String> = s.indices.iter().map(|&i| format_i64(i as i64, opts)).collect();
     let value: Vec<String> =
         (0..s.entries * width).map(|i| format_atom(&a.data, i, opts)).collect();
-    let index_widths = column_widths(&index, k.max(1));
-    let value_widths = column_widths(&value, width.max(1));
+    let index_widths = column_widths(&index, k.max(1), opts);
+    let value_widths = column_widths(&value, width.max(1), opts);
     let mut out = String::new();
     for e in 0..s.entries {
         if e > 0 {
             out.push('\n');
         }
-        push_row(&mut out, &index[e * k..(e + 1) * k], &index_widths, Cells::Right);
+        push_row(&mut out, &index[e * k..(e + 1) * k], &index_widths, Cells::Right, opts);
         out.push_str(" | ");
-        push_row(&mut out, &value[e * width..(e + 1) * width], &value_widths, Cells::Right);
+        push_row(&mut out, &value[e * width..(e + 1) * width], &value_widths, Cells::Right, opts);
     }
     out
 }
@@ -222,7 +290,7 @@ fn nested_vector_line(a: &Array, opts: &FmtOpts) -> String {
         for (r, row) in rows.iter_mut().enumerate() {
             let text = lines.get(r).map(String::as_str).unwrap_or("");
             row.push_str(text);
-            for _ in 0..w.saturating_sub(width(text)) {
+            for _ in 0..w.saturating_sub(width(text, opts)) {
                 row.push(' ');
             }
         }
@@ -232,7 +300,7 @@ fn nested_vector_line(a: &Array, opts: &FmtOpts) -> String {
 
 /// One formatted element per position, laid out for the shape: a vector on
 /// one line, higher ranks as aligned columns and planes.
-fn laid_out(shape: &[usize], texts: Vec<String>, cells: Cells) -> String {
+fn laid_out(shape: &[usize], texts: Vec<String>, cells: Cells, opts: &FmtOpts) -> String {
     let rank = shape.len();
     let a_shape = shape;
     match rank {
@@ -247,7 +315,7 @@ fn laid_out(shape: &[usize], texts: Vec<String>, cells: Cells) -> String {
             let widths = if cells == Cells::Text {
                 vec![0; ncols]
             } else {
-                column_widths(&texts, ncols)
+                column_widths(&texts, ncols, opts)
             };
             let frame = &a_shape[..rank - 2];
             let plane_size = nrows * ncols;
@@ -263,7 +331,7 @@ fn laid_out(shape: &[usize], texts: Vec<String>, cells: Cells) -> String {
                         out.push('\n');
                     }
                     let start = p * plane_size + r * ncols;
-                    push_row(&mut out, &texts[start..start + ncols], &widths, cells);
+                    push_row(&mut out, &texts[start..start + ncols], &widths, cells, opts);
                 }
             }
             out
@@ -323,12 +391,12 @@ fn block(a: &Array, opts: &FmtOpts) -> (Vec<String>, usize) {
         let w = a.shape[rank - 1];
         return (vec![" ".repeat(w); rows], w);
     }
-    let text = format_array(a, opts);
+    let text = format_raw(a, opts);
     if text.is_empty() {
         return (vec![String::new()], 0);
     }
     let lines: Vec<String> = text.lines().map(str::to_string).collect();
-    let w = lines.iter().map(|l| width(l)).max().unwrap_or(0);
+    let w = lines.iter().map(|l| width(l, opts)).max().unwrap_or(0);
     (lines, w)
 }
 
@@ -369,7 +437,7 @@ fn push_boxed_plane(
                 }
                 let text = cell.get(k).map(String::as_str).unwrap_or("");
                 line.push_str(text);
-                for _ in 0..widths[c].saturating_sub(width(text)) {
+                for _ in 0..widths[c].saturating_sub(width(text, opts)) {
                     line.push(' ');
                 }
                 if fence {
@@ -406,16 +474,16 @@ fn plane_gap(frame: &[usize], p: usize) -> usize {
 }
 
 /// Widest formatted element per column index, taken over the whole array.
-fn column_widths(texts: &[String], ncols: usize) -> Vec<usize> {
+fn column_widths(texts: &[String], ncols: usize, opts: &FmtOpts) -> Vec<usize> {
     let mut widths = vec![0usize; ncols];
     for (i, t) in texts.iter().enumerate() {
         let j = i % ncols;
-        widths[j] = widths[j].max(width(t));
+        widths[j] = widths[j].max(width(t, opts));
     }
     widths
 }
 
-fn push_row(out: &mut String, row: &[String], widths: &[usize], cells: Cells) {
+fn push_row(out: &mut String, row: &[String], widths: &[usize], cells: Cells, opts: &FmtOpts) {
     for (j, cell) in row.iter().enumerate() {
         if cells == Cells::Text {
             out.push_str(cell);
@@ -424,7 +492,7 @@ fn push_row(out: &mut String, row: &[String], widths: &[usize], cells: Cells) {
         if j > 0 {
             out.push(' ');
         }
-        let pad = widths[j].saturating_sub(width(cell));
+        let pad = widths[j].saturating_sub(width(cell, opts));
         if cells == Cells::Right {
             for _ in 0..pad {
                 out.push(' ');
@@ -439,8 +507,14 @@ fn push_row(out: &mut String, row: &[String], widths: &[usize], cells: Cells) {
     }
 }
 
-/// Display width in characters; the APL minus sign is multi-byte.
-fn width(s: &str) -> usize {
+/// Display width in characters, which is not the count of what the text
+/// holds: the APL minus sign is multi-byte, and where a character is a byte
+/// (J) a continuation byte belongs to the character before it and takes no
+/// column of its own.
+fn width(s: &str, opts: &FmtOpts) -> usize {
+    if opts.bytes {
+        return s.chars().filter(|&c| !matches!(c as u32, 0x80..=0xBF)).count();
+    }
     s.chars().count()
 }
 

@@ -1,0 +1,109 @@
+// Quoted literals outside ASCII. J's literal type is one BYTE per item, so
+// a source character that takes several bytes to spell takes several items
+// to hold: `# 'é'` is 2, and length, shape, indexing, `a.`, `e.`, `i.`,
+// `":` and `u:` all count bytes. The display writes those bytes out again,
+// which is why the text looks like what was written.
+//
+// The other reading — one item per character — is the opt-in
+// `j_unicode_strings` extension, and nothing flagged is recorded here:
+// extension behaviour is pinned in crates/libjay/tests/extensions.rs.
+
+// How long a literal is.
+# ''
+$ ''
+# 'abc'
+# 'é'
+$ 'é'
+# 'héllo'
+$ 'héllo'
+# 'αβγ'
+# '日本'
+# 'naïve café'
+# 'Ω'
+# 'a☺b'
+
+// The codes those bytes have. `a.` is the 256-byte alphabet, so `a. i.`
+// answers with the bytes themselves.
+a. i. 'é'
+a. i. '日'
+a. i. 'αβγ'
+3 u: 'é'
+3 u: 'αβγ'
+3 u: '日本'
+# a.
+'é' e. a.
++/ 'é' e. a.
+
+// Comparison and matching are elementwise over the bytes.
+'é' = 'é'
+'é' -: 'é'
+'héllo' -: 'héllo'
+'héllo' -: 'hello'
+'ab' e. 'héllo'
+'héllo' e. 'é'
+
+// Selecting, taking and dropping count bytes, so a whole character is what
+// its own byte count takes.
+0 { 'héllo'
+3 { 'héllo'
+1 3 5 { 'héllo'
+3 {. 'héllo'
+_3 {. 'héllo'
+3 }. 'héllo'
+'héllo' i. 'l'
+'héllo' i. 'é'
+'héllo' i. 'h'
+
+// Structure over the bytes.
+|. 'olléh'
+/:~ 'héllo'
+~. 'héllo'
+# ~. 'αβγαβγ'
+'abc' , 'é'
+# 'abc' , 'é'
+'é' , 'é'
+# 'é' , 'é'
+# ; 'héllo' ; 'ab'
+
+// A reshape cuts the bytes, so a character can be split between rows.
+$ 2 3 $ 'héllo!'
+2 3 $ 'héllo!'
+3 4 $ 'héllo!'
+$ 3 4 $ 'héllo!'
+
+// A box is drawn to what the text occupies; `":` answers with the bytes of
+// the lines it drew.
+< 'héllo'
+< 'é'
+'ab' ; 'héllo'
+> 'héllo' ; 'ab'
+$ > 'héllo' ; 'ab'
+": 'héllo'
+# ": 'héllo'
+$ ": 'héllo'
+$ ": < 'é'
+$ ": < 2 3 $ 'héllo!'
+# ;: 'héllo world'
+
+// The type of a literal, and a literal that is source text again.
+3!:0 'é'
+". '# ''é'''
+". '''héllo'''
+f =. 3 : '# y'\nf 'héllo'
+f =. 3 : '# ''é'''\nf 0
+
+// The byte reading carries into the rest of the vocabulary: stitch, infix,
+// cut, symbols, rotate, and the round trip through `a.`.
+'héllo' ,. 'x'
+$ 'héllo' ,. 'x'
+2 ]\\ 'héllo'
+$ 2 ]\\ 'héllo'
+<;._1 ' héllo world'
+# <;._1 ' héllo world'
+s: 'héllo'
+# s: 'héllo'
+5 s: s: 'héllo'
+_1 |. 'héllo'
+'é' i: 'é'
+a. i. 'naïve'
+(a. {~ a. i. 'é') -: 'é'

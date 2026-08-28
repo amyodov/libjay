@@ -32,6 +32,14 @@ def main(argv: list[str] | None = None) -> int:
         help="APL dialect: the APL2/GNU line (default) or Dyalog's; APL only",
     )
     parser.add_argument(
+        "--extension",
+        action="append",
+        metavar="NAME",
+        default=[],
+        help="switch on a non-standard extension (repeatable); "
+        "j_unicode_strings makes a J literal Unicode characters, not bytes",
+    )
+    parser.add_argument(
         "--explain",
         action="store_true",
         help="print what the expression became instead of running it",
@@ -66,14 +74,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dialect and lang is not apl:
         parser.error("--dialect applies to APL only")
+    # An extension named here overrides whatever the environment set, which
+    # is what makes a run reproducible from its command line alone.
+    extensions = tuple(args.extension) if args.extension else None
     try:
         if args.dialect == "dyalog":
             from .lang import APL
 
             compiler = APL.create_compiler(APL.Dialect.dyalog)
-            kernel = compiler.compile(source)
+            kernel = compiler.compile(source, extensions=extensions)
         else:
-            kernel = lang.compile(source)
+            kernel = lang.compile(source, extensions=extensions)
         if args.explain:
             print(kernel.explain().rstrip("\n"))
             return 0

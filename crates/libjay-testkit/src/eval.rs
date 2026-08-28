@@ -1,6 +1,6 @@
 //! libjay's own answer to a sentence.
 
-use jay::fmt::{FmtOpts, format_array};
+use jay::fmt::format_array;
 use jay::{Dialect, Error, Lang, compile};
 
 /// What libjay made of a sentence: the lines a session would show — what
@@ -32,6 +32,10 @@ pub fn eval_detail(lang: Lang, expr: &str, index_origin: u8) -> Answer {
 /// The same, under a dialect the caller chose. The index origin still
 /// comes from the corpus, which is where a `@ io=0` file states it.
 pub fn eval_detail_as(lang: Lang, expr: &str, index_origin: u8, base: Dialect) -> Answer {
+    // The corpus is what the reference implementations answer, so it is
+    // compiled with no extension whatever the environment says: a flag left
+    // in the environment must not be able to move a recorded answer.
+    let base = Dialect { extensions: Some(jay::Extensions::NONE), ..base };
     let dialect = match lang {
         Lang::J => base,
         Lang::Apl => Dialect { index_origin: Some(index_origin as i64), ..base },
@@ -55,13 +59,9 @@ pub fn eval_detail_as(lang: Lang, expr: &str, index_origin: u8, base: Dialect) -
             let shown = match outcome.value {
                 None => None,
                 Some(_) if outcome.shy => None,
-                Some(result) => {
-                    let opts = match lang {
-                        Lang::J => FmtOpts::J,
-                        Lang::Apl => FmtOpts::APL,
-                    };
-                    Some(format_array(&result, &opts))
-                }
+                // The program's own conventions, which carry whatever
+                // extensions it was compiled under.
+                Some(result) => Some(format_array(&result, &program.fmt)),
             };
             match (printed.is_empty(), shown) {
                 (true, None) if shy => Answer::Value(String::new()),

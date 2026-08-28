@@ -18,9 +18,11 @@ __all__ = [
     "apl",
     "compile",
     "devices",
+    "extensions",
     "Kernel",
     "Device",
     "DeviceArray",
+    "Extension",
     "JayError",
     "clear_cache",
 ]
@@ -38,6 +40,26 @@ class Device(NamedTuple):
     kind: str
     f64: bool
     """Whether shaders on this adapter can compute in double precision."""
+
+
+class Extension(NamedTuple):
+    """One non-standard extension, as this build defines it."""
+
+    name: str
+    """What ``extensions=`` and ``--extension`` take."""
+    env: str
+    """The environment variable that sets the process default."""
+    description: str
+    """What switching it on does."""
+
+
+def extensions() -> list[Extension]:
+    """Every non-standard extension this build has.
+
+    Each is a departure from what the reference implementations answer, off
+    unless named; docs/extensions.md says what each one is for.
+    """
+    return [Extension(*e) for e in _jay.extensions()]
 
 
 def devices() -> list[Device]:
@@ -84,14 +106,35 @@ _DIALECT_KEYS = (
 )
 
 
-@lru_cache(maxsize=_CACHE_SIZE)
-def _compiled(lang: str, source: str, origin, dialect: tuple = ()):
-    return _jay.compile(lang, source, origin, *dialect)
+def _extensions(value) -> tuple:
+    """One extension name, or several, as a tuple — the cache key's shape.
+
+    Extensions are not dialect settings: each one is a departure from what
+    the reference implementations answer, off unless it is named. ``None``
+    leaves the process default, which the environment sets
+    (``LIBJAY_J_UNICODE_STRINGS=1``); naming any set overrides that for this
+    compiler, so an embedded libjay is never at the mercy of the
+    environment. See docs/extensions.md.
+    """
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
 
 
 @lru_cache(maxsize=_CACHE_SIZE)
-def _compiled_parts(lang: str, parts: tuple, names: tuple, origin, dialect: tuple = ()):
-    return _jay.compile_parts(lang, list(parts), list(names), origin, *dialect)
+def _compiled(lang: str, source: str, origin, dialect: tuple = (), extensions=None):
+    return _jay.compile(lang, source, origin, *dialect, extensions=extensions)
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def _compiled_parts(
+    lang: str, parts: tuple, names: tuple, origin, dialect: tuple = (), extensions=None
+):
+    return _jay.compile_parts(
+        lang, list(parts), list(names), origin, *dialect, extensions=extensions
+    )
 
 
 def clear_cache() -> None:
@@ -249,9 +292,9 @@ class _Lang:
     """One language's entry point: callable for the one-shot form, with
     ``compile`` for the kernel form."""
 
-    __slots__ = ("_name", "_index_origin", "_dialect")
+    __slots__ = ("_name", "_index_origin", "_dialect", "_extensions")
 
-    def __init__(self, name: str, index_origin: int | None = None, **dialect):
+    def __init__(self, name: str, index_origin: int | None = None, extensions=None, **dialect):
         unknown = [k for k in dialect if k not in _DIALECT_KEYS]
         if unknown:
             raise TypeError(
@@ -264,28 +307,41 @@ class _Lang:
         self._index_origin = index_origin
         # A tuple, because it is part of the compilation cache's key.
         self._dialect = tuple(dialect.get(k) for k in _DIALECT_KEYS)
+        self._extensions = None if extensions is None else _extensions(extensions)
 
     @property
     def name(self) -> str:
         return self._name
 
-    def compile(self, source, data: dict | None = None, *, index_origin: int | None = None) -> Kernel:
+    def compile(
+        self,
+        source,
+        data: dict | None = None,
+        *,
+        index_origin: int | None = None,
+        extensions=None,
+    ) -> Kernel:
         """Compile a string (with ``{name}`` holes) or a t-string template.
 
         Interpolated/`data` values become both the type contract and the
         default values; the kernel keeps them alive.
+
+        `extensions` names the non-standard extensions this compilation
+        departs in — one name or several — and overrides both the
+        language's own set and the environment's default.
         """
         origin = index_origin if index_origin is not None else self._index_origin
+        exts = self._extensions if extensions is None else _extensions(extensions)
         defaults: dict = {}
         if _HAVE_TSTRINGS and _is_template(source):
             from ._tstring import split_template
 
             parts, names, defaults = split_template(source)
             inner = _compiled_parts(
-                self._name, tuple(parts), tuple(names), origin, self._dialect
+                self._name, tuple(parts), tuple(names), origin, self._dialect, exts
             )
         elif isinstance(source, str):
-            inner = _compiled(self._name, source, origin, self._dialect)
+            inner = _compiled(self._name, source, origin, self._dialect, exts)
         else:
             raise TypeError(f"expected str or Template, got {type(source).__name__}")
         kernel = Kernel(inner, defaults)

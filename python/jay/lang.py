@@ -1,7 +1,10 @@
 """Dialect objects and per-dialect compiler construction.
 
 Dialect settings (like APL's index origin) belong to a compiler instance,
-never to global state.
+never to global state. So do the non-standard extensions, which are a
+different thing altogether: a dialect setting chooses between readings some
+reference implementation answers with, an extension departs from all of
+them. ``create_compiler`` takes both, apart.
 """
 
 from __future__ import annotations
@@ -12,15 +15,20 @@ from . import _Lang
 
 
 class J:
-    """The J language. No dialect settings yet."""
+    """The J language. No dialect settings yet.
+
+    ``extensions`` is not one: it names non-standard behaviours, off unless
+    asked for, and is separate from the dialect on purpose. See
+    docs/extensions.md.
+    """
 
     @dataclass(frozen=True)
     class Dialect:
         pass
 
     @staticmethod
-    def create_compiler(dialect: "J.Dialect | None" = None) -> _Lang:
-        return _Lang("j")
+    def create_compiler(dialect: "J.Dialect | None" = None, extensions=None) -> _Lang:
+        return _Lang("j", extensions=extensions)
 
 
 class APL:
@@ -157,7 +165,12 @@ class APL:
     )
 
     @staticmethod
-    def create_compiler(dialect: "APL.Dialect | None" = None) -> _Lang:
+    def create_compiler(dialect: "APL.Dialect | None" = None, extensions=None) -> _Lang:
         d = dialect if dialect is not None else APL.Dialect.gnu
         settings = asdict(d)
-        return _Lang("apl", index_origin=settings.pop("index_base"), **settings)
+        return _Lang(
+            "apl",
+            index_origin=settings.pop("index_base"),
+            extensions=extensions,
+            **settings,
+        )

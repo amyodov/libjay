@@ -40,7 +40,12 @@ anything.
 
 `Dialect` carries the host's settings — today APL's `⎕IO`
 (`Dialect { index_origin: Some(0) }`); J's index origin is 0 and is not
-configurable. `Lang::Apl` selects the other frontend, with its own semantics:
+configurable. It also carries `extensions`, which is a different thing: a
+set of opt-in departures from what the reference implementations answer,
+off unless named and documented apart in
+[docs/extensions.md](../../docs/extensions.md). The environment sets a
+process default; naming a set here overrides it, so a library that embeds
+libjay compiles the same way on every machine. `Lang::Apl` selects the other frontend, with its own semantics:
 J reduces along the leading axis, APL along the trailing one.
 
 Errors carry a span into the source. `Error::render(source)` renders a

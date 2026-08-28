@@ -578,3 +578,62 @@ fn the_old_run_has_no_input_source() {
     assert!(take_message(err).contains("no input source attached"));
     unsafe { jay_program_free(prog) };
 }
+
+// --- extensions ------------------------------------------------------------
+
+/// The header's bits are the core's bits.
+#[test]
+fn the_extension_bits_are_the_core_s() {
+    assert_eq!(JAY_EXT_NONE, u64::from(jay::extensions::Extensions::NONE.bits()));
+    assert_eq!(
+        JAY_EXT_J_UNICODE_STRINGS,
+        u64::from(jay::extensions::Extensions::J_UNICODE_STRINGS.bits())
+    );
+}
+
+/// A name for each bit, and 0 for one this build has not.
+#[test]
+fn an_extension_is_looked_up_by_name() {
+    for name in [c"j_unicode_strings", c"LIBJAY_J_UNICODE_STRINGS"] {
+        assert_eq!(
+            unsafe { jay_extension_bit(name.as_ptr()) },
+            JAY_EXT_J_UNICODE_STRINGS,
+            "{name:?}"
+        );
+    }
+    assert_eq!(unsafe { jay_extension_bit(c"nonesuch".as_ptr()) }, JAY_EXT_NONE);
+    assert_eq!(unsafe { jay_extension_bit(ptr::null()) }, JAY_EXT_NONE);
+}
+
+/// The stable entry compiles the language as it ships; the extended one
+/// names what it departs in.
+#[test]
+fn compiling_under_an_extension_changes_what_a_literal_holds() {
+    let src = CString::new("# 'é'").unwrap();
+    let lang = CString::new("j").unwrap();
+    let mut err: *mut jay_error = ptr::null_mut();
+    let spec =
+        unsafe { jay_compile_ext(src.as_ptr(), lang.as_ptr(), -1, JAY_EXT_NONE, &mut err) };
+    assert!(!spec.is_null());
+    assert_eq!(result_i64(run_ok(spec, &[])), vec![2]);
+    let flagged = unsafe {
+        jay_compile_ext(src.as_ptr(), lang.as_ptr(), -1, JAY_EXT_J_UNICODE_STRINGS, &mut err)
+    };
+    assert!(!flagged.is_null());
+    assert_eq!(result_i64(run_ok(flagged, &[])), vec![1]);
+    unsafe {
+        jay_program_free(spec);
+        jay_program_free(flagged);
+    }
+}
+
+/// A bit this build has not is a refusal, not a silent no-op.
+#[test]
+fn an_unknown_extension_bit_is_refused() {
+    let src = CString::new("1").unwrap();
+    let lang = CString::new("j").unwrap();
+    let mut err: *mut jay_error = ptr::null_mut();
+    let prog = unsafe { jay_compile_ext(src.as_ptr(), lang.as_ptr(), -1, 1 << 20, &mut err) };
+    assert!(prog.is_null());
+    assert!(take_message(err).contains("unknown extension bits"));
+}

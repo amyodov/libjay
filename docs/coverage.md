@@ -936,6 +936,27 @@ of all, so `1ar1p1` is the polar value `1ar1` scaled by π and `1p1j1` is π
 raised to the power `1j1` — except where a `b` splits the word first, since
 its own binding is looser still.
 
+## Character literals
+
+J's `literal` type holds one BYTE per item, and a quoted literal holds the
+UTF-8 bytes of the text it was written with. So `# 'é'` is 2, `# '日本'` is
+6, `a. i. 'é'` is `195 169`, `2 3 $ 'héllo!'` cuts the character in half,
+and a reshape, a take or an index can land between the bytes of one
+character. The display writes those bytes out again — which is why the text
+still looks like what was typed, and why a byte taken out of the middle of
+one shows as a character that could not be read. `corpus/j/literals.txt`
+holds the family, recorded against jconsole.
+
+One item per character is available as the opt-in `j_unicode_strings`
+extension; see [extensions.md](extensions.md), which is where every
+non-standard behaviour is described. APL is Unicode-native and needs
+nothing: `⍴'héllo'` is 5 in GNU APL and here.
+
+libjay has one character type where J has three — one, two and four bytes
+per item — and the wider two differ from the narrow one only in how they
+are WRITTEN OUT; the items and their codes are the same. The four sentences
+that costs are in "Known divergences" below.
+
 ## Random numbers
 
 `?` and `?.` (J) and `?` (APL) draw from MT19937, the published Mersenne
@@ -1687,6 +1708,14 @@ language and reference each entry compares against is named inline;
 oracle directly, one entry per line of
 `crates/libjay/tests/corpus/apl/divergences.txt`.
 
+- J's `u:` widens a literal to a wider character type, which libjay does
+  not have: the widened value has the same items and the same codes here
+  (`# u: 'é'` is 2 and `3 u: u: 'é'` is `195 169` in both), and only the
+  DISPLAY differs, because libjay writes a character below 256 as that byte.
+  So `u: 'é'` shows `é` here and `Ã©` there, `u: 233` shows a byte no text
+  can hold, and `3!:0 u: 'é'` reports the one character type. Every code at
+  256 or above — the ones that need the wide type to exist — displays alike.
+  One entry per line of `crates/libjay/tests/corpus/j/divergences.txt`.
 - APL dyadic `⌽` and `⊖` reduce a large rotate amount whole; GNU APL
   truncates it to a signed 32-bit integer first, so `9223372036854775806⌽1 2 3`
   is `1 2 3` here and `2 3 1` there.

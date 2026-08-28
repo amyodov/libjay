@@ -6709,7 +6709,7 @@ fn format_chars(y: &Array, opts: &FmtOpts) -> Array {
     // A sparse array's display is a table of lines whatever its own rank
     // is: one line per stored entry.
     if y.is_sparse() {
-        let text = crate::fmt::format_array(y, opts);
+        let text = crate::fmt::format_raw(y, opts);
         let lines: Vec<&str> = text.lines().collect();
         let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
         let mut chars: Vec<char> = Vec::with_capacity(lines.len() * width);
@@ -6726,7 +6726,7 @@ fn format_chars(y: &Array, opts: &FmtOpts) -> Array {
     if y.count() == 0 {
         return Array::new(y.shape.clone(), Data::empty(DType::Char));
     }
-    let text = crate::fmt::format_array(y, opts);
+    let text = crate::fmt::format_raw(y, opts);
     if y.dtype() == DType::Box {
         // A fenced box (J) takes several lines per row of cells, so the
         // display's own rows and columns become the last two axes of the
@@ -15234,7 +15234,9 @@ fn execute(y: &Array, apl: bool, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
     let Data::Char(v) = &y.data else {
         return Err(Error::domain("execute reads a character list", span));
     };
-    let src: String = v.iter().collect();
+    // A literal is source text again, so where a character is a byte the
+    // bytes are read back as the characters they spell.
+    let src = crate::fmt::text_of(v.iter().copied(), ctx.cfg.fmt.bytes);
     execute_source(&src, apl, ctx, span)
 }
 
