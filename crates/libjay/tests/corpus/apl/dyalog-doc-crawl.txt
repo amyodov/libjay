@@ -1,0 +1,459 @@
+// What the Dyalog Language Reference documents, sentence by sentence.
+//
+// A doc crawl: the primitive-function pages of the Dyalog APL Language
+// Reference Guide were read one by one, and every behaviour class each page
+// states was put to Dyalog itself in expressions of this file's own making.
+// The lines here are the ones both sides answered alike; the disagreements
+// are tickets, not corpus.
+//
+// The pages cover glyphs GNU APL either spells differently or does not have
+// (⍸, ⊆, ≢, monadic ≠), so there is no `gnu:` column: this is Dyalog's file
+// and the replay holds `Dialect::dyalog()` to it. Answers are kept narrow —
+// under the session's 80 columns, since a wider one comes back folded — and
+// short, so that a failing row says what broke rather than where.
+@ reference=dyalog
+
+// --- Where (monadic ⍸): the indices of the 1s ----------------------------
+⍸1 0 1 1 0
+⍸0 0 0
+⍴⍸0 0 0
+⍸1=1 2 1 3 1
++/⍸1 0 1 0 1
+⍸⍬
+⍸0⍴0
+⍸,1
+⍸5⍴0 1
+≡⍸1 0 1
+
+// A count other than 0 or 1 repeats the index that many times.
+⍸2 0 1
+⍸3⍴1
+⍸0 2 0 3
+⍸0 0 3 0
+
+// Rank above 1: each index is a vector as long as the rank.
+⍸2 2⍴1 0 0 1
+⍸2 3⍴0 1 0 1 0 1
+⍸4 3⍴1 0 0
+≢⍸2 3 4⍴1
+⍴⍸2 2⍴1
+⍸2 2⍴0
+⊃⍸2 2⍴1
+≡⍸2 2⍴1
+
+// --- Interval Index (dyadic ⍸): which interval a value falls in ----------
+10 20 30⍸5 15 25 35
+10 20 30⍸10 20 30
+0 10 20⍸¯5 0 9 10
+2 4 6 8⍸1 2 3 4 5 6 7 8 9
+1 2 3⍸⍬
+1 3 5 7⍸0
+0 1⍸0.5
+¯5 0 5⍸¯10 ¯5 ¯4 0 4 5 6
+1 2 3⍸3 3
+2 4⍸2 2 2
+1 1 2 2 3⍸1 2 3
+0.5 1.5⍸1 1.4999 1.5
+1 2 3⍸1.5
+10 20⍸¯1e10 1e10
+
+// The boundaries may be characters, and the right argument may be shaped.
+'aeiou'⍸'hello'
+'ADG'⍸'ABCDEFGH'
+10 20 30⍸2 3⍴⍳6
+⍴10 20⍸2 3⍴1 15 25 5 100 0
+
+// --- Nest (monadic ⊆): a simple array becomes one item -------------------
+⊆1 2 3
+≡⊆1 2 3
+⍴⊆1 2 3
+⊆'abc'
+⊆2 2⍴⍳4
+⍴⊆2 2⍴⍳4
+⍴⍴⊆3 3⍴0
+⍴⊆⍬
+≡⊆⍬
+⊃⊆1 2 3
+
+// A simple scalar, and anything already nested, is left as it is.
+⊆5
+≡⊆5
+⊆'a'
+≡⊆'a'
+⊆(1 2)(3 4)
+≡⊆(1 2)(3 4)
+⊆⊂1 2
+≡⊆⊂1 2
+
+// --- Partition (dyadic ⊆): a new part where the count rises -------------
+1 1 2 2⊆'abcd'
+1 1 0 1⊆'abcd'
+0 0 1 1⊆⍳4
+1 0 1 0 1⊆⍳5
+2 3 3 1⊆'wxyz'
+1 1 1⊆⍳3
+0 0 0⊆⍳3
+⍴0 0 0⊆⍳3
+≢1 1 2 2⊆⍳4
+1 0 1⊆'abc'
+1 1 2 2 0 1⊆⍳6
+⍴1 1 2⊆'abc'
+≡1 1 2⊆'abc'
+1⊆'abc'
+3 1⊆'ab'
+2 0 2⊆'xyz'
+1 2 3⊆2 3⍴⍳6
+1 1⊆2 2⍴⍳4
+
+// --- Tally (monadic ≢) and Not Match (dyadic ≢) --------------------------
+≢5
+≢⍳7
+≢2 3⍴⍳6
+≢⍬
+≢'abc'
+≢⊂1 2 3
+⍴≢⍳4
+≢0 3⍴0
+≢2 3 4⍴0
+≢'a'
+1 2 3≢1 2 3
+1 2 3≢1 2 4
+'abc'≢'abc'
+(1 2)(3 4)≢(1 2)(3 4)
+(2 2⍴⍳4)≢2 2⍴⍳4
+1≢1 1⍴1
+
+// --- Unique Mask (monadic ≠): the first of each value --------------------
+≠1 2 1 3 2
+≠'mississippi'
+≠⍬
+≠'abcabc'
++/≠1 1 1 2
+≠(1 2)(1 2)3
+≠1 1.0 2
+
+// --- Mix (monadic ↑): the items assembled into one array -----------------
+↑(1 2)(3 4)
+↑(1 2 3)(4 5)
+↑'ab' 'cde'
+⍴↑'ab' 'cde'
+↑(1 2)3
+⍴↑(1 2)3
+↑1 2 3
+⍴↑1 2 3
+↑⍬
+⍴↑⍬
+↑'abc'
+↑2 3⍴⍳6
+↑(1 2)(3 4)(5 6)
+≡↑(1 2)(3 4)
+↑(⍳0)(⍳0)
+⍴↑(⍳0)(⍳0)
+
+// Items of unlike rank are padded, and the enclosure of one array mixes
+// back to the array.
+↑⊂2 2⍴⍳4
+⍴↑⊂2 2⍴⍳4
+↑(2 2⍴⍳4)(1 2)
+⍴↑(2 2⍴⍳4)(1 2)
+↑⊂⊂1 2
+⍴↑2 2⍴(1 2)(3 4)(5 6)(7 8)
+
+// --- Pick (dyadic ⊃): one item, a level per index ------------------------
+2⊃1 2 3 4
+1⊃'abc'
+3⊃(1 2)(3 4)(5 6)
+2 1⊃(1 2)(3 4)
+1 1⊃((1 2)(3 4))((5 6)(7 8))
+2 2 1⊃((1 2)(3 4))((5 6)(7 8))
+≡2 1⊃(1 2)((3 4)(5 6))
+(⊂2 2)⊃2 3⍴⍳6
+(⊂2 3)⊃2 3⍴'abcdef'
+2⊃⊂1 2 3
+5⊃1 2 3
+(⊂1 2)⊃(1 2 3)(4 5 6)
+
+// An empty index picks the simple scalar itself.
+⍬⊃5
+⍬⊃'a'
+(⊂⍬)⊃⊂1 2 3
+
+// --- Take (dyadic ↑): as many as asked for, filled if short --------------
+3↑1 2 3 4 5
+¯3↑1 2 3 4 5
+7↑1 2 3
+⍴7↑1 2 3
+¯7↑1 2 3
+5↑'abc'
+¯5↑'abc'
+0↑1 2 3
+⍴0↑1 2 3
+2↑⍬
+2↑(1 2)(3 4)(5 6)
+4↑(1 2)(3 4)
+4↑⊂1 2
+⍴4↑⊂1 2
+2↑5
+⍴2↑5
+2↑'a'
+2 2↑3 4⍴⍳12
+¯2 ¯2↑3 4⍴⍳12
+3 5↑2 2⍴⍳4
+⍴3 5↑2 2⍴⍳4
+1 1↑2 3⍴⍳6
+⍴1 2 3↑2 2 2⍴⍳8
+
+// --- Drop (dyadic ↓) and Split (monadic ↓) -------------------------------
+3↓1 2 3 4 5
+¯3↓1 2 3 4 5
+7↓1 2 3
+⍴7↓1 2 3
+¯7↓'abc'
+0↓1 2 3
+2↓(1 2)(3 4)(5 6)
+1↓5
+⍴1↓5
+0↓5
+⍴0↓5
+1 1↓3 4⍴⍳12
+¯1 ¯1↓3 4⍴⍳12
+2 0↓3 3⍴⍳9
+1 0↓2 3⍴⍳6
+↓2 3⍴⍳6
+⍴↓2 3⍴⍳6
+↓1 2 3
+⍴↓1 2 3
+↓5
+⍴↓5
+≡↓2 3⍴⍳6
+↓2 3⍴'abcdef'
+↓⍬
+⍴↓2 2 2⍴⍳8
+
+// --- Index (⌷): bracket indexing spelled as a function -------------------
+2⌷1 2 3 4
+2 3⌷3 4⍴⍳12
+(⊂2 3)⌷1 2 3 4 5
+2⌷3 4⍴⍳12
+⍴2⌷3 4⍴⍳12
+1 2⌷2 2 2⍴⍳8
+⍴1⌷2 3 4⍴⍳24
+⍬⌷1 2 3
+⍴⍬⌷1 2 3
+(⊂2 1)⌷'abcd'
+⌷1 2 3
+⌷5
+0⌷1 2 3
+5⌷1 2 3
+(2 2⍴1 2 1 2)⌷1 2 3
+
+// --- Replicate (/ and ⌿) -------------------------------------------------
+1 0 1/1 2 3
+1 0 1 0 1/⍳5
+2/1 2 3
+2 3/1 2
+0/1 2 3
+⍴0/1 2 3
+¯2/1 2
+¯1 2 ¯1/1 2 3
+1 0 1/'abc'
+2/'ab'
+1 2 3/'abc'
+0 0 0/'abc'
+⍴0 0 0/'abc'
+1 0 1/(1 2)(3 4)(5 6)
+2/⊂1 2
+1 0 1/⍬
+1 0 1⌿3 3⍴⍳9
+1 0 1/3 3⍴⍳9
+2/3 2⍴⍳6
+⍴2/3 2⍴⍳6
+
+// --- Expand (\ and ⍀): the 0s and 1s a mask holds ------------------------
+1 1 0 1\\1 2 3
+1 0 1\\'ab'
+1 0 1\\2 2⍴⍳4
+1 0 1⍀2 2⍴⍳4
+0\\⍬
+⍴0\\⍬
+1 0 1\\(1 2)(3 4)
+1\\5
+⍴1\\5
+0\\1 2 3
+
+// --- Index Of (dyadic ⍳): where a value first occurs ---------------------
+1 2 3⍳2
+1 2 3⍳4
+1 2 3⍳3 1 5
+'abcd'⍳'bad'
+⍬⍳1 2
+1 2 3⍳⍬
+⍴1 2 3⍳⍬
+(1 2)(3 4)⍳⊂1 2
+(1 2)(3 4)⍳⊂5 6
+'abc'⍳'d'
+⍴'abc'⍳'d'
+1 2 3⍳2 2⍴1 2 3 4
+1 1 2⍳1
+'ab'⍳'ab' 'c'
+1 2 3⍳1.0
+'aab'⍳'ab'
+(,1)⍳1
+⍴(,1)⍳,1
+
+// --- Find (dyadic ⍷): a boolean mask of the occurrences ------------------
+'ab'⍷'abcab'
+'b'⍷'abcab'
+1 2⍷1 2 3 1 2
+(2 2⍴⍳4)⍷4 4⍴⍳16
+'ab'⍷2 3⍴'xaby'
+⍴'ab'⍷2 3⍴'abcabc'
+(2 2⍴⍳4)⍷1 2
+'abc'⍷'ab'
+⍬⍷1 2 3
+1⍷1 1 1
+(1 2)⍷(1 2)(3 4)
++/'aa'⍷'aaaa'
+'x'⍷'abc'
+(1 2⍴1 2)⍷2 3⍴1 2 3 4 1 2
+
+// --- Membership (∊) and Enlist (monadic ∊) -------------------------------
+1 2 3∊2 4
+2∊1 2 3
+'abc'∊'cd'
+(1 2)(3 4)∊⊂1 2
+⍴(2 3⍴⍳6)∊1 2
+1 2 3∊⍬
+⍬∊1 2
+∊(1 2)(3 4)
+∊1 2 3
+∊2 2⍴⍳4
+∊(1(2 3))(4 5)
+⍴∊'ab' 'cd'
+≡∊(1 2)(3 4)
+∊5
+⍴∊5
+∊⍬
+
+// --- Union, Unique, Intersection, Without --------------------------------
+1 2 3∪2 3 4
+1 1 2∪2
+'abc'∪'cde'
+1 2∪⍬
+⍬∪1 2
+(1 2)(3 4)∪⊂1 2
+1 2 3∪1
+∪1 2 1 3 2
+∪'mississippi'
+∪⍬
+∪(1 2)(1 2)(3 4)
+∪2 2⍴1 2 1 2
+1 2 3∩2 3 4
+'abcd'∩'cdef'
+1 2 3∩⍬
+⍬∩1 2 3
+1 1 2∩1
+∩ 1 2
+1 2 3~2
+'hello'~'l'
+1 2 3~⍬
+⍬~1 2
+(1 2)(3 4)~⊂1 2
+~1 0 1
+
+// --- Grade Up and Grade Down, with and without a collation ---------------
+'abc'⍋'cab'
+'abc'⍋2 2⍴'bacb'
+'zyx'⍋'xyz'
+'abc'⍋'aabbc'
+'ab'⍋'ba'
+'aabc'⍋'abc'
+'abc'⍒'cab'
+⍋3 1 2
+⍋2 2⍴3 1 2 4
+⍒3 1 2
+⍋'cba'
+⍋⍬
+⍒⍬
+⍋'aa'
+⍋1 1 1
+⍋2 3⍴1 2 3 1 2 2
+⍒2 3⍴1 2 3 1 2 2
+
+// --- Format (⍕), monadic and by width and precision ----------------------
+⍕1.5
+⍕2 3⍴⍳6
+⍕'abc'
+⍕⍬
+⍕1 2 3
+⍕⊂1 2
+6 2⍕1.5
+6 0⍕1.567
+5 1⍕2 2⍴1.11 2.22 3.33 4.44
+2⍕1.234
+0⍕1.234
+8 2⍕¯1.5
+6 2⍕1 2 3
+2 0⍕1 2
+10 3⍕1÷3
+4 0⍕1.5
+4 0⍕¯1.5
+
+// --- Transpose (⍉), monadic and dyadic -----------------------------------
+⍉2 3⍴⍳6
+⍉1 2 3
+⍉5
+⍉2 3 4⍴⍳24
+⍴⍉2 3 4⍴⍳24
+1 2⍉2 3⍴⍳6
+2 1⍉2 3⍴⍳6
+2 1 3⍉2 3 4⍴⍳24
+⍴2 1 3⍉2 3 4⍴⍳24
+1⍉1 2 3
+1 2⍉'ab' 'cd'
+0⍉1 2 3
+3 1⍉2 3⍴⍳6
+
+// A repeated axis takes the diagonal.
+1 1⍉2 3⍴⍳6
+1 1⍉3 3⍴⍳9
+1 1⍉2 4⍴⍳8
+⍴1 1⍉2 4⍴⍳8
+1 1 1⍉2 2 2⍴⍳8
+1 1 2⍉2 2 3⍴⍳12
+⍴1 1 2⍉2 2 3⍴⍳12
+2 2 1⍉2 3 4⍴⍳24
+
+// --- Encode (⊤) and Decode (⊥) -------------------------------------------
+2 2⊤5
+2 2 2⊤5
+0 2 2⊤9
+10 10 10⊤123
+10⊤123
+2⊤7
+⍴2 2 2⊤5
+2 2 2⊤1 2 3
+⍴2 2 2⊤1 2 3
+0 10⊤123
+24 60 60⊤3661
+2 2 2⊤¯1
+10 10⊤¯5
+1.25 10.5⊤2.5
+⍬⊤5
+⍴⍬⊤5
+2⊤2 3⍴⍳6
+⍴2⊤2 3⍴⍳6
+(2 2⍴2)⊤3
+⍴(2 2⍴2)⊤3
+2 2⊥1 1
+10⊥1 2 3
+10 10⊥1 2
+2⊥1 0 1 1
+1 2 3⊥1 1 1
+0⊥1 2 3
+2⊥2 3⍴⍳6
+10⊥⍬
+(2 2⍴10)⊥1 2
+⍴(2 2⍴10)⊥2 2⍴1 2 3 4
+0.5⊥1 2
+2 3⊥'ab'
