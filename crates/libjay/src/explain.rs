@@ -118,6 +118,10 @@ fn expr_lines(e: &Expr, depth: usize, p: &Program, tr: &Trace, out: &mut String)
         Expr::Name(n, _) => {
             let _ = writeln!(out, "{pad}name {n}{}", note(e, tr));
         }
+        Expr::AssignMany { names, value, .. } => {
+            let _ = writeln!(out, "{pad}assign ({}){}", names.join(" "), note(e, tr));
+            expr_lines(value, depth + 1, p, tr, out);
+        }
         Expr::Assign { name, value, .. } => {
             // A name the fusion pass introduced replaces an assignment it
             // elided: what is left of the sentence is the tally that still
@@ -421,6 +425,7 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             let reads = if p.monad == crate::verb::MonadOp::ReadStream { " (reads stdin)" } else { "" };
             head(out, &format!("{} primitive{reads}", p.name))
         }
+        Verb::Constant(m) => head(out, &format!("the constant verb answering {}", brief(m))),
         Verb::Rank(u, r) => {
             head(out, &format!("rank \"{}", ranks(*r)));
             verb_lines(u, depth + 1, p, tr, out);
@@ -524,6 +529,26 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
         }
         Verb::Adverse(u, w) => {
             head(out, "adverse :: (the second verb answers a refusal)");
+            verb_lines(u, depth + 1, p, tr, out);
+            verb_lines(w, depth + 1, p, tr, out);
+        }
+        Verb::At { left, right } => {
+            head(out, &format!("at @ ({} where {})", left.name(), right.name()));
+            if let crate::verb::Operand::Func(f) = left {
+                verb_lines(f, depth + 1, p, tr, out);
+            }
+            if let crate::verb::Operand::Func(g) = right {
+                verb_lines(g, depth + 1, p, tr, out);
+            }
+        }
+        Verb::AmendGerund(vs) => {
+            head(out, "gerund amend } (the replacement, the indices, the array)");
+            for v in vs {
+                verb_lines(v, depth + 1, p, tr, out);
+            }
+        }
+        Verb::Ambivalent(u, w) => {
+            head(out, "monad-dyad pair : (the monad first, then the dyad)");
             verb_lines(u, depth + 1, p, tr, out);
             verb_lines(w, depth + 1, p, tr, out);
         }

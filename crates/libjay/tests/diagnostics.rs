@@ -176,7 +176,7 @@ fn j_index_errors_name_the_index_and_the_length() {
 const J_NAMES: &[Case] = &[
     j("nope + 1", ErrorKind::Value, "nope", &["nope"]),
     j("foo 1 2", ErrorKind::Value, "foo", &["foo"]),
-    j("$: 1", ErrorKind::Value, "$: 1", &["self-reference"]),
+    j("$: 1", ErrorKind::NotYet, "$: 1", &["self-reference", "tacit"]),
     j("2 {: 3", ErrorKind::Domain, "2 {: 3", &["{:", "no dyadic meaning"]),
     j("2 ~. 3", ErrorKind::Domain, "2 ~. 3", &["~.", "no dyadic meaning"]),
     // A definition's valence is its header's, in both directions.
@@ -286,7 +286,7 @@ fn j_a_definition_reports_inside_its_own_body() {
 const APL_SYNTAX: &[Case] = &[
     apl("'abc", ErrorKind::Parse, "'abc", &["unterminated string"]),
     apl("(1+2", ErrorKind::Parse, "(", &["syntax error"]),
-    apl("2 @ 3", ErrorKind::Parse, "@", &["unknown symbol", "@"]),
+    apl("2 ` 3", ErrorKind::Parse, "`", &["unknown symbol", "`"]),
     apl("¯", ErrorKind::Parse, "¯", &["unknown symbol"]),
     apl("+/", ErrorKind::Parse, "+/", &["missing right argument"]),
     apl("1 2 3⍴", ErrorKind::Parse, "⍴", &["missing right argument"]),

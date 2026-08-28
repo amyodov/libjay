@@ -307,3 +307,19 @@
 ? an obverse here, no inverse known there
 < 3 2 1
 > gnu: <error>
+= 1∘+ 10 20 30
+? the array binds as f's left argument here; there it multiplies f's result
+< 11 21 31
+> gnu: 10 20 30
+= 2∘× 3 4 5
+? the array binds as f's left argument here; there it multiplies f's result
+< 6 8 10
+> gnu: 2 2 2
+= 1∘⌽ 1 2 3
+? the array binds as f's left argument here; there it multiplies f's result
+< 2 3 1
+> gnu: 3 2 1
+= 2 3∘+ 1 1
+? the array binds as f's left argument here; there it multiplies f's result
+< 3 4
+> gnu: 5

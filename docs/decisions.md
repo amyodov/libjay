@@ -3718,3 +3718,80 @@ the register.
   which Dyalog documents as the way to interleave the item axes with the
   frame axes) is a second and smaller job on top of it, and stays a parse
   error naming the feature.
+- 2026-08-28 — J's boxed total ordering compares the ATOMS before the shape
+  (wild-hunt pass 2, X2). The comparator read class → rank → shape → atoms,
+  so two boxed lists of different length were ordered by length: `/:` of
+  `(<'aa'), (<,'b')` answered `1 0` where jconsole answers `0 1`, and `\:`
+  and `I.` shared the defect — a silent wrong answer on a list of words,
+  the commonest boxed data there is. Probed one expression at a time: the
+  reference reads the two arrays ITEM by item after the class and the rank,
+  each pair settled by the same rule, and the shape (last axis most
+  significant) speaks only where every shared item ties. That last clause is
+  what separates two EMPTIES of different shape, which have no items at all:
+  `/: (<0 5$0),(<5 0$0)` is `1 0`. The two readings agree for equal shapes,
+  so `cmp_items_j` keeps a flat fast path there and walks items only where
+  the shapes differ.
+- 2026-08-28 — `m"n` is the constant verb, and its noun operand is not the
+  parked "computed operand" gap (wild-hunt pass 2, X1: 56 hits in one
+  harvest, 46 in another — the most frequent single thing that stopped a
+  harvested J program). It is `Verb::Rank(Verb::Constant(m), n)`: a verb
+  that ignores both arguments, wrapped in the rank machinery, which is what
+  makes `(3"1) i.2 3` answer `3 3` and `3"0 b. 0` answer `0 0 0`. A noun
+  operand that is not settled at compile time keeps the named gap.
+- 2026-08-28 — `0 : 0` is read by the LEXER, not by the fragment pass that
+  handles `3 : 0`. Its body is text, not J, so the lines below it must be
+  taken whole before anything tries to lex them — a here-document holding an
+  unbalanced quote is exactly what the form is for. The value is one
+  character vector with each line followed by a line break, which is what
+  jconsole answers (`$` of a two-line body is 6, and an empty body is 0).
+- 2026-08-28 — APL reads five Unicode look-alikes as APL glyphs: `∣`
+  (U+2223) as `|`, `∈` (U+2208) as `∊`, `∼` (U+223C) as `~`, `⋆` (U+22C6)
+  as `*` and `−` (U+2212) as `-`. W7's follow-up round looked for ASCII
+  substitutes and found none; the substitutes that actually occur in
+  harvested APL are these, and GNU APL takes all five. The list is closed
+  rather than a slippery slope — `∗` (U+2217), `∸`, `‾` and `∅` are near
+  twins too and the reference refuses them, so they stay refused. The fold
+  happens where a glyph is read as a symbol and never inside a character
+  literal, so `'∣'` is still that character.
+- 2026-08-28 — A `∇` body may carry the line numbers the `∇` editor prints
+  (`[1]`, `[1.1]`). Every APL book, wiki page and session listing writes a
+  definition that way and GNU APL reads it straight back in; most of the
+  definitions the wild hunt could not use were refused here rather than for
+  anything about their meaning. A leading `[n]` is punctuation of the
+  LISTING and is stripped from the line, and the label rule was widened to
+  look past one, so `[4] L:r←1` is still a label. `[0]`, which the `∇`
+  editor reads as the header line, is out of the corpus: libjay strips it
+  like any other.
+- 2026-08-28 — `(a b)←values` is `Expr::AssignMany`, a node of its own
+  rather than a desugaring: the value is evaluated once, a scalar goes to
+  every name and a vector hands each name the item that stands where it
+  does. Its whole body lives in `assign_many` and not in `eval_node`'s
+  match, because the evaluator RECURSES through that match — every local an
+  arm of it holds is stack paid for at each level, and `RECURSION_LIMIT` is
+  set by exactly that cost. Adding the arm inline cost enough to make a
+  runaway recursion overflow the stack before the guard could fire.
+- 2026-08-28 — An each frames results of different depth. `⊂` leaves a
+  simple scalar alone, so `⌽¨ 1 (2 3)` has a simple cell beside an enclosed
+  one; the frame used to refuse the pair outright. `assemble_each` holds the
+  simple ones as values of their own instead, which is the nested vector
+  such a result IS — the residual of A11, which taught the primitives to
+  build mixed arrays and left the operators' framing alone.
+- 2026-08-28 — APL's `@` follows Dyalog, recorded in
+  `corpus/apl/dyalog-operators.txt`; GNU APL has no such glyph. Both
+  operands may be a value or a function, which neither of the frontend's
+  operator paths allowed, so `@` is settled before them; its right operand
+  may also be a parenthesised group the pass has not closed yet, which is
+  folded on its own. The dyadic `x f@g y` is a named gap.
+- 2026-08-28 — `A∘f` DOES have a GNU APL reading and status.md was wrong to
+  say it had none (wild-hunt pass 2, Y6). GNU APL falls into its
+  matrix-product reading of `∘` and takes the product against f's MONADIC
+  answer: `2∘× 3 4 5` is `2 2 2` there. libjay keeps Dyalog's bind — it is
+  what a reader of `2∘× 5` means, and J's `m&v` is the same thing — and the
+  disagreement is now pinned in `corpus/apl/divergences.txt` rather than
+  going unrecorded.
+- 2026-08-28 — `$:` in a gerund is a primitive with an inflection, not a
+  verb the atomic representation cannot spell; the domain error naming it
+  one was wrong, and `` (base`$:)@.test `` is how a recursion is written
+  with an agenda. `$:` in a TACIT verb — where the reference makes it name
+  the largest verb containing it — stays a gap, and now says so as one
+  instead of reporting a value error against the program.

@@ -588,7 +588,9 @@ impl Walker<'_> {
             | Expr::Name(..)
             | Expr::Input { .. }
             | Expr::ModDef { .. } => {}
-            Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => self.expr(value, at),
+            Expr::Assign { value, .. }
+            | Expr::AssignMany { value, .. }
+            | Expr::PrintPass { value, .. } => self.expr(value, at),
             Expr::AmendIndex { slots, value, .. } => {
                 for slot in slots.iter().flatten() {
                     self.expr(slot, at);

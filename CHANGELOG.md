@@ -79,6 +79,59 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - APL reads the ASCII `^` as `∧`, which is what a program typed on a
   keyboard without an APL layout holds: `4^6` is 12.
 
+- J's constant verb, `m"n`: `"` with a noun on its LEFT ignores both
+  arguments and answers that noun, at the rank the right operand gives.
+  `('ab'"_) 7` is `ab`, `(3"0) i.2 3` is a table of threes, and `0"_` is
+  how a train writes a zero.
+
+- J's noun definition, `0 : 0`: the lines below it, up to a lone `)`, are
+  read as text and become the value — one character vector, each line
+  followed by a line break. `0 : 'text'` writes the same thing inline.
+
+- J's monad-dyad conjunction, `u : v`: one verb out of two, u its monad and
+  v its dyad. `f =: (+/) : (-/)` sums a list and subtracts a pair.
+
+- J's `#` takes a COMPLEX count, which is copies and fills: the real part
+  says how many copies of the item to make and the imaginary part how many
+  fills to put after them. `1j2 # 'a'` is an `a` and two spaces, and
+  `2j1 1j0 # 'ab'` is `aa b` — the form a fixed-width layout is built with.
+
+- J's `}` takes a LIST of index specifications — `7 8 (0 1; 2 0) } 3 3$0`
+  amends two cells and takes one replacement for each — and a single value
+  now fills a whole item, so `9 (1 1) } 3 3$0` writes 9 across the row it
+  names.
+
+- J's gerund amend, `` x u`v`w} y ``: u makes the replacement, v the
+  indices and w the array they go into, each reading both arguments.
+  `1 3 (+:@:{`[`]}) 9 8 7 6` doubles the items it names in place.
+
+- `$:` may stand in a gerund, which is how a recursion is written with an
+  agenda: `` (base`$:)@.test ``.
+
+- APL reads five Unicode look-alikes as the glyphs they stand for — `∣` as
+  `|`, `∈` as `∊`, `∼` as `~`, `⋆` as `*` and `−` as `-` — which is what
+  the reference does with them, and what a definition copied out of a
+  typeset page holds. A character literal is untouched: `'∣'` is still that
+  character.
+
+- APL's distributed assignment, `(a b)←1 2`: the names in the brackets
+  share the value out between them, one item each, and a scalar goes to all
+  of them. `(a b)←b a` swaps two names, and the sentence still yields the
+  value.
+
+- A `∇` definition's body may carry the line numbers the `∇` editor prints
+  in front of it — `[1]`, `[2]`, `[1.1]` — which is how every printed APL
+  definition is written, so a listing can be pasted in and run. A label
+  keeps its meaning behind one: `[4] L:r←1`.
+
+- APL's `@` (at, Dyalog's): the positions the right operand names, changed
+  by the left one, and everything else left alone. A value right operand is
+  the positions and a function's result is a boolean mask over the items; a
+  value left operand replaces what stands there and a function is applied
+  to the selection. `9@2 ⊢ 0 0 0` is `0 9 0` and
+  `(×∘10)@(2∘|) ⊢ 1 2 3 4 5` is `10 2 30 4 50`. Recorded against Dyalog:
+  GNU APL has no `@`.
+
 ### Changed
 
 - A J quoted literal is a vector of BYTES, which is what J's literal type
@@ -147,6 +200,23 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   nothing.
 
 ### Fixed
+
+- J's boxed total ordering compared the SHAPE before the atoms, so `/:`,
+  `\:` and `I.` quietly answered wrongly on the commonest boxed data there
+  is — a list of words of different lengths. The reference walks the two
+  arrays item by item after the class and the rank, and the shape speaks
+  only where every shared item ties: `/: (<'aa'), (<,'b')` is `0 1`, not
+  `1 0`, and a sorted table of words now looks up the slot it should.
+
+- An APL each whose results are not all of one depth refused to build an
+  array at all ("cannot frame boxed and unboxed results"). `⌽¨ 1 (2 3)` is
+  the nested `1` and `3 2` again, and a dfn that answers a number for some
+  items and a list for others now works.
+
+- The gerund form of `}` was read as a boxed index specification and failed
+  on its shape, and `$:` inside a gerund was called a verb no atomic
+  representation may name. Both diagnostics named the wrong feature; both
+  spellings now mean what the reference means by them.
 
 - `x u^:_n y` applied u forward n times instead of undoing it, in both
   languages, and answered the opposite of what was asked with no

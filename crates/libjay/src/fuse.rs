@@ -611,6 +611,7 @@ fn replayable(e: &Expr) -> bool {
     match e {
         Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => true,
         Expr::Assign { .. }
+        | Expr::AssignMany { .. }
         | Expr::PrintPass { .. }
         | Expr::Input { .. }
         | Expr::Elided { .. }
@@ -703,6 +704,9 @@ fn fuse_expr(e: Expr, tol: Tol) -> Expr {
     match e {
         Expr::Assign { name, value, scope, span } => {
             Expr::Assign { name, value: Box::new(fuse_expr(*value, tol)), scope, span }
+        }
+        Expr::AssignMany { names, value, scope, span } => {
+            Expr::AssignMany { names, value: Box::new(fuse_expr(*value, tol)), scope, span }
         }
         Expr::Monad { verb, y, span } => {
             Expr::Monad { verb, y: Box::new(fuse_expr(*y, tol)), span }
@@ -979,7 +983,9 @@ fn uses_land(e: &Expr, name: &str, def: &Expr, tol: Tol) -> Option<usize> {
     match e {
         Expr::Name(n, _) if n == name => None,
         Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => Some(0),
-        Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => uses_land(value, name, def, tol),
+        Expr::Assign { value, .. }
+        | Expr::AssignMany { value, .. }
+        | Expr::PrintPass { value, .. } => uses_land(value, name, def, tol),
         Expr::Monad { y, .. } => uses_land(y, name, def, tol),
         Expr::Dyad { x, y, .. } => Some(uses_land(x, name, def, tol)? + uses_land(y, name, def, tol)?),
         Expr::Fused { .. }
@@ -1131,7 +1137,9 @@ fn mentions(e: &Expr, name: &str) -> bool {
 fn free_names(e: &Expr, out: &mut Vec<String>) {
     match e {
         Expr::Name(n, _) => out.push(n.clone()),
-        Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => free_names(value, out),
+        Expr::Assign { value, .. }
+        | Expr::AssignMany { value, .. }
+        | Expr::PrintPass { value, .. } => free_names(value, out),
         Expr::Monad { y, .. } => free_names(y, out),
         Expr::Dyad { x, y, .. } => {
             free_names(x, out);
@@ -1154,6 +1162,9 @@ fn assigns_any(e: &Expr, names: &[String]) -> bool {
     match e {
         Expr::Assign { name, value, .. } => {
             names.iter().any(|n| n == name) || assigns_any(value, names)
+        }
+        Expr::AssignMany { names: ns, value, .. } => {
+            ns.iter().any(|n| names.contains(n)) || assigns_any(value, names)
         }
         Expr::PrintPass { value, .. } => assigns_any(value, names),
         Expr::Monad { y, .. } => assigns_any(y, names),
@@ -1185,7 +1196,9 @@ pub fn is_fused(p: &Program) -> bool {
             | Expr::AmendIndex { .. }
             | Expr::VerbDef { .. }
             | Expr::ModDef { .. } => false,
-            Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => any(value),
+            Expr::Assign { value, .. }
+            | Expr::AssignMany { value, .. }
+            | Expr::PrintPass { value, .. } => any(value),
             Expr::Monad { y, .. } => any(y),
             Expr::Dyad { x, y, .. } => any(x) || any(y),
         }

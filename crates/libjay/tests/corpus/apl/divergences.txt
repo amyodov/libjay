@@ -252,3 +252,19 @@ N←{42} ⋄ N 5
 // a DOMAIN ERROR there.
 ⌽⍣¯1⊢1 2 3
 ? an obverse here, no inverse known there
+
+// `A∘f` binds the array as f's LEFT argument here — Dyalog's bind, and
+// what a reader of `2∘× 5` means — while GNU APL reads the `∘` between two
+// values as its matrix product and takes it against `f`'s MONADIC answer:
+// `2∘× 3 4 5` is `2 2 2` there, the product of 2 with the signum. The bind
+// is the reading libjay follows everywhere else (J's `m&v` is the same
+// thing), and the matrix product still answers where neither operand is a
+// function.
+1∘+ 10 20 30
+? the array binds as f's left argument here; there it multiplies f's result
+2∘× 3 4 5
+? the array binds as f's left argument here; there it multiplies f's result
+1∘⌽ 1 2 3
+? the array binds as f's left argument here; there it multiplies f's result
+2 3∘+ 1 1
+? the array binds as f's left argument here; there it multiplies f's result

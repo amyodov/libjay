@@ -88,9 +88,13 @@ fn self_reference_names_the_definition_it_stands_in() {
 }
 
 #[test]
-fn self_reference_outside_a_definition_is_a_value_error() {
+fn self_reference_outside_a_definition_names_the_tacit_gap() {
+    // The reference makes `$:` name the largest verb containing it, which
+    // a tacit verb has; libjay resolves it against the definition it
+    // stands in and has none here. That is a queue position, not a
+    // program error, and the diagnostic says so.
     let e = fails(Lang::J, "$: 5");
-    assert_eq!(e.kind, ErrorKind::Value);
+    assert_eq!(e.kind, ErrorKind::NotYet);
     assert!(e.msg.contains("self-reference"), "{}", e.msg);
 }
 

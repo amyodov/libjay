@@ -315,6 +315,7 @@ impl EvalCfg {
 /// rise when the evaluator's frames shrink.
 pub const RECURSION_LIMIT: usize = 64;
 
+
 /// The names a running program can reach: the values it has assigned, the
 /// verbs it has named, and the arguments bound to its parameters.
 ///
@@ -1209,6 +1210,11 @@ impl OpDef {
 #[derive(Clone, Debug)]
 pub enum Verb {
     Prim(Prim),
+    /// J `m"n`: the constant verb. It ignores both arguments and answers
+    /// the noun m; the rank n it is written with decides how many copies
+    /// the frame collects, and is carried by the [`Verb::Rank`] the
+    /// frontend wraps this in.
+    Constant(Array),
     /// Apply the verb to cells of the given ranks (J `"`, APL `⍤`).
     Rank(Box<Verb>, [i64; 3]),
     /// Insert the verb between items, folding right to left (J `/`, APL `⌿`).
@@ -1261,6 +1267,10 @@ pub enum Verb {
     /// J `u}`: the same amend, with the indices computed rather than
     /// written — `u} y` is `(u y)} y` and `x u} y` is `x (x u y)} y`.
     AmendVerb(Box<Verb>),
+    /// J `` u`v`w} ``: the amend whose three parts each compute one of its
+    /// arguments — `` x u`v`w} y `` is `(x u y) (x v y) } (x w y)`. u makes
+    /// the replacement, v the indices, w the array they go into.
+    AmendGerund(Vec<Verb>),
     /// J `|.!.f`: shift instead of rotate, the vacated positions taking the
     /// fill f.
     ShiftFill(Array),
@@ -1310,6 +1320,10 @@ pub enum Verb {
     /// A verb named earlier in the program, looked up when it is applied so
     /// that a definition can call itself by its own name.
     Named(String),
+    /// J `u : v`: one verb out of two — u is its monad, v is its dyad. The
+    /// pair keeps neither operand's ranks: the derived verb reads both
+    /// arguments whole, and each operand applies at its own ranks inside.
+    Ambivalent(Box<Verb>, Box<Verb>),
     /// J `u :. v`: u, with v declared to be its obverse. The declaration is
     /// what `obverse` answers with; applying the verb applies u.
     WithObverse(Box<Verb>, Box<Verb>),
@@ -1327,6 +1341,13 @@ pub enum Verb {
     /// right argument and the left one arrives untouched, which is what
     /// separates it from `⍥` (this crate's [`Verb::Compose`]).
     Beside(Box<Verb>, Box<Verb>),
+    /// APL `f@g` (Dyalog's at): the argument with the positions the right
+    /// operand names changed and everything else left alone. A VALUE right
+    /// operand is the indices; a function's result is a boolean mask of
+    /// the items to change. A VALUE left operand replaces what stands
+    /// there; a function is applied to the selection and its answer goes
+    /// back where the selection came from.
+    At { left: Operand, right: Operand },
     /// APL `f⌺w` (Dyalog's stencil): f applied to the window of `w` cells
     /// centred on each cell of y in turn, the edges filled. One size per
     /// leading axis; the axes past them travel with the cell.
@@ -1413,6 +1434,7 @@ impl Verb {
     pub fn name(&self) -> String {
         match self {
             Verb::Prim(p) => p.name.to_string(),
+            Verb::Constant(_) => "a constant verb".to_string(),
             Verb::Cycle(vs) => {
                 vs.iter().map(Verb::name).collect::<Vec<_>>().join("`")
             }
@@ -1438,6 +1460,9 @@ impl Verb {
             Verb::Each(v, _) => format!("({}¨)", v.name()),
             Verb::Fit(v, n) => format!("{}!.{n}", v.name()),
             Verb::Amend(_) => "(m})".to_string(),
+            Verb::AmendGerund(vs) => {
+                format!("({}}})", vs.iter().map(Verb::name).collect::<Vec<_>>().join("`"))
+            }
             Verb::Choose(_) => "(⊢[m])".to_string(),
             Verb::AmendVerb(v) => format!("({}}})", v.name()),
             Verb::ShiftFill(_) => "|.!.n".to_string(),
@@ -1460,6 +1485,7 @@ impl Verb {
             Verb::Explicit(d) => d.name.clone(),
             Verb::SelfRef => "$:".to_string(),
             Verb::Named(n) => n.clone(),
+            Verb::Ambivalent(v, w) => format!("({}:{})", v.name(), w.name()),
             Verb::WithObverse(v, w) => format!("({}:.{})", v.name(), w.name()),
             Verb::Adverse(v, w) => format!("({}::{})", v.name(), w.name()),
             Verb::Beside(f, g) => format!("({}∘{})", f.name(), g.name()),
@@ -1478,6 +1504,7 @@ impl Verb {
                 let sizes: Vec<String> = w.iter().map(i64::to_string).collect();
                 format!("({}⌺{})", u.name(), sizes.join(" "))
             }
+            Verb::At { left, right } => format!("({}@{})", left.name(), right.name()),
             Verb::InnerProduct { u, v, .. } => format!("({} . {})", u.name(), v.name()),
         }
     }
@@ -1539,7 +1566,8 @@ impl Verb {
             }
             // An explicit definition's body is a program of its own; `!.`
             // has no reach into it.
-            Verb::Amend(_)
+            Verb::AmendGerund(_)
+            | Verb::Amend(_)
             | Verb::Choose(_)
             | Verb::AmendVerb(_)
             | Verb::ShiftFill(_)
@@ -1547,12 +1575,14 @@ impl Verb {
             | Verb::Explicit(_)
             | Verb::SelfRef
             | Verb::Named(_)
+            | Verb::Constant(_)
             | Verb::Hypergeometric { .. } => false,
             Verb::Memo(v, _) | Verb::Level { u: v, .. } => v.uses_tolerance(),
             Verb::WithObverse(v, _) => v.uses_tolerance(),
-            Verb::Adverse(v, w) | Verb::Beside(v, w) | Verb::Before(v, w) => {
-                v.uses_tolerance() || w.uses_tolerance()
-            }
+            Verb::Adverse(v, w)
+            | Verb::Beside(v, w)
+            | Verb::Before(v, w)
+            | Verb::Ambivalent(v, w) => v.uses_tolerance() || w.uses_tolerance(),
             Verb::KeyPairs(v) => v.uses_tolerance(),
             Verb::UserDerived { def, alpha, omega } => {
                 let operand = |o: &Operand| match o {
@@ -1568,6 +1598,13 @@ impl Verb {
             }
             Verb::Evoke(vs, _) | Verb::Cycle(vs) => vs.iter().any(Verb::uses_tolerance),
             Verb::Stencil(u, _) => u.uses_tolerance(),
+            Verb::At { left, right } => {
+                let reads = |o: &Operand| match o {
+                    Operand::Func(v) => v.uses_tolerance(),
+                    Operand::Value(_) => false,
+                };
+                reads(left) || reads(right)
+            }
             Verb::InnerProduct { u, v, .. } => u.uses_tolerance() || v.uses_tolerance(),
             Verb::Fork(f, g, h) => {
                 f.uses_tolerance() || g.uses_tolerance() || h.uses_tolerance()
@@ -1610,19 +1647,29 @@ impl Verb {
             | Verb::UnderRavel(v)
             | Verb::Fit(v, _) => v.is_pure(),
             Verb::Key(v) | Verb::Cut(v, _) | Verb::AlongAxis(v, _) => v.is_pure(),
-            Verb::Hypergeometric { .. } => true,
+            Verb::Hypergeometric { .. } | Verb::Constant(_) => true,
             Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => v.is_pure() && w.is_pure(),
             Verb::WithObverse(v, _) => v.is_pure(),
-            Verb::Adverse(v, w) | Verb::Beside(v, w) | Verb::Before(v, w) => {
-                v.is_pure() && w.is_pure()
-            }
+            Verb::Adverse(v, w)
+            | Verb::Beside(v, w)
+            | Verb::Before(v, w)
+            | Verb::Ambivalent(v, w) => v.is_pure() && w.is_pure(),
             Verb::KeyPairs(v) => v.is_pure(),
             // The body reads and writes the program's names, exactly as a
             // definition called any other way does.
             Verb::UserDerived { .. } => false,
             Verb::Agenda(vs, w) => w.is_pure() && vs.iter().all(Verb::is_pure),
-            Verb::Evoke(vs, _) | Verb::Cycle(vs) => vs.iter().all(Verb::is_pure),
+            Verb::Evoke(vs, _) | Verb::Cycle(vs) | Verb::AmendGerund(vs) => {
+                vs.iter().all(Verb::is_pure)
+            }
             Verb::Stencil(u, _) => u.is_pure(),
+            Verb::At { left, right } => {
+                let pure = |o: &Operand| match o {
+                    Operand::Func(v) => v.is_pure(),
+                    Operand::Value(_) => true,
+                };
+                pure(left) && pure(right)
+            }
             Verb::InnerProduct { u, v, .. } => u.is_pure() && v.is_pure(),
             Verb::Amend(_) | Verb::Choose(_) | Verb::ShiftFill(_) | Verb::Characteristics(_) => {
                 true
@@ -1702,6 +1749,7 @@ impl Verb {
     fn monad_rows(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         debug_assert!(y.is_row_major());
         match self {
+            Verb::Constant(m) => Ok(m.clone()),
             Verb::Prim(p) => {
                 // Scalar verbs have cell rank 0: the cells are the elements,
                 // so the whole buffer is one elementwise pass.
@@ -1792,7 +1840,7 @@ impl Verb {
                     let opened = open_cell(&atom(y, i));
                     Ok(enclose(&u.monad(&opened, c, span)?, *rule))
                 })?;
-                assemble(&y.shape, cells, span)
+                assemble_each(&y.shape, cells, span)
             }
             // `u&., y`: the shape is put back afterwards, so a ravel that
             // says nothing about where it came from still has an inverse
@@ -1875,6 +1923,15 @@ impl Verb {
                 None => Err(Error::domain("an adverb's gerund is empty", span)),
             },
             Verb::Stencil(u, w) => stencil(u, w, y, ctx, span),
+            Verb::At { left, right } => at(left, right, y, ctx, span),
+            // `u : v` applies u monadically.
+            Verb::Ambivalent(u, _) => u.monad(y, ctx, span),
+            // The gerund amend has a monadic valence in the reference, and
+            // it is not this amend at all: `` (0:`0:`]}) 1 2 3 `` is 1.
+            // What it IS has not been worked out here.
+            Verb::AmendGerund(_) => {
+                Err(Error::not_yet("the monadic gerund amend (u`v`w} y)", span))
+            }
             Verb::InnerProduct { u, v, apl } => determinant(u, v, *apl, y, ctx, span),
         }
     }
@@ -1973,6 +2030,7 @@ impl Verb {
     /// indifferent to.
     fn dyad_rows(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         match self {
+            Verb::Constant(m) => Ok(m.clone()),
             Verb::Prim(_) | Verb::Rank(_, _) | Verb::Each(..) => {
                 self.dyad_ranked(x, y, ctx, span)
             }
@@ -2018,6 +2076,7 @@ impl Verb {
                 ctx.with_tol(tol, |c| v.dyad(x, y, c, span))
             }
             Verb::Amend(m) => amend(m, x, y, ctx.cfg.near(), span),
+            Verb::AmendGerund(vs) => amend_gerund(vs, x, y, ctx, span),
             Verb::Choose(m) => choose(m, x, y, span),
             // `x u} y` is `x (x u y)} y`: u names the places to amend.
             Verb::AmendVerb(u) => {
@@ -2062,6 +2121,7 @@ impl Verb {
                 let r = g.monad(y, ctx, span)?;
                 f.dyad(x, &r, ctx, span)
             }
+            Verb::Ambivalent(_, v) => v.dyad(x, y, ctx, span),
             Verb::Hypergeometric { .. } => {
                 Err(Error::domain("m H. n has no dyadic meaning", span))
             }
@@ -2077,6 +2137,9 @@ impl Verb {
             Verb::Stencil(..) => {
                 Err(Error::domain("f⌺w has no dyadic meaning", span))
             }
+            // Dyalog gives `@` a dyadic valence, where both operands read
+            // the left argument too. Only the monad is written here.
+            Verb::At { .. } => Err(Error::not_yet("the dyadic at (x f@g y)", span)),
             // J gives a bond, and under-ravel, one valence only.
             Verb::BondLeft(..) | Verb::BondRight(..) | Verb::UnderRavel(_) => {
                 Err(Error::domain(format!("{} has no dyadic meaning", self.name()), span))
@@ -2116,6 +2179,9 @@ impl Verb {
             let yc = y.cell_at(fyl, i / p.y_div);
             self.dyad_cell(&xc, &yc, c, span)
         })?;
+        if matches!(self, Verb::Each(..)) {
+            return assemble_each(&p.frame, cells, span);
+        }
         assemble(&p.frame, cells, span)
     }
 
@@ -2176,13 +2242,13 @@ pub fn effective_rank(r: i64, arg_rank: usize) -> usize {
 /// splitting is worth it. Either way the first failing cell in index order
 /// supplies the error.
 /// The definition `$:` or `∇` names: the innermost one now running.
+///
+/// A TACIT verb has none — the reference makes `$:` name the largest verb
+/// containing it there, and that is a queue position rather than an error
+/// in the program.
 fn self_ref(ctx: &Ctx<'_>, span: Span) -> Result<Arc<crate::ir::ExplicitDef>> {
     ctx.env.current_def().ok_or_else(|| {
-        Error::new(
-            ErrorKind::Value,
-            "self-reference outside an explicit definition",
-            Some(span),
-        )
+        Error::not_yet("a self-reference in a tacit verb ($: outside a definition)", span)
     })
 }
 
@@ -2515,6 +2581,24 @@ fn boxed_elements(a: &Array) -> Array {
     let row = a.to_row_major();
     let held: Vec<Array> = (0..row.count()).map(|i| atom(&row, i)).collect();
     Array::new(row.shape.clone(), Data::Box(held.into()))
+}
+
+/// [`assemble`] for an EACH, whose results need not all be of one depth.
+///
+/// `⊂` leaves a simple scalar alone, so an each that answers a number for
+/// one item and a list for another has a simple cell beside an enclosed
+/// one. They still make one array: the simple ones are held as values of
+/// their own, which is the nested vector such a result IS.
+fn assemble_each(frame: &[usize], mut cells: Vec<Array>, span: Span) -> Result<Array> {
+    let boxed = cells.iter().filter(|c| c.dtype() == DType::Box).count();
+    if boxed != 0 && boxed != cells.len() {
+        for c in &mut cells {
+            if c.dtype() != DType::Box {
+                *c = Array::boxed(c.clone());
+            }
+        }
+    }
+    assemble(frame, cells, span)
 }
 
 /// Frame the results of a cell-by-cell application into one array.
@@ -5946,8 +6030,8 @@ impl Grading {
 /// J compares the type class first — and an EMPTY array has no atoms to
 /// take a class from, so it takes the lowest one whatever its type, which
 /// is why `/: (<''),(<<1)` puts the empty character list first and two
-/// empties of different types tie. Then the rank, then the shape read with
-/// the LAST axis most significant, then the atoms in row-major order.
+/// empties of different types tie. Then the rank, then the items, and only
+/// then the shape; `cmp_items_j` carries the detail.
 ///
 /// APL2 compares the rank first, then the shape read from the FIRST axis,
 /// then the atoms, where a character precedes a number precedes a nested
@@ -5959,14 +6043,7 @@ fn cmp_items_total(x: &Array, y: &Array, ord: Grading) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
     match ord.tao {
         Tao::Dyalog => cmp_items_dyalog(x, y, ord),
-        Tao::J => {
-            let class = |a: &Array| if a.count() == 0 { 0 } else { ord.class(a.dtype()) };
-            class(x)
-                .cmp(&class(y))
-                .then_with(|| x.rank().cmp(&y.rank()))
-                .then_with(|| x.shape.iter().rev().cmp(y.shape.iter().rev()))
-                .then_with(|| cmp_atoms(x, y, ord))
-        }
+        Tao::J => cmp_items_j(x, y, ord),
         Tao::Apl2 => x
             .rank()
             .cmp(&y.rank())
@@ -5980,6 +6057,46 @@ fn cmp_items_total(x: &Array, y: &Array, ord: Grading) -> std::cmp::Ordering {
                 }
             }),
     }
+}
+
+/// Two whole arrays in J's ordering.
+///
+/// The class and the rank decide first. Then the arrays are read ITEM by
+/// item, each pair settled by this same rule, so the atoms of the first
+/// item speak before either shape does: `<'aa'` precedes `<,'b'` because
+/// `a` precedes `b`, not because one list is longer. The shape is the last
+/// word, read with the LAST axis most significant, and it is what
+/// separates two arrays whose shared items all tie — a list from its own
+/// extension, and two empties of different shape, which have no items to
+/// compare at all.
+fn cmp_items_j(x: &Array, y: &Array, ord: Grading) -> std::cmp::Ordering {
+    use std::cmp::Ordering::Equal;
+    let class = |a: &Array| if a.count() == 0 { 0 } else { ord.class(a.dtype()) };
+    let head = class(x).cmp(&class(y)).then_with(|| x.rank().cmp(&y.rank()));
+    if head != Equal {
+        return head;
+    }
+    let shapes = || x.shape.iter().rev().cmp(y.shape.iter().rev());
+    // An atom has no items; a boxed one hands the ordering its contents.
+    if x.rank() == 0 {
+        return cmp_atoms(x, y, ord);
+    }
+    // Equal shapes make the item walk a row-major walk over the atoms, and
+    // so does an unboxed pair whose items agree in shape — there the walk
+    // stops at the shorter buffer and the shapes settle the rest.
+    if x.shape == y.shape {
+        return cmp_atoms(x, y, ord);
+    }
+    if x.dtype() != DType::Box && y.dtype() != DType::Box && x.shape[1..] == y.shape[1..] {
+        let n = x.count().min(y.count());
+        return cmp_atoms_n(x, y, n, ord).then_with(shapes);
+    }
+    let (xr, yr) = (x.to_row_major(), y.to_row_major());
+    (0..xr.shape[0].min(yr.shape[0]))
+        .map(|i| cmp_items_j(&xr.item(i), &yr.item(i), ord))
+        .find(|o| *o != Equal)
+        .unwrap_or(Equal)
+        .then_with(shapes)
 }
 
 /// Two whole arrays in Dyalog's total array ordering.
@@ -6087,8 +6204,12 @@ fn atom_array(d: &Data, i: usize) -> Array {
 /// The atoms of two arrays of the same shape, in row-major order. A boxed
 /// atom is compared by its contents, which is where the ordering recurses.
 fn cmp_atoms(x: &Array, y: &Array, ord: Grading) -> std::cmp::Ordering {
+    cmp_atoms_n(x, y, x.count(), ord)
+}
+
+/// The first `n` atoms of each array, which must hold at least that many.
+fn cmp_atoms_n(x: &Array, y: &Array, n: usize, ord: Grading) -> std::cmp::Ordering {
     use std::cmp::Ordering::Equal;
-    let n = x.count();
     if n == 0 {
         return Equal;
     }
@@ -6896,13 +7017,53 @@ pub(crate) fn catenate(
 /// `1 0 1 # 5` is `5 5` and `1 0 1 # ,5` is a length error. A negative
 /// count is APL's: it contributes that many fills. J has no such reading
 /// and refuses it.
+/// `` x u`v`w} y ``: each part computes one of the amend's arguments.
+fn amend_gerund(
+    vs: &[Verb],
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let [u, v, w] = vs else {
+        return Err(Error::not_yet("a gerund amend of other than three verbs", span));
+    };
+    let new = u.dyad(x, y, ctx, span)?;
+    let at = v.dyad(x, y, ctx, span)?;
+    let into = w.dyad(x, y, ctx, span)?;
+    amend(&at, &new, &into, ctx.cfg.near(), span)
+}
+
+/// J's complex replication counts, as pairs of copies and fills. Both
+/// halves have to be non-negative whole numbers: `1j2` is one copy and two
+/// fills, and `_1j2` and `1j2.5` are no count at all.
+fn complex_counts(x: &Array, near: NearInt, span: Span) -> Result<Vec<(i64, i64)>> {
+    let mut tmp = Vec::new();
+    let parts = borrow_cx(&x.to_row_major().data, &mut tmp).to_vec();
+    let whole = |v: f64| -> Result<i64> {
+        let n = near.round(v).filter(|n| *n >= 0).ok_or_else(|| {
+            Error::domain("replication counts must be nonnegative whole numbers", span)
+        })?;
+        Ok(n)
+    };
+    parts.iter().map(|c| Ok((whole(c[0])?, whole(c[1])?))).collect()
+}
+
 fn copy_items(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<Array> {
-    let counts = x
-        .to_i64_vec_near(near)
-        .ok_or_else(|| Error::domain("replication counts must be integers", span))?;
-    if !apl && counts.iter().any(|&c| c < 0) {
-        return Err(Error::domain("replication counts must be nonnegative", span));
-    }
+    // Each count is a number of copies and a number of fills to follow
+    // them. J spells the pair as one COMPLEX count — `1j2 # 'a'` is an `a`
+    // and two spaces — and APL spells a run of fills as a negative count.
+    let counts: Vec<(i64, i64)> = if !apl && x.dtype() == DType::Complex {
+        complex_counts(x, near, span)?
+    } else {
+        let plain = x
+            .to_i64_vec_near(near)
+            .ok_or_else(|| Error::domain("replication counts must be integers", span))?;
+        if !apl && plain.iter().any(|&c| c < 0) {
+            return Err(Error::domain("replication counts must be nonnegative", span));
+        }
+        plain.iter().map(|&c| if c < 0 { (0, -c) } else { (c, 0) }).collect()
+    };
     // A scalar right argument stands in for every count, and in APL so does
     // an argument of ONE item along the axis: `2 0 1/,5` is `5 5 5`, where
     // J's `#` calls the same pair a length error.
@@ -6920,20 +7081,23 @@ fn copy_items(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Res
     }
     // Items, not elements: an item of zero elements still costs a trip
     // round the loop, so the ceiling applies to whichever is larger.
-    let items: u128 = per.iter().map(|&c| c.unsigned_abs() as u128).sum();
+    let items: u128 = per.iter().map(|&(c, f)| c as u128 + f as u128).sum();
     let total = crate::limits::count(items * m.max(1) as u128, span)? / m.max(1);
+    // APL's fill is the argument's prototype; J's is the type's own fill,
+    // so a boxed argument gets `a:` rather than a zeroed copy of an item.
     let fill = if apl { prototype_of(y) } else { None };
     let mut data = Data::empty(y.dtype());
-    for (i, &c) in per.iter().enumerate() {
+    for (i, &(copies, fills)) in per.iter().enumerate() {
         // A scalar y stands in for every count.
         let src = if scalar_y { 0 } else { i };
-        for _ in 0..c.unsigned_abs() {
+        for _ in 0..copies {
             for k in 0..m {
-                if c < 0 {
-                    push_gap(&mut data, &fill);
-                } else {
-                    push_elem(&mut data, &y.data, src * m + k);
-                }
+                push_elem(&mut data, &y.data, src * m + k);
+            }
+        }
+        for _ in 0..fills {
+            for _ in 0..m {
+                push_gap(&mut data, &fill);
             }
         }
     }
@@ -11228,10 +11392,25 @@ fn amend(m: &Array, x: &Array, y: &Array, near: NearInt, span: Span) -> Result<A
     if y.rank() == 0 {
         return Err(Error::new(ErrorKind::Rank, "cannot amend a scalar", Some(span)));
     }
-    // A boxed m is J's index specification, the same one `{` reads.
-    if let Some(spec) = m.as_boxes().and_then(<[Array]>::first) {
-        let spec = index_spec(spec, y, near, span)?;
-        return amend_spec(&spec, x, y, span);
+    // A boxed m is J's index specification, the same one `{` reads — and
+    // each ITEM of it is one specification of its own, so `(0 1; 2 0)}`
+    // amends two cells and takes one replacement for each.
+    if let Some(items) = m.as_boxes() {
+        // A LIST of them holds one simple index array each; only a boxed
+        // SCALAR m reaches several axes at once, and the reference refuses
+        // a nested item in a list (`9 ((<0);(<1))} i.3 3` is a domain
+        // error there while the same m selects with `{`).
+        if m.rank() > 0 && items.iter().any(|it| it.dtype() == DType::Box) {
+            return Err(Error::domain(
+                "an index specification in a list of them holds integers, not boxes",
+                span,
+            ));
+        }
+        let specs: Vec<Spec> = items
+            .iter()
+            .map(|it| index_spec(it, y, near, span))
+            .collect::<Result<_>>()?;
+        return amend_spec(&merge_specs(&specs, m, span)?, x, y, span);
     }
     let idx = m
         .to_i64_vec_near(near)
@@ -11249,7 +11428,10 @@ fn amend(m: &Array, x: &Array, y: &Array, near: NearInt, span: Span) -> Result<A
         at.push(k as usize);
     }
     let cell = y.item_size();
-    let per_index = if x.count() == cell {
+    // A single value fills a whole item, however large the item is:
+    // `9 (1 1)} 3 3$0` writes 9 across the row it names.
+    let spread = x.count() == 1 && cell != 1;
+    let per_index = if spread || x.count() == cell {
         false
     } else if x.count() == cell * at.len() {
         true
@@ -11291,7 +11473,7 @@ fn amend(m: &Array, x: &Array, y: &Array, near: NearInt, span: Span) -> Result<A
         match slot {
             Some(n) => {
                 for e in 0..cell {
-                    push_elem(&mut data, &src, n * cell + e);
+                    push_elem(&mut data, &src, if spread { 0 } else { n * cell + e });
                 }
             }
             None => {
@@ -12198,6 +12380,96 @@ fn index_spec(content: &Array, y: &Array, near: NearInt, span: Span) -> Result<S
     Ok(Spec { width, cells, shape })
 }
 
+/// The specifications the items of one boxed `m` hold, read as a single
+/// one: the cells run in m's own order, and m's shape stands in front of
+/// what each specification contributes. A boxed SCALAR m is one
+/// specification and comes back unchanged.
+///
+/// They have to reach the same number of axes: cells of different sizes
+/// could not be replaced by one value each.
+fn merge_specs(specs: &[Spec], m: &Array, span: Span) -> Result<Spec> {
+    let Some(first) = specs.first() else {
+        return Err(Error::domain("an index specification is empty", span));
+    };
+    if specs.iter().any(|s| s.width != first.width) {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "the index specifications reach different numbers of axes",
+            Some(span),
+        ));
+    }
+    let mut shape = m.shape.clone();
+    shape.extend_from_slice(&first.shape);
+    let cells = specs.iter().flat_map(|s| s.cells.iter().cloned()).collect();
+    Ok(Spec { width: first.width, cells, shape })
+}
+
+/// `f@g y` (Dyalog's at): y with the positions g names changed by f.
+///
+/// The right operand says WHERE. A value is a list of indices, read at the
+/// dialect's index origin; a function is applied to y and its answer is a
+/// boolean mask over y's items, a 1 marking one to change.
+///
+/// The left operand says WHAT. A value replaces the selected items — one
+/// value for all of them, or one each; a function is applied to the whole
+/// selection at once and its result goes back where the selection came
+/// from.
+fn at(left: &Operand, right: &Operand, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+    let origin = ctx.cfg.rules.origin;
+    let near = ctx.cfg.near();
+    let picks: Vec<i64> = match right {
+        Operand::Value(a) => a
+            .to_i64_vec_near(near)
+            .ok_or_else(|| Error::domain("@'s positions are integers", span))?
+            .iter()
+            .map(|&i| i - origin)
+            .collect(),
+        Operand::Func(g) => {
+            let mask = g.monad(y, ctx, span)?;
+            let bits = mask
+                .to_i64_vec_near(near)
+                .ok_or_else(|| Error::domain("@'s selection is a boolean array", span))?;
+            if bits.len() != y.items() {
+                return Err(Error::new(
+                    ErrorKind::Length,
+                    format!("@'s selection has {} item(s) for {} item(s)", bits.len(), y.items()),
+                    Some(span),
+                ));
+            }
+            bits.iter()
+                .enumerate()
+                .filter(|(_, b)| **b != 0)
+                .map(|(i, _)| i as i64)
+                .collect()
+        }
+    };
+    let at_arr = Array::from_i64(picks.clone());
+    let new = match left {
+        Operand::Value(a) => (**a).clone(),
+        Operand::Func(f) => {
+            let chosen = at_selection(&picks, y, span)?;
+            f.monad(&chosen, ctx, span)?
+        }
+    };
+    amend(&at_arr, &new, y, near, span)
+}
+
+/// The items of `y` at the (already origin-corrected) indices `idx`.
+fn at_selection(idx: &[i64], y: &Array, span: Span) -> Result<Array> {
+    let n = y.items() as i64;
+    let mut cells = Vec::with_capacity(idx.len());
+    for &i in idx {
+        if i < 0 || i >= n {
+            return Err(Error::domain(
+                format!("@ reaches position {i} of {n} item(s)"),
+                span,
+            ));
+        }
+        cells.push(y.item(i as usize));
+    }
+    assemble(&[idx.len()], cells, span)
+}
+
 /// The offset of a cell's first element, given the argument's strides.
 fn spec_offset(st: &[usize], cell: &[usize]) -> usize {
     cell.iter().enumerate().map(|(k, &p)| p * st[k]).sum()
@@ -12223,7 +12495,10 @@ fn select_spec(spec: &Spec, y: &Array) -> Array {
 /// which is either one cell spread over all of them or one cell each.
 fn amend_spec(spec: &Spec, x: &Array, y: &Array, span: Span) -> Result<Array> {
     let size: usize = y.shape[spec.width..].iter().product();
-    let per_cell = if x.count() == size {
+    // A single value fills whichever cells the specification names, however
+    // large they are: `0 (<1)} i.3 3` blanks a whole row.
+    let spread = x.count() == 1 && size != 1;
+    let per_cell = if spread || x.count() == size {
         false
     } else if x.count() == size * spec.cells.len() {
         true
@@ -12254,7 +12529,13 @@ fn amend_spec(spec: &Spec, x: &Array, y: &Array, span: Span) -> Result<Array> {
     for (n, cell) in spec.cells.iter().enumerate() {
         let at = spec_offset(&st, cell);
         for e in 0..size {
-            plan[at + e] = Some(if per_cell { n * size + e } else { e });
+            plan[at + e] = Some(if spread {
+                0
+            } else if per_cell {
+                n * size + e
+            } else {
+                e
+            });
         }
     }
     let mut data = Data::empty(t);

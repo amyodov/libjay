@@ -1831,6 +1831,14 @@ line of `crates/libjay/tests/corpus/apl/divergences.txt`, which asserts that
 they keep disagreeing — a silent convergence is a test failure, not a quiet
 win. Everything else in the corpus agrees.
 
+`A∘f` binds the array as f's LEFT argument here — Dyalog's bind, and what
+J's `m&v` does with the same shape. GNU APL reads the `∘` between two
+values as its matrix product and takes it against f's MONADIC answer, so
+`1∘+ 10 20 30` is `10 20 30` there and `11 21 31` here, and `2∘× 3 4 5` is
+`2 2 2` there and `6 8 10` here. Where neither operand is a function the
+matrix product is what libjay answers too, so the reading libjay does not
+follow is still reachable.
+
 libjay answers an OVERFLOW where GNU APL refuses one:
 
 - `1E308×2`, `1E308×1E308` and `2⋆1E10` are `∞` here and DOMAIN ERROR
@@ -2001,6 +2009,18 @@ sections above is also collected here.
   atoms to separate them are ordered there by the item they WOULD have held:
   a nested empty's prototype, and for a simple one the fill its type
   implies.
+- `$:` in a TACIT verb: the reference makes it name the largest verb
+  containing it, and libjay resolves it against the explicit definition it
+  stands in. A gerund may name it now (`` (base`$:)@.test ``, which is how
+  a recursion is written with an agenda), and applying one outside a
+  definition says "a self-reference in a tacit verb" rather than calling it
+  an error in the program.
+- The MONADIC gerund amend, `` u`v`w} y ``: the reference gives it a
+  meaning that is not the amend at all (`` (0:`0:`]}) 1 2 3 `` is `1`),
+  and what it is has not been worked out. The dyad — u the replacement, v
+  the indices, w the array they go into — is implemented.
+- APL's dyadic `@`: `x f@g y`, where both operands read the left argument
+  too. The monad is implemented.
 - An explicit modifier whose body derives the modifier itself is refused:
   libjay derives at parse time, so the body would be parsed for ever.
   Recursion inside the derived verb's own body, by `$:` or by a verb's name,

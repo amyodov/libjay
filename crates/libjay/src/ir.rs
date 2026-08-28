@@ -34,6 +34,11 @@ pub enum Expr {
     /// Yields the assigned value in expression position; a whole sentence
     /// that is an assignment displays nothing at the top level.
     Assign { name: String, value: Box<Expr>, scope: Scope, span: Span },
+    /// APL `(a b)←values`: distributed assignment. Each name takes the
+    /// item of the value that stands in its place, and a scalar value goes
+    /// to every one of them. The whole expression yields the value, as a
+    /// plain assignment does.
+    AssignMany { names: Vec<String>, value: Box<Expr>, scope: Scope, span: Span },
     /// APL `A[i;j]←v`: the named value with the part the brackets select
     /// replaced. The name is read, a copy is written, and the copy takes
     /// the name's place. An elided slot selects its whole axis.
@@ -213,7 +218,9 @@ impl Expr {
                 | Expr::VerbDef { .. }
                 | Expr::Input { .. }
                 | Expr::ModDef { .. } => Vec::new(),
-                Expr::Assign { value, .. } | Expr::PrintPass { value, .. } => vec![value],
+                Expr::Assign { value, .. }
+                | Expr::AssignMany { value, .. }
+                | Expr::PrintPass { value, .. } => vec![value],
                 Expr::AmendIndex { slots, value, .. } => {
                     slots.iter().flatten().chain(std::iter::once(&**value)).collect()
                 }
@@ -235,6 +242,7 @@ impl Expr {
             Expr::Control(_, s) => *s,
             Expr::AmendIndex { span, .. } | Expr::Input { span, .. } => *span,
             Expr::Assign { span, .. }
+            | Expr::AssignMany { span, .. }
             | Expr::Monad { span, .. }
             | Expr::Dyad { span, .. }
             | Expr::PrintPass { span, .. }
@@ -254,6 +262,7 @@ impl Expr {
             Expr::Control(_, s) => *s = to,
             Expr::AmendIndex { span, .. } | Expr::Input { span, .. } => *span = to,
             Expr::Assign { span, .. }
+            | Expr::AssignMany { span, .. }
             | Expr::Monad { span, .. }
             | Expr::Dyad { span, .. }
             | Expr::PrintPass { span, .. }
@@ -271,6 +280,7 @@ impl Expr {
         matches!(
             self,
             Expr::Assign { .. }
+                | Expr::AssignMany { .. }
                 | Expr::AmendIndex { .. }
                 | Expr::PrintPass { .. }
                 | Expr::Elided { .. }
@@ -286,7 +296,13 @@ impl Expr {
     /// level `is_silent` gets to those two first: there the sequence keeps
     /// no value at all.
     pub(crate) fn is_shy(&self) -> bool {
-        matches!(self, Expr::Assign { .. } | Expr::AmendIndex { .. } | Expr::PrintPass { .. })
+        matches!(
+            self,
+            Expr::Assign { .. }
+                | Expr::AssignMany { .. }
+                | Expr::AmendIndex { .. }
+                | Expr::PrintPass { .. }
+        )
     }
 
     /// Whether this sentence ends by APPLYING a verb, so that the
@@ -1089,6 +1105,56 @@ fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
     Ok(v)
 }
 
+/// `(a b)←values`: each name takes the item of the value that stands where
+/// it does, and a scalar goes to every one of them.
+///
+/// Its own function rather than an arm of `eval_node`'s match: the
+/// evaluator recurses through that match, and every local it holds is
+/// stack a recursion pays for at every level.
+#[inline(never)]
+fn assign_many(
+    names: &[String],
+    value: &Expr,
+    scope: Scope,
+    ctx: &mut Ctx<'_>,
+    rec: &mut Option<Trace>,
+    span: Span,
+) -> Result<Array> {
+    let v = eval(value, ctx, rec)?;
+    if v.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!(
+                "distributed assignment to {} names takes a scalar or a vector, not a rank-{} value",
+                names.len(),
+                v.rank()
+            ),
+            Some(span),
+        ));
+    }
+    if v.rank() == 0 {
+        for n in names {
+            ctx.env.assign(n.clone(), v.clone(), scope);
+        }
+        return Ok(v);
+    }
+    if v.items() != names.len() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "distributed assignment to {} names from {} value(s)",
+                names.len(),
+                v.items()
+            ),
+            Some(span),
+        ));
+    }
+    for (i, n) in names.iter().enumerate() {
+        ctx.env.assign(n.clone(), crate::verb::open_cell(&v.item(i)), scope);
+    }
+    Ok(v)
+}
+
 fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
     match e {
         Expr::Const(a, _) => Ok(a.clone()),
@@ -1100,6 +1166,9 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
             let v = eval(value, ctx, rec)?;
             ctx.env.assign(name.clone(), v.clone(), *scope);
             Ok(v)
+        }
+        Expr::AssignMany { names, value, scope, span } => {
+            assign_many(names, value, *scope, ctx, rec, *span)
         }
         Expr::AmendIndex { name, slots, value, origin, scope, span } => {
             let base = ctx.env.get(name).ok_or_else(|| {

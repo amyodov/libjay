@@ -23,10 +23,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 151 green / 24 partial / 2 absent by design, of 177 valences in the
+**J: 150 green / 25 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
-**APL: 103 green / 21 partial / 3 absent by design, of 127 valences in the
+**APL: 103 green / 22 partial / 3 absent by design, of 128 valences in the
 inventory. Nothing in APL's primitive tables is red.**
 
 ## J — verbs
@@ -84,7 +84,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | Spelling | Monad | Dyad |
 |---|---|---|
 | `$` | 🟢 shape of; extended where the argument is | 🟢 reshape, laying out ITEMS |
-| `#` | 🟢 tally; extended where the argument is | 🟢 copy; `#^:_1` is the expansion that undoes it |
+| `#` | 🟢 tally; extended where the argument is | 🟢 copy; a COMPLEX count is copies and fills — `1j2 # 'a'` is an `a` and two spaces — and `#^:_1` is the expansion that undoes it |
 | `,` | 🟢 ravel | 🟢 append; unequal item shapes are overtaken, which fills, and a rank gap of any width makes the lower-ranked side one item. An operand with no elements takes the other side's type rather than clashing with it |
 | `,.` | 🟢 ravel items; never below rank 2, so `$ ,. 5` is `1 1` | 🟢 stitch |
 | `,:` | 🟢 itemize | 🟢 laminate |
@@ -108,7 +108,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `I.` | 🟢 indices | 🟢 interval index; boxed bounds are ordered by the total array ordering |
 | `e.` | 🟢 raze in | 🟢 member of |
 | `E.` | — | 🟢 member of interval; two atoms are read as one-item lists |
-| `/:` | 🟢 grade up; boxes by the total array ordering | 🟢 sort; the grade indexes x's ITEMS, so an atom answers only the first |
+| `/:` | 🟢 grade up; boxes by the total array ordering — class, then rank, then the ITEMS one by one, and only then the shape, so `<'aa'` precedes `<,'b'` | 🟢 sort; the grade indexes x's ITEMS, so an atom answers only the first |
 | `\:` | 🟢 grade down; boxes by the total array ordering | 🟢 sort; same |
 | `A.` | 🟢 anagram index | 🟢 anagram |
 | `C.` | 🟢 cycle-direct; a short direct permutation is the abbreviated one | 🟢 permute; direct, abbreviated, an atom, or cyclic — a cycle's element counts back from the end where it is negative, and every one is checked before the permutation is built |
@@ -147,13 +147,13 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `\.` | 🟢 suffix | 🟢 outfix; a piece of one item applies nothing, and only the five folds J has special code for (`+/` `*/` `<./` `>./` `+./`) type the whole argument first |
 | `/.` | 🟢 oblique | 🟢 key |
 | `~` | 🟢 reflex | 🟢 passive |
-| `}` | 🟢 noun or verb operand; a boxed index specification too | 🟢 the same |
+| `}` | 🟡 noun or verb operand, a boxed index specification, and a LIST of them; a gerund operand has a monadic valence in the reference that is named here | 🟢 the same, plus the gerund `` u`v`w} ``: u makes the replacement, v the indices, w the array they go into |
 
 ## J — conjunctions
 
 | Spelling | Status |
 |---|---|
-| `"` rank | 🟡 noun ranks; `u"v` not yet |
+| `"` rank | 🟡 noun ranks on the right, and a noun on the LEFT is the constant verb `m"n` — it ignores both arguments and answers m at rank n; `u"v` not yet |
 | `@` atop | 🟢 |
 | `@:` at | 🟢 |
 | `&` bond / compose | 🟡 verbs compose, literal nouns bond; computed nouns not yet |
@@ -162,7 +162,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `&.:` under | 🟢 the same on whole arguments, over the same table |
 | `^:` power | 🟡 a literal count, a list of them (mixed signs included), `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives — which obverse a negative count runs is settled when the arguments arrive, so `x u^:_1 y` undoes the bond `x&u` and the monad undoes u; a computed count not yet |
 | `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
-| `:` explicit definition | 🟡 `1 :`, `2 :`, `3 :`, `4 :`, and the `m : 0` body on the lines below; `13 :` not yet |
+| `:` explicit definition | 🟡 `0 :` (the noun definition, whose lines below are its text), `1 :`, `2 :`, `3 :`, `4 :`, the `m : 0` body on the lines below, and `u : v`, which joins two VERBS into one ambivalent verb; `13 :` not yet |
 | `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named. The left rank is finite — 2 for the rectangles, 1 for the frets — so a longer left argument is a FRAME of cuts, one per cell. An empty fret list is the whole argument in one piece; a BOXED left argument — J's per-axis frets — is named |
 | `!.` fit | 🟡 the tolerance meaning, and the fill for `\|.` (the shift); a fill on any other verb is named |
 | `!:` foreign | 🟡 `1!:1` (read a line from stdin), `1!:2` (write a line to stdout), `3!:0` (type code) and `5!:1` (the atomic representation of a name); the ones that reach a file, a script, the host, the clock or a shared library are ⚪ closed by the sandbox, and the ones that only compute are 🔴 named |
@@ -338,16 +338,17 @@ conjunctions above:
 | `/` `⌿` replicate (after an operand) | 🟢 a negative count leaves that many prototype fills |
 | `\` `⍀` scan | 🟢 the reduce over each prefix, so it collects the same enclosures |
 | `\` `⍀` expand (after an operand) | 🟢 the gap holds the first item's prototype. A boolean mask; `expansion` names Dyalog's reading, where any integer vector serves — a positive count repeats that item, a negative one leaves that many fills, 0 means `¯1`, and the result is `+/1⌈|X` items long |
-| `¨` each | 🟢 |
+| `¨` each | 🟢 including results of different depth: an each that answers a number for one item and a list for another frames them into the nested vector such a result is |
 | `⍨` commute | 🟢 |
 | `∘.` outer product | 🟢 the function between every pair of ELEMENTS whatever its rank, each disclosed on the way in and the result enclosed on the way into the table: `1 2∘.,3 4` is a two-by-two of pairs, `¯1 0 1∘.⌽⊂m` rotates the matrix |
 | `⍤` rank / atop | 🟡 a rank specification, or Dyalog's atop with a function operand; no oracle for the latter |
 | `⍣` power | 🟡 literal count — negatives included, answered from the obverse table, and a dyadic `x f⍣¯n y` undoes the bond `x∘f` — or a function operand (`f⍣≡`); a count computed at run time is named. GNU APL implements no negative MONADIC power, so those rows are recorded against Dyalog in `corpus/apl/dyalog-operators.txt`; it does answer the dyadic ones, and reads `x-⍣¯1 y` differently, pinned in `corpus/apl/divergences.txt` |
-| `∘` beside | 🟡 Dyalog's `f∘g`, and `A∘f`/`f∘A` with an array bound, have no oracle: GNU APL reads `∘` between two VALUES as the matrix product instead, which libjay also answers — a left vector is a row and a right one a column, a scalar operand makes it the element-wise `×`, and inner lengths that differ are padded with zeros |
+| `∘` beside | 🟡 Dyalog's `f∘g` has no oracle: GNU APL rejects two function operands. `A∘f` and `f∘A` bind the array as f's argument here — Dyalog's bind, and J's `m&v` — where GNU APL DOES answer, by reading the `∘` as its matrix product against f's monadic result (`2∘× 3 4 5` is `2 2 2` there); the divergence is pinned in `corpus/apl/divergences.txt`. Where neither operand is a function the matrix product is what libjay answers too — a left vector is a row and a right one a column, a scalar operand makes it the element-wise `×`, and inner lengths that differ are padded with zeros |
 | `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🟡 no oracle: GNU APL rejects it; Dyalog's `f⍛g` |
 | `⍢` under | 🟡 no oracle, and no reference either: GNU APL rejects the glyph and Dyalog 20.0 answers `SYNTAX ERROR: Invalid token` (recorded in `corpus/apl/dyalog-operators.txt`), so ours is an extension — `g⍣¯1 ⊢ (g x) f (g y)`, over the same obverse table J's `&.:` uses |
 | `⌸` key | 🟡 no oracle: GNU APL rejects it; Dyalog's, with the operand taking the key and its group |
+| `@` at | 🟡 no oracle: GNU APL rejects the glyph; Dyalog's monadic form — a VALUE right operand is the positions, a function's result is a boolean mask over the items, a value left operand replaces what stands there and a function is applied to the selection. The dyadic `x f@g y` is named |
 | `⌺` stencil | 🟡 no oracle: GNU APL rejects it; Dyalog's monadic-window form — one size per leading axis, the windows centred and the edges filled. The two-row form that also gives the movement is named |
 | `.` inner product | 🟢 `f.g` is `f/¨` over the outer product: `+.×` is the matrix product, `∧.=` asks which rows match. Each vector along x's last axis meets each vector along y's first under g, f folds the result, and the each encloses it. `Dialect.inner_each` names Dyalog's reading, which puts the each on the pairing instead — g meets one element from each side and the fold's own value is the cell |
 | `⍠` variant | 🟡 one dialect setting overridden for one application: `⎕CT` (the principal option, so a bare number sets it) and `⎕IO`, as literal options — `=⍠0`, `⍳⍠('IO' 0)`. Another option, or one that is not settled when the program is compiled, is named. No oracle: GNU APL rejects the glyph, and Dyalog takes a variant only on its search-and-replace family — both `=⍠0` and `⍳⍠('IO' 0)` are a DOMAIN ERROR there, recorded in `corpus/apl/dyalog-operators.txt` |
@@ -366,7 +367,7 @@ conjunctions above:
 | Dfn guards `cond:expr`, `⍺←default`, `∇` self-reference | 🟡 guards and `∇` have no oracle (absent from GNU APL); `⍺←` follows the published default-only rule where GNU APL assigns unconditionally (recorded divergence) |
 | Dfn operators `⍺⍺` / `⍵⍵` | 🟡 no oracle: GNU APL has neither; a dfn naming one is an operator, and naming the operator keeps it one |
 | SHY results | 🟡 no oracle: GNU APL has no dfns to have them; a definition whose answer came from an assignment answers shyly, `Program::run_detail` reports it, and an operator that ends by applying the definition passes it on (`{a←⍵×2}¨1 2 3`) |
-| Tradfns `∇ Z←L F R;locals` … `∇` | 🟢 including APL's global-by-default scope rule, and the niladic form, which naming calls |
+| Tradfns `∇ Z←L F R;locals` … `∇` | 🟢 including APL's global-by-default scope rule, the niladic form, which naming calls, and a body whose lines carry the `∇` editor's line numbers (`[1]`, `[1.1]`), which is how every printed definition is written |
 | Trains (forks and atops) | 🟡 no oracle: GNU APL rejects them; Dyalog's rules, shipped as an extension (`Dialect.trains`, on by default) — 2-train atop, 3-train fork, a value left tine, longer trains grouped from the right |
 | Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included |
 | Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
@@ -383,8 +384,10 @@ conjunctions above:
 | `"strings"` with C escapes | 🟢 always a vector, where `'Q'` is a scalar; `\a \b \f \n \r \t \v`, `\\`, `\"` and `\0` are read, and `\` before anything else keeps its backslash |
 | `$ff` hexadecimal literals | 🟢 one scalar in either case of letter, stranding as a decimal literal does |
 | Conditional `test →→ body ←→ otherwise ←←` | 🟢 the test is read as strictly as a dfn guard's, each marker may end a line, and a clause that is not taken shows nothing. Only the block model divides us from GNU APL there: a clause of several statements displays the last one's value, not every one |
+| Distributed assignment (`(a b)←1 2`) | 🟢 the names in the brackets share the value out between them — one item each, or a scalar to all of them; a rank above one and a length that does not match are refused as the reference refuses them |
 | Stranding a specification (`3 V←1 2`) | 🟢 specification binds tighter than a strand item, so the assignment's value is one item |
 | `'strings'`, `⍝` comments, `⋄` and newline separators | 🟢 |
+| Unicode look-alike glyphs (`∣ ∈ ∼ ⋆ −`) | 🟢 read as `\| ∊ ~ * -`, which is what the reference does with them; harvested APL is full of them, and the list is closed — `∗`, `∸`, `‾` and `∅` are refused there and here |
 | `{name}` host-data interpolation | 🟢 |
 
 ## APL — the Dyalog line
@@ -392,9 +395,9 @@ conjunctions above:
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
 APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
 a preset of the dialect object rather than a second engine:
-`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 2533 of the
-2574 expressions Dyalog 20.0 has been recorded on — the default answers
-2278 of them — and the 41 it does not are itemised below.
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 2544 of the
+2585 expressions Dyalog 20.0 has been recorded on — the default answers
+2289 of them — and the 41 it does not are itemised below.
 
 That is a GATE, not a measurement: `cargo test -p libjay --test
 oracle_dyalog` replays the recorded `dyalog:` column under the preset and

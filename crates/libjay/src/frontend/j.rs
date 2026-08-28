@@ -279,6 +279,16 @@ fn take_colon_definition(
         .ok_or_else(|| Error::parse("an explicit definition starts with a number", span))?;
     let body_arr = as_const(&sentence[at + 1]).cloned().expect("checked by the finder");
     let body_span = sentence[at + 1].span();
+    // `0 : 'text'` is the noun definition whose body is written inline: the
+    // string IS the value. The `0 : 0` form never reaches here — the lexer
+    // takes the lines below it as text before anything reads them.
+    if valence == 0.0 {
+        if !matches!(body_arr.data, Data::Char(_)) {
+            return Err(Error::parse("a noun definition takes 0 or a string", body_span));
+        }
+        sentence.splice(at - 1..at + 2, [Frag::Noun(Expr::Const(body_arr, span))]);
+        return Ok(());
+    }
     let (dyadic, modifier) = match valence {
         3.0 => (false, None),
         4.0 => (true, None),
@@ -1335,13 +1345,51 @@ fn lex(src: &SourceParts, char_bytes: bool) -> Result<Vec<Vec<Frag>>> {
     for seg in &src.segments {
         match seg {
             Segment::Text { text, offset } => {
+                let lines: Vec<&str> = text.split('\n').collect();
                 let mut pos = 0usize;
-                for (n, line) in text.split('\n').enumerate() {
+                let mut n = 0usize;
+                while n < lines.len() {
+                    let line = lines[n];
                     if n > 0 && !cur.is_empty() {
                         sentences.push(std::mem::take(&mut cur));
                     }
                     lex_line(line, offset + pos, char_bytes, &mut cur)?;
                     pos += line.len() + 1;
+                    n += 1;
+                    // `0 : 0` is J's here-document: the lines below it, up
+                    // to a lone `)`, are its VALUE and not its source, so
+                    // they are taken whole before anything lexes them.
+                    if noun_definition_ends(&cur) {
+                        let open = pos;
+                        let mut body = String::new();
+                        let mut closed = false;
+                        while n < lines.len() {
+                            let l = lines[n];
+                            pos += l.len() + 1;
+                            n += 1;
+                            if l.trim() == ")" {
+                                closed = true;
+                                break;
+                            }
+                            body.push_str(l);
+                            body.push('\n');
+                        }
+                        if !closed {
+                            return Err(Error::parse(
+                                "this noun definition's body has no closing `)`",
+                                Span::new(offset + open, offset + pos),
+                            ));
+                        }
+                        let span = Span::merge(
+                            cur[cur.len() - 3].span(),
+                            Span::new(offset + open, offset + pos),
+                        );
+                        cur.truncate(cur.len() - 3);
+                        cur.push(Frag::Noun(Expr::Const(
+                            literal_text(&body, char_bytes),
+                            span,
+                        )));
+                    }
                 }
             }
             Segment::Param { index, offset, len } => {
@@ -1354,6 +1402,32 @@ fn lex(src: &SourceParts, char_bytes: bool) -> Result<Vec<Vec<Frag>>> {
         sentences.push(cur);
     }
     Ok(sentences)
+}
+
+/// Whether these fragments end with `0 : 0`, the noun definition. Only the
+/// pair of literal zeros is one: `3 : 0` reads J source below it, and
+/// `0 : 'text'` carries its own body.
+fn noun_definition_ends(cur: &[Frag]) -> bool {
+    let zero = |f: &Frag| {
+        as_const(f).is_some_and(|a| a.rank() == 0 && a.to_f64_vec().as_deref() == Some(&[0.0]))
+    };
+    match cur {
+        [.., m, c, n] => {
+            zero(m) && matches!(c, Frag::Conj(Modifier::Prim(":"), _)) && zero(n)
+        }
+        _ => false,
+    }
+}
+
+/// Source text as J's literal type holds it: one item per character, or per
+/// BYTE where a quoted literal is a byte vector. Always a vector, however
+/// short — a noun definition's body is a list of lines, not one character.
+fn literal_text(text: &str, char_bytes: bool) -> Array {
+    let mut chars: Vec<char> = text.chars().collect();
+    if char_bytes {
+        chars = literal_bytes(&chars);
+    }
+    Array::new(vec![chars.len()], Data::Char(chars.into()))
 }
 
 /// A numeric word's value. Kept apart from `Array` so that a list of words
@@ -2238,6 +2312,21 @@ fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
     // computes them from the arguments instead.
     if glyph == "}" {
         if !u.is_real_verb() {
+            // A GERUND is boxed data too, and it is not a list of indices:
+            // `` u`v`w} `` is the amend whose three verbs compute the
+            // replacement, the indices and the array they go into.
+            if let Some(m) = noun_in_scope(&u, scope)
+                && is_gerund(&m)
+            {
+                let verbs = gerund_verbs(&u, scope, span)?;
+                if verbs.len() != 3 {
+                    return Err(Error::not_yet(
+                        "a gerund amend of other than three verbs (u`v`w})",
+                        span,
+                    ));
+                }
+                return Ok(Frag::Verb(VerbFrag::V(Verb::AmendGerund(verbs)), span));
+            }
             let m = noun_value(&u)
                 .ok_or_else(|| Error::not_yet("amend over a computed index", span))?;
             return Ok(Frag::Verb(VerbFrag::V(Verb::Amend(m)), span));
@@ -2315,11 +2404,21 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
     };
     match glyph {
         "\"" => {
-            let f = verb_operand(u, span)?;
             if v.is_verb() {
                 return Err(Error::not_yet("verb rank (u\"v)", span));
             }
             let ranks = rank_spec(&v, span)?;
+            // `m"n` is the CONSTANT verb: a noun on the left is the answer
+            // itself, whatever the arguments are, and n says how large a
+            // cell each copy stands for.
+            let f = if u.is_noun() {
+                match noun_value(&u) {
+                    Some(m) => Verb::Constant(m),
+                    None => return Err(Error::not_yet("a computed constant verb (m\"n)", span)),
+                }
+            } else {
+                verb_operand(u, span)?
+            };
             Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(f), ranks)), span))
         }
         "@:" => {
@@ -2547,10 +2646,17 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             }), span))
         }
         "!:" => foreign(&u, &v, span),
-        // `u : v` is J's monad/dyad conjunction. The explicit definitions
-        // spelled `3 : '…'` and `4 : '…'` are read by the lexer and never
-        // reach here.
-        ":" => Err(Error::not_yet("the monad-dyad conjunction (u : v)", span)),
+        // `u : v` is one verb out of two: u is its monad, v its dyad. The
+        // explicit definitions spelled `3 : '…'` and `4 : '…'` are read by
+        // the lexer and never reach here.
+        ":" => {
+            let f = verb_operand(u, span)?;
+            let g = verb_operand(v, span)?;
+            Ok(Frag::Verb(
+                VerbFrag::V(Verb::Ambivalent(Box::new(f), Box::new(g))),
+                span,
+            ))
+        }
         _ => Err(Error::not_yet(format!("the conjunction {glyph}"), span)),
     }
 }
@@ -2847,6 +2953,19 @@ fn noun_in_scope(f: &Frag, scope: &Names) -> Option<Array> {
     noun_value(f)
 }
 
+/// Whether this value is a GERUND rather than data: a non-empty boxed
+/// array every item of which is an atomic representation. An index
+/// specification holds integers and never reads as one.
+fn is_gerund(a: &Array) -> bool {
+    match a.as_boxes() {
+        Some(items) => {
+            !items.is_empty()
+                && items.iter().all(|it| crate::gerund::Ar::from_array(it).is_some())
+        }
+        None => false,
+    }
+}
+
 /// The verbs a gerund holds. A lone verb is a gerund of one, and boxed data
 /// is read as the atomic representations it is.
 fn gerund_verbs(f: &Frag, scope: &Names, span: Span) -> Result<Vec<Verb>> {
@@ -2878,6 +2997,12 @@ fn ar_frag(ar: &crate::gerund::Ar, scope: &Names, span: Span) -> Result<Frag> {
         Ar::Prim(word) => {
             if word == "[:" {
                 return Ok(Frag::Verb(VerbFrag::Cap, span));
+            }
+            // `$:` is a primitive with an inflection rather than a table
+            // entry, and a gerund names it: the recursive case of an
+            // agenda is `` (base`$:)@.test ``.
+            if word == "$:" {
+                return Ok(Frag::Verb(VerbFrag::V(Verb::SelfRef), span));
             }
             match verb_for(word) {
                 Some(v) => Ok(Frag::Verb(VerbFrag::V(v), span)),

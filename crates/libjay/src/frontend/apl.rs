@@ -433,6 +433,8 @@ enum OpGlyph {
     Before,
     /// `⌸` key (Dyalog): each distinct major cell with what shares it.
     Key,
+    /// `@` at (Dyalog): the selected positions changed, the rest left alone.
+    At,
     /// `.` between two functions: the inner product, `+.×` above all. The
     /// operand on its right is a function too, as `∘.`'s is.
     Dot,
@@ -457,6 +459,7 @@ impl OpGlyph {
             OpGlyph::Each => '¨',
             OpGlyph::Before => '⍛',
             OpGlyph::Key => '⌸',
+            OpGlyph::At => '@',
             OpGlyph::Dot => '.',
             OpGlyph::Variant => '⍠',
         }
@@ -1004,6 +1007,27 @@ fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
 
 /// A glyph the language has and libjay does not, with the name to report
 /// it under. These are queue positions, not unknown characters.
+/// The Unicode near-twins of five APL glyphs, folded onto the glyph they
+/// stand for. Harvested APL is full of them — a page typeset in a
+/// mathematical font writes the divides sign, the element sign, the tilde
+/// operator, the star operator and the minus sign rather than the APL
+/// characters — and the reference reads all five. The list is closed: the
+/// asterisk operator, dot minus, the overline and the empty set are near
+/// twins too and the reference refuses them, so it refuses them here.
+///
+/// The fold happens where a glyph is read as a symbol, never inside a
+/// character literal, so `'∣'` is still that character.
+fn lookalike(ch: char) -> char {
+    match ch {
+        '\u{2223}' => '|', // DIVIDES for the residue
+        '\u{2208}' => '∊', // ELEMENT OF for membership
+        '\u{223C}' => '~', // TILDE OPERATOR for not/without
+        '\u{22C6}' => '*', // STAR OPERATOR for power
+        '\u{2212}' => '-', // MINUS SIGN for subtract
+        other => other,
+    }
+}
+
 fn queued_glyph(ch: char) -> Option<&'static str> {
     Some(match ch {
         '⌶' => "I-beam (⌶)",
@@ -1028,6 +1052,7 @@ fn op_for(ch: char) -> Option<OpGlyph> {
         '⍥' => Some(OpGlyph::Over),
         '⍢' => Some(OpGlyph::Under),
         '⌺' => Some(OpGlyph::Stencil),
+        '@' => Some(OpGlyph::At),
         '¨' => Some(OpGlyph::Each),
         '⍛' => Some(OpGlyph::Before),
         '⌸' => Some(OpGlyph::Key),
@@ -1203,7 +1228,7 @@ fn lex_text(
             // `L:` at the head of a line is a label: the name stands for
             // that line's number and `→` branches to it. A control word
             // never follows a name, so the two never compete.
-            ':' if matches!(cur.as_slice(), [t] if matches!(t.kind, Tok::Name(_))) => {
+            ':' if is_label_head(cur) => {
                 cur.push(Token { kind: Tok::Colon, span: Span::new(offset + i, offset + i + 1) });
                 i += 1;
             }
@@ -1355,6 +1380,7 @@ fn lex_text(
             }
             _ => {
                 let mut end = i + clen;
+                let ch = lookalike(ch);
                 // `⊤` with a logical glyph after it is one bit-wise
                 // function, and the glyph is not the monad it would be on
                 // its own — none of the six has one.
@@ -1796,6 +1822,40 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             });
             continue;
         }
+        // `@` takes an operand of either part of speech on either side, so
+        // neither the function-to-the-left path nor the value one fits it.
+        if op == OpGlyph::At {
+            let (right, rspan) = at_operand(&mut it, d, t.span)?;
+            // A bracketed VALUE is still bracketed here: the closing pass
+            // collapses a function group and leaves a value one alone.
+            if matches!(out.last().map(|x| &x.kind), Some(Tok::RParen))
+                && let Some(open) = matching_lparen(&out, out.len() - 1)
+                && out.len() == open + 3
+                && literal(&out[open + 1].kind).is_some()
+            {
+                let inner = out.remove(open + 1);
+                let span = Span::merge(out[open].span, out[open + 1].span);
+                out.truncate(open);
+                out.push(Token { kind: inner.kind, span });
+            }
+            let (left, lspan) = match out.pop() {
+                Some(Token { kind: Tok::Func(f), span }) => {
+                    (Operand::Func(Box::new(f)), span)
+                }
+                Some(tok) if literal(&tok.kind).is_some() => (
+                    Operand::Value(Box::new(literal(&tok.kind).expect("checked").clone())),
+                    tok.span,
+                ),
+                _ => {
+                    return Err(Error::parse("@ needs an operand on its left", t.span));
+                }
+            };
+            out.push(Token {
+                kind: Tok::Func(Verb::At { left, right }),
+                span: Span::merge(lspan, rspan),
+            });
+            continue;
+        }
         // `f∘g` and `f⍥g` need a function on both sides; the right one is
         // taken here so the ordinary "operand to the left" path can run.
         if matches!(
@@ -1873,6 +1933,7 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     | OpGlyph::Key
                     | OpGlyph::Dot
                     | OpGlyph::Variant
+                    | OpGlyph::At
                     | OpGlyph::Each => {
                         return Err(Error::parse(
                             format!("{} needs a function to its left", op.glyph()),
@@ -1936,6 +1997,8 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             }
             OpGlyph::Commute => Verb::Commute(Box::new(f)),
             OpGlyph::Key => Verb::KeyPairs(Box::new(f)),
+            // `@` is settled above, where either operand may be a value.
+            OpGlyph::At => return Err(Error::internal("@ folded twice")),
             // `f⍠B`: one setting of the dialect overridden for this
             // application and no other.
             OpGlyph::Variant => {
@@ -2250,6 +2313,86 @@ fn close_paren(out: &mut Vec<Token>, d: Rules) -> Result<()> {
     Ok(())
 }
 
+/// The names inside the brackets of a distributed assignment target. They
+/// stand side by side and nothing else may stand among them: a target is a
+/// list of names, not an expression that happens to yield one.
+fn target_names(toks: &[Token], span: Span) -> Result<Vec<String>> {
+    if toks.is_empty() {
+        return Err(Error::parse("an assignment target names at least one name", span));
+    }
+    let mut names = Vec::with_capacity(toks.len());
+    for t in toks {
+        match &t.kind {
+            Tok::Name(n) => names.push(n.clone()),
+            _ => return Err(Error::parse("assignment target must be a name", t.span)),
+        }
+    }
+    Ok(names)
+}
+
+/// `@`'s right operand, which may be a function, a value, or a
+/// parenthesised group the pass has not reached yet — a `(` is folded when
+/// its `)` arrives, and `@`'s operand stands before that happens.
+fn at_operand(
+    it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
+    d: Rules,
+    span: Span,
+) -> Result<(Operand, Span)> {
+    let one = |tok: Token| -> Result<(Operand, Span)> {
+        match &tok.kind {
+            Tok::Func(f) => Ok((Operand::Func(Box::new(f.clone())), tok.span)),
+            k if literal(k).is_some() => Ok((
+                Operand::Value(Box::new(literal(k).expect("checked").clone())),
+                tok.span,
+            )),
+            _ => Err(Error::parse("@ needs an operand on its right", tok.span)),
+        }
+    };
+    match it.peek().map(|t| &t.kind) {
+        Some(Tok::LParen) => {
+            let open = it.next().expect("peeked");
+            let mut depth = 1usize;
+            let mut inner: Vec<Token> = Vec::new();
+            let mut end = open.span;
+            for tok in it.by_ref() {
+                match tok.kind {
+                    Tok::LParen => depth += 1,
+                    Tok::RParen => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = tok.span;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                inner.push(tok);
+            }
+            if depth != 0 {
+                return Err(Error::parse("unmatched (", open.span));
+            }
+            let mut folded = fold_operators(inner, d)?;
+            let whole = Span::merge(open.span, end);
+            if folded.len() > 1 {
+                // A train inside the brackets is one function; the closing
+                // pass wants the brackets back to see it.
+                folded.insert(0, Token { kind: Tok::LParen, span: open.span });
+                folded.push(Token { kind: Tok::RParen, span: end });
+                close_paren(&mut folded, d)?;
+            }
+            match folded.len() {
+                1 => one(folded.pop().expect("one token")).map(|(o, _)| (o, whole)),
+                _ => Err(Error::not_yet("@ over a computed operand", span)),
+            }
+        }
+        Some(_) => {
+            let tok = it.next().expect("peeked");
+            one(tok)
+        }
+        None => Err(Error::parse("@ needs an operand on its right", span)),
+    }
+}
+
 /// The `(` that `out[close]` closes, counting the pairs between.
 fn matching_lparen(out: &[Token], close: usize) -> Option<usize> {
     let mut depth = 0usize;
@@ -2556,6 +2699,20 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, d: Rules) -> Re
                     }
                     Tok::Quad { quote } => {
                         acc = Expr::PrintPass { value: Box::new(acc), bare: *quote, span };
+                    }
+                    // `(a b)←values`: the names in the brackets share the
+                    // value out between them.
+                    Tok::RParen => {
+                        let l = match_lparen(toks, lo, start - 2)?;
+                        let names = target_names(&toks[l + 1..start - 2], target.span)?;
+                        let span = Span::new(toks[l].span.start, end);
+                        acc = Expr::AssignMany {
+                            names,
+                            value: Box::new(acc),
+                            scope: Scope::Local,
+                            span,
+                        };
+                        start = l + 2;
                     }
                     _ => {
                         return Err(Error::parse(
@@ -3236,13 +3393,48 @@ fn parse_tradfn(
         if line.len() == 1 && matches!(line[0].kind, Tok::Del) {
             break;
         }
-        body_lines.push(line.clone());
+        body_lines.push(strip_line_number(line));
     }
     let close = sentences
         .get(i.saturating_sub(1))
         .and_then(|l| l.first())
         .map_or(open, |t| t.span);
     build_tradfn(&head, &body_lines, Span::merge(open, close), d, verbs)
+}
+
+/// A `∇` body line with the line number the `∇` editor prints in front of
+/// it removed. Every printed APL definition — a book, a wiki page, a
+/// session listing — carries them, and the reference reads such a listing
+/// straight back in, so `[1]` and `[1.1]` are punctuation of the LISTING
+/// and not part of the line. A line that only looks like one (`[1] ← 2`
+/// cannot start a sentence anyway) keeps its brackets: the number has to
+/// be a single non-negative literal and stand at the very front.
+/// Whether a `:` standing after these tokens ends a LABEL: the line so far
+/// is one name, with at most the `∇` editor's line number in front of it.
+fn is_label_head(cur: &[Token]) -> bool {
+    let rest = match cur {
+        [a, b, c, tail @ ..]
+            if matches!(a.kind, Tok::LBracket)
+                && matches!(c.kind, Tok::RBracket)
+                && matches!(&b.kind, Tok::Nums(n) if n.rank() == 0) =>
+        {
+            tail
+        }
+        all => all,
+    };
+    matches!(rest, [t] if matches!(t.kind, Tok::Name(_)))
+}
+
+fn strip_line_number(line: &[Token]) -> Vec<Token> {
+    if line.len() > 3
+        && matches!(line[0].kind, Tok::LBracket)
+        && matches!(line[2].kind, Tok::RBracket)
+        && let Tok::Nums(a) = &line[1].kind
+        && a.rank() == 0
+    {
+        return line[3..].to_vec();
+    }
+    line.to_vec()
 }
 
 /// A definition from its header tokens and one token list per body line —
@@ -3803,6 +3995,17 @@ fn set_scopes(e: &mut Expr, own: &[String]) {
             *scope = pick(name);
             set_scopes(value, own);
         }
+        Expr::AssignMany { names, value, scope, .. } => {
+            // Every name of a distributed target is written by the same
+            // sentence, so they share one scope: local when the definition
+            // declared them, global otherwise.
+            *scope = if names.iter().all(|n| own.iter().any(|o| o == n)) {
+                Scope::Local
+            } else {
+                Scope::Global
+            };
+            set_scopes(value, own);
+        }
         Expr::AmendIndex { name, slots, value, scope, .. } => {
             *scope = pick(name);
             for slot in slots.iter_mut().flatten() {
@@ -4066,9 +4269,12 @@ mod tests {
 
     #[test]
     fn unknown_symbol_is_reported_with_its_position() {
-        let e = err("2 @ 3");
+        let e = err("2 & 3");
+        assert_eq!(e.kind, ErrorKind::NotYet);
+        assert_eq!(e.span, Some(Span::new(2, 3)));
+        let e = err("2 ` 3");
         assert_eq!(e.kind, ErrorKind::Parse);
-        assert_eq!(e.msg, "unknown symbol: @");
+        assert_eq!(e.msg, "unknown symbol: `");
         assert_eq!(e.span, Some(Span::new(2, 3)));
     }
 
@@ -4589,10 +4795,10 @@ mod tests {
 
     #[test]
     fn errors_render_against_the_display_source() {
-        let src = "2 3⍴⍳6\n2 @ 3";
+        let src = "2 3⍴⍳6\n2 ` 3";
         let e = err(src);
         let rendered = e.render(src);
-        assert!(rendered.contains("unknown symbol: @"), "{rendered}");
-        assert!(rendered.contains("2 @ 3"), "{rendered}");
+        assert!(rendered.contains("unknown symbol: `"), "{rendered}");
+        assert!(rendered.contains("2 ` 3"), "{rendered}");
     }
 }
