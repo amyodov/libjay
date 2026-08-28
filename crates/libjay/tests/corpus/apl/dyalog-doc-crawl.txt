@@ -457,3 +457,181 @@
 ⍴(2 2⍴10)⊥2 2⍴1 2 3 4
 0.5⊥1 2
 2 3⊥'ab'
+
+// --- Take and Drop: a left argument shorter than the rank ----------------
+// The counts apply to the LEADING axes; an axis they do not reach is taken
+// whole and dropped from not at all.
+2↑3 4⍴⍳12
+¯2↑3 4⍴⍳12
+1↑2 3⍴'abcdef'
+1↓3 4⍴⍳12
+⍴¯2↑2 3 4⍴⍳24
+⍴1↓2 3 4⍴⍳24
+⍬↑3 4⍴⍳12
+⍴⍬↑3 4⍴⍳12
+⍬↓3 4⍴⍳12
+0↑3 4⍴⍳12
+⍴0↑3 4⍴⍳12
+5↑3 4⍴⍳12
+⍴5↑2 3⍴⍳6
+5↓3 4⍴⍳12
+⍴5↓3 4⍴⍳12
+2 3 4↑3 4⍴⍳12
+2↑5
+2 3↑5
+
+// --- Unique Mask (monadic ≠) over major cells ----------------------------
+// One bit per major cell, and always a vector: rank 0 gives one element and
+// an empty argument gives an empty vector as long as ≢Y.
+≠3 3⍴1 2 3 1 2 3 4 5 6
+≠2 2⍴0
+⍴≠5
+⍴≠0 3⍴0
+≠1 2 1 3
+≠2 3⍴'aabaab'
+≠3 2⍴1 2 1 2 3 4
+≢≠2 3 4⍴⍳24
+
+// --- Expand (\) with a general integer left argument ---------------------
+// A positive count repeats that item, a negative one leaves that many
+// fills, and 0 means ¯1; the result is `+/1⌈|X` items long.
+1 2 1\\1 2 3
+2 2\\'ab'
+¯2\\1
+⍴¯2\\1
+1 ¯2 1\\1 2
+1 ¯1 1\\'ab'
+2 3\\1 2
+⍴2 3\\1 2
+¯3\\⍬
+⍴¯3\\⍬
+0\\1
+0 0\\⍬
+2\\5
+⍴2\\5
+0 3 0\\1 2
+2\\1 2
+2\\2 2⍴⍳4
+
+// --- Index Of (⍳) over major cells ---------------------------------------
+// A matrix left argument searches rows; the result shape is `(1-⍴⍴X)↓⍴Y`.
+(2 3⍴⍳6)⍳1 2 3
+(2 3⍴⍳6)⍳2 3⍴4 5 6 1 2 3
+⍴(2 3⍴⍳6)⍳2 3⍴⍳6
+(2 2⍴⍳4)⍳2 2⍴3 4 1 2
+(2 3⍴⍳6)⍳7 8 9
+(2 3⍴⍳6)⍳2 2 3⍴⍳12
+⍴(2 3⍴⍳6)⍳2 2 3⍴⍳12
+(2 2 3⍴⍳12)⍳2 3⍴⍳6
+(2 3⍴'abcdef')⍳'abc'
+(0 3⍴0)⍳1 2 3
+⍴(2 3⍴⍳6)⍳0 3⍴0
+5⍳5
+(2 3⍴⍳6)⍳5
+(2 3⍴⍳6)⍳2 4⍴⍳8
+
+// --- Interval Index (⍸) over major cells ---------------------------------
+// The same rule as `⍳`: the bounds are the major cells, and a scalar left
+// argument has none.
+(2 2⍴1 2 3 4)⍸1 2
+(2 2⍴1 2 3 4)⍸2 2⍴1 2 3 5
+⍴(2 2⍴1 2 3 4)⍸2 2⍴1 2 3 5
+(2 2⍴1 2 3 4)⍸2 2⍴0 0 9 9
+(2 2⍴1 2 3 4)⍸3 3
+'b'⍸'abc'
+100⍸0 100 200
+(2 2⍴1 2 3 4)⍸5
+(2 2⍴1 2 3 4)⍸2 3⍴⍳6
+
+// --- Where (monadic ⍸) of a scalar ---------------------------------------
+// An index is a vector as long as the rank, so a rank-0 argument answers a
+// one-item nested vector holding the empty vector.
+⍴⍸1
+≡⍸1
+⍴⍸0
+
+// --- Dyadic ⍕: width 0, asterisks, the scaled form, and the ties ---------
+// W=0 is as wide as the column needs plus a blank; a value too wide for a
+// given W fills its field with asterisks; a negative precision is the
+// scaled form with |P| mantissa digits; a half rounds away from zero, on
+// the decimal that names the value.
+0 2⍕1.5
+0 1⍕0.05
+0 0⍕1.6
+1 0⍕100
+6 ¯2⍕123.45
+4 0⍕0.5
+4 0⍕2.5
+3 1⍕1.25
+4 1⍕0.25
+4 1⍕0.35
+4 2⍕1.005
+4 0⍕1.5
+4 0⍕¯1.5
+2 2⍕1 2
+2 0⍕1 2
+0 2⍕1.5 22.25
+0 0⍕1 2 3
+0 3⍕1.5
+2 1⍕¯1.55
+3 0⍕¯2.5
+6 2⍕1234.5678
+10 2⍕1234.5678
+0 2⍕1234.5678
+10 3⍕1.0005
+10 2⍕2.675
+10 2⍕¯1.005
+10 0⍕0.49999999999999
+0 ¯2⍕123.45
+0 ¯1⍕123.45
+0 ¯3⍕123.45
+0 ¯2⍕0
+8 ¯3⍕123.45
+9 ¯2⍕123.45
+9 ¯2⍕¯123.45
+9 ¯2⍕0.0001
+10 ¯2⍕0
+12 ¯3⍕0
+7 ¯1⍕¯123.45
+6 ¯2⍕1 2 3
+8 ¯3⍕123.45 0.001
+0 ¯2⍕1E100
+⍴8 ¯3⍕123.45
+10 0⍕1E15
+
+// --- Mix (monadic ↑) framing characters with numbers ---------------------
+// The result is a mixed simple array, and each row is padded with its own
+// prototype.
+↑('ab')(1 2)
+⍴↑('ab')(1 2)
+≡↑('ab')(1 2)
+↑(1 2)('abc')
+
+// --- Pick (⊃): one path item is one level, one index per axis ------------
+(2 2)⊃2 3⍴⍳6
+0⊃1 2 3
+¯1⊃1 2 3
+1⊃⊂1 2 3
+(⊂⍬)⊃1 2 3
+(⊂2 2)⊃2 3⍴⍳6
+(1 1)⊃(1 2)(3 4)
+(2 1)⊃(1 2)(3 4)
+⍬⊃5
+(⊂⍬)⊃5
+⍬⊃1 2 3
+(⊂1 2)⊃2 3⍴⍳6
+2⊃⊂1 2 3
+1⊃⊂⊂1 2 3
+4⊃1 2 3
+
+// --- The [k] axis on replicate and expand --------------------------------
+// `/` and `⌿` are one primitive at two ranks, and so are `\\` and `⍀`; a
+// named axis picks whichever one it names.
+1 0 1/[1]3 3⍴⍳9
+1 0 1/[2]3 3⍴⍳9
+2 1 1/[1]3 3⍴⍳9
+⍴1 0 1/[1]3 3⍴⍳9
+1 0 1\\[1]2 3⍴⍳6
+1 0 1\\[2]2 2⍴⍳4
+1 0 1/[3]3 3⍴⍳9
+1 0 1/[0]3 3⍴⍳9

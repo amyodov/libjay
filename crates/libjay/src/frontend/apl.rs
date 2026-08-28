@@ -666,7 +666,7 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
         '⍳' => Prim {
             name: "⍳",
             monad: M::IotaApl { origin },
-            dyad: D::IndexOf { origin, vector_left: d.lookup_left == LookupLeft::VectorOnly },
+            dyad: D::IndexOf { origin, major_cells: d.lookup_left == LookupLeft::MajorCells },
             // The monad takes the whole argument: a vector of lengths asks
             // for a nested index array, which is a refusal, not a frame of
             // one index generator per atom.
@@ -831,11 +831,16 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
         },
         // `⍸` counts from ⎕IO; its dyad is the interval index, which GNU
         // APL answers with the count of bounds below the value plus ⎕IO-1.
+        // The Dyalog reading searches the left argument's MAJOR CELLS, so
+        // the whole of it reaches the verb rather than one vector at a time.
         '⍸' => Prim {
             name: "⍸",
             monad: M::Indices { origin, boxed_coords: true },
             dyad: D::IntervalIndex { offset: origin - 1, closed: true },
-            ranks: [RANK_INF, 1, RANK_INF],
+            ranks: match d.lookup_left {
+                LookupLeft::AnyRank => [RANK_INF, 1, RANK_INF],
+                LookupLeft::MajorCells => [RANK_INF, RANK_INF, RANK_INF],
+            },
         },
         // `⌷` indexes with one scalar per axis and has no monadic case in
         // the APL2 reading; the other reads index vectors instead.
@@ -2064,9 +2069,15 @@ fn take_axis(
     };
     let span = Span::merge(open.span, close.span);
     let arr = literal(&spec.kind).expect("checked above");
-    let ints = arr
-        .to_i64_vec()
-        .ok_or_else(|| Error::parse("an axis must be a whole number", spec.span))?;
+    let Some(ints) = arr.to_i64_vec() else {
+        // A FRACTIONAL axis is a meaning of its own — `↑[0.5]` interleaves
+        // the item axes with the frame axes — and a named gap rather than a
+        // malformed axis. Anything else in the brackets is malformed.
+        if arr.to_f64_vec().is_some() {
+            return Err(Error::not_yet("a fractional axis (f[k.5])", spec.span));
+        }
+        return Err(Error::parse("an axis must be a whole number", spec.span));
+    };
     let [k] = ints[..] else {
         return Err(Error::not_yet("several axes in one specification", spec.span));
     };
@@ -2440,6 +2451,16 @@ fn leading_axis_form(v: &Verb) -> Option<Verb> {
             if matches!(p.dyad, DyadOp::RotateApl { .. }) {
                 p.dyad = DyadOp::RotateApl { last: false };
             }
+            Some(Verb::Prim(p))
+        }
+        // Replicate and expand are one primitive each, applied at the rank
+        // that picks the axis: `/` and `\\` take the last, `⌿` and `⍀` the
+        // leading one. With an axis named the leading form is the one that
+        // runs, because `AlongAxis` has already brought that axis to the
+        // front.
+        Verb::Prim(p) if matches!(p.dyad, DyadOp::Copy | DyadOp::Expand) => {
+            let mut p = *p;
+            p.ranks = [RANK_INF, 1, RANK_INF];
             Some(Verb::Prim(p))
         }
         _ => None,
@@ -4147,7 +4168,7 @@ mod tests {
         match &stmts[0] {
             Expr::Monad { verb, .. } => {
                 assert_eq!(as_prim(verb).monad, MonadOp::IotaApl { origin });
-                assert_eq!(as_prim(verb).dyad, DyadOp::IndexOf { origin, vector_left: false });
+                assert_eq!(as_prim(verb).dyad, DyadOp::IndexOf { origin, major_cells: false });
                 assert_eq!(as_prim(verb).ranks, [RANK_INF, RANK_INF, RANK_INF]);
             }
             other => panic!("expected a monad, got {other:?}"),

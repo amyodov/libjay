@@ -99,9 +99,43 @@ class APL:
         "total-order" (Dyalog's total array ordering)."""
 
         lookup_left: str = "any-rank"
-        """What dyadic ``⍳`` takes on its left: "any-rank" (the items of a
-        left argument of any rank are searched) or "vector-only" (Dyalog's
-        rule, where anything but a vector is a rank error)."""
+        """What dyadic ``⍳`` and ``⍸`` take on their left: "any-rank" (the
+        ELEMENTS of a left argument of any rank are searched, and ``⍸``
+        takes a scalar bound) or "major-cells" (Dyalog's rule, where a
+        matrix searches rows and a scalar — having no major cell — is a
+        rank error)."""
+
+        axis_counts: str = "per-axis"
+        """How long the left argument of ``↑`` and ``↓`` may be: "per-axis"
+        (GNU APL — one count per axis, exactly) or "leading" (Dyalog — that
+        many or fewer, the counts applying to the leading axes, so
+        ``2↑matrix`` is the first two rows)."""
+
+        unique_mask: str = "elements"
+        """What monadic ``≠`` counts: "elements" (GNU APL — the ravel, and
+        the argument's shape is kept) or "major-cells" (Dyalog — one bit
+        per major cell, and always a vector)."""
+
+        expansion: str = "boolean"
+        """What dyadic backslash takes on its left: "boolean" (GNU APL — a mask
+        of 0s and 1s) or "counts" (Dyalog — any integer vector: a positive
+        count repeats that item, a negative one leaves that many fills, and
+        0 means ``¯1``)."""
+
+        where_rank: str = "flattened"
+        """What shape monadic ``⍸`` gives an index: "flattened" (GNU APL —
+        a scalar argument answers the plain index) or "by-rank" (Dyalog —
+        an index is a vector as long as the rank, so ``⍸1`` is a one-item
+        nested vector holding the empty vector)."""
+
+        format_spec: str = "plain"
+        """How dyadic ``⍕`` lays a number out: "plain" (GNU APL — a half is
+        measured on the double scaled by the precision, a one-digit
+        mantissa has no point, the scaled form is right-justified, and a
+        value too wide is refused) or "padded" (Dyalog — the half is
+        measured on the shortest decimal that names the double, the
+        mantissa keeps its point, a given width pads the exponent out to
+        four characters, and a field too narrow fills with asterisks)."""
 
         gcd_rule: str = "tolerant"
         """Which line's ``∨`` and ``∧``: "tolerant" (GNU APL — a zero
@@ -164,7 +198,12 @@ class APL:
         dfn_result="first-non-assignment",
         order_domain="numeric",
         nested_grade="total-order",
-        lookup_left="vector-only",
+        lookup_left="major-cells",
+        axis_counts="leading",
+        unique_mask="major-cells",
+        expansion="counts",
+        where_rank="by-rank",
+        format_spec="padded",
         gcd_rule="exact",
         near_count="tolerant",
         floor_rule="scaled",

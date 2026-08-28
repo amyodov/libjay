@@ -570,6 +570,11 @@ fn dialect_of(
     order_domain: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
+    axis_counts: Option<&str>,
+    unique_mask: Option<&str>,
+    expansion: Option<&str>,
+    where_rank: Option<&str>,
+    format_spec: Option<&str>,
     gcd_rule: Option<&str>,
     near_count: Option<&str>,
     floor_rule: Option<&str>,
@@ -580,10 +585,10 @@ fn dialect_of(
     extensions: Option<Vec<String>>,
 ) -> PyResult<Dialect> {
     use jay::frontend::{
-        ComplexOrder, ControlStrictness, DefaultArg, DepthSign, DfnResult, EncodeDigits,
-        FirstDisclose, FloorRule,
+        AxisCounts, ComplexOrder, ControlStrictness, DefaultArg, DepthSign, DfnResult,
+        EncodeDigits, Expansion, FirstDisclose, FloorRule, FormatSpec,
         GcdRule, IndexForm, InnerEach, LookupLeft, NearCount, NestedGrade, NestedModel,
-        OrderDomain, Partition,
+        OrderDomain, Partition, UniqueMask, WhereRank,
     };
     let d = Dialect::default();
     // Extensions are not a dialect setting — they are departures from every
@@ -674,9 +679,39 @@ fn dialect_of(
         lookup_left: setting(
             lookup_left,
             "lookup_left",
-            &[("any-rank", LookupLeft::AnyRank), ("vector-only", LookupLeft::VectorOnly)],
+            &[("any-rank", LookupLeft::AnyRank), ("major-cells", LookupLeft::MajorCells)],
         )?
         .unwrap_or(d.lookup_left),
+        axis_counts: setting(
+            axis_counts,
+            "axis_counts",
+            &[("per-axis", AxisCounts::PerAxis), ("leading", AxisCounts::Leading)],
+        )?
+        .unwrap_or(d.axis_counts),
+        unique_mask: setting(
+            unique_mask,
+            "unique_mask",
+            &[("elements", UniqueMask::Elements), ("major-cells", UniqueMask::MajorCells)],
+        )?
+        .unwrap_or(d.unique_mask),
+        expansion: setting(
+            expansion,
+            "expansion",
+            &[("boolean", Expansion::Boolean), ("counts", Expansion::Counts)],
+        )?
+        .unwrap_or(d.expansion),
+        where_rank: setting(
+            where_rank,
+            "where_rank",
+            &[("flattened", WhereRank::Flattened), ("by-rank", WhereRank::ByRank)],
+        )?
+        .unwrap_or(d.where_rank),
+        format_spec: setting(
+            format_spec,
+            "format_spec",
+            &[("plain", FormatSpec::Plain), ("padded", FormatSpec::Padded)],
+        )?
+        .unwrap_or(d.format_spec),
         gcd_rule: setting(
             gcd_rule,
             "gcd_rule",
@@ -737,6 +772,11 @@ fn dialect_of(
     order_domain=None,
     nested_grade=None,
     lookup_left=None,
+    axis_counts=None,
+    unique_mask=None,
+    expansion=None,
+    where_rank=None,
+    format_spec=None,
     gcd_rule=None,
     near_count=None,
     floor_rule=None,
@@ -763,6 +803,11 @@ fn compile(
     order_domain: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
+    axis_counts: Option<&str>,
+    unique_mask: Option<&str>,
+    expansion: Option<&str>,
+    where_rank: Option<&str>,
+    format_spec: Option<&str>,
     gcd_rule: Option<&str>,
     near_count: Option<&str>,
     floor_rule: Option<&str>,
@@ -787,6 +832,11 @@ fn compile(
         order_domain,
         nested_grade,
         lookup_left,
+        axis_counts,
+        unique_mask,
+        expansion,
+        where_rank,
+        format_spec,
         gcd_rule,
         near_count,
         floor_rule,
@@ -838,6 +888,11 @@ fn devices() -> Vec<(String, String, String, bool)> {
     order_domain=None,
     nested_grade=None,
     lookup_left=None,
+    axis_counts=None,
+    unique_mask=None,
+    expansion=None,
+    where_rank=None,
+    format_spec=None,
     gcd_rule=None,
     near_count=None,
     floor_rule=None,
@@ -865,6 +920,11 @@ fn compile_parts(
     order_domain: Option<&str>,
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
+    axis_counts: Option<&str>,
+    unique_mask: Option<&str>,
+    expansion: Option<&str>,
+    where_rank: Option<&str>,
+    format_spec: Option<&str>,
     gcd_rule: Option<&str>,
     near_count: Option<&str>,
     floor_rule: Option<&str>,
@@ -889,6 +949,11 @@ fn compile_parts(
         order_domain,
         nested_grade,
         lookup_left,
+        axis_counts,
+        unique_mask,
+        expansion,
+        where_rank,
+        format_spec,
         gcd_rule,
         near_count,
         floor_rule,

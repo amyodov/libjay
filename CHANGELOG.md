@@ -198,6 +198,58 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   default dialect, which answers with a body's last sentence, was never
   affected.
 
+- Dyadic `⍕` refused three things it should answer, and rounded a fourth
+  the wrong way. A width of 0 — given, or left out with a lone precision —
+  now means "as wide as the column needs, plus a separating blank", so
+  `0 2⍕1.5` is ` 1.50`. A NEGATIVE precision is the scaled form, with that
+  many mantissa digits and the exponent after an `E`: `0 ¯2⍕123.45` is
+  ` 1.2E2`. And a half now rounds AWAY from zero rather than to the nearest
+  even digit, so `4 0⍕2.5` is 3, `3 1⍕1.25` is 1.3 and `4 1⍕0.35` is 0.4;
+  only the ties that fell on an odd digit ever differed.
+
+- `⊃` (pick) answered where both references refuse. One item of the left
+  argument is one LEVEL of the path and holds one index per axis of the
+  value at that level, so `(2 2)⊃matrix` asks for two levels of nesting and
+  is a rank error where `(⊂2 2)⊃matrix` — one two-axis index — still
+  answers; an empty index picks from a simple scalar and nothing else
+  (`(⊂⍬)⊃5` is 5, `(⊂⍬)⊃1 2 3` is refused); no index picks from a scalar at
+  all, so `1⊃⊂1 2 3` is refused; and an index below `⎕IO` is out of range
+  rather than an index from the end, so `0⊃1 2 3` and `¯1⊃1 2 3` are
+  refused.
+
+- Mix — `⊃` in the default dialect, `↑` in Dyalog's — refused to frame a
+  character item beside a numeric one. `⊃('ab')(1 2)` is now the two-row
+  mixed simple array both references answer, and each row is padded with
+  ITS OWN prototype, so `⊃(1 2)('abc')` pads the numeric row with a zero.
+
+- The `[k]` axis on the DYADIC `/` and `\\`: `1 0 1/[1]3 3⍴⍳9` keeps the
+  first and last rows, `1 0 1\\[2]2 2⍴⍳4` opens a column of fills. The pair
+  `/`/`⌿` and the pair `\\`/`⍀` are one primitive each at two ranks, so a
+  named axis is what picks between them. `⊆[k]`, `↑[k]` and `⌷[k]` are still
+  named gaps, and a FRACTIONAL axis (`↑[0.5]`) now names itself as one
+  rather than reporting a malformed axis.
+
+### Dialect
+
+- Six settings were added to the dialect object, each naming a rule where
+  the two APL lines part. `axis_counts`: `↑` and `↓` take a left argument
+  SHORTER than the rank, the counts applying to the leading axes and the
+  rest taken whole or dropped from not at all — `2↑matrix` is the first two
+  rows. `unique_mask`: monadic `≠` marks MAJOR CELLS and always answers a
+  vector as long as `≢Y`. `expansion`: dyadic `\` takes any integer count
+  list — `2 2\'ab'` is `aabb`, `¯2\1` is `0 0` — the result being
+  `+/1⌈|X` items long. `where_rank`: monadic `⍸` gives a rank-0 argument an
+  EMPTY index vector, so `⍸1` is a one-item nested vector. `format_spec`:
+  dyadic `⍕` rounds a half on the shortest decimal that names the value,
+  keeps a one-digit mantissa's point, pads the scaled form's exponent out
+  to four characters under a given width, and fills a field too narrow with
+  asterisks rather than refusing. And `lookup_left`, which already named
+  Dyalog's `⍳`, now covers `⍸` as well and reads MAJOR CELLS rather than
+  refusing every left argument that is not a vector: `(2 3⍴⍳6)⍳1 2 3` is 1
+  and `(2 2⍴1 2 3 4)⍸1 2` is 1, while a scalar left argument — having no
+  major cell — is a rank error. All six ship in `Dialect::dyalog()` /
+  `APL.Dialect.dyalog`; the default dialect is unchanged by any of them.
+
 ## 0.3.1 — 2026-08-23
 
 ### Added

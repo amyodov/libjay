@@ -472,3 +472,77 @@ A←5 ⋄ 3A
 // A complex value with no imaginary part is the real it displays as.
 !2j0
 !3j0
+
+// --- Pick (⊃): one path item is one level, one index per axis ------------
+// A two-item left argument means two LEVELS of nesting; an index below ⎕IO
+// is out of range rather than an index from the end; a scalar has no axis
+// to pick from; and an empty index picks a simple scalar only.
+(2 2)⊃2 3⍴⍳6
+0⊃1 2 3
+¯1⊃1 2 3
+1⊃⊂1 2 3
+(⊂⍬)⊃1 2 3
+(⊂2 2)⊃2 3⍴⍳6
+(1 1)⊃(1 2)(3 4)
+(2 1)⊃(1 2)(3 4)
+⍬⊃5
+(⊂⍬)⊃5
+⍬⊃1 2 3
+(⊂1 2)⊃2 3⍴⍳6
+2⊃⊂1 2 3
+1⊃⊂⊂1 2 3
+4⊃1 2 3
+
+// --- Disclose (monadic ⊃) framing characters with numbers ----------------
+// A mixed simple array, each row padded with its own prototype.
+⊃('ab')(1 2)
+⍴⊃('ab')(1 2)
+≡⊃('ab')(1 2)
+⊃(1 2)('abc')
+
+// --- Dyadic ⍕: width 0, the scaled form, and the ties --------------------
+// W=0 is as wide as the column needs plus a blank; a negative precision is
+// the scaled form with |P| mantissa digits; a half rounds away from zero.
+0 2⍕1.5
+0 0⍕1.6
+0 3⍕1.5
+0 2⍕1.5 22.25
+0 0⍕1 2 3
+0 2⍕¯1.5 2
+4 0⍕0.5
+4 0⍕2.5
+3 1⍕1.25
+4 0⍕1.5
+4 0⍕¯1.5
+3 0⍕¯2.5
+2 0⍕1 2
+0 2⍕1234.5678
+10 2⍕1234.5678
+0 ¯2⍕123.45
+0 ¯1⍕123.45
+0 ¯3⍕123.45
+0 ¯2⍕0
+8 ¯3⍕123.45
+9 ¯2⍕123.45
+9 ¯2⍕¯123.45
+9 ¯2⍕0.0001
+10 ¯2⍕0
+12 ¯3⍕0
+7 ¯1⍕¯123.45
+6 ¯2⍕1 2 3
+8 ¯3⍕123.45 0.001
+0 ¯2⍕1E100
+⍴8 ¯3⍕123.45
+1 0⍕100
+
+// --- The [k] axis on replicate and expand --------------------------------
+// `/` and `⌿` are one primitive at two ranks, and so are `\\` and `⍀`; a
+// named axis picks whichever one it names.
+1 0 1/[1]3 3⍴⍳9
+1 0 1/[2]3 3⍴⍳9
+2 1 1/[1]3 3⍴⍳9
+⍴1 0 1/[1]3 3⍴⍳9
+1 0 1\\[1]2 3⍴⍳6
+1 0 1\\[2]2 2⍴⍳4
+1 0 1/[3]3 3⍴⍳9
+1 0 1/[0]3 3⍴⍳9

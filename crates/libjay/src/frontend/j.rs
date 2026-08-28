@@ -1168,7 +1168,7 @@ fn primitive(word: &str) -> Option<Prim> {
         "}:" => prim("}:", M::Curtail, D::None, [INF, INF, INF]),
         "|." => prim("|.", M::Reverse, D::Rotate, [INF, 1, INF]),
         "|:" => prim("|:", M::TransposeAxes, D::TransposeJ, [INF, 1, INF]),
-        "i." => prim("i.", M::IotaJ, D::IndexOf { origin: 0, vector_left: false }, [1, INF, INF]),
+        "i." => prim("i.", M::IotaJ, D::IndexOf { origin: 0, major_cells: false }, [1, INF, INF]),
         "i:" => prim("i:", M::Steps, D::IndexOfLast { origin: 0 }, [0, INF, INF]),
         "I." => prim(
             "I.",

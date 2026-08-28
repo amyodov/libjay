@@ -14,7 +14,8 @@ use crate::error::{Error, ErrorKind, Result, Span};
 use crate::exact::{self, Ext, Rat};
 use crate::fmt::FmtOpts;
 use crate::frontend::{
-    ComplexOrder, EncodeDigits, FloorRule, InnerEach, NearCount, NestedGrade, OrderDomain, Rules,
+    AxisCounts, ComplexOrder, EncodeDigits, Expansion, FloorRule, FormatSpec, InnerEach,
+    LookupLeft, NearCount, NestedGrade, OrderDomain, Rules, UniqueMask, WhereRank,
 };
 use crate::par;
 use crate::simd::multiversioned;
@@ -875,9 +876,10 @@ pub enum DyadOp {
     /// Catenate along the LAST axis (APL `,`).
     AppendLast,
     /// x i. y / x ⍳ y: the index in x's items of each cell of y, or
-    /// `origin + #items(x)` when absent. `vector_left` is the Dyalog
-    /// dialect's rule that the left argument must be a vector.
-    IndexOf { origin: i64, vector_left: bool },
+    /// `origin + #items(x)` when absent. `major_cells` is the Dyalog
+    /// dialect's rule that the left argument is a list of MAJOR CELLS, so
+    /// a matrix searches rows and a scalar has nothing to search.
+    IndexOf { origin: i64, major_cells: bool },
     /// x e. y: is each cell of x, shaped like y's items, an item of y?
     MemberJ,
     /// x ∊ y: does each ELEMENT of x occur anywhere in y?
@@ -1727,6 +1729,11 @@ impl Verb {
                 let cells = each_cell(n, y.count(), self.is_pure(), ctx, |i, c| {
                     monad_op(p, &y.cell_at(frame_rank, i), c, span)
                 })?;
+                // Mix — `⊃` or `↑` at cell rank 0, whichever the dialect
+                // spells it — is where APL frames characters beside numbers.
+                if p.monad == MonadOp::Open && ctx.cfg.rules.lang == crate::Lang::Apl {
+                    return assemble_mixed(&frame, cells, span);
+                }
                 assemble(&frame, cells, span)
             }
             Verb::Rank(v, r) => {
@@ -2447,6 +2454,59 @@ fn assemble_items(frame: &[usize], mut cells: Vec<Array>, span: Span) -> Result<
         }
     }
     assemble(frame, cells, span)
+}
+
+/// [`assemble`] for APL's mix, which frames a character cell beside a
+/// numeric one rather than refusing.
+///
+/// The answer is a MIXED SIMPLE array — depth 1, held here as boxed
+/// scalars — and every cell is padded to the common shape with ITS OWN
+/// fill first, so `↑(1 2)('abc')` pads the numeric row with a zero and the
+/// character row with nothing.
+fn assemble_mixed(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
+    let mut mixed = cells.iter().all(|c| c.dtype() != DType::Box);
+    if mixed {
+        let mut dt = None;
+        for c in cells.iter().filter(|c| c.count() > 0) {
+            dt = match dt {
+                None => Some(c.dtype()),
+                Some(t) => DType::promote(t, c.dtype()),
+            };
+            if dt.is_none() {
+                break;
+            }
+        }
+        mixed = dt.is_none() && cells.iter().any(|c| c.count() > 0);
+    }
+    if !mixed {
+        return assemble(frame, cells, span);
+    }
+    let crank = cells.iter().map(Array::rank).max().unwrap_or(0);
+    let raised: Vec<Array> = cells
+        .iter()
+        .map(|c| {
+            let mut s = vec![1usize; crank - c.rank()];
+            s.extend_from_slice(&c.shape);
+            Array::new(s, c.to_row_major().data.clone())
+        })
+        .collect();
+    let mut common = vec![0usize; crank];
+    for c in &raised {
+        for (k, slot) in common.iter_mut().enumerate() {
+            *slot = (*slot).max(c.shape[k]);
+        }
+    }
+    let counts = Array::from_i64(common.iter().map(|&n| n as i64).collect());
+    let mut padded = Vec::with_capacity(raised.len());
+    for c in &raised {
+        let fit = if c.shape == common {
+            c.clone()
+        } else {
+            take(&counts, c, false, true, true, NearInt::J, span)?
+        };
+        padded.push(boxed_elements(&fit));
+    }
+    assemble(frame, padded, span).map(tightened_mixed)
 }
 
 /// The same array with every element held as its own value, so that it can
@@ -6519,27 +6579,58 @@ fn member_apl(x: &Array, y: &Array, tol: Tol) -> Array {
     Array::new(x.shape.clone(), Data::Bool(out.into()))
 }
 
+/// How many trailing axes of `y` one MAJOR CELL of `x` covers, with the
+/// conformance both major-cell searches want: `x` has to have a major cell
+/// at all, and `y` has to be made of cells shaped like one.
+fn major_cell_rank(what: &str, x: &Array, y: &Array, span: Span) -> Result<usize> {
+    if x.rank() == 0 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("{what} searches the major cells of its left argument, and a scalar has none"),
+            Some(span),
+        ));
+    }
+    let cell_rank = x.rank() - 1;
+    if y.rank() < cell_rank {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!(
+                "{what} searches cells of rank {cell_rank}, and the right argument has rank {}",
+                y.rank()
+            ),
+            Some(span),
+        ));
+    }
+    let want = &x.shape[1..];
+    let have = &y.shape[y.rank() - cell_rank..];
+    if want != have {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{what} searches cells of shape {want:?} among cells of shape {have:?}"),
+            Some(span),
+        ));
+    }
+    Ok(cell_rank)
+}
+
 /// `x i. y` / `x ⍳ y`: where each cell of y sits among the items of x.
 ///
-/// `vector_left` is the Dyalog reading, where the lookup table is a vector
-/// and nothing else; without it the items of a left argument of any rank
-/// are searched, which is what J and the APL2 line do.
+/// `major_cells` is the Dyalog reading, where the left argument is a list of
+/// major cells and a scalar has none; without it the items of a left
+/// argument of any rank are searched, which is what J and the APL2 line do.
 fn index_of(
     x: &Array,
     y: &Array,
     origin: i64,
-    vector_left: bool,
+    major_cells: bool,
     tol: Tol,
     span: Span,
 ) -> Result<Array> {
-    if vector_left && x.rank() != 1 {
-        return Err(Error::new(
-            ErrorKind::Rank,
-            format!("⍳ looks up in a vector, and its left argument has rank {}", x.rank()),
-            Some(span),
-        ));
-    }
-    let cell_rank = x.rank().saturating_sub(1).min(y.rank());
+    let cell_rank = if major_cells {
+        major_cell_rank("⍳", x, y, span)?
+    } else {
+        x.rank().saturating_sub(1).min(y.rank())
+    };
     let frame_rank = y.rank() - cell_rank;
     let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
     let nf: usize = frame.iter().product();
@@ -6734,7 +6825,7 @@ pub(crate) fn catenate(
             to[axis] = a.shape[axis] as i64;
             // The lengths are ours, not the program's: no float
             // reaches the near-integer admission on this path.
-            take(&Array::from_i64(to), a, false, false, NearInt::J, span)
+            take(&Array::from_i64(to), a, false, false, true, NearInt::J, span)
         };
         (fit(&xa)?, fit(&ya)?)
     } else {
@@ -7356,9 +7447,9 @@ pub(crate) fn with_origin(v: &Verb, origin: i64) -> Option<Verb> {
                 other => other,
             };
             out.dyad = match p.dyad {
-                DyadOp::IndexOf { vector_left, .. } => {
+                DyadOp::IndexOf { major_cells, .. } => {
                     changed = true;
-                    DyadOp::IndexOf { origin, vector_left }
+                    DyadOp::IndexOf { origin, major_cells }
                 }
                 DyadOp::IndexOfLast { .. } => {
                     changed = true;
@@ -7962,7 +8053,8 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             Ok(Array::scalar_i64(if signed && d > 1 && !uniform(y) { -d } else { d }))
         }
         MonadOp::Indices { origin, boxed_coords } => {
-            where_indices(y, origin, boxed_coords, ctx.cfg.near(), span)
+            let by_rank = ctx.cfg.rules.where_rank == WhereRank::ByRank;
+            where_indices(y, origin, boxed_coords, by_rank, ctx.cfg.near(), span)
         }
         MonadOp::Steps => steps(y, span),
         MonadOp::ToExact => to_exact(y, span),
@@ -7997,7 +8089,11 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         }
         MonadOp::ComplexParts { polar } => complex_parts(y, polar, span),
         MonadOp::SelfClassify => Ok(self_classify(y, ctx.cfg.tol)),
-        MonadOp::NubSieve => Ok(nub_sieve(y, ctx.cfg.tol, ctx.cfg.rules.lang)),
+        MonadOp::NubSieve => {
+            let by_element = ctx.cfg.rules.lang == crate::Lang::Apl
+                && ctx.cfg.rules.unique_mask == UniqueMask::Elements;
+            Ok(nub_sieve(y, ctx.cfg.tol, by_element))
+        }
         MonadOp::Unicode { pass_chars } => unicode(y, pass_chars, ctx.cfg.near(), span),
         MonadOp::Symbols => to_symbols(y, span),
         MonadOp::Words => words(y, span),
@@ -8155,6 +8251,7 @@ fn take(
     y: &Array,
     prototype_fill: bool,
     apl: bool,
+    per_axis: bool,
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
@@ -8172,11 +8269,12 @@ fn take(
     } else {
         y
     };
-    // J's take, unlike its drop, wants at least one count.
-    let wrong = if apl {
-        counts.len() != base.rank()
-    } else {
-        counts.len() > base.rank() || (counts.is_empty() && base.rank() > 0)
+    // J's take, unlike its drop, wants at least one count. APL wants one
+    // per axis where the dialect says so, and the leading axes otherwise.
+    let wrong = match (apl, per_axis) {
+        (true, true) => counts.len() != base.rank(),
+        (true, false) => counts.len() > base.rank(),
+        (false, _) => counts.len() > base.rank() || (counts.is_empty() && base.rank() > 0),
     };
     if wrong {
         return Err(count_rank("take", counts.len(), base.rank(), span));
@@ -8269,7 +8367,14 @@ fn push_gap(data: &mut Data, fill: &Option<Array>) {
     }
 }
 
-fn drop_(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<Array> {
+fn drop_(
+    x: &Array,
+    y: &Array,
+    apl: bool,
+    per_axis: bool,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
     let counts = axis_counts(x, "drop", near, span)?;
     let promoted;
     let base = if y.rank() == 0 {
@@ -8279,7 +8384,7 @@ fn drop_(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<A
         y
     };
     let wrong =
-        if apl { counts.len() != base.rank() } else { counts.len() > base.rank() };
+        if apl && per_axis { counts.len() != base.rank() } else { counts.len() > base.rank() };
     if wrong {
         return Err(count_rank("drop", counts.len(), base.rank(), span));
     }
@@ -8330,9 +8435,17 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         }
         DyadOp::Take => {
             let apl = cfg.rules.lang == crate::Lang::Apl;
-            take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, cfg.near(), span)
+            let per_axis = cfg.rules.axis_counts == AxisCounts::PerAxis;
+            take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, per_axis, cfg.near(), span)
         }
-        DyadOp::Drop => drop_(x, y, cfg.rules.lang == crate::Lang::Apl, cfg.near(), span),
+        DyadOp::Drop => drop_(
+            x,
+            y,
+            cfg.rules.lang == crate::Lang::Apl,
+            cfg.rules.axis_counts == AxisCounts::PerAxis,
+            cfg.near(),
+            span,
+        ),
         DyadOp::Right => Ok(y.clone()),
         DyadOp::Left => Ok(x.clone()),
         DyadOp::Rotate => rotate(x, y, cfg.near(), span),
@@ -8345,15 +8458,15 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::AppendLast => {
             catenate(x, y, false, cfg.agreement == Agreement::LeadingPrefix, span)
         }
-        DyadOp::IndexOf { origin, vector_left } => {
+        DyadOp::IndexOf { origin, major_cells } => {
             let (x, y) = align_mixed(x, y, apl);
             // A left argument of rank 2 or more is looked up ELEMENT by
             // element, and each answer is the coordinate vector that finds
             // it — a lookup in a table cannot be one number.
-            if apl && !vector_left && x.rank() > 1 {
+            if apl && !major_cells && x.rank() > 1 {
                 return Ok(index_of_coords(&x, &y, origin, tol));
             }
-            index_of(&x, &y, origin, vector_left, tol, span)
+            index_of(&x, &y, origin, major_cells, tol, span)
         }
         DyadOp::MemberJ => Ok(member_j(x, y, tol)),
         DyadOp::MemberApl => {
@@ -8402,6 +8515,28 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::Link => link(x, y, span),
         DyadOp::Strand => strand(x, y, span),
         DyadOp::IntervalIndex { offset, closed } => {
+            // The bounds are MAJOR CELLS in the Dyalog reading, so a matrix
+            // searches rows and a scalar — having no cell — is refused; the
+            // APL2 line reads a scalar as one bound and has no meaning for
+            // a table of them. J's `I.` reads neither rule.
+            if apl {
+                match cfg.rules.lookup_left {
+                    LookupLeft::MajorCells if x.rank() >= 2 => {
+                        return interval_index_cells(
+                            x,
+                            y,
+                            offset,
+                            closed,
+                            Grading::of(cfg.rules, tol),
+                            span,
+                        );
+                    }
+                    LookupLeft::MajorCells => {
+                        major_cell_rank("⍸", x, y, span)?;
+                    }
+                    LookupLeft::AnyRank => {}
+                }
+            }
             interval_index(x, y, offset, closed, tol, Grading::of(cfg.rules, tol), span)
         }
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
@@ -8416,7 +8551,7 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::PolyEval => poly_eval(x, y, span),
         DyadOp::PolyIntegral => poly_integral(x, y, span),
         DyadOp::TruthTable(m) => truth_table(m, x, y, span),
-        DyadOp::FormatSpec => format_spec(x, y, &cfg.fmt, span),
+        DyadOp::FormatSpec => format_spec(x, y, &cfg.fmt, cfg.rules.format_spec, span),
         DyadOp::FormatSpecJ => format_spec_j(x, y, &cfg.fmt, span),
         DyadOp::ParseNumbers => parse_numbers(x, y, span),
         DyadOp::SequentialMachine => sequential_machine(x, y, span),
@@ -8454,7 +8589,14 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             prime_exponents(x, y, cfg.near(), span).map(|r| carry_exact2(r, x, y))
         }
         DyadOp::Pick { origin } => pick(x, y, origin, cfg.near(), span),
-        DyadOp::Expand => expand(x, y, cfg.rules.lang == crate::Lang::Apl, cfg.near(), span),
+        DyadOp::Expand => expand(
+            x,
+            y,
+            cfg.rules.lang == crate::Lang::Apl,
+            cfg.rules.expansion == Expansion::Counts,
+            cfg.near(),
+            span,
+        ),
         // Writing needs the output sink, which this dispatcher does not
         // carry; `dyad_cell` takes it before the call gets here.
         DyadOp::WriteStream => Err(Error::internal("1!:2 reached the pure dyad dispatcher")),
@@ -10402,14 +10544,25 @@ fn along_axis(
 /// J applies at rank 1, so a higher-rank argument frames the vector answers;
 /// APL applies to the whole argument and answers a rank-2-or-higher one with
 /// one boxed coordinate vector per occurrence.
-fn where_indices(y: &Array, origin: i64, boxed: bool, near: NearInt, span: Span) -> Result<Array> {
+fn where_indices(
+    y: &Array,
+    origin: i64,
+    boxed: bool,
+    by_rank: bool,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
     let counts = y
         .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("indices needs non-negative integers", span))?;
     if counts.iter().any(|&c| c < 0) {
         return Err(Error::domain("indices needs non-negative integers", span));
     }
-    if !boxed || y.rank() < 2 {
+    // An index is a vector as long as the rank. GNU APL answers the plain
+    // index below rank 2, Dyalog only below rank 1: a rank-0 argument there
+    // has one index and it is the EMPTY vector.
+    let nested = boxed && (y.rank() >= 2 || (by_rank && y.rank() == 0));
+    if !nested {
         let mut out = Vec::new();
         for (i, &c) in counts.iter().enumerate() {
             for _ in 0..c {
@@ -10493,6 +10646,38 @@ fn interval_index(
         })
         .collect();
     Ok(Array::new(y.shape.clone(), Data::I64(out.into())))
+}
+
+/// `x ⍸ y` where the bounds are MAJOR CELLS: a table of them searches the
+/// cells of `y` shaped like one, and answers one number per cell in the
+/// frame that is left. The cells are compared by the dialect's total array
+/// ordering, which is what puts two rows in order.
+fn interval_index_cells(
+    x: &Array,
+    y: &Array,
+    offset: i64,
+    closed: bool,
+    ord: Grading,
+    span: Span,
+) -> Result<Array> {
+    let cell_rank = major_cell_rank("⍸", x, y, span)?;
+    let frame_rank = y.rank() - cell_rank;
+    let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
+    let nf: usize = frame.iter().product();
+    let bounds: Vec<Array> = (0..x.items()).map(|i| item_or_self(x, i)).collect();
+    let mut out = Vec::with_capacity(nf);
+    for i in 0..nf {
+        let cell = y.cell_at(frame_rank, i);
+        let count = bounds
+            .iter()
+            .filter(|b| {
+                let o = cmp_items_total(b, &cell, ord);
+                if closed { o.is_le() } else { o.is_lt() }
+            })
+            .count();
+        out.push(offset + count as i64);
+    }
+    Ok(Array::new(frame, Data::I64(out.into())))
 }
 
 /// [`interval_index`] over the element types that are ordered but not
@@ -13142,25 +13327,123 @@ impl std::hash::Hasher for KeyHasher {
     }
 }
 
+/// A decimal text with `p` places after the point, rounded half away from
+/// zero. `s` is a nonnegative positional decimal — what `f64`'s own display
+/// writes — so the rounding is on the digits that name the value rather
+/// than on the double behind them.
+fn round_decimal_text(s: &str, p: usize) -> String {
+    let (int, frac) = s.split_once('.').unwrap_or((s, ""));
+    let place = |int: &str, frac: &str| -> String {
+        let int = int.trim_start_matches('0');
+        let int = if int.is_empty() { "0" } else { int };
+        if p == 0 { int.to_string() } else { format!("{int}.{frac}") }
+    };
+    if frac.len() <= p {
+        let mut f = frac.to_string();
+        while f.len() < p {
+            f.push('0');
+        }
+        return place(int, &f);
+    }
+    let mut digits: Vec<u8> = int.bytes().chain(frac[..p].bytes()).collect();
+    if frac.as_bytes()[p] >= b'5' {
+        let mut i = digits.len();
+        loop {
+            if i == 0 {
+                digits.insert(0, b'1');
+                break;
+            }
+            i -= 1;
+            if digits[i] == b'9' {
+                digits[i] = b'0';
+            } else {
+                digits[i] += 1;
+                break;
+            }
+        }
+    }
+    let cut = digits.len() - p;
+    let text = String::from_utf8(digits).expect("ascii digits");
+    place(&text[..cut], &text[cut..])
+}
+
+/// A nonnegative value written with exactly `p` places after the point.
+///
+/// `decimal` chooses what the half is measured on: the shortest decimal
+/// that names the double, or the double itself scaled by the precision.
+/// Both round a half away from zero, which is what the references do and
+/// what Rust's own formatting does not.
+fn fixed_digits(v: f64, p: usize, decimal: bool) -> String {
+    if !v.is_finite() {
+        return format!("{v:.p$}");
+    }
+    if decimal {
+        return round_decimal_text(&format!("{v}"), p);
+    }
+    let z = v * 10f64.powi(p as i32);
+    if z.is_finite() && z < 9e15 {
+        let n = (z + 0.5).floor() as u128;
+        let mut digits = n.to_string();
+        while digits.len() <= p {
+            digits.insert(0, '0');
+        }
+        let cut = digits.len() - p;
+        return if p == 0 { digits } else { format!("{}.{}", &digits[..cut], &digits[cut..]) };
+    }
+    format!("{v:.p$}")
+}
+
+/// `m` significant digits of a nonnegative value, rounded half away from
+/// zero, and the power of ten the first of them stands at.
+fn scaled_digits(v: f64, m: usize) -> (String, i64) {
+    if v == 0.0 || !v.is_finite() {
+        return ("0".repeat(m), 0);
+    }
+    let written = format!("{v:e}");
+    let (mant, exp) = written.split_once('e').unwrap_or((written.as_str(), "0"));
+    let mut e: i64 = exp.parse().unwrap_or(0);
+    let rounded = round_decimal_text(mant, m - 1);
+    let mut digits: String = rounded.chars().filter(|c| *c != '.').collect();
+    // A carry out of the leading digit lifts the exponent: `9.99` at two
+    // digits is `1.0E1`, not `10E0`.
+    if digits.len() > m {
+        e += 1;
+        digits.truncate(m);
+    }
+    while digits.len() < m {
+        digits.push('0');
+    }
+    (digits, e)
+}
+
 /// APL `x ⍕ y`: format by specification. `x` is one width-and-precision
 /// pair per column of y's last axis, one pair for all of them, or a lone
-/// precision, which takes the width the values need plus a separating
-/// blank. A value that does not fit its width is a domain error, as the
-/// reference has it.
-fn format_spec(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Array> {
+/// precision. A width of zero, given or left out, takes the width the
+/// column needs plus a separating blank. A negative precision is the
+/// SCALED form, with that many mantissa digits. What a value too wide for
+/// its field does, and how the scaled form sits in one, is the dialect's:
+/// see [`FormatSpec`].
+fn format_spec(
+    x: &Array,
+    y: &Array,
+    fmt: &FmtOpts,
+    style: FormatSpec,
+    span: Span,
+) -> Result<Array> {
     let spec = x
         .to_i64_vec()
         .ok_or_else(|| Error::domain("a format specification is whole numbers", span))?;
     if y.dtype() == DType::Box {
         return Err(Error::not_yet("format by specification of a nested array", span));
     }
+    let padded = style == FormatSpec::Padded;
     let cols = if y.rank() == 0 { 1 } else { y.shape[y.rank() - 1] };
     let rows = y.count() / cols.max(1);
     // One number is a precision alone; pairs are width and precision.
-    let pairs: Vec<(Option<i64>, i64)> = match spec.len() {
-        1 => vec![(None, spec[0]); cols],
-        2 => vec![(Some(spec[0]), spec[1]); cols],
-        n if n == 2 * cols => spec.chunks(2).map(|c| (Some(c[0]), c[1])).collect(),
+    let pairs: Vec<(i64, i64)> = match spec.len() {
+        1 => vec![(0, spec[0]); cols],
+        2 => vec![(spec[0], spec[1]); cols],
+        n if n == 2 * cols => spec.chunks(2).map(|c| (c[0], c[1])).collect(),
         n => {
             return Err(Error::new(
                 ErrorKind::Length,
@@ -13169,39 +13452,52 @@ fn format_spec(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Array>
             ));
         }
     };
-    if pairs.iter().any(|&(w, p)| w.is_some_and(|w| w < 0) || p < 0) {
-        return Err(Error::domain("a format width and precision are nonnegative", span));
+    if pairs.iter().any(|&(w, _)| w < 0) {
+        return Err(Error::domain("a format width is nonnegative", span));
     }
     // A width and a precision are lengths, and a written number is free to
     // ask for more characters than any machine holds. The ceiling applies
     // here as it does to a shape.
     for &(w, p) in &pairs {
-        crate::limits::count(w.unwrap_or(0) as u128, span)?;
-        crate::limits::count(p as u128, span)?;
+        crate::limits::count(w as u128, span)?;
+        crate::limits::count(p.unsigned_abs() as u128, span)?;
     }
     let numbers = y.to_f64_vec();
-    let text = |i: usize, p: i64| -> String {
-        match (&y.data, &numbers) {
-            (Data::Char(v), _) => v[i].to_string(),
-            (_, Some(v)) => {
-                let s = format!("{:.*}", p as usize, v[i]);
-                if v[i] < 0.0 { format!("{}{}", fmt.neg, &s[1..]) } else { s }
-            }
-            _ => String::new(),
-        }
-    };
     if y.dtype() != DType::Char && numbers.is_none() {
         return Err(Error::domain("format by specification takes numbers or characters", span));
     }
-    // A width the caller did not give is the widest value plus a blank.
+    // What one value needs, before any field is put round it: the text
+    // itself, and — for the scaled form — how many characters of it stand
+    // after the `E`, which is the field Dyalog pads out first.
+    let text = |i: usize, p: i64| -> (String, usize) {
+        match (&y.data, &numbers) {
+            (Data::Char(v), _) => (v[i].to_string(), 0),
+            (_, Some(v)) => {
+                let sign = if v[i] < 0.0 { fmt.neg.to_string() } else { String::new() };
+                if p >= 0 {
+                    let digits = fixed_digits(v[i].abs(), p as usize, padded);
+                    return (format!("{sign}{digits}"), 0);
+                }
+                let m = p.unsigned_abs() as usize;
+                let (digits, e) = scaled_digits(v[i].abs(), m);
+                let point = if m > 1 || padded { "." } else { "" };
+                let exp = if e < 0 { format!("{}{}", fmt.neg, -e) } else { e.to_string() };
+                let head = &digits[..1];
+                let tail = &digits[1..];
+                (format!("{sign}{head}{point}{tail}E{exp}"), exp.chars().count())
+            }
+            _ => (String::new(), 0),
+        }
+    };
+    // A width of zero is the widest value in the column plus a blank.
     let widths: Vec<usize> = pairs
         .iter()
         .enumerate()
         .map(|(c, &(w, p))| match w {
-            Some(w) => w as usize,
-            None => {
-                (0..rows).map(|r| text(r * cols + c, p).chars().count()).max().unwrap_or(0) + 1
+            0 => {
+                (0..rows).map(|r| text(r * cols + c, p).0.chars().count()).max().unwrap_or(0) + 1
             }
+            w => w as usize,
         })
         .collect();
     let line = crate::limits::count(widths.iter().map(|&w| w as u128).sum(), span)?;
@@ -13209,16 +13505,31 @@ fn format_spec(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Array>
     let mut out: Vec<char> = Vec::with_capacity(total);
     for r in 0..rows {
         for c in 0..cols {
-            let s = text(r * cols + c, pairs[c].1);
+            let (w, p) = (widths[c], pairs[c].1);
+            let (s, explen) = text(r * cols + c, p);
             let len = s.chars().count();
-            if len > widths[c] {
-                return Err(Error::domain(
-                    format!("{s} does not fit a field {} wide", widths[c]),
-                    span,
-                ));
+            if len > w {
+                if !padded {
+                    return Err(Error::domain(
+                        format!("{s} does not fit a field {w} wide"),
+                        span,
+                    ));
+                }
+                out.extend(std::iter::repeat_n('*', w));
+                continue;
             }
-            out.extend(std::iter::repeat_n(' ', widths[c] - len));
+            // The scaled form under a GIVEN width keeps four characters
+            // after the `E`, so the padding goes behind the exponent before
+            // it goes in front of the mantissa. A width the column worked
+            // out for itself is right-justified like everything else.
+            let trail = if padded && p < 0 && pairs[c].0 > 0 {
+                4usize.saturating_sub(explen).min(w - len)
+            } else {
+                0
+            };
+            out.extend(std::iter::repeat_n(' ', w - len - trail));
             out.extend(s.chars());
+            out.extend(std::iter::repeat_n(' ', trail));
         }
     }
     let mut shape = if y.rank() == 0 { Vec::new() } else { y.shape[..y.rank() - 1].to_vec() };
@@ -14506,12 +14817,12 @@ fn holds_nan(y: &Array) -> bool {
 
 /// `~: y` / `≠ y`: 1 where a value has not been seen before.
 ///
-/// The two languages count different things. J's sieve runs over ITEMS and
-/// answers one bit per item, so a matrix gives a vector. APL's runs over
-/// the ELEMENTS in ravel order and keeps the argument's own shape, so a
-/// matrix gives a matrix and a scalar gives a scalar.
-fn nub_sieve(y: &Array, tol: Tol, lang: crate::Lang) -> Array {
-    let by_element = lang == crate::Lang::Apl;
+/// What is counted differs. J's sieve runs over ITEMS and answers one bit
+/// per item, so a matrix gives a vector; GNU APL's runs over the ELEMENTS
+/// in ravel order and keeps the argument's own shape, so a matrix gives a
+/// matrix and a scalar gives a scalar; Dyalog's runs over the major cells,
+/// which is J's reading, and always answers a vector.
+fn nub_sieve(y: &Array, tol: Tol, by_element: bool) -> Array {
     let n = if by_element {
         y.count()
     } else if y.rank() == 0 {
@@ -14932,7 +15243,7 @@ fn apl_matrix_product(x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<
     };
     let grow = |a: Array, shape: [usize; 2]| -> Result<Array> {
         let want = Array::from_i64(vec![shape[0] as i64, shape[1] as i64]);
-        take(&want, &a, false, true, cfg.near(), span)
+        take(&want, &a, false, true, true, cfg.near(), span)
     };
     let left = grow(square(x, [rows, xk]), [rows, k])?;
     let right = grow(square(y, [yk, cols]), [k, cols])?;
@@ -15459,11 +15770,12 @@ fn pick(x: &Array, y: &Array, origin: i64, near: NearInt, span: Span) -> Result<
         let idx = step
             .to_i64_vec_near(near)
             .ok_or_else(|| Error::domain("a pick path holds integers", span))?;
-        let base =
-            if cur.rank() == 0 { Array::new(vec![1], cur.data.clone()) } else { cur.clone() };
-        if idx.len() > base.rank() {
+        // One item of the path is one LEVEL, and it holds one index per
+        // axis of the value at that level: an empty index picks from a
+        // scalar and nothing else, and no index picks from a scalar at all.
+        if idx.len() != cur.rank() {
             return Err(Error::new(
-                ErrorKind::Length,
+                ErrorKind::Rank,
                 format!(
                     "a path step of {} index(es) into a value of rank {}",
                     idx.len(),
@@ -15473,8 +15785,16 @@ fn pick(x: &Array, y: &Array, origin: i64, near: NearInt, span: Span) -> Result<
             ));
         }
         let zeroed: Vec<i64> = idx.iter().map(|&v| v - origin).collect();
-        let at = cell_index(&base, &zeroed, span)?;
-        cur = open_cell(&base.cell_at(idx.len(), at));
+        // A pick counts from the origin upwards; an index below it is out
+        // of range rather than an index from the end.
+        if let Some(bad) = idx.iter().zip(&zeroed).find(|&(_, &z)| z < 0) {
+            return Err(Error::domain(
+                format!("index {} is below the index origin {origin}", bad.0),
+                span,
+            ));
+        }
+        let at = cell_index(&cur, &zeroed, span)?;
+        cur = open_cell(&cur.cell_at(idx.len(), at));
     }
     Ok(cur)
 }
@@ -15609,15 +15929,25 @@ fn one_int(a: &Array, what: &str, near: NearInt, span: Span) -> Result<i64> {
 /// `x \\ y`: expand. Every 1 in x takes the next item of y; every 0 leaves
 /// a fill in its place — the type's own fill, or, for a nested argument in
 /// APL, the prototype of its first item.
-fn expand(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<Array> {
-    let mask = x
-        .to_i64_vec_near(near)
-        .ok_or_else(|| Error::domain("an expansion mask holds 0s and 1s", span))?;
-    if mask.iter().any(|&b| b != 0 && b != 1) {
-        return Err(Error::domain("an expansion mask holds 0s and 1s", span));
+fn expand(
+    x: &Array,
+    y: &Array,
+    apl: bool,
+    counts: bool,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
+    let what =
+        if counts { "an expansion count list holds integers" } else { "an expansion mask holds 0s and 1s" };
+    let mask = x.to_i64_vec_near(near).ok_or_else(|| Error::domain(what, span))?;
+    if !counts && mask.iter().any(|&b| b != 0 && b != 1) {
+        return Err(Error::domain(what, span));
     }
     let ys = as_list(y);
-    let taken = mask.iter().filter(|&&b| b == 1).count();
+    // A count above zero passes that many copies of the next item on; every
+    // other count leaves fills, and a zero leaves one — which is the
+    // boolean reading where the counts are 0s and 1s.
+    let taken = mask.iter().filter(|&&b| b > 0).count();
     let n = ys.items();
     // A one-item argument spreads over every slot the mask opens.
     let spread = n == 1 && taken != 1;
@@ -15629,27 +15959,45 @@ fn expand(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<
         ));
     }
     let m = ys.item_size();
+    // The result is `+/1⌈|X` items long, and the program wrote those counts:
+    // the size limit is what stands between a large one and the machine.
+    let mut want = ys.shape.clone();
+    let total = mask
+        .iter()
+        .fold(0usize, |a, &b| a.saturating_add(b.unsigned_abs().max(1) as usize));
+    if want.is_empty() {
+        want.push(total);
+    } else {
+        want[0] = total;
+    }
+    crate::limits::elements(&want, span)?;
     let fill = if apl { prototype_of(&ys) } else { None };
     let mut data = Data::empty(ys.dtype());
     let mut at = 0usize;
+    let mut slots = 0usize;
     for &b in &mask {
-        if b == 1 {
+        if b > 0 {
             let from = if spread { 0 } else { at };
-            for k in 0..m {
-                push_elem(&mut data, &ys.data, from * m + k);
+            for _ in 0..b {
+                for k in 0..m {
+                    push_elem(&mut data, &ys.data, from * m + k);
+                }
             }
+            slots += b as usize;
             at += 1;
         } else {
-            for _ in 0..m {
+            let gaps = b.unsigned_abs().max(1) as usize;
+            for _ in 0..gaps * m {
                 push_gap(&mut data, &fill);
             }
+            slots += gaps;
         }
     }
     let mut shape = ys.shape.clone();
     if shape.is_empty() {
-        shape.push(mask.len());
+        shape.push(slots);
     } else {
-        shape[0] = mask.len();
+        shape[0] = slots;
     }
     Ok(keep_proto(Array::new(shape, data), &ys, apl))
 }

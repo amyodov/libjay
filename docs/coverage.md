@@ -601,9 +601,25 @@ answers in `snapshots/apl/grade.snap`, which is what pins it. A third is
 with its sign and rounds a near-whole or vanishing argument before the
 Euclid runs, and Dyalog does neither (`¯3∨0` is 3 there, `¯3` here).
 
-One more row is the preset's: dyadic `⍳` takes a VECTOR on its left and
-gives a rank error for anything else, scalars included, where the APL2 line
-searches the items of a left argument of any rank (`Dialect.lookup_left`).
+Six more rows are the preset's. `Dialect.lookup_left`: dyadic `⍳` and `⍸`
+search their left argument's MAJOR CELLS, so a matrix looks up rows and
+answers one number per cell of the right argument, and a scalar — having no
+cell — is a rank error, where the APL2 line searches the ELEMENTS of a left
+argument of any rank. `Dialect.axis_counts`: `↑` and `↓` take a left
+argument shorter than the rank, the counts applying to the leading axes and
+the rest being taken whole or dropped from not at all, so `2↑matrix` is the
+first two rows. `Dialect.unique_mask`: monadic `≠` marks major cells and
+always answers a vector as long as `≢Y`, where the APL2 line marks the
+elements and keeps the shape. `Dialect.expansion`: dyadic `\` takes any
+integer count list — a positive count repeats that item, a negative one
+leaves that many fills, 0 means `¯1`, and the result is `+/1⌈|X` items long
+— where the APL2 line takes a boolean mask alone. `Dialect.where_rank`:
+monadic `⍸` gives a rank-0 argument an empty index vector, so `⍸1` is a
+one-item nested vector. `Dialect.format_spec`: dyadic `⍕` rounds a half on
+the shortest decimal that names the value rather than on the double scaled
+by the precision, keeps a one-digit mantissa's point, pads the scaled
+form's exponent out to four characters under a given width, and fills a
+field too narrow with asterisks rather than refusing.
 
 Three more are the tolerance readings: `Dialect.near_count` (a float near
 a whole number is admitted as a count relatively, scaled by `⎕CT`, rather
@@ -633,18 +649,18 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `\|` | magnitude | residue |
 | `=` `<` `≤` `>` `≥` | — | comparisons (0/1). `< ≤ > ≥` are TOTAL in this line: a character orders by its codepoint and stands below every number, and a complex value orders by its real part then its imaginary one. `Dialect.order_domain` names the narrow reading, where each of the three is a domain error. `⌈` and `⌊` are not comparisons and stay numeric under either |
 | `⊤∧` `⊤∨` `⊤⍲` `⊤⍱` `⊤=` `⊤≠` | the argument as the integer it stands for (`⊤∧`, `⊤∨`) or every bit of it complemented (`⊤⍱`); the other three have no monad | the logical operation on every bit of two 64-bit two's-complement integers, so `12 ⊤∧ 10` is 8. `⊤` and the glyph after it are one function, blanks between them included; an argument that is not a whole number within `⎕CT`, or does not fit in 64 bits, is a domain error |
-| `≠` | nub sieve: 1 at each item that has not occurred before | not equal (0/1) |
+| `≠` | unique mask: 1 at each ELEMENT, in ravel order, that has not occurred before, keeping the argument's shape. `Dialect.unique_mask` names Dyalog's reading, one bit per major cell and always a vector as long as `≢y` | not equal (0/1) |
 | `∧` | — | LCM (logical and on booleans; the Gaussian one on complex) |
 | `∨` | — | GCD (logical or on booleans; the Gaussian one on complex) |
 | `~` | not (the argument must be 0 or 1) | without: x's items that y has not |
 | `⍴` | shape of | reshape: x lays out y's ELEMENTS, cyclically, which is where APL and J part company above rank 1. An empty y fills with the type's fill |
-| `⍳` | index generator (respects `⎕IO`): one length gives the counting vector, two or more give an array of that shape whose elements are the boxed coordinate vectors | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`). The items of a left argument of ANY rank are searched; above rank 1 that search is per ELEMENT and each answer is the enclosed coordinate vector that finds it, or the enclosed empty vector where it is absent, so `(2 2⍴⍳4)⍳3` is the enclosed `2 1`. `Dialect.lookup_left` names Dyalog's reading, where the left argument must be a vector and anything else is a rank error |
+| `⍳` | index generator (respects `⎕IO`): one length gives the counting vector, two or more give an array of that shape whose elements are the boxed coordinate vectors | index of (respects `⎕IO`; absent gives `⎕IO + ≢x`). The items of a left argument of ANY rank are searched; above rank 1 that search is per ELEMENT and each answer is the enclosed coordinate vector that finds it, or the enclosed empty vector where it is absent, so `(2 2⍴⍳4)⍳3` is the enclosed `2 1`. `Dialect.lookup_left` names Dyalog's reading, where the left argument's MAJOR CELLS are searched instead — a matrix looks up rows, the result shape is `(1-⍴⍴x)↓⍴y`, and a scalar is a rank error |
 | `⍉` | transpose | dyadic transpose: x says, for each axis of y in turn, which axis of the RESULT it becomes; a destination two axes share runs them together, which is the diagonal, and every axis of the result must be named |
-| `↓` | split: the vectors along the LAST axis, each enclosed, laid out in the remaining axes' shape (no oracle — see "Which APL" above) | drop |
+| `↓` | split: the vectors along the LAST axis, each enclosed, laid out in the remaining axes' shape (no oracle — see "Which APL" above) | drop: one count per axis. `Dialect.axis_counts` names Dyalog's reading, where fewer counts leave the trailing axes alone |
 | `,` | ravel | catenate along the LAST axis. Axes other than that one must conform: APL refuses the ragged case that J fills, which is where the two rules part company |
 | `⍪` | table: one row per item, holding that item's elements (a scalar gives 1×1, a vector n×1) | catenate along the LEADING axis |
 | `!` | factorial (always float); a value with an imaginary part is a named gap, and one without is the real it displays as | binomial, J's argument order; the same gap |
-| `⍕` | format: the characters that display the argument | format by specification: x is one width-and-precision pair per column of y's last axis, one pair for all of them, or a lone precision, which takes the width the values need plus a separating blank. A value that does not fit its field is a domain error; a nested y is a named gap |
+| `⍕` | format: the characters that display the argument | format by specification: x is one width-and-precision pair per column of y's last axis, one pair for all of them, or a lone precision. A width of 0, given or left out, is the width the column needs plus a separating blank. A NEGATIVE precision is the scaled form, with that many mantissa digits and the exponent after an `E`. A half rounds away from zero. A value that does not fit its field is a domain error; a nested y is a named gap. `Dialect.format_spec` names Dyalog's reading of the four rules that part |
 | `⊥` | — | mixed-radix decode; with no digit to weigh the radix is never read, so `'a'⊥(0⍴0)` is the empty sum 0 whatever the radix was written as |
 | `⊤` | — | mixed-radix encode; with no value to write the radix is never read either, so `'a'⊤(0⍴0)` is the empty. `A⊤[N]B` encodes to N copies of the single radix A, N counted from one whatever `⎕IO` is; `A⊤[0]B` works the width out — the smallest that reaches the largest value, and one digit more when any value is negative |
 | `⌽` | reverse each row (last axis) | rotate each row (last axis) |
@@ -652,12 +668,12 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `≢` | tally | not match |
 | `∊` | enlist: every leaf element, in ravel order, as a vector | membership, element by element (an element of a nested array is a whole array) |
 | `⊂` | enclose — except that a simple scalar is its own enclosure, so `⊂5` is `5` | partitioned enclose: a partition opens where x rises (`x[i] > x[i-1]`, reading `x[¯1]` as 0) and an item flagged 0 is dropped. Rank 2 and above partitions the LAST axis, once per cross section, and the axes ahead of it frame the answer. No flag against no item is the empty nested vector, and nothing about the flags has to be a flag; where there ARE items the flags are read as always |
-| `⍸` | where: index `i` repeated `y[i]` times, from `⎕IO`; a rank-2 or higher argument gives one boxed coordinate vector per occurrence | interval index: how many items of the ascending x are at or below each cell, plus `⎕IO - 1`. The interval is closed on the left here and open in J's `I.`: `1 3 5⍸3` is 2 where `1 3 5 I. 3` is 1 |
+| `⍸` | where: index `i` repeated `y[i]` times, from `⎕IO`; a rank-2 or higher argument gives one boxed coordinate vector per occurrence. `Dialect.where_rank` names Dyalog's reading, where an index is a vector as long as the rank at rank 0 too, so `⍸1` is a one-item nested vector holding `⍬` | interval index: how many items of the ascending x are at or below each cell, plus `⎕IO - 1`. The interval is closed on the left here and open in J's `I.`: `1 3 5⍸3` is 2 where `1 3 5 I. 3` is 1. `Dialect.lookup_left` names Dyalog's reading, where the bounds are the left argument's MAJOR CELLS — a matrix of them searches rows — and a scalar is a rank error |
 | `⌷` | materialise: the argument itself (no oracle — see "Which APL" above) | index: one item of x per axis of y, and the count must equal the rank. An item is a scalar, which drops its axis, or an ENCLOSED vector, which keeps it and selects that many — `(⊂1 2)⌷5 6 7 8` is `5 6` |
 | `⌹` | matrix inverse — the pseudo-inverse of a taller matrix; wider is refused, singular is a domain error | matrix divide: the least-squares solution of `y a = x` |
 | `?` | roll: a random value in `⎕IO .. ⎕IO+y-1` (`?0` is a domain error) | deal: x distinct values from that range |
-| `⊃` | disclose: the items mixed into one array, filled where their shapes differ | pick: each item of x is one step of a path — a simple step indexes the items, a boxed one is a whole coordinate vector |
-| `↑` | first: the first element of the ravel, disclosed; the type's fill when there is none | take; overtaking a NESTED array fills with the first item's prototype — that item's shape with a zero for every number and a blank for every character, nested to the same depth |
+| `⊃` | disclose: the items mixed into one array, filled where their shapes differ; a character item beside a numeric one gives a MIXED SIMPLE array, each cell padded with its own prototype | pick: each item of x is one LEVEL of a path, and holds one index per axis of the value at that level — so an empty index picks from a scalar and nothing else, and `(2 2)⊃matrix` asks for two levels where `(⊂2 2)⊃matrix` asks for one two-axis index. Indices count upwards from `⎕IO`; one below it is out of range, not an index from the end |
+| `↑` | first: the first element of the ravel, disclosed; the type's fill when there is none. Under `Dialect.first_disclose` it is MIX instead, which is `⊃`'s monad here | take; overtaking a NESTED array fills with the first item's prototype — that item's shape with a zero for every number and a blank for every character, nested to the same depth. One count per axis; `Dialect.axis_counts` names Dyalog's reading, where fewer counts take the trailing axes whole |
 | `≡` | depth: 0 for a simple scalar, 1 for a simple array, one more than the deepest box | match: same shape and values, else 0 |
 | `∪` | nub: distinct items, first-occurrence order | union: x's items, then y's items that are new. Only the right argument is sieved, so x keeps whatever repeats it has |
 | `∩` | — | intersection: x's items that y also has, in x's order |
@@ -667,7 +683,7 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `⎕UCS` | codepoints become characters, characters become their codepoints | — |
 | `⎕CC` | the characters of the numbered class — the digits (1, 10), the two cases of the Latin (2, 26, 3, ¯26, 52) and Greek (48) alphabets, ASCII (4, 128), the printable range (95), the octal (8) and hexadecimal (16, ¯16, 17) digits, and the RFC 4648 alphabets (33, 65). Several numbers give one class per item, nested. The four classes GNU APL states as its own glyph repertoire — 5, 6, 7 and 9 — are named gaps | — |
 | `⎕FX` | fix a definition from its lines and answer with its name; the lines must be literal text (see below) | — |
-| `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill |
+| `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill. `Dialect.expansion` names Dyalog's reading, where the left argument is any integer vector — a positive count repeats that item, a negative one leaves that many fills, 0 means `¯1`, and the result is `+/1⌈|x` items long |
 | `⍋` `⍒` | grade up / down (stable; respects `⎕IO`). A NESTED argument orders by the APL2 rule: the rank, then the shape read from the FIRST axis, then the atoms in row-major order — a character before a number before a nested value, a nested one recursively — and two arrays with no atoms are separated by their types instead. It is a different comparator from J's at every step; `Dialect.nested_grade` names Dyalog's total array ordering as the other reading | collating grade: every character of y is keyed by where it FIRST occurs in the collating array x — the coordinate read with the last axis most significant, and one past the end for a character x does not hold — and the items of y are ordered by those keys read left to right |
 | `⊢` `⊣` | same | right / left. `A⊢[M]B` is the selection function: a 1 in M takes the element of B that stands there, a 0 the element of A, and M, A and B agree by the ordinary scalar rule. M is settled before the program runs |
 | `○` | pi times y | circle function k (see below) |
@@ -842,11 +858,15 @@ sandbox", which is the sandbox speaking rather than a queue position — see
 "Sandbox" below. `⎕` and `⍞` on their own are input rather than names: see
 the same section.
 
-An axis specification `f[k]` is supported for the four spellings where an
+An axis specification `f[k]` is supported for the spellings where an
 explicit axis is the whole point: `f/[k]` and `f⌿[k]` both reduce axis k,
-`f\[k]` and `f⍀[k]` both scan it, and `⌽[k]` and `⊖[k]` both reverse it —
-naming an axis collapses each pair to one function. The axis is counted from
-`⎕IO`. Every other glyph reports `axis specification for X` as a gap.
+`f\[k]` and `f⍀[k]` both scan it, `⌽[k]` and `⊖[k]` both reverse it, and the
+DYADIC `x/[k]y` and `x\[k]y` replicate and expand along it — naming an axis
+collapses each pair to one function. The axis is counted from `⎕IO`. Every
+other glyph reports `axis specification for X` as a gap; `⊆[k]`, `↑[k]` and
+`⌷[k]` are the three that a Dyalog program is likeliest to want. A
+FRACTIONAL axis — `↑[0.5]`, which interleaves the item axes with the frame
+axes — is a second gap, named as `a fractional axis (f[k.5])`.
 
 Bracket indexing `A[i;j]` is real: one slot per axis, an elided slot meaning
 the whole axis, indices counted from `⎕IO`, and the result's shape the

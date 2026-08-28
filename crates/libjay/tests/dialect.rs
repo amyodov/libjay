@@ -36,6 +36,22 @@ fn i64s(shape: &[usize], values: &[i64]) -> Array {
     Array::new(shape.to_vec(), Data::I64(values.to_vec().into()))
 }
 
+fn bools(shape: &[usize], values: &[u8]) -> Array {
+    Array::new(shape.to_vec(), Data::Bool(values.to_vec().into()))
+}
+
+/// The kind a sentence is refused with under a dialect, for the settings
+/// whose other reading answers instead of refusing.
+fn refusal(src: &str, dialect: &Dialect) -> ErrorKind {
+    let program = compile(Lang::Apl, src, dialect);
+    let program = match program {
+        Ok(p) => p,
+        Err(e) => return e.kind,
+    };
+    let mut sink = |_: &str| {};
+    program.run(&[], &mut sink).expect_err("this dialect refuses it").kind
+}
+
 #[test]
 fn the_shipped_dialect_is_the_default_one() {
     // The preset writes out every setting; the default derives them. They
@@ -173,10 +189,15 @@ fn the_dyalog_preset_answers_the_dyalog_way() {
     let life = "{↑1 ⍵∨.∧3 4=+/,¯1 0 1∘.⊖¯1 0 1∘.⌽⊂⍵} 2 2⍴1 1 1 0";
     assert_eq!(val(&format!("≡{life}"), &dy), Array::scalar_i64(1));
     assert_eq!(val(&format!("≡{life}"), &gnu), Array::scalar_i64(2));
-    // Dyadic `⍳` looks up in a VECTOR and nothing else; the APL2 line
-    // searches the items of a left argument of any rank.
+    // Dyadic `⍳` and `⍸` search the left argument's MAJOR CELLS, so a
+    // matrix looks up rows; the APL2 line searches the ELEMENTS of a left
+    // argument of any rank and answers a coordinate vector.
     assert_eq!(val("'abc'⍳'b'", &dy), Array::scalar_i64(2));
-    for src in ["(2 3⍴⍳6)⍳5", "5⍳6"] {
+    assert_eq!(val("(2 3⍴⍳6)⍳1 2 3", &dy), Array::scalar_i64(1));
+    assert_eq!(val("(2 3⍴⍳6)⍳2 3⍴4 5 6 1 2 3", &dy), i64s(&[2], &[2, 1]));
+    assert_eq!(val("(2 2⍴1 2 3 4)⍸1 2", &dy), Array::scalar_i64(1));
+    // A scalar has no major cell, and neither verb takes one.
+    for src in ["(2 3⍴⍳6)⍳5", "5⍳6", "100⍸0 100 200"] {
         let p = compile(Lang::Apl, src, &dy).expect("it compiles in either reading");
         let mut sink = |_: &str| {};
         assert_eq!(
@@ -185,6 +206,39 @@ fn the_dyalog_preset_answers_the_dyalog_way() {
             "{src}"
         );
         run(src, &gnu).unwrap_or_else(|| panic!("{src} answers under the APL2 reading"));
+    }
+    // `↑` and `↓` take a left argument shorter than the rank: the counts
+    // are the leading axes, and the rest are taken whole or left alone.
+    assert_eq!(val("2↑3 4⍴⍳12", &dy), i64s(&[2, 4], &[1, 2, 3, 4, 5, 6, 7, 8]));
+    assert_eq!(val("1↓3 4⍴⍳12", &dy), i64s(&[2, 4], &[5, 6, 7, 8, 9, 10, 11, 12]));
+    assert_eq!(refusal("2↑3 4⍴⍳12", &gnu), ErrorKind::Length);
+    assert_eq!(refusal("1↓3 4⍴⍳12", &gnu), ErrorKind::Length);
+    // Monadic `≠` marks MAJOR CELLS and always answers a vector.
+    assert_eq!(val("≠3 3⍴1 2 3 1 2 3 4 5 6", &dy), bools(&[3], &[1, 0, 1]));
+    assert_eq!(val("≠2 2⍴0", &dy), bools(&[2], &[1, 0]));
+    assert_eq!(val("⍴≠5", &dy), i64s(&[1], &[1]));
+    assert_eq!(val("≠2 2⍴0", &gnu), bools(&[2, 2], &[1, 0, 0, 0]));
+    // Dyadic `\\` takes a general integer count list.
+    assert_eq!(val("2 2\\'ab'", &dy), val("'aabb'", &dy));
+    assert_eq!(val("¯2\\1", &dy), i64s(&[2], &[0, 0]));
+    assert_eq!(val("1 2 1\\1 2 3", &dy), i64s(&[4], &[1, 2, 2, 3]));
+    assert_eq!(refusal("2 2\\'ab'", &gnu), ErrorKind::Domain);
+    // Monadic `⍸` follows the rank all the way down: a rank-0 argument's
+    // one index is the EMPTY vector, so the answer is nested.
+    assert_eq!(val("≡⍸1", &dy), Array::scalar_i64(2));
+    assert_eq!(val("≡⍸1", &gnu), Array::scalar_i64(1));
+    // Dyadic `⍕` rounds a half on the decimal that names the value, and
+    // fills a field too narrow with asterisks.
+    assert_eq!(val("4 2⍕1.005", &dy), val("'1.01'", &dy));
+    assert_eq!(val("4 2⍕1.005", &gnu), val("'1.00'", &gnu));
+    assert_eq!(val("2 2⍕1 2", &dy), val("'****'", &dy));
+    assert_eq!(refusal("2 2⍕1 2", &gnu), ErrorKind::Domain);
+    // Both lines round a half AWAY from zero, and both take a width of 0
+    // and a negative precision.
+    for d in [&dy, &gnu] {
+        assert_eq!(val("4 0⍕2.5", d), val("'   3'", d));
+        assert_eq!(val("0 2⍕1.5", d), val("' 1.50'", d));
+        assert_eq!(val("0 ¯2⍕123.45", d), val("' 1.2E2'", d));
     }
 }
 

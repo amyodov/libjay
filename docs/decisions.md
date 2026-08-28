@@ -3663,3 +3663,58 @@ the register.
   the recorder cannot see it as one, and the two lines are left out of the
   corpus rather than pinned against a diagnostic that arrives on the wrong
   channel.
+
+- 2026-08-28 — The Dyalog doc crawl's findings, closed. Ten tickets came out
+  of reading the Dyalog Language Reference against the 20.0 oracle; nine are
+  implemented and one is scoped. Both oracles were put to every case, which
+  is what decided each ticket's shape: three are SHARED holes libjay had in
+  every dialect, six are places the two APL lines genuinely part.
+
+  Shared, so fixed everywhere. `⊃` (pick) was too permissive on four counts,
+  and GNU APL and Dyalog refuse identically on all four: one item of the
+  path is one LEVEL and carries one index per axis of the value at that
+  level (so `(2 2)⊃matrix` is a rank error and `(⊂2 2)⊃matrix` is not), an
+  empty index picks from a simple scalar alone, a scalar has no axis to pick
+  from, and an index below `⎕IO` is out of range rather than an index from
+  the end. Mix refused to frame a character cell beside a numeric one; both
+  references build the MIXED SIMPLE array, padding each cell with its own
+  prototype, and libjay already had that representation everywhere else —
+  `assemble_mixed` boxes the elements after padding, and only the rank-0
+  application of `Open` under APL takes that path, so J's framing keeps its
+  type error. Dyadic `⍕` refused a width of 0, refused a negative precision,
+  and rounded a half to even; both references answer the natural width, the
+  scaled `1.2E2` form, and a half AWAY from zero.
+
+  Split, so a dialect setting each. `axis_counts` (`↑`/`↓` take fewer counts
+  than the rank — `2↑matrix` is the first two rows there and a LENGTH ERROR
+  in GNU APL), `unique_mask` (monadic `≠` over major cells, always a
+  vector), `expansion` (`\` with a general integer count list, the result
+  `+/1⌈|X` long), `where_rank` (monadic `⍸` of a scalar answers a nested
+  empty index), `format_spec` (four `⍕` rules that move together), and
+  `lookup_left`, which existed but named the wrong rule: Dyalog's `⍳` does
+  not want a vector, it wants MAJOR CELLS — `(2 3⍴⍳6)⍳1 2 3` is 1 there —
+  and `⍸` reads its bounds the same way. The variant is renamed
+  `VectorOnly` → `MajorCells` accordingly, and `⍸`'s left rank becomes
+  infinite under it so the whole table reaches the verb.
+
+  `format_spec` is one setting for four behaviours because they never move
+  apart: they are the one page, and every one of them was measured. The
+  rounding basis was the hard half. Both references round a half away from
+  zero, but on different things: GNU APL on the double scaled by the
+  precision (`1.005×100` is `100.49999999999999`, so `4 2⍕1.005` is `1.00`,
+  while `0.35×10` is exactly `3.5`, so `4 1⍕0.35` is `0.4`), Dyalog on the
+  shortest decimal that names the double (`1.005` is a tie, so `1.01`). A
+  tolerant floor was tried first and fits neither — `10 0⍕0.49999999999999`
+  is 0 on both sides and any tolerance large enough for `1.005` lifts it.
+  The scaled form's LAYOUT parts too: GNU APL right-justifies it, and Dyalog
+  reserves four characters after the `E`, so a given width pads behind the
+  exponent before it pads in front of the mantissa — `9 ¯2⍕123.45` is
+  `' 1.2E2   '`. A width of 0 is right-justified in both.
+
+  What is left. The `[k]` axis on `⊆`, `↑`, `⌷` and `/` is still the named
+  gap it was; `⌿` and `⍀` already carry their axis, so only the bracket form
+  is missing, and it wants the axis to reach a verb that has no place for
+  one — a parser and IR change, not a primitive. A FRACTIONAL axis (`↑[0.5]`,
+  which Dyalog documents as the way to interleave the item axes with the
+  frame axes) is a second and smaller job on top of it, and stays a parse
+  error naming the feature.

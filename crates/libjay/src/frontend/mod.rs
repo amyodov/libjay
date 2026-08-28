@@ -155,17 +155,96 @@ pub enum NestedGrade {
     TotalOrder,
 }
 
-/// What dyadic `⍳` takes on its left.
+/// What dyadic `⍳` and `⍸` take on their left.
 ///
 /// The APL2/ISO line, which GNU APL implements, looks a cell up among the
-/// items of a left argument of any rank, so `(2 3⍴⍳6)⍳5` answers and a
-/// scalar left argument is a one-item table. Dyalog takes a vector alone
-/// and gives a RANK ERROR for anything else, scalars included.
+/// ELEMENTS of a left argument of any rank, so `(2 3⍴⍳6)⍳5` answers with a
+/// coordinate vector and a scalar left argument is a one-item table; `⍸`
+/// there takes a scalar bound and refuses rank 2 and above. Dyalog reads
+/// the left argument as a list of MAJOR CELLS in both verbs, so a matrix
+/// searches rows and answers one number per cell of the right argument,
+/// and a scalar — having no major cells — is a RANK ERROR.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LookupLeft {
     #[default]
     AnyRank,
-    VectorOnly,
+    MajorCells,
+}
+
+/// How long the left argument of `↑` and `↓` may be.
+///
+/// GNU APL wants exactly one count per axis of the right argument. Dyalog
+/// takes that many or fewer, the counts applying to the LEADING axes and
+/// every axis they do not reach being taken whole and dropped from not at
+/// all — which is what makes `2↑matrix` the first two rows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AxisCounts {
+    /// GNU APL: one count per axis, exactly.
+    #[default]
+    PerAxis,
+    /// Dyalog: the leading axes, and as few of them as the program likes.
+    Leading,
+}
+
+/// What monadic `≠` counts.
+///
+/// GNU APL runs the sieve over the ELEMENTS in ravel order and keeps the
+/// argument's shape, so a matrix answers a matrix. Dyalog runs it over the
+/// MAJOR CELLS and always answers a vector as long as `≢Y` — one bit per
+/// row of a matrix, and a one-element vector for a scalar.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UniqueMask {
+    #[default]
+    Elements,
+    MajorCells,
+}
+
+/// What dyadic `\` takes on its left.
+///
+/// GNU APL takes a boolean mask alone: a 1 passes the next item on, a 0
+/// leaves a fill. Dyalog takes any simple integer vector — a positive count
+/// repeats that item, a negative one leaves that many fills, and 0 means
+/// `¯1` — so the result is `+/1⌈|X` items long. `/` reads its left argument
+/// that way in both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Expansion {
+    #[default]
+    Boolean,
+    Counts,
+}
+
+/// What shape monadic `⍸` gives an index.
+///
+/// Both lines answer a vector of indices for a vector argument and a vector
+/// of coordinate vectors above rank 1. They part over rank 0, where the
+/// coordinate vector is EMPTY: GNU APL answers the plain index anyway, so
+/// `⍸1` is the number 1, and Dyalog follows the rank, so `⍸1` is a one-item
+/// nested vector holding `⍬`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WhereRank {
+    /// GNU APL: a scalar argument answers a plain index.
+    #[default]
+    Flattened,
+    /// Dyalog: an index is a vector as long as the rank, rank 0 included.
+    ByRank,
+}
+
+/// How dyadic `⍕` lays a number out.
+///
+/// Four rules of the one page move together. GNU APL measures a half on the
+/// double scaled by the precision, so `4 2⍕1.005` is `1.00`; writes a
+/// one-digit mantissa without a point, so `0 ¯1⍕123.45` is `1E2`;
+/// right-justifies the scaled form in its field; and refuses a value too
+/// wide for the field it was given. Dyalog measures the half on the
+/// shortest decimal that names the double (`1.01`); keeps the mantissa's
+/// point (`1.E2`); reserves four characters after the `E`, so a given width
+/// pads the exponent out before it pads the front; and fills a field too
+/// narrow with asterisks rather than refusing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FormatSpec {
+    #[default]
+    Plain,
+    Padded,
 }
 
 /// Which line's `∨` and `∧` these are.
@@ -313,6 +392,11 @@ pub struct Dialect {
     pub order_domain: OrderDomain,
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
+    pub axis_counts: AxisCounts,
+    pub unique_mask: UniqueMask,
+    pub expansion: Expansion,
+    pub where_rank: WhereRank,
+    pub format_spec: FormatSpec,
     pub gcd_rule: GcdRule,
     pub near_count: NearCount,
     pub floor_rule: FloorRule,
@@ -355,6 +439,11 @@ impl Dialect {
             order_domain: OrderDomain::Total,
             nested_grade: NestedGrade::Apl2,
             lookup_left: LookupLeft::AnyRank,
+            axis_counts: AxisCounts::PerAxis,
+            unique_mask: UniqueMask::Elements,
+            expansion: Expansion::Boolean,
+            where_rank: WhereRank::Flattened,
+            format_spec: FormatSpec::Plain,
             gcd_rule: GcdRule::Tolerant,
             near_count: NearCount::Absolute,
             floor_rule: FloorRule::Shift,
@@ -388,7 +477,12 @@ impl Dialect {
             complex_order: ComplexOrder::RealThenImaginary,
             order_domain: OrderDomain::Numeric,
             nested_grade: NestedGrade::TotalOrder,
-            lookup_left: LookupLeft::VectorOnly,
+            lookup_left: LookupLeft::MajorCells,
+            axis_counts: AxisCounts::Leading,
+            unique_mask: UniqueMask::MajorCells,
+            expansion: Expansion::Counts,
+            where_rank: WhereRank::ByRank,
+            format_spec: FormatSpec::Padded,
             gcd_rule: GcdRule::Exact,
             near_count: NearCount::Tolerant,
             floor_rule: FloorRule::Scaled,
@@ -468,6 +562,11 @@ impl Dialect {
             order_domain: self.order_domain,
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
+            axis_counts: self.axis_counts,
+            unique_mask: self.unique_mask,
+            expansion: self.expansion,
+            where_rank: self.where_rank,
+            format_spec: self.format_spec,
             gcd_rule: self.gcd_rule,
             near_count: self.near_count,
             floor_rule: self.floor_rule,
@@ -506,6 +605,11 @@ pub struct Rules {
     pub order_domain: OrderDomain,
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
+    pub axis_counts: AxisCounts,
+    pub unique_mask: UniqueMask,
+    pub expansion: Expansion,
+    pub where_rank: WhereRank,
+    pub format_spec: FormatSpec,
     pub gcd_rule: GcdRule,
     pub near_count: NearCount,
     pub floor_rule: FloorRule,
@@ -539,6 +643,11 @@ impl Rules {
             order_domain: self.order_domain,
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
+            axis_counts: self.axis_counts,
+            unique_mask: self.unique_mask,
+            expansion: self.expansion,
+            where_rank: self.where_rank,
+            format_spec: self.format_spec,
             gcd_rule: self.gcd_rule,
             near_count: self.near_count,
             floor_rule: self.floor_rule,
