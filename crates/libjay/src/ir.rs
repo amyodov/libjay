@@ -205,6 +205,11 @@ pub struct ExplicitDef {
     pub id: u64,
     /// True when running the body can have no effect beyond its result.
     pub pure: bool,
+    /// The lines this definition was written as: the header first, then one
+    /// per body line, each as the source spells it. APL's `⎕CR` hands them
+    /// back. Empty for a definition that has no such lines — a J one, or a
+    /// `{…}`, which is an expression rather than a listing.
+    pub source: Vec<String>,
 }
 
 impl Expr {
@@ -380,6 +385,11 @@ pub struct Outcome {
     /// Meaningful only where there is a value; false for J, which has no
     /// shy results.
     pub shy: bool,
+    /// The display conventions as the run left them. They start at the
+    /// program's own and change when the program sets one — APL's `⎕PP`
+    /// is the only such setting today — so a caller that displays the
+    /// value shows it the way the program asked for.
+    pub fmt: FmtOpts,
 }
 
 impl Program {
@@ -398,6 +408,21 @@ impl Program {
     /// a REPL, a transcript — needs the difference.
     pub fn run_detail(&self, args: &[Array], out: &mut dyn FnMut(&str)) -> Result<Outcome> {
         self.exec(args, out, None, &mut None, None)
+    }
+
+    /// Every option a run has, and everything a caller that DISPLAYS the
+    /// answer needs: whether a session would show it, and the display
+    /// conventions the program ended on. `device` places the fused
+    /// kernels, `inp` answers the program's reads; None for either is the
+    /// same run without it.
+    pub fn run_detail_on_io(
+        &self,
+        device: Option<&crate::device::Device>,
+        args: &[Array],
+        out: &mut dyn FnMut(&str),
+        inp: crate::verb::InputFn<'_>,
+    ) -> Result<Outcome> {
+        self.exec(args, out, inp, &mut None, device)
     }
 
     /// Execute with both halves of the sandbox's stdio wired: `out` takes
@@ -479,6 +504,12 @@ impl Program {
             rules: self.rules,
         };
         let mut env = Env::new(args.to_vec());
+        // A run's random link belongs to that run: `⎕RL` starts a stream
+        // that ends with the program that named it, however it ends.
+        let _link = crate::rng::LinkGuard;
+        if self.rules.lang == Lang::Apl {
+            crate::sysvar::seed(&mut env);
+        }
         let mut inp = inp;
         let inp = crate::verb::reborrow_input(&mut inp);
         let mut ctx = Ctx { cfg, out, inp, env: &mut env, device, shy: false };
@@ -486,7 +517,7 @@ impl Program {
         // an assignment answers with the assigned value, displayed like
         // any other.
         let shyness = self.rules.lang == Lang::Apl;
-        let mut last = Outcome { value: None, shy: false };
+        let mut last = Outcome { value: None, shy: false, fmt: cfg.fmt };
         for stmt in &self.stmts {
             // A loop contains its own `:Leave`, and there is no definition
             // out here for a `:Return` or a `→` to leave.
@@ -499,9 +530,9 @@ impl Program {
                 ));
             }
             last = if stmt.is_silent() {
-                Outcome { value: None, shy: false }
+                Outcome { value: None, shy: false, fmt: ctx.cfg.fmt }
             } else {
-                Outcome { value: v, shy: shyness && ctx.shy }
+                Outcome { value: v, shy: shyness && ctx.shy, fmt: ctx.cfg.fmt }
             };
         }
         Ok(last)
@@ -1157,6 +1188,28 @@ fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
     Ok(v)
 }
 
+/// `name←value`, and the system variables among them: a `⎕`-name that is
+/// a setting has to make what it controls follow before it is stored.
+///
+/// Its own function rather than an arm of `eval_node`'s match, for the
+/// same reason as [`assign_many`].
+#[inline(never)]
+fn assign_one(
+    name: &str,
+    value: &Expr,
+    scope: Scope,
+    span: Span,
+    ctx: &mut Ctx<'_>,
+    rec: &mut Option<Trace>,
+) -> Result<Array> {
+    let v = eval(value, ctx, rec)?;
+    if name.starts_with('⎕') {
+        crate::sysvar::apply(name, &v, ctx, span)?;
+    }
+    ctx.env.assign(name.to_string(), v.clone(), scope);
+    Ok(v)
+}
+
 /// `(a b)←values`: each name takes the item of the value that stands where
 /// it does, and a scalar goes to every one of them.
 ///
@@ -1214,10 +1267,8 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
         Expr::Name(n, span) => ctx.env.get(n).ok_or_else(|| {
             Error::new(ErrorKind::Value, format!("undefined name: {n}"), Some(*span))
         }),
-        Expr::Assign { name, value, scope, .. } => {
-            let v = eval(value, ctx, rec)?;
-            ctx.env.assign(name.clone(), v.clone(), *scope);
-            Ok(v)
+        Expr::Assign { name, value, scope, span } => {
+            assign_one(name, value, *scope, *span, ctx, rec)
         }
         Expr::AssignMany { names, value, scope, span } => {
             assign_many(names, value, *scope, ctx, rec, *span)

@@ -405,6 +405,11 @@ impl Env {
         self.verbs.get(name)
     }
 
+    /// Whether a name has a value now — what `⎕NC` asks.
+    pub fn has_value(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
     pub fn arg(&self, i: usize) -> Result<Array> {
         self.args
             .get(i)
@@ -844,6 +849,12 @@ pub enum MonadOp {
     /// GNU APL `⎕CC n`: the characters of the numbered class, as a vector.
     /// Several numbers give one class per item, nested.
     CharClass,
+    /// APL `⎕NC name`: what a name is — a variable, a defined function,
+    /// a system variable, an unused name, or not a name at all.
+    NameClass,
+    /// APL `⎕CR name`: the lines of the named definition, as a character
+    /// matrix.
+    CharRep,
     /// Present in the language, not implemented: named feature.
     NotYet(&'static str),
     /// No monadic meaning exists for this primitive in its language.
@@ -1044,6 +1055,17 @@ pub enum DyadOp {
     /// ask about the argument; 8 drops the stored entries that hold the
     /// sparse element.
     SparseForm,
+    /// GNU APL `x ⌹[8] y`: the polynomial whose coefficients are x times
+    /// the polynomial whose coefficients are y, lowest power first.
+    PolyMultiply,
+    /// GNU APL `x ⌹[9] y`: x divided by y as polynomials — the quotient
+    /// and the remainder, in that order, as two items.
+    PolyDivide,
+    /// GNU APL `n ⎕CR y`: the numbered conversion. libjay answers the ones
+    /// that are conversions between representations of the same data —
+    /// hexadecimal, base 64 and UTF-8 — and names the rest, which report
+    /// on an interpreter's own display and storage.
+    CharRep,
     NotYet(&'static str),
     None,
 }
@@ -8479,6 +8501,8 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         MonadOp::Execute { apl } => execute(y, apl, ctx, span),
         MonadOp::Bitwise(op) => bit_monad(op, y, ctx.cfg, span),
         MonadOp::CharClass => char_class(y, ctx.cfg.near(), span),
+        MonadOp::NameClass => name_class(y, ctx.env, span),
+        MonadOp::CharRep => char_rep(y, ctx.env, span),
         MonadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         MonadOp::None => {
             Err(Error::domain(format!("{} has no monadic meaning", p.name), span))
@@ -8929,6 +8953,9 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::ParseNumbers => parse_numbers(x, y, span),
         DyadOp::SequentialMachine => sequential_machine(x, y, span),
         DyadOp::Deal { origin, fixed } => deal(x, y, origin, fixed, cfg.near(), span),
+        DyadOp::CharRep => char_rep_dyad(x, y, cfg.near(), span),
+        DyadOp::PolyMultiply => poly_multiply(x, y, span),
+        DyadOp::PolyDivide => poly_divide(x, y, span),
         DyadOp::ExactForm => exact_form(x, y, cfg.near(), span),
         DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
         DyadOp::Bitwise(op) => bit_dyad(op, x, y, cfg, span),
@@ -16266,6 +16293,417 @@ fn char_class(y: &Array, near: NearInt, span: Span) -> Result<Array> {
         cells.push(char_class_one(n, span)?);
     }
     Ok(Array::new(y.shape.clone(), Data::Box(cells.into())))
+}
+
+// ------------------------------------------------ ⌹[8] and ⌹[9]: polynomials
+
+/// The coefficients one side of a polynomial operation holds, lowest power
+/// first. A scalar is the one coefficient of a constant.
+fn poly_terms(a: &Array, what: &str, span: Span) -> Result<Vec<f64>> {
+    if a.rank() > 1 {
+        return Err(Error::not_yet(
+            "⌹[8] and ⌹[9] over an array of rank 2 or more",
+            span,
+        ));
+    }
+    if a.count() == 0 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{what} is a polynomial, and has no coefficients"),
+            Some(span),
+        ));
+    }
+    a.to_f64_vec()
+        .ok_or_else(|| Error::domain(format!("{what} takes numbers"), span))
+}
+
+/// `x ⌹[8] y`: the product of two polynomials — the convolution of their
+/// coefficients.
+#[inline(never)]
+fn poly_multiply(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let a = poly_terms(x, "the left polynomial", span)?;
+    let b = poly_terms(y, "the right polynomial", span)?;
+    let mut out = vec![0.0f64; a.len() + b.len() - 1];
+    for (i, &u) in a.iter().enumerate() {
+        for (j, &v) in b.iter().enumerate() {
+            out[i + j] += u * v;
+        }
+    }
+    Ok(whole_where_possible(out))
+}
+
+/// `x ⌹[9] y`: x divided by y as polynomials. The answer is the quotient
+/// and the remainder, in that order.
+///
+/// The quotient has one more coefficient than the difference of their
+/// degrees, and the remainder has one fewer than the divisor — the shapes
+/// long division gives, whatever the numbers in them come to.
+///
+/// The two halves are not written the same way round: the quotient runs
+/// from the lowest power up, like every other argument here, and the
+/// remainder runs from the highest power down. That asymmetry is the
+/// reference's, measured, not a reading of anything.
+#[inline(never)]
+fn poly_divide(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let a = poly_terms(x, "the dividend", span)?;
+    let b = poly_terms(y, "the divisor", span)?;
+    if a.len() < b.len() {
+        return Err(Error::not_yet(
+            "⌹[9] where the dividend has fewer coefficients than the divisor",
+            span,
+        ));
+    }
+    // Long division runs from the highest power down, so both sides are
+    // read backwards and the answer is turned round again at the end.
+    let hi: Vec<f64> = a.iter().rev().copied().collect();
+    let by: Vec<f64> = b.iter().rev().copied().collect();
+    let lead = by[0];
+    let mut rest = hi;
+    let width = rest.len() - by.len() + 1;
+    let mut quotient = Vec::with_capacity(width);
+    for i in 0..width {
+        let q = rest[i] / lead;
+        quotient.push(q);
+        for (j, &d) in by.iter().enumerate() {
+            rest[i + j] -= q * d;
+        }
+    }
+    let remainder: Vec<f64> = rest[width..].to_vec();
+    let cells = vec![
+        whole_where_possible(quotient.into_iter().rev().collect()),
+        whole_where_possible(remainder),
+    ];
+    Ok(Array::new(vec![2], Data::Box(cells.into())))
+}
+
+/// A coefficient vector as whole numbers where every one of them is whole,
+/// which is what an exact polynomial answer should look like.
+fn whole_where_possible(v: Vec<f64>) -> Array {
+    if v.iter().all(|x| x.is_finite() && x.fract() == 0.0 && x.abs() < 9.0e15) {
+        return Array::from_i64(v.iter().map(|&x| x as i64).collect());
+    }
+    Array::new(vec![v.len()], Data::F64(v.into()))
+}
+
+// -------------------------------------------------- ⎕NC, ⎕CR: names and text
+
+/// The names an argument to `⎕NC` or `⎕CR` holds: a vector is one name, a
+/// matrix is one per row, and trailing blanks are not part of a name.
+///
+/// An empty argument names nothing, whatever its type. A non-empty one
+/// that is not characters is not a name at all, and says so.
+fn names_asked_for(y: &Array, what: &str, span: Span) -> Result<Option<Vec<String>>> {
+    if y.count() == 0 {
+        return Ok(None);
+    }
+    let Data::Char(cs) = &y.data else {
+        return Err(Error::domain(format!("{what} takes the characters of a name"), span));
+    };
+    if y.rank() > 2 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("{what} takes a name or a matrix of them, not a rank-{} array", y.rank()),
+            Some(span),
+        ));
+    }
+    let width = if y.rank() == 2 { y.shape[1] } else { cs.len() };
+    if width == 0 {
+        return Ok(None);
+    }
+    Ok(Some(cs.chunks(width).map(|row| row.iter().collect::<String>().trim_end().to_string()).collect()))
+}
+
+/// What one name is: not a name at all (`¯1`), a name with nothing in it
+/// (`0`), a variable (`2`), a defined function (`3`), a system variable
+/// (`5`), or an argument of a `{…}` (`6`).
+fn name_class_of(name: &str, env: &Env) -> i64 {
+    if name.is_empty() {
+        return -1;
+    }
+    if name == "⍺" || name == "⍵" {
+        return 6;
+    }
+    if let Some(bare) = name.strip_prefix('⎕') {
+        // The bare `⎕` is the session's own input and output, and is a
+        // system variable like the rest.
+        if bare.is_empty() || crate::sysvar::is_system_variable(&bare.to_uppercase()) {
+            return 5;
+        }
+        return -1;
+    }
+    let mut chars = name.chars();
+    let head = chars.next().expect("a non-empty name has a first character");
+    if !crate::frontend::apl::is_name_start(head)
+        || !chars.all(crate::frontend::apl::is_name_body)
+    {
+        return -1;
+    }
+    if env.verb(name).is_some() {
+        return 3;
+    }
+    if env.has_value(name) {
+        return 2;
+    }
+    0
+}
+
+/// `⎕NC y`: the class of every name in y.
+#[inline(never)]
+fn name_class(y: &Array, env: &Env, span: Span) -> Result<Array> {
+    let Some(names) = names_asked_for(y, "⎕NC", span)? else {
+        return Ok(Array::scalar_i64(-1));
+    };
+    let classes: Vec<i64> = names.iter().map(|n| name_class_of(n, env)).collect();
+    if y.rank() < 2 {
+        return Ok(Array::scalar_i64(classes[0]));
+    }
+    Ok(Array::from_i64(classes))
+}
+
+/// `⎕CR name`: the lines the named definition was written as, laid out as
+/// a character matrix and padded to the longest of them.
+///
+/// A name that is not a definition has no text, which is an empty matrix
+/// — the same answer for a variable and for a name nothing has used.
+#[inline(never)]
+fn char_rep(y: &Array, env: &Env, span: Span) -> Result<Array> {
+    if y.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "⎕CR takes one name",
+            Some(span),
+        ));
+    }
+    let empty = || Ok(Array::new(vec![0, 0], Data::Char(Vec::new().into())));
+    let Some(names) = names_asked_for(y, "⎕CR", span)? else {
+        return empty();
+    };
+    let lines = match env.verb(&names[0]) {
+        None => return empty(),
+        Some(Verb::Explicit(def)) if !def.source.is_empty() => def.source.clone(),
+        Some(_) => {
+            return Err(Error::not_yet(
+                format!(
+                    "⎕CR of {}: only a ∇ or ⎕FX definition was written as lines of text",
+                    names[0]
+                ),
+                span,
+            ));
+        }
+    };
+    Ok(char_matrix(&lines))
+}
+
+/// Lines of text as a character matrix, every row padded with blanks to
+/// the longest.
+fn char_matrix(lines: &[String]) -> Array {
+    let rows: Vec<Vec<char>> = lines.iter().map(|l| l.chars().collect()).collect();
+    let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let mut cs = Vec::with_capacity(rows.len() * width);
+    for row in &rows {
+        cs.extend_from_slice(row);
+        cs.extend(std::iter::repeat_n(' ', width - row.len()));
+    }
+    Array::new(vec![rows.len(), width], Data::Char(cs.into()))
+}
+
+/// The bytes `n ⎕CR y` reads out of its argument: a whole number in
+/// `¯128` to `255`, or a character whose code point fits in a byte.
+fn conversion_bytes(y: &Array, near: NearInt, span: Span) -> Result<Vec<u8>> {
+    if let Data::Char(cs) = &y.data {
+        return cs
+            .iter()
+            .map(|&c| {
+                u8::try_from(c as u32).map_err(|_| {
+                    Error::domain(
+                        format!("⎕CR converts characters that fit in a byte, and {c:?} does not"),
+                        span,
+                    )
+                })
+            })
+            .collect();
+    }
+    let ns = y
+        .to_i64_vec_near(near)
+        .ok_or_else(|| Error::domain("⎕CR converts whole numbers and characters", span))?;
+    ns.iter()
+        .map(|&n| {
+            if (-128..=255).contains(&n) {
+                Ok(n as u8)
+            } else {
+                Err(Error::domain(
+                    format!("⎕CR converts bytes, from ¯128 to 255, and {n} is not one"),
+                    span,
+                ))
+            }
+        })
+        .collect()
+}
+
+/// The characters of an argument that must be text, as one line.
+fn conversion_text(y: &Array, what: &str, span: Span) -> Result<Vec<char>> {
+    if y.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("{what} takes a character vector"),
+            Some(span),
+        ));
+    }
+    match &y.data {
+        Data::Char(cs) => Ok(cs.to_vec()),
+        _ if y.count() == 0 => Ok(Vec::new()),
+        _ => Err(Error::domain(format!("{what} takes characters"), span)),
+    }
+}
+
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// `n ⎕CR y`: the numbered conversion between two ways of writing the same
+/// bytes.
+#[inline(never)]
+fn char_rep_dyad(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    let which = match x.to_i64_vec_near(near).as_deref() {
+        Some([n]) => *n,
+        _ => return Err(Error::domain("⎕CR is chosen by one whole number", span)),
+    };
+    match which {
+        // Bytes as hexadecimal, in either case. The shape is the
+        // argument's with its last axis twice as long, because every byte
+        // spells as two digits.
+        5 | 6 => {
+            let bytes = conversion_bytes(y, near, span)?;
+            let mut cs: Vec<char> = Vec::with_capacity(bytes.len() * 2);
+            for b in &bytes {
+                let text =
+                    if which == 5 { format!("{b:02X}") } else { format!("{b:02x}") };
+                cs.extend(text.chars());
+            }
+            let mut shape = if y.rank() == 0 { vec![1] } else { y.shape.clone() };
+            if let Some(last) = shape.last_mut() {
+                *last *= 2;
+            }
+            Ok(Array::new(shape, Data::Char(cs.into())))
+        }
+        // Hexadecimal back to the bytes it spells, one character each.
+        13 => {
+            let text = conversion_text(y, "13 ⎕CR", span)?;
+            if text.len() % 2 != 0 {
+                return Err(Error::new(
+                    ErrorKind::Length,
+                    "13 ⎕CR reads two hexadecimal digits per byte, and this text has an odd number",
+                    Some(span),
+                ));
+            }
+            let mut cs = Vec::with_capacity(text.len() / 2);
+            for pair in text.chunks(2) {
+                let hi = pair[0].to_digit(16);
+                let lo = pair[1].to_digit(16);
+                let (Some(hi), Some(lo)) = (hi, lo) else {
+                    return Err(Error::domain(
+                        "13 ⎕CR reads hexadecimal digits, 0 to 9 and A to F",
+                        span,
+                    ));
+                };
+                cs.push(char::from_u32(hi * 16 + lo).expect("a byte is a character"));
+            }
+            Ok(Array::from_chars(cs))
+        }
+        // Bytes to base 64 and back, as RFC 4648 spells it.
+        16 => {
+            let text = conversion_text(y, "16 ⎕CR", span)?;
+            let bytes = Array::from_chars(text);
+            let bytes = conversion_bytes(&bytes, near, span)?;
+            Ok(Array::from_chars(to_base64(&bytes)))
+        }
+        17 => {
+            let text = conversion_text(y, "17 ⎕CR", span)?;
+            let bytes = from_base64(&text, span)?;
+            Ok(Array::from_chars(
+                bytes.iter().map(|&b| char::from(b)).collect::<Vec<char>>(),
+            ))
+        }
+        // Text to the bytes UTF-8 writes it as, and back.
+        18 => {
+            let text = conversion_text(y, "18 ⎕CR", span)?;
+            let s: String = text.into_iter().collect();
+            Ok(Array::from_i64(s.bytes().map(i64::from).collect()))
+        }
+        19 => {
+            if y.rank() > 1 {
+                return Err(Error::new(
+                    ErrorKind::Rank,
+                    "19 ⎕CR takes a vector of bytes",
+                    Some(span),
+                ));
+            }
+            let bytes = conversion_bytes(y, near, span)?;
+            let text = String::from_utf8(bytes).map_err(|_| {
+                Error::domain("19 ⎕CR reads bytes that spell UTF-8, and these do not", span)
+            })?;
+            Ok(Array::from_chars(text.chars().collect()))
+        }
+        // The numbers that report on an interpreter's own display and
+        // storage — a boxed listing, its internal record of a value, the
+        // code it gives a cell — rather than converting between ways of
+        // writing the same data.
+        0..=4 | 7..=12 | 14 | 15 | 20 | 26 => Err(Error::not_yet(
+            format!("{which} ⎕CR, which reports on an interpreter's own display or storage"),
+            span,
+        )),
+        _ => Err(Error::domain(format!("⎕CR has no conversion numbered {which}"), span)),
+    }
+}
+
+fn to_base64(bytes: &[u8]) -> Vec<char> {
+    let mut out = Vec::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            out.push(if i <= chunk.len() {
+                char::from(BASE64[((n >> (18 - 6 * i)) & 63) as usize])
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+
+fn from_base64(text: &[char], span: Span) -> Result<Vec<u8>> {
+    if text.len() % 4 != 0 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            "17 ⎕CR reads base 64 four characters at a time",
+            Some(span),
+        ));
+    }
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    for group in text.chunks(4) {
+        let mut n: u32 = 0;
+        let mut kept = 3;
+        for (i, &c) in group.iter().enumerate() {
+            if c == '=' {
+                kept = kept.min(i.saturating_sub(1));
+                n <<= 6;
+                continue;
+            }
+            let v = u8::try_from(c as u32)
+                .ok()
+                .and_then(|b| BASE64.iter().position(|&d| d == b))
+                .ok_or_else(|| {
+                    Error::domain(
+                        format!("17 ⎕CR reads the base-64 alphabet, and {c:?} is not in it"),
+                        span,
+                    )
+                })?;
+            n = (n << 6) | v as u32;
+        }
+        for i in 0..kept {
+            out.push(((n >> (16 - 8 * i)) & 255) as u8);
+        }
+    }
+    Ok(out)
 }
 
 /// The radix list `A⊤[N]B` encodes to: N copies of the one value A.

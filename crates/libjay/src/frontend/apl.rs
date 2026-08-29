@@ -35,7 +35,7 @@ pub fn parse(src: &SourceParts, d: Rules) -> Result<Vec<Expr>> {
     let mut i = 0usize;
     while i < sentences.len() {
         if matches!(sentences[i].first().map(|t| &t.kind), Some(Tok::Del)) {
-            let stmt = parse_tradfn(&sentences, &mut i, d, &mut verbs)?;
+            let stmt = parse_tradfn(&sentences, &mut i, d, &mut verbs, &src.display)?;
             stmts.push(stmt);
             continue;
         }
@@ -270,6 +270,8 @@ fn fix_definition(
     }
     let span = Span::merge(fx, toks[toks.len() - 1].span);
     let mut lines: Vec<(Vec<Token>, Span)> = Vec::new();
+    // The text `⎕FX` was given, line by line, kept for `⎕CR` to hand back.
+    let mut source: Vec<String> = Vec::new();
     for t in &toks[1..] {
         let text = match &t.kind {
             Tok::Value(a) if a.rank() <= 1 => match &a.data {
@@ -284,6 +286,7 @@ fn fix_definition(
                 t.span,
             ));
         };
+        source.push(text.trim_end().to_string());
         let src = SourceParts::from_parts(&[&text], &[]);
         let mut lexed = lex(&src, d)?;
         if lexed.len() > 1 {
@@ -302,7 +305,7 @@ fn fix_definition(
         return Err(Error::parse("⎕FX starts with the definition's header", head_span));
     }
     let body: Vec<Vec<Token>> = lines.into_iter().map(|(l, _)| l).collect();
-    let def = build_tradfn(&head, &body, span, d, verbs)?;
+    let def = build_tradfn(&head, &body, span, d, verbs, source)?;
     let Expr::VerbDef { name, .. } = &def else {
         return Err(Error::internal("⎕FX did not build a definition"));
     };
@@ -988,35 +991,73 @@ fn verb_for(ch: char, d: Rules) -> Option<Verb> {
 /// A `⎕`-name: the pure ones libjay answers, and a clear refusal for the
 /// ones that would have to reach outside the sandbox.
 ///
-/// `⎕IO` and `⎕CT` are the dialect's own settings, readable but not
-/// assignable — the compiler fixed them before the program ran.
+/// Most of them are constants the compiler folds in before the program
+/// runs. `⎕IO` and `⎕CT` are the dialect's own settings, readable but not
+/// assignable, for that reason. `⎕PP` and `⎕RL` are the two a program may
+/// change while it runs, so they become names the run holds rather than
+/// values fixed here — [`crate::sysvar`] seeds and applies them.
 fn quad_name(name: &str, d: Rules, span: Span) -> Result<Tok> {
     let chars = |s: &str| Tok::Value(Array::from_chars(s.chars().collect()));
+    let func = |name, monad, dyad| {
+        Tok::Func(Verb::Prim(Prim {
+            name,
+            monad,
+            dyad,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        }))
+    };
     Ok(match name {
         "A" => chars("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
         "D" => chars("0123456789"),
+        "AV" => Tok::Value(Array::from_chars(crate::sysvar::atomic_vector())),
         "IO" => Tok::Value(Array::scalar_i64(d.origin)),
         "CT" => Tok::Value(Array::scalar_f64(d.ct)),
+        // Read and set while the program runs: they live in the run's own
+        // name table, under the spelling written here.
+        "PP" | "RL" => Tok::Name(format!("⎕{name}")),
+        // The latent expression is what a session runs when it loads a
+        // saved workspace. libjay compiles and runs a string and never
+        // loads a workspace, so its latent expression is empty and stays
+        // empty; reading it is honest, setting it is refused below.
+        "LX" => chars(""),
+        // The last error's type and message. libjay's APL has no
+        // construct that catches an error and carries on, so an error
+        // always ends the program: nothing can be read after one, and
+        // these keep the values that mean "no error yet" for every
+        // program libjay can run.
+        "ET" => Tok::Value(Array::from_i64(vec![0, 0])),
+        "EM" => Tok::Value(Array::new(vec![3, 0], Data::Char(Vec::new().into()))),
         "FX" => Tok::QuadFx,
-        "CC" => Tok::Func(Verb::Prim(Prim {
-            name: "⎕CC",
-            monad: MonadOp::CharClass,
-            dyad: DyadOp::None,
-            ranks: [RANK_INF, RANK_INF, RANK_INF],
-        })),
-        "UCS" => Tok::Func(Verb::Prim(Prim {
-            name: "⎕UCS",
-            monad: MonadOp::Unicode { pass_chars: false },
-            dyad: DyadOp::None,
-            ranks: [RANK_INF, RANK_INF, RANK_INF],
-        })),
+        "CC" => func("⎕CC", MonadOp::CharClass, DyadOp::None),
+        "NC" => func("⎕NC", MonadOp::NameClass, DyadOp::None),
+        "CR" => func("⎕CR", MonadOp::CharRep, DyadOp::CharRep),
+        "UCS" => func("⎕UCS", MonadOp::Unicode { pass_chars: false }, DyadOp::None),
         // The ones that would read a clock, a workspace or a file. The
         // sandbox is libjay's own policy, not a queue position, so this
-        // is a refusal and not a promise.
+        // is a refusal and not a promise. `⎕SVR` retracts the offer of a
+        // shared variable, which is the same surface as `⎕SVO`/`⎕SVQ`:
+        // libjay shares no variable with anything, so the whole surface
+        // is closed rather than answering that nothing is shared.
         "TS" | "AI" | "TC" | "WA" | "SI" | "LC" | "NL" | "EX" | "FIO" | "NA" | "SH" | "CMD"
-        | "MAP" | "SVO" | "SVQ" | "TZ" | "DL" => {
+        | "MAP" | "SVO" | "SVQ" | "SVR" | "SVC" | "SVE" | "SVS" | "TZ" | "DL" => {
             Err(Error::sandbox(format!("⎕{name} reads outside the program"), span))?
         }
+        // A table of one interpreter's own build: how many cores it was
+        // configured for, how big its hash table is, what its input line
+        // length is. Those are not facts about APL, and libjay has no
+        // counterpart to report in their place.
+        "SYL" => Err(Error::language(
+            "⎕SYL reports one interpreter's build limits, which is not \
+             something another implementation can answer",
+            span,
+        ))?,
+        // A page width would have to be a page. libjay's display writes
+        // an array in full and never folds a long line, so there is no
+        // width to set.
+        "PW" => Err(Error::not_yet(
+            "⎕PW: libjay's display does not fold a value to a page width",
+            span,
+        ))?,
         other => Err(Error::not_yet(format!("the system name ⎕{other}"), span))?,
     })
 }
@@ -1349,12 +1390,16 @@ fn lex_text(
                 if j > after {
                     let span = Span::new(offset + i, offset + j);
                     let name = text[after..j].to_uppercase();
-                    // Every system name libjay answers is read-only: the
-                    // ones that are settings were fixed by the dialect
-                    // before the program was compiled, so assigning one is
-                    // a refusal and not a promise. A name libjay does not
+                    // `⎕PP` and `⎕RL` are settings the running program
+                    // owns, and take an assignment. Every other system
+                    // name libjay answers is read-only — the settings
+                    // among them were fixed by the dialect before the
+                    // program was compiled — so assigning one is a
+                    // refusal and not a promise. A name libjay does not
                     // answer at all reports itself first.
-                    if text[j..].trim_start().starts_with('←') {
+                    if text[j..].trim_start().starts_with('←')
+                        && !crate::sysvar::is_settable_bare(&name)
+                    {
                         quad_name(&name, d, span)?;
                         return Err(Error::language(
                             format!(
@@ -1449,11 +1494,11 @@ fn end_sentence(out: &mut Vec<Vec<Token>>, cur: &mut Vec<Token>) {
     }
 }
 
-fn is_name_start(c: char) -> bool {
+pub(crate) fn is_name_start(c: char) -> bool {
     c.is_alphabetic() || c == '∆' || c == '⍙'
 }
 
-fn is_name_body(c: char) -> bool {
+pub(crate) fn is_name_body(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '∆' || c == '⍙'
 }
 
@@ -1914,6 +1959,17 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             op,
             OpGlyph::Jot | OpGlyph::Over | OpGlyph::Before | OpGlyph::Under | OpGlyph::Dot
         ) {
+            // `P.x` is a name on both sides of the dot: a MEMBER of a
+            // structured variable, not an inner product. It is a
+            // name-space feature — every assignment, lookup and scope rule
+            // would have to learn about dotted paths — so it names itself
+            // rather than reporting the inner product it is not.
+            if op == OpGlyph::Dot
+                && matches!(it.peek().map(|x| &x.kind), Some(Tok::Name(_)))
+                && matches!(out.last().map(|x| &x.kind), Some(Tok::Name(_)))
+            {
+                return Err(Error::not_yet("a structured variable (P.x)", t.span));
+            }
             let Some(gtok) = it.peek().filter(|x| matches!(x.kind, Tok::Func(_))) else {
                 return Err(Error::not_yet(
                     format!("{} with a value operand", op.glyph()),
@@ -2643,6 +2699,25 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             });
             continue;
         }
+        // `⌹[K]` is not an axis either: the bracket picks one of a group
+        // of functions that have nothing to do with each other, and K is
+        // its number whatever `⎕IO` is.
+        if matches!(f, Verb::Prim(p) if p.name == "⌹")
+            && matches!(it.peek().map(|x| &x.kind), Some(Tok::LBracket))
+        {
+            let (n, aspan) = bracket_value(&mut it, d)?;
+            let which = match n.to_i64_vec().as_deref() {
+                Some([k]) => *k,
+                _ => {
+                    return Err(Error::parse("⌹[K] takes one whole number", aspan));
+                }
+            };
+            out.push(Token {
+                kind: Tok::Func(matrix_divide_group(which, aspan)?),
+                span: Span::merge(t.span, aspan),
+            });
+            continue;
+        }
         let Some((spec, aspan)) = take_axis(&mut it, d)? else {
             out.push(t);
             continue;
@@ -2653,6 +2728,30 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         });
     }
     Ok(out)
+}
+
+/// The function `⌹[K]` stands for. The group is GNU APL's: `[8]` and `[9]`
+/// are polynomial arithmetic on coefficient vectors, and the rest are a
+/// factorization and a printed form, each a piece of numerical work in its
+/// own right.
+fn matrix_divide_group(which: i64, aspan: Span) -> Result<Verb> {
+    let prim = |name, dyad| {
+        Verb::Prim(Prim {
+            name,
+            monad: MonadOp::None,
+            dyad,
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
+        })
+    };
+    Ok(match which {
+        8 => prim("⌹[8]", DyadOp::PolyMultiply),
+        9 => prim("⌹[9]", DyadOp::PolyDivide),
+        1 => Err(Error::not_yet("⌹[1], the QR factorization", aspan))?,
+        7 => Err(Error::not_yet("⌹[7], a polynomial written out as text", aspan))?,
+        other => {
+            Err(Error::domain(format!("⌹ has no function numbered {other}"), aspan))?
+        }
+    })
 }
 
 /// The function `f[…]` stands for.
@@ -2826,10 +2925,18 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, d: Rules) -> Re
                 let span = Span::new(target.span.start, end);
                 match &target.kind {
                     Tok::Name(n) => {
+                        // A system variable is the run's, not a
+                        // definition's: setting `⎕PP` inside one holds
+                        // after it returns, as it does in a session.
+                        let scope = if crate::sysvar::is_settable(n) {
+                            Scope::Global
+                        } else {
+                            Scope::Local
+                        };
                         acc = Expr::Assign {
                             name: n.clone(),
                             value: Box::new(acc),
-                            scope: Scope::Local,
+                            scope,
                             span,
                         };
                     }
@@ -3364,6 +3471,8 @@ fn build_dfn(body: &[Token], d: Rules, verbs: &HashMap<String, Verb>) -> Result<
             enclosing,
             id,
             pure,
+            // A dfn is an expression, not a listing of lines.
+            source: Vec::new(),
         })))
     };
     if !(alpha_op || omega_op) {
@@ -3516,6 +3625,7 @@ fn parse_tradfn(
     i: &mut usize,
     d: Rules,
     verbs: &mut HashMap<String, Verb>,
+    src: &str,
 ) -> Result<Expr> {
     let header = &sentences[*i];
     let open = header[0].span;
@@ -3532,11 +3642,40 @@ fn parse_tradfn(
         }
         body_lines.push(strip_line_number(line));
     }
+    // What `⎕CR` hands back. The header starts after the `∇`; a body line
+    // keeps the blanks it was indented by, which is what the reference
+    // shows.
+    let mut source = vec![written_text(src, &head, false)];
+    source.extend(body_lines.iter().map(|line| written_text(src, line, true)));
     let close = sentences
         .get(i.saturating_sub(1))
         .and_then(|l| l.first())
         .map_or(open, |t| t.span);
-    build_tradfn(&head, &body_lines, Span::merge(open, close), d, verbs)
+    build_tradfn(&head, &body_lines, Span::merge(open, close), d, verbs, source)
+}
+
+/// The source text a run of tokens was written as, without its trailing
+/// blanks. With `indent`, the blanks in front of it are kept too, but only
+/// where nothing else stands between them and the start of the line — so
+/// an indented body line keeps its indent and a line the `∇` editor
+/// numbered does not keep the space after the number.
+fn written_text(src: &str, toks: &[Token], indent: bool) -> String {
+    let (Some(first), Some(last)) = (toks.first(), toks.last()) else {
+        return String::new();
+    };
+    let mut start = first.span.start;
+    if indent {
+        let head = &src[..start];
+        let line_start = head.rfind('\n').map_or(0, |at| at + 1);
+        if src[line_start..start].chars().all(|c| c == ' ' || c == '\t') {
+            start = line_start;
+        }
+    }
+    let end = last.span.end.min(src.len());
+    if start >= end {
+        return String::new();
+    }
+    src[start..end].trim_end().to_string()
 }
 
 /// A `∇` body line with the line number the `∇` editor prints in front of
@@ -3582,6 +3721,7 @@ fn build_tradfn(
     span: Span,
     d: Rules,
     verbs: &mut HashMap<String, Verb>,
+    source: Vec<String>,
 ) -> Result<Expr> {
     let (name, def_left, def_right, result, locals) = parse_header(head, span)?;
     // The body can call the function by its own name.
@@ -3656,6 +3796,7 @@ fn build_tradfn(
         labels,
         lines,
         pure,
+        source,
     }));
     verbs.insert(name.clone(), verb.clone());
     Ok(Expr::VerbDef { name, verb, span })

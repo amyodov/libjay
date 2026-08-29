@@ -56,12 +56,14 @@ pub fn eval_detail_as(lang: Lang, expr: &str, index_origin: u8, base: Dialect) -
             // A shy value is an answer the session shows as an empty line,
             // which is not the same as a sentence that had no value at all.
             let shy = outcome.shy && outcome.value.is_some();
+            let fmt = outcome.fmt;
             let shown = match outcome.value {
                 None => None,
                 Some(_) if outcome.shy => None,
                 // The program's own conventions, which carry whatever
-                // extensions it was compiled under.
-                Some(result) => Some(format_array(&result, &program.fmt)),
+                // extensions it was compiled under and whatever print
+                // precision it ended on.
+                Some(result) => Some(format_array(&result, &fmt)),
             };
             match (printed.is_empty(), shown) {
                 (true, None) if shy => Answer::Value(String::new()),

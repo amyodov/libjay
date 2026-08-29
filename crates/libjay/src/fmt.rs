@@ -35,13 +35,27 @@ pub struct FmtOpts {
     /// False for APL, whose characters are Unicode, and for J under the
     /// `j_unicode_strings` extension.
     pub bytes: bool,
+    /// Significant digits kept when a float is displayed. APL's `⎕PP` sets
+    /// it for the rest of the run; [`DEFAULT_PRECISION`] is where both
+    /// languages start.
+    pub precision: u8,
 }
 
 impl FmtOpts {
-    pub const J: FmtOpts =
-        FmtOpts { neg: '_', imag: 'j', boxes: BoxStyle::Fenced, bytes: true };
-    pub const APL: FmtOpts =
-        FmtOpts { neg: '¯', imag: 'J', boxes: BoxStyle::Spaced, bytes: false };
+    pub const J: FmtOpts = FmtOpts {
+        neg: '_',
+        imag: 'j',
+        boxes: BoxStyle::Fenced,
+        bytes: true,
+        precision: DEFAULT_PRECISION,
+    };
+    pub const APL: FmtOpts = FmtOpts {
+        neg: '¯',
+        imag: 'J',
+        boxes: BoxStyle::Spaced,
+        bytes: false,
+        precision: DEFAULT_PRECISION,
+    };
 
     /// J's conventions under a set of rules: the extensions decide whether
     /// a character is a byte.
@@ -53,8 +67,14 @@ impl FmtOpts {
     }
 }
 
-/// Significant digits kept when displaying a float.
-const SIG_DIGITS: usize = 6;
+/// Significant digits kept when displaying a float, before anything sets
+/// another number.
+pub const DEFAULT_PRECISION: u8 = 6;
+
+/// The widest and narrowest a print precision may be. One digit is the
+/// least that says anything; seventeen is what an f64 round-trips in.
+pub const MIN_PRECISION: u8 = 1;
+pub const MAX_PRECISION: u8 = 17;
 
 /// Format an array as a session shows it. No trailing newline.
 ///
@@ -574,9 +594,11 @@ fn format_f64(x: f64, opts: &FmtOpts) -> String {
         };
     }
     let magnitude = x.abs();
-    // Round to `SIG_DIGITS` first, then decide how to spell the result;
-    // scientific formatting hands us the digits and the exponent directly.
-    let sci = format!("{:.*e}", SIG_DIGITS - 1, magnitude);
+    // Round to the print precision first, then decide how to spell the
+    // result; scientific formatting hands us the digits and the exponent
+    // directly.
+    let digits_kept = opts.precision.clamp(MIN_PRECISION, MAX_PRECISION) as usize;
+    let sci = format!("{:.*e}", digits_kept - 1, magnitude);
     let (mantissa, exponent) = sci.split_once('e').expect("scientific form has an exponent");
     let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
     let exponent: i32 = exponent.parse().expect("exponent is an integer");

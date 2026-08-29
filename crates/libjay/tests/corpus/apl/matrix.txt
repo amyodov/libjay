@@ -1,4 +1,4 @@
-// Matrix division.
+// Matrix division, and the polynomial arithmetic that shares its glyph.
 // --- matrix division ---------------------------------------------------
 ⌹2 2⍴1 2 3 4
 ⌹2 2⍴4 7 2 6
@@ -11,3 +11,40 @@
 (1 0 0)⌹3 2⍴1 1 1 2 1 3
 (1 2 3)⌹3 1⍴1 1 1
 (1 2 3)⌹3 3⍴2 0 0 0 3 0 0 0 4
+
+// --- ⌹[8] and ⌹[9]: polynomials ------------------------------------------
+// The bracket after ⌹ picks a function of the group rather than an axis,
+// and K is its number whatever ⎕IO is. [8] multiplies two polynomials
+// given by their coefficients, lowest power first; [9] divides them and
+// answers the quotient and the remainder. The quotient runs lowest power
+// first like every other argument here and the remainder runs the other
+// way round, which is the reference's own asymmetry.
+1 2 ⌹[8] 1 1
+1 2 3 ⌹[8] 1 1
+1 ⌹[8] 1
+1.5 2 ⌹[8] 1 1
+1 2 ⌹[8] 1
+2 ⌹[8] 3
+1 2 3 4 5 ⌹[8] 2 0 1
+1 0 1 ⌹[9] 1 1
+1 2 3 4 ⌹[9] 1 1
+6 ¯5 1 ⌹[9] ¯2 1
+1 2 ⌹[9] 1
+1 2 ⌹[9] 2
+1 2 ⌹[9] 0 1
+1 2 3 ⌹[9] 1 0 1
+0 0 0 1 ⌹[9] 1 1 1
+1 2 3 4 ⌹[9] 1 2 3
+1 0 0 0 1 ⌹[9] 1 0 0 1
+1 2 3 4 5 ⌹[9] 2 0 1
+⍴¨1 2 ⌹[9] 1
+⍴¨1 0 1 ⌹[9] 1 1
+⍴¨1 2 3 4 ⌹[9] 1 1
+(1 2 ⌹[8] 1 1) ⌹[9] 1 1
+1 2 ⌹[9] ⍬
+1 2 ⌹[8] ⍬
+'ab' ⌹[8] 1 1
+'ab' ⌹[9] 1 1
+⌹[8] 1 2
+⌹[9] 1 2
+⌹[10]1 2

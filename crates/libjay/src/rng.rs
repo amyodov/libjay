@@ -127,11 +127,51 @@ fn os_seed() -> u32 {
     (mixed as u32) ^ ((mixed >> 32) as u32)
 }
 
+thread_local! {
+    /// The generator a program asked for by name, if one did. APL's `⎕RL`
+    /// sets it; it lives for the run that set it and no longer, so one
+    /// program's seed never reaches the next.
+    static LINK: std::cell::RefCell<Option<Mt19937>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Start a random stream at `seed`, for this thread, until [`clear_link`].
+///
+/// The stream is libjay's own: the seed reproduces libjay's sequence, and
+/// no other implementation's.
+pub fn set_link(seed: i64) {
+    let g = Mt19937::new(seed as u32);
+    LINK.with(|l| *l.borrow_mut() = Some(g));
+}
+
+/// Forget any stream a program started, so the next run begins where an
+/// unseeded run begins.
+pub fn clear_link() {
+    LINK.with(|l| *l.borrow_mut() = None);
+}
+
+/// Clears the thread's random link when it goes out of scope, whatever
+/// ended the run that installed it.
+pub struct LinkGuard;
+
+impl Drop for LinkGuard {
+    fn drop(&mut self) {
+        clear_link();
+    }
+}
+
 /// Run `f` over the generator this spelling draws from: a fresh one at the
-/// fixed seed for `?.`, the process's own for `?`.
+/// fixed seed for `?.`, the one a `⎕RL` started if there is one, and
+/// otherwise the process's own.
 pub fn with<R>(fixed: bool, f: impl FnOnce(&mut Mt19937) -> R) -> R {
     if fixed {
         return f(&mut Mt19937::new(FIXED_SEED));
+    }
+    let linked = LINK.with(|l| l.borrow().is_some());
+    if linked {
+        return LINK.with(|l| {
+            let mut slot = l.borrow_mut();
+            f(slot.as_mut().expect("the link was there a moment ago"))
+        });
     }
     // A poisoned lock would mean a panic inside a roll; the state is a
     // plain array, so carrying on with it is safe.

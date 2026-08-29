@@ -7,6 +7,34 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- APL's system names. `⎕AV` is the 256-character atomic vector, so
+  `⎕AV⍳'A'` and `⎕AV[66]` answer what a GNU APL session answers. `⎕PP` and
+  `⎕RL` can be READ and SET while a program runs: `⎕PP←3 ⋄ ÷3` shows
+  `0.333`, and the answer a program hands back is displayed at the
+  precision the program asked for, in Python and through the C ABI as well
+  as in the corpus. `⎕RL←42` starts libjay's random stream from that seed,
+  so the same seed rolls the same numbers — the seed is reproducible, the
+  sequence is libjay's own and matches no other implementation's, and a
+  run's seed does not reach the next run. `⎕LX` reads as the empty vector
+  (libjay loads no workspace for a latent expression to be latent for), and
+  `⎕ET` and `⎕EM` are the values that mean "no error yet", which is what
+  every program libjay can run reads.
+- `⎕NC` — what a name holds now: `¯1` not a name at all, `0` a name with
+  nothing in it, `2` a variable, `3` a defined function, `5` a system
+  variable, `6` an argument of a `{…}`. A character vector asks about one
+  name and a character matrix about one per row.
+- `⎕CR` — a definition's own text. `⎕CR 'F'` gives back the lines `F` was
+  written as, header first, as a character matrix padded to the longest of
+  them, whether `F` came from a `∇ … ∇` or from `⎕FX`. The dyadic form
+  answers the numbered conversions that rewrite the same bytes another way:
+  `5 ⎕CR` and `6 ⎕CR` write them as hexadecimal in either case and
+  `13 ⎕CR` reads it back, `16 ⎕CR` and `17 ⎕CR` are base 64, and `18 ⎕CR`
+  and `19 ⎕CR` are UTF-8 both ways.
+- APL's polynomial arithmetic, `⌹[8]` and `⌹[9]`. The bracket after `⌹`
+  picks a function rather than an axis, and its number is the number
+  written whatever `⎕IO` is: `1 2 ⌹[8] 1 1` is `1 3 2`, the product of
+  `1+2x` and `1+x` as coefficients lowest power first, and `⌹[9]` divides
+  two polynomials and answers the quotient and the remainder.
 - APL's axis specification `f[K]` for every function that reads one. The
   brackets after a function say which axis it works along, and may name
   several where the function takes several:
@@ -59,6 +87,16 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The system names libjay does not answer now say which kind of thing they
+  are instead of naming a queue position. `⎕SYL` reports one interpreter's
+  own build — how many cores it was configured for, how big its hash table
+  is — and another implementation has nothing to put in those rows, so it
+  is refused as not being in the language. `⎕SVR` joins `⎕SVO` and `⎕SVQ`
+  behind the sandbox: it retracts the offer of a shared variable, and
+  libjay shares no variable with anything. `⎕PW` is still a promise, with
+  the reason given — libjay's display writes a value in full and folds no
+  line, so there is no page whose width could be set. And `P.x` reports "a
+  structured variable" rather than the inner product it is not.
 - APL's scalar functions PERVADE a nested argument: they descend through
   the boxes to the simple values at the bottom, so `1+⊂2 3` is `⊂3 4`,
   `(1 2)(3 4 5)+10` adds ten under both boxes, and `2 3⌈⊂1 5` spreads a

@@ -608,13 +608,14 @@ unsafe fn run_impl(
             }
         };
         let mut inp = || source(&mut buf);
-        let result = if attach_input {
-            program.prog.run_io(&arrays, &mut sink, &mut inp)
-        } else {
-            program.prog.run(&arrays, &mut sink)
-        };
+        let input: jay::verb::InputFn<'_> = if attach_input { Some(&mut inp) } else { None };
+        let result = program.prog.run_detail_on_io(None, &arrays, &mut sink, input);
         match result {
-            Ok(value) => {
+            Ok(outcome) => {
+                // The run's own display conventions, which a `⎕PP` in the
+                // program may have moved.
+                let fmt = outcome.fmt;
+                let value = outcome.value;
                 // Boxed and exact results have no descriptor in this ABI
                 // yet: their elements are arrays and bignums, not numbers.
                 let unsupported = match value.as_ref().map(|a| a.dtype()) {
@@ -640,7 +641,7 @@ unsafe fn run_impl(
                 if out.is_null() {
                     return JAY_OK;
                 }
-                let result = Box::new(jay_result::new(value, program.prog.fmt));
+                let result = Box::new(jay_result::new(value, fmt));
                 // SAFETY: `out` is non-NULL and owned by the caller.
                 unsafe { *out = Box::into_raw(result) };
                 JAY_OK

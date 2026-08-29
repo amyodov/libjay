@@ -619,6 +619,8 @@ fn build_definition(
         lines: Vec::new(),
         empty: Some(crate::ir::empty_result()),
         pure,
+        // J has no `⎕CR`, and nothing else asks a definition for its text.
+        source: Vec::new(),
     })))
 }
 

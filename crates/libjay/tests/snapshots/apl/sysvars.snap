@@ -1,0 +1,363 @@
+# libjay reference snapshot: APL — corpus/apl/sysvars.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= ⍴⎕AV
+> gnu: 256
+= ⎕AV≡⎕AV
+> gnu: 1
+= ⎕AV⍳'A'
+> gnu: 66
+= ⎕AV⍳'ABC'
+> gnu: 66 67 68
+= ⎕AV[66]
+> gnu: A
+= ⎕AV[65 66 67]
+> gnu: @AB
+= ⎕AV[1]≡⎕UCS 0
+> gnu: 1
+= ⎕UCS ⎕AV[130]
+> gnu: 8364
+= ⎕UCS ⎕AV[256]
+> gnu: 160
+= (⎕AV⍳'z')-⎕AV⍳'a'
+> gnu: 25
+= ⍴⎕AV⍳⎕AV
+> gnu: 256
+= ∧/(⎕AV⍳⎕AV)=⍳256
+> gnu: 1
+= '⎕'∊⎕AV
+> gnu: 1
+= ⎕AV←'x'
+> gnu: <error>
+= ⍴⎕LX
+> gnu: 0
+= ⎕LX≡''
+> gnu: 1
+= ⎕ET
+> gnu: 0 0
+= ⍴⎕ET
+> gnu: 2
+= ⎕ET≡0 0
+> gnu: 1
+= ⍴⎕EM
+> gnu: 3 0
+= 0=⍴,⎕EM
+> gnu: 1
+= ⎕ET←1 2
+> gnu: <error>
+= ⎕EM←'x'
+> gnu: <error>
+= ⎕PP←3 ⋄ ⎕PP
+> gnu: 3
+= ⎕PP←17 ⋄ ⎕PP
+> gnu: 17
+= ⎕PP←3 ⋄ ÷3
+> gnu: 0.333
+= ⎕PP←3 ⋄ 1÷3 7
+> gnu: 0.333 0.143
+= ⎕PP←17 ⋄ ÷3
+> gnu: 0.3333333333333333
+= ⎕PP←1 ⋄ ÷3
+> gnu: 0.3
+= ⎕PP←12 ⋄ ○1
+> gnu: 3.14159265359
+= ⎕PP←4 ⋄ ○1
+> gnu: 3.142
+= ⎕PP←3 ⋄ 123456789012
+> gnu: 123456789012
+= ⎕PP←3 ⋄ 1.23456
+> gnu: 1.23
+= ⎕PP←3 ⋄ ⍕÷3
+> gnu: 0.333
+= ⎕PP←3 ⋄ ⎕←÷3
+> gnu: 0.333
+= ∇F\n⎕PP←3\n∇\nF\n÷3
+> gnu: 0.333
+= ⍎'⎕PP←3' ⋄ ÷3
+> gnu: 0.333
+= ⎕RL←5 ⋄ ⍎'⎕RL'
+> gnu: 5
+= ⎕PP←0
+> gnu: <error>
+= ⎕PP←¯1
+> gnu: <error>
+= ⎕PP←'a'
+> gnu: <error>
+= ⎕PP←1 2
+> gnu: <error>
+= ⎕PP←⍬
+> gnu: <error>
+= ⎕RL
+> gnu: 16807
+= ⎕RL←42 ⋄ ⎕RL
+> gnu: 42
+= ⎕RL←0 ⋄ ⎕RL
+> gnu: 0
+= ⎕RL←1.5
+> gnu: <error>
+= ⎕RL←1 2
+> gnu: <error>
+= ⎕RL←⍬
+> gnu: <error>
+= ⎕RL←'a'
+> gnu: <error>
+= ⎕NC 'A'
+> gnu: 0
+= A←5 ⋄ ⎕NC 'A'
+> gnu: 2
+= ⎕NC ''
+> gnu: ¯1
+= ⎕NC 'A1'
+> gnu: 0
+= ⎕NC '1A'
+> gnu: ¯1
+= ⎕NC 'A B'
+> gnu: ¯1
+= ⎕NC 'ABC'
+> gnu: 0
+= ⎕NC '  A  '
+> gnu: ¯1
+= A←5 ⋄ ⎕NC ' A'
+> gnu: ¯1
+= A←5 ⋄ ⎕NC 'A '
+> gnu: 2
+= ⎕NC '⎕IO'
+> gnu: 5
+= ⎕NC '⎕CT'
+> gnu: 5
+= ⎕NC '⎕AV'
+> gnu: 5
+= ⎕NC '⎕PP'
+> gnu: 5
+= ⎕NC '⎕RL'
+> gnu: 5
+= ⎕NC '⎕LX'
+> gnu: 5
+= ⎕NC '⎕EM'
+> gnu: 5
+= ⎕NC '⎕ET'
+> gnu: 5
+= ⎕NC '⎕PW'
+> gnu: 5
+= ⎕NC '⎕SYL'
+> gnu: 5
+= ⎕NC '⎕TS'
+> gnu: 5
+= ⎕NC '⎕WA'
+> gnu: 5
+= ⎕NC '⎕TC'
+> gnu: 5
+= ⎕NC '⎕AI'
+> gnu: 5
+= ⎕NC '⎕LC'
+> gnu: 5
+= ⎕NC '⎕TZ'
+> gnu: 5
+= ⎕NC '⎕FX'
+> gnu: ¯1
+= ⎕NC '⎕CC'
+> gnu: ¯1
+= ⎕NC '⎕UCS'
+> gnu: ¯1
+= ⎕NC '⎕NC'
+> gnu: ¯1
+= ⎕NC '⎕CR'
+> gnu: ¯1
+= ⎕NC '⎕XX'
+> gnu: ¯1
+= ⎕NC '⎕'
+> gnu: 5
+= ⎕NC '⍺'
+> gnu: 6
+= ⎕NC '⍵'
+> gnu: 6
+= ⎕NC 3
+> gnu: <error>
+= ⎕NC ⍬
+> gnu: ¯1
+= ⎕NC 'ABC' 'A'
+> gnu: <error>
+= ⍴⎕NC 'A'
+> gnu:
+= ⎕NC 2 3⍴'ABCDEF'
+> gnu: 0 0
+= ⎕NC 1 3⍴'ABC'
+> gnu: 0
+= A←5 ⋄ ⎕NC 2 1⍴'A '
+> gnu: 2 ¯1
+= ⎕NC 3 1⍴'AB '
+> gnu: 0 0 ¯1
+= A←5 ⋄ B←'x' ⋄ ⎕NC 2 1⍴'AB'
+> gnu: 2 2
+= ∇Z←N X\nZ←X+1\n∇\n⎕NC 'N'
+> gnu: 3
+= Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⎕NC 'F'
+> gnu: 3
+= Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⎕CR 'F'
+> gnu: Z←F X
+> gnu: Z←X+1
+= Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⍴⎕CR 'F'
+> gnu: 2 5
+= Q←⎕FX 'Z←F X' ' Z←X+1' ⋄ ⍴⎕CR 'F'
+> gnu: 2 6
+= Q←⎕FX 'Z ← F  X' 'Z←X+1' ⋄ ⍴⎕CR 'F'
+> gnu: 2 8
+= Q←⎕FX 'Z←A F B;L' 'L←1' 'Z←A+B+L' ⋄ ⎕CR 'F'
+> gnu: Z←A F B;L
+> gnu: L←1
+> gnu: Z←A+B+L
+= Q←⎕FX 'Z←A F B;L' 'L←1' 'Z←A+B+L' ⋄ ⍴⎕CR 'F'
+> gnu: 3 9
+= Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⎕UCS ⎕CR 'F'
+> gnu: 90 8592 70 32 88
+> gnu: 90 8592 88 43 49
+= Q←⎕FX 'R' 'A←1' ⋄ ⎕CR 'R'
+> gnu: R
+> gnu: A←1
+= Q←⎕FX 'R' 'A←1' ⋄ ⍴⎕CR 'R'
+> gnu: 2 3
+= Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⍴⎕CR 'G'
+> gnu: 0 0
+= Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ (⎕CR 'F')[1;]
+> gnu: Z←F X
+= ∇Z←F X\n Z←X+1\n∇\n⎕CR 'F'
+> gnu: Z←F X
+> gnu:  Z←X+1
+= ∇Z←G X\n Z←X+1\n∇\n⍴⎕CR 'G'
+> gnu: 2 6
+= ∇Z←H X\n   Z←X+1\n   Z←Z+1\n∇\n⍴⎕CR 'H'
+> gnu: 3 8
+= ∇Z←K X;A\nA←1\nZ←X+A\n∇\n⎕CR 'K'
+> gnu: Z←K X;A
+> gnu: A←1
+> gnu: Z←X+A
+= ∇ Z←M X\nZ←X+1\n∇\n⍴⎕CR 'M'
+> gnu: 2 5
+= ∇Z←P X\nZ←X+1\n∇\n⎕CR 'P'
+> gnu: Z←P X
+> gnu: Z←X+1
+= ⍴⎕CR 'A'
+> gnu: 0 0
+= A←5 ⋄ ⍴⎕CR 'A'
+> gnu: 0 0
+= A←5 ⋄ ⎕CR 'A'
+> gnu:
+= ⎕CR 5
+> gnu: <error>
+= ⎕CR 2 2⍴'ABCD'
+> gnu: <error>
+= 5 ⎕CR 255 16
+> gnu: FF10
+= 6 ⎕CR 255 16
+> gnu: ff10
+= 5 ⎕CR 0
+> gnu: 00
+= 5 ⎕CR ¯1
+> gnu: FF
+= 5 ⎕CR ¯128
+> gnu: 80
+= 5 ⎕CR 256
+> gnu: <error>
+= 5 ⎕CR ¯129
+> gnu: <error>
+= 5 ⎕CR 1.5
+> gnu: <error>
+= 5 ⎕CR 'A'
+> gnu: 41
+= 5 ⎕CR 'é'
+> gnu: E9
+= 6 ⎕CR 65 66 67
+> gnu: 414243
+= ⍴5 ⎕CR ⍬
+> gnu: 0
+= ⍴5 ⎕CR 2 2⍴1 2 3 4
+> gnu: 2 4
+= 5 ⎕CR 2 2⍴1 2 3 4
+> gnu: 0102
+> gnu: 0304
+= 5 ⎕CR 'AB' 'CD'
+> gnu: <error>
+= 13 ⎕CR 'FF01'
+> gnu: ÿ
+= 13 ⎕CR 'ff01'
+> gnu: ÿ
+= 13 ⎕CR 'F'
+> gnu: <error>
+= 13 ⎕CR 'GG'
+> gnu: <error>
+= 13 ⎕CR 65 66
+> gnu: <error>
+= ⍴13 ⎕CR 'ff'
+> gnu: 1
+= 5 ⎕CR 13 ⎕CR 'FF01'
+> gnu: FF01
+= 16 ⎕CR 'ABC'
+> gnu: QUJD
+= 16 ⎕CR 'A'
+> gnu: QQ==
+= 16 ⎕CR 'AB'
+> gnu: QUI=
+= 16 ⎕CR 'é'
+> gnu: 6Q==
+= 16 ⎕CR 65 66 67
+> gnu: <error>
+= ⍴16 ⎕CR 'ABC'
+> gnu: 4
+= 17 ⎕CR 'QUJD'
+> gnu: ABC
+= 17 ⎕CR 'QQ=='
+> gnu: A
+= 17 ⎕CR 'QUI='
+> gnu: AB
+= 17 ⎕CR '!!!!'
+> gnu: <error>
+= 17 ⎕CR 81 85 74 68
+> gnu: <error>
+= 17 ⎕CR 16 ⎕CR 'é'
+> gnu: é
+= 18 ⎕CR 'AB'
+> gnu: 65 66
+= 18 ⎕CR 'é'
+> gnu: 195 169
+= 18 ⎕CR 65
+> gnu: <error>
+= 18 ⎕CR 2 2⍴'ABCD'
+> gnu: <error>
+= ⍴18 ⎕CR 'AB'
+> gnu: 2
+= 19 ⎕CR 65 66
+> gnu: AB
+= 19 ⎕CR 195 169
+> gnu: é
+= 19 ⎕CR 'AB'
+> gnu: AB
+= 19 ⎕CR 2 2⍴65 66 67 68
+> gnu: <error>
+= ⍴19 ⎕CR 65
+> gnu: 1
+= 19 ⎕CR 18 ⎕CR 'héllo'
+> gnu: héllo
+= 1 2 ⎕CR 1
+> gnu: <error>
+= 99 ⎕CR 1
+> gnu: <error>
+= ¯1 ⎕CR 1
+> gnu: <error>

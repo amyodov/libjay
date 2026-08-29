@@ -23,6 +23,7 @@ mod rng;
 pub mod simd;
 pub mod sparse;
 pub mod symbol;
+pub mod sysvar;
 pub mod verb;
 
 pub use array::{joins_made, layouts_made, Array, Buf, Data, Layout, NearInt, Owner};

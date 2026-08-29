@@ -4003,3 +4003,109 @@ the register.
   `+/3 0⍴0` answered `0 0 0`). The two halves cannot both be a rule, and the
   `0` half discards the argument's type — `,/''` is 0 there rather than a
   character. Pinned as a divergence rather than followed.
+- 2026-08-29 — APL's system names, decided one at a time. The 0.4.0 claim
+  audit listed eleven `⎕`-names GNU APL answers and libjay named. Each was
+  probed against the oracle and settled on what it actually reports:
+  - `⎕AV` is answered, with the reference's own 256 characters. The
+    standard leaves the atomic vector to the implementation, so there is no
+    language fact to derive; the alternative — inventing an order of
+    libjay's own — would make `⎕AV⍳c` and `⎕AV[i]` mean different things in
+    the two, for nothing. The table was MEASURED by running the oracle
+    (`⎕UCS ⎕AV`), which is the black-box route the clean-room rule opens,
+    and it is pinned in the corpus so a later release moving it is noticed.
+  - `⎕PP` and `⎕RL` are answered AND settable, which needed the run to hold
+    state a sentence can change. They are ordinary names in the run's own
+    table under their full spelling — `⎕` is not a character either
+    language allows in a user's name, so no collision is possible — read
+    through `Expr::Name` and written through `Expr::Assign`, with a hook on
+    the way in that makes what they control follow. That reuses the two
+    existing arms instead of adding evaluator nodes, which matters: the
+    hook alone was enough to push `eval_node`'s frame past the recursion
+    limit, and the assignment arm had to move into an `#[inline(never)]`
+    function of its own, as `(a b)←v` already had.
+  - `⎕PP` starts at libjay's own six significant digits and not the
+    reference's ten. Six is what every libjay display uses, in both
+    languages; changing the default would move every recorded float in both
+    corpora and every number a Python or C caller has ever seen, which is
+    an owner-sized decision and not this wave's. Setting it agrees exactly,
+    and the default is pinned as a divergence. Raising the APL default to
+    ten stays available.
+  - `⎕RL` reads back the seed it was set from and does not advance as the
+    stream does. GNU APL's `⎕RL` carries its generator's running state, and
+    libjay's stream is deliberately not GNU's (the 2026-08-20 entry on `?`
+    above), so there is no state to agree about — only the seed,
+    which is reproducible. The generator lives in a thread-local the run
+    installs and a guard clears, because the dyadic path (`x?y`) is handed
+    a `Copy` `EvalCfg` and no `Env` at all: making deal reach the run's
+    names would mean threading `&mut Ctx` through every dyad, which is the
+    thing that keeps pure verbs runnable off-thread.
+  - `⎕NC` is answered from the run's two name tables. A name libjay would
+    not accept is "not a name" here, which is its own lexer's rule and why
+    `_` parts company. A `⎕`-name is 5 when libjay knows it as a system
+    VARIABLE and ¯1 otherwise — which is the reference's own split between
+    its system variables and its system functions.
+  - `⎕LX`, `⎕ET` and `⎕EM` are answered as the constants they are for every
+    program libjay can run. libjay loads no workspace, so a latent
+    expression has nothing to be latent for and `⎕LX` is the empty vector,
+    read-only: storing one where it could never run would be a setting that
+    quietly does nothing. And nothing in libjay's APL catches an error and
+    carries on — the only catch site is J's `try.`/`catch.` — so an error
+    always ends the program and `⎕ET`/`⎕EM` are always the values that mean
+    "no error yet". They will carry a trapped error when there is a trap to
+    carry one from.
+  - `⎕SYL` is ⚪. Its rows are one interpreter's build — cores configured,
+    hash-table size, input line length, `./configure` settings — and
+    another implementation has nothing to put in them. Answering with
+    libjay's own numbers under the reference's own row labels would be
+    impersonating a particular build, not implementing a language feature.
+  - `⎕PW` is a named gap with a reason: libjay's display writes a value in
+    full and folds no line, so there is no page whose width could be set.
+    A wrapping display would close it; a `⎕PW` that stored a number and
+    changed nothing would not.
+  - `⎕SVR` joins `⎕SVO` and `⎕SVQ` in the sandbox. It retracts the offer of
+    a SHARED variable; libjay shares no variable with anything, and the
+    honest answer is that the surface is closed, not that nothing happens
+    to be shared.
+  - `⎕CR` is answered monadically, which meant keeping a definition's own
+    text: `ExplicitDef` now carries the lines it was written as. For `⎕FX`
+    they are the character vectors it was given; for `∇ … ∇` they are cut
+    from the source at the tokens' spans, the header from its first token
+    (so the `∇` and the blanks after it go) and a body line from the start
+    of its physical line (so an indent stays), each trimmed at the end and
+    padded to the longest. That reproduces the reference's layout exactly,
+    including the blank a `⎕FX` line was written with. A `{…}` is an
+    expression rather than a listing and is a named gap — the reference
+    prints its own internal λ form there, which is not a thing to copy.
+  - Dyadic `⎕CR` is answered where the number names a CONVERSION between
+    two ways of writing the same bytes — 5, 6 and 13 (hexadecimal), 16 and
+    17 (base 64), 18 and 19 (UTF-8) — and named where it reports on an
+    interpreter's own display or storage: the boxed listings, its internal
+    record of a value, its cell-type codes. That is the same line `⎕CC`
+    drew between a class anyone can state and the reference's own glyph
+    tables.
+- 2026-08-29 — `⌹[K]` is a group of functions, not an axis, so K is the
+  number written whatever `⎕IO` is — the third bracket in APL that is not an
+  axis, beside `⊤[N]` and `⊢[M]`. `⌹[8]` and `⌹[9]` are implemented: the
+  convolution of two coefficient vectors, and long division answering the
+  quotient and the remainder. THE ORACLE WINS on a surprise there — the
+  quotient comes back lowest power first, like every other argument, and the
+  remainder comes back highest power first. Four probes with a remainder of
+  more than one coefficient agree on it, so it is what libjay does, marked
+  in the code as measured rather than reasoned. Where the dividend has FEWER
+  coefficients than the divisor the reference contradicts its own shapes
+  (`1 ⌹[9] 1 1` answers a one-element quotient and a two-element remainder
+  where its rule gives none and one), so that case is a named gap rather
+  than a guess. `⌹[1]`, a QR factorization, and `⌹[7]`, a polynomial written
+  out as text, stay named.
+- 2026-08-29 — Structured variables (`P.x`) stay a named gap, and the
+  diagnostic now says so: a dot between two NAMES reports "a structured
+  variable (P.x)" rather than the inner product it is not. Probing settled
+  the scope question the earlier note left open — `P` itself is a value
+  there, with a display of its own (`P.x←3 ⋄ P` is an 8-by-2 character
+  matrix), and `⎕NC 'P'` calls it a variable — so a flat name holding
+  "P.x" would answer the two probes in the ticket and be wrong about the
+  whole rest of the feature. And the `∇`-header axis (`∇Z←AV[X] B`) and the
+  lambda axis `χ` move from the axis family to the COMPUTED-OPERAND family:
+  the header binds a name the body then uses as an axis (`+/[X]B`), which
+  is a computed axis, so the header form cannot be useful until computed
+  axes are.

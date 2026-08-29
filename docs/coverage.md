@@ -687,6 +687,8 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `⎕UCS` | codepoints become characters, characters become their codepoints | — |
 | `⎕CC` | the characters of the numbered class — the digits (1, 10), the two cases of the Latin (2, 26, 3, ¯26, 52) and Greek (48) alphabets, ASCII (4, 128), the printable range (95), the octal (8) and hexadecimal (16, ¯16, 17) digits, and the RFC 4648 alphabets (33, 65). Several numbers give one class per item, nested. The four glyph repertoires the reference states — superscripts (5), subscripts (6), the box-drawing frame (7) and the mathematical symbols (9) — are the reference's own tables, and 7 and 9 are the 6-by-10 and 4-by-7 MATRICES they are there, not vectors | — |
 | `⎕FX` | fix a definition from its lines and answer with its name; the lines must be literal text (see below) | — |
+| `⎕NC` | the class of every name in the argument: `¯1` not a name at all, `0` a name with nothing in it, `2` a variable, `3` a defined function, `5` a system variable, `6` an argument of a `{…}`. A character vector is one name and a character matrix one per row; a row's trailing blanks are not part of the name it holds, and an empty argument of any type names nothing. Anything else is a domain error | — |
+| `⎕CR` | the lines a `∇` or `⎕FX` definition was written as: the header first, then one line each, as a character matrix padded with blanks to the longest of them. A name that is not a definition has no text at all, which is the 0-by-0 matrix — the same answer for a variable and for a name nothing has used | the numbered conversion, which rewrites the same bytes another way: 5 and 6 write bytes as hexadecimal in either case (a character counts as its code point, and the shape is the argument's with its last axis twice as long), 13 reads hexadecimal back, 16 and 17 are base 64 as RFC 4648 spells it, and 18 and 19 are UTF-8 both ways |
 | `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill. `Dialect.expansion` names Dyalog's reading, where the left argument is any integer vector — a positive count repeats that item, a negative one leaves that many fills, 0 means `¯1`, and the result is `+/1⌈|x` items long |
 | `⍋` `⍒` | grade up / down (stable; respects `⎕IO`). A NESTED argument orders by the APL2 rule: the rank, then the shape read from the FIRST axis, then the atoms in row-major order — a character before a number before a nested value, a nested one recursively — and two arrays with no atoms are separated by their types instead. It is a different comparator from J's at every step; `Dialect.nested_grade` names Dyalog's total array ordering as the other reading | collating grade: every character of y is keyed by where it FIRST occurs in the collating array x — the coordinate read with the last axis most significant, and one past the end for a character x does not hold — and the items of y are ordered by those keys read left to right |
 | `⊢` `⊣` | same | right / left. `A⊢[M]B` is the selection function: a 1 in M takes the element of B that stands there, a 0 the element of A, and M, A and B agree by the ordinary scalar rule. M is settled before the program runs |
@@ -2098,6 +2100,18 @@ libjay is stricter, or simply elsewhere:
 - the display of a nested array whose items are themselves several rows
   deep: GNU APL puts a blank line between the rows of the outer array
   (`3 1⍴(⊂2 2⍴⍳4)`), libjay does not. Layout only — the values match.
+- the SYSTEM NAMES, in five places. `⎕PP` starts at libjay's own print
+  precision — six significant digits, what every other libjay display uses
+  and what its J side uses too — where GNU APL starts at ten; SETTING it
+  agrees exactly, and `corpus/apl/sysvars.txt` records that. `⎕A` and `⎕D`
+  are names libjay answers and this GNU APL build does not have at all, so
+  `⎕NC '⎕A'` is 5 here and ¯1 there. A name libjay accepts starts with a
+  letter, so `⎕NC '_'` is ¯1 here and 0 there — its own lexer's rule.
+  `⎕SVR` is closed by the sandbox with the rest of the shared-variable
+  surface, where GNU APL answers 0 for a variable nothing shared. And `⎕LX`
+  is read-only: libjay loads no workspace, so a latent expression has
+  nothing to be latent for, and storing one where it could never run would
+  be a setting that quietly does nothing.
 
 Three entries are GNU APL's bug rather than a dialect difference, pinned so
 that a later release fixing them is noticed. An axis outside the argument's
@@ -2181,31 +2195,50 @@ sections above is also collected here.
   a primitive — a dfn (`{⍵}[1]`), a train, or an operator's derived
   function (`⌽⍤0[1]`) — which is refused by name, as are the primitives
   that have no axis form at all.
-- Five GNU APL features the 2026-08-28 manual crawl found and this wave did
-  not implement, each of them a named refusal rather than a wrong answer:
-  a `[X]` axis in a `∇`-definition header (`∇Z←AV[X] B`) and the lambda
-  axis variable `χ`; structured variables and associative arrays (`P.x←3`,
-  with intermediate members created implicitly); dyadic `⎕CR`, which is a
-  family of conversions — bytes to hex, UTF-8 either way, cell types, the
-  boxed display — rather than one function; `⌹[X]`, whose bracket selects a
-  QR factorization or one of the polynomial sub-functions rather than an
-  axis; and `⎕SYL`, `⎕AV` and `⎕PP`, which describe an interpreter's own
-  limits, glyph repertoire and printing rather than the language. Each is a
-  release-sized piece of work on its own.
-- The 2026-08-29 certification sweep re-confirmed those against the live
-  oracle and found eight more spellings GNU APL answers and libjay names:
-  the system variables `⎕PW`, `⎕RL`, `⎕LX`, `⎕ET` and the system functions
-  `⎕NC`, `⎕EM`, `⎕SVR` — which, like `⎕SYL` and `⎕AV`, report an
-  interpreter's own state rather than the language, and want a decision
-  about how much of that state libjay is willing to have before any of
-  them is written; a POWER whose count is computed rather than literal
-  (`+⍣(1+1)⊢5`, `N←2 ⋄ +⍣N⊢5`, and a computed LIST of counts) and an AXIS
-  that is computed (`K←1 ⋄ ⌽[K]M`), both of which need an operand's
-  expression to survive into the derived function, which nothing in the IR
-  holds today — the same wall the Dyalog `computed-operand` row names; and
-  INDEXED ASSIGNMENT used as an expression (`(A[1]←9)`, `1+A[1]←9`), which
-  wants an assignment to have a value. All are named refusals, never wrong
-  answers.
+- The system-name family the 2026-08-28 manual crawl and the 2026-08-29
+  certification sweep collected is now answered, and what is left of it is
+  four rows with a reason apiece. Answered: `⎕AV` (the atomic vector, whose
+  content the standard leaves to the implementation and which libjay
+  measured from the reference and adopted, so a code that indexes it means
+  the same in both), `⎕PP` and `⎕RL` (read AND set while the program runs,
+  each moving what it controls), `⎕NC`, `⎕LX`, `⎕ET`, `⎕EM`, monadic `⎕CR`,
+  the dyadic `⎕CR` conversions that rewrite the same bytes another way (5,
+  6, 13, 16, 17, 18, 19), and the polynomial half of the `⌹[K]` group (8
+  and 9). What is left:
+  - `⎕PW`, a page width. libjay's display writes a value in full and folds
+    no line, so there is no page to set the width of. A named gap, and one
+    a display that wraps would close.
+  - `⎕SYL`, ⚪. It reports one interpreter's own build — cores configured,
+    hash-table size, input line length, the `./configure` settings — and
+    another implementation has no counterpart to put in those rows.
+    Answering it would mean impersonating a particular build.
+  - `⎕SVR`, ⚪ closed by the sandbox, with `⎕SVO`, `⎕SVQ`, `⎕SVC`, `⎕SVE`
+    and `⎕SVS`: it retracts the offer of a SHARED variable, and libjay
+    shares no variable with anything. The reference answers 0 because
+    nothing was shared there either; libjay closes the surface rather than
+    answering about a mechanism it does not have.
+  - The rest of dyadic `⎕CR` — the boxed listings (0 to 4, 7 to 9, 20), the
+    interpreter's internal record of a value (11, 12, 14, 15), the
+    cell-type codes (26) — and the rest of the `⌹[K]` group: `⌹[1]`, a QR
+    factorization, and `⌹[7]`, a polynomial written out as text. Each is a
+    piece of numerical or presentation work of its own.
+- Still named, with the reason sharpened by the 2026-08-29 probes:
+  structured variables and associative arrays (`P.x←3`, with intermediate
+  members created implicitly) — a name-space feature, not a primitive:
+  every assignment, lookup and scope rule would have to learn about dotted
+  paths, and the reference gives the whole structure a display of its own
+  (`P.x←3 ⋄ P` is an 8-by-2 character matrix there). A `[X]` axis in a
+  `∇`-definition header (`∇Z←AV[X] B`) and the lambda axis `χ` belong with
+  the computed-operand family rather than with the axis vocabulary: the
+  header binds a NAME the body then uses as an axis (`+/[X]B`), which is a
+  computed axis, so the two stand or fall together.
+- A POWER whose count is computed rather than literal (`+⍣(1+1)⊢5`,
+  `N←2 ⋄ +⍣N⊢5`, and a computed LIST of counts) and an AXIS that is
+  computed (`K←1 ⋄ ⌽[K]M`) both need an operand's expression to survive
+  into the derived function, which nothing in the IR holds today — the same
+  wall the Dyalog `computed-operand` row names; and INDEXED ASSIGNMENT used
+  as an expression (`(A[1]←9)`, `1+A[1]←9`) wants an assignment to have a
+  value. All are named refusals, never wrong answers.
   The APL glyphs are reported by NAME rather than as unknown
   characters: a glyph the language has and libjay has not reached is a
   queue position, and the diagnostic says which one. Three spellings are

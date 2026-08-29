@@ -468,3 +468,36 @@ N←{42} ⋄ N 5
 ? no blank line between the outer rows here, one there
 2 2⍴(⊂2 2⍴⍳4)
 ? no blank line between the outer rows here, one there
+
+// The system names, where the two answer differently on purpose.
+//
+// `⎕PP` starts at libjay's own print precision, six significant digits,
+// which is what every other libjay display uses and what its J side uses
+// too; GNU APL starts at ten. Setting it agrees exactly (see
+// corpus/apl/sysvars.txt) — only the number it starts at differs.
+⎕PP
+? six significant digits here, ten there
+// `⎕A` and `⎕D` are names libjay answers and this GNU APL build does not
+// have at all, so `⎕NC` calls them a system variable here and not a name
+// there.
+⎕NC '⎕A'
+? a system variable here, not a name there
+⎕NC '⎕D'
+? a system variable here, not a name there
+// A name libjay accepts starts with a letter. GNU APL lets one start with
+// an underscore, so `⎕NC` calls `_` an unused name there and not a name
+// here — which is what libjay's own lexer would say of it.
+⎕NC '_'
+? not a name here, an unused name there
+// The shared-variable surface is closed by the sandbox, all of it: `⎕SVO`
+// offers, `⎕SVR` retracts, and libjay shares no variable with anything.
+// GNU APL answers 0, meaning nothing was shared.
+⎕SVR 'A'
+? closed by the sandbox here, 0 there
+// The latent expression is what a session runs when it LOADS a saved
+// workspace. libjay compiles and runs a string and loads no workspace, so
+// there is nothing for a latent expression to be latent for: it reads as
+// the empty vector both sides agree on, and setting it is refused rather
+// than stored where it could never run.
+⎕LX←'2+2'
+? read-only here, stored there

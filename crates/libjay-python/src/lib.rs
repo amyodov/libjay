@@ -147,21 +147,22 @@ impl Kernel {
                 }
             }
         };
-        let result = match (&self.device, has_input) {
-            (None, false) => self.program.run(&args, &mut sink),
-            (None, true) => self.program.run_io(&args, &mut sink, &mut source),
-            (Some(d), false) => self.program.run_on(d, &args, &mut sink),
-            (Some(d), true) => self.program.run_on_io(d, &args, &mut sink, &mut source),
-        };
+        let input: jay::verb::InputFn<'_> = if has_input { Some(&mut source) } else { None };
+        let outcome =
+            self.program.run_detail_on_io(self.device.as_ref(), &args, &mut sink, input);
         if let Some(e) = read_err {
             return Err(e);
         }
         if let Some(e) = write_err {
             return Err(e);
         }
-        let result = result.map_err(|e| jay_err(&self.program.display_src, &e))?;
+        let outcome = outcome.map_err(|e| jay_err(&self.program.display_src, &e))?;
+        // The run's own display conventions: a program that set `⎕PP`
+        // shows its answer at the precision it asked for.
+        let fmt = outcome.fmt;
+        let result = outcome.value;
         let display = if want_display {
-            result.as_ref().map(|a| format_array(a, &self.program.fmt)).filter(|s| !s.is_empty())
+            result.as_ref().map(|a| format_array(a, &fmt)).filter(|s| !s.is_empty())
         } else {
             None
         };
@@ -175,14 +176,14 @@ impl Kernel {
                 Some(a) => {
                     let array =
                         device.upload(&a).map_err(|e| JayError::new_err(e.to_string()))?;
-                    Py::new(py, DeviceArray { array, device, fmt: self.program.fmt })?.into_any()
+                    Py::new(py, DeviceArray { array, device, fmt })?.into_any()
                 }
             };
             return Ok((value, display));
         }
         let value = match result {
             None => py.None(),
-            Some(a) => array_to_py(py, a, self.program.fmt)?,
+            Some(a) => array_to_py(py, a, fmt)?,
         };
         Ok((value, display))
     }

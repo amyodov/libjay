@@ -1,0 +1,210 @@
+// APL's system names: the `⎕`-names a program reads, the two it may also
+// set, and the two system functions that answer questions about the names
+// in the program itself.
+//
+// Several lines below record a REFUSAL on both sides — a domain rule, a
+// length rule, a name that cannot be assigned. That refusal is the
+// behaviour worth pinning, so it is here rather than in the bug register.
+//
+// A line that fixes a definition assigns `⎕FX`'s answer away (`Q←⎕FX …`):
+// a GNU APL session displays every sentence it runs and libjay answers
+// with the last one, so a sentence in the middle that has a value would
+// differ for that reason alone.
+
+// --- ⎕AV: the atomic vector ----------------------------------------------
+// The standard leaves its content to the implementation. libjay adopts the
+// reference's, so that a code that indexes it means the same in both.
+⍴⎕AV
+⎕AV≡⎕AV
+⎕AV⍳'A'
+⎕AV⍳'ABC'
+⎕AV[66]
+⎕AV[65 66 67]
+⎕AV[1]≡⎕UCS 0
+⎕UCS ⎕AV[130]
+⎕UCS ⎕AV[256]
+(⎕AV⍳'z')-⎕AV⍳'a'
+⍴⎕AV⍳⎕AV
+∧/(⎕AV⍳⎕AV)=⍳256
+'⎕'∊⎕AV
+⎕AV←'x'
+
+// --- ⎕LX, ⎕ET, ⎕EM: the workspace and the last error ---------------------
+// libjay loads no workspace, so its latent expression is empty; and it has
+// no construct that catches an error and carries on, so no program it can
+// run ever observes one after the fact.
+⍴⎕LX
+⎕LX≡''
+⎕ET
+⍴⎕ET
+⎕ET≡0 0
+⍴⎕EM
+0=⍴,⎕EM
+⎕ET←1 2
+⎕EM←'x'
+
+// --- ⎕PP: print precision ------------------------------------------------
+// Set it and every float displayed afterwards keeps that many significant
+// digits. The number it starts at is libjay's own — see divergences.txt.
+⎕PP←3 ⋄ ⎕PP
+⎕PP←17 ⋄ ⎕PP
+⎕PP←3 ⋄ ÷3
+⎕PP←3 ⋄ 1÷3 7
+⎕PP←17 ⋄ ÷3
+⎕PP←1 ⋄ ÷3
+⎕PP←12 ⋄ ○1
+⎕PP←4 ⋄ ○1
+⎕PP←3 ⋄ 123456789012
+⎕PP←3 ⋄ 1.23456
+⎕PP←3 ⋄ ⍕÷3
+⎕PP←3 ⋄ ⎕←÷3
+// The setting is the RUN's, not a definition's: it holds after the
+// definition that made it returns, and an ⍎ shares it either way.
+∇F\n⎕PP←3\n∇\nF\n÷3
+⍎'⎕PP←3' ⋄ ÷3
+⎕RL←5 ⋄ ⍎'⎕RL'
+⎕PP←0
+⎕PP←¯1
+⎕PP←'a'
+⎕PP←1 2
+⎕PP←⍬
+
+// --- ⎕RL: the random link ------------------------------------------------
+// The seed reads back as it was set. The SEQUENCE it starts is libjay's
+// own and is not compared here — `?` is out of both corpora.
+⎕RL
+⎕RL←42 ⋄ ⎕RL
+⎕RL←0 ⋄ ⎕RL
+⎕RL←1.5
+⎕RL←1 2
+⎕RL←⍬
+⎕RL←'a'
+
+// --- ⎕NC: the class of a name --------------------------------------------
+// ¯1 is not a name at all, 0 a name with nothing in it, 2 a variable, 3 a
+// defined function, 5 a system variable, 6 an argument of a `{…}`. A
+// vector is one name and a matrix is one per row, trailing blanks aside.
+⎕NC 'A'
+A←5 ⋄ ⎕NC 'A'
+⎕NC ''
+⎕NC 'A1'
+⎕NC '1A'
+⎕NC 'A B'
+⎕NC 'ABC'
+⎕NC '  A  '
+A←5 ⋄ ⎕NC ' A'
+A←5 ⋄ ⎕NC 'A '
+⎕NC '⎕IO'
+⎕NC '⎕CT'
+⎕NC '⎕AV'
+⎕NC '⎕PP'
+⎕NC '⎕RL'
+⎕NC '⎕LX'
+⎕NC '⎕EM'
+⎕NC '⎕ET'
+⎕NC '⎕PW'
+⎕NC '⎕SYL'
+⎕NC '⎕TS'
+⎕NC '⎕WA'
+⎕NC '⎕TC'
+⎕NC '⎕AI'
+⎕NC '⎕LC'
+⎕NC '⎕TZ'
+⎕NC '⎕FX'
+⎕NC '⎕CC'
+⎕NC '⎕UCS'
+⎕NC '⎕NC'
+⎕NC '⎕CR'
+⎕NC '⎕XX'
+⎕NC '⎕'
+⎕NC '⍺'
+⎕NC '⍵'
+⎕NC 3
+⎕NC ⍬
+⎕NC 'ABC' 'A'
+⍴⎕NC 'A'
+⎕NC 2 3⍴'ABCDEF'
+⎕NC 1 3⍴'ABC'
+A←5 ⋄ ⎕NC 2 1⍴'A '
+⎕NC 3 1⍴'AB '
+A←5 ⋄ B←'x' ⋄ ⎕NC 2 1⍴'AB'
+∇Z←N X\nZ←X+1\n∇\n⎕NC 'N'
+Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⎕NC 'F'
+
+// --- ⎕CR: a definition as the text it was written as ---------------------
+// The header first, then one line per body line, padded with blanks to the
+// longest. A name that is not a definition has no text at all.
+Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⎕CR 'F'
+Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⍴⎕CR 'F'
+Q←⎕FX 'Z←F X' ' Z←X+1' ⋄ ⍴⎕CR 'F'
+Q←⎕FX 'Z ← F  X' 'Z←X+1' ⋄ ⍴⎕CR 'F'
+Q←⎕FX 'Z←A F B;L' 'L←1' 'Z←A+B+L' ⋄ ⎕CR 'F'
+Q←⎕FX 'Z←A F B;L' 'L←1' 'Z←A+B+L' ⋄ ⍴⎕CR 'F'
+Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⎕UCS ⎕CR 'F'
+Q←⎕FX 'R' 'A←1' ⋄ ⎕CR 'R'
+Q←⎕FX 'R' 'A←1' ⋄ ⍴⎕CR 'R'
+Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ ⍴⎕CR 'G'
+Q←⎕FX 'Z←F X' 'Z←X+1' ⋄ (⎕CR 'F')[1;]
+∇Z←F X\n Z←X+1\n∇\n⎕CR 'F'
+∇Z←G X\n Z←X+1\n∇\n⍴⎕CR 'G'
+∇Z←H X\n   Z←X+1\n   Z←Z+1\n∇\n⍴⎕CR 'H'
+∇Z←K X;A\nA←1\nZ←X+A\n∇\n⎕CR 'K'
+∇ Z←M X\nZ←X+1\n∇\n⍴⎕CR 'M'
+∇Z←P X\nZ←X+1\n∇\n⎕CR 'P'
+⍴⎕CR 'A'
+A←5 ⋄ ⍴⎕CR 'A'
+A←5 ⋄ ⎕CR 'A'
+⎕CR 5
+⎕CR 2 2⍴'ABCD'
+
+// --- n ⎕CR y: the numbered conversions -----------------------------------
+// 5 and 6 write bytes as hexadecimal and 13 reads it back; 16 and 17 are
+// base 64; 18 and 19 are UTF-8 both ways.
+5 ⎕CR 255 16
+6 ⎕CR 255 16
+5 ⎕CR 0
+5 ⎕CR ¯1
+5 ⎕CR ¯128
+5 ⎕CR 256
+5 ⎕CR ¯129
+5 ⎕CR 1.5
+5 ⎕CR 'A'
+5 ⎕CR 'é'
+6 ⎕CR 65 66 67
+⍴5 ⎕CR ⍬
+⍴5 ⎕CR 2 2⍴1 2 3 4
+5 ⎕CR 2 2⍴1 2 3 4
+5 ⎕CR 'AB' 'CD'
+13 ⎕CR 'FF01'
+13 ⎕CR 'ff01'
+13 ⎕CR 'F'
+13 ⎕CR 'GG'
+13 ⎕CR 65 66
+⍴13 ⎕CR 'ff'
+5 ⎕CR 13 ⎕CR 'FF01'
+16 ⎕CR 'ABC'
+16 ⎕CR 'A'
+16 ⎕CR 'AB'
+16 ⎕CR 'é'
+16 ⎕CR 65 66 67
+⍴16 ⎕CR 'ABC'
+17 ⎕CR 'QUJD'
+17 ⎕CR 'QQ=='
+17 ⎕CR 'QUI='
+17 ⎕CR '!!!!'
+17 ⎕CR 81 85 74 68
+17 ⎕CR 16 ⎕CR 'é'
+18 ⎕CR 'AB'
+18 ⎕CR 'é'
+18 ⎕CR 65
+18 ⎕CR 2 2⍴'ABCD'
+⍴18 ⎕CR 'AB'
+19 ⎕CR 65 66
+19 ⎕CR 195 169
+19 ⎕CR 'AB'
+19 ⎕CR 2 2⍴65 66 67 68
+⍴19 ⎕CR 65
+19 ⎕CR 18 ⎕CR 'héllo'
+1 2 ⎕CR 1
+99 ⎕CR 1
+¯1 ⎕CR 1
