@@ -507,6 +507,14 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             head(out, &format!("cut ;.{n}"));
             verb_lines(u, depth + 1, p, tr, out);
         }
+        Verb::BoundAxis(f, a) => {
+            head(out, &format!("an axis bound in the definition: {}", brief(a)));
+            verb_lines(f, depth + 1, p, tr, out);
+        }
+        Verb::Deferred(d) => {
+            head(out, &format!("{}, its operand read at each application", d.spelling));
+            verb_lines(&d.template, depth + 1, p, tr, out);
+        }
         Verb::PowerV(u, v) => {
             head(out, "power, count from a verb");
             verb_lines(u, depth + 1, p, tr, out);

@@ -23,10 +23,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 152 green / 23 partial / 2 absent by design, of 177 valences in the
+**J: 153 green / 22 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
-**APL: 106 green / 19 partial / 3 absent by design, of 128 valences in the
+**APL: 107 green / 18 partial / 3 absent by design, of 128 valences in the
 inventory. Nothing in APL's primitive tables is red.**
 
 ## J — verbs
@@ -160,7 +160,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `&:` appose | 🟢 |
 | `&.` under | 🟢 `v^:_1 @: u &: v`, over the obverse table — docs/coverage.md's "The obverse table" lists what is in it and the two verbs still named. `&.>` and `&.,` are the two unders not built out of an inverse: box by box, and over the ravel with the shape put back |
 | `&.:` under | 🟢 the same on whole arguments, over the same table |
-| `^:` power | 🟡 a literal count, a list of them (mixed signs included), `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives — which obverse a negative count runs is settled when the arguments arrive, so `x u^:_1 y` undoes the bond `x&u` and the monad undoes u; a computed count not yet |
+| `^:` power | 🟢 a count the program COMPUTES as readily as a literal one — a name, an expression, a definition's own argument — read where the derived verb is applied and not while the program compiles; a list of counts (mixed signs included), `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives — which obverse a negative count runs is settled when the arguments arrive, so `x u^:_1 y` undoes the bond `x&u` and the monad undoes u |
 | `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, whose base case is `u` applied to the last column's own values — so `u . v y` of a vector or an atom, each read as one column, is `u y` — and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
 | `:` explicit definition | 🟡 `0 :` (the noun definition, whose lines below are its text), `1 :`, `2 :`, `3 :`, `4 :`, the `m : 0` body on the lines below, the same body given as a BOXED list of lines (`3 : ('a =. *: y' ; 'a + a')`), and `u : v`, which joins two VERBS into one ambivalent verb; `13 :` not yet, and an explicit MODIFIER (`1 :`, `2 :`) whose body is boxed is named |
 | `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named. The left rank is finite — 2 for the rectangles, 1 for the frets — so a longer left argument is a FRAME of cuts, one per cell. An empty fret list is the whole argument in one piece; a BOXED left argument — J's per-axis frets — is named |
@@ -343,7 +343,7 @@ conjunctions above:
 | `⍨` commute | 🟢 |
 | `∘.` outer product | 🟢 the function between every pair of ELEMENTS whatever its rank, each disclosed on the way in and the result enclosed on the way into the table: `1 2∘.,3 4` is a two-by-two of pairs, `¯1 0 1∘.⌽⊂m` rotates the matrix |
 | `⍤` rank / atop | 🟡 a rank specification, or Dyalog's atop with a function operand; no oracle for the latter |
-| `⍣` power | 🟡 literal count — negatives included, answered from the obverse table, and a dyadic `x f⍣¯n y` undoes the bond `x∘f` — or a function operand (`f⍣≡`); a count computed at run time is named. GNU APL implements no negative MONADIC power, so those rows are recorded against Dyalog in `corpus/apl/dyalog-operators.txt`; it does answer the dyadic ones, and reads `x-⍣¯1 y` differently, pinned in `corpus/apl/divergences.txt` |
+| `⍣` power | 🟢 a count the program COMPUTES as readily as a literal one — a name, a parenthesised expression, a definition's own argument — read where the derived function is applied; the count is ONE operand, so `f⍣N+1` reads `N` and leaves the `+1` to the sentence. Negatives included, answered from the obverse table, and a dyadic `x f⍣¯n y` undoes the bond `x∘f`; a function operand is `f⍣≡`. GNU APL implements no negative MONADIC power, so those rows are recorded against Dyalog in `corpus/apl/dyalog-operators.txt`; it does answer the dyadic ones, and reads `x-⍣¯1 y` differently, pinned in `corpus/apl/divergences.txt` |
 | `∘` beside | 🟡 Dyalog's `f∘g` has no oracle: GNU APL rejects two function operands. `A∘f` and `f∘A` bind the array as f's argument here — Dyalog's bind, and J's `m&v` — where GNU APL DOES answer, by reading the `∘` as its matrix product against f's monadic result (`2∘× 3 4 5` is `2 2 2` there); the divergence is pinned in `corpus/apl/divergences.txt`. Where neither operand is a function the matrix product is what libjay answers too — a left vector is a row and a right one a column, a scalar operand makes it the element-wise `×`, and inner lengths that differ are padded with zeros |
 | `⍥` over | 🟡 no oracle: not in GNU APL's character set; Dyalog's `f⍥g` |
 | `⍛` before | 🟡 no oracle: GNU APL rejects it; Dyalog's `f⍛g` |
@@ -371,8 +371,8 @@ conjunctions above:
 | Tradfns `∇ Z←L F R;locals` … `∇` | 🟢 including APL's global-by-default scope rule, the niladic form, which naming calls, and a body whose lines carry the `∇` editor's line numbers (`[1]`, `[1.1]`), which is how every printed definition is written |
 | Trains (forks and atops) | 🟡 no oracle: GNU APL rejects them; Dyalog's rules, shipped as an extension (`Dialect.trains`, on by default) — 2-train atop, 3-train fork, a value left tine, longer trains grouped from the right |
 | Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included. The brackets bind to the value written immediately before them, which in a run of numbers is the LAST number: `1 2 3[2]` is `1 2` beside `3[2]`, and indexing a scalar is a rank error, as the reference has it |
-| Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
-| Axis specification `f[K]` | 🟢 for every function that takes one: `/` `⌿` `\` `⍀` after an operand and the dyadic `x/[k]y` and `x\[k]y`; `⌽` `⊖`; `,` `⍪` in both valences, laminate's FRACTIONAL axis (`x,[0.5]y`) included; `↑` `↓` `⌷` `⊂` `⊆`, monadic `↑` (first here, mix under Dyalog's dialect, where `↑[K.5]` places the item axes at a gap) and `⊃`; and the SCALAR functions, where the argument of lower rank lines up with the named axes. A list of axes is read where the function takes one — `,[1 2]`, `1 2↑[3 1]`, `⊂[2 1]`, `(2 3⍴1)+[1 2]` — and `Dialect.axis_order` names which end of the pairing Dyalog reads differently. Three brackets are not axes at all: `⊤[N]`, a digit count; `⊢[M]`, a selection mask; and `⌹[K]`, which picks one of a group of unrelated functions — all settled before the program runs. A function with no axis form (`⍉` `∊` `≡` `⍴` `⍒`, a dfn, an operator's derived function) is named as a gap, and so is an axis the program computes (`K←1 ⋄ ⌽[K]M`) or one a `∇` header binds (`∇Z←AV[X] B`): the derived function is built while the program compiles, and nothing in the IR holds an operand's expression to evaluate later. The lambda axis `χ` is the same wall — the ∇-header form it belongs with reads its own axis name as a computed axis |
+| Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value. It is an expression like any other, so it may stand inside a larger sentence and chain (`B←A[2]←5`, `2+A[1]←9`, `A[1]←C[2]←9`); its value is the value ASSIGNED, not the array it was written into. The target is a NAME — writing through an expression (`(A,4)[1]←9`) is refused there too |
+| Axis specification `f[K]` | 🟢 for every function that takes one: `/` `⌿` `\` `⍀` after an operand and the dyadic `x/[k]y` and `x\[k]y`; `⌽` `⊖`; `,` `⍪` in both valences, laminate's FRACTIONAL axis (`x,[0.5]y`) included; `↑` `↓` `⌷` `⊂` `⊆`, monadic `↑` (first here, mix under Dyalog's dialect, where `↑[K.5]` places the item axes at a gap) and `⊃`; and the SCALAR functions, where the argument of lower rank lines up with the named axes. The axis may be COMPUTED — a name, an expression, a definition's own argument (`K←1 ⋄ ⌽[K]M`) — and is then read where the function is applied and held to the argument's rank there. A list of axes is read where the function takes one — `,[1 2]`, `1 2↑[3 1]`, `⊂[2 1]`, `(2 3⍴1)+[1 2]` — and `Dialect.axis_order` names which end of the pairing Dyalog reads differently. An explicit definition reads the brackets as a value of its own rather than as an axis: a `∇` header may declare its name (`∇Z←AV[X] B`) and a `{…}` reads it as `χ`, verbatim and with no `⎕IO` adjustment; a definition whose header names none refuses one. Three brackets are not axes at all: `⊤[N]`, a digit count; `⊢[M]`, a selection mask; and `⌹[K]`, which picks one of a group of unrelated functions — the first and the last choose which function the glyph stands for and so stay settled before the program runs, while `⊢[M]` may be computed. A function with no axis form (`⍉` `∊` `≡` `⍴` `⍒`, an operator's derived function) is named as a gap |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
 | Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟢 two presets — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default, and `Dialect::dyalog()` (`APL.Dialect.dyalog` in Python). Every point where the lineages diverge is a setting on it: `⎕CT`, `↑`/`⊃`, `⌷`, dyadic `⊂`, `≡`'s sign, the dfn result, the nested grade, dyadic `⍳`'s left rank, an axis list's order (`axis_order`), what `< ≤ ≥ >` may order and trains are all implemented in both readings; the nested model, `⍺←`'s laziness and the complex order are implemented in one, and asking for the other is refused as not implemented yet |
 | `⎕`-system names as runtime variables | 🟡 the pure ones, read-only: `⎕A` `⎕D` `⎕AV` `⎕IO` `⎕CT` `⎕LX` `⎕ET` `⎕EM`, and the system functions `⎕UCS` `⎕CC` `⎕NC` `⎕CR` `⎕FX`. `⎕CC` answers every class that is a set anyone can state, and the four glyph repertoires (5, 6, 7, 9) as the reference's own tables — 7 and 9 as the 6-by-10 and 4-by-7 frames they are. `⎕AV` is the 256-character atomic vector, whose content the standard leaves to the implementation and which libjay measured from the reference and adopted, so that `⎕AV⍳c` means the same in both. `⎕LX` is empty and stays empty — libjay loads no workspace for a latent expression to be latent for — and `⎕ET`/`⎕EM` are the values that mean "no error yet", which is what every program libjay can run reads: nothing in it catches an error and carries on. The ones that read a clock or a filesystem, and the whole shared-variable surface (`⎕SVO` `⎕SVQ` `⎕SVR` `⎕SVC` `⎕SVE` `⎕SVS`), are ⚪ closed by the sandbox (`ErrorKind::Sandbox`). `⎕SYL` is ⚪ not in the language: it reports one interpreter's own build limits — cores configured, hash-table size, input line length — and another implementation has no counterpart to put there. `⎕PW` is a named gap: libjay's display writes a value in full and folds no line to a page width |
@@ -401,15 +401,15 @@ conjunctions above:
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
 APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
 a preset of the dialect object rather than a second engine:
-`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 2609 of the
-2652 expressions Dyalog 20.0 has been recorded on — the default answers
-2317 of them — and the 43 it does not are itemised below.
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 2616 of the
+2658 expressions Dyalog 20.0 has been recorded on — the default answers
+2324 of them — and the 42 it does not are itemised below.
 
 That is a GATE, not a measurement: `cargo test -p libjay --test
 oracle_dyalog` replays the recorded `dyalog:` column under the preset and
 fails on any expression not on the exemption list,
 `crates/libjay/tests/expected/dyalog.txt`. The list carries a reason per
-row — 23 of them a divergence libjay keeps on purpose, 20 a gap — and the
+row — 23 of them a divergence libjay keeps on purpose, 19 a gap — and the
 `Tag` column below is the tag those gap rows name, so closing a row here
 deletes its exemptions and tightens the gate. Nothing is exempt silently.
 `jay-corpus stats apl --dialect-diff --dialect dyalog` measures the same
@@ -455,7 +455,6 @@ keeps.
 | An operand in PARENTHESES to the right of an operator: `=⍥(2∘|)`, `⌽HALF (2∘↑)` | `operand-parens` | 2 | 🔴 the operator folder reaches it before the `)` has closed — a parser ordering gap, not a missing meaning |
 | Two singletons of different rank conforming (`(1 1⍴5)+,3`) | `singleton-rank` | 2 | 🔴 the higher rank wins there, the first argument here |
 | The `¯7○` branch cut | `circle-branch` | 1 | 🔴 the conjugate branch there |
-| A COMPUTED array where a function operand belongs: `(⍳3){⍺⍺+⍵}0`. A literal one binds | `computed-operand` | 1 | 🔴 nothing in the IR holds an operand's expression to evaluate when the derived function is built |
 | `⍺←` with a FUNCTION as the default left argument | `function-default` | 1 | 🔴 libjay takes an array alone |
 | A dfn that falls off its end | `no-result` | 1 | 🔴 no result at all there, a value here |
 | `⌺` over an empty | `stencil-empty` | 1 | 🔴 answered here, refused there |

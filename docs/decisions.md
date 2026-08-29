@@ -4109,3 +4109,66 @@ the register.
   the header binds a name the body then uses as an axis (`+/[X]B`), which
   is a computed axis, so the header form cannot be useful until computed
   axes are.
+- 2026-08-29 — A derived function may carry its operand's EXPRESSION and
+  read it when it is applied. `Verb::Deferred` holds the operand's IR node,
+  the derived function with the operand's place left empty, and a function
+  pointer that builds the real derived function from a value; `Verb::monad`
+  and `Verb::dyad` evaluate the operand in the caller's context, build, and
+  apply. That closes `f⍣N` and `u^:n` over a computed count, `f[K]` over a
+  computed axis, and a computed array where a function operand belongs
+  (`(⍳3){⍺⍺+⍵}0`, the Dyalog `computed-operand` ledger row). Nothing is
+  cached: a count read from a definition's argument is read again at every
+  call, which is the point of reading it late. Where the operand IS settled
+  at compile time — `fold_const` answers — the derived function is still
+  built there, so the diagnostics and the constant folding a literal
+  operand had are unchanged.
+  Two decisions inside it. The operand is ONE token's worth — a literal, a
+  name, or a parenthesised expression — because that is what the references
+  do: `⌽⍣N+1⊢1 2 3` in GNU APL reverses twice and leaves the `+1` to the
+  sentence. And what the value cannot decide is anything the PARSE depends
+  on: whether an operator's operand is an array or a function chooses how
+  `{⍺⍺+⍵}` reads, so that stays compile-time and only the value waits. The
+  same line keeps `⊤[N]` and `⌹[K]` settled at compile time — those
+  brackets choose which function the glyph stands for.
+  Implementation note: both application arms are `#[inline(never)]`
+  functions rather than arms of the evaluator's match. Putting an
+  `Option<Array>` local in `monad_rows` was by itself enough to take the
+  recursion test past `RECURSION_LIMIT` and overflow the stack, which is
+  the same cliff the system-name wave hit.
+- 2026-08-29 — APL's indexed assignment is an expression whose value is the
+  value ASSIGNED. THE ORACLE WINS: `(A[2]←5)` is 5 in GNU APL, `2+A[1]←9`
+  is 11, and `A[1]←C[2]←9` writes a 9 into both names. libjay was answering
+  the whole amended array instead — a wrong answer wherever the value
+  flowed on — and would not parse the form inside a larger sentence at all.
+  It is now an ordinary arm of the sentence parser's assignment case, so
+  the target being a NAME is the only thing left of the old restriction;
+  writing through an expression (`(A,4)[1]←9`) stays named, and GNU APL
+  calls it a SYNTAX ERROR.
+- 2026-08-29 — An explicit definition reads `f[K]` as a value of its own
+  rather than as an axis. A `∇` header may declare the name
+  (`∇Z←A F[X] B`) and a `{…}` reads it as `χ`; the value is bound in the
+  definition's frame verbatim, with no `⎕IO` adjustment, because the body
+  decides what it means (`∇Z←SHOW[X] B ⋄ Z←X ∇ ⋄ SHOW[7] 0` is 7 there).
+  It belongs to the ONE call that wrote it: the context carries it and
+  `call_explicit` takes it, so a definition applied inside the body does
+  not inherit it — `G←{⍵×2} ⋄ F←{χ+G ⍵} ⋄ F[10]5` is 20 in GNU APL and
+  here. A definition whose header names no axis REFUSES one; that is not a
+  gap, because the language has the feature and this definition did not ask
+  for it.
+- 2026-08-29 — `⎕FX` on text the program assembles stays a named gap, after
+  measuring the whole of it. The run-time half already exists: `Env::define`
+  binds a name to a function while a program runs, `Verb::Named` looks one
+  up when it is applied, and `⍎` compiles and runs a program from a string.
+  The half that is missing is the PARSE of the sentence that CALLS the
+  fixed function — `F 3` is an application if `F` is a function and a
+  two-item strand if it is a value, and libjay settles that while it
+  compiles, from a pre-pass over the source that reads every `∇` header and
+  every literal `⎕FX` header. A computed header is invisible to that pass.
+  The reachable middle was rejected on purpose: where the header is literal
+  and only the body is computed the pre-pass DOES find the name, but the
+  body would then be compiled at run time against a function table built
+  from that text alone, so a body calling another of the program's own
+  functions would read the call as a strand and answer a wrong value — the
+  shape of the `⎕FX` bug the 0.4.0 audit found. Closing that means the
+  compiler taking its function table from the running environment, which is
+  the name-resolution redesign, and it is not this wave.

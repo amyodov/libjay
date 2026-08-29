@@ -203,7 +203,7 @@ fn fixed_names(sentences: &[Vec<Token>], d: Rules) -> Vec<String> {
             }
         };
         let Some(first) = head.first() else { continue };
-        if let Ok((name, ..)) = parse_header(&head, first.span) {
+        if let Ok(Header { name, .. }) = parse_header(&head, first.span) {
             out.push(name);
         }
     }
@@ -384,11 +384,6 @@ fn parse_statement(
         ));
     }
     let hint = Span::merge(toks[0].span, toks[toks.len() - 1].span);
-    // `A[i]←v` replaces part of a named value; nothing else assigns through
-    // a bracket.
-    if let Some(e) = indexed_assignment(&toks, d, hint)? {
-        return Ok(Some(e));
-    }
     parse_range(&toks, 0, toks.len(), hint, d).map(Some)
 }
 
@@ -1831,6 +1826,13 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         // function on its left, and one on its right where it asked for it.
         if let Tok::UserOp { def, omega } = &t.kind {
             let (def, omega) = (def.clone(), *omega);
+            // An operand written as an expression is read where the
+            // derived function is applied; until then its PLACE is filled
+            // with an empty array, which is enough to fix the reading the
+            // body parses under.
+            let mut deferred: Option<(Expr, bool, Span)> = None;
+            let placeholder =
+                || Operand::Value(Box::new(Array::empty(crate::dtype::DType::I64)));
             let right = if omega {
                 match it.peek().map(|tok| &tok.kind) {
                     Some(Tok::Func(_)) => {
@@ -1840,34 +1842,64 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     }
                     // Dyalog lets an ARRAY stand where a function operand
                     // belongs, and the body reads `⍵⍵` as that array.
-                    Some(k) if literal(k).is_some() => {
-                        let a = it.next().expect("peeked");
-                        Some(Operand::Value(Box::new(literal(&a.kind).expect("checked").clone())))
-                    }
-                    _ => {
-                        return Err(Error::parse(
-                            "⍵⍵ needs an operand on the operator's right",
-                            t.span,
-                        ));
-                    }
+                    _ => match take_value_operand(&mut it, d)? {
+                        Some((ValueOperand::Now(a), _)) => Some(Operand::Value(Box::new(a))),
+                        Some((ValueOperand::Later(e), span)) => {
+                            deferred = Some((e, false, span));
+                            Some(placeholder())
+                        }
+                        None => {
+                            return Err(Error::parse(
+                                "⍵⍵ needs an operand on the operator's right",
+                                t.span,
+                            ));
+                        }
+                    },
                 }
             } else {
                 None
             };
-            let alpha = match out.pop() {
-                Some(Token { kind: Tok::Func(f), span }) => (Operand::Func(Box::new(f)), span),
-                Some(tok) if literal(&tok.kind).is_some() => {
-                    (Operand::Value(Box::new(literal(&tok.kind).expect("checked").clone())), tok.span)
+            let (alpha, fspan) = match out.last().map(|tok| &tok.kind) {
+                Some(Tok::Func(_)) => {
+                    let Some(Token { kind: Tok::Func(f), span }) = out.pop() else {
+                        unreachable!("checked above")
+                    };
+                    (Operand::Func(Box::new(f)), span)
                 }
-                _ => {
-                    return Err(Error::parse(
-                        "⍺⍺ needs an operand on the operator's left",
-                        t.span,
-                    ));
+                _ => match take_left_value_operand(&mut out, d)? {
+                    Some((ValueOperand::Now(a), span)) => {
+                        (Operand::Value(Box::new(a)), span)
+                    }
+                    Some((ValueOperand::Later(e), span)) => {
+                        if deferred.is_some() {
+                            return Err(Error::not_yet(
+                                "both operands of an operator computed at once",
+                                span,
+                            ));
+                        }
+                        deferred = Some((e, true, span));
+                        (placeholder(), span)
+                    }
+                    None => {
+                        return Err(Error::parse(
+                            "⍺⍺ needs an operand on the operator's left",
+                            t.span,
+                        ));
+                    }
+                },
+            };
+            let template = Verb::UserDerived { def, alpha, omega: right };
+            let derived = match deferred {
+                None => template,
+                Some((operand, is_alpha, _)) => {
+                    Verb::Deferred(std::sync::Arc::new(crate::verb::Deferred {
+                        operand,
+                        template,
+                        build: if is_alpha { built_alpha } else { built_omega },
+                        spelling: "(n {…})".to_string(),
+                    }))
                 }
             };
-            let (alpha, fspan) = alpha;
-            let derived = Verb::UserDerived { def, alpha, omega: right };
             out.push(Token { kind: Tok::Func(derived), span: Span::merge(fspan, t.span) });
             continue;
         }
@@ -2079,18 +2111,9 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     ));
                 }
             };
-            // A reduction and a scan each fold ONE axis, so nothing but a
-            // single whole one has a meaning here.
-            if spec.single().is_none() {
-                return Err(Error::domain(
-                    format!("{} folds one whole axis, not {spec}", op.glyph()),
-                    aspan,
-                ));
-            }
-            out.push(Token {
-                kind: Tok::Func(Verb::AlongAxis(Box::new(inner), spec)),
-                span: Span::merge(span, aspan),
-            });
+            let spelling = format!("{}[k]", op.glyph());
+            let v = spec.derive(inner, built_fold_axis, spelling, aspan, d)?;
+            out.push(Token { kind: Tok::Func(v), span: Span::merge(span, aspan) });
             continue;
         }
         let derived = match op {
@@ -2133,30 +2156,26 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             // stays simple, which is APL's enclosure rule.
             OpGlyph::Each => Verb::Each(Box::new(f), Enclose::ExceptSimpleScalar),
             OpGlyph::Power => {
-                let spec = match it.peek() {
-                    // `f⍣g` iterates until `new g old` holds: `f⍣≡` is the
-                    // fixed point, which is the spelling the reference uses.
-                    Some(tok) if matches!(tok.kind, Tok::Func(_)) => {
-                        let gtok = it.next().unwrap();
-                        let Tok::Func(g) = gtok.kind else { unreachable!("checked above") };
-                        let v = Verb::PowerUntil(Box::new(f), Box::new(g));
-                        out.push(Token {
-                            kind: Tok::Func(v),
-                            span: Span::merge(span, gtok.span),
-                        });
-                        continue;
-                    }
-                    Some(tok) if literal(&tok.kind).is_some() => it.next().unwrap(),
-                    _ => {
-                        return Err(Error::not_yet("computed power (f⍣n)", t.span));
-                    }
+                // `f⍣g` iterates until `new g old` holds: `f⍣≡` is the
+                // fixed point, which is the spelling the reference uses.
+                if matches!(it.peek().map(|tok| &tok.kind), Some(Tok::Func(_))) {
+                    let gtok = it.next().expect("peeked");
+                    let Tok::Func(g) = gtok.kind else { unreachable!("checked above") };
+                    let v = Verb::PowerUntil(Box::new(f), Box::new(g));
+                    out.push(Token {
+                        kind: Tok::Func(v),
+                        span: Span::merge(span, gtok.span),
+                    });
+                    continue;
+                }
+                let Some((count, cspan)) = take_value_operand(&mut it, d)? else {
+                    return Err(Error::parse("⍣ needs a count on its right", t.span));
                 };
-                let arr = literal(&spec.kind).expect("checked above");
                 // `f⍣¯n` runs f's inverse n times, over the same obverse
                 // table J's `u^:_n` reads.
-                let p = power_spec(arr, spec.span)?;
-                let f = Verb::PowerN(Box::new(f), p);
-                out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
+                let spelling = format!("{}⍣n", f.name());
+                let v = count.derive(f, built_power, spelling, cspan, d)?;
+                out.push(Token { kind: Tok::Func(v), span: Span::merge(span, cspan) });
                 continue;
             }
             // `f⌺w`: the window sizes are a value on the right, one per
@@ -2236,17 +2255,11 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
 fn take_axis(
     it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
     d: Rules,
-) -> Result<Option<(AxisSpec, Span)>> {
+) -> Result<Option<(ValueOperand, Span)>> {
     if !matches!(it.peek().map(|t| &t.kind), Some(Tok::LBracket)) {
         return Ok(None);
     }
-    let (arr, span) = bracket_value(it, d).map_err(|e| match (e.kind, e.span) {
-        (crate::error::ErrorKind::NotYet, Some(s)) => {
-            Error::not_yet("a computed axis (f[k])", s)
-        }
-        _ => e,
-    })?;
-    Ok(Some((axis_spec(&arr, d.origin, span)?, span)))
+    Ok(Some(bracket_operand(it, d)?))
 }
 
 /// The axes a bracket's value names.
@@ -2614,13 +2627,68 @@ fn tine_run(toks: &[Token], d: Rules) -> Result<Option<Verb>> {
     train(toks)
 }
 
-/// The value a whole `[…]` holds, taken from the token stream. The
-/// brackets may hold any expression whose value is settled before the
-/// program runs; one that reads a name is a named gap.
-fn bracket_value(
+/// An operand written where a VALUE belongs: the count of `f⍣n`, the axis
+/// of `f[k]`, the array a user-written operator is given for `⍺⍺` or `⍵⍵`.
+///
+/// Either the whole of it is settled while the program compiles, or it is
+/// an expression the derived function reads afresh at every application —
+/// which is what lets a definition's own argument decide a count or an
+/// axis.
+enum ValueOperand {
+    Now(Array),
+    Later(Expr),
+}
+
+impl ValueOperand {
+    /// The derived function this operand makes of `template`, built now
+    /// where the operand is settled and at each application where it is
+    /// not. `spelling` names the whole in a diagnostic.
+    fn derive(
+        self,
+        template: Verb,
+        build: fn(&Verb, &Array, Span, Rules) -> Result<Verb>,
+        spelling: String,
+        span: Span,
+        d: Rules,
+    ) -> Result<Verb> {
+        match self {
+            ValueOperand::Now(a) => build(&template, &a, span, d),
+            ValueOperand::Later(operand) => {
+                Ok(Verb::Deferred(std::sync::Arc::new(crate::verb::Deferred {
+                    operand,
+                    template,
+                    build,
+                    spelling,
+                })))
+            }
+        }
+    }
+}
+
+/// The configuration a compile-time evaluation runs under.
+fn const_cfg(d: Rules) -> crate::verb::EvalCfg {
+    crate::verb::EvalCfg {
+        agreement: crate::verb::Agreement::ExactOrScalar,
+        fmt: crate::fmt::FmtOpts::APL,
+        tol: d.tol(),
+        rules: d,
+    }
+}
+
+/// An operand expression as an operand: its value where the whole of it is
+/// settled now, and the expression itself where it is not.
+fn settle(e: Expr, d: Rules) -> ValueOperand {
+    match crate::ir::fold_const(&e, const_cfg(d)) {
+        Some(a) => ValueOperand::Now(a),
+        None => ValueOperand::Later(e),
+    }
+}
+
+/// The operand a whole `[…]` holds, taken from the token stream.
+fn bracket_operand(
     it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
     d: Rules,
-) -> Result<(Array, Span)> {
+) -> Result<(ValueOperand, Span)> {
     let open = it.next().expect("the caller peeked a [");
     let mut inner: Vec<Token> = Vec::new();
     let mut depth = 0usize;
@@ -2640,18 +2708,127 @@ fn bracket_value(
     if let [only] = inner.as_slice()
         && let Some(a) = literal(&only.kind)
     {
-        return Ok((a.clone(), span));
+        return Ok((ValueOperand::Now(a.clone()), span));
     }
-    let e = parse_prepared(&inner, span, d)?;
-    let cfg = crate::verb::EvalCfg {
-        agreement: crate::verb::Agreement::ExactOrScalar,
-        fmt: crate::fmt::FmtOpts::APL,
-        tol: d.tol(),
-        rules: d,
+    Ok((settle(parse_prepared(&inner, span, d)?, d), span))
+}
+
+/// The value a whole `[…]` holds, for the brackets that choose a MEANING
+/// rather than name an axis — `⊤[N]` and `⌹[K]`. Those pick which function
+/// the glyph stands for, which is settled while the program compiles, so
+/// one that reads a name is a named gap.
+fn bracket_value(
+    it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
+    d: Rules,
+    what: &str,
+) -> Result<(Array, Span)> {
+    match bracket_operand(it, d)? {
+        (ValueOperand::Now(a), span) => Ok((a, span)),
+        (ValueOperand::Later(_), span) => Err(Error::not_yet(what, span)),
+    }
+}
+
+/// The tokens of the balanced `( … )` at the head of the stream, without
+/// the brackets themselves. The caller has peeked the `(`.
+fn paren_run(
+    it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
+) -> Result<(Vec<Token>, Span)> {
+    let open = it.next().expect("the caller peeked a (");
+    let mut inner: Vec<Token> = Vec::new();
+    let mut depth = 0usize;
+    let close = loop {
+        let Some(tok) = it.next() else {
+            return Err(Error::parse("unmatched (", open.span));
+        };
+        match tok.kind {
+            Tok::RParen if depth == 0 => break tok,
+            Tok::LParen => depth += 1,
+            Tok::RParen => depth -= 1,
+            _ => {}
+        }
+        inner.push(tok);
     };
-    crate::ir::fold_const(&e, cfg)
-        .map(|a| (a, span))
-        .ok_or_else(|| Error::not_yet("a computed selection (⊢[m])", span))
+    Ok((inner, Span::merge(open.span, close.span)))
+}
+
+/// The value operand standing to the RIGHT of an operator: one literal,
+/// one name, or one parenthesised expression. An operator's operand is one
+/// token's worth, so `f⍣N+1` reads `N` and leaves the `+1` to the sentence.
+///
+/// None where the next token is none of those, which is the caller's cue
+/// to report what its own operator wanted there.
+fn take_value_operand(
+    it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
+    d: Rules,
+) -> Result<Option<(ValueOperand, Span)>> {
+    match it.peek().map(|t| &t.kind) {
+        Some(k) if literal(k).is_some() => {
+            let tok = it.next().expect("peeked");
+            let a = literal(&tok.kind).expect("checked above").clone();
+            Ok(Some((ValueOperand::Now(a), tok.span)))
+        }
+        Some(Tok::Name(_)) => {
+            let tok = it.next().expect("peeked");
+            let Tok::Name(n) = tok.kind else { unreachable!("peeked a name") };
+            Ok(Some((ValueOperand::Later(Expr::Name(n, tok.span)), tok.span)))
+        }
+        Some(Tok::LParen) => {
+            let (inner, span) = paren_run(it)?;
+            if inner.is_empty() {
+                return Ok(None);
+            }
+            let folded = fold_operators(inner, d)?;
+            // A parenthesised run of FUNCTIONS is a function operand and
+            // not a value at all. This pass reaches it before the `)` has
+            // closed over it, so there is no one function here yet to give
+            // the operator — a parser ordering gap, named as one.
+            if folded.iter().all(|t| matches!(t.kind, Tok::Func(_))) {
+                return Err(Error::not_yet(
+                    "a function operand in parentheses, whose ) has not closed yet",
+                    span,
+                ));
+            }
+            let toks = fold_axes(folded, d)?;
+            let e = parse_range(&toks, 0, toks.len(), span, d)?;
+            Ok(Some((settle(e, d), span)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The value operand standing to the LEFT of an operator, taken off the
+/// tokens already folded. The same three shapes `take_value_operand`
+/// reads, and a parenthesised group whose `)` the folding pass has already
+/// closed over.
+fn take_left_value_operand(
+    out: &mut Vec<Token>,
+    d: Rules,
+) -> Result<Option<(ValueOperand, Span)>> {
+    match out.last().map(|t| &t.kind) {
+        Some(k) if literal(k).is_some() => {
+            let tok = out.pop().expect("checked above");
+            let a = literal(&tok.kind).expect("checked above").clone();
+            Ok(Some((ValueOperand::Now(a), tok.span)))
+        }
+        Some(Tok::Name(_)) => {
+            let tok = out.pop().expect("checked above");
+            let Tok::Name(n) = tok.kind else { unreachable!("checked above") };
+            Ok(Some((ValueOperand::Later(Expr::Name(n, tok.span)), tok.span)))
+        }
+        Some(Tok::RParen) => {
+            let close = out.len() - 1;
+            let Some(open) = matching_lparen(out, close) else { return Ok(None) };
+            let span = Span::merge(out[open].span, out[close].span);
+            let inner: Vec<Token> = out[open + 1..close].to_vec();
+            if inner.is_empty() {
+                return Ok(None);
+            }
+            let e = parse_prepared(&inner, span, d)?;
+            out.truncate(open);
+            Ok(Some((settle(e, d), span)))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// `f[k]` where `f` is a plain function rather than a derived one.
@@ -2669,11 +2846,15 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         if matches!(f, Verb::Prim(p) if p.name == "⊢")
             && matches!(it.peek().map(|x| &x.kind), Some(Tok::LBracket))
         {
-            let (mask, aspan) = bracket_value(&mut it, d)?;
-            out.push(Token {
-                kind: Tok::Func(Verb::Choose(mask)),
-                span: Span::merge(t.span, aspan),
-            });
+            let (mask, aspan) = bracket_operand(&mut it, d)?;
+            let v = mask.derive(
+                f.clone(),
+                built_choose,
+                "(⊢[m])".to_string(),
+                aspan,
+                d,
+            )?;
+            out.push(Token { kind: Tok::Func(v), span: Span::merge(t.span, aspan) });
             continue;
         }
         // `⊤[N]` is not an axis either: N is how many digits the answer
@@ -2682,7 +2863,7 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         if matches!(f, Verb::Prim(p) if p.name == "⊤")
             && matches!(it.peek().map(|x| &x.kind), Some(Tok::LBracket))
         {
-            let (n, aspan) = bracket_value(&mut it, d)?;
+            let (n, aspan) = bracket_value(&mut it, d, "a computed digit count (⊤[N])")?;
             let width = match n.to_i64_vec().as_deref() {
                 Some([w]) if *w >= 0 => *w as u32,
                 _ => return Err(Error::parse("⊤[N] takes one width at or above zero", aspan)),
@@ -2705,7 +2886,8 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         if matches!(f, Verb::Prim(p) if p.name == "⌹")
             && matches!(it.peek().map(|x| &x.kind), Some(Tok::LBracket))
         {
-            let (n, aspan) = bracket_value(&mut it, d)?;
+            let (n, aspan) =
+                bracket_value(&mut it, d, "a computed function number (⌹[K])")?;
             let which = match n.to_i64_vec().as_deref() {
                 Some([k]) => *k,
                 _ => {
@@ -2722,10 +2904,9 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             out.push(t);
             continue;
         };
-        out.push(Token {
-            kind: Tok::Func(axis_verb(f, spec, aspan)?),
-            span: Span::merge(t.span, aspan),
-        });
+        let spelling = format!("{}[k]", axis_glyph(f));
+        let v = spec.derive(f.clone(), built_axis, spelling, aspan, d)?;
+        out.push(Token { kind: Tok::Func(v), span: Span::merge(t.span, aspan) });
     }
     Ok(out)
 }
@@ -2773,10 +2954,81 @@ fn axis_verb(f: &Verb, spec: AxisSpec, aspan: Span) -> Result<Verb> {
         }
         return Ok(Verb::AlongAxis(Box::new(inner), spec));
     }
+    // A definition whose header names no axis has nowhere to put one. That
+    // is a refusal and not a gap: the language has the feature and this
+    // definition did not ask for it.
+    if let Verb::Explicit(def) = f {
+        return Err(Error::domain(
+            format!("{} takes no axis: its header names none", def.name),
+            aspan,
+        ));
+    }
     if !reads_axis(f) {
         return Err(Error::not_yet(format!("axis specification for {}", axis_glyph(f)), aspan));
     }
     Ok(Verb::AlongAxis(Box::new(f.clone()), spec))
+}
+
+/// `f[k]` once the brackets have a value: the axis is read in `⎕IO` origin
+/// and the function that reads it is chosen.
+fn built_axis(f: &Verb, a: &Array, span: Span, d: Rules) -> Result<Verb> {
+    // An explicit definition does not read the brackets as an axis at all:
+    // the value goes into the definition under the name its header gave it
+    // (`χ` for a `{…}`), verbatim, and the body decides what it means.
+    if let Verb::Explicit(def) = f
+        && def.axis.is_some()
+    {
+        return Ok(Verb::BoundAxis(Box::new(f.clone()), a.clone()));
+    }
+    axis_verb(f, axis_spec(a, d.origin, span)?, span)
+}
+
+/// `f/[k]` and `f\[k]` once the brackets have a value. A reduction and a
+/// scan each fold ONE axis, so nothing but a single whole one has a
+/// meaning there.
+fn built_fold_axis(inner: &Verb, a: &Array, span: Span, d: Rules) -> Result<Verb> {
+    let spec = axis_spec(a, d.origin, span)?;
+    if spec.single().is_none() {
+        return Err(Error::domain(
+            format!("{} folds one whole axis, not {spec}", inner.name()),
+            span,
+        ));
+    }
+    Ok(Verb::AlongAxis(Box::new(inner.clone()), spec))
+}
+
+/// `f⍣n` once the right operand has a value.
+fn built_power(f: &Verb, a: &Array, span: Span, _d: Rules) -> Result<Verb> {
+    Ok(Verb::PowerN(Box::new(f.clone()), power_spec(a, span)?))
+}
+
+/// `⊢[m]` once the mask has a value.
+fn built_choose(_f: &Verb, a: &Array, _span: Span, _d: Rules) -> Result<Verb> {
+    Ok(Verb::Choose(a.clone()))
+}
+
+/// A user-written operator once its LEFT operand has a value.
+fn built_alpha(template: &Verb, a: &Array, _span: Span, _d: Rules) -> Result<Verb> {
+    let Verb::UserDerived { def, omega, .. } = template else {
+        return Err(Error::internal("an ⍺⍺ operand outside a user operator"));
+    };
+    Ok(Verb::UserDerived {
+        def: def.clone(),
+        alpha: Operand::Value(Box::new(a.clone())),
+        omega: omega.clone(),
+    })
+}
+
+/// A user-written operator once its RIGHT operand has a value.
+fn built_omega(template: &Verb, a: &Array, _span: Span, _d: Rules) -> Result<Verb> {
+    let Verb::UserDerived { def, alpha, .. } = template else {
+        return Err(Error::internal("a ⍵⍵ operand outside a user operator"));
+    };
+    Ok(Verb::UserDerived {
+        def: def.clone(),
+        alpha: alpha.clone(),
+        omega: Some(Operand::Value(Box::new(a.clone()))),
+    })
 }
 
 /// The glyph to name in an axis diagnostic: the primitive under whatever
@@ -2942,6 +3194,46 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, d: Rules) -> Re
                     }
                     Tok::Quad { quote } => {
                         acc = Expr::PrintPass { value: Box::new(acc), bare: *quote, span };
+                    }
+                    // `A[i;j]←v`: the one assignment that writes through a
+                    // bracket. It is an expression like any other — its
+                    // value is the value assigned — so it may stand inside
+                    // a larger sentence: `2+A[1]←9` is 11.
+                    Tok::RBracket => {
+                        let close = start - 2;
+                        let open = match_lbracket(toks, lo, close)?;
+                        if open == lo {
+                            return Err(Error::parse(
+                                "[ needs a value on its left",
+                                toks[open].span,
+                            ));
+                        }
+                        let Tok::Name(n) = &toks[open - 1].kind else {
+                            return Err(Error::not_yet(
+                                "indexed assignment through an expression",
+                                Span::new(toks[open - 1].span.start, end),
+                            ));
+                        };
+                        let ranges = index_slots(toks, open + 1, close, toks[open].span)?;
+                        let mut slots = Vec::with_capacity(ranges.len());
+                        for slot in &ranges {
+                            slots.push(match *slot {
+                                None => None,
+                                Some((slo, shi)) => {
+                                    Some(parse_range(toks, slo, shi, toks[open].span, d)?)
+                                }
+                            });
+                        }
+                        acc = Expr::AmendIndex {
+                            name: n.clone(),
+                            slots,
+                            value: Box::new(acc),
+                            origin: d.origin,
+                            scope: Scope::Local,
+                            span: Span::new(toks[open - 1].span.start, end),
+                        };
+                        // The `start -= 2` below lands on the name.
+                        start = open + 1;
                     }
                     // `(a b)←values`: the names in the brackets share the
                     // value out between them.
@@ -3463,6 +3755,8 @@ fn build_dfn(body: &[Token], d: Rules, verbs: &HashMap<String, Verb>) -> Result<
             spare_left: true,
             result: None,
             locals: Vec::new(),
+            // `{…}` reads an axis written at the call site under `χ`.
+            axis: Some("χ".to_string()),
             body: stmts,
             // A dfn that reaches its end without a value has no result.
             empty: None,
@@ -3723,7 +4017,8 @@ fn build_tradfn(
     verbs: &mut HashMap<String, Verb>,
     source: Vec<String>,
 ) -> Result<Expr> {
-    let (name, def_left, def_right, result, locals) = parse_header(head, span)?;
+    let Header { name, left: def_left, right: def_right, result, locals, axis } =
+        parse_header(head, span)?;
     // The body can call the function by its own name.
     let mut inner = verbs.clone();
     inner.insert(name.clone(), Verb::Named(name.clone()));
@@ -3773,6 +4068,7 @@ fn build_tradfn(
     let mut own: Vec<String> = locals.clone();
     own.extend(result.clone());
     own.extend(def_left.clone());
+    own.extend(axis.clone());
     own.push(def_right.clone());
     for stmt in &mut body {
         set_scopes(stmt, &own);
@@ -3791,6 +4087,7 @@ fn build_tradfn(
         id: 0,
         result,
         locals,
+        axis,
         body,
         empty: None,
         labels,
@@ -3802,13 +4099,24 @@ fn build_tradfn(
     Ok(Expr::VerbDef { name, verb, span })
 }
 
-type Header = (String, Option<String>, String, Option<String>, Vec<String>);
+/// A `∇` header taken apart: the function's name, its left and right
+/// argument names, the name of its result, the names it declares local,
+/// and the name an axis written at the call site binds to.
+struct Header {
+    name: String,
+    left: Option<String>,
+    right: String,
+    result: Option<String>,
+    locals: Vec<String>,
+    axis: Option<String>,
+}
 
-/// `Z←L F R;a;b` and its shorter forms.
+/// `Z←L F[X] R;a;b` and its shorter forms.
 fn parse_header(toks: &[Token], span: Span) -> Result<Header> {
     let mut names: Vec<String> = Vec::new();
     let mut locals: Vec<String> = Vec::new();
     let mut result = None;
+    let mut axis = None;
     let mut in_locals = false;
     let mut k = 0usize;
     // `Z←` in front names the result.
@@ -3823,14 +4131,26 @@ fn parse_header(toks: &[Token], span: Span) -> Result<Header> {
             Tok::Semi => in_locals = true,
             Tok::Name(n) if in_locals => locals.push(n.clone()),
             Tok::Name(n) => names.push(n.clone()),
-            // `∇Z←AV[X] B` gives the definition an axis, bound to the name
-            // in the brackets. That is a feature, not a malformed header,
-            // so it is named as a gap rather than reported as a fault.
+            // `∇Z←A F[X] B` gives the definition an axis: the brackets
+            // name a local the body reads, and a call writes its value in
+            // brackets of its own.
             Tok::LBracket => {
-                return Err(Error::not_yet(
-                    "a [X] axis in a ∇ definition header",
-                    toks[k].span,
-                ));
+                let (Some(Tok::Name(x)), Some(Tok::RBracket)) =
+                    (toks.get(k + 1).map(|t| &t.kind), toks.get(k + 2).map(|t| &t.kind))
+                else {
+                    return Err(Error::parse(
+                        "a ∇ header's [X] names one axis",
+                        toks[k].span,
+                    ));
+                };
+                if axis.is_some() {
+                    return Err(Error::parse(
+                        "a ∇ header names one axis at most",
+                        toks[k].span,
+                    ));
+                }
+                axis = Some(x.clone());
+                k += 2;
             }
             _ => {
                 return Err(Error::parse("this is not a ∇ definition header", toks[k].span));
@@ -3838,12 +4158,18 @@ fn parse_header(toks: &[Token], span: Span) -> Result<Header> {
         }
         k += 1;
     }
-    match names.len() {
-        3 => Ok((names[1].clone(), Some(names[0].clone()), names[2].clone(), result, locals)),
-        2 => Ok((names[0].clone(), None, names[1].clone(), result, locals)),
-        1 => Ok((names[0].clone(), None, crate::ir::NILADIC.to_string(), result, locals)),
-        _ => Err(Error::parse("a ∇ definition header names a function and its arguments", span)),
-    }
+    let (name, left, right) = match names.len() {
+        3 => (names[1].clone(), Some(names[0].clone()), names[2].clone()),
+        2 => (names[0].clone(), None, names[1].clone()),
+        1 => (names[0].clone(), None, crate::ir::NILADIC.to_string()),
+        _ => {
+            return Err(Error::parse(
+                "a ∇ definition header names a function and its arguments",
+                span,
+            ));
+        }
+    };
+    Ok(Header { name, left, right, result, locals, axis })
 }
 
 /// One line of a `∇` definition: a control word with what follows it, or a
@@ -4238,46 +4564,6 @@ fn parse_prepared(toks: &[Token], hint: Span, d: Rules) -> Result<Expr> {
         return Err(Error::parse("this needs an expression", hint));
     }
     parse_range(&toks, 0, toks.len(), hint, d)
-}
-
-/// `A[i;j]←v`: the one assignment that writes through a bracket. None when
-/// the sentence is not one.
-fn indexed_assignment(toks: &[Token], d: Rules, hint: Span) -> Result<Option<Expr>> {
-    let Some(assign) = toks.iter().position(|t| matches!(t.kind, Tok::Assign)) else {
-        return Ok(None);
-    };
-    if assign < 3 || !matches!(toks[assign - 1].kind, Tok::RBracket) {
-        return Ok(None);
-    }
-    let close = assign - 1;
-    let open = match_lbracket(toks, 0, close)?;
-    if open == 0 {
-        return Err(Error::parse("[ needs a value on its left", toks[open].span));
-    }
-    let Tok::Name(name) = &toks[open - 1].kind else {
-        return Err(Error::not_yet("indexed assignment through an expression", hint));
-    };
-    if open != 1 {
-        return Err(Error::not_yet("indexed assignment inside a larger sentence", hint));
-    }
-    let ranges = index_slots(toks, open + 1, close, toks[open].span)?;
-    let mut slots = Vec::with_capacity(ranges.len());
-    for slot in &ranges {
-        slots.push(match *slot {
-            None => None,
-            Some((lo, hi)) => Some(parse_range(toks, lo, hi, toks[open].span, d)?),
-        });
-    }
-    let value = parse_range(toks, assign + 1, toks.len(), toks[assign].span, d)?;
-    let span = Span::merge(toks[0].span, toks[toks.len() - 1].span);
-    Ok(Some(Expr::AmendIndex {
-        name: name.clone(),
-        slots,
-        value: Box::new(value),
-        origin: d.origin,
-        scope: Scope::Local,
-        span,
-    }))
 }
 
 /// Give every assignment in a `∇` definition's body its scope: local for

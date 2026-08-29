@@ -7,6 +7,24 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Operands the program computes. A `⍣` or `^:` count, an `f[K]` axis and an
+  array standing where a function operand belongs may now be a name or an
+  expression instead of a literal, and are read where the derived function
+  is applied rather than while the program compiles. `N←3 ⋄ ⌽⍣N⊢1 2 3`
+  reverses three times; `K←1 ⋄ +/[K]M` sums the columns; `n =. 3` then
+  `>:^:n ] 0` is 3 in J. Because the operand is read at every application,
+  a definition's own argument may decide it: `∇Z←S K ⋄ Z←+/[K]B ∇` sums
+  whichever axis the caller asks for. The operand is one operand — `⌽⍣N+1`
+  reads the count `N` and leaves the `+1` to the sentence, as the
+  references do.
+- An axis a definition reads for itself. A `∇` header may name one
+  (`∇Z←SUM[X] B ⋄ Z←+/[X]B ∇`, called as `SUM[2] M`), and a `{…}` reads it
+  as `χ`: `F←{⍵+χ} ⋄ F[10]5` is 15. The value arrives exactly as written,
+  with no index-origin adjustment, and belongs to the one call that wrote
+  it. A definition whose header names no axis refuses one.
+- APL's indexed assignment may stand inside a larger sentence, and its
+  value is the value assigned: `B←A[2]←5` gives `B` the 5, `2+A[1]←9` is
+  11, and `A[1]←C[2]←9` writes a 9 into both names.
 - APL's system names. `⎕AV` is the 256-character atomic vector, so
   `⎕AV⍳'A'` and `⎕AV[66]` answer what a GNU APL session answers. `⎕PP` and
   `⎕RL` can be READ and SET while a program runs: `⎕PP←3 ⋄ ÷3` shows
@@ -125,6 +143,9 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   read so far and hand the rest back as data, so `T←'Z←N×2' ⋄ ⎕FX 'Z←F N' T`
   quietly defined an empty `F`. It now says the definition is not literal
   text in the program, which is the gap it always was.
+- APL's indexed assignment answered the whole amended array where it stood
+  in expression position: `F←{A←1 2 3 ⋄ A[⍵]←5} ⋄ 0+F 2` was `1 5 3` and is
+  now 5, which is what the value assigned is.
 
 - APL's enlist `∊` raised an internal error wherever an EMPTY leaf of one
   type stood beside a value of another: `∊1 2 ''`, `∊'abc' ⍬`, `∊'' 1 2`,

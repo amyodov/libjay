@@ -170,13 +170,6 @@ HALF←{⍺⍺ ⍵⍵ ⍵} ⋄ (⌽HALF (2∘↑)) 1 2 3 4
 ¯7○2
 ? gap circle-branch: the branch cut of ¯7○ runs the other way here
 
-// --- gap computed-operand (1) -------------------------------------------
-// A COMPUTED array where a function operand belongs. Nothing in the IR holds
-// the operand's expression to evaluate when the derived function is built; a
-// literal array binds.
-(⍳3){⍺⍺+⍵}0
-? gap computed-operand: an operand's expression is not evaluated
-
 // --- gap function-default (1) -------------------------------------------
 // `⍺←` with a FUNCTION as the default left argument.
 F←{⍺←⊢ ⋄ ⍺ ⍵} 7

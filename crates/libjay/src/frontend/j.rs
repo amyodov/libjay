@@ -613,6 +613,8 @@ fn build_definition(
         id: 0,
         result: None,
         locals: Vec::new(),
+        // J writes no axis at a call site.
+        axis: None,
         body: stmts,
         // A branch that runs nothing yields J's empty result, `i. 0 0`.
         labels: Vec::new(),
@@ -2582,8 +2584,26 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             // A negative count runs the obverse that many times, whether it
             // was written plainly or in a box (`u^:(<_3)`); `power_spec`
             // marks it, and which obverse it is waits for the arguments.
-            let p = power_spec(&v, span)?;
-            Ok(Frag::Verb(VerbFrag::V(Verb::PowerN(Box::new(f), p)), span))
+            if let Some(arr) = noun_value(&v) {
+                let p = power_spec(&arr, span)?;
+                return Ok(Frag::Verb(VerbFrag::V(Verb::PowerN(Box::new(f), p)), span));
+            }
+            // A count the program computes is read where the derived verb
+            // is applied, so a definition's own argument can decide it.
+            let Some(operand) = noun_expr(&v) else {
+                return Err(Error::not_yet("computed power (u^:n)", span));
+            };
+            let spelling = format!("{}^:n", f.name());
+            let deferred = crate::verb::Deferred {
+                operand,
+                template: f,
+                build: built_power,
+                spelling,
+            };
+            Ok(Frag::Verb(
+                VerbFrag::V(Verb::Deferred(std::sync::Arc::new(deferred))),
+                span,
+            ))
         }
         ";." => {
             let f = verb_operand(u, span)?;
@@ -2964,11 +2984,27 @@ fn near_whole(n: f64) -> f64 {
     crate::array::NearInt::J.round(n).map_or(n, |k| k as f64)
 }
 
-fn power_spec(f: &Frag, span: Span) -> Result<Power> {
-    let Some(arr) = noun_value(f) else {
-        return Err(Error::not_yet("computed power (u^:n)", span));
-    };
-    let arr = &arr;
+/// `u^:n` once the right operand has a value.
+fn built_power(
+    f: &Verb,
+    a: &Array,
+    span: Span,
+    _d: crate::frontend::Rules,
+) -> Result<Verb> {
+    Ok(Verb::PowerN(Box::new(f.clone()), power_spec(a, span)?))
+}
+
+/// A noun operand as an expression, for a modifier that reads it where the
+/// derived verb is applied rather than while the program compiles.
+fn noun_expr(f: &Frag) -> Option<Expr> {
+    match f {
+        Frag::Noun(e) => Some(e.clone()),
+        Frag::Name(n, span) => Some(Expr::Name(n.clone(), *span)),
+        _ => None,
+    }
+}
+
+fn power_spec(arr: &Array, span: Span) -> Result<Power> {
     // A boxed count traces the applications rather than taking one of
     // them: `u^:(<n)` is `u^:(i.n)`, and `u^:a:` traces to convergence.
     if let Some(boxes) = arr.as_boxes() {
@@ -3704,8 +3740,16 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_computed_power_count_is_read_at_each_application() {
+        let (v, _) = monad_of(&one("+ ^: {n} y"));
+        match &v {
+            Verb::Deferred(d) => assert_eq!(d.spelling, "+^:n"),
+            other => panic!("expected a deferred count, got {other:?}"),
+        }
+    }
+
     #[rstest]
-    #[case("+ ^: {n} y", "computed power")]
     // `u^:_1` names its obverse when it runs and not when it compiles:
     // which obverse it needs depends on whether it is applied monadically
     // or dyadically, and that is not known here. tests/wildhunt.rs pins it.

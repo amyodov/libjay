@@ -42,6 +42,9 @@ pub enum Expr {
     /// APL `A[i;j]←v`: the named value with the part the brackets select
     /// replaced. The name is read, a copy is written, and the copy takes
     /// the name's place. An elided slot selects its whole axis.
+    ///
+    /// The expression's own value is the value ASSIGNED, not the array it
+    /// was written into, so `2+A[1]←9` is 11.
     AmendIndex {
         name: String,
         slots: Vec<Option<Expr>>,
@@ -179,6 +182,10 @@ pub struct ExplicitDef {
     pub result: Option<String>,
     /// Names the header declares local (APL's `;name` list).
     pub locals: Vec<String>,
+    /// The name an axis written at the call site is bound to: the one a
+    /// `∇Z←A F[X] B` header declares, and `χ` for a `{…}`. None where the
+    /// definition takes no axis, which makes `F[1] y` a refusal.
+    pub axis: Option<String>,
     pub body: Vec<Expr>,
     /// The value a body that ran nothing yields; None makes that an error.
     pub empty: Option<Array>,
@@ -512,7 +519,7 @@ impl Program {
         }
         let mut inp = inp;
         let inp = crate::verb::reborrow_input(&mut inp);
-        let mut ctx = Ctx { cfg, out, inp, env: &mut env, device, shy: false };
+        let mut ctx = Ctx { cfg, out, inp, env: &mut env, device, shy: false, axis: None };
         // Only APL has shy results. A J definition whose last sentence is
         // an assignment answers with the assigned value, displayed like
         // any other.
@@ -1021,6 +1028,14 @@ pub(crate) fn call_explicit(
         ));
     }
     let mut frame: HashMap<String, Array> = HashMap::new();
+    // An axis written at the call site belongs to THIS call, whether or
+    // not the definition has a name to put it under: it is TAKEN rather
+    // than read, so nothing the body goes on to apply sees it. The
+    // argument names are bound after it, so they win a collision.
+    let axis = ctx.axis.take();
+    if let (Some(name), Some(axis)) = (&def.axis, axis) {
+        frame.insert(name.clone(), axis);
+    }
     frame.insert(def.right.clone(), y.clone());
     if let (Some(name), Some(v)) = (&def.left, x) {
         frame.insert(name.clone(), v.clone());
@@ -1162,6 +1177,14 @@ pub(crate) fn fold_const(e: &Expr, cfg: EvalCfg) -> Option<Array> {
     cfg.pure(|ctx| eval(e, ctx, &mut None).ok())
 }
 
+/// The value of an operand a derived function reads when it is applied —
+/// APL's `f⍣N` and `f[K]`, J's `u^:n`. It runs in the names the
+/// application can see, and is not recorded: the node belongs to a verb
+/// rather than to a sentence, so an explanation has no place to show it.
+pub(crate) fn eval_operand(e: &Expr, ctx: &mut Ctx<'_>) -> Result<Array> {
+    eval(e, ctx, &mut None)
+}
+
 fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
     // The walk is recursive, so a deeply nested sentence would run out of
     // stack; the ceiling turns that into a diagnostic.
@@ -1296,8 +1319,10 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
                 ctx.cfg.near(),
                 *span,
             )?;
-            ctx.env.assign(name.clone(), out.clone(), *scope);
-            Ok(out)
+            ctx.env.assign(name.clone(), out, *scope);
+            // The sentence's VALUE is what was assigned, not the array it
+            // was written into: `(A[1]←9)` is 9 and `2+A[1]←9` is 11.
+            Ok(v)
         }
         // A control sentence is run by `eval_stmt`, which is the only place
         // its signal has anywhere to go.

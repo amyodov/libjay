@@ -301,7 +301,15 @@ impl EvalCfg {
     pub(crate) fn pure<R>(self, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let mut sink = |_: &str| debug_assert!(false, "a pure verb wrote to the output sink");
         let mut env = Env::new(Vec::new());
-        f(&mut Ctx { cfg: self, out: &mut sink, inp: None, env: &mut env, device: None, shy: false })
+        f(&mut Ctx {
+            cfg: self,
+            out: &mut sink,
+            inp: None,
+            env: &mut env,
+            device: None,
+            shy: false,
+            axis: None,
+        })
     }
 }
 
@@ -490,6 +498,12 @@ pub struct Ctx<'a> {
     /// application clears it on the way in, an explicit definition sets it
     /// on the way out, and [`crate::ir::Program::run_detail`] reads it.
     pub shy: bool,
+    /// The axis an application wrote in brackets, waiting for the explicit
+    /// definition it belongs to. APL's `F[K] y` binds it in the
+    /// definition's own frame — under the name a `∇` header declared, or
+    /// under `χ` in a `{…}` — and the call takes it, so nothing it goes on
+    /// to apply sees it.
+    pub axis: Option<Array>,
 }
 
 /// How deep one application may sit inside another before libjay stops.
@@ -558,6 +572,7 @@ impl Ctx<'_> {
             env: &mut *self.env,
             device: self.device,
             shy: self.shy,
+            axis: self.axis.clone(),
         })
     }
 
@@ -1189,6 +1204,74 @@ impl Operand {
     }
 }
 
+/// A derived function one of whose operands is written as an EXPRESSION
+/// rather than as a literal: APL `f⍣N` and `f[K]`, J `u^:n`, an array
+/// operand to a user-written operator.
+///
+/// The expression is evaluated where the derived function is applied, in
+/// the names the application can see, and `build` then makes the real
+/// derived function from the value. Nothing is cached: a count or an axis
+/// that reads a name is read afresh at every application, which is what
+/// makes it useful inside a definition whose argument decides it.
+#[derive(Debug)]
+pub struct Deferred {
+    /// The operand as it was written.
+    pub operand: crate::ir::Expr,
+    /// The derived function with the operand's place left empty, for
+    /// `build` to fill.
+    pub template: Verb,
+    /// The derived function this stands for, once the operand has a value.
+    pub build: fn(&Verb, &Array, Span, Rules) -> Result<Verb>,
+    /// How the whole reads in a diagnostic.
+    pub spelling: String,
+}
+
+/// Apply `F[K]` where F is an explicit definition: the bracket's value
+/// waits in the context for the definition to take into its own frame.
+///
+/// Its own function, and never inlined, for the reason
+/// [`apply_deferred`] is: it stands in the recursive path.
+#[inline(never)]
+fn apply_bound_axis(
+    f: &Verb,
+    a: &Array,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let held = ctx.axis.replace(a.clone());
+    let r = match x {
+        Some(x) => f.dyad(x, y, ctx, span),
+        None => f.monad(y, ctx, span),
+    };
+    ctx.axis = held;
+    r
+}
+
+/// Apply a derived function whose operand is an expression: read the
+/// operand where the application stands, build the real derived function
+/// from what it answered, and apply that.
+///
+/// Its own function, and never inlined, because the evaluator recurses
+/// through [`Verb::monad`] and [`Verb::dyad`] and every local those two
+/// hold is stack paid for at every level of a nested value.
+#[inline(never)]
+fn apply_deferred(
+    d: &Deferred,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let value = crate::ir::eval_operand(&d.operand, ctx)?;
+    let f = (d.build)(&d.template, &value, span, ctx.cfg.rules)?;
+    match x {
+        Some(x) => f.dyad(x, y, ctx, span),
+        None => f.monad(y, ctx, span),
+    }
+}
+
 /// An operator dfn's body, parsed once for each reading of its operands.
 ///
 /// Whether `⍺⍺` names a function or an array decides how the body PARSES,
@@ -1437,6 +1520,14 @@ pub enum Verb {
     /// exists only inside those adverbs, which ask it for the verb of a
     /// given piece; applied on its own it is the first verb of the cycle.
     Cycle(Vec<Verb>),
+    /// A derived function whose operand is only settled when it is
+    /// applied: see [`Deferred`].
+    Deferred(Arc<Deferred>),
+    /// APL `F[K] y` where F is an explicit definition: the value in the
+    /// brackets is bound inside the definition, under the name its header
+    /// declared (`∇Z←A F[X] B`) or under `χ` for a `{…}`. It is not an
+    /// axis the language reads — the body decides what to do with it.
+    BoundAxis(Box<Verb>, Array),
     /// J `u . v` and APL `f.g`: the inner product, of which `+/ . *` and
     /// `+.×` are the matrix product. Dyadically each cell of x at v's
     /// dyadic LEFT rank — 1 where that rank is smaller — meets the whole
@@ -1578,6 +1669,8 @@ impl Verb {
                 format!("({}⌺{})", u.name(), sizes.join(" "))
             }
             Verb::At { left, right } => format!("({}@{})", left.name(), right.name()),
+            Verb::Deferred(d) => d.spelling.clone(),
+            Verb::BoundAxis(f, _) => format!("{}[k]", f.name()),
             Verb::InnerProduct { u, v, .. } => format!("({} . {})", u.name(), v.name()),
         }
     }
@@ -1678,6 +1771,10 @@ impl Verb {
                 };
                 reads(left) || reads(right)
             }
+            // The operand only says how the function underneath is built,
+            // so whether the tolerance matters is that function's question.
+            Verb::Deferred(d) => d.template.uses_tolerance(),
+            Verb::BoundAxis(f, _) => f.uses_tolerance(),
             Verb::InnerProduct { u, v, .. } => u.uses_tolerance() || v.uses_tolerance(),
             Verb::Fork(f, g, h) => {
                 f.uses_tolerance() || g.uses_tolerance() || h.uses_tolerance()
@@ -1756,7 +1853,13 @@ impl Verb {
             // so its cells can never be run out of order on other threads —
             // whatever its body does. `ExplicitDef::pure` records whether
             // the body itself has an effect; this is the stronger question.
-            Verb::Explicit(_) | Verb::SelfRef | Verb::Named(_) => false,
+            // A deferred operand reads the names too, before anything of
+            // the derived function has run.
+            Verb::Explicit(_)
+            | Verb::SelfRef
+            | Verb::Named(_)
+            | Verb::Deferred(_)
+            | Verb::BoundAxis(..) => false,
         }
     }
 
@@ -1793,6 +1896,9 @@ impl Verb {
     /// verb gets the rows it assumes, materialised once here.
     pub fn monad(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let _depth = Nesting::enter(span)?;
+        if let Verb::Deferred(d) = self {
+            return apply_deferred(d, None, y, ctx, span);
+        }
         // Every application decides its own shyness, and only an explicit
         // definition's last sentence makes it shy. An operator that ends
         // by applying its operand therefore keeps what the operand left —
@@ -2005,6 +2111,12 @@ impl Verb {
             Verb::AmendGerund(_) => {
                 Err(Error::not_yet("the monadic gerund amend (u`v`w} y)", span))
             }
+            // `monad` reads the operand and applies what it built, so the
+            // deferred verb itself never reaches this far.
+            Verb::Deferred(_) => {
+                Err(Error::internal("a deferred operand reached the verb table"))
+            }
+            Verb::BoundAxis(f, a) => apply_bound_axis(f, a, None, y, ctx, span),
             Verb::InnerProduct { u, v, apl } => determinant(u, v, *apl, y, ctx, span),
         }
     }
@@ -2054,6 +2166,9 @@ impl Verb {
     /// as they lie and keeps the layout, and everything else is given rows.
     pub fn dyad(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         let _depth = Nesting::enter(span)?;
+        if let Verb::Deferred(d) = self {
+            return apply_deferred(d, Some(x), y, ctx, span);
+        }
         // As in `monad`, the application starts out not shy.
         ctx.shy = false;
         // As in `monad`: only `x $. y` reads a sparse argument as it lies,
@@ -2206,6 +2321,12 @@ impl Verb {
                 Some(v) => v.dyad(x, y, ctx, span),
                 None => Err(Error::domain("an adverb's gerund is empty", span)),
             },
+            // `dyad` reads the operand and applies what it built, so the
+            // deferred verb itself never reaches this far.
+            Verb::Deferred(_) => {
+                Err(Error::internal("a deferred operand reached the verb table"))
+            }
+            Verb::BoundAxis(f, a) => apply_bound_axis(f, a, Some(x), y, ctx, span),
             Verb::InnerProduct { u, v, apl } => inner_product(u, v, *apl, x, y, ctx, span),
             Verb::Stencil(..) => {
                 Err(Error::domain("f⌺w has no dyadic meaning", span))
@@ -17854,6 +17975,7 @@ mod tests {
                 env: &mut env,
                 device: None,
                 shy: false,
+                axis: None,
             };
         };
         ($name:ident) => {
@@ -18925,6 +19047,7 @@ mod tests {
             env: &mut env,
             device: None,
             shy: false,
+            axis: None,
         };
         v.monad(&y, &mut c, sp()).unwrap();
         assert_eq!(seen, (0..16).map(|i| i * 8192).collect::<Vec<i64>>());

@@ -871,11 +871,11 @@ it runs, so the lines have to be literal text the compiler can read: a
 definition assembled while the program runs, or a `⎕FX` inside another
 definition's body, is named as not implemented yet rather than answered.
 The reason is the compile-then-run split rather than the fixing itself:
-libjay resolves every name to the function it stands for while it compiles,
-so `⎕FX L ⋄ F 3` would have to read `F` as a function before anything had
-defined one. A run-time definition needs a run-time name table that the
-sentence parser consults, which is a redesign of name resolution and not a
-change to `⎕FX`.
+libjay decides while it compiles whether `F 3` is an application or a
+two-item strand, and it decides that from the source. "A computed operand"
+below sets out what the 2026-08-29 wave measured — which half of the
+machinery already exists, and why the reachable middle would answer wrong
+rather than refuse.
 Where Dyalog answers a definition it cannot fix with the number of the
 offending line, libjay reports the fault, pointing at the line that carries
 it.
@@ -1654,6 +1654,82 @@ match, and a scalar value spreads over the whole selection. A value of a
 wider type widens the array rather than being truncated into it. An index
 outside its axis is a domain error naming the axis and its length.
 
+It is an EXPRESSION, not a statement: it may stand inside a larger
+sentence, and its value is the value assigned rather than the array the
+value went into. `B←A[2]←5` gives B the 5; `2+A[1]←9` is 11; `A[1]←C[2]←9`
+writes a 9 into each of the two names. The value is shy, so a session shows
+nothing for the assignment on its own. The TARGET is a name — writing
+through an expression (`(A,4)[1]←9`) is a named gap here and a SYNTAX ERROR
+in GNU APL.
+
+## A computed operand
+
+An operator's operand may be a name or an expression rather than a
+literal — a `⍣`/`^:` count, an `f[K]` axis, an array where a function
+operand belongs — and then the derived function cannot be built while the
+program compiles. libjay keeps the operand's EXPRESSION in the derived
+function and reads it where the function is applied, in the names that
+application can see, and builds the real derived function from what came
+back. Nothing is cached: a count read from a definition's argument is read
+again at every call, which is the point of reading it late.
+
+The operand is one token's worth, which is what the references do: a
+literal, a name, or a parenthesised expression. `f⍣N+1` therefore reads the
+count `N` and leaves the `+1` to the sentence.
+
+Everything a literal operand means, a computed one means too, because the
+value is read the same way: J's list of counts and its boxed trace
+(`u^:(<n)`), a negative count over the obverse table, an axis list, a
+fractional laminate axis. What the value cannot decide is anything the
+PARSE depends on: whether an operator's operand is an array or a function
+chooses how the body of `{⍺⍺+⍵}` is read, so that stays a compile-time
+decision and only the array's value waits.
+
+Two brackets stay settled before the program runs, because they pick which
+function the glyph stands for rather than name an axis: `⊤[N]`, the digit
+count, and `⌹[K]`, which selects one of a group of unrelated functions.
+Both name the gap if the program computes them. The third bracket that is
+not an axis, `⊢[M]`, names DATA rather than a function — a selection mask —
+so it may be computed like any other operand.
+
+An explicit definition reads `f[K]` as a value of its own rather than as an
+axis. A `∇` header may declare the name (`∇Z←A F[X] B`) and a `{…}` reads
+it as `χ`; the value arrives verbatim, with no `⎕IO` adjustment, and the
+body decides what it means. It belongs to the one call that wrote it — a
+definition applied inside the body does not inherit it — and a definition
+whose header names none refuses one rather than naming a gap.
+
+### `⎕FX` on text the program assembles: the gap that stays
+
+`⎕FX` fixes a definition from its lines. Where every line is literal text
+in the program, libjay reads them while it compiles, and a later sentence
+calling the function is compiled as an application. Where a line is
+computed the definition stays a named gap, and the reason is not `⎕FX`:
+
+- The run-time half already exists. A definition's name is bound at run
+  time (`Env::define`), a name standing for a function is applied at run
+  time (`Verb::Named` looks the name up in the environment when the verb
+  is applied), and a whole program can be compiled and run from a string
+  while another one runs (`⍎`). A `⎕FX` that built its definition at run
+  time and bound the name would fit all of that.
+- The half that does not is the PARSE of the sentence that calls it. `F 3`
+  is an application if `F` is a function and a two-item strand if it is a
+  value, and libjay settles that while it compiles — from a pre-pass over
+  the source that reads every `∇` header and every literal `⎕FX` header.
+  A definition whose header is computed is invisible to that pass, so `F 3`
+  cannot be given the reading it needs, whatever happens at run time.
+- The reachable middle is a trap. Where the HEADER is literal and only the
+  BODY is computed, the pre-pass does find the name, so `F 3` would parse.
+  But the body would then be compiled at run time against a function table
+  built from that text alone: a body calling another of the program's own
+  functions would read the call as a strand and answer a wrong value — the
+  same shape as the `⎕FX` bug the 2026-08-29 audit found and fixed. Closing
+  that means the compiler taking its function table from the running
+  environment, which is the name-resolution redesign this gap has named
+  from the start.
+
+So the gap stays, whole, and is refused by name in both halves.
+
 ## Device placement
 
 Where an expression runs is not part of what it means. A compiled kernel is
@@ -2227,20 +2303,13 @@ sections above is also collected here.
   members created implicitly) — a name-space feature, not a primitive:
   every assignment, lookup and scope rule would have to learn about dotted
   paths, and the reference gives the whole structure a display of its own
-  (`P.x←3 ⋄ P` is an 8-by-2 character matrix there). A `[X]` axis in a
-  `∇`-definition header (`∇Z←AV[X] B`) and the lambda axis `χ` belong with
-  the computed-operand family rather than with the axis vocabulary: the
-  header binds a NAME the body then uses as an axis (`+/[X]B`), which is a
-  computed axis, so the two stand or fall together.
-- A POWER whose count is computed rather than literal (`+⍣(1+1)⊢5`,
-  `N←2 ⋄ +⍣N⊢5`, and a computed LIST of counts) and an AXIS that is
-  computed (`K←1 ⋄ ⌽[K]M`) both need an operand's expression to survive
-  into the derived function, which nothing in the IR holds today — the same
-  wall the Dyalog `computed-operand` row names; and INDEXED ASSIGNMENT used
-  as an expression (`(A[1]←9)`, `1+A[1]←9`) wants an assignment to have a
-  value. All are named refusals, never wrong answers.
-  The APL glyphs are reported by NAME rather than as unknown
-  characters: a glyph the language has and libjay has not reached is a
+  (`P.x←3 ⋄ P` is an 8-by-2 character matrix there).
+- `⎕FX` on text the program ASSEMBLES stays named; "A computed operand"
+  above sets out what was tried and where it breaks. It is a named refusal,
+  never a wrong answer.
+
+  Every gap is reported by NAME rather than as an unknown
+  character: a glyph the language has and libjay has not reached is a
   queue position, and the diagnostic says which one. Three spellings are
   NOT queue positions. `T.` and `t.` (J) and `&` (APL) run in the
   language's own threads, which the sandbox does not open (see "Sandbox"

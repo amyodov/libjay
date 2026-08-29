@@ -224,10 +224,10 @@
 > gnu: 1
 = ⎕CT
 > gnu: 1E¯13
-= ∇Z←AV[X] B⋄Z←(+/[X]B)÷(⍴B)[X]⋄∇⋄AV[1]3 3⍴⍳9
-> gnu: <error>
-= ∇Z←AV[X] B⋄Z←(+/[X]B)÷(⍴B)[X]⋄∇⋄AV[2]3 3⍴⍳9
-> gnu: <error>
+= ∇Z←AV[X] B\nZ←(+/[X]B)÷(⍴B)[X]\n∇\nAV[1]3 3⍴⍳9
+> gnu: 4 5 6
+= ∇Z←AV[X] B\nZ←(+/[X]B)÷(⍴B)[X]\n∇\nAV[2]3 3⍴⍳9
+> gnu: 2 5 8
 = ⎕FIO.errno
 > gnu: <error>
 = ⎕RE.version
