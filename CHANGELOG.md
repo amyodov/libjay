@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.3.2 — 2026-08-29
+
+### Added
+
 - Non-standard extensions: opt-in departures from what the reference
   implementations answer, named one by one and off unless asked for. The
   environment sets a process default (`LIBJAY_J_UNICODE_STRINGS=1`), and
