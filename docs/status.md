@@ -23,10 +23,10 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 150 green / 25 partial / 2 absent by design, of 177 valences in the
+**J: 152 green / 23 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
-**APL: 103 green / 22 partial / 3 absent by design, of 128 valences in the
+**APL: 106 green / 19 partial / 3 absent by design, of 128 valences in the
 inventory. Nothing in APL's primitive tables is red.**
 
 ## J — verbs
@@ -53,7 +53,7 @@ inventory. Nothing in APL's primitive tables is red.**
 | `-.` | 🟢 not (`1-y`) | 🟢 less (the items of x that y has not) |
 | `+.` | 🟢 real/imaginary | 🟢 GCD (reals and Gaussian integers) |
 | `*.` | 🟢 length/angle | 🟢 LCM (reals and Gaussian integers) |
-| `!` | 🟡 factorial; a complex argument is a named gap | 🟡 out of; same |
+| `!` | 🟢 factorial — the gamma function, in the complex plane as well as on the reals | 🟢 out of |
 | `o.` | 🟢 pi times | 🟢 circle; `_12` to `12`, real and complex |
 | `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
 | `j.` | 🟢 imaginary | 🟢 complex |
@@ -253,10 +253,10 @@ conjunctions above:
 | `⌈` | 🟢 ceiling | 🟢 maximum |
 | `⌊` | 🟢 floor | 🟢 minimum |
 | `\|` | 🟢 magnitude | 🟢 residue; the quotient is rounded with the tolerance |
-| `!` | 🟡 factorial; a value with an imaginary part is a named gap, and one without is the real it displays as | 🟡 binomial; same |
+| `!` | 🟢 factorial — the gamma function by the Lanczos approximation, in the complex plane as well as on the reals; a value with no imaginary part is the real it displays as | 🟢 binomial; the same function |
 | `○` | 🟢 pi times | 🟢 circle; `¯12` to `12`, real and complex |
 | `?` | 🟡 roll; libjay's own stream, not GNU APL's | 🟡 deal; same |
-| `⌹` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
+| `⌹` | 🟢 matrix inverse (Householder QR, f64); an argument of rank 3 or more is a rank error, as it is in the reference — J's `%.` has rank 2 and runs over the 2-cells instead | 🟢 matrix divide; the same rank rule on both sides |
 
 ### Comparison and logic
 
@@ -319,13 +319,13 @@ conjunctions above:
 | Glyph | Monad | Dyad |
 |---|---|---|
 | `⍕` | 🟢 format | 🟡 format by specification: width and precision pairs, a width of 0 as wide as the column needs plus a blank, a negative precision the scaled form, and a half rounded away from zero. `format_spec` names Dyalog's reading of the four rules that part; a nested argument is named |
-| `⍎` | 🟡 execute; the string runs over the names around it. An EMPTY program yields no value at all in GNU APL, and a libjay verb has no way to answer that, so it refuses and says so | — |
+| `⍎` | 🟡 execute; the string runs over the names around it. An EMPTY program yields no value at all in GNU APL, where a whole SENTENCE may be one and print nothing; a libjay verb has no way to answer that, so `⍎''` is a value error pointing at the `⍎` — pinned in `corpus/apl/divergences.txt` | — |
 | `⊢` | 🟢 same | 🟢 right; `A⊢[M]B` is the selection function — a 1 in M takes the element of B, a 0 the element of A, and the three agree by the scalar rule |
 | `⊣` | 🟢 same | 🟢 left |
 | `⎕←` / `⍞←` output | 🟢 `⎕←` ends the line; `⍞←` writes the characters and nothing else. Both assign, so both pass their value on and neither ends the definition they stand in — a dfn body may print and go on computing under either reading of `Dialect.dfn_result` | — |
 | `⍞` character input | 🟢 one line from the input source, terminator dropped | — |
 | `⎕` evaluated input | 🟢 one line, run as APL over the program's own names | — |
-| `→` branch | 🟡 inside a `∇` definition: labels, `→0`, `→(cond)/L`, `→⍬`; a label and a control structure in one definition is named | 🟢 `A→B` branches A lines on from the line it stands on when B holds — `0→B` runs the line again and a step past the body ends the definition |
+| `→` branch | 🟡 inside a `∇` definition: labels, `→0`, `→(cond)/L`, `→⍬`, and a label beside a control structure — a label is the number of its LINE and the body carries the line each statement began at. Branching INTO a control structure has no statement to land on and is named. No oracle: GNU APL has no control structures in a `∇` definition at all | 🟢 `A→B` branches A lines on from the line it stands on when B holds — `0→B` runs the line again and a step past the body ends the definition |
 | `⍬` zilde | 🟢 | — |
 | `⌶` I-beam | ⚪ implementation-defined | ⚪ the same |
 
@@ -360,7 +360,7 @@ conjunctions above:
 | Feature | Status |
 |---|---|
 | Stranding (vector notation) | 🟢 |
-| Nested arrays | 🟡 structural verbs, mixed simple arrays (built by `,` `⍪` `∪` `∩` `~` `⍷` `∊` `⍳` `≡`, and printed with a run of characters as text) and prototype fills; the operators apply between items, so `∘.`, `/`, `⌿`, `\`, `⍀` and `.` disclose what they take and enclose what they collect. The arithmetic still refuses a boxed operand |
+| Nested arrays | 🟡 structural verbs, mixed simple arrays (built by `,` `⍪` `∪` `∩` `~` `⍷` `∊` `⍳` `≡`, and printed with a run of characters as text) and prototype fills; the operators apply between items, so `∘.`, `/`, `⌿`, `\`, `⍀` and `.` disclose what they take and enclose what they collect. The scalar functions PERVADE: they descend through the boxes to the simple values at the bottom, on a work stack of their own so that depth costs no call stack |
 | `←` assignment, including inline | 🟢 |
 | Function assignment `F←+/`, `F←+/÷≢` | 🟡 no oracle: GNU APL rejects it; the same extension as trains, and off with it |
 | Dfns `{⍵+1}`, `⍺`/`⍵`, `⋄` bodies, nesting | 🟢 |
@@ -370,13 +370,13 @@ conjunctions above:
 | SHY results | 🟡 no oracle: GNU APL has no dfns to have them; a definition whose answer came from an assignment answers shyly, `Program::run_detail` reports it, and an operator that ends by applying the definition passes it on (`{a←⍵×2}¨1 2 3`) |
 | Tradfns `∇ Z←L F R;locals` … `∇` | 🟢 including APL's global-by-default scope rule, the niladic form, which naming calls, and a body whose lines carry the `∇` editor's line numbers (`[1]`, `[1.1]`), which is how every printed definition is written |
 | Trains (forks and atops) | 🟡 no oracle: GNU APL rejects them; Dyalog's rules, shipped as an extension (`Dialect.trains`, on by default) — 2-train atop, 3-train fork, a value left tine, longer trains grouped from the right |
-| Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included |
+| Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included. The brackets bind to the value written immediately before them, which in a run of numbers is the LAST number: `1 2 3[2]` is `1 2` beside `3[2]`, and indexing a scalar is a rank error, as the reference has it |
 | Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
 | Axis specification `f[K]` | 🟢 for every function that takes one: `/` `⌿` `\` `⍀` after an operand and the dyadic `x/[k]y` and `x\[k]y`; `⌽` `⊖`; `,` `⍪` in both valences, laminate's FRACTIONAL axis (`x,[0.5]y`) included; `↑` `↓` `⌷` `⊂` `⊆`, monadic `↑` (first here, mix under Dyalog's dialect, where `↑[K.5]` places the item axes at a gap) and `⊃`; and the SCALAR functions, where the argument of lower rank lines up with the named axes. A list of axes is read where the function takes one — `,[1 2]`, `1 2↑[3 1]`, `⊂[2 1]`, `(2 3⍴1)+[1 2]` — and `Dialect.axis_order` names which end of the pairing Dyalog reads differently. Two brackets are not axes at all: `⊤[N]`, a digit count, and `⊢[M]`, a selection mask, both settled before the program runs. A function with no axis form (`⍉` `∊` `≡` `⍴` `⍒`, a dfn, an operator's derived function) is named as a gap |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
 | Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟢 two presets — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default, and `Dialect::dyalog()` (`APL.Dialect.dyalog` in Python). Every point where the lineages diverge is a setting on it: `⎕CT`, `↑`/`⊃`, `⌷`, dyadic `⊂`, `≡`'s sign, the dfn result, the nested grade, dyadic `⍳`'s left rank, an axis list's order (`axis_order`), what `< ≤ ≥ >` may order and trains are all implemented in both readings; the nested model, `⍺←`'s laziness and the complex order are implemented in one, and asking for the other is refused as not implemented yet |
-| `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS` `⎕CC`), read-only. `⎕CC` answers every class that is a set anyone can state; its four glyph-repertoire classes (5, 6, 7, 9) are named gaps; the ones that read a clock or a filesystem are ⚪ closed by the sandbox (`ErrorKind::Sandbox`) |
-| `⎕FX` | 🟢 fix a definition from its lines, answering with its name — the same lines a `∇ … ∇` takes, control words included. 🟡 the lines must be literal text the compiler can read: one assembled at run time, or a `⎕FX` inside another definition's body, is named as a gap |
+| `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS` `⎕CC`), read-only. `⎕CC` answers every class that is a set anyone can state, and the four glyph repertoires (5, 6, 7, 9) as the reference's own tables — 7 and 9 as the 6-by-10 and 4-by-7 frames they are; the ones that read a clock or a filesystem are ⚪ closed by the sandbox (`ErrorKind::Sandbox`) |
+| `⎕FX` | 🟢 fix a definition from its lines, answering with its name — the same lines a `∇ … ∇` takes, control words included. 🟡 the lines must be literal text the compiler can read: one assembled at run time, or a `⎕FX` inside another definition's body, is named as a gap. libjay resolves a name to the function it stands for while it compiles, so a definition that does not exist until the program runs has no caller that could name it |
 | Control structures `:If :While :Repeat :For :Select :AndIf :OrIf :CaseList` | 🟡 GNU APL rejects them, so the oracle is Dyalog's recording in `corpus/apl/dyalog-control.txt`: all 79 of its expressions agree. `:AndIf` and `:OrIf` short-circuit the condition above them, `:CaseList` takes any one of its items, `:For a b :In` takes each item apart, `:For` binds an item's contents, a body may call a function the program fixes after it, and a control structure may stand outside a definition |
 | `:Return` `:Leave` `:Continue` | 🟡 the same recording; `:Leave` outside a loop is accepted here and refused there |
 | Exact-or-scalar conformability | 🟢 |

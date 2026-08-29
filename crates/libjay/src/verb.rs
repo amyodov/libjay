@@ -3862,9 +3862,7 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
             })?
         }
         Min | Max => return Err(no_complex_order(span)),
-        Binomial => {
-            return Err(Error::not_yet("the binomial function on complex numbers", span));
-        }
+        Binomial => cx::binomial(a, b),
         Eq | Ne | Lt | Le | Gt | Ge => {
             return Err(Error::internal("a comparison in the complex arithmetic path"));
         }
@@ -5290,6 +5288,16 @@ fn frame_pervaded(frame: Vec<usize>, cells: Vec<Array>, span: Span) -> Result<Ar
 /// The two sides agree by the ordinary scalar rule at every level, so a
 /// scalar spreads over a nested array's items as it does over a simple
 /// array's elements. J has no such rule — a box there is a type error.
+/// The descent runs on a work stack of its own rather than on the call
+/// stack: nesting depth is DATA, and a value a thousand boxes deep would
+/// otherwise take the process down instead of answering.
+enum Pervade {
+    /// Apply the verb to this pair and leave the answer in `out`.
+    Pair { x: Array, y: Array, out: usize },
+    /// Every cell of one level is done: frame `n` of them from `first`.
+    Frame { frame: Vec<usize>, first: usize, n: usize, out: usize },
+}
+
 fn pervade_dyad(
     op: ScalarDyad,
     x: &Array,
@@ -5297,32 +5305,80 @@ fn pervade_dyad(
     cfg: EvalCfg,
     span: Span,
 ) -> Result<Array> {
-    let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
-    if p.n == 0 {
-        return Ok(Array::new(p.frame, Data::empty(DType::Box)));
+    let mut slots: Vec<Option<Array>> = vec![None];
+    let mut work = vec![Pervade::Pair { x: x.clone(), y: y.clone(), out: 0 }];
+    while let Some(job) = work.pop() {
+        match job {
+            Pervade::Pair { x, y, out } => {
+                if x.dtype() != DType::Box && y.dtype() != DType::Box {
+                    slots[out] = Some(scalar_dyad(op, &x, &y, cfg, span)?);
+                    continue;
+                }
+                let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
+                if p.n == 0 {
+                    slots[out] = Some(Array::new(p.frame, Data::empty(DType::Box)));
+                    continue;
+                }
+                let (xr, yr) = (x.to_row_major(), y.to_row_major());
+                let first = slots.len();
+                slots.resize(first + p.n, None);
+                // The frame is pushed first so that it is taken last, when
+                // every cell under it has an answer.
+                work.push(Pervade::Frame { frame: p.frame, first, n: p.n, out });
+                for i in 0..p.n {
+                    let a = open_cell(&atom(&xr, i / p.x_div));
+                    let b = open_cell(&atom(&yr, i / p.y_div));
+                    work.push(Pervade::Pair { x: a, y: b, out: first + i });
+                }
+            }
+            Pervade::Frame { frame, first, n, out } => {
+                let cells: Vec<Array> = (first..first + n)
+                    .map(|k| slots[k].take().expect("a cell of this frame was answered"))
+                    .collect();
+                slots[out] = Some(frame_pervaded(frame, cells, span)?);
+            }
+        }
     }
-    let (xr, yr) = (x.to_row_major(), y.to_row_major());
-    let mut cells = Vec::with_capacity(p.n);
-    for i in 0..p.n {
-        let a = open_cell(&atom(&xr, i / p.x_div));
-        let b = open_cell(&atom(&yr, i / p.y_div));
-        cells.push(scalar_dyad(op, &a, &b, cfg, span)?);
-    }
-    frame_pervaded(p.frame, cells, span)
+    Ok(slots[0].take().expect("the outermost answer"))
 }
 
-/// The monadic half of [`pervade_dyad`].
+/// The monadic half of [`pervade_dyad`], on a work stack of its own.
 fn pervade_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
-    if y.count() == 0 {
-        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Box)));
+    enum Job {
+        Cell { y: Array, out: usize },
+        Frame { frame: Vec<usize>, first: usize, n: usize, out: usize },
     }
-    let yr = y.to_row_major();
-    let mut cells = Vec::with_capacity(y.count());
-    for i in 0..y.count() {
-        let a = open_cell(&atom(&yr, i));
-        cells.push(scalar_monad(op, &a, cfg, span)?);
+    let mut slots: Vec<Option<Array>> = vec![None];
+    let mut work = vec![Job::Cell { y: y.clone(), out: 0 }];
+    while let Some(job) = work.pop() {
+        match job {
+            Job::Cell { y, out } => {
+                if y.dtype() != DType::Box {
+                    slots[out] = Some(scalar_monad(op, &y, cfg, span)?);
+                    continue;
+                }
+                if y.count() == 0 {
+                    slots[out] = Some(Array::new(y.shape.clone(), Data::empty(DType::Box)));
+                    continue;
+                }
+                let n = y.count();
+                let yr = y.to_row_major();
+                let first = slots.len();
+                slots.resize(first + n, None);
+                work.push(Job::Frame { frame: y.shape.clone(), first, n, out });
+                for i in 0..n {
+                    work.push(Job::Cell { y: open_cell(&atom(&yr, i)), out: first + i });
+                }
+            }
+            Job::Frame { frame, first, n, out } => {
+                let cells: Vec<Array> = (first..first + n)
+                    .map(|k| slots[k].take().expect("a cell of this frame was answered"))
+                    .collect();
+                slots[out] = Some(frame_pervaded(frame, cells, span)?);
+            }
+        }
     }
-    frame_pervaded(y.shape.clone(), cells, span)
+    Ok(slots[0].take().expect("the outermost answer"))
 }
 
 /// The same array with its complex values read as the reals they are, or
@@ -5428,11 +5484,9 @@ fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
         // Magnitude is the one that leaves the complex domain again.
         Abs => Data::F64(par::map(v, |&z| cx::abs(z)).into()),
         Not => return Err(Error::domain("logical negation needs values of 0 or 1", span)),
-        Factorial => {
-            return Err(Error::not_yet("the factorial of a complex number", span));
-        }
         _ => {
             let step: fn(Cx) -> Cx = match op {
+                Factorial => cx::factorial,
                 Conj => cx::conj,
                 Neg => cx::neg,
                 Signum => cx::signum,
@@ -5451,7 +5505,7 @@ fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                 Pi => |z| [std::f64::consts::PI * z[0], std::f64::consts::PI * z[1]],
                 Imaginary => |z| cx::mul(cx::I, z),
                 Polar => |z| cx::exp(cx::mul(cx::I, z)),
-                Abs | Not | Factorial => unreachable!("handled above"),
+                Abs | Not => unreachable!("handled above"),
             };
             Data::Complex(par::map(v, |&z| step(z)).into())
         }
@@ -16087,13 +16141,44 @@ fn bit_dyad(op: BitDyad, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Resu
     Ok(Array::scalar_i64(v))
 }
 
+/// The four `⎕CC` classes that are glyph REPERTOIRES rather than sets
+/// anyone can state: superscripts, subscripts, the box-drawing frame and
+/// the mathematical symbols. Each is a fixed table, and the two frames are
+/// matrices — 6 by 10 and 4 by 7 — not vectors.
+fn glyph_repertoire(n: i64) -> Option<(Vec<usize>, &'static [u32])> {
+    const SUPERSCRIPT: [u32; 21] = [
+        178, 179, 185, 690, 7503, 7504, 7511, 8304, 8305, 8308, 8309, 8310, 8311, 8312, 8313,
+        8314, 8315, 8316, 8317, 8318, 8319,
+    ];
+    const SUBSCRIPT: [u32; 20] = [
+        7522, 8320, 8321, 8322, 8323, 8324, 8325, 8326, 8327, 8328, 8329, 8330, 8331, 8332, 8333,
+        8334, 8342, 8344, 8345, 11388,
+    ];
+    const FRAME: [u32; 60] = [
+        9484, 9472, 9516, 9472, 9488, 9554, 9552, 9572, 9552, 9557, 9500, 9472, 9532, 9472, 9508,
+        9566, 9552, 9578, 9552, 9569, 9492, 9472, 9524, 9472, 9496, 9560, 9552, 9575, 9552, 9563,
+        9555, 9472, 9573, 9472, 9558, 9556, 9552, 9574, 9552, 9559, 9567, 9472, 9579, 9472, 9570,
+        9568, 9552, 9580, 9552, 9571, 9561, 9472, 9576, 9472, 9564, 9562, 9552, 9577, 9552, 9565,
+    ];
+    const SYMBOL: [u32; 28] = [
+        9138, 9115, 9118, 9121, 9124, 9127, 9131, 9139, 9116, 9119, 9122, 9125, 9128, 9132, 8596,
+        9117, 9120, 9123, 9126, 9134, 9134, 8469, 8484, 8474, 8477, 8450, 9129, 9133,
+    ];
+    match n {
+        5 => Some((vec![SUPERSCRIPT.len()], &SUPERSCRIPT)),
+        6 => Some((vec![SUBSCRIPT.len()], &SUBSCRIPT)),
+        7 => Some((vec![6, 10], &FRAME)),
+        9 => Some((vec![4, 7], &SYMBOL)),
+        _ => None,
+    }
+}
+
 /// The characters of one `⎕CC` class.
 ///
 /// Every class here is a set anyone can state — the digits, the two cases
 /// of the Latin and Greek alphabets, the ASCII range, the octal and
-/// hexadecimal digits, and the RFC 4648 alphabets. The four GNU APL states
-/// as its own glyph repertoire (superscripts, subscripts, line drawing and
-/// mathematical symbols) are named gaps rather than a guess at its table.
+/// hexadecimal digits, and the RFC 4648 alphabets — except the four
+/// repertoires [`glyph_repertoire`] holds, which are settled before this.
 fn char_class_chars(n: i64, span: Span) -> Result<Vec<char>> {
     let upper = || ('A'..='Z').collect::<Vec<char>>();
     let lower = || ('a'..='z').collect::<Vec<char>>();
@@ -16123,29 +16208,37 @@ fn char_class_chars(n: i64, span: Span) -> Result<Vec<char>> {
             .chain(['+', '/', '='])
             .collect(),
         95 => (0x20u8..0x7f).map(char::from).collect(),
-        5 | 6 | 7 | 9 => {
-            return Err(Error::not_yet(
-                format!("the ⎕CC glyph-repertoire class {n}"),
-                span,
-            ));
-        }
         _ => return Err(Error::domain(format!("{n} names no ⎕CC character class"), span)),
     })
 }
 
+/// One `⎕CC` class as the array it is: a character vector, or the matrix
+/// the two frame repertoires are.
+fn char_class_one(n: i64, span: Span) -> Result<Array> {
+    if let Some((shape, codes)) = glyph_repertoire(n) {
+        let chars: Vec<char> =
+            codes.iter().map(|&c| char::from_u32(c).expect("a glyph table holds characters")).collect();
+        let mut data = Data::empty(DType::Char);
+        for c in chars {
+            push_elem(&mut data, &Data::Char(vec![c].into()), 0);
+        }
+        return Ok(Array::new(shape, data));
+    }
+    Ok(Array::from_chars(char_class_chars(n, span)?))
+}
+
 /// `⎕CC y`: the characters of every class y names. One number gives one
-/// character vector; several give one per item, nested.
+/// character array; several give one per item, nested.
 fn char_class(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let ns = y
         .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("⎕CC takes the whole number of a character class", span))?;
     if y.rank() == 0 {
-        let chars = char_class_chars(ns[0], span)?;
-        return Ok(Array::from_chars(chars));
+        return char_class_one(ns[0], span);
     }
     let mut cells = Vec::with_capacity(ns.len());
     for n in ns {
-        cells.push(Array::from_chars(char_class_chars(n, span)?));
+        cells.push(char_class_one(n, span)?);
     }
     Ok(Array::new(y.shape.clone(), Data::Box(cells.into())))
 }
@@ -17112,7 +17205,15 @@ pub(crate) fn execute_source(
     let mut rec = None;
     let (value, _) = crate::ir::run_block(&nested.stmts, None, ctx, &mut rec)
         .map_err(|e| nested_error(e, src, span))?;
-    value.ok_or_else(|| Error::domain("the executed string yielded no value", span))
+    // A nested program whose last sentence produced nothing — the empty
+    // program among them — leaves the sentence that executed it with no
+    // value to hand on. GNU APL reports that as a VALUE ERROR wherever the
+    // value is wanted, and this is the same complaint under libjay's name;
+    // the difference is that GNU APL lets a whole SENTENCE be `⍎''` and
+    // prints nothing, which is pinned in `corpus/apl/divergences.txt`.
+    value.ok_or_else(|| {
+        Error::new(ErrorKind::Value, "the executed string yielded no value", Some(span))
+    })
 }
 
 /// The stream number a J file foreign was given, checked against the one

@@ -63,7 +63,7 @@ feature — that is a promise, not a refusal.
 | `#` | tally; extended where the argument is | replicate: item i repeated x[i] times (a scalar x applies to every item, and a scalar y is repeated for every count, so `1 0 1 # 5` is `5 5`) |
 | `#.` | base-2 decode (rank 1) | mixed-radix decode; a scalar x is the radix of every digit, a radix of 0 contributes none |
 | `#:` | base-2 encode; the width fits the largest magnitude in the WHOLE argument, so the verb has infinite rank | mixed-radix encode; the digit axis is x's own shape, so `2 #: 5` is a scalar and `2 2 2 #: 5` a 3-list |
-| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity in J and a domain error in APL, which has no infinite value; a complex argument is a named gap | binomial: x things chosen from y, defined on the reals through gamma; complex is the same gap |
+| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity in J and a domain error in APL, which has no infinite value; a complex argument reaches gamma through the Lanczos approximation | binomial: x things chosen from y, defined through gamma on the reals and in the complex plane alike |
 | `j.` | `0j1 * y` | `x + 0j1 * y` |
 | `r.` | `^ 0j1 * y`: the unit complex at angle y | `x * ^ 0j1 * y`: polar coordinates |
 | `":` | format: the characters that display the argument | format by specification: x is one complex `w j d` per column of y's last axis, or one for all of them — `w` the field width, `d` the digits after the point, and the rounding half-to-even. A width of 0 takes what the column needs, with one blank in front of every column but the first; a NEGATIVE width asks for the exponential form, written from the left behind one column of sign. A value too wide for its field is written as that many asterisks rather than refused, and a character or boxed argument is a domain error |
@@ -663,7 +663,7 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `↓` | split: the vectors along the LAST axis, each enclosed, laid out in the remaining axes' shape (no oracle — see "Which APL" above) | drop: one count per axis. `Dialect.axis_counts` names Dyalog's reading, where fewer counts leave the trailing axes alone |
 | `,` | ravel | catenate along the LAST axis. Axes other than that one must conform: APL refuses the ragged case that J fills, which is where the two rules part company |
 | `⍪` | table: one row per item, holding that item's elements (a scalar gives 1×1, a vector n×1) | catenate along the LEADING axis |
-| `!` | factorial (always float); a value with an imaginary part is a named gap, and one without is the real it displays as | binomial, J's argument order; the same gap |
+| `!` | factorial (always float); a value with an imaginary part reaches the complex gamma function, and one without is the real it displays as | binomial, J's argument order; the same function |
 | `⍕` | format: the characters that display the argument | format by specification: x is one width-and-precision pair per column of y's last axis, one pair for all of them, or a lone precision. A width of 0, given or left out, is the width the column needs plus a separating blank. A NEGATIVE precision is the scaled form, with that many mantissa digits and the exponent after an `E`. A half rounds away from zero. A value that does not fit its field is a domain error; a nested y is a named gap. `Dialect.format_spec` names Dyalog's reading of the four rules that part |
 | `⊥` | — | mixed-radix decode; with no digit to weigh the radix is never read, so `'a'⊥(0⍴0)` is the empty sum 0 whatever the radix was written as |
 | `⊤` | — | mixed-radix encode; with no value to write the radix is never read either, so `'a'⊤(0⍴0)` is the empty. `A⊤[N]B` encodes to N copies of the single radix A, N counted from one whatever `⎕IO` is; `A⊤[0]B` works the width out — the smallest that reaches the largest value, and one digit more when any value is negative |
@@ -674,7 +674,7 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `⊂` | enclose — except that a simple scalar is its own enclosure, so `⊂5` is `5` | partitioned enclose: a partition opens where x rises (`x[i] > x[i-1]`, reading `x[¯1]` as 0) and an item flagged 0 is dropped. Rank 2 and above partitions the LAST axis, once per cross section, and the axes ahead of it frame the answer. No flag against no item is the empty nested vector, and nothing about the flags has to be a flag; where there ARE items the flags are read as always |
 | `⍸` | where: index `i` repeated `y[i]` times, from `⎕IO`; a rank-2 or higher argument gives one boxed coordinate vector per occurrence. `Dialect.where_rank` names Dyalog's reading, where an index is a vector as long as the rank at rank 0 too, so `⍸1` is a one-item nested vector holding `⍬` | interval index: how many items of the ascending x are at or below each cell, plus `⎕IO - 1`. The interval is closed on the left here and open in J's `I.`: `1 3 5⍸3` is 2 where `1 3 5 I. 3` is 1. `Dialect.lookup_left` names Dyalog's reading, where the bounds are the left argument's MAJOR CELLS — a matrix of them searches rows — and a scalar is a rank error |
 | `⌷` | materialise: the argument itself (no oracle — see "Which APL" above) | index: one item of x per axis of y, and the count must equal the rank. An item is a scalar, which drops its axis, or an ENCLOSED vector, which keeps it and selects that many — `(⊂1 2)⌷5 6 7 8` is `5 6` |
-| `⌹` | matrix inverse — the pseudo-inverse of a taller matrix; wider is refused, singular is a domain error | matrix divide: the least-squares solution of `y a = x` |
+| `⌹` | matrix inverse — the pseudo-inverse of a taller matrix; wider is refused, singular is a domain error. APL's `⌹` reads the whole argument, so rank 3 or more is a rank error; J's `%.` has rank 2 and runs over the 2-cells | matrix divide: the least-squares solution of `y a = x`, under the same rank rule |
 | `?` | roll: a random value in `⎕IO .. ⎕IO+y-1` (`?0` is a domain error) | deal: x distinct values from that range |
 | `⊃` | disclose: the items mixed into one array, filled where their shapes differ; a character item beside a numeric one gives a MIXED SIMPLE array, each cell padded with its own prototype | pick: each item of x is one LEVEL of a path, and holds one index per axis of the value at that level — so an empty index picks from a scalar and nothing else, and `(2 2)⊃matrix` asks for two levels where `(⊂2 2)⊃matrix` asks for one two-axis index. Indices count upwards from `⎕IO`; one below it is out of range, not an index from the end |
 | `↑` | first: the first element of the ravel, disclosed; the type's fill when there is none. Under `Dialect.first_disclose` it is MIX instead, which is `⊃`'s monad here | take; overtaking a NESTED array fills with the first item's prototype — that item's shape with a zero for every number and a blank for every character, nested to the same depth. One count per axis; `Dialect.axis_counts` names Dyalog's reading, where fewer counts take the trailing axes whole |
@@ -685,7 +685,7 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `⍷` | — | find: 1 at each position of y where a copy of x begins |
 | `⍎` | execute: the characters are compiled as an APL program and run HERE, over the names the sentence itself can see. An EMPTY program — `⍎''`, or an empty of any other type — yields no value at all in GNU APL; a libjay verb has no way to answer that, so it refuses and says the executed string yielded no value | — |
 | `⎕UCS` | codepoints become characters, characters become their codepoints | — |
-| `⎕CC` | the characters of the numbered class — the digits (1, 10), the two cases of the Latin (2, 26, 3, ¯26, 52) and Greek (48) alphabets, ASCII (4, 128), the printable range (95), the octal (8) and hexadecimal (16, ¯16, 17) digits, and the RFC 4648 alphabets (33, 65). Several numbers give one class per item, nested. The four classes GNU APL states as its own glyph repertoire — 5, 6, 7 and 9 — are named gaps | — |
+| `⎕CC` | the characters of the numbered class — the digits (1, 10), the two cases of the Latin (2, 26, 3, ¯26, 52) and Greek (48) alphabets, ASCII (4, 128), the printable range (95), the octal (8) and hexadecimal (16, ¯16, 17) digits, and the RFC 4648 alphabets (33, 65). Several numbers give one class per item, nested. The four glyph repertoires the reference states — superscripts (5), subscripts (6), the box-drawing frame (7) and the mathematical symbols (9) — are the reference's own tables, and 7 and 9 are the 6-by-10 and 4-by-7 MATRICES they are there, not vectors | — |
 | `⎕FX` | fix a definition from its lines and answer with its name; the lines must be literal text (see below) | — |
 | `\` `⍀` | — | expand, after an operand: every 1 takes the next item, every 0 leaves a fill. `Dialect.expansion` names Dyalog's reading, where the left argument is any integer vector — a positive count repeats that item, a negative one leaves that many fills, 0 means `¯1`, and the result is `+/1⌈|x` items long |
 | `⍋` `⍒` | grade up / down (stable; respects `⎕IO`). A NESTED argument orders by the APL2 rule: the rank, then the shape read from the FIRST axis, then the atoms in row-major order — a character before a number before a nested value, a nested one recursively — and two arrays with no atoms are separated by their types instead. It is a different comparator from J's at every step; `Dialect.nested_grade` names Dyalog's total array ordering as the other reading | collating grade: every character of y is keyed by where it FIRST occurs in the collating array x — the coordinate read with the last axis most significant, and one past the end for a character x does not hold — and the items of y are ordered by those keys read left to right |
@@ -703,7 +703,10 @@ folds x's LAST axis against y's LEADING one, so `(2 2⍴2)⊥2 3⍴⍳6` is a 2-
 answer and the two axes have to agree in length.
 
 Vector notation is real: juxtaposed operands are the items of one vector,
-and the whole strand is a single operand. Every primary contributes one
+and the whole strand is a single operand — except under index brackets,
+which bind to the value written immediately before them and not to the
+strand: `1 2 3[2]` is `1 2` beside `3[2]`, which is a rank error because a
+scalar has no axis to index, while `(1 2 3)[2]` is 2. Every primary contributes one
 item, except a run of numeric literals, whose numbers are items of their
 own — which is why `1 2 (3 4)` has three items, `'ab' 'cd'` has two, and
 `1 2 3` is still one simple integer vector. A strand of simple scalars of
@@ -730,6 +733,20 @@ The missing valences in the table above are marked "not supported yet".
 The glyphs and features with no oracle at all — because GNU APL lacks the
 valence outright, or because the feature is Dyalog's own — are listed in
 "Which APL" above.
+
+APL's SCALAR functions pervade a nested argument: they descend through the
+boxes, item by item, and apply to the simple values at the bottom, so
+`1+⊂2 3` is `⊂3 4` and `(1 2)(3 4 5)+10` adds ten to five numbers under two
+boxes. The two sides agree by the ordinary scalar rule at every level, so a
+scalar spreads over a nested array's items as it does over a simple array's
+elements, and a shape that does not agree is a length error at the level it
+does not agree on. A leaf that is not a number is refused where it stands:
+`1+⊂'ab'` is a type error. Cells that all come back simple scalars make a
+simple array again, so pervasion never adds a level the argument did not
+have. The descent runs on a work stack of its own rather than the call
+stack, because nesting depth is data: a value thousands of boxes deep
+answers instead of taking the process down. J has no such rule — a box
+there is a type error, and `>` opens one first.
 
 Every APL operator that collects the values of several applications does so
 between ITEMS: what it hands the function is the CONTENTS of an item, and a
@@ -851,6 +868,12 @@ same lines a `∇ … ∇` would, control words included. libjay compiles before
 it runs, so the lines have to be literal text the compiler can read: a
 definition assembled while the program runs, or a `⎕FX` inside another
 definition's body, is named as not implemented yet rather than answered.
+The reason is the compile-then-run split rather than the fixing itself:
+libjay resolves every name to the function it stands for while it compiles,
+so `⎕FX L ⋄ F 3` would have to read `F` as a function before anything had
+defined one. A run-time definition needs a run-time name table that the
+sentence parser consults, which is a redesign of name resolution and not a
+change to `⎕FX`.
 Where Dyalog answers a definition it cannot fix with the number of the
 offending line, libjay reports the fault, pointing at the line that carries
 it.
@@ -1591,10 +1614,13 @@ all) leaves the definition. A label's value is its line number, so the
 conditional branch is written `→(cond)/LABEL`: replicate answers the label
 where the condition holds and an empty vector where it does not. A branching
 definition is run statement by statement rather than as a block, which is
-what lets a `→` inside a loop leave it. A label and a control structure in
-one definition is a named gap: a control structure folds several lines into
-one statement, and the numbering a label stands for would stop meaning
-anything. libjay stops a definition that has branched 2²² times rather than
+what lets a `→` inside a loop leave it. A label and a control structure stand in
+one definition: a control structure folds several lines into one statement,
+so the definition carries the line each of its statements began at, and a
+`→` reads that to find where to go. A branch INTO a control structure has no
+statement of its own to land on and is a named gap. No oracle covers any of
+this — GNU APL has no control structures inside a `∇` definition at all, and
+refuses `:If` there outright. libjay stops a definition that has branched 2²² times rather than
 letting it hang.
 
 A `∇`-definition whose header names no argument is NILADIC: naming it is
@@ -1981,12 +2007,17 @@ libjay is stricter, or simply elsewhere:
   instead: `⊣1 2 3` and `⍴⊣1 2 3` both display nothing, and `(⊣5),9` is
   `0 9` there where it is `5 9` here. The display and the value are the one
   choice, not two.
-- bracket indexing binds tighter than a strand item in the APL2 line, so
-  `1 2 3[2]` there indexes the scalar `3` alone and is a RANK ERROR. The
-  manual calls that an unfortunate consequence of the binding strengths and
-  keeps it for compatibility; libjay reads the strand first, which is what
-  the spelling looks like it means and what every other bracket in the
-  language does. `(1 2 3)[2]` agrees.
+- the DISPLAY of a complex value in GNU APL drops the imaginary part
+  whenever it is smaller than about 1E¯10 in absolute terms, whatever the
+  real part is: `1J1E¯11` prints as `1`, and so does `1E¯20J1E¯21`, whose
+  imaginary part is a tenth of its real one. The value keeps it —
+  `11○1E¯20J1E¯21` is 1E¯21 there — so this is the printer rather than the
+  arithmetic. libjay prints both parts of every complex number.
+- `⍎''` is the empty program and produces no value at all. GNU APL lets a
+  whole SENTENCE be one and prints nothing, the way an assignment does, and
+  complains only where the value is wanted (`⍴⍎''` is a VALUE ERROR there).
+  Every libjay verb answers with a value, so a `⍎` that reached none is the
+  same complaint wherever it stands, pointing at the `⍎`.
 - a `{…}` whose body mentions neither `⍺` nor `⍵`. GNU APL runs the body
   where it stands and leaves a VALUE — `{42}` is 42, and `N←{42} ⋄ N 5` is
   the pair `42 5`; the manual lists it as a pitfall. libjay keeps `{…}` a
@@ -2145,9 +2176,9 @@ sections above is also collected here.
   complex numbers are both implemented; bigints and rationals (the exact
   types) are too — see "The numeric tower and the exact types" above — and
   so are symbols, see "Symbols".
-- Complex numbers reach every scalar verb, the reductions, the scans and
-  the structural verbs. They do NOT reach: `!` (the gamma function of a
-  complex argument), matrix inverse and matrix divide (`%.` / `⌹`, which
+- Complex numbers reach every scalar verb, `!` included, the reductions,
+  the scans and the structural verbs. They do NOT reach: matrix inverse
+  and matrix divide (`%.` / `⌹`, which
   work in f64), `#.`/`⊥` and `#:`/`⊤` (decode and encode), and the fused
   blockwise kernel, which computes in one real type and declines a chain
   that touches complex data — the ordinary pipeline runs it instead, with

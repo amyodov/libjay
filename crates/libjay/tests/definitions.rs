@@ -315,11 +315,20 @@ fn a_branch_moves_to_the_line_a_label_names() {
     assert_eq!(apl("∇Z←G N\n→(N>3)/BIG\nZ←1\n→0\nBIG:\nZ←2\n∇\nG 1"), vec![1]);
     // An empty target falls through to the next line.
     assert_eq!(apl("∇Z←K N\nZ←1\n→⍬\nZ←2\n∇\nK 0"), vec![2]);
-    // A label and a control structure in one definition would make the
-    // line numbers a label stands for mean nothing.
-    let e = fails(Lang::Apl, "∇Z←F R\nL:\n:If R\nZ←1\n:EndIf\n∇\nF 1");
+    // A label and a control structure stand in one definition: the label
+    // is still the number of its LINE, and a `→` finds the statement that
+    // line began.
+    assert_eq!(apl("∇Z←F R\nL:\n:If R\nZ←1\n:EndIf\n∇\nF 1"), vec![1]);
+    assert_eq!(
+        apl("∇Z←F N\nZ←0\nL:→(N<1)/OUT\n:If 2|N\nZ←Z+N\n:EndIf\nN←N-1\n→L\nOUT:Z←Z×10\n∇\nF 5"),
+        vec![90]
+    );
+    // A label's value is its line number whatever stands between.
+    assert_eq!(apl("∇Z←F R\nZ←0\n:If R\nZ←1\n:EndIf\nL:Z←L\n∇\nF 1"), vec![5]);
+    // Branching INTO a control structure has no statement to land on.
+    let e = fails(Lang::Apl, "∇Z←M N\nZ←0\n:If 1\nA:Z←1\n:EndIf\n→A\n∇\nM 1");
     assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("label"), "{}", e.msg);
+    assert!(e.msg.contains("control structure"), "{}", e.msg);
 }
 
 #[test]

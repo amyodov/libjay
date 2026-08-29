@@ -193,14 +193,6 @@
 ? identity here, a committed 0 there
 < abc
 > gnu: 0 c
-= 1 2 3[2]
-? the strand is indexed here, its last item there
-< 2
-> gnu: <error>
-= 1 2 3 4[2 3]
-? the strand is indexed here, its last item there
-< 2 3
-> gnu: <error>
 = {42}
 ? a function here, the value 42 there
 < <error>
@@ -347,3 +339,19 @@
 ? a dfn operand takes an axis here, as in Dyalog; a syntax error there
 < 4 5 6
 > gnu: <error>
+= ⍎''
+? a value error here, a sentence with no value there
+< <error>
+> gnu:
+= 1J1E¯11
+? both parts print here, a small imaginary part is dropped there
+< 1J1e¯11
+> gnu: 1
+= 1E¯20J1E¯21
+? both parts print here, a small imaginary part is dropped there
+< 1e¯20J1e¯21
+> gnu: 1E¯20
+= 3j1!1j1
+? both parts print here, a small imaginary part is dropped there
+< ¯3.89817e¯18J3.89817e¯18
+> gnu: ¯3.898171833E¯18

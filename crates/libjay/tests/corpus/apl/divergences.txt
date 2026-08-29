@@ -141,16 +141,6 @@ F←+/ ⋄ F 1 2 3
 ? identity here, a committed 0 there
 (⊣'ab'),'c'
 ? identity here, a committed 0 there
-// Bracket indexing binds tighter than a strand item in the APL2 line, so
-// `1 2 3[2]` there indexes the scalar 3 alone and is a RANK ERROR. The
-// manual calls that an unfortunate consequence of the binding strengths
-// and keeps it for compatibility; libjay reads the strand first, which is
-// what the spelling looks like it means and what every other bracket in
-// the language does. `(1 2 3)[2]` agrees.
-1 2 3[2]
-? the strand is indexed here, its last item there
-1 2 3 4[2 3]
-? the strand is indexed here, its last item there
 // A `{…}` with neither `⍺` nor `⍵` in it. GNU APL runs the body where it
 // stands and leaves a VALUE, so `{42}` is 42 and `N←{42} ⋄ N 5` is the
 // pair `42 5`; the manual lists it as a pitfall. libjay keeps `{…}` a
@@ -289,3 +279,22 @@ N←{42} ⋄ N 5
 // Dyalog reduces, which is what libjay does.
 {+/⍵}/[1]2 3⍴⍳6
 ? a dfn operand takes an axis here, as in Dyalog; a syntax error there
+// `⍎''` is the empty program: it produces no value at all. GNU APL lets a
+// SENTENCE be one and prints nothing, the way an assignment does, and only
+// complains where the value is wanted — `⍴⍎''` is a VALUE ERROR there.
+// libjay's verbs all answer with a value, so a `⍎` that reached nothing is
+// the same complaint wherever it stands, pointing at the `⍎`.
+⍎''
+? a value error here, a sentence with no value there
+// GNU APL's DISPLAY of a complex value drops the imaginary part whenever
+// it is smaller than about 1E¯10 in absolute terms, whatever the real part
+// is: `1J1E¯11` prints as `1`, and so does `1E¯20J1E¯21`, whose imaginary
+// part is a tenth of its real one. The value keeps it — `11○1E¯20J1E¯21` is
+// 1E¯21 there — so this is the printer and not the arithmetic. libjay
+// prints both parts of every complex number.
+1J1E¯11
+? both parts print here, a small imaginary part is dropped there
+1E¯20J1E¯21
+? both parts print here, a small imaginary part is dropped there
+3j1!1j1
+? both parts print here, a small imaginary part is dropped there

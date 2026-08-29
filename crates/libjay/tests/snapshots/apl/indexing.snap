@@ -187,3 +187,39 @@
 = ¯1 0 1 0⊂'abcd'
 > gnu: <error>
 > dyalog: <error>
+= 1 2 3[2]
+> gnu: <error>
+= 1 2 3 4[2 3]
+> gnu: <error>
+= 1 2 3 [2]
+> gnu: <error>
+= ¯1 2[1]
+> gnu: <error>
+= 0.5 1.5[1]
+> gnu: <error>
+= 1 2 3[2;]
+> gnu: <error>
+= (1 2 3)[2]
+> gnu: 2
+= (1 2 3 4)[2 3]
+> gnu: 2 3
+= 1 2 (3 4)[1]
+> gnu: 1 2 3
+= ⍴1 2 (3 4)[1]
+> gnu: 3
+= 1 2 'abc'[2]
+> gnu: 1 2 b
+= ⍴1 2 'abc'[2]
+> gnu: 3
+= 'abc'[2]
+> gnu: b
+= 3[1]
+> gnu: <error>
+= ⍳3[1]
+> gnu: <error>
+= 2 3⍴1 2 3[1]
+> gnu: <error>
+= A←1 2 3 ⋄ 9 A[2]
+> gnu: 9 2
+= A←2 3⍴⍳6 ⋄ 1 2 A[1;2]
+> gnu: 1 2 2

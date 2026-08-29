@@ -407,6 +407,53 @@ pub fn circle(k: i64, y: Cx) -> Option<Cx> {
     })
 }
 
+// ------------------------------------------------------------------ gamma
+
+/// The Lanczos coefficients for g = 7 and nine terms, which give the gamma
+/// function to about fifteen significant digits over the whole plane.
+const LANCZOS_G: f64 = 7.0;
+const LANCZOS: [f64; 9] = [
+    0.999_999_999_999_809_9,
+    676.520_368_121_885_1,
+    -1_259.139_216_722_402_8,
+    771.323_428_777_653_1,
+    -176.615_029_162_140_6,
+    12.507_343_278_686_905,
+    -0.138_571_095_265_720_12,
+    9.984_369_578_019_572e-6,
+    1.505_632_735_149_311_6e-7,
+];
+
+/// The gamma function of a complex argument, by the Lanczos
+/// approximation. The half-plane left of ½ is reached through the
+/// reflection formula, so a pole — a non-positive whole real argument —
+/// answers with an infinity rather than a value.
+pub fn gamma(z: Cx) -> Cx {
+    if z[0] < 0.5 {
+        // Γ(z)Γ(1−z) = π ÷ sin πz.
+        let s = sin(mul(from_real(std::f64::consts::PI), z));
+        return div(from_real(std::f64::consts::PI), mul(s, gamma(sub(ONE, z))));
+    }
+    let z = sub(z, ONE);
+    let mut x = from_real(LANCZOS[0]);
+    for (i, &c) in LANCZOS.iter().enumerate().skip(1) {
+        x = add(x, div(from_real(c), add(z, from_real(i as f64))));
+    }
+    let t = add(z, from_real(LANCZOS_G + 0.5));
+    let front = pow(t, add(z, from_real(0.5)));
+    mul(mul(from_real((2.0 * std::f64::consts::PI).sqrt()), front), mul(exp(neg(t)), x))
+}
+
+/// `!z`: the factorial, which is Γ(z+1).
+pub fn factorial(z: Cx) -> Cx {
+    gamma(add(z, ONE))
+}
+
+/// `x!y`: the binomial, Γ(y+1) ÷ Γ(x+1)Γ(y−x+1).
+pub fn binomial(x: Cx, y: Cx) -> Cx {
+    div(factorial(y), mul(factorial(x), factorial(sub(y, x))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,6 +496,19 @@ mod tests {
         assert_eq!(floor([0.6, 0.8]), [0.0, 1.0]);
         assert_eq!(floor([3.5, 4.5]), [4.0, 4.0]);
         assert!(close(residue([5.0, 0.0], [3.0, 4.0]), [3.0, -1.0]));
+    }
+
+    #[test]
+    fn the_gamma_function_matches_its_whole_number_values() {
+        // Γ(n) is (n−1)! on the positive whole numbers.
+        assert!(close(gamma([1.0, 0.0]), ONE));
+        assert!(close(gamma([5.0, 0.0]), [24.0, 0.0]));
+        assert!(close(factorial([5.0, 0.0]), [120.0, 0.0]));
+        // Γ(½) is the square root of π, on both sides of the reflection.
+        assert!(close(gamma([0.5, 0.0]), [std::f64::consts::PI.sqrt(), 0.0]));
+        assert!(close(gamma([-0.5, 0.0]), [-2.0 * std::f64::consts::PI.sqrt(), 0.0]));
+        // The binomial of whole numbers is the count it always was.
+        assert!(close(binomial([2.0, 0.0], [5.0, 0.0]), [10.0, 0.0]));
     }
 
     #[test]

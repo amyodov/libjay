@@ -3893,3 +3893,69 @@ the register.
   whose items are scalars takes one axis and ignores it — even one outside
   the answer's rank, which is Dyalog's own edge and was measured, not
   guessed.
+- 2026-08-29 — Index brackets bind to the value written immediately before
+  them, not to the strand that value stands in: `1 2 3[2]` is `1 2` beside
+  `3[2]`, which is a RANK ERROR because a scalar has no axis to index. This
+  reverses a divergence libjay had pinned on purpose (the strand read like
+  the operand and every other bracket in the language takes the whole thing
+  to its left), and it reverses it because the oracle wins: GNU APL answers
+  RANK ERROR for `1 2 3[2]`, `1 2 3 [2]`, `0.5 1.5[1]` and `¯1 2[1]`, and
+  `1 2 'abc'[2]` is `1 2 b` there — the brackets take the LAST item of the
+  run and the rest of the strand builds around the result. The cut is made
+  in the lexer, where a run of numeric literals that brackets follow becomes
+  two tokens; everything downstream already read that shape.
+- 2026-08-29 — APL's `⌹` has no rank. GNU APL raises RANK ERROR for every
+  argument of rank 3 or more, monadic and dyadic, on either side; libjay's
+  `⌹` shared J's `%.` entry, whose rank of 2 made a rank-3 argument a run
+  over 2-cells and answered where the reference refuses. The two glyphs now
+  carry different ranks in their own frontends' tables, which is where a
+  divergence of this kind belongs — J's `%.` still runs over planes.
+- 2026-08-29 — The complex gamma function is the Lanczos approximation
+  (g = 7, nine terms), with the reflection formula for the half-plane left
+  of ½. Both oracles answer `!2j1`, `2j1!5` and `2!3j1`, and the
+  approximation reproduces every digit either of them prints, out to
+  `!100j1` and `!¯100j1`. A pole is a non-positive whole REAL argument, and
+  those never reach the complex path: a complex value with no imaginary
+  part is demoted to the real it displays as before the monad runs.
+- 2026-08-29 — GNU APL's DISPLAY of a complex value drops the imaginary
+  part whenever it is smaller than about 1E¯10 in ABSOLUTE terms, however
+  small the real part is: `1J1E¯11` and `1E¯20J1E¯21` both print as their
+  real part alone, while `11○` on the same value still answers the
+  imaginary one. Measured by bisection over sixteen magnitudes; nothing
+  relative explains it. libjay prints both parts, and the three natural
+  spellings are pinned in `corpus/apl/divergences.txt` so that a later
+  release which changes the printer is noticed.
+- 2026-08-29 — A `∇` definition's labels are LINE numbers and its body is
+  STATEMENTS, and a control structure folds several lines into one
+  statement. `ExplicitDef` now carries `lines`, the line each statement
+  began at, and a `→` reads it: a line that starts a statement is where the
+  branch goes, a line past the body leaves the definition, and a line
+  inside a control structure has no statement to land on and is a named
+  gap. The pair used to be refused outright, which cost every definition
+  that wanted an `:If` and a loop label at once. No oracle: GNU APL has no
+  control structures inside a `∇` definition at all — it flags `:If` there
+  as a SYNTAX ERROR — so this follows the published Dyalog-line definition
+  and is unit-tested by hand rather than recorded in the corpus.
+- 2026-08-29 — `⎕FX` from lines assembled at run time stays a named gap,
+  and the reason is the compile-then-run split rather than anything about
+  fixing. libjay resolves every name to the function it stands for while it
+  compiles, so `⎕FX L ⋄ F 3` would need `F` to be a function before any
+  line had defined one; that wants a run-time name table the sentence
+  parser consults, which is a redesign of name resolution. What WAS wrong
+  is that a `⎕FX` whose lines ran out at a non-literal token fixed a
+  definition from the literals it had and left the rest to strand onto the
+  answer, so `T←'Z←N×2' ⋄ ⎕FX 'Z←F N' T` defined an empty `F` and answered
+  `'F' 'Z←N×2'`. A wrong answer where a gap belongs; it now names the gap.
+- 2026-08-29 — Pervasion descends on a WORK STACK, not the call stack.
+  Nesting depth is data — `(⊂⍣3000)1 2` is an ordinary value — and the
+  recursive `pervade_dyad` cost enough stack per level to abort the process
+  at about 1700 levels where merely BUILDING such a value reached 14000.
+  The two now fail at the same depth, which is the recursive `Array` type's
+  own limit (its `Drop` recurses too) and not the arithmetic's.
+- 2026-08-29 — `⎕CC`'s four glyph repertoires — superscripts, subscripts,
+  the box-drawing frame and the mathematical symbols — are the reference's
+  own tables, read off the black-box oracle through `⎕UCS` and stored as
+  codepoints. Classes 7 and 9 are MATRICES there (6 by 10 and 4 by 7), so
+  `⎕CC` answers an array rather than always a vector. They were a named gap
+  on the grounds that libjay would be guessing at a table; measuring the
+  oracle is not guessing, and it is the same method the corpus uses.

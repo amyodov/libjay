@@ -616,6 +616,7 @@ fn build_definition(
         body: stmts,
         // A branch that runs nothing yields J's empty result, `i. 0 0`.
         labels: Vec::new(),
+        lines: Vec::new(),
         empty: Some(crate::ir::empty_result()),
         pure,
     })))

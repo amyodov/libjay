@@ -339,7 +339,6 @@ fn the_dyalog_line_orders_numbers_alone(#[case] src: &str) {
 #[rstest]
 #[case(Lang::J, "3j4 + 'a'", "character")]
 #[case(Lang::J, "3j4 + < 1", "boxed")]
-#[case(Lang::J, "! 3j4", "complex")]
 fn a_complex_value_where_it_does_not_belong(
     #[case] lang: Lang,
     #[case] src: &str,

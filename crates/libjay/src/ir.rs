@@ -182,10 +182,16 @@ pub struct ExplicitDef {
     pub body: Vec<Expr>,
     /// The value a body that ran nothing yields; None makes that an error.
     pub empty: Option<Array>,
-    /// APL's branch labels: each label with the body statement it names.
-    /// A label's value is its line number, which is one more than its
-    /// position here, and `→` takes one of those numbers.
+    /// APL's branch labels: each label with the 1-based body LINE it
+    /// stands on, which is the number `→` takes and the value the label
+    /// itself has.
     pub labels: Vec<(String, usize)>,
+    /// The 1-based body line each statement of `body` began at. A control
+    /// structure folds several lines into one statement, so this is what a
+    /// `→` reads to turn a line number into a place to run from. Empty
+    /// where the two are the same, which is every J definition and every
+    /// APL one written without control structures.
+    pub lines: Vec<usize>,
     /// The dfns this one is written INSIDE, outermost first, by
     /// [`ExplicitDef::id`]. A dfn's body reads the names its enclosing
     /// dfns made local — `{a←10 ⋄ {a+⍵} ⍵} 5` is 15 — and this is what
@@ -747,11 +753,15 @@ fn eval_control(
                 .to_i64_vec()
                 .and_then(|v| v.first().copied())
                 .ok_or_else(|| Error::domain("a branch target is a line number", span))?;
-            let lines = ctx.env.current_def().map_or(0, |d| d.body.len() as i64);
-            if line >= 1 && line <= lines {
-                return Ok((None, Flow::Goto(line as usize - 1)));
+            let def = ctx.env.current_def();
+            match branch_target(def.as_deref(), line) {
+                Target::Statement(k) => Ok((None, Flow::Goto(k))),
+                Target::Leave => Ok((None, Flow::Return)),
+                Target::Folded => Err(Error::not_yet(
+                    format!("a branch INTO a control structure, which line {line} is inside of,"),
+                    span,
+                )),
             }
-            Ok((None, Flow::Return))
         }
         // `A→B`: A lines on from here when B holds, and nothing when it
         // does not. B is the condition, so an empty one is no branch.
@@ -985,8 +995,8 @@ pub(crate) fn call_explicit(
         frame.insert(name.clone(), v.clone());
     }
     // A label's value is its line number, which is what `→` takes.
-    for (label, at) in &def.labels {
-        frame.insert(label.clone(), Array::scalar_i64(*at as i64 + 1));
+    for (label, line) in &def.labels {
+        frame.insert(label.clone(), Array::scalar_i64(*line as i64));
     }
     ctx.env.enter(frame, Arc::clone(def), span)?;
     let mut rec = None;
@@ -1027,6 +1037,38 @@ pub(crate) fn call_explicit(
 /// How many statements a branching definition may run before libjay stops
 /// it. A `→` loop has no other bound, and an unbounded one would hang.
 const BRANCH_LIMIT: usize = 1 << 22;
+
+/// Where a `→ line` lands.
+enum Target {
+    /// The body statement to run from.
+    Statement(usize),
+    /// No line of this definition: the branch leaves it.
+    Leave,
+    /// A line of this definition that a control structure folded into a
+    /// statement of its own, so there is no place in the body to go to.
+    Folded,
+}
+
+/// The statement a branch to `line` runs from.
+fn branch_target(def: Option<&ExplicitDef>, line: i64) -> Target {
+    let Some(def) = def else { return Target::Leave };
+    if def.lines.is_empty() {
+        // One statement per line, so the number is the position.
+        return match line >= 1 && line <= def.body.len() as i64 {
+            true => Target::Statement(line as usize - 1),
+            false => Target::Leave,
+        };
+    }
+    if let Some(k) = def.lines.iter().position(|&l| l as i64 == line) {
+        return Target::Statement(k);
+    }
+    // Past the last line the body holds, the branch leaves; between them,
+    // the line is inside a control structure.
+    match line >= 1 && line < *def.lines.last().unwrap_or(&0) as i64 {
+        true => Target::Folded,
+        false => Target::Leave,
+    }
+}
 
 /// A definition's body, statement by statement, with `→` free to move the
 /// place it runs from. The value is the last statement that produced one.

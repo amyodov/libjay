@@ -71,6 +71,19 @@ pub fn parse(src: &SourceParts, d: Rules) -> Result<Vec<Expr>> {
             while end < sentence.len() && matches!(sentence[end].kind, Tok::Value(_)) {
                 end += 1;
             }
+            // Everything to a `⎕FX`'s right is its argument. A token past
+            // the run of literals that is not a closing bracket is part of
+            // that argument and is not literal text, so the definition is
+            // one libjay cannot fix before the program runs — a gap, not a
+            // definition with a short body.
+            if let Some(t) = sentence.get(end)
+                && !matches!(t.kind, Tok::RParen | Tok::RBracket | Tok::RBrace | Tok::Semi)
+            {
+                return Err(Error::not_yet(
+                    "⎕FX on a definition that is not literal text in the program",
+                    t.span,
+                ));
+            }
             let (def, name) = fix_definition(&sentence[at..end], d, &mut verbs)?;
             stmts.push(def);
             let span = Span::merge(sentence[at].span, sentence[end - 1].span);
@@ -861,11 +874,14 @@ fn prim_for(ch: char, d: Rules) -> Option<Prim> {
             dyad: D::Deal { origin, fixed: false },
             ranks: [RANK_INF, 0, 0],
         },
+        // APL's ⌹ sees the whole argument: a rank of 3 or more is a rank
+        // error rather than a run over 2-cells. J's `%.` has rank 2 and
+        // does run over them, which is where the two lines differ.
         '⌹' => Prim {
             name: "⌹",
             monad: M::MatrixInverse,
             dyad: D::MatrixDivide,
-            ranks: [2, RANK_INF, 2],
+            ranks: [RANK_INF, RANK_INF, RANK_INF],
         },
         '⊃' => Prim {
             name: "⊃",
@@ -1359,8 +1375,8 @@ fn lex_text(
                 i = after;
             }
             _ if num_start(text, i) => {
-                let (tok, next) = lex_number_vector(text, i, offset)?;
-                cur.push(tok);
+                let (toks, next) = lex_number_vector(text, i, offset)?;
+                cur.extend(toks);
                 i = next;
             }
             _ if is_name_start(ch) => {
@@ -1624,16 +1640,36 @@ fn take_digits(text: &str, mut i: usize, buf: &mut String) -> usize {
     i
 }
 
+/// True where the next thing in the text, past any blanks, opens index
+/// brackets.
+fn index_follows(text: &str, at: usize) -> bool {
+    let mut k = at;
+    while text[k..].starts_with(' ') || text[k..].starts_with('\t') {
+        k += 1;
+    }
+    text[k..].starts_with('[')
+}
+
 /// A run of blank-separated numeric literals: one value token. Integers
 /// unless some literal needs floating point; a single literal is a scalar.
-fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, usize)> {
+///
+/// Index brackets bind to the value written immediately before them, which
+/// in a run of numbers is the LAST number and not the whole run: `1 2 3[2]`
+/// is `1 2` beside `3[2]`, and indexing a scalar is a rank error. A run
+/// that brackets follow is therefore lexed as two tokens.
+fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Vec<Token>, usize)> {
     let mut vals: Vec<crate::complex::Cx> = Vec::new();
     let mut exacts: Vec<i64> = Vec::new();
     let mut any_float = false;
     let mut any_complex = false;
     let mut i = start;
     let mut end;
+    // Where the last literal of the run begins, and where the one before
+    // it ended: the two places the run is cut at when brackets follow.
+    let mut last_start;
+    let mut head_end = start;
     loop {
+        last_start = i;
         let (v, exact, mut next) = lex_number(text, i, offset)?;
         let mut imag = 0.0;
         if let Some(c) = text[next..].chars().next() {
@@ -1658,6 +1694,7 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
             k += 1;
         }
         if k > i && num_start(text, k) {
+            head_end = end;
             i = k;
             continue;
         }
@@ -1670,12 +1707,27 @@ fn lex_number_vector(text: &str, start: usize, offset: usize) -> Result<(Token, 
     } else {
         Data::I64(exacts.into())
     };
-    let shape = if data.len() == 1 { vec![] } else { vec![data.len()] };
-    let tok = Token {
-        kind: Tok::Nums(Array::new(shape, data)),
-        span: Span::new(offset + start, offset + end),
+    let n = data.len();
+    let nums = |d: Data, from: usize, to: usize| {
+        let shape = if to - from == 1 { vec![] } else { vec![to - from] };
+        Tok::Nums(Array::new(shape, d.slice(from, to)))
     };
-    Ok((tok, end))
+    if n > 1 && index_follows(text, end) {
+        return Ok((
+            vec![
+                Token {
+                    kind: nums(data.clone(), 0, n - 1),
+                    span: Span::new(offset + start, offset + head_end),
+                },
+                Token {
+                    kind: nums(data, n - 1, n),
+                    span: Span::new(offset + last_start, offset + end),
+                },
+            ],
+            end,
+        ));
+    }
+    Ok((vec![Token { kind: nums(data, 0, n), span: Span::new(offset + start, offset + end) }], end))
 }
 
 // ---------------------------------------------------------------------------
@@ -3308,6 +3360,7 @@ fn build_dfn(body: &[Token], d: Rules, verbs: &HashMap<String, Verb>) -> Result<
             // A dfn that reaches its end without a value has no result.
             empty: None,
             labels: Vec::new(),
+            lines: Vec::new(),
             enclosing,
             id,
             pure,
@@ -3535,14 +3588,19 @@ fn build_tradfn(
     let mut inner = verbs.clone();
     inner.insert(name.clone(), Verb::Named(name.clone()));
     let mut items = Vec::new();
+    // The 1-based body line each item begins at. A conditional written with
+    // `→→` spans several lines and is one item, so the two run apart.
+    let mut item_lines: Vec<usize> = Vec::new();
     let mut labels: Vec<(String, usize)> = Vec::new();
     let mut at = 0usize;
     while at < body_lines.len() {
+        let line_no = at + 1;
         // A conditional's three markers may each end a line, so one spans
         // as many lines as it needs and becomes one statement.
         if body_lines[at].iter().any(|t| matches!(t.kind, Tok::CondThen)) {
             let e = parse_conditional(body_lines, &mut at, d, &mut inner)?;
             items.push(AplItem::Sentence(e));
+            item_lines.push(line_no);
             continue;
         }
         let line = &body_lines[at];
@@ -3550,19 +3608,20 @@ fn build_tradfn(
         let mut label = None;
         let item = to_item(line.clone(), d, &mut inner, &mut label)?;
         if let Some(name) = label {
-            labels.push((name, items.len()));
+            labels.push((name, line_no));
         }
         items.push(item);
+        item_lines.push(line_no);
     }
-    let item_count = if items.len() == body_lines.len() { items.len() } else { usize::MAX };
     let mut cursor = AplCursor { items: &items, at: 0, d, loops: 0 };
-    let mut body = parse_apl_block(&mut cursor, &[])?;
-    // A label is the number of a LINE, so the statements have to be the
-    // lines: a control structure folds several of them into one and the
-    // numbering would no longer mean anything.
-    if !labels.is_empty() && body.len() != item_count {
-        return Err(Error::not_yet("a label and a control structure in one definition", span));
-    }
+    let mut starts = Vec::new();
+    let mut body = parse_apl_block_from(&mut cursor, &[], &mut starts)?;
+    // A label is the number of a LINE, and a control structure folds
+    // several lines into one statement, so the body carries the line each
+    // of its statements began at: that is what a `→` reads to find where
+    // to go, and a line inside a control structure has no statement of its
+    // own to reach.
+    let lines: Vec<usize> = starts.iter().map(|&i| item_lines[i]).collect();
     if let Some(item) = cursor.peek() {
         return Err(Error::parse(
             format!(":{} has no matching opening word", item.word().unwrap_or("?")),
@@ -3595,6 +3654,7 @@ fn build_tradfn(
         body,
         empty: None,
         labels,
+        lines,
         pure,
     }));
     verbs.insert(name.clone(), verb.clone());
@@ -3794,6 +3854,18 @@ impl<'a> AplCursor<'a> {
 }
 
 fn parse_apl_block(cur: &mut AplCursor<'_>, stop: &[&str]) -> Result<Vec<Expr>> {
+    parse_apl_block_from(cur, stop, &mut Vec::new())
+}
+
+/// [`parse_apl_block`], also recording which item each statement of the
+/// block began at. A `∇` definition's labels are LINE numbers, and a
+/// control structure folds several lines into one statement, so the
+/// definition's top level needs the mapping back.
+fn parse_apl_block_from(
+    cur: &mut AplCursor<'_>,
+    stop: &[&str],
+    starts: &mut Vec<usize>,
+) -> Result<Vec<Expr>> {
     let mut out = Vec::new();
     loop {
         match cur.peek() {
@@ -3802,10 +3874,14 @@ fn parse_apl_block(cur: &mut AplCursor<'_>, stop: &[&str]) -> Result<Vec<Expr>> 
                 return Ok(out);
             }
             Some(AplItem::Sentence(e)) => {
+                starts.push(cur.at);
                 cur.at += 1;
                 out.push(e.clone());
             }
-            Some(AplItem::Word { .. }) => out.push(parse_apl_control(cur)?),
+            Some(AplItem::Word { .. }) => {
+                starts.push(cur.at);
+                out.push(parse_apl_control(cur)?);
+            }
         }
     }
 }

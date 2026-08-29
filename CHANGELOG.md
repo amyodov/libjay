@@ -42,9 +42,51 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   element `2 1⌷[1 2]M` does by default and the one `1 2⌷[1 2]M` does
   there. `↑` `↓` `,` and `⊂` keep the order written under both.
 
+- The gamma function in the complex plane. `!2j1` and `!2J1` answer
+  `0.962865j1.339097`, and the binomial follows it, so `2j1!5` and
+  `2!3j1` have values too. A number with no imaginary part is still the
+  real it displays as, and the real path is untouched.
+
+- APL's `⎕CC` answers its four glyph repertoires: the superscripts (5),
+  the subscripts (6), the box-drawing frame (7) and the mathematical
+  symbols (9). The two frames are matrices — `⍴⎕CC 7` is `6 10` and
+  `⍴⎕CC 9` is `4 7`.
+
+- A `∇` definition may carry a label and a control structure at once. A
+  label is the number of its LINE, and a `→` finds the statement that line
+  began, so a `→L` loop and an `:If` block live in one definition. A
+  branch INTO a control structure has no statement to land on and says so.
+
 ### Changed
 
+- APL's scalar functions PERVADE a nested argument: they descend through
+  the boxes to the simple values at the bottom, so `1+⊂2 3` is `⊂3 4`,
+  `(1 2)(3 4 5)+10` adds ten under both boxes, and `2 3⌈⊂1 5` spreads a
+  scalar over items as it does over elements. The descent runs on a work
+  stack rather than the call stack, so a value thousands of boxes deep
+  answers instead of taking the process down. (The rule itself already
+  worked; the depth and the documentation did not.)
+
+- APL's index brackets bind to the value written immediately before them,
+  which in a run of numbers is the LAST number: `1 2 3[2]` is `1 2` beside
+  `3[2]`, and indexing a scalar is a rank error. `(1 2 3)[2]` is 2 as
+  before. This is what the reference does; libjay used to index the whole
+  strand.
+
+- APL's `⌹` reads the whole argument, so an argument of rank 3 or more is
+  a rank error on either side, as it is in the reference. J's `%.` keeps
+  its rank of 2 and still runs over the 2-cells.
+
+- `⍎` of a program that produced no value — the empty program among them —
+  is now a VALUE error rather than a domain error, and says so at the `⍎`.
+
 ### Fixed
+
+- `⎕FX` with a line that is not literal text — a name, or a parenthesised
+  expression — used to fix a definition from the literal lines it had
+  read so far and hand the rest back as data, so `T←'Z←N×2' ⋄ ⎕FX 'Z←F N' T`
+  quietly defined an empty `F`. It now says the definition is not literal
+  text in the program, which is the gap it always was.
 
 ## 0.3.2 — 2026-08-29
 

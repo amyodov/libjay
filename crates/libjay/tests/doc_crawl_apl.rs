@@ -303,7 +303,13 @@ fn character_classes() {
     assert_eq!(apl("'5'∊⎕CC 1"), bit(1));
     assert_eq!(apl("≡⎕CC 1 2"), scalar(2));
     assert_eq!(err("⎕CC 11").kind, ErrorKind::Domain);
-    assert_eq!(err("⎕CC 5").kind, ErrorKind::NotYet);
+    // The four glyph repertoires, two of them frames laid out as matrices.
+    assert_eq!(apl("⍴⎕CC 5"), i64s(&[1], &[21]));
+    assert_eq!(apl("⍴⎕CC 6"), i64s(&[1], &[20]));
+    assert_eq!(apl("⍴⎕CC 7"), i64s(&[2], &[6, 10]));
+    assert_eq!(apl("⍴⎕CC 9"), i64s(&[2], &[4, 7]));
+    assert_eq!(apl("'┌'∊⎕CC 7"), bit(1));
+    assert_eq!(apl("'⁰'∊⎕CC 5"), bit(1));
     assert_eq!(err("1 ⎕CC '7'").kind, ErrorKind::Domain);
 }
 
