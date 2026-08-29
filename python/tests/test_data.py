@@ -174,7 +174,10 @@ class TestPyArrow:
         del value
         gc.collect()
         assert out.to_pylist()[-1] == 999
-        assert self.pa.compute.sum(out).as_py() == 499500
+        # pyarrow 25 stopped importing `compute` as a side effect of
+        # importing the package, so ask for the submodule by name.
+        compute = pytest.importorskip("pyarrow.compute")
+        assert compute.sum(out).as_py() == 499500
 
     def test_capsules_in_the_wrong_order_are_refused(self):
         # The capsule's name is the only thing that says what the pointer

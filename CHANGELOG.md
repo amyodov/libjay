@@ -88,6 +88,19 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   quietly defined an empty `F`. It now says the definition is not literal
   text in the program, which is the gap it always was.
 
+- APL's enlist `∊` raised an internal error wherever an EMPTY leaf of one
+  type stood beside a value of another: `∊1 2 ''`, `∊'abc' ⍬`, `∊'' 1 2`,
+  `∊(1 2)(0 3⍴'')(3 4)` and `∊''` on its own all failed. An empty leaf has
+  no element to convert, so it now takes the result's type outright, the
+  way an empty side of a catenation always has; where every leaf is empty
+  the answer is an empty of the first leaf's type.
+
+- APL's membership `∊` compared two integers as the double each stands
+  for, so any two past 2⋆53 were the same number to it and
+  `9007199254740992∊9007199254740993` was 1. Integers are compared as
+  integers now; an integer still finds a float of the same value, and `=`,
+  `⍳`, `∪` and `~` were already exact.
+
 ## 0.3.2 — 2026-08-29
 
 ### Added

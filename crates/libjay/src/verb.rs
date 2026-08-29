@@ -2890,9 +2890,20 @@ fn enlist(y: &Array, _span: Span) -> Result<Array> {
         }
         return Ok(Array::new(vec![cells.len()], Data::Box(cells.into())));
     }
-    let dt = dt.unwrap_or(DType::I64);
+    // Where every leaf is empty, none of them decided the type above and the
+    // first one does: the enlist of an empty is an empty of that leaf's own
+    // type. An argument with no leaf at all — an empty nested array — has no
+    // type to read and comes back numeric.
+    let dt = dt.unwrap_or_else(|| parts.first().map_or(DType::I64, |p| p.dtype()));
     let mut data = Data::empty(dt);
     for p in &parts {
+        // An empty leaf brings no element to convert, so it takes the
+        // result's type outright, as an empty side of a catenation does.
+        // There is no character in it to read as a number, which is the
+        // conversion that has no meaning.
+        if p.count() == 0 {
+            continue;
+        }
         let cast = p.data.cast(dt).ok_or_else(|| Error::internal("unsupported widening in enlist"))?;
         data.extend_from(&cast);
     }
@@ -6850,6 +6861,20 @@ fn member_apl(x: &Array, y: &Array, tol: Tol) -> Array {
         let ys = borrow_f64(&y.data, &mut ty);
         let out: Vec<u8> =
             xs.iter().map(|a| ys.iter().any(|b| tol.eq(*a, *b)) as u8).collect();
+        return Array::new(x.shape.clone(), Data::Bool(out.into()));
+    }
+    // Where both sides are integers they are keyed as integers. The general
+    // key below is the value's DOUBLE, so that an integer finds a float of
+    // the same value; but past 2⋆53 two integers share a double, and that
+    // key would call them the same number — `9007199254740992` would be a
+    // member of `9007199254740993`.
+    let integral = |d: DType| matches!(d, DType::Bool | DType::I64);
+    if integral(x.dtype()) && integral(y.dtype()) {
+        let (mut tx, mut ty) = (Vec::new(), Vec::new());
+        let xs = borrow_i64(&x.data, &mut tx);
+        let ys = borrow_i64(&y.data, &mut ty);
+        let seen: HashSet<i64> = ys.iter().copied().collect();
+        let out: Vec<u8> = xs.iter().map(|a| seen.contains(a) as u8).collect();
         return Array::new(x.shape.clone(), Data::Bool(out.into()));
     }
     let seen: HashSet<u64> = (0..y.count()).map(|i| num_key(&y.data, i)).collect();

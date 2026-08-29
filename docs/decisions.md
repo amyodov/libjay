@@ -3959,3 +3959,47 @@ the register.
   `⎕CC` answers an array rather than always a vector. They were a named gap
   on the grounds that libjay would be guessing at a table; measuring the
   oracle is not guessing, and it is the same method the corpus uses.
+- 2026-08-29 — APL's enlist `∊` and the EMPTY leaf. `∊` chose the result's
+  type from the non-empty leaves and then converted every leaf, including
+  the empty ones, so a character empty standing beside a number asked for a
+  character to be read as a number: `∊1 2 ''`, `∊'abc' ⍬`, `∊'' 1 2`,
+  `∊(1 2)(0 3⍴'')(3 4)` and `∊''` alone all raised an internal error, where
+  GNU APL has an answer for each. An empty leaf brings no element to
+  convert, so it takes the result's type outright — the rule catenate and
+  framing already applied, and the two sites beside it in `verb.rs` already
+  guarded the empty case the same way. Where EVERY leaf is empty the first
+  leaf's type decides, which is what Dyalog answers (`⎕DR ∊''` is 80,
+  `⎕DR ∊⍬` is 83) and what keeps `∊` of an empty an empty. GNU APL does not
+  win this one: it answers ONE element there, the prototype, and the same
+  length its own assertion guards elsewhere — `∊⊂''`, `∊'' ''` and
+  `∊(0⍴0)(0⍴0)` abort the interpreter with a C++ assertion rather than
+  answer. An implementation that dies has no answer to follow, so the
+  non-aborting half is pinned as a divergence and the aborting half is kept
+  out of the corpus: a process that dies is neither an answer nor a
+  refusal, and the recorder would otherwise file it as a refusal.
+- 2026-08-29 — APL membership `∊` compares INTEGERS as integers. The hash it
+  used keyed a value by the double it stands for, so that an integer would
+  find a float of the same value; past 2⋆53 two integers share a double and
+  the key called them the same number, making `9007199254740992` a member of
+  `9007199254740993`. `=`, `⍳`, `∪`, `~` and `≡` were exact already —
+  membership was the one place the shortcut showed. Both sides integral now
+  take an integer hash; the double key stays for the mixed case, where it is
+  what makes `1∊1.0` true.
+- 2026-08-29 — GNU APL's axis validation is per-glyph accident, not a rule,
+  and libjay does not follow it. Measured over the whole axis-taking
+  vocabulary: an axis outside the argument's rank is IGNORED on `,` `⍪` `⌽`
+  `⊖` and dyadic `⌽`, an AXIS ERROR on `⊂` `/` `⌿` `\` `↑` `⍉` and dyadic
+  `,`, and on `1↓[0]M` it aborts the interpreter. An empty axis list splits
+  the same way, and a fractional axis outside the range is clamped rather
+  than refused. Following that would mean a per-glyph table of which axes
+  may be ignored, one of whose entries is a crash; libjay holds every axis
+  to the argument's rank on every glyph and names the valid range when it
+  refuses, which is also what Dyalog does. The divergence note that claimed
+  the leniency was `,`'s alone is corrected.
+- 2026-08-29 — The empty reduction of the STRUCTURAL functions stays a named
+  refusal, and catenation's identity stays the empty list. GNU APL answers a
+  scalar `0` for `,/⍬ ⍴/⍬ ↑/⍬ ⌽/⍬ ⊖/⍬ ⍉/⍬ ⊂/⍬ ⌹/⍬`, and a DOMAIN ERROR for
+  the very same empty reduction folded more than once (`,/1 0⍴0` refused,
+  `+/3 0⍴0` answered `0 0 0`). The two halves cannot both be a rule, and the
+  `0` half discards the argument's type — `,/''` is 0 there rather than a
+  character. Pinned as a divergence rather than followed.

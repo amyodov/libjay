@@ -2059,14 +2059,60 @@ libjay is stricter, or simply elsewhere:
 - a dfn operand takes an axis: `{+/⍵}/[1]M` folds the rows exactly as a
   primitive operand would, which is Dyalog's reading. GNU APL takes an axis
   only after a PRIMITIVE function and answers a SYNTAX ERROR for the dfn.
+- the enlist of an argument whose every leaf is EMPTY is an empty here,
+  keeping its type — `∊''` is `''` and `∊⍬` is `⍬`, which is Dyalog's
+  answer too. GNU APL produces ONE element, the prototype: `⍴∊''` is 1
+  there and `⍴∊0⍴⊂1 2` is 2. It is the same length its own assertion
+  guards elsewhere, since `∊⊂''`, `∊'' ''` and `∊(0⍴0)(0⍴0)` abort the
+  interpreter rather than answer, so those are left out of the corpus
+  entirely. Where any leaf is non-empty the two agree, and
+  `corpus/apl/empty_enlist.txt` records that.
+- the empty reduction of the STRUCTURAL functions. GNU APL answers a scalar
+  `0` for `,/⍬`, `⍴/⍬`, `↑/⍬`, `⌽/⍬`, `⊖/⍬`, `⍉/⍬`, `⊂/⍬` and `⌹/⍬`, and a
+  DOMAIN ERROR for the same empty reduction folded more than once —
+  `,/1 0⍴0` is refused there while `+/3 0⍴0` is `0 0 0`. The two halves are
+  not one rule, and the `0` half discards the argument's type (`,/''` is 0
+  there). Catenation's identity is the empty list here, whatever the cells'
+  type, which is also what the J frontend answers for `,/i.0`; the rest are
+  named refusals.
+- dyadic `∪` sieves only the RIGHT argument, so the left keeps whatever
+  repeats it has and `1 1 2∪3` is `1 1 2 3` — the reading the table above
+  states and `corpus/apl/dyalog-doc-crawl.txt` records. GNU APL uniques the
+  whole result, so its answer is `1 2 3` and `'aab'∪''` is `ab`.
+- `⍷` with an EMPTY pattern matches wherever a run of no elements fits, at
+  every rank: `''⍷'abc'` is `1 1 1` and `(0 3⍴0)⍷(2 3⍴⍳6)` is `1 0 0`
+  twice, both of which GNU APL agrees with. It parts company only where the
+  pattern's LAST axis is 0 inside an argument of rank 2 or more, matching
+  nowhere there — even though the same pattern in a rank-1 argument matches
+  everywhere.
+- `x!y` below the diagonal. GNU APL answers 0 for every y under x, integer
+  or not, so `1!0.5` is 0 there and 0.5 here; libjay's `!` is the
+  generalised binomial its row promises, on the reals and in the complex
+  plane.
+- `|` and `⋆` under the comparison tolerance. GNU APL tolerates two
+  integers one unit apart at 2⋆52 into equality, so
+  `4503599627370496|4503599627370497` is 0 there and 1 here, and it reads a
+  near-integer exponent as the integer it is near, so
+  `¯1⋆¯1.0000000000001` is the real `¯1` there where libjay takes the
+  principal value and answers a complex number.
+- the display of a nested array whose items are themselves several rows
+  deep: GNU APL puts a blank line between the rows of the outer array
+  (`3 1⍴(⊂2 2⍴⍳4)`), libjay does not. Layout only — the values match.
 
 Three entries are GNU APL's bug rather than a dialect difference, pinned so
-that a later release fixing them is noticed. A SINGLE axis outside the
-argument's rank is let through on `,` alone there and answers with the
-argument unchanged, so `,[0]M` under `⎕IO←1` and `,[9]M` are both the
-argument, while `,[0 4]M` — two axes, one out of range — is an AXIS ERROR
-there and `⊂[0]M` is one too; libjay holds every axis to the rank on every
-glyph, and Dyalog refuses these as well. A scan over an EMPTY argument keeps the
+that a later release fixing them is noticed. An axis outside the argument's
+rank is let through on SOME glyphs there and refused on others, with no rule
+joining the two sets: `,[0]M` under `⎕IO←1`, `,[9]M`, `⍪[0]M`, `⌽[0]M`,
+`⊖[0]M`, `2⌽[0]M` and `⍪[2]'abc'` all answer with the argument unchanged,
+while `⌽[3]M`, `2⌽[9]M`, `⊂[0]M`, `⊂[9]M`, `+/[0]M`, `+⌿[0]M`, `+\[0]M`,
+`1↑[0]M`, `1 2/[0]M`, `,[0 4]M` and `M,[0]M` are AXIS ERRORs — and `1↓[0]M`
+aborts the interpreter outright with an internal assertion. An EMPTY axis
+list splits the same way (`⍪[⍳0]v`, `,[⍳0]v`, `1 2↓[⍳0]M` and `⊂[⍳0]M`
+accepted, `⌽[⍳0]M`, `+/[⍳0]M` and `2⌽[⍳0]M` not, `2↑[⍳0]M` a LENGTH ERROR),
+and a FRACTIONAL axis outside the range is clamped rather than refused, so
+`,[¯0.5]M` is the argument and `,[3.5]M` is `,[2.5]M`. libjay holds every
+axis to the rank on every glyph and names the valid range when it refuses;
+Dyalog refuses these as well. A scan over an EMPTY argument keeps the
 argument's shape when the function is `+` or `×` there and drops it to a
 rank-1 empty when it is `-`, so `⍴-\0 3⍴1` is `0 3` here and `0` there
 while `⍴+\0 3⍴1` is `0 3` on both sides. A scan whose axis has length 1
@@ -2146,6 +2192,20 @@ sections above is also collected here.
   axis; and `⎕SYL`, `⎕AV` and `⎕PP`, which describe an interpreter's own
   limits, glyph repertoire and printing rather than the language. Each is a
   release-sized piece of work on its own.
+- The 2026-08-29 certification sweep re-confirmed those against the live
+  oracle and found eight more spellings GNU APL answers and libjay names:
+  the system variables `⎕PW`, `⎕RL`, `⎕LX`, `⎕ET` and the system functions
+  `⎕NC`, `⎕EM`, `⎕SVR` — which, like `⎕SYL` and `⎕AV`, report an
+  interpreter's own state rather than the language, and want a decision
+  about how much of that state libjay is willing to have before any of
+  them is written; a POWER whose count is computed rather than literal
+  (`+⍣(1+1)⊢5`, `N←2 ⋄ +⍣N⊢5`, and a computed LIST of counts) and an AXIS
+  that is computed (`K←1 ⋄ ⌽[K]M`), both of which need an operand's
+  expression to survive into the derived function, which nothing in the IR
+  holds today — the same wall the Dyalog `computed-operand` row names; and
+  INDEXED ASSIGNMENT used as an expression (`(A[1]←9)`, `1+A[1]←9`), which
+  wants an assignment to have a value. All are named refusals, never wrong
+  answers.
   The APL glyphs are reported by NAME rather than as unknown
   characters: a glyph the language has and libjay has not reached is a
   queue position, and the diagnostic says which one. Three spellings are
