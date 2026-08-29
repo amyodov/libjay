@@ -1,0 +1,90 @@
+// Axis specification where the two APLs part. Dyalog reads `↑[K]` as MIX
+// with the item axes placed where K names — a gap between two axes
+// included — where GNU APL reads `↑[K]` as FIRST and spells mix `⊃[K]`;
+// gives monadic `↓[K]` the SPLIT that GNU APL spells `⊂[K]` and has no
+// monadic `↓` for at all; has `⊆[K]` where GNU APL has no such character;
+// and pairs the axes of `⌷[K]` and of a SCALAR function with what
+// accompanies them in the order K was written, where GNU APL reads K as a
+// set and pairs them in ascending order.
+//
+// Recorded Dyalog ground truth: there is no `gnu:` column here, and the
+// Dyalog preset is held to every line.
+@ reference=dyalog
+
+// --- ↑[K] is mix, and K places the item axes -----------------------
+↑[1](1 2)(3 4)
+↑[2](1 2)(3 4)
+⍴↑[1](1 2)(3 4)
+⍴↑[2](1 2)(3 4)
+↑[1](1 2)(3 4 5)
+⍴↑[1](1 2)(3 4 5)
+↑[2](1 2)(3 4 5)
+↑[1 2](2 2⍴1 2 3 4)(2 2⍴5 6 7 8)
+↑[1 3](2 2⍴1 2 3 4)(2 2⍴5 6 7 8)
+↑[2 3](2 2⍴1 2 3 4)(2 2⍴5 6 7 8)
+↑[2 1](2 2⍴1 2 3 4)(2 2⍴5 6 7 8)
+⍴↑[1 2](2 2⍴1 2 3 4)(2 2⍴5 6 7 8)
+↑[1]2 3⍴⍳6
+↑[2]2 3⍴⍳6
+⍴↑[1]2 3⍴⍳6
+↑[1]⍳3
+↑[1 2]2 3 4⍴⍳24
+↑[1 2 3]2 3 4⍴⍳24
+// --- ↑[K.5]: the item axes at a gap --------------------------------
+↑[0.5](1 2)(3 4)
+↑[1.5](1 2)(3 4)
+↑[0.5](1 2 3)(4 5 6)
+⍴↑[0.5](2 2⍴⍳4)(2 2⍴⍳4)
+⍴↑[1.5](2 2⍴⍳4)(2 2⍴⍳4)
+↑[2.5](2 2⍴⍳4)(2 2⍴⍳4)
+// --- ↓[K] is split -------------------------------------------------
+↓[1]2 3⍴⍳6
+↓[2]2 3⍴⍳6
+⍴↓[1]2 3⍴⍳6
+⍴↓[2]2 3⍴⍳6
+↓[1]2 3 4⍴⍳24
+⍴↓[2]2 3 4⍴⍳24
+↓[1]⍳3
+// --- ⊆[K] partitions along a named axis ----------------------------
+1 0 1⊆[1]3 3⍴⍳9
+1 0 1⊆[2]3 3⍴⍳9
+1 1 2⊆[1]3 3⍴⍳9
+⍴1 0 1⊆[1]3 3⍴⍳9
+1 0 0 1⊆[2]2 4⍴⍳8
+// --- ⌷[K] pairs the indices with K in the order written ------------
+2 1⌷[2 1]3 4⍴⍳12
+1 2⌷[2 1]3 4⍴⍳12
+1 2⌷[1 2]3 4⍴⍳12
+2⌷[1]3 4⍴⍳12
+2⌷[2]3 4⍴⍳12
+1 2 3⌷[1 2 3]2 3 4⍴⍳24
+1 2 3⌷[3 2 1]2 3 4⍴⍳24
+// --- a scalar function pairs its axes the same way -----------------
+(2 3⍴1)+[2 1]3 2 4⍴⍳24
+(3 2⍴1)+[2 1]3 2 4⍴⍳24
+(2 3⍴1)+[1 2]2 3 4⍴⍳24
+1 2+[1]2 3⍴⍳6
+1 2 3+[2]2 3⍴⍳6
+1+[1]2 3⍴⍳6
+// --- ⊃[K] and ⍪[K] have no axis form here --------------------------
+⊃[1](1 2)(3 4)
+⊃[1]2 3⍴⍳6
+⍪[1]2 3⍴⍳6
+// --- the axes Dyalog refuses ---------------------------------------
+,[0]2 3⍴⍳6
+,[4]2 3 4⍴⍳24
+↑[1 2](1 2 3)(4 5 6)
++/[1 2]2 3 4⍴⍳24
+⌽[1 2]2 3⍴⍳6
+// --- ⎕IO 0 --------------------------------------------------------
+@ io=0
+↑[0](1 2)(3 4)
+↑[1](1 2)(3 4)
+↑[¯0.5](1 2)(3 4)
+↑[0.5](1 2)(3 4)
+↓[0]2 3⍴⍳6
+↓[1]2 3⍴⍳6
+1 0 1⊆[0]3 3⍴⍳9
+1 0⌷[1 0]3 4⍴⍳12
+0 1⌷[1 0]3 4⍴⍳12
+(2 3⍴1)+[1 0]3 2 4⍴⍳24

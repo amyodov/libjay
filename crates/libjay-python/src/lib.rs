@@ -571,6 +571,7 @@ fn dialect_of(
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     axis_counts: Option<&str>,
+    axis_order: Option<&str>,
     unique_mask: Option<&str>,
     expansion: Option<&str>,
     where_rank: Option<&str>,
@@ -585,7 +586,7 @@ fn dialect_of(
     extensions: Option<Vec<String>>,
 ) -> PyResult<Dialect> {
     use jay::frontend::{
-        AxisCounts, ComplexOrder, ControlStrictness, DefaultArg, DepthSign, DfnResult,
+        AxisCounts, AxisOrder, ComplexOrder, ControlStrictness, DefaultArg, DepthSign, DfnResult,
         EncodeDigits, Expansion, FirstDisclose, FloorRule, FormatSpec,
         GcdRule, IndexForm, InnerEach, LookupLeft, NearCount, NestedGrade, NestedModel,
         OrderDomain, Partition, UniqueMask, WhereRank,
@@ -688,6 +689,12 @@ fn dialect_of(
             &[("per-axis", AxisCounts::PerAxis), ("leading", AxisCounts::Leading)],
         )?
         .unwrap_or(d.axis_counts),
+        axis_order: setting(
+            axis_order,
+            "axis_order",
+            &[("ascending", AxisOrder::Ascending), ("as-written", AxisOrder::AsWritten)],
+        )?
+        .unwrap_or(d.axis_order),
         unique_mask: setting(
             unique_mask,
             "unique_mask",
@@ -773,6 +780,7 @@ fn dialect_of(
     nested_grade=None,
     lookup_left=None,
     axis_counts=None,
+    axis_order=None,
     unique_mask=None,
     expansion=None,
     where_rank=None,
@@ -804,6 +812,7 @@ fn compile(
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     axis_counts: Option<&str>,
+    axis_order: Option<&str>,
     unique_mask: Option<&str>,
     expansion: Option<&str>,
     where_rank: Option<&str>,
@@ -833,6 +842,7 @@ fn compile(
         nested_grade,
         lookup_left,
         axis_counts,
+        axis_order,
         unique_mask,
         expansion,
         where_rank,
@@ -889,6 +899,7 @@ fn devices() -> Vec<(String, String, String, bool)> {
     nested_grade=None,
     lookup_left=None,
     axis_counts=None,
+    axis_order=None,
     unique_mask=None,
     expansion=None,
     where_rank=None,
@@ -921,6 +932,7 @@ fn compile_parts(
     nested_grade: Option<&str>,
     lookup_left: Option<&str>,
     axis_counts: Option<&str>,
+    axis_order: Option<&str>,
     unique_mask: Option<&str>,
     expansion: Option<&str>,
     where_rank: Option<&str>,
@@ -950,6 +962,7 @@ fn compile_parts(
         nested_grade,
         lookup_left,
         axis_counts,
+        axis_order,
         unique_mask,
         expansion,
         where_rank,

@@ -17,8 +17,8 @@ use crate::frontend::{
 };
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
-    BitDyad, BitMonad, BoolDyad, DyadOp, Enclose, MonadOp, OpDef, Operand, Power, Prim, ScalarDyad,
-    ScalarMonad, Verb, WindowKind,
+    AxisSpec, BitDyad, BitMonad, BoolDyad, DyadOp, Enclose, MonadOp, OpDef, Operand, Power, Prim,
+    ScalarDyad, ScalarMonad, Verb, WindowKind,
     RANK_INF,
 };
 
@@ -1958,7 +1958,7 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
         // An explicit axis replaces the glyph's own choice of one: `+/[k]`
         // and `+⌿[k]` both reduce axis k, and `f\\[k]` and `f⍀[k]` both scan
         // it, which is what makes the two spellings the same function here.
-        if let Some((k, aspan)) = take_axis(&mut it, d)? {
+        if let Some((spec, aspan)) = take_axis(&mut it, d)? {
             let inner = match op {
                 OpGlyph::Slash | OpGlyph::SlashBar => Verb::NWise(Box::new(f)),
                 OpGlyph::Backslash | OpGlyph::BackslashBar => {
@@ -1971,8 +1971,16 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     ));
                 }
             };
+            // A reduction and a scan each fold ONE axis, so nothing but a
+            // single whole one has a meaning here.
+            if spec.single().is_none() {
+                return Err(Error::domain(
+                    format!("{} folds one whole axis, not {spec}", op.glyph()),
+                    aspan,
+                ));
+            }
             out.push(Token {
-                kind: Tok::Func(Verb::AlongAxis(Box::new(inner), k)),
+                kind: Tok::Func(Verb::AlongAxis(Box::new(inner), spec)),
                 span: Span::merge(span, aspan),
             });
             continue;
@@ -2111,45 +2119,63 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
     Ok(out)
 }
 
-/// `[k]` immediately after an operator glyph, if it is there. The axis is
-/// given in `⎕IO` origin and comes back as a zero-based one.
+/// `[k]` immediately after a function or an operator glyph, if it is there.
+///
+/// The axes are written in `⎕IO` origin and come back counted from zero. A
+/// number that is not whole names the GAP before the axis it rounds up to,
+/// which is where a new axis of the result goes; the value that comes back
+/// is that position.
 fn take_axis(
     it: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
     d: Rules,
-) -> Result<Option<(usize, Span)>> {
+) -> Result<Option<(AxisSpec, Span)>> {
     if !matches!(it.peek().map(|t| &t.kind), Some(Tok::LBracket)) {
         return Ok(None);
     }
-    let open = it.next().expect("peeked");
-    let spec = match it.next() {
-        Some(tok) if literal(&tok.kind).is_some() => tok,
-        Some(tok) => return Err(Error::not_yet("a computed axis (f[k])", tok.span)),
-        None => return Err(Error::parse("unterminated axis specification", open.span)),
-    };
-    let close = match it.next() {
-        Some(tok) if matches!(tok.kind, Tok::RBracket) => tok,
-        _ => return Err(Error::parse("unterminated axis specification", open.span)),
-    };
-    let span = Span::merge(open.span, close.span);
-    let arr = literal(&spec.kind).expect("checked above");
-    let Some(ints) = arr.to_i64_vec() else {
-        // A FRACTIONAL axis is a meaning of its own — `↑[0.5]` interleaves
-        // the item axes with the frame axes — and a named gap rather than a
-        // malformed axis. Anything else in the brackets is malformed.
-        if arr.to_f64_vec().is_some() {
-            return Err(Error::not_yet("a fractional axis (f[k.5])", spec.span));
+    let (arr, span) = bracket_value(it, d).map_err(|e| match (e.kind, e.span) {
+        (crate::error::ErrorKind::NotYet, Some(s)) => {
+            Error::not_yet("a computed axis (f[k])", s)
         }
-        return Err(Error::parse("an axis must be a whole number", spec.span));
-    };
-    let [k] = ints[..] else {
-        return Err(Error::not_yet("several axes in one specification", spec.span));
-    };
-    let origin = d.origin;
-    let k = k - origin;
-    if k < 0 {
-        return Err(Error::domain(format!("axis {} does not exist", k + origin), spec.span));
+        _ => e,
+    })?;
+    Ok(Some((axis_spec(&arr, d.origin, span)?, span)))
+}
+
+/// The axes a bracket's value names.
+fn axis_spec(arr: &Array, origin: i64, span: Span) -> Result<AxisSpec> {
+    if arr.rank() > 1 {
+        return Err(Error::parse("an axis specification is one number or a vector", span));
     }
-    Ok(Some((k as usize, span)))
+    if let Some(ints) = arr.to_i64_vec() {
+        let mut axes = Vec::with_capacity(ints.len());
+        for k in ints {
+            let a = k - origin;
+            if a < 0 {
+                return Err(Error::domain(
+                    format!("axis {k} does not exist: they start at {origin}"),
+                    span,
+                ));
+            }
+            axes.push(a as usize);
+        }
+        return Ok(AxisSpec::Axes(axes));
+    }
+    // A FRACTIONAL axis names the gap between two axes: `[0.5]` under
+    // `⎕IO←1` is the gap before the first one, `[1.5]` the one after it.
+    let Some(reals) = arr.to_f64_vec() else {
+        return Err(Error::parse("an axis must be a number", span));
+    };
+    let [k] = reals[..] else {
+        return Err(Error::parse("only one axis may name a gap between axes", span));
+    };
+    let place = (k - origin as f64).ceil();
+    if place < 0.0 {
+        return Err(Error::domain(
+            format!("axis {k} lies before the first one, which is {origin}"),
+            span,
+        ));
+    }
+    Ok(AxisSpec::Between(place as usize))
 }
 
 /// The options `⍠` was given, as `(name, value)` pairs.
@@ -2565,19 +2591,77 @@ fn fold_axes(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             });
             continue;
         }
-        let Some((k, aspan)) = take_axis(&mut it, d)? else {
+        let Some((spec, aspan)) = take_axis(&mut it, d)? else {
             out.push(t);
             continue;
         };
-        let Some(inner) = leading_axis_form(f) else {
-            return Err(Error::not_yet(format!("axis specification for {}", f.name()), aspan));
-        };
         out.push(Token {
-            kind: Tok::Func(Verb::AlongAxis(Box::new(inner), k)),
+            kind: Tok::Func(axis_verb(f, spec, aspan)?),
             span: Span::merge(t.span, aspan),
         });
     }
     Ok(out)
+}
+
+/// The function `f[…]` stands for.
+///
+/// Where the two glyphs of a pair differ only in which axis they pick, the
+/// axis specification settles it and the LEADING form is what runs, because
+/// `AlongAxis` has already brought the named axis to the front. Every other
+/// function that takes an axis reads it itself, so it is kept as it is;
+/// a function that takes none at all is a named gap.
+fn axis_verb(f: &Verb, spec: AxisSpec, aspan: Span) -> Result<Verb> {
+    if let Some(inner) = leading_axis_form(f) {
+        // These pick ONE of a pair of axes, so one whole axis is all the
+        // brackets can say.
+        if spec.single().is_none() {
+            return Err(Error::domain(
+                format!("{} takes one whole axis, not {spec}", axis_glyph(f)),
+                aspan,
+            ));
+        }
+        return Ok(Verb::AlongAxis(Box::new(inner), spec));
+    }
+    if !reads_axis(f) {
+        return Err(Error::not_yet(format!("axis specification for {}", axis_glyph(f)), aspan));
+    }
+    Ok(Verb::AlongAxis(Box::new(f.clone()), spec))
+}
+
+/// The glyph to name in an axis diagnostic: the primitive under whatever
+/// rank the frontend wrapped it in, so `⌽` reads as `⌽` and not as the
+/// rank-1 application it is built from.
+fn axis_glyph(v: &Verb) -> String {
+    match v {
+        Verb::Rank(inner, _) => axis_glyph(inner),
+        other => other.name(),
+    }
+}
+
+/// Whether the function reads an axis specification of its own — one it
+/// applies rather than one that only says which of a pair of axes to pick.
+fn reads_axis(v: &Verb) -> bool {
+    let Verb::Prim(p) = v else { return false };
+    // A SCALAR function takes an axis dyadically: the argument of lower
+    // rank lines up with the named axes of the other. The monadic case has
+    // no meaning, and says so when it runs.
+    if matches!(p.dyad, DyadOp::Scalar(_)) || matches!(p.monad, MonadOp::Scalar(_)) {
+        return true;
+    }
+    matches!(
+        p.monad,
+        MonadOp::Ravel | MonadOp::Enclose(_) | MonadOp::Split | MonadOp::Open
+    ) || matches!(p.monad, MonadOp::First if p.name == "↑")
+        || matches!(
+            p.dyad,
+            DyadOp::AppendLast
+                | DyadOp::AppendLeading
+                | DyadOp::Take
+                | DyadOp::Drop
+                | DyadOp::Squad { .. }
+                | DyadOp::PartitionEnclose
+                | DyadOp::PartitionCounts
+        )
 }
 
 /// The function a glyph means once an axis is named — the leading-axis form

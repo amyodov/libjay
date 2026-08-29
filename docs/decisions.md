@@ -3845,3 +3845,51 @@ the register.
   letter followed by alphanumerics, and what precedes the suffix is itself
   a name — which is what tells `a__` (a name) from `a___` (not one).
   Locales themselves remain a gap; this is only the spelling.
+- 2026-08-29 — An APL axis specification is ONE mechanism, not a hack per
+  primitive. `AxisSpec` holds what the brackets said — a list of whole
+  axes, or the gap a fractional one names — and `Verb::AlongAxis` carries
+  it. At run time a primitive that reads the axis ITSELF (`,` `⍪` `↑` `↓`
+  `⌷` `⊂` `⊆` `⊃`, and the scalar functions) is answered by `axis_prim`
+  with the specification in hand; everything else — the pairs that differ
+  only in which axis they pick, `f/[k]` `f\[k]` `⌽[k]` `⊖[k]` `x/[k]y`
+  `x\[k]y` — keeps the old transpose-apply-untranspose path, because for
+  those the axis is not an argument but a choice of function. The frontend
+  decides which of the two a glyph is (`reads_axis`, `leading_axis_form`)
+  and refuses the rest by name, so a function with no axis meaning never
+  reaches the engine wearing one.
+- 2026-08-29 — Both references were asked what an axis LIST means where a
+  function pairs one thing per axis, and they part. `↑` `↓` `,` and `⊂`
+  read K in the order written in both — `1 2↑[3 1]Y` takes 1 along axis 3
+  — but `⌷` and the scalar functions do not: `2 1⌷[2 1]Y` is 5 on a
+  `3 4⍴⍳12` in GNU APL, which reads K as a SET and pairs the indices with
+  the axes ascending, and 2 in Dyalog, which pairs them as written.
+  `Dialect.axis_order` (`ascending` / `as-written`) is that one question,
+  and it settles both functions at once rather than each glyph deciding
+  for itself.
+- 2026-08-29 — A SCALAR function takes an axis, which neither the earlier
+  status table nor the gap list had noticed: `1 2+[1]2 3⍴⍳6` adds 1 to the
+  first row and 2 to the second, in both references. The rule the oracles
+  gave is narrow — the argument of lower rank must have exactly as many
+  axes as K names, and its shape must equal the other's at those axes —
+  and `scalar_axis` spreads it to the larger shape and then applies the
+  function unchanged, so nothing in the scalar path knows about axes. A
+  SCALAR argument spreads as it would with no axis at all, which GNU APL
+  does and Dyalog refuses; the preset carries that as an `axis-strict`
+  exemption rather than a third setting, since `⍪[K]`, which Dyalog also
+  refuses, would need one of its own.
+- 2026-08-29 — GNU APL lets a single out-of-range axis through on `,`
+  alone: `,[0]M` under `⎕IO←1` and `,[9]M` both answer with the argument,
+  while `,[0 4]M` and `⊂[0]M` are AXIS ERRORs in the same interpreter and
+  Dyalog refuses all four. libjay holds every axis to the argument's rank
+  everywhere, and the three sentences are pinned in
+  `corpus/apl/divergences.txt`: a diagnostic that names the valid range
+  cannot have one glyph exempt from the range.
+- 2026-08-29 — `↑[K]` and `⊃[K]` are both mix, and the two references
+  check K differently, so the check follows the GLYPH rather than the
+  operation. On `⊃` (GNU APL's mix) any axes of the ANSWER will do and a
+  list longer than the item rank names the last of them, which is what
+  makes `⊃[1]` of a simple matrix a transpose. On `↑` (Dyalog's) the list
+  must be exactly as long as the items are deep, except that an argument
+  whose items are scalars takes one axis and ignores it — even one outside
+  the answer's rank, which is Dyalog's own edge and was measured, not
+  guessed.

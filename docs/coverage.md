@@ -601,14 +601,18 @@ answers in `snapshots/apl/grade.snap`, which is what pins it. A third is
 with its sign and rounds a near-whole or vanishing argument before the
 Euclid runs, and Dyalog does neither (`¯3∨0` is 3 there, `¯3` here).
 
-Six more rows are the preset's. `Dialect.lookup_left`: dyadic `⍳` and `⍸`
+Seven more rows are the preset's. `Dialect.lookup_left`: dyadic `⍳` and `⍸`
 search their left argument's MAJOR CELLS, so a matrix looks up rows and
 answers one number per cell of the right argument, and a scalar — having no
 cell — is a rank error, where the APL2 line searches the ELEMENTS of a left
 argument of any rank. `Dialect.axis_counts`: `↑` and `↓` take a left
 argument shorter than the rank, the counts applying to the leading axes and
 the rest being taken whole or dropped from not at all, so `2↑matrix` is the
-first two rows. `Dialect.unique_mask`: monadic `≠` marks major cells and
+first two rows. `Dialect.axis_order`: the axes of `⌷[K]` and of a scalar
+function's `f[K]` pair with what accompanies them in the order K was
+written, so `2 1⌷[2 1]M` means `1 2⌷[1 2]M`, where the APL2 line reads K as
+a set and pairs them ascending, making the same sentence `2 1⌷[1 2]M`.
+`↑` `↓` `,` and `⊂` keep the order written under both. `Dialect.unique_mask`: monadic `≠` marks major cells and
 always answers a vector as long as `≢Y`, where the APL2 line marks the
 elements and keeps the shape. `Dialect.expansion`: dyadic `\` takes any
 integer count list — a positive count repeats that item, a negative one
@@ -858,15 +862,50 @@ sandbox", which is the sandbox speaking rather than a queue position — see
 "Sandbox" below. `⎕` and `⍞` on their own are input rather than names: see
 the same section.
 
-An axis specification `f[k]` is supported for the spellings where an
-explicit axis is the whole point: `f/[k]` and `f⌿[k]` both reduce axis k,
-`f\[k]` and `f⍀[k]` both scan it, `⌽[k]` and `⊖[k]` both reverse it, and the
-DYADIC `x/[k]y` and `x\[k]y` replicate and expand along it — naming an axis
-collapses each pair to one function. The axis is counted from `⎕IO`. Every
-other glyph reports `axis specification for X` as a gap; `⊆[k]`, `↑[k]` and
-`⌷[k]` are the three that a Dyalog program is likeliest to want. A
-FRACTIONAL axis — `↑[0.5]`, which interleaves the item axes with the frame
-axes — is a second gap, named as `a fractional axis (f[k.5])`.
+An axis specification `f[K]` is real for every function that reads one, and
+the axes are counted from `⎕IO`. Two kinds of function take one.
+
+Where a PAIR of glyphs differs only in which axis it picks, naming an axis
+collapses the pair to one function: `f/[k]` and `f⌿[k]` both reduce axis k,
+`f\[k]` and `f⍀[k]` both scan it, `⌽[k]` and `⊖[k]` both reverse or rotate
+it, and the DYADIC `x/[k]y` and `x\[k]y` replicate and expand along it.
+Each of these folds or picks ONE whole axis, so a list of them, or a
+fractional one, is a domain error naming the glyph.
+
+The rest read the axis themselves, and several of them take a LIST:
+
+- `,[K]` and `⍪[K]` run a RUN of neighbouring axes together (`,[1 2]` of a
+  2×3×4 is 6×4); the axes must follow one another. A fractional `,[K.5]`
+  adds a new axis of length one at the gap. Dyadically, `x,[k]y` joins the
+  named axis and `x,[k.5]y` LAMINATES — the two arguments beside each other
+  along a new axis, a scalar spreading over the other's shape.
+- `x↑[K]y` and `x↓[K]y` take one count from x per axis K names, in the
+  order written; every axis K leaves out is taken whole and dropped from
+  not at all.
+- `x⌷[K]y` indexes only the axes K names, the rest coming through whole.
+- `⊂[K]y` makes the named axes the shape of each item, in the order
+  written, and the axes K left out the shape of the answer; `⊂[⍳0]y` names
+  none, and `⊂[1 2 3]` of a rank-3 argument is one enclosure. Dyadically,
+  `x⊂[k]y` and `x⊆[k]y` partition the named axis in place.
+- Monadic `↑[K]` is first here, taking one item along each named axis and
+  keeping the axis; `⊃[K]` is mix, placing the item axes at the positions
+  K names. Under `Dialect.first_disclose` the two swap, and `↑[K.5]` then
+  places every item axis at one gap.
+- A SCALAR function takes an axis dyadically: the argument of lower rank is
+  shaped like the axes K names and is stretched along the rest, so
+  `1 2+[1]2 3⍴⍳6` adds 1 to the first row and 2 to the second. Its rank
+  must equal the number of axes; a scalar spreads as it would with no axis.
+  Monadically there is nothing to line up, and it says so.
+
+`Dialect.axis_order` settles which axis of K goes with which item of what
+accompanies it, where the two lines disagree: `↑` `↓` `,` and `⊂` read K in
+the order written in both, while `⌷` and the scalar functions read it as a
+SET here (`2 1⌷[2 1]M` is `1 2⌷[1 2]M`) and in the order written under
+Dyalog's preset.
+
+Every other glyph reports `axis specification for X` as a gap — `⍉` `∊` `≡`
+`⍴` `⍒`, a dfn operand's own brackets, and an operator's derived function
+(`⌽⍤0[1]`) among them.
 
 Bracket indexing `A[i;j]` is real: one slot per axis, an elided slot meaning
 the whole axis, indices counted from `⎕IO`, and the result's shape the
@@ -1986,8 +2025,17 @@ libjay is stricter, or simply elsewhere:
 - libjay's obverse table reaches past GNU APL's, so `⌽⍣¯1`, and the rest of
   the rearranging rows above, answer here and are a DOMAIN ERROR there.
 
-Two entries are GNU APL's bug rather than a dialect difference, pinned so
-that a later release fixing them is noticed. A scan over an EMPTY argument keeps the
+- a dfn operand takes an axis: `{+/⍵}/[1]M` folds the rows exactly as a
+  primitive operand would, which is Dyalog's reading. GNU APL takes an axis
+  only after a PRIMITIVE function and answers a SYNTAX ERROR for the dfn.
+
+Three entries are GNU APL's bug rather than a dialect difference, pinned so
+that a later release fixing them is noticed. A SINGLE axis outside the
+argument's rank is let through on `,` alone there and answers with the
+argument unchanged, so `,[0]M` under `⎕IO←1` and `,[9]M` are both the
+argument, while `,[0 4]M` — two axes, one out of range — is an AXIS ERROR
+there and `⊂[0]M` is one too; libjay holds every axis to the rank on every
+glyph, and Dyalog refuses these as well. A scan over an EMPTY argument keeps the
 argument's shape when the function is `+` or `×` there and drops it to a
 rank-1 empty when it is `-`, so `⍴-\0 3⍴1` is `0 3` here and `0` there
 while `⍴+\0 3⍴1` is `0 3` on both sides. A scan whose axis has length 1
@@ -2051,8 +2099,11 @@ sections above is also collected here.
   capped fork or an explicit definition; and `!.` as a fill on any verb but
   `|.`. In APL: a variant option other than `⎕CT` and `⎕IO`, or one that is
   not settled when the program is compiled; a nested argument to dyadic
-  `⍕`; a stencil with a movement row; and a label sharing a definition with
-  a control structure.
+  `⍕`; a stencil with a movement row; a label sharing a definition with
+  a control structure; and an axis specification on a function that is not
+  a primitive — a dfn (`{⍵}[1]`), a train, or an operator's derived
+  function (`⌽⍤0[1]`) — which is refused by name, as are the primitives
+  that have no axis form at all.
 - Five GNU APL features the 2026-08-28 manual crawl found and this wave did
   not implement, each of them a named refusal rather than a wrong answer:
   a `[X]` axis in a `∇`-definition header (`∇Z←AV[X] B`) and the lambda

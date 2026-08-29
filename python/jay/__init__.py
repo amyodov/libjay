@@ -98,6 +98,7 @@ _DIALECT_KEYS = (
     "nested_grade",
     "lookup_left",
     "axis_counts",
+    "axis_order",
     "unique_mask",
     "expansion",
     "where_rank",

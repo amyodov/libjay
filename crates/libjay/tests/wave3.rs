@@ -460,9 +460,121 @@ fn apl_axis_specification_picks_the_axis() {
     assert_eq!(ints(&val0("+/[0]2 3⍴⍳6")), vec![3, 5, 7]);
 }
 
+/// The structural functions read the axis themselves.
+#[test]
+fn apl_axis_specification_reaches_the_structural_functions() {
+    // Catenate joins the named axis; a fractional one lays the two
+    // arguments beside each other along a new axis.
+    assert_eq!(val(Lang::Apl, "1 2 3,[1]2 3⍴⍳6").shape, vec![3, 3]);
+    assert_eq!(val(Lang::Apl, "(2 3⍴⍳6),[2]2 2⍴⍳4").shape, vec![2, 5]);
+    assert_eq!(val(Lang::Apl, "1 2 3,[0.5]4 5 6"), i64s(&[2, 3], &[1, 2, 3, 4, 5, 6]));
+    assert_eq!(val(Lang::Apl, "1 2 3,[1.5]4 5 6"), i64s(&[3, 2], &[1, 4, 2, 5, 3, 6]));
+    // Ravel with an axis runs a RUN of axes together.
+    assert_eq!(val(Lang::Apl, ",[1 2]2 3 4⍴⍳24").shape, vec![6, 4]);
+    assert_eq!(val(Lang::Apl, ",[0.5]2 3⍴⍳6").shape, vec![1, 2, 3]);
+    // Take and drop read one count per axis the brackets name, in the
+    // order they were written; every other axis comes through whole.
+    assert_eq!(val(Lang::Apl, "1↑[1]2 3 4⍴⍳24").shape, vec![1, 3, 4]);
+    assert_eq!(val(Lang::Apl, "1 2↑[3 1]2 3 4⍴⍳24").shape, vec![2, 3, 1]);
+    assert_eq!(val(Lang::Apl, "1↓[2]2 3⍴⍳6"), i64s(&[2, 2], &[2, 3, 5, 6]));
+    // Index, likewise.
+    assert_eq!(ints(&val(Lang::Apl, "2⌷[2]3 4⍴⍳12")), vec![2, 6, 10]);
+    assert_eq!(val(Lang::Apl, "(1 2)(3 4)⌷[1 2]3 4⍴⍳12"), i64s(&[2, 2], &[3, 4, 7, 8]));
+    // Enclose along the named axes: they become the shape of each item.
+    assert_eq!(val(Lang::Apl, "⊂[1]2 3⍴⍳6").shape, vec![3]);
+    assert_eq!(val(Lang::Apl, "⊂[2 1]2 3 4⍴⍳24").shape, vec![4]);
+    // Partition, in place along the named axis.
+    assert_eq!(val(Lang::Apl, "1 0 1⊂[1]3 3⍴⍳9").shape, vec![2, 3]);
+    assert_eq!(val(Lang::Apl, "1 0 1⊂[2]3 3⍴⍳9").shape, vec![3, 2]);
+    // The axis is named in ⎕IO origin here too.
+    assert_eq!(val0("1↑[0]2 3 4⍴⍳24").shape, vec![1, 3, 4]);
+    assert_eq!(val0("1 2 3,[0.5]4 5 6").shape, vec![3, 2]);
+}
+
+#[test]
+fn an_axis_the_argument_lacks_is_refused() {
+    for src in ["+/[3]2 3⍴⍳6", "⌽[1]5", "1↑[0]2 3⍴⍳6", "⊂[1]5", "1 2 3,[3]2 3⍴⍳6"] {
+        let e = err(Lang::Apl, src);
+        assert!(
+            matches!(e.kind, ErrorKind::Rank | ErrorKind::Domain),
+            "{src}: {:?} {}",
+            e.kind,
+            e.msg
+        );
+    }
+    // One axis where only one has a meaning, and one count per axis.
+    assert_eq!(err(Lang::Apl, "+/[1 2]2 3 4⍴⍳24").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::Apl, "1 2↑[1]2 3 4⍴⍳24").kind, ErrorKind::Length);
+    assert_eq!(err(Lang::Apl, ",[1 3]2 3 4⍴⍳24").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::Apl, "1↑[1 1]2 3⍴⍳6").kind, ErrorKind::Domain);
+}
+
+/// A scalar function's axis says how the smaller argument lines up.
+#[test]
+fn apl_a_scalar_function_reads_an_axis() {
+    assert_eq!(val(Lang::Apl, "1 2+[1]2 3⍴⍳6"), i64s(&[2, 3], &[2, 3, 4, 6, 7, 8]));
+    assert_eq!(val(Lang::Apl, "1 2 3+[2]2 3⍴⍳6"), i64s(&[2, 3], &[2, 4, 6, 5, 7, 9]));
+    // Either side may be the smaller one.
+    assert_eq!(val(Lang::Apl, "(2 3⍴⍳6)+[1]1 2"), i64s(&[2, 3], &[2, 3, 4, 6, 7, 8]));
+    // Several axes, and a scalar that spreads over everything as it would
+    // with no axis at all.
+    assert_eq!(val(Lang::Apl, "(2 3⍴1)+[1 2]2 3 4⍴⍳24").shape, vec![2, 3, 4]);
+    assert_eq!(val(Lang::Apl, "1+[1]2 3⍴⍳6"), i64s(&[2, 3], &[2, 3, 4, 5, 6, 7]));
+    assert_eq!(ints(&val0("1 2+[0]2 3⍴⍳6")), vec![1, 2, 3, 5, 6, 7]);
+    // The argument must be shaped like the axes, and one argument has
+    // nothing to line up.
+    assert_eq!(err(Lang::Apl, "1 2 3+[1]2 3⍴⍳6").kind, ErrorKind::Length);
+    assert_eq!(err(Lang::Apl, "(2 3⍴1)+[1]2 3⍴⍳6").kind, ErrorKind::Rank);
+    assert_eq!(err(Lang::Apl, "+[1]2 3⍴⍳6").kind, ErrorKind::Domain);
+}
+
+/// `⌷` and the scalar functions read their axes as a SET in the shipped
+/// dialect and in the order written under Dyalog's; `↑` `↓` `,` and `⊂`
+/// keep the order written in both.
+#[test]
+fn apl_the_axis_order_is_a_dialect_question() {
+    let dyalog = Dialect::dyalog();
+    assert_eq!(ints(&val(Lang::Apl, "2 1⌷[2 1]3 4⍴⍳12")), vec![5]);
+    assert_eq!(ints(&run_dialect(Lang::Apl, "2 1⌷[2 1]3 4⍴⍳12", &dyalog).unwrap()), vec![2]);
+    assert_eq!(val(Lang::Apl, "(3 2⍴1)+[2 1]3 2 4⍴⍳24").shape, vec![3, 2, 4]);
+    assert_eq!(
+        run_dialect(Lang::Apl, "(2 3⍴1)+[2 1]3 2 4⍴⍳24", &dyalog).unwrap().shape,
+        vec![3, 2, 4]
+    );
+    // Take keeps the order the brackets named it in, either way.
+    for d in [Dialect::default(), dyalog] {
+        let a = run_dialect(Lang::Apl, "1 2↑[3 1]2 3 4⍴⍳24", &d).unwrap();
+        assert_eq!(a.shape, vec![2, 3, 1]);
+    }
+}
+
+/// `↑[K]` is mix under Dyalog's dialect and first under the shipped one,
+/// and the two read K differently.
+#[test]
+fn apl_mix_places_its_item_axes_where_the_brackets_say() {
+    let dyalog = Dialect::dyalog();
+    let mix = |src: &str| run_dialect(Lang::Apl, src, &dyalog).unwrap();
+    assert_eq!(mix("↑[1](1 2)(3 4)"), i64s(&[2, 2], &[1, 3, 2, 4]));
+    assert_eq!(mix("↑[2](1 2)(3 4)"), i64s(&[2, 2], &[1, 2, 3, 4]));
+    assert_eq!(mix("↑[0.5](1 2)(3 4)"), i64s(&[2, 2], &[1, 3, 2, 4]));
+    assert_eq!(mix("↑[1.5](1 2)(3 4)"), i64s(&[2, 2], &[1, 2, 3, 4]));
+    assert_eq!(mix("↑[2 1](2 2⍴1 2 3 4)(2 2⍴5 6 7 8)").shape, vec![2, 2, 2]);
+    // One axis per item axis; a simple argument takes one and ignores it.
+    assert_eq!(mix("↑[3]2 3⍴⍳6").shape, vec![2, 3]);
+    let too_many = compile(Lang::Apl, "↑[1 2](1 2 3)(4 5 6)", &dyalog)
+        .expect("it compiles")
+        .run(&[], &mut |_: &str| {})
+        .expect_err("two axes for one item axis");
+    assert_eq!(too_many.kind, ErrorKind::Length);
+    // The shipped dialect reads `↑[K]` as first and spells mix `⊃[K]`.
+    assert_eq!(val(Lang::Apl, "↑[1]2 3⍴⍳6").shape, vec![1, 3]);
+    assert_eq!(val(Lang::Apl, "⊃[1](1 2)(3 4)"), i64s(&[2, 2], &[1, 3, 2, 4]));
+    assert_eq!(val(Lang::Apl, "⍴⊃[1]2 3 4⍴⍳24").to_i64_vec().unwrap(), vec![4, 2, 3]);
+}
+
 #[test]
 fn the_axis_forms_libjay_lacks_are_named() {
-    for src in [",[1]2 3⍴⍳6", "⊂[1]2 3⍴⍳6"] {
+    for src in ["⍉[1]2 3⍴⍳6", "∊[1]2 3⍴⍳6", "⌷[1]2 3⍴⍳6", "1 2⍴[1]2 3⍴⍳6"] {
         let e = err(Lang::Apl, src);
         assert_eq!(e.kind, ErrorKind::NotYet, "{src}");
         assert!(e.msg.contains("axis specification"), "{src}: {}", e.msg);

@@ -111,6 +111,13 @@ class APL:
         many or fewer, the counts applying to the leading axes, so
         ``2↑matrix`` is the first two rows)."""
 
+        axis_order: str = "ascending"
+        """How the axes of ``f[K]`` pair with what accompanies them, where
+        the function takes one thing per axis: "ascending" (GNU APL — K is
+        a set, so ``2 1⌷[2 1]M`` indexes exactly as ``[1 2]`` would) or
+        "as-written" (Dyalog — the order the brackets named). ``↑`` ``↓``
+        ``,`` and ``⊂`` keep the order written either way."""
+
         unique_mask: str = "elements"
         """What monadic ``≠`` counts: "elements" (GNU APL — the ravel, and
         the argument's shape is kept) or "major-cells" (Dyalog — one bit
@@ -200,6 +207,7 @@ class APL:
         nested_grade="total-order",
         lookup_left="major-cells",
         axis_counts="leading",
+        axis_order="as-written",
         unique_mask="major-cells",
         expansion="counts",
         where_rank="by-rank",

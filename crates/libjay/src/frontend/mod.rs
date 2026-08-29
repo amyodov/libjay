@@ -186,6 +186,24 @@ pub enum AxisCounts {
     Leading,
 }
 
+/// How the axes named in `f[K]` line up with what accompanies them, where
+/// the function pairs one thing per axis.
+///
+/// `↑` `↓` `,` and `⊂` read K in the order it was written in both
+/// references — `1 2↑[3 1]Y` takes 1 along axis 3 and 2 along axis 1.
+/// `⌷` and the scalar functions do not agree: GNU APL reads their K as a
+/// SET, so `2 1⌷[2 1]Y` indexes row 2 and column 1 exactly as `[1 2]`
+/// would, while Dyalog pairs them in the order written and answers the
+/// other element.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AxisOrder {
+    /// GNU APL: ascending, whatever order the brackets named.
+    #[default]
+    Ascending,
+    /// Dyalog: the order the brackets named.
+    AsWritten,
+}
+
 /// What monadic `≠` counts.
 ///
 /// GNU APL runs the sieve over the ELEMENTS in ravel order and keeps the
@@ -393,6 +411,7 @@ pub struct Dialect {
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
     pub axis_counts: AxisCounts,
+    pub axis_order: AxisOrder,
     pub unique_mask: UniqueMask,
     pub expansion: Expansion,
     pub where_rank: WhereRank,
@@ -440,6 +459,7 @@ impl Dialect {
             nested_grade: NestedGrade::Apl2,
             lookup_left: LookupLeft::AnyRank,
             axis_counts: AxisCounts::PerAxis,
+            axis_order: AxisOrder::Ascending,
             unique_mask: UniqueMask::Elements,
             expansion: Expansion::Boolean,
             where_rank: WhereRank::Flattened,
@@ -479,6 +499,7 @@ impl Dialect {
             nested_grade: NestedGrade::TotalOrder,
             lookup_left: LookupLeft::MajorCells,
             axis_counts: AxisCounts::Leading,
+            axis_order: AxisOrder::AsWritten,
             unique_mask: UniqueMask::MajorCells,
             expansion: Expansion::Counts,
             where_rank: WhereRank::ByRank,
@@ -563,6 +584,7 @@ impl Dialect {
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
             axis_counts: self.axis_counts,
+            axis_order: self.axis_order,
             unique_mask: self.unique_mask,
             expansion: self.expansion,
             where_rank: self.where_rank,
@@ -606,6 +628,7 @@ pub struct Rules {
     pub nested_grade: NestedGrade,
     pub lookup_left: LookupLeft,
     pub axis_counts: AxisCounts,
+    pub axis_order: AxisOrder,
     pub unique_mask: UniqueMask,
     pub expansion: Expansion,
     pub where_rank: WhereRank,
@@ -644,6 +667,7 @@ impl Rules {
             nested_grade: self.nested_grade,
             lookup_left: self.lookup_left,
             axis_counts: self.axis_counts,
+            axis_order: self.axis_order,
             unique_mask: self.unique_mask,
             expansion: self.expansion,
             where_rank: self.where_rank,

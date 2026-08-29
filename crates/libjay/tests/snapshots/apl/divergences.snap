@@ -323,3 +323,27 @@
 ? the array binds as f's left argument here; there it multiplies f's result
 < 3 4
 > gnu: 5
+= ,[0]2 3⍴⍳6
+? an axis outside the argument's rank is refused here, ignored there
+< <error>
+> gnu: 1 2 3
+> gnu: 4 5 6
+= ,[9]2 3⍴⍳6
+? an axis outside the argument's rank is refused here, ignored there
+< <error>
+> gnu: 1 2 3
+> gnu: 4 5 6
+= ,[4]2 3 4⍴⍳24
+? an axis outside the argument's rank is refused here, ignored there
+< <error>
+> gnu:  1  2  3  4
+> gnu:  5  6  7  8
+> gnu:  9 10 11 12
+> gnu:
+> gnu: 13 14 15 16
+> gnu: 17 18 19 20
+> gnu: 21 22 23 24
+= {+/⍵}/[1]2 3⍴⍳6
+? a dfn operand takes an axis here, as in Dyalog; a syntax error there
+< 4 5 6
+> gnu: <error>

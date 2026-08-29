@@ -268,3 +268,24 @@ N←{42} ⋄ N 5
 ? the array binds as f's left argument here; there it multiplies f's result
 2 3∘+ 1 1
 ? the array binds as f's left argument here; there it multiplies f's result
+
+// GNU APL lets a SINGLE out-of-range axis through on `,` alone and answers
+// with the argument unchanged: `,[0]M` under ⎕IO←1 and `,[9]M` are both
+// the argument, while `,[0 4]M` — two axes, one of them out of range — is
+// an AXIS ERROR there, and `⊂[0]M` is one too. libjay holds every axis to
+// the argument's rank, on `,` as on the rest; Dyalog refuses these as
+// well. Matching the leniency would mean a diagnostic that names the valid
+// range everywhere except one glyph.
+,[0]2 3⍴⍳6
+? an axis outside the argument's rank is refused here, ignored there
+,[9]2 3⍴⍳6
+? an axis outside the argument's rank is refused here, ignored there
+,[4]2 3 4⍴⍳24
+? an axis outside the argument's rank is refused here, ignored there
+
+// `⍺⍺`-free dfns reduce along a named axis here: `{+/⍵}/[1]M` folds the
+// rows exactly as a primitive operand would. GNU APL takes an axis only
+// after a PRIMITIVE function and answers a SYNTAX ERROR for a dfn operand;
+// Dyalog reduces, which is what libjay does.
+{+/⍵}/[1]2 3⍴⍳6
+? a dfn operand takes an axis here, as in Dyalog; a syntax error there

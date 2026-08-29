@@ -7,6 +7,41 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- APL's axis specification `f[K]` for every function that reads one. The
+  brackets after a function say which axis it works along, and may name
+  several where the function takes several:
+
+  - `,[K]` and `⍪[K]` run neighbouring axes together — `,[1 2]` of a
+    2×3×4 answers 6×4 — and a fractional `,[K.5]` adds a new axis of
+    length one at the gap it names.
+  - `x,[k]y` catenates along the named axis, and `x,[k.5]y` LAMINATES:
+    the two arguments beside each other along a new axis, so
+    `1 2 3,[0.5]4 5 6` is a 2×3 matrix and `[1.5]` a 3×2 one.
+  - `x↑[K]y` and `x↓[K]y` take and drop one count per named axis, in the
+    order written, leaving every other axis whole.
+  - `x⌷[K]y` indexes only the named axes; the rest come through whole.
+  - `⊂[K]y` makes the named axes the shape of each item and the rest the
+    shape of the answer, and `x⊂[k]y` / `x⊆[k]y` partition the named axis
+    in place.
+  - `↑[K]y` takes one item along each named axis; `⊃[K]y` mixes, placing
+    the item axes where K names. Under Dyalog's dialect the two swap and
+    `↑[K.5]` puts every item axis at one gap.
+  - a SCALAR function takes an axis dyadically: `1 2+[1]2 3⍴⍳6` adds 1 to
+    the first row and 2 to the second, and `(2 3⍴1)+[1 2]2 3 4⍴⍳24` lines
+    a matrix up with two axes of a three-axis argument.
+
+  What already worked — `f/[k]` `f⌿[k]` `f\[k]` `f⍀[k]`, `⌽[k]` `⊖[k]`,
+  and the dyadic `x/[k]y` and `x\[k]y` — is unchanged. An axis outside the
+  argument's rank now says which axes there are, and a function that takes
+  one whole axis says so rather than reporting a gap.
+
+- `Dialect.axis_order`, one setting for the one place the two APL lines
+  read an axis LIST differently: `⌷[K]` and a scalar function's `f[K]`
+  pair their axes with what accompanies them ascending by default and in
+  the order written under `Dialect.dyalog()`, so `2 1⌷[2 1]M` answers the
+  element `2 1⌷[1 2]M` does by default and the one `1 2⌷[1 2]M` does
+  there. `↑` `↓` `,` and `⊂` keep the order written under both.
+
 ### Changed
 
 ### Fixed

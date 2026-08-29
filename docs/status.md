@@ -287,17 +287,17 @@ conjunctions above:
 | Glyph | Monad | Dyad |
 |---|---|---|
 | `⍴` | 🟢 shape | 🟢 reshape, laying out elements; an empty argument fills |
-| `,` | 🟢 ravel | 🟢 catenate (last axis); a simple side joined to a nested one has its items enclosed, and two that share no type make a mixed simple array |
-| `⍪` | 🟢 table | 🟢 catenate (leading axis); same |
-| `⌽` | 🟢 reverse | 🟢 rotate |
-| `⊖` | 🟢 reverse first | 🟢 rotate first; one amount per column, as `⌽` takes one per row |
+| `,` | 🟢 ravel; `,[K]` runs a RUN of neighbouring axes together, and a fractional `,[K.5]` adds a new axis of length one at the gap | 🟢 catenate (last axis); a simple side joined to a nested one has its items enclosed, and two that share no type make a mixed simple array. `,[k]` joins the named axis, and a fractional `,[k.5]` LAMINATES — the two arguments beside each other along a new axis there |
+| `⍪` | 🟢 table; `⍪[K]` is `,[K]`, as the reference reads an axis on either glyph | 🟢 catenate (leading axis); same, `⍪[k]` and its laminate included |
+| `⌽` | 🟢 reverse; `⌽[k]` reverses the named axis | 🟢 rotate; `⌽[k]` rotates it |
+| `⊖` | 🟢 reverse first; `⊖[k]` is `⌽[k]` — the axis settles which, whichever glyph was written | 🟢 rotate first; one amount per column, as `⌽` takes one per row; `⊖[k]` likewise |
 | `⍉` | 🟢 transpose | 🟢 dyadic transpose; x says which axis of the result each axis of y becomes, and a repeated destination runs those axes together |
-| `↑` | 🟢 first; an empty nested argument answers the prototype it remembers. Under `first_disclose` it is MIX, which frames characters beside numbers into a mixed simple array, each cell padded with its own prototype | 🟢 take; overtaking a nested array fills with the first item's prototype. One count per axis; `axis_counts` names Dyalog's reading, where fewer counts leave the trailing axes whole |
-| `↓` | 🟡 no oracle: GNU APL has no monadic `↓`; Dyalog's split | 🟢 drop; one count per axis, and `axis_counts` names Dyalog's reading, where fewer counts drop nothing from the trailing axes |
-| `⊂` | 🟢 enclose | 🟢 partitioned enclose; rank 2 and above partitions the last axis; a single flag extends over every item, so `1⊂1 2 3` is one partition, and no flag against no item is the empty nested vector |
-| `⊃` | 🟢 disclose / mix; a character cell frames beside a numeric one into a mixed simple array | 🟢 pick: one item of the path is one LEVEL and holds one index per axis of the value at that level, counted from `⎕IO` upwards |
-| `⊆` | 🟡 no oracle: not in GNU APL's character set; Dyalog's nest | 🟡 no oracle; Dyalog's partition, which is GNU APL's dyadic `⊂` |
-| `⌷` | 🟡 no oracle: materialise, which Dyalog makes the identity | 🟢 index (APL2: one item of x per axis, a scalar or an enclosed vector) |
+| `↑` | 🟢 first; an empty nested argument answers the prototype it remembers, and `↑[K]` takes one item along each named axis, the axis staying. Under `first_disclose` it is MIX — `↑[K]` places the item axes where K names, a fractional `↑[K.5]` putting them all at one gap — which frames characters beside numbers into a mixed simple array, each cell padded with its own prototype | 🟢 take; overtaking a nested array fills with the first item's prototype. One count per axis; `axis_counts` names Dyalog's reading, where fewer counts leave the trailing axes whole. `x↑[K]y` takes one count per axis K names, in the order written, and leaves every other axis whole |
+| `↓` | 🟡 no oracle: GNU APL has no monadic `↓`; Dyalog's split, `↓[k]` recorded against Dyalog in `corpus/apl/dyalog-axis.txt` | 🟢 drop; one count per axis, and `axis_counts` names Dyalog's reading, where fewer counts drop nothing from the trailing axes. `x↓[K]y` drops one count per axis K names, in the order written, and nothing from the rest |
+| `⊂` | 🟢 enclose; `⊂[K]` makes the named axes the shape of each item, in the order written, and the rest the shape of the answer | 🟢 partitioned enclose; rank 2 and above partitions the last axis; a single flag extends over every item, so `1⊂1 2 3` is one partition, and no flag against no item is the empty nested vector. `x⊂[k]y` partitions the named axis in place |
+| `⊃` | 🟢 disclose / mix; a character cell frames beside a numeric one into a mixed simple array. `⊃[K]` places the item axes at the positions K names | 🟢 pick: one item of the path is one LEVEL and holds one index per axis of the value at that level, counted from `⎕IO` upwards |
+| `⊆` | 🟡 no oracle: not in GNU APL's character set; Dyalog's nest, which takes no axis there | 🟡 no oracle; Dyalog's partition, which is GNU APL's dyadic `⊂`; `x⊆[k]y` partitions the named axis, recorded against Dyalog in `corpus/apl/dyalog-axis.txt` |
+| `⌷` | 🟡 no oracle: materialise, which Dyalog makes the identity | 🟢 index (APL2: one item of x per axis, a scalar or an enclosed vector). `x⌷[K]y` indexes only the axes K names and leaves the rest whole; `Dialect.axis_order` names which index goes with which axis, ascending here and as written under Dyalog's |
 | `⊥` | — | 🟢 decode; the inner product `+.×` over x's last axis and y's leading one; a SINGLE on either side extends along the other's axis, and an empty axis weighs nothing — with no digit to weigh the radix is never read, so `'a'⊥(0⍴0)` is 0 |
 | `⊤` | — | 🟢 encode; with no value to write the radix is never read, so `'a'⊤(0⍴0)` is the empty. `A⊤[N]B` encodes to N copies of the single radix A — N counted from one whatever `⎕IO` is — and `A⊤[0]B` works the width out, one digit more when a value is negative |
 
@@ -333,12 +333,12 @@ conjunctions above:
 
 | Glyph | Status |
 |---|---|
-| `/` reduce (last axis) | 🟢 between the ELEMENTS along the axis, each disclosed and the fold's value enclosed: `,/1 2 3` is an enclosed vector |
-| `⌿` reduce (leading axis) | 🟢 the same rule down the first axis: `,⌿2 3⍴⍳6` pairs the columns |
-| `/` `⌿` n-wise reduction (dyadic) | 🟢 `n f/ y` folds every window of n items along the axis the glyph chooses: `2+/1 2 3` is `3 5`. n is one number — a negative one reverses each window, zero answers the operand's identity once per gap, and a window may reach one item past the axis before it is a domain error. A positive window shares the blockwise kernel with J's `n u/\ y`. The shape of an EMPTY argument of rank ≥2 diverges from GNU APL — see divergences |
-| `/` `⌿` replicate (after an operand) | 🟢 a negative count leaves that many prototype fills |
-| `\` `⍀` scan | 🟢 the reduce over each prefix, so it collects the same enclosures |
-| `\` `⍀` expand (after an operand) | 🟢 the gap holds the first item's prototype. A boolean mask; `expansion` names Dyalog's reading, where any integer vector serves — a positive count repeats that item, a negative one leaves that many fills, 0 means `¯1`, and the result is `+/1⌈|X` items long |
+| `/` reduce (last axis) | 🟢 between the ELEMENTS along the axis, each disclosed and the fold's value enclosed: `,/1 2 3` is an enclosed vector. `f/[k]` folds the named axis instead, and one whole axis is all it takes |
+| `⌿` reduce (leading axis) | 🟢 the same rule down the first axis: `,⌿2 3⍴⍳6` pairs the columns; `f⌿[k]` and `f/[k]` are the same function |
+| `/` `⌿` n-wise reduction (dyadic) | 🟢 `n f/ y` folds every window of n items along the axis the glyph chooses: `2+/1 2 3` is `3 5`. n is one number — a negative one reverses each window, zero answers the operand's identity once per gap, and a window may reach one item past the axis before it is a domain error. A positive window shares the blockwise kernel with J's `n u/\ y`. `n f/[k] y` folds the windows along the named axis. The shape of an EMPTY argument of rank ≥2 diverges from GNU APL — see divergences |
+| `/` `⌿` replicate (after an operand) | 🟢 a negative count leaves that many prototype fills; `x/[k]y` replicates along the named axis |
+| `\` `⍀` scan | 🟢 the reduce over each prefix, so it collects the same enclosures; `f\[k]` and `f⍀[k]` scan the named axis |
+| `\` `⍀` expand (after an operand) | 🟢 the gap holds the first item's prototype; `x\[k]y` expands the named axis. A boolean mask; `expansion` names Dyalog's reading, where any integer vector serves — a positive count repeats that item, a negative one leaves that many fills, 0 means `¯1`, and the result is `+/1⌈|X` items long |
 | `¨` each | 🟢 including results of different depth: an each that answers a number for one item and a list for another frames them into the nested vector such a result is |
 | `⍨` commute | 🟢 |
 | `∘.` outer product | 🟢 the function between every pair of ELEMENTS whatever its rank, each disclosed on the way in and the result enclosed on the way into the table: `1 2∘.,3 4` is a two-by-two of pairs, `¯1 0 1∘.⌽⊂m` rotates the matrix |
@@ -372,9 +372,9 @@ conjunctions above:
 | Trains (forks and atops) | 🟡 no oracle: GNU APL rejects them; Dyalog's rules, shipped as an extension (`Dialect.trains`, on by default) — 2-train atop, 3-train fork, a value left tine, longer trains grouped from the right |
 | Bracket indexing `A[1]` | 🟢 reading and writing, elided slots included |
 | Indexed assignment `A[i]←v`, `A[i;j]←v` | 🟢 copy-on-write on the named value |
-| Axis specification `f[k]` | 🟡 `/` `⌿` `\` `⍀` after an operand, the dyadic `x/[k]y` and `x\[k]y`, and `⌽` `⊖`, plus the two brackets that are not axes at all — `⊤[N]`, a digit count, and `⊢[M]`, a selection mask, both settled before the program runs; the rest named, `⊆[k]`, `↑[k]` and `⌷[k]` among them, and a FRACTIONAL axis (`↑[0.5]`) named separately |
+| Axis specification `f[K]` | 🟢 for every function that takes one: `/` `⌿` `\` `⍀` after an operand and the dyadic `x/[k]y` and `x\[k]y`; `⌽` `⊖`; `,` `⍪` in both valences, laminate's FRACTIONAL axis (`x,[0.5]y`) included; `↑` `↓` `⌷` `⊂` `⊆`, monadic `↑` (first here, mix under Dyalog's dialect, where `↑[K.5]` places the item axes at a gap) and `⊃`; and the SCALAR functions, where the argument of lower rank lines up with the named axes. A list of axes is read where the function takes one — `,[1 2]`, `1 2↑[3 1]`, `⊂[2 1]`, `(2 3⍴1)+[1 2]` — and `Dialect.axis_order` names which end of the pairing Dyalog reads differently. Two brackets are not axes at all: `⊤[N]`, a digit count, and `⊢[M]`, a selection mask, both settled before the program runs. A function with no axis form (`⍉` `∊` `≡` `⍴` `⍒`, a dfn, an operator's derived function) is named as a gap |
 | `⎕IO` as a dialect setting of the compiler | 🟢 |
-| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟢 two presets — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default, and `Dialect::dyalog()` (`APL.Dialect.dyalog` in Python). Every point where the lineages diverge is a setting on it: `⎕CT`, `↑`/`⊃`, `⌷`, dyadic `⊂`, `≡`'s sign, the dfn result, the nested grade, dyadic `⍳`'s left rank, what `< ≤ ≥ >` may order and trains are all implemented in both readings; the nested model, `⍺←`'s laziness and the complex order are implemented in one, and asking for the other is refused as not implemented yet |
+| Dialect object (`⎕IO`, `⎕CT`, the lineage settings) | 🟢 two presets — `Dialect::gnu_apl()`, the APL2/ISO line plus the extensions, which is the default, and `Dialect::dyalog()` (`APL.Dialect.dyalog` in Python). Every point where the lineages diverge is a setting on it: `⎕CT`, `↑`/`⊃`, `⌷`, dyadic `⊂`, `≡`'s sign, the dfn result, the nested grade, dyadic `⍳`'s left rank, an axis list's order (`axis_order`), what `< ≤ ≥ >` may order and trains are all implemented in both readings; the nested model, `⍺←`'s laziness and the complex order are implemented in one, and asking for the other is refused as not implemented yet |
 | `⎕`-system names as runtime variables | 🟡 the pure ones (`⎕A` `⎕D` `⎕IO` `⎕CT` `⎕UCS` `⎕CC`), read-only. `⎕CC` answers every class that is a set anyone can state; its four glyph-repertoire classes (5, 6, 7, 9) are named gaps; the ones that read a clock or a filesystem are ⚪ closed by the sandbox (`ErrorKind::Sandbox`) |
 | `⎕FX` | 🟢 fix a definition from its lines, answering with its name — the same lines a `∇ … ∇` takes, control words included. 🟡 the lines must be literal text the compiler can read: one assembled at run time, or a `⎕FX` inside another definition's body, is named as a gap |
 | Control structures `:If :While :Repeat :For :Select :AndIf :OrIf :CaseList` | 🟡 GNU APL rejects them, so the oracle is Dyalog's recording in `corpus/apl/dyalog-control.txt`: all 79 of its expressions agree. `:AndIf` and `:OrIf` short-circuit the condition above them, `:CaseList` takes any one of its items, `:For a b :In` takes each item apart, `:For` binds an item's contents, a body may call a function the program fixes after it, and a control structure may stand outside a definition |
@@ -396,15 +396,15 @@ conjunctions above:
 The inventory above is the APL2/ISO vocabulary, which is the line libjay's
 APL follows by default (docs/coverage.md, "Which APL"). The Dyalog line is
 a preset of the dialect object rather than a second engine:
-`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 2544 of the
-2585 expressions Dyalog 20.0 has been recorded on — the default answers
-2289 of them — and the 41 it does not are itemised below.
+`Dialect::dyalog()`, `APL.Dialect.dyalog` in Python. It answers 2609 of the
+2652 expressions Dyalog 20.0 has been recorded on — the default answers
+2317 of them — and the 43 it does not are itemised below.
 
 That is a GATE, not a measurement: `cargo test -p libjay --test
 oracle_dyalog` replays the recorded `dyalog:` column under the preset and
 fails on any expression not on the exemption list,
 `crates/libjay/tests/expected/dyalog.txt`. The list carries a reason per
-row — 23 of them a divergence libjay keeps on purpose, 18 a gap — and the
+row — 23 of them a divergence libjay keeps on purpose, 20 a gap — and the
 `Tag` column below is the tag those gap rows name, so closing a row here
 deletes its exemptions and tightens the gate. Nothing is exempt silently.
 `jay-corpus stats apl --dialect-diff --dialect dyalog` measures the same
@@ -414,7 +414,9 @@ includes the four Dyalog-only theme files and the tolerance theme.
 What the preset changes, each of it verified against the recording:
 `⎕CT` is `1e¯14`; `↑` is mix and `⊃` is first; `⌷` names the leading axes,
 so a shorter index takes the trailing ones whole and an enclosed index
-vector keeps its axis; a dyadic `⊂` counts partitions (partitioned
+vector keeps its axis; `⌷[K]` and a scalar function's `f[K]` pair their
+axes with what accompanies them in the order K was written, where the
+default reads K as a set; a dyadic `⊂` counts partitions (partitioned
 enclose) while `⊆` stays the partition both lines share; `≡` negates the
 depth of an array whose items do not share one; a dfn answers with its
 first sentence that is not an assignment; a nested grade uses the total
@@ -452,6 +454,7 @@ keeps.
 | `⍺←` with a FUNCTION as the default left argument | `function-default` | 1 | 🔴 libjay takes an array alone |
 | A dfn that falls off its end | `no-result` | 1 | 🔴 no result at all there, a value here |
 | `⌺` over an empty | `stencil-empty` | 1 | 🔴 answered here, refused there |
+| An axis Dyalog refuses: a SCALAR spread under `f[K]` (`1+[1]M`), and `⍪[K]`, which takes no axis there | `axis-strict` | 2 | 🔴 the preset is the more permissive of the two; each needs a rule of its own |
 | The empty-base `⊥` | `empty-base` | 5 | ⚪ zeros here; GNU APL agrees about the SHAPE and refuses to print the value, Dyalog refuses outright. Pinned in `corpus/apl/divergences.txt`, with the same rows in `fuzz_found.txt` |
 | A rotate amount or a modulus above 2⋆53 | `large-count` | 3 | ⚪ the count the program wrote, reduced exactly; pinned in `divergences.txt` |
 | `⍢` with a structural operand | `under-extension` | 3 | ⚪ libjay answers and the recorded Dyalog refuses; a preset chooses a dialect's rules, it does not withdraw an extension libjay ships in every dialect |

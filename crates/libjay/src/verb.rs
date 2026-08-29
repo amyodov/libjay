@@ -14,7 +14,7 @@ use crate::error::{Error, ErrorKind, Result, Span};
 use crate::exact::{self, Ext, Rat};
 use crate::fmt::FmtOpts;
 use crate::frontend::{
-    AxisCounts, ComplexOrder, EncodeDigits, Expansion, FloorRule, FormatSpec, InnerEach,
+    AxisCounts, AxisOrder, ComplexOrder, EncodeDigits, Expansion, FloorRule, FormatSpec, InnerEach,
     LookupLeft, NearCount, NestedGrade, OrderDomain, Rules, UniqueMask, WhereRank,
 };
 use crate::par;
@@ -1204,6 +1204,54 @@ impl OpDef {
     }
 }
 
+/// What the brackets of an APL axis specification hold.
+///
+/// A WHOLE axis names one of the argument's own axes; the frontend has
+/// already taken `⎕IO` off, so these count from zero. Several of them are
+/// legal where the function reads one axis per item of its left argument
+/// (`↑` `↓` `⌷`) or gathers a run of them (`,` `⊂`), and the order they
+/// were written in is kept.
+///
+/// A FRACTIONAL axis names the GAP between two axes instead, and the value
+/// held here is the position a NEW axis of the result goes at: `[0.5]`
+/// under `⎕IO←1` is position 0. That is what laminates two arguments
+/// (`x,[0.5]y`) and what places the item axes of a mix (`↑[1.5]y`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AxisSpec {
+    Axes(Vec<usize>),
+    Between(usize),
+}
+
+impl AxisSpec {
+    /// The specification naming one whole axis.
+    pub fn one(k: usize) -> AxisSpec {
+        AxisSpec::Axes(vec![k])
+    }
+
+    /// The single whole axis this names, if it names exactly one.
+    pub fn single(&self) -> Option<usize> {
+        match self {
+            AxisSpec::Axes(ks) => match ks[..] {
+                [k] => Some(k),
+                _ => None,
+            },
+            AxisSpec::Between(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for AxisSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AxisSpec::Axes(ks) => {
+                let parts: Vec<String> = ks.iter().map(|k| k.to_string()).collect();
+                write!(f, "{}", parts.join(" "))
+            }
+            AxisSpec::Between(p) => write!(f, "{p}.5"),
+        }
+    }
+}
+
 /// A verb: primitive or derived. Language-agnostic; frontends decide which
 /// combinations their syntax produces (e.g. APL `+/` becomes
 /// `Rank(Reduce(+), [1,1,1])` — reduce the last axis).
@@ -1306,10 +1354,13 @@ pub enum Verb {
     PowerV(Box<Verb>, Box<Verb>),
     /// APL `f⍣g`: apply f until `new g old` holds.
     PowerUntil(Box<Verb>, Box<Verb>),
-    /// APL `f[k]`: f along axis k. The axis is brought to the front, f
-    /// applies to the leading axis, and a result of the argument's own rank
-    /// has the axis put back where it was.
-    AlongAxis(Box<Verb>, usize),
+    /// APL `f[k]`: f along the axis the brackets name.
+    ///
+    /// A primitive that reads the axis itself is applied with it; for the
+    /// rest — the pairs that differ only in which axis they pick — the axis
+    /// is brought to the front, f applies to the leading one, and a result
+    /// of the argument's own rank has the axis put back where it was.
+    AlongAxis(Box<Verb>, AxisSpec),
     /// An explicit definition: a body of sentences run with the arguments
     /// bound to names. J's `3 : '…'`, `4 : '…'` and `{{ … }}`, APL's `{…}`
     /// and `∇`-defined functions.
@@ -1897,7 +1948,7 @@ impl Verb {
             Verb::Cut(u, n) => cut(u, None, y, *n, ctx, span),
             Verb::PowerV(u, v) => power_v(u, v, None, y, ctx, span),
             Verb::PowerUntil(u, v) => power_until(u, v, y, ctx, span),
-            Verb::AlongAxis(u, k) => along_axis(u, None, y, *k, ctx, span),
+            Verb::AlongAxis(u, k) => along_axis(u, None, y, k, ctx, span),
             Verb::Explicit(d) => crate::ir::call_explicit(d, None, y, ctx, span),
             Verb::SelfRef => {
                 let d = self_ref(ctx, span)?;
@@ -2108,7 +2159,7 @@ impl Verb {
             Verb::PowerUntil(..) => {
                 Err(Error::not_yet("dyadic power with a function operand (x f⍣g y)", span))
             }
-            Verb::AlongAxis(u, k) => along_axis(u, Some(x), y, *k, ctx, span),
+            Verb::AlongAxis(u, k) => along_axis(u, Some(x), y, k, ctx, span),
             Verb::Explicit(d) => crate::ir::call_explicit(d, Some(x), y, ctx, span),
             Verb::SelfRef => {
                 let d = self_ref(ctx, span)?;
@@ -6949,7 +7000,16 @@ pub(crate) fn catenate(
 ) -> Result<Array> {
     let rank = x.rank().max(y.rank()).max(1);
     let axis = if leading { 0 } else { rank - 1 };
-    let deep = fill && leading;
+    catenate_at(x, y, axis, fill, span)
+}
+
+/// Catenate along a named axis. The two arguments join there and must agree
+/// on every other axis; one of them may be a scalar, or one axis short, in
+/// which case it is a single item of the join.
+fn catenate_at(x: &Array, y: &Array, axis: usize, fill: bool, span: Span) -> Result<Array> {
+    let rank = x.rank().max(y.rank()).max(1);
+    check_axis(axis, rank, span)?;
+    let deep = fill && axis == 0;
     let xa = cat_promote(x, y, rank, axis, deep, span)?;
     let ya = cat_promote(y, x, rank, axis, deep, span)?;
     // J lets an operand with no elements join anything, taking the other
@@ -7703,7 +7763,9 @@ pub(crate) fn with_origin(v: &Verb, origin: i64) -> Option<Verb> {
         Verb::Commute(u) => Some(Verb::Commute(Box::new(with_origin(u, origin)?))),
         Verb::Each(u, e) => Some(Verb::Each(Box::new(with_origin(u, origin)?), *e)),
         Verb::Fit(u, n) => Some(Verb::Fit(Box::new(with_origin(u, origin)?), *n)),
-        Verb::AlongAxis(u, k) => Some(Verb::AlongAxis(Box::new(with_origin(u, origin)?), *k)),
+        Verb::AlongAxis(u, k) => {
+            Some(Verb::AlongAxis(Box::new(with_origin(u, origin)?), k.clone()))
+        }
         _ => None,
     }
 }
@@ -8773,7 +8835,9 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::MatrixDivide => matrix_divide(x, y, span),
         DyadOp::PartitionEnclose => partition_enclose(x, y, cfg.near(), span),
         DyadOp::PartitionCounts => partition_counts(x, y, cfg.near(), span),
-        DyadOp::Squad { origin, leading } => squad(x, y, origin, leading, cfg.near(), span),
+        DyadOp::Squad { origin, leading } => {
+            squad(x, y, origin, leading, None, cfg.near(), span)
+        }
         DyadOp::SelectAxis { axis, rank, origin } => {
             select_axis(x, y, axis, rank, origin, cfg.near(), span)
         }
@@ -10742,27 +10806,38 @@ fn power_until(
     Err(Error::domain("the iteration did not converge", span))
 }
 
-/// `f[k]` (APL): `f` applied along axis `k`.
+/// `f[k]` (APL): `f` applied along the axis the brackets name.
 ///
-/// The axis is brought to the front, the verb runs on the leading axis, and
-/// a result that kept the argument's rank has the axis put back — which is
+/// A primitive that reads the axis itself — catenate, take, drop, index,
+/// enclose, partition, ravel, mix — is answered by [`axis_prim`]. For the
+/// rest the axis is brought to the front, the verb runs on the leading
+/// axis, and a result that kept the argument's rank has the axis put back:
 /// what separates a reduction (rank drops, axes stay in order) from a scan
 /// or a reversal (rank kept).
 fn along_axis(
     u: &Verb,
     x: Option<&Array>,
     y: &Array,
-    k: usize,
+    spec: &AxisSpec,
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
-    if k >= y.rank().max(1) {
-        return Err(Error::new(
-            ErrorKind::Rank,
-            format!("axis {k} does not exist on an argument of rank {}", y.rank()),
-            Some(span),
-        ));
+    if let Verb::Prim(p) = u
+        && let Some(out) = axis_prim(p, u, x, y, spec, ctx, span)?
+    {
+        return Ok(out);
     }
+    let k = match spec.single() {
+        Some(k) => k,
+        None => {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!("{} takes one whole axis, not {spec}", u.name()),
+                Some(span),
+            ));
+        }
+    };
+    check_axis(k, y.rank(), span)?;
     let moved = axis_to_front(y, k);
     let r = moved.rank();
     let out = match x {
@@ -10773,6 +10848,525 @@ fn along_axis(
         return Ok(front_to_axis(&out, k));
     }
     Ok(out)
+}
+
+/// An axis the argument does not have.
+fn check_axis(k: usize, rank: usize, span: Span) -> Result<()> {
+    if k < rank {
+        return Ok(());
+    }
+    let valid = if rank == 0 {
+        "the argument has none".to_string()
+    } else if rank == 1 {
+        "the only axis is 0".to_string()
+    } else {
+        format!("the axes are 0 to {}", rank - 1)
+    };
+    Err(Error::new(
+        ErrorKind::Rank,
+        format!("axis {k} does not exist: {valid}"),
+        Some(span),
+    ))
+}
+
+/// Every whole axis the specification names, checked against a rank.
+///
+/// The order they were written in is kept — it is what decides where each
+/// count of a take goes and how an enclosure's item axes lie — and a
+/// repeated axis is refused.
+fn axis_list(spec: &AxisSpec, rank: usize, span: Span) -> Result<Vec<usize>> {
+    let AxisSpec::Axes(ks) = spec else {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("axis {spec} must be a whole number here"),
+            Some(span),
+        ));
+    };
+    for (i, &k) in ks.iter().enumerate() {
+        check_axis(k, rank, span)?;
+        if ks[..i].contains(&k) {
+            return Err(Error::domain(format!("axis {k} is named twice"), span));
+        }
+    }
+    Ok(ks.clone())
+}
+
+/// `f[k]` where f is a primitive that reads the axis itself.
+///
+/// `None` where the primitive has no axis meaning of its own, which sends
+/// the caller to the transpose-and-apply path.
+fn axis_prim(
+    p: &Prim,
+    u: &Verb,
+    x: Option<&Array>,
+    y: &Array,
+    spec: &AxisSpec,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Option<Array>> {
+    let cfg = ctx.cfg;
+    let near = cfg.near();
+    let out = match x {
+        None => match p.monad {
+            // `,[K]` and `⍪[K]`: the reference reads an axis on either
+            // glyph as the ravel's, whichever axis the glyph picks alone.
+            MonadOp::Ravel | MonadOp::TableOf => ravel_axes(y, spec, span)?,
+            // `⊂[K]`: the named axes become the shape of each item, the
+            // rest the shape of the answer. Dyalog's `↓[k]` is the same
+            // function, and splits ONE axis off.
+            MonadOp::Enclose(_) => enclose_axes(y, &axis_list(spec, y.rank(), span)?, span)?,
+            MonadOp::Split => {
+                let k = one_axis(spec, u, y.rank(), span)?;
+                enclose_axes(y, &[k], span)?
+            }
+            // Mix: the item axes go where the specification names.
+            MonadOp::Open => mix_axes(u, y, spec, p.name, ctx, span)?,
+            // `⌷` and `⊆` take an axis dyadically and have no monadic
+            // meaning for one.
+            MonadOp::Same | MonadOp::Nest => {
+                return Err(Error::not_yet(
+                    format!("axis specification for monadic {}", p.name),
+                    span,
+                ));
+            }
+            // GNU APL's `↑[K]`, which is First: one item along each named
+            // axis, and the axis stays.
+            // A SCALAR function reads an axis only with two arguments: the
+            // axis says how the smaller argument lines up with the larger,
+            // and one argument leaves nothing to line up.
+            MonadOp::Scalar(_) => {
+                return Err(Error::domain(
+                    format!("{} takes an axis only with two arguments", p.name),
+                    span,
+                ));
+            }
+            MonadOp::First if p.name == "↑" => {
+                let axes = axis_list(spec, y.rank(), span)?;
+                if y.rank() == 0 {
+                    check_axis(0, 0, span)?;
+                }
+                let mut counts: Vec<i64> = y.shape.iter().map(|&n| n as i64).collect();
+                for &a in &axes {
+                    counts[a] = 1;
+                }
+                take(&Array::from_i64(counts), y, true, true, true, near, span)?
+            }
+            _ => return Ok(None),
+        },
+        Some(x) => match p.dyad {
+            // `x f[K] y` for a SCALAR f: the argument of lower rank is
+            // shaped like the named axes of the other and is stretched
+            // along the rest.
+            DyadOp::Scalar(_) => scalar_axis(u, p.name, x, y, spec, ctx, span)?,
+            // `x,[k]y` joins along a whole axis; a FRACTIONAL one laminates,
+            // which lays the two sides beside each other along a new one.
+            DyadOp::AppendLast | DyadOp::AppendLeading => {
+                let fill = cfg.agreement == Agreement::LeadingPrefix;
+                match spec {
+                    AxisSpec::Between(pos) => laminate_axis(x, y, *pos, fill, span)?,
+                    AxisSpec::Axes(_) => {
+                        let rank = x.rank().max(y.rank()).max(1);
+                        let k = one_axis(spec, u, rank, span)?;
+                        catenate_at(x, y, k, fill, span)?
+                    }
+                }
+            }
+            DyadOp::Take => {
+                let counts = axis_counts_at(x, y, spec, "take", true, near, span)?;
+                let apl = cfg.rules.lang == crate::Lang::Apl;
+                take(&counts, y, cfg.agreement == Agreement::ExactOrScalar, apl, true, near, span)?
+            }
+            DyadOp::Drop => {
+                let counts = axis_counts_at(x, y, spec, "drop", false, near, span)?;
+                let apl = cfg.rules.lang == crate::Lang::Apl;
+                drop_(&counts, y, apl, true, near, span)?
+            }
+            DyadOp::Squad { origin, .. } => {
+                let axes = paired_axes(spec, y.rank(), cfg, span)?;
+                squad(x, y, origin, false, Some(&axes), near, span)?
+            }
+            // The two readings of a dyadic `⊂`: one partitions the axis in
+            // place, the other answers a vector of the pieces.
+            DyadOp::PartitionEnclose | DyadOp::PartitionCounts => {
+                let k = one_axis(spec, u, y.rank(), span)?;
+                partition_at(p.dyad, x, y, k, near, span)?
+            }
+            _ => return Ok(None),
+        },
+    };
+    Ok(Some(out))
+}
+
+/// `x f[K] y` where f is a SCALAR function.
+///
+/// The argument of lower rank is shaped like the axes K names on the other
+/// one, and is stretched along every axis K left out: `1 2+[1]2 3⍴⍳6` adds
+/// 1 to the first row and 2 to the second. Which axis of K goes with which
+/// axis of the smaller argument is `Dialect.axis_order`'s question.
+///
+/// Nothing changes for the function itself: once the smaller argument has
+/// been spread to the other's shape, it is an ordinary scalar application.
+fn scalar_axis(
+    u: &Verb,
+    name: &str,
+    x: &Array,
+    y: &Array,
+    spec: &AxisSpec,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let cfg = ctx.cfg;
+    if matches!(spec, AxisSpec::Between(_)) {
+        return Err(Error::domain(format!("{name} takes whole axes, not {spec}"), span));
+    }
+    // The argument with the axes is the one of greater rank; equal ranks
+    // leave the left as the frame, which is what a K naming every axis of
+    // either amounts to.
+    let x_frames = x.rank() >= y.rank();
+    let (big, small) = if x_frames { (x, y) } else { (y, x) };
+    let axes = paired_axes(spec, big.rank(), cfg, span)?;
+    // A scalar spreads over everything, as it does without an axis at all.
+    if small.rank() == 0 {
+        return u.dyad(x, y, ctx, span);
+    }
+    if small.rank() != axes.len() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!(
+                "an argument of rank {} for {} named axis(es)",
+                small.rank(),
+                axes.len()
+            ),
+            Some(span),
+        ));
+    }
+    let want: Vec<usize> = axes.iter().map(|&a| big.shape[a]).collect();
+    if small.shape != want {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("shape {} against axes of shape {}", shape_str(&small.shape), shape_str(&want)),
+            Some(span),
+        ));
+    }
+    let spread = spread_over(small, &big.shape, &axes);
+    let big = big.to_row_major();
+    if x_frames { u.dyad(&big, &spread, ctx, span) } else { u.dyad(&spread, &big, ctx, span) }
+}
+
+/// `small`, whose shape is `shape`'s lengths at `axes`, laid out over the
+/// whole of `shape`: element `i` of the answer is the element of `small`
+/// at `i`'s coordinates along those axes.
+fn spread_over(small: &Array, shape: &[usize], axes: &[usize]) -> Array {
+    let small = small.to_row_major();
+    let inner = strides(&small.shape);
+    let outer = strides(shape);
+    let total: usize = shape.iter().product();
+    let mut data = Data::empty(small.dtype());
+    for i in 0..total {
+        let mut off = 0;
+        for (j, &a) in axes.iter().enumerate() {
+            off += ((i / outer[a]) % shape[a]) * inner[j];
+        }
+        push_elem(&mut data, &small.data, off);
+    }
+    Array::new(shape.to_vec(), data)
+}
+
+/// A shape as a diagnostic reads it.
+fn shape_str(shape: &[usize]) -> String {
+    if shape.is_empty() {
+        return "an atom".to_string();
+    }
+    shape.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("×")
+}
+
+/// The axes of a specification for a function that pairs one thing per
+/// axis with them, in the order the dialect reads them.
+fn paired_axes(spec: &AxisSpec, rank: usize, cfg: EvalCfg, span: Span) -> Result<Vec<usize>> {
+    let mut axes = axis_list(spec, rank, span)?;
+    if cfg.rules.axis_order == AxisOrder::Ascending {
+        axes.sort_unstable();
+    }
+    Ok(axes)
+}
+
+/// The one whole axis a function that takes exactly one was given.
+fn one_axis(spec: &AxisSpec, u: &Verb, rank: usize, span: Span) -> Result<usize> {
+    let Some(k) = spec.single() else {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{} takes one whole axis, not {spec}", u.name()),
+            Some(span),
+        ));
+    };
+    check_axis(k, rank, span)?;
+    Ok(k)
+}
+
+/// The per-axis count list `x↑[K]y` and `x↓[K]y` amount to: one count from
+/// x for each axis K names, and every other axis left alone — taken whole,
+/// or dropped from not at all.
+fn axis_counts_at(
+    x: &Array,
+    y: &Array,
+    spec: &AxisSpec,
+    verb: &str,
+    whole: bool,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
+    let axes = axis_list(spec, y.rank(), span)?;
+    let given = axis_counts(x, verb, near, span)?;
+    if given.len() != axes.len() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{} {verb} count(s) for {} axis(es)", given.len(), axes.len()),
+            Some(span),
+        ));
+    }
+    let mut counts: Vec<i64> =
+        y.shape.iter().map(|&n| if whole { n as i64 } else { 0 }).collect();
+    for (i, &a) in axes.iter().enumerate() {
+        counts[a] = given[i];
+    }
+    Ok(Array::from_i64(counts))
+}
+
+/// The same elements under a new shape of the same size.
+fn reshaped(y: &Array, shape: Vec<usize>) -> Array {
+    let y = y.to_row_major();
+    Array::new(shape, y.data)
+}
+
+/// `,[K]y`: the named axes run together into one, and a FRACTIONAL K adds a
+/// new axis of length one at the gap it names.
+fn ravel_axes(y: &Array, spec: &AxisSpec, span: Span) -> Result<Array> {
+    let r = y.rank();
+    if let AxisSpec::Between(pos) = spec {
+        if *pos > r {
+            return Err(Error::new(
+                ErrorKind::Rank,
+                format!("axis {spec} lies past the end of a rank-{r} argument"),
+                Some(span),
+            ));
+        }
+        let mut shape = y.shape.clone();
+        shape.insert(*pos, 1);
+        return Ok(reshaped(y, shape));
+    }
+    // A scalar has no axis to name, and GNU APL answers it with itself
+    // rather than refusing.
+    if r == 0 {
+        return Ok(y.clone());
+    }
+    let ks = axis_list(spec, r, span)?;
+    // No axis named: a new one of length one, after the last.
+    if ks.is_empty() {
+        let mut shape = y.shape.clone();
+        shape.push(1);
+        return Ok(reshaped(y, shape));
+    }
+    // The axes must be a run, ascending: only neighbours can be laid end to
+    // end without moving an element.
+    if ks.windows(2).any(|w| w[1] != w[0] + 1) {
+        return Err(Error::domain(
+            format!("`,[{spec}]` needs axes that follow one another"),
+            span,
+        ));
+    }
+    let (first, last) = (ks[0], ks[ks.len() - 1]);
+    let joined: usize = y.shape[first..=last].iter().product();
+    let mut shape: Vec<usize> = y.shape[..first].to_vec();
+    shape.push(joined);
+    shape.extend_from_slice(&y.shape[last + 1..]);
+    Ok(reshaped(y, shape))
+}
+
+/// `x,[k.5]y`: the two arguments beside each other along a NEW axis at
+/// position `pos`. Each side becomes one item of that axis, so a scalar
+/// spreads over the other's shape and the shapes must otherwise agree.
+fn laminate_axis(x: &Array, y: &Array, pos: usize, fill: bool, span: Span) -> Result<Array> {
+    let r = x.rank().max(y.rank());
+    if r == 0 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "laminate needs an argument with an axis",
+            Some(span),
+        ));
+    }
+    if pos > r {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("axis {pos}.5 lies past the end of a rank-{r} argument"),
+            Some(span),
+        ));
+    }
+    // A side that is one axis short is not a cell here: laminate wants the
+    // two shapes to match, and only a scalar spreads.
+    let widen = |a: &Array, other: &Array| -> Result<Array> {
+        if a.rank() == r {
+            let mut shape = a.shape.clone();
+            shape.insert(pos, 1);
+            return Ok(reshaped(a, shape));
+        }
+        if a.rank() != 0 {
+            return Err(Error::new(
+                ErrorKind::Rank,
+                format!("cannot laminate rank {} with rank {}", x.rank(), y.rank()),
+                Some(span),
+            ));
+        }
+        let mut shape = other.shape.clone();
+        shape.insert(pos, 1);
+        let n: usize = shape.iter().product();
+        let mut data = Data::empty(a.dtype());
+        for _ in 0..n {
+            push_elem(&mut data, &a.data, 0);
+        }
+        Ok(Array::new(shape, data))
+    };
+    let xa = widen(x, y)?;
+    let ya = widen(y, x)?;
+    catenate_at(&xa, &ya, pos, fill, span)
+}
+
+/// `⊂[K]y` and Dyalog's `↓[K]y`: every subarray over the named axes
+/// enclosed, the axes K did not name framing the answer.
+fn enclose_axes(y: &Array, axes: &[usize], span: Span) -> Result<Array> {
+    let r = y.rank();
+    if r == 0 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "an axis specification needs an argument with an axis",
+            Some(span),
+        ));
+    }
+    let frame: Vec<usize> = (0..r).filter(|a| !axes.contains(a)).collect();
+    let src: Vec<usize> = frame.iter().copied().chain(axes.iter().copied()).collect();
+    let moved = permute_axes(&y.to_row_major(), &src);
+    let frame_shape: Vec<usize> = frame.iter().map(|&a| y.shape[a]).collect();
+    let item_shape: Vec<usize> = axes.iter().map(|&a| y.shape[a]).collect();
+    let each: usize = item_shape.iter().product();
+    let outer: usize = frame_shape.iter().product();
+    let mut items: Vec<Array> = Vec::with_capacity(outer);
+    for o in 0..outer {
+        items.push(Array::new(item_shape.clone(), moved.data.slice(o * each, (o + 1) * each)));
+    }
+    Ok(Array::new(frame_shape, Data::Box(items.into())))
+}
+
+/// `↑[K]y` (Dyalog) and `⊃[K]y` (GNU APL): mix, with the item axes placed
+/// where the specification names — one position each, or a run of them
+/// starting at the gap a fractional axis names.
+///
+/// The two glyphs read K differently, and both references were asked. On
+/// `⊃` any list of axes of the ANSWER will do, and a list longer than the
+/// items names the last of them: `⊃[1]` over a simple matrix, whose items
+/// are scalars, still moves the trailing axis to the front. On `↑` the
+/// list must be exactly as long as the items are deep — an argument whose
+/// items are scalars takes one axis and ignores it, mix being nothing
+/// there. The gap form is `↑`'s alone.
+fn mix_axes(
+    u: &Verb,
+    y: &Array,
+    spec: &AxisSpec,
+    name: &str,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let mixed = u.monad(y, ctx, span)?;
+    let frame = y.rank();
+    let rank = mixed.rank();
+    let items = rank.saturating_sub(frame);
+    let places: Vec<usize> = match spec {
+        AxisSpec::Between(pos) => {
+            if name != "↑" {
+                return Err(Error::domain(format!("{name} takes a whole axis"), span));
+            }
+            if pos + items > rank {
+                return Err(Error::new(
+                    ErrorKind::Rank,
+                    format!("axis {spec} leaves no room for {items} item axis(es)"),
+                    Some(span),
+                ));
+            }
+            (*pos..*pos + items).collect()
+        }
+        AxisSpec::Axes(ks) if name == "↑" => {
+            // One axis per item axis, and one unused axis where the items
+            // are scalars: mix has nothing to place, so the axis is not
+            // even held to the answer's rank.
+            if ks.len() != items.max(1) {
+                return Err(Error::new(
+                    ErrorKind::Length,
+                    format!("{} axis(es) for items of rank {items}", ks.len()),
+                    Some(span),
+                ));
+            }
+            if items == 0 {
+                return Ok(mixed);
+            }
+            axis_list(spec, rank, span)?
+        }
+        AxisSpec::Axes(_) => {
+            let ks = axis_list(spec, rank.max(1), span)?;
+            if ks.len() > rank {
+                return Err(Error::new(
+                    ErrorKind::Length,
+                    format!("{} axis(es) for an answer of rank {rank}", ks.len()),
+                    Some(span),
+                ));
+            }
+            ks
+        }
+    };
+    if places.is_empty() {
+        return Ok(mixed);
+    }
+    // Axis `places[i]` of the answer is the i-th of the LAST `places.len()`
+    // axes of the mix; the rest fill what is left, in their own order.
+    let first = rank - places.len();
+    let mut src = vec![usize::MAX; rank];
+    for (i, &place) in places.iter().enumerate() {
+        src[place] = first + i;
+    }
+    let mut next = 0usize;
+    for slot in src.iter_mut() {
+        if *slot == usize::MAX {
+            *slot = next;
+            next += 1;
+        }
+    }
+    Ok(permute_axes(&mixed.to_row_major(), &src))
+}
+
+/// `x⊂[k]y` and `x⊆[k]y`: partition along the named axis rather than the
+/// last one.
+fn partition_at(
+    op: DyadOp,
+    x: &Array,
+    y: &Array,
+    k: usize,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
+    let moved = axis_to_back(y, k);
+    match op {
+        DyadOp::PartitionCounts => {
+            // The answer is a vector of pieces, each of them the argument's
+            // own shape with the partitioned axis shortened.
+            let parts = partition_counts(x, &moved, near, span)?;
+            let Some(boxes) = parts.as_boxes() else {
+                return Err(Error::internal("a partition is boxed"));
+            };
+            let moved: Vec<Array> = boxes.iter().map(|a| back_to_axis(a, k)).collect();
+            Ok(Array::new(parts.shape.clone(), Data::Box(moved.into())))
+        }
+        _ => {
+            let parts = partition_enclose(x, &moved, near, span)?;
+            Ok(back_to_axis(&parts, k))
+        }
+    }
 }
 
 // ------------------------------------------------- wave 3: search and steps
@@ -11327,7 +11921,15 @@ fn matrix_divide(x: &Array, y: &Array, span: Span) -> Result<Array> {
 // ----------------------------------------------------- indexing and amend
 
 /// `x ⌷ y` (APL2): one scalar index per axis of y.
-fn squad(x: &Array, y: &Array, origin: i64, leading: bool, near: NearInt, span: Span) -> Result<Array> {
+fn squad(
+    x: &Array,
+    y: &Array,
+    origin: i64,
+    leading: bool,
+    axes: Option<&[usize]>,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
     if x.rank() > 1 {
         return Err(Error::new(
             ErrorKind::Rank,
@@ -11337,20 +11939,47 @@ fn squad(x: &Array, y: &Array, origin: i64, leading: bool, near: NearInt, span: 
     }
     // One item of x per axis of y — per LEADING axis where the dialect
     // reads it that way, so a shorter index leaves the trailing axes
-    // whole. An item is a scalar, which drops its axis, or an enclosed
-    // vector, which keeps it and selects that many.
+    // whole, and per NAMED axis where an axis specification says which.
+    // An item is a scalar, which drops its axis, or an enclosed vector,
+    // which keeps it and selects that many.
     let items: Vec<Array> = if x.rank() == 0 { vec![x.clone()] } else { x.cells(1) };
     let named = items.len();
-    if named > y.rank() || (!leading && named != y.rank()) {
-        return Err(Error::new(
-            ErrorKind::Rank,
-            format!("{} index(es) for an argument of rank {}", named, y.rank()),
-            Some(span),
-        ));
+    match axes {
+        Some(axes) if named != axes.len() => {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!("{named} index(es) for {} axis(es)", axes.len()),
+                Some(span),
+            ));
+        }
+        None if named > y.rank() || (!leading && named != y.rank()) => {
+            return Err(Error::new(
+                ErrorKind::Rank,
+                format!("{} index(es) for an argument of rank {}", named, y.rank()),
+                Some(span),
+            ));
+        }
+        _ => {}
     }
-    let mut specs = Vec::with_capacity(items.len());
+    // Which item of x indexes axis k of y, if any: in axis order without a
+    // specification, and in the order the brackets named them with one.
+    let slot = |k: usize| -> Option<usize> {
+        match axes {
+            Some(axes) => axes.iter().position(|&a| a == k),
+            None => (k < named).then_some(k),
+        }
+    };
+    let mut specs = Vec::with_capacity(y.rank());
     let mut shape = Vec::new();
-    for (k, item) in items.iter().enumerate() {
+    for k in 0..y.rank() {
+        let Some(i) = slot(k) else {
+            // No index for this axis: it comes through whole.
+            let n = y.shape[k];
+            shape.push(n);
+            specs.push((vec![n], (0..n as i64).map(|i| i + origin).collect()));
+            continue;
+        };
+        let item = &items[i];
         let spec = match item.as_boxes() {
             Some(bs) if item.rank() == 0 => bs[0].clone(),
             _ => item.clone(),
@@ -11369,13 +11998,6 @@ fn squad(x: &Array, y: &Array, origin: i64, leading: bool, near: NearInt, span: 
         }
         shape.extend_from_slice(&spec.shape);
         specs.push((spec.shape.clone(), idx));
-    }
-    // An index shorter than the rank names the leading axes only; every
-    // trailing axis comes through whole.
-    for k in named..y.rank() {
-        let n = y.shape[k];
-        shape.push(n);
-        specs.push((vec![n], (0..n as i64).map(|i| i + origin).collect()));
     }
     let y = y.to_row_major();
     let st = strides(&y.shape);
@@ -12186,6 +12808,34 @@ fn axis_to_front(y: &Array, k: usize) -> Array {
     let r = y.rank();
     let src: Vec<usize> = std::iter::once(k).chain((0..r).filter(|&a| a != k)).collect();
     permute_axes(y, &src)
+}
+
+/// `y` with axis `k` moved behind the others, their order kept.
+fn axis_to_back(y: &Array, k: usize) -> Array {
+    let r = y.rank();
+    if r < 2 || k + 1 == r {
+        return y.clone();
+    }
+    let src: Vec<usize> = (0..r).filter(|&a| a != k).chain(std::iter::once(k)).collect();
+    permute_axes(&y.to_row_major(), &src)
+}
+
+/// `y` with its last axis moved to position `k`.
+fn back_to_axis(y: &Array, k: usize) -> Array {
+    let r = y.rank();
+    if r < 2 || k + 1 == r {
+        return y.clone();
+    }
+    // Output axis a reads source axis: k itself is the source's last axis,
+    // the ones after k shift down by one, the rest keep their place.
+    let src: Vec<usize> = (0..r)
+        .map(|a| match a.cmp(&k) {
+            std::cmp::Ordering::Less => a,
+            std::cmp::Ordering::Equal => r - 1,
+            std::cmp::Ordering::Greater => a - 1,
+        })
+        .collect();
+    permute_axes(&y.to_row_major(), &src)
 }
 
 /// `y` with its leading axis moved to position `k`.

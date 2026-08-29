@@ -191,3 +191,16 @@ F←{⍺←⊢ ⋄ ⍺ ⍵} 7
 // `⌺` over an empty, which Dyalog refuses.
 {+/,⍵}⌺3⊢⍬
 ? gap stencil-empty: ⌺ over an empty answers here
+
+// --- gap axis-strict (2) ------------------------------------------------
+// Two places Dyalog refuses an axis the APL2 line accepts. A SCALAR
+// function there wants its smaller argument to be exactly as long as the
+// axis, so a scalar has nothing to line up and is a LENGTH ERROR, where
+// GNU APL spreads it as it would without an axis at all. And `⍪` there
+// takes no axis whatever, while GNU APL reads one on either catenate
+// glyph. Both are the preset being more permissive than Dyalog, and each
+// needs a rule of its own to close.
+1+[1]2 3⍴⍳6
+? gap axis-strict: a scalar spreads under an axis here, a LENGTH ERROR there
+⍪[1]2 3⍴⍳6
+? gap axis-strict: ⍪ reads an axis here, a SYNTAX ERROR there
