@@ -362,7 +362,7 @@ fn reductions_and_scans_run_on_complex_data() {
     close(Lang::Apl, "+/3J4 1J1 2", [6.0, 5.0]);
     // A reduction with no items has no complex identity to reach for; the
     // real one serves, as it does for floats.
-    assert_eq!(val(Lang::J, "+/ 0j0 #~ 0"), Array::scalar_i64(0));
+    assert_eq!(val(Lang::J, "+/ 0j0 #~ 0"), Array::scalar_bool(false));
 }
 
 #[test]

@@ -128,7 +128,12 @@ fn a_zero_window_answers_the_operands_identity_once_per_gap(
     #[case] shape: &[usize],
     #[case] want: &[i64],
 ) {
-    assert_eq!(apl(src), i64s(shape, want));
+    // Every one of these identities is 0 or 1, which is boolean storage.
+    let want: Vec<u8> = want.iter().map(|&k| k as u8).collect();
+    assert_eq!(
+        apl(src),
+        Array::new(shape.to_vec(), Data::Bool(want.into()))
+    );
 }
 
 /// `/` windows the LAST axis and `⌿` the leading one, which is the same

@@ -239,9 +239,15 @@ fn the_hypergeometric_series_sums_its_parameters() {
     let e = err(Lang::J, "(1 H. '') 1");
     assert_eq!(e.kind, ErrorKind::Domain);
     assert!(e.msg.contains("did not converge"), "{}", e.msg);
-    // It has no dyadic valence.
-    let e = err(Lang::J, "2 (1 H. 1) 3");
-    assert_eq!(e.kind, ErrorKind::Domain);
+    // The dyad stops the same sum after x terms: 1 + 3 + 9/2 = 8.5.
+    assert_eq!(j("3 (1 H. 1) 3"), Array::scalar_f64(8.5));
+    assert_eq!(j("0 (1 H. 1) 5"), Array::scalar_f64(0.0));
+    assert_eq!(j("1 (1 H. 1) 5"), Array::scalar_f64(1.0));
+    // The count pairs with the argument element by element.
+    assert_eq!(j("1 2 3 (1 H. 1) 1"), Array::from_f64(vec![1.0, 2.0, 2.5]));
+    // A count has to be a whole nonnegative number.
+    assert_eq!(err(Lang::J, "_1 (1 H. 1) 1").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::J, "2.5 (1 H. 1) 1").kind, ErrorKind::Domain);
 }
 
 // --- the gaps this wave leaves --------------------------------------------

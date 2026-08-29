@@ -92,7 +92,11 @@ fn j_iota() {
 fn j_structural() {
     assert_eq!(run(Lang::J, "$ i. 2 3"), Some(i64s(&[2], &[2, 3])));
     assert_eq!(run(Lang::J, "2 3 $ 1 2 3 4 5 6"), Some(i64s(&[2, 3], &[1, 2, 3, 4, 5, 6])));
-    assert_eq!(run(Lang::J, "2 3 $ 0 1"), Some(i64s(&[2, 3], &[0, 1, 0, 1, 0, 1])));
+    // `0 1` is a boolean literal, and a reshape carries the type through.
+    assert_eq!(
+        run(Lang::J, "2 3 $ 0 1"),
+        Some(Array::new(vec![2, 3], Data::Bool(vec![0, 1, 0, 1, 0, 1].into())))
+    );
     assert_eq!(run(Lang::J, "|: i. 2 3"), Some(i64s(&[3, 2], &[0, 3, 1, 4, 2, 5])));
     assert_eq!(run(Lang::J, "# 7 8 9"), Some(Array::scalar_i64(3)));
     assert_eq!(run(Lang::J, ", i. 2 2"), Some(i64s(&[4], &[0, 1, 2, 3])));

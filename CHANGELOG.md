@@ -201,6 +201,51 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `$.^:(1 1) 1 0 1` — a power with a LIST of counts over a sparse array —
+  crashed. The results are collected into one array, and a sparse one holds
+  only its stored entries while its shape is the logical one, so the answer
+  was sized from a shape its buffer could not fill. Every collecting form
+  now makes a cell dense before framing it, which is what the rest of
+  libjay already did with sparse values.
+
+- `u . v y` handed `u` a vector of ones instead of the argument's own
+  values wherever `u` was not an insert, so `(*: . >) 1 2` answered `1 1`
+  where the reference answers `1 4`, and a character argument reached a
+  numeric comparison it should never have seen. The expansion now bottoms
+  out on the last column itself: `u . v y` of a vector or an atom, each
+  read as one column, is `u y`.
+
+- `x (m H. n) y` — the hypergeometric series stopped after x terms — said
+  it had no dyadic meaning. `8 (1 H. 1) i. 6` now sums eight terms of the
+  exponential; the count is a whole nonnegative number and pairs with the
+  argument element by element.
+
+- An explicit definition whose body has no sentences at all — `3 : ''`,
+  `3 : 'NB. nothing'` — was applied and answered nothing, which is not a
+  value a verb may give. It now refuses at either valence. A body that RAN
+  and produced nothing is unchanged: an untaken branch still yields J's
+  empty result.
+
+- `3 : ('a =. *: y' ; 'a + a')`, the multi-line body given as a boxed list
+  of lines, was refused with a message about a different construct. It is
+  now the ordinary multi-line definition, one box per line, and a lone `:`
+  between the lines separates the monad case from the dyad case — in this
+  spelling and in the `3 : 0` body below the sentence alike.
+
+- A J numeric literal whose atoms are all 0 or 1 is BOOLEAN, which is what
+  `3!:0 (1 0 1)` reports of it in the reference; libjay called every
+  numeric literal an integer. The type now travels the way J's does:
+  through the structural verbs, through `*` `<.` `>.` `^` `|` `!`, which
+  cannot leave `{0, 1}`, and out through `+` and `-`, which widen. The
+  identity element of an empty reduction is boolean too.
+
+- `a_ =: 3` was accepted. A trailing underscore closes a locative and
+  nothing else, so `a_` is not a name; `a_b_`, `a__` and `cc__` still are.
+
+- `(2;a) $. y` and its relatives — the boxed left arguments that respecify
+  a sparse array's axes or element — refused with a rank error, which read
+  as though the language did not allow them. They are named gaps now.
+
 - J's boxed total ordering compared the SHAPE before the atoms, so `/:`,
   `\:` and `I.` quietly answered wrongly on the commonest boxed data there
   is — a list of words of different lengths. The reference walks the two

@@ -145,20 +145,30 @@ fn the_determinant_expands_down_the_first_column() {
     assert_eq!(j("*/ . + 2 2 $ 1 2 3 4"), Array::scalar_i64(25));
 }
 
-/// The two base cases: no columns left is v's identity element, no rows
-/// left is u over nothing.
+/// The base cases: ONE column left is u applied to that column, no columns
+/// at all is v's identity element, and no rows left is u over nothing. The
+/// identity elements are boolean, as both references report them.
 #[test]
 fn the_determinant_bottoms_out_at_the_identity_elements() {
-    assert_eq!(j("-/ . * 0 0 $ 0"), Array::scalar_i64(1));
-    assert_eq!(j("-/ . + 0 0 $ 0"), Array::scalar_i64(0));
-    assert_eq!(j("-/ . * 2 0 $ 0"), Array::scalar_i64(1));
-    assert_eq!(j("-/ . * 0 2 $ 0"), Array::scalar_i64(0));
+    assert_eq!(j("-/ . * 0 0 $ 0"), Array::scalar_bool(true));
+    assert_eq!(j("-/ . + 0 0 $ 0"), Array::scalar_bool(false));
+    assert_eq!(j("-/ . * 2 0 $ 0"), Array::scalar_bool(true));
+    assert_eq!(j("-/ . * 0 2 $ 0"), Array::scalar_bool(false));
     assert_eq!(j("-/ . * 1 1 $ 7"), Array::scalar_i64(7));
     // A single column is the fold of that column; an argument of rank 1 or
     // 0 is read as one.
     assert_eq!(j("-/ . * 2 1 $ 5 6"), Array::scalar_i64(-1));
     assert_eq!(j("-/ . * 1 2 3"), Array::scalar_i64(2));
     assert_eq!(j("-/ . * 5"), Array::scalar_i64(5));
+    // The base case carries the column's own VALUES, so a u that is not an
+    // insert sees them rather than a vector of identity elements.
+    assert_eq!(j("*: . > 1 2"), i64s(&[2], &[1, 4]));
+    assert_eq!(j("$ . > 1 2"), i64s(&[1], &[2]));
+    assert_eq!(
+        j("< . > 'ab'"),
+        Array::new(Vec::new(), Data::Box(vec![chars(&[2], "ab")].into()))
+    );
+    assert_eq!(j("*: . > 2 2 $ 1 2 3 4"), i64s(&[2, 1], &[0, 0]));
 }
 
 /// The verb's monadic rank is 2, so an argument of higher rank gives one
@@ -351,7 +361,7 @@ fn format_by_specification_refuses_what_it_cannot_lay_out() {
 fn reading_numbers_out_of_text_stands_in_for_what_it_cannot_read() {
     assert_eq!(j("0 \". '1 2 3'"), i64s(&[3], &[1, 2, 3]));
     assert_eq!(j("_1 \". '1 2 x 3'"), i64s(&[4], &[1, 2, -1, 3]));
-    assert_eq!(j("0 \". 'abc'"), Array::scalar_i64(0));
+    assert_eq!(j("0 \". 'abc'"), Array::scalar_bool(false));
     assert_eq!(j("99 \". 'oops'"), Array::scalar_i64(99));
     assert_eq!(j("$ 0 \". '1'"), i64s(&[0], &[]));
     assert_eq!(j("$ 0 \". ''"), i64s(&[1], &[0]));

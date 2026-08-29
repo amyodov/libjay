@@ -185,8 +185,12 @@ fn j_window_edges_follow_the_reference() {
     assert_eq!(val(Lang::J, "5 +/\\ 1 2 3 4").shape, vec![0]);
     assert_eq!(val(Lang::J, "9 +/\\ 1 2 3").shape, vec![0]);
     assert_eq!(val(Lang::J, "3 +/\\ i. 2 3").shape, vec![0, 3]);
-    // Zero takes the n+1 empty runs, each reduced to the verb's identity.
-    assert_eq!(val(Lang::J, "0 +/\\ 1 2 3 4 5"), i64s(&[6], &[0, 0, 0, 0, 0, 0]));
+    // Zero takes the n+1 empty runs, each reduced to the verb's identity,
+    // and that identity is boolean.
+    assert_eq!(
+        val(Lang::J, "0 +/\\ 1 2 3 4 5"),
+        Array::new(vec![6], Data::Bool(vec![0; 6].into()))
+    );
     assert_eq!(val(Lang::J, "0 <./\\ 1 2 3"), f64s(&[4], &[f64::INFINITY; 4]));
     // A negative window takes non-overlapping chunks, the last one short.
     assert_eq!(val(Lang::J, "_2 +/\\ 1 2 3 4 5"), i64s(&[3], &[3, 7, 5]));

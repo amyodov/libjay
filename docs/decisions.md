@@ -3795,3 +3795,53 @@ the register.
   with an agenda. `$:` in a TACIT verb — where the reference makes it name
   the largest verb containing it — stays a gap, and now says so as one
   instead of reporting a value error against the program.
+- 2026-08-29 — A cell is made dense where it is FRAMED, not where it is
+  read. `u^:n y` over a list of counts collects one result per count and
+  laminates them; a sparse result holds only its stored entries while its
+  shape is the logical one, so the lamination sized the answer from a shape
+  its buffer could not fill — a debug assertion in `Array::new`, and in a
+  release build a malformed array that panicked later in the display. The
+  fix is in `assemble`, which every collecting form goes through (the
+  power, the scans, the cuts, the ranked applications): one place knows
+  that a sparse cell has to be expanded first, rather than each caller.
+- 2026-08-29 — `u . v y` bottoms out on the LAST COLUMN, not on an identity
+  element. The expansion down the first column was reaching `v`'s identity
+  once no columns were left, which fed `u` a vector of ones; `u` has to see
+  the column's own values. Read off the oracle: with one column left the
+  value is `u` applied to that column, so `u . v y` of a vector or an atom
+  — each read as a single column — is `u y` itself, and `(< . >) 'ab'` is
+  a box of `ab` rather than a comparison between a character and a number.
+  `-/ . *` agreed all along because the ones and the values fold the same
+  way there, which is why the earlier crawl recorded `.` as clean.
+- 2026-08-29 — A J numeric literal whose atoms are all 0 or 1 is BOOLEAN.
+  The rule is one line at the lexer, but its consequences are not: the type
+  travels through the structural verbs, stays boolean under the operations
+  that cannot leave `{0, 1}` (`*` `<.` `>.` `^` `|` `!`) and widens under
+  `+` and `-`, and the identity element of an empty reduction is boolean
+  whatever it was folding. Each of those was read off `3!:0` against the
+  oracle rather than guessed. Only J's frontend narrows the literal, and
+  only J's arithmetic keeps the type: GNU APL has no type report at all, so
+  nothing in APL asks the question and nothing in APL was changed.
+  An empty SCAN was the one place the new identity type showed through
+  wrongly — it takes the shape from the verb applied to the empty argument
+  and used to take that run's type too, which is now overridden by the
+  argument's wherever the run is boolean, matching `+/\ 0$'a'` (character)
+  and `+/\ i. 0` (integer).
+- 2026-08-29 — An explicit definition with no sentences in its body has
+  neither valence and refuses to be applied. The value model has no room
+  for a verb that answers nothing; a body that RAN and produced nothing is
+  a different thing and still yields J's empty result for an untaken
+  branch. Both languages refuse, which is what GNU APL does with `{}5`.
+- 2026-08-29 — `m : n` accepts a boxed list of lines as the body, one line
+  per box, and a lone `:` line separates the monad case from the dyad case
+  — in that spelling and in the `3 : 0` body below the sentence alike, since
+  the split lives in `build_definition` where both arrive. The right
+  operand is folded as a constant, so `(3 : ('a' ; 'b'))` is settled at
+  compile time like every other noun operand; a body that is not known
+  until the sentence runs is a named gap.
+- 2026-08-29 — A trailing underscore in a J name belongs to a locative and
+  to nothing else. The lexer now refuses a word that ends in one unless it
+  parses as `name_locale_`, where the locale is empty, all digits, or a
+  letter followed by alphanumerics, and what precedes the suffix is itself
+  a name — which is what tells `a__` (a name) from `a___` (not one).
+  Locales themselves remain a gap; this is only the spelling.

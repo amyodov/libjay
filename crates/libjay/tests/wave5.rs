@@ -103,7 +103,7 @@ fn the_map_replaces_every_leaf_by_its_path() {
         *first,
         boxes(&[2], vec![Array::from_i64(vec![0]), Array::from_i64(vec![0])])
     );
-    assert_eq!(val(Lang::J, "(0;0) {:: (1;2);3"), Array::scalar_i64(1));
+    assert_eq!(val(Lang::J, "(0;0) {:: (1;2);3"), Array::scalar_bool(true));
 }
 
 // --- J: index specifications ----------------------------------------------

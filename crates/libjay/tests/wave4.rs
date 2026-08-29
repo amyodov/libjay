@@ -274,7 +274,7 @@ fn agenda_picks_one_verb_of_a_gerund() {
 
 #[test]
 fn the_adverse_answers_a_refusal_with_the_other_verb() {
-    assert_eq!(val(Lang::J, "(+/ :: 0) 'abc'"), Array::scalar_i64(0));
+    assert_eq!(val(Lang::J, "(+/ :: 0) 'abc'"), bits(&[], &[0]));
     assert_eq!(val(Lang::J, "(+/ :: 0) 1 2 3"), Array::scalar_i64(6));
     // A gap in libjay is a promise, not an error the program may handle.
     let e = err(Lang::J, "(2&s: :: 0) 'a b'");
@@ -411,7 +411,8 @@ fn the_outfix_leaves_out_a_run_of_items() {
     // A NEGATIVE width leaves out non-overlapping runs, the last short.
     assert_eq!(val(Lang::J, "_2 +/\\. i. 5"), i64s(&[3], &[9, 5, 6]));
     assert_eq!(val(Lang::J, "_3 +/\\. i. 5"), i64s(&[2], &[7, 3]));
-    assert_eq!(val(Lang::J, "_7 +/\\. i. 5"), i64s(&[1], &[0]));
+    // Nothing is left in: the answer is one copy of the identity, boolean.
+    assert_eq!(val(Lang::J, "_7 +/\\. i. 5"), bits(&[1], &[0]));
 }
 
 #[test]

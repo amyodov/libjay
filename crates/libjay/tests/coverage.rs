@@ -329,14 +329,15 @@ fn lcm_and_gcd() {
     assert_eq!(val(Lang::J, "_4 *. 6"), Array::scalar_i64(-12));
     assert_eq!(val(Lang::J, "_4 *. _6"), Array::scalar_i64(12));
     // Zero cases.
-    assert_eq!(val(Lang::J, "0 +. 0"), Array::scalar_i64(0));
+    // Two boolean literals under the GCD stay boolean, as J reports them.
+    assert_eq!(val(Lang::J, "0 +. 0"), bits(&[], &[0]));
     assert_eq!(val(Lang::J, "0 +. 5"), Array::scalar_i64(5));
     assert_eq!(val(Lang::J, "0 *. 5"), Array::scalar_i64(0));
     // Reductions have the identities 1 and 0.
     assert_eq!(val(Lang::J, "*./ 4 6 8"), Array::scalar_i64(24));
     assert_eq!(val(Lang::J, "+./ 12 18 24"), Array::scalar_i64(6));
-    assert_eq!(val(Lang::J, "*./ i. 0"), Array::scalar_i64(1));
-    assert_eq!(val(Lang::J, "+./ i. 0"), Array::scalar_i64(0));
+    assert_eq!(val(Lang::J, "*./ i. 0"), bits(&[], &[1]));
+    assert_eq!(val(Lang::J, "+./ i. 0"), bits(&[], &[0]));
     // On booleans the pair is exactly logical and / or, and stays boolean.
     let and = val(Lang::J, "(1 2 3 > 2) *. 1 2 3 > 1");
     assert_eq!(and, bits(&[3], &[0, 0, 1]));
@@ -397,7 +398,7 @@ fn increment_decrement_double_halve_square() {
     let big = format!(">: {}", i64::MAX);
     assert_eq!(val(Lang::J, &big).dtype(), DType::F64);
     // J's `-.` is `1 - y` on any number; APL's `~` insists on 0 or 1.
-    assert_eq!(val(Lang::J, "-. 0 1"), i64s(&[2], &[1, 0]));
+    assert_eq!(val(Lang::J, "-. 0 1"), bits(&[2], &[1, 0]));
     assert_eq!(val(Lang::J, "-. 0.25"), f64s(&[], &[0.75]));
     assert_eq!(val(Lang::J, "-. 5"), Array::scalar_i64(-4));
     assert_eq!(val(Lang::Apl, "~0 1"), bits(&[2], &[1, 0]));
@@ -441,7 +442,7 @@ fn tail_and_curtail() {
     // With no items the tail is a cell of fills.
     assert_eq!(val(Lang::J, "{: i. 0 2"), i64s(&[2], &[0, 0]));
     assert_eq!(val(Lang::J, "}: i. 0 2"), i64s(&[0, 2], &[]));
-    assert_eq!(val(Lang::J, "{: 0 $ 0"), Array::scalar_i64(0));
+    assert_eq!(val(Lang::J, "{: 0 $ 0"), bits(&[], &[0]));
     // A scalar is one item: it is its own tail and curtails to nothing.
     assert_eq!(val(Lang::J, "{: 5"), Array::scalar_i64(5));
     assert_eq!(val(Lang::J, "}: 5"), Array::empty(DType::I64));

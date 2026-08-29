@@ -61,7 +61,7 @@ fn scalar_box(a: Array) -> Array {
 fn sample() -> Array {
     boxes(
         &[3],
-        vec![Array::scalar_i64(1), i64s(&[2], &[2, 3]), text(&[3], "abc")],
+        vec![bits(&[], &[1]), i64s(&[2], &[2, 3]), text(&[3], "abc")],
     )
 }
 
@@ -132,8 +132,9 @@ fn apl_first_takes_one_element() {
 fn j_link_builds_a_boxed_list() {
     // `;` is right-associative and a boxed right argument is joined as it
     // is, so a chain of links is one flat list of boxes.
+    // `1` is a boolean literal, `2` and `3` are integers.
     assert_eq!(val(Lang::J, "1;2;3"), boxes(&[3], vec![
-        Array::scalar_i64(1),
+        bits(&[], &[1]),
         Array::scalar_i64(2),
         Array::scalar_i64(3),
     ]));
@@ -168,7 +169,7 @@ fn j_raze_catenates_the_opened_items() {
     );
     // An unboxed argument razes to its own ravel.
     assert_eq!(val(Lang::J, "; i. 2 3"), i64s(&[6], &[0, 1, 2, 3, 4, 5]));
-    assert_eq!(val(Lang::J, "; 1"), i64s(&[1], &[1]));
+    assert_eq!(val(Lang::J, "; 1"), bits(&[1], &[1]));
     // Mixed contents have no common type.
     assert_eq!(err(Lang::J, ";1;2 3;'ab'").kind, ErrorKind::Type);
 }
@@ -187,7 +188,7 @@ fn j_each_opens_applies_and_boxes_again() {
     );
     assert_eq!(
         val(Lang::J, "1 ,&.> 1;2"),
-        boxes(&[2], vec![i64s(&[2], &[1, 1]), i64s(&[2], &[1, 2])])
+        boxes(&[2], vec![bits(&[2], &[1, 1]), i64s(&[2], &[1, 2])])
     );
     // J always boxes the result again, even a bare number.
     assert_eq!(val(Lang::J, "+ &.> 1;2"), val(Lang::J, "1;2"));
@@ -291,7 +292,7 @@ fn j_structure_works_on_boxes() {
     let a = "1;2 3;'abc'";
     assert_eq!(val(Lang::J, &format!("$ {a}")), i64s(&[1], &[3]));
     assert_eq!(val(Lang::J, &format!("# {a}")), Array::scalar_i64(3));
-    assert_eq!(val(Lang::J, &format!("{{. {a}")), scalar_box(Array::scalar_i64(1)));
+    assert_eq!(val(Lang::J, &format!("{{. {a}")), scalar_box(bits(&[], &[1])));
     assert_eq!(val(Lang::J, &format!("{{: {a}")), scalar_box(text(&[3], "abc")));
     assert_eq!(val(Lang::J, &format!("}}. {a}")), val(Lang::J, "(2 3);'abc'"));
     assert_eq!(val(Lang::J, &format!("}}: {a}")), val(Lang::J, "1;2 3"));
@@ -347,7 +348,7 @@ fn overtaking_a_boxed_array_fills_with_the_empty_box() {
     assert_eq!(
         val(Lang::J, "4 {. 1;2 3"),
         boxes(&[4], vec![
-            Array::scalar_i64(1),
+            bits(&[], &[1]),
             i64s(&[2], &[2, 3]),
             Array::empty(jay::DType::I64),
             Array::empty(jay::DType::I64),
@@ -442,8 +443,9 @@ fn apl_scalar_functions_pervade_a_nested_argument() {
 fn boxes_grade_by_the_ordering_of_the_language_being_graded_in() {
     // J orders by type class first, APL2 by rank first; the batteries are
     // in tests/wave8.rs and the two corpora.
-    assert_eq!(val(Lang::J, "/: 'b';'a'"), val(Lang::J, "1 0"));
-    assert_eq!(val(Lang::J, "\\: 1;2"), val(Lang::J, "1 0"));
+    // A grade is an integer index list; the literal `1 0` is boolean.
+    assert_eq!(val(Lang::J, "/: 'b';'a'"), i64s(&[2], &[1, 0]));
+    assert_eq!(val(Lang::J, "\\: 1;2"), i64s(&[2], &[1, 0]));
     assert_eq!(val(Lang::Apl, "⍋(1 2)(3 4)"), val(Lang::Apl, "1 2"));
     // Sorting boxed items BY a key that is not boxed works.
     assert_eq!(val(Lang::J, "('ab';'c';'d') /: 3 1 2"), val(Lang::J, "'c';'d';'ab'"));

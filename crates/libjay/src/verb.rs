@@ -2034,6 +2034,9 @@ impl Verb {
             Verb::Prim(_) | Verb::Rank(_, _) | Verb::Each(..) => {
                 self.dyad_ranked(x, y, ctx, span)
             }
+            // `x (m H. n) y` reads both arguments an element at a time, so
+            // the frame machinery pairs the term count with the argument.
+            Verb::Hypergeometric { .. } => self.dyad_ranked(x, y, ctx, span),
             // `x u\ y` and `x u\. y` need the frame machinery: their left
             // cell is an atom. So does the cut, whose left cell is one
             // rectangle or one list of frets.
@@ -2122,9 +2125,6 @@ impl Verb {
                 f.dyad(x, &r, ctx, span)
             }
             Verb::Ambivalent(_, v) => v.dyad(x, y, ctx, span),
-            Verb::Hypergeometric { .. } => {
-                Err(Error::domain("m H. n has no dyadic meaning", span))
-            }
             Verb::Agenda(vs, w) => {
                 agenda_pick(vs, w, Some(x), y, ctx, span)?.dyad(x, y, ctx, span)
             }
@@ -2205,6 +2205,9 @@ impl Verb {
                 Ok(enclose(&r, *rule))
             }
             Verb::Cut(u, n) => cut(u, Some(x), y, *n, ctx, span),
+            Verb::Hypergeometric { num, den } => {
+                hypergeometric_partial(num, den, x, y, ctx.cfg.near(), span)
+            }
             _ => Err(Error::internal("dyad_cell on a verb without cell ranks")),
         }
     }
@@ -2613,6 +2616,17 @@ fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
         // to learn the shape; we yield an empty array of the frame's shape.
         return Ok(Array::new(frame.to_vec(), Data::empty(DType::I64)));
     }
+    // A sparse cell's buffer holds its stored entries alone while its shape
+    // is the logical one; framing splices buffers end to end, so a sparse
+    // cell would size the result from a shape its buffer cannot fill. Every
+    // collecting operator arrives here — `u^:n` over a list of counts, the
+    // scans, the cuts, the ranked applications — and this is the one place
+    // that has to know: a cell is made dense before it is framed.
+    let cells: Vec<Array> = if cells.iter().any(Array::is_sparse) {
+        cells.iter().map(Array::densified).collect()
+    } else {
+        cells
+    };
     let cells: Vec<Array> =
         if cells.iter().all(Array::is_row_major) {
             cells
@@ -5100,6 +5114,45 @@ fn exact_compare_data(
 /// folding both run without materialising cells.
 #[allow(clippy::too_many_arguments)]
 fn scalar_dyad_data(
+    op: ScalarDyad,
+    x: &Data,
+    xoff: usize,
+    xdiv: usize,
+    y: &Data,
+    yoff: usize,
+    ydiv: usize,
+    n: usize,
+    tol: Tol,
+    rules: Rules,
+    span: Span,
+) -> Result<Data> {
+    let out = scalar_dyad_wide(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, rules, span)?;
+    // Two booleans stay boolean under the operations that cannot leave
+    // {0, 1} — `*` `<.` `>.` `^` `|` `!` — while `+` and `-` widen to
+    // integer, which is the type J reports for each of them. GNU APL has
+    // no type report at all, so nothing in APL asks this question.
+    if rules.lang == crate::Lang::J
+        && x.dtype() == DType::Bool
+        && y.dtype() == DType::Bool
+        && matches!(
+            op,
+            ScalarDyad::Mul
+                | ScalarDyad::Min
+                | ScalarDyad::Max
+                | ScalarDyad::Pow
+                | ScalarDyad::Residue
+                | ScalarDyad::Binomial
+        )
+        && let Data::I64(v) = &out
+        && v.iter().all(|&k| k == 0 || k == 1)
+    {
+        return Ok(Data::Bool(v.iter().map(|&k| k as u8).collect()));
+    }
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scalar_dyad_wide(
     op: ScalarDyad,
     x: &Data,
     xoff: usize,
@@ -8067,6 +8120,19 @@ fn minors(
             )
         })?;
         Array::new(Vec::new(), data)
+    } else if column + 1 == cols {
+        // The last column: the expansion bottoms out on the VALUES still in
+        // play, not on an identity element. `u . v` of a one-column table is
+        // `u` applied to that column — which for a vector or an atom, both
+        // of which are read as a single column, is `u y` itself.
+        let n = left.count_ones() as usize;
+        let mut column_cells = Vec::with_capacity(n);
+        for r in 0..rows {
+            if left & (1 << r) != 0 {
+                column_cells.push(atom(y, r * cols + column));
+            }
+        }
+        u.monad(&assemble(&[n], column_cells, span)?, ctx, span)?
     } else if left == 0 {
         u.monad(&Array::new(vec![0], Data::empty(DType::I64)), ctx, span)?
     } else {
@@ -8791,19 +8857,20 @@ const APL_EXTREME: f64 = 1.7976e308;
 fn reduce_identity(v: &Verb, n: usize, lang: crate::Lang) -> Option<Data> {
     let Verb::Prim(p) = v else { return None };
     let DyadOp::Scalar(op) = p.dyad else { return None };
-    let ints = |k: i64| Data::I64(vec![k; n].into());
+    // Every numeric identity here is 0 or 1, and both references report a
+    // boolean for each of them.
     let bits = |k: u8| Data::Bool(vec![k; n].into());
     let extreme =
         |sign: f64| Data::F64(vec![sign * if lang == crate::Lang::Apl { APL_EXTREME } else { f64::INFINITY }; n].into());
     Some(match op {
-        ScalarDyad::Add | ScalarDyad::Sub | ScalarDyad::Gcd | ScalarDyad::Residue => ints(0),
+        ScalarDyad::Add | ScalarDyad::Sub | ScalarDyad::Gcd | ScalarDyad::Residue => bits(0),
         ScalarDyad::Mul
         | ScalarDyad::DivJ
         | ScalarDyad::DivApl
         | ScalarDyad::Pow
         | ScalarDyad::Lcm
         | ScalarDyad::Root
-        | ScalarDyad::Binomial => ints(1),
+        | ScalarDyad::Binomial => bits(1),
         ScalarDyad::Min => extreme(1.0),
         ScalarDyad::Max => extreme(-1.0),
         ScalarDyad::Eq | ScalarDyad::Le | ScalarDyad::Ge => bits(1),
@@ -10322,7 +10389,14 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
             return Ok(Array::new(base.shape.clone(), Data::empty(base.dtype())));
         }
         let cell = u.is_pure().then(|| base.clone());
-        return Ok(empty_frame(&[0], base.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
+        let framed = empty_frame(&[0], base.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span));
+        // That run gives the shape, and its type too — except a boolean,
+        // which carries no type of its own here: an insert's identity is
+        // boolean whatever it was folding, and then the argument's type
+        // stands. `+/\ 0$'a'` is an empty CHARACTER list, `":\ i.0` an
+        // empty character one, and `#\ 0$'a'` an empty integer one.
+        let dt = if framed.dtype() == DType::Bool { base.dtype() } else { framed.dtype() };
+        return Ok(Array::new(framed.shape, Data::empty(dt)));
     }
     if n > 0 && base.dtype().is_numeric() && let Some(op) = folded_op(u) {
         // Folding from the right is the insert's own order, so it holds
@@ -12949,9 +13023,33 @@ fn hypergeometric(num: &[Cx], den: &[Cx], y: &Array, span: Span) -> Result<Array
     let at = poly_coeffs(y, span)?;
     let mut out = Vec::with_capacity(at.len());
     for z in &at {
-        out.push(hypergeometric_at(&num, &den, *z, span)?);
+        out.push(hypergeometric_at(&num, &den, *z, None, span)?);
     }
     let mut a = complex_or_real(out);
+    a.shape = y.shape.clone();
+    Ok(a)
+}
+
+/// `x (m H. n) y`: the same series stopped after its first `x` terms, so
+/// that `0` terms is 0 and `1` term is 1. The count is a whole nonnegative
+/// number; both arguments are read one element at a time.
+fn hypergeometric_partial(
+    num: &[Cx],
+    den: &[Cx],
+    x: &Array,
+    y: &Array,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
+    let terms = one_int(x, "a term count for m H. n", near, span)?;
+    if terms < 0 {
+        return Err(Error::domain("m H. n sums a nonnegative number of terms", span));
+    }
+    let (num, den) = cancel_parameters(num, den);
+    let at = poly_coeffs(y, span)?;
+    let z = at.first().copied().unwrap_or(cx::ZERO);
+    let v = hypergeometric_at(&num, &den, z, Some(terms as usize), span)?;
+    let mut a = complex_or_real(vec![v]);
     a.shape = y.shape.clone();
     Ok(a)
 }
@@ -12972,7 +13070,13 @@ fn cancel_parameters(num: &[Cx], den: &[Cx]) -> (Vec<Cx>, Vec<Cx>) {
     (left, right)
 }
 
-fn hypergeometric_at(num: &[Cx], den: &[Cx], z: Cx, span: Span) -> Result<Cx> {
+///
+/// `terms` is how many of them to sum: None sums to convergence, and
+/// `Some(n)` stops after n whatever the sum is doing.
+fn hypergeometric_at(num: &[Cx], den: &[Cx], z: Cx, terms: Option<usize>, span: Span) -> Result<Cx> {
+    if terms == Some(0) {
+        return Ok(cx::ZERO);
+    }
     // Wholly real arguments are summed in real arithmetic, where dividing
     // by a zero parameter gives the infinity J answers with; the complex
     // quotient would make that same division a NaN in both parts.
@@ -12980,11 +13084,13 @@ fn hypergeometric_at(num: &[Cx], den: &[Cx], z: Cx, span: Span) -> Result<Cx> {
     if z[1] == 0.0 && real(num) && real(den) {
         let n: Vec<f64> = num.iter().map(|c| c[0]).collect();
         let d: Vec<f64> = den.iter().map(|c| c[0]).collect();
-        return Ok([hypergeometric_real(&n, &d, z[0], span)?, 0.0]);
+        return Ok([hypergeometric_real(&n, &d, z[0], terms, span)?, 0.0]);
     }
+    // The first term is 1, so a count of n leaves n-1 to accumulate.
+    let limit = terms.map_or(HYPERGEOMETRIC_TERMS, |n| n - 1);
     let mut sum = cx::ONE;
     let mut term = cx::ONE;
-    for k in 0..HYPERGEOMETRIC_TERMS {
+    for k in 0..limit {
         let kk = [k as f64, 0.0];
         let mut ratio = z;
         for a in num {
@@ -13006,16 +13112,26 @@ fn hypergeometric_at(num: &[Cx], den: &[Cx], z: Cx, span: Span) -> Result<Cx> {
             return Ok(sum);
         }
     }
+    if terms.is_some() {
+        return Ok(sum);
+    }
     Err(Error::domain(
         format!("the hypergeometric series did not converge within {HYPERGEOMETRIC_TERMS} terms"),
         span,
     ))
 }
 
-fn hypergeometric_real(num: &[f64], den: &[f64], z: f64, span: Span) -> Result<f64> {
+fn hypergeometric_real(
+    num: &[f64],
+    den: &[f64],
+    z: f64,
+    terms: Option<usize>,
+    span: Span,
+) -> Result<f64> {
+    let limit = terms.map_or(HYPERGEOMETRIC_TERMS, |n| n - 1);
     let mut sum = 1.0f64;
     let mut term = 1.0f64;
-    for k in 0..HYPERGEOMETRIC_TERMS {
+    for k in 0..limit {
         let kk = k as f64;
         let mut ratio = z;
         for a in num {
@@ -13033,6 +13149,9 @@ fn hypergeometric_real(num: &[f64], den: &[f64], z: f64, span: Span) -> Result<f
         if sum == before {
             return Ok(sum);
         }
+    }
+    if terms.is_some() {
+        return Ok(sum);
     }
     Err(Error::domain(
         format!("the hypergeometric series did not converge within {HYPERGEOMETRIC_TERMS} terms"),
@@ -15975,6 +16094,17 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// element dropped. `2` also answers a dense argument, which has all of its
 /// axes conceptually sparse; the others refuse one.
 fn sparse_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    // `(2;a) $. y` respecifies which axes are stored sparsely, `(3;e) $. y`
+    // which element is the sparse one, and `(2 1;a)` and `(2 2;a)` ask what
+    // the array would cost under other axes. The storage they respecify is
+    // here; the forms themselves are not written yet.
+    if x.dtype() == DType::Box {
+        return Err(Error::not_yet(
+            "a boxed sparse form ((2;a) $. y and its relatives), which respecifies \
+             a sparse array's axes or element",
+            span,
+        ));
+    }
     if x.rank() != 0 {
         return Err(Error::new(ErrorKind::Rank, "a sparse form is one atom", Some(span)));
     }
@@ -16848,9 +16978,10 @@ mod tests {
         let empty = Array::new(vec![0, 2], Data::I64(vec![].into()));
         let r = Verb::Reduce(b(plus())).monad(&empty, &mut c, sp()).unwrap();
         assert_eq!(r.shape, vec![2]);
-        assert_eq!(ints(&r), vec![0, 0]);
+        // The identities 0 and 1 are boolean, as both references report them.
+        assert_eq!(bools(&r), vec![0, 0]);
         let r = Verb::Reduce(b(times())).monad(&empty, &mut c, sp()).unwrap();
-        assert_eq!(ints(&r), vec![1, 1]);
+        assert_eq!(bools(&r), vec![1, 1]);
         let r = Verb::Reduce(b(floor_v())).monad(&empty, &mut c, sp()).unwrap();
         assert!(floats(&r).iter().all(|&x| x == f64::INFINITY));
         let r = Verb::Reduce(b(ceil_v())).monad(&empty, &mut c, sp()).unwrap();
@@ -16858,9 +16989,9 @@ mod tests {
         // Subtraction and division have identities too, and a comparison
         // has the conventional one both references print.
         let r = Verb::Reduce(b(minus())).monad(&empty, &mut c, sp()).unwrap();
-        assert_eq!(ints(&r), vec![0, 0]);
+        assert_eq!(bools(&r), vec![0, 0]);
         let r = Verb::Reduce(b(pct())).monad(&empty, &mut c, sp()).unwrap();
-        assert_eq!(ints(&r), vec![1, 1]);
+        assert_eq!(bools(&r), vec![1, 1]);
         let r = Verb::Reduce(b(eq_v())).monad(&empty, &mut c, sp()).unwrap();
         assert_eq!(bools(&r), vec![1, 1]);
         // An empty vector reduces to a scalar identity.
@@ -16868,7 +16999,7 @@ mod tests {
             .monad(&Array::empty(DType::I64), &mut c, sp())
             .unwrap();
         assert!(r.shape.is_empty());
-        assert_eq!(ints(&r), vec![0]);
+        assert_eq!(bools(&r), vec![0]);
     }
 
     #[test]

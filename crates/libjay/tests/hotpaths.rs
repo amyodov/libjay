@@ -148,7 +148,8 @@ fn the_cases_the_row_fold_declines_are_unchanged() {
     let empty = Array::new(vec![2, 0], Data::I64(Vec::new().into()));
     let r = run("+/\"1 {y}", std::slice::from_ref(&empty));
     assert_eq!(r.shape, vec![2]);
-    assert_eq!(r.data, Data::I64(vec![0, 0].into()));
+    // The identity 0 is boolean, as both references report it.
+    assert_eq!(r.data, Data::Bool(vec![0, 0].into()));
 
     let big = Array::new(vec![2, 2], Data::I64(vec![1 << 40, 1 << 40, 2, 3].into()));
     let r = run("*/\"1 {y}", std::slice::from_ref(&big));

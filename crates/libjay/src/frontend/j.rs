@@ -183,6 +183,26 @@ fn is_j_name(s: &str) -> bool {
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Whether a word made of letters, digits and underscores is a name J would
+/// accept.
+///
+/// A TRAILING underscore is reserved: it closes a locative, `name_locale_`,
+/// and there is no other way for a name to end in one. So `a_` is not a
+/// name at all, while `a_b_` (the name `a` in locale `b`) and `a__` are.
+/// The locale is empty, all digits, or a letter followed by alphanumerics,
+/// and what precedes the suffix has to be a name in its own right — which
+/// is what tells `a__` from `a___`.
+fn is_well_formed_name(word: &str) -> bool {
+    let Some(body) = word.strip_suffix('_') else { return true };
+    let Some(cut) = body.rfind('_') else { return false };
+    let locale = &body[cut + 1..];
+    let named = locale.is_empty()
+        || locale.bytes().all(|b| b.is_ascii_digit())
+        || (locale.starts_with(|c: char| c.is_ascii_alphabetic())
+            && locale.bytes().all(|b| b.is_ascii_alphanumeric()));
+    named && !body[..cut].is_empty() && is_well_formed_name(&body[..cut])
+}
+
 /// One piece of a definition body: a run of ordinary words, or a control
 /// word. A line break ends a sentence, and so does every control word.
 #[derive(Clone, Debug)]
@@ -467,6 +487,60 @@ fn take_direct_definition(
     Ok(())
 }
 
+/// True for the body line that is a lone `:` — the marker between an
+/// explicit definition's monad case and its dyad case.
+fn is_case_separator(line: &[Frag]) -> bool {
+    matches!(line, [Frag::Conj(Modifier::Prim(":"), _)])
+}
+
+/// `m : n` where n is a boxed list of lines: the body of a multi-line
+/// definition, one line per box, given as a value instead of as the text
+/// below the sentence.
+fn boxed_body_definition(u: &Frag, v: &Frag, scope: &Names, span: Span) -> Result<Frag> {
+    let valence = noun_value(u)
+        .filter(|a| a.rank() == 0)
+        .and_then(|a| a.to_f64_vec())
+        .and_then(|n| n.first().copied())
+        .ok_or_else(|| Error::parse("an explicit definition starts with a number", span))?;
+    let dyadic = match valence {
+        3.0 => false,
+        4.0 => true,
+        1.0 | 2.0 => {
+            return Err(Error::not_yet(
+                "an explicit modifier whose body is a boxed list of lines",
+                span,
+            ));
+        }
+        13.0 => return Err(Error::not_yet("tacit definitions (13 : '...')", span)),
+        n => return Err(Error::domain(format!("{n} is not an explicit definition"), span)),
+    };
+    let Some(body_arr) = noun_value(v) else {
+        return Err(Error::not_yet(
+            "an explicit definition whose body is not known until the sentence runs",
+            span,
+        ));
+    };
+    let Some(boxes) = body_arr.as_boxes() else {
+        return Err(Error::parse(
+            "an explicit definition takes 0, a string, or a boxed list of lines",
+            span,
+        ));
+    };
+    let mut body = Vec::with_capacity(boxes.len());
+    for b in boxes.iter() {
+        let Data::Char(chars) = &b.data else {
+            return Err(Error::parse("every box of an explicit body holds one line", span));
+        };
+        let text = crate::fmt::text_of(chars.as_slice().iter().copied(), scope.char_bytes);
+        let mut frags = Vec::new();
+        lex_line(&text, span.start, scope.char_bytes, &mut frags)?;
+        body.push(frags);
+    }
+    let name = if dyadic { "4 : '...'" } else { "3 : '...'" };
+    let verb = build_definition(body, dyadic, name, scope, None)?;
+    Ok(Frag::Verb(VerbFrag::V(verb), span))
+}
+
 /// True where a definition's words include this name.
 fn mentions(body: &[Vec<Frag>], name: &str) -> bool {
     body.iter().any(|l| l.iter().any(|f| matches!(f, Frag::Name(n, _) if n == name)))
@@ -480,6 +554,14 @@ fn build_definition(
     scope: &Names,
     self_name: Option<&str>,
 ) -> Result<Verb> {
+    // A line that is nothing but `:` separates the monad case from the dyad
+    // case: what precedes it is applied with y alone, what follows with x
+    // and y both, and the definition is one verb out of the two.
+    if let Some(cut) = body.iter().position(|l| is_case_separator(l)) {
+        let monad = build_definition(body[..cut].to_vec(), false, name, scope, self_name)?;
+        let dyad = build_definition(body[cut + 1..].to_vec(), true, name, scope, self_name)?;
+        return Ok(Verb::Ambivalent(Box::new(monad), Box::new(dyad)));
+    }
     // The body reads the names the program has already given, and binds its
     // own arguments over them.
     let mut inner = scope.clone();
@@ -1587,7 +1669,18 @@ fn lex_line(text: &str, base: usize, char_bytes: bool, out: &mut Vec<Frag>) -> R
             let word = &text[off(start)..off(i)];
             match verb_for(word) {
                 Some(v) => out.push(Frag::Verb(VerbFrag::V(v), span(start, i))),
-                None => out.push(Frag::Name(word.to_string(), span(start, i))),
+                None => {
+                    if !is_well_formed_name(word) {
+                        return Err(Error::parse(
+                            format!(
+                                "ill-formed name: {word} — a name ends in an underscore \
+                                 only as the locative `name_locale_`"
+                            ),
+                            span(start, i),
+                        ));
+                    }
+                    out.push(Frag::Name(word.to_string(), span(start, i)))
+                }
             }
             continue;
         }
@@ -1993,6 +2086,13 @@ fn num_array(nums: &[Num]) -> Array {
             })
             .collect();
         return Array::new(shape, Data::Ext(data));
+    }
+    // A literal whose atoms are all 0 or 1 is BOOLEAN, which is what `3!:0`
+    // reports of it; the type widens on the first arithmetic that needs it,
+    // exactly as it does for a comparison's answer.
+    if nums.iter().all(|n| matches!(n, Num::I(0 | 1))) {
+        let data = nums.iter().map(|n| u8::from(matches!(n, Num::I(1)))).collect();
+        return Array::new(shape, Data::Bool(data));
     }
     let data = nums
         .iter()
@@ -2650,6 +2750,14 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         // explicit definitions spelled `3 : '…'` and `4 : '…'` are read by
         // the lexer and never reach here.
         ":" => {
+            // `m : n` with a boxed n is the ordinary multi-line definition
+            // written on one line, one box per line. The literal
+            // `3 : 'text'` spelling never arrives here — the lexer takes it
+            // while the sentence is still words — so a noun on the left
+            // means the body came from an expression.
+            if u.is_noun() && v.is_noun() {
+                return boxed_body_definition(&u, &v, scope, span);
+            }
             let f = verb_operand(u, span)?;
             let g = verb_operand(v, span)?;
             Ok(Frag::Verb(
@@ -3216,8 +3324,10 @@ mod tests {
         }
     }
 
+    // A literal of 0s and 1s is boolean, so the numbers are read out rather
+    // than borrowed from an integer buffer.
     fn ints(e: &Expr) -> Vec<i64> {
-        konst(e).as_i64_slice().expect("integer data").to_vec()
+        konst(e).to_i64_vec().expect("integer data")
     }
 
     fn prim_of(v: &Verb) -> Prim {
@@ -3638,7 +3748,7 @@ mod tests {
         let (v, _) = monad_of(&one("1 & + y"));
         match &v {
             Verb::BondLeft(a, g) => {
-                assert_eq!(a.as_i64_slice(), Some(&[1i64][..]));
+                assert_eq!(a.to_i64_vec(), Some(vec![1i64]));
                 assert_eq!(prim_of(g).name, "+");
             }
             other => panic!("expected a left bond, got {other:?}"),

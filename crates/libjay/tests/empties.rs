@@ -177,8 +177,9 @@ fn a_boxed_polynomial_is_its_roots() {
     assert_eq!(j("p. (1;2 3)"), j("6.0 _5.0 1.0"));
     assert_eq!(j("p.. (<1 2 3)"), j("11 _12 3"));
     assert_eq!(j("p. (<i.0)"), j(",1.0"));
-    assert_eq!(j("p.. (<i.0)"), j(",0"));
-    assert_eq!(j("p.. (0$'a')"), j(",0"));
+    // An integer list, not the boolean one `,0` spells.
+    assert_eq!(j("p.. (<i.0)"), j(",0 + 0"));
+    assert_eq!(j("p.. (0$'a')"), j(",0 + 0"));
     assert_eq!(j("(1;0$'a') p. 4"), j("1.0"));
     assert_eq!(j("(<i.0) p. 3"), j("1.0"));
 }

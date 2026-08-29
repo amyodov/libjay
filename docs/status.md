@@ -161,8 +161,8 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `&.` under | 🟢 `v^:_1 @: u &: v`, over the obverse table — docs/coverage.md's "The obverse table" lists what is in it and the two verbs still named. `&.>` and `&.,` are the two unders not built out of an inverse: box by box, and over the ravel with the shape put back |
 | `&.:` under | 🟢 the same on whole arguments, over the same table |
 | `^:` power | 🟡 a literal count, a list of them (mixed signs included), `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives — which obverse a negative count runs is settled when the arguments arrive, so `x u^:_1 y` undoes the bond `x&u` and the monad undoes u; a computed count not yet |
-| `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
-| `:` explicit definition | 🟡 `0 :` (the noun definition, whose lines below are its text), `1 :`, `2 :`, `3 :`, `4 :`, the `m : 0` body on the lines below, and `u : v`, which joins two VERBS into one ambivalent verb; `13 :` not yet |
+| `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, whose base case is `u` applied to the last column's own values — so `u . v y` of a vector or an atom, each read as one column, is `u y` — and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
+| `:` explicit definition | 🟡 `0 :` (the noun definition, whose lines below are its text), `1 :`, `2 :`, `3 :`, `4 :`, the `m : 0` body on the lines below, the same body given as a BOXED list of lines (`3 : ('a =. *: y' ; 'a + a')`), and `u : v`, which joins two VERBS into one ambivalent verb; `13 :` not yet, and an explicit MODIFIER (`1 :`, `2 :`) whose body is boxed is named |
 | `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named. The left rank is finite — 2 for the rectangles, 1 for the frets — so a longer left argument is a FRAME of cuts, one per cell. An empty fret list is the whole argument in one piece; a BOXED left argument — J's per-axis frets — is named |
 | `!.` fit | 🟡 the tolerance meaning, and the fill for `\|.` (the shift); a fill on any other verb is named |
 | `!:` foreign | 🟡 `1!:1` (read a line from stdin), `1!:2` (write a line to stdout), `3!:0` (type code) and `5!:1` (the atomic representation of a name); the ones that reach a file, a script, the host, the clock or a shared library are ⚪ closed by the sandbox, and the ones that only compute are 🔴 named |
@@ -183,8 +183,8 @@ conjunctions above:
 | `L:` level | 🟢 both valences; the dyad descends both arguments together |
 | `S:` spread | 🟢 both valences, as `L:` |
 | `b.` boolean / characteristics | 🟢 `m b.` (the 32 boolean and bitwise functions) and all three characteristics: `0` the ranks, `1` the identity function, `_1` the obverse. `_1` answers a SPELLING, and libjay writes its own — a derived verb whose operand is a noun spells as `(n&+)` here where the reference writes the noun out |
-| `$.` sparse | 🟡 the storage kind, the monad and the dyad's forms `_1 0 1 2 3 4 5 7 8`, and the display. A sparse array reaching any other verb is expanded first, so the ANSWER always matches and the storage kind does not survive the step — where J keeps `s + 1` sparse, libjay gives the dense array. Sparse characters and boxes are named gaps, as they are in J |
-| `H.` hypergeometric | 🟢 the series, with the shared parameters cancelled; a series that neither converges nor overflows is refused by name |
+| `$.` sparse | 🟡 the storage kind, the monad and the dyad's atomic forms `_1 0 1 2 3 4 5 7 8`, and the display. The BOXED left arguments — `(2;a)` and `(3;e)`, which respecify a sparse array's axes or element, and `(2 1;a)` and `(2 2;a)`, which price it under other axes — are named gaps. A sparse array reaching any other verb is expanded first, so the ANSWER always matches and the storage kind does not survive the step — where J keeps `s + 1` sparse, libjay gives the dense array. Sparse characters and boxes are named gaps, as they are in J |
+| `H.` hypergeometric | 🟢 both valences: the monad sums the series to its limit, with the shared parameters cancelled, and `x (m H. n) y` stops after x terms — a whole nonnegative count, paired with the argument element by element. A series that neither converges nor overflows is refused by name |
 | `t.` task | ⚪ the reference spells `t.` the TASK conjunction — it runs a verb in one of J's thread pools and answers with a pyx. The sandbox does not open those threads, as it does not for `T.` |
 | `t:` | — the reference rejects the spelling as an invalid inflection, as it does `d.`, `D.` and `D:` |
 | `..` even | — the reference rejects the spelling as an invalid inflection |
@@ -208,8 +208,8 @@ conjunctions above:
 | Adverb and conjunction assignment `m =. /` | 🟢 the name is that modifier from the next sentence on |
 | Multiple assignment `'a b' =. …` | 🔴 |
 | `=.` vs `=:` scoping | 🟢 a definition has its own frame; `=:` names a global |
-| Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🟢 |
-| Multi-line definition body `3 : 0` … `)` | 🟢 |
+| Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🟢 a body with no sentences at all has neither valence, and refuses |
+| Multi-line definition body `3 : 0` … `)` | 🟢 a lone `:` line separates the monad case from the dyad case |
 | Explicit adverb `1 : '…'` and conjunction `2 : '…'` | 🟢 both phases; operands as `u`/`v` or `m`/`n` |
 | Multi-line modifier body `1 : 0` / `2 : 0` … `)` | 🟢 |
 | `{{ }}` modifier forms | 🟢 the part of speech is read off the operand names the body uses |
@@ -219,7 +219,8 @@ conjunctions above:
 | Tacit definition `13 : '…'` | 🔴 named |
 | Control words `if. while. for. select. try.` | 🟢 `whilst.`, `for_i.`, `fcase.`, `elseif.` included |
 | Control words `throw. catcht. goto_x. label_x.` | 🔴 named |
-| Locales and `18!:` | 🔴 |
+| Locales and `18!:` | 🔴 a locative is read as an ordinary name |
+| Ill-formed names | 🟢 a name ends in an underscore only as the locative `name_locale_`, so `a_` is refused where `a_b_`, `a__` and `cc__` are names |
 | `$:` self-reference | 🟡 names the definition it stands in; the oracle self-applies |
 | Recursion by name inside a definition | 🟢 bounded, with a diagnostic |
 | `x` / `y` arguments | 🟢 |

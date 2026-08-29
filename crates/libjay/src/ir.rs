@@ -951,6 +951,16 @@ pub(crate) fn call_explicit(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
+    // A body with no sentences computes nothing, and a verb that answers
+    // nothing at all is not a value — the definition has neither valence.
+    // Both languages refuse it rather than let the hole travel.
+    if def.body.is_empty() && def.result.is_none() {
+        return Err(Error::new(
+            ErrorKind::Domain,
+            format!("{} has an empty body: it defines neither a monad nor a dyad", def.name),
+            Some(span),
+        ));
+    }
     if x.is_some() && def.left.is_none() && !def.spare_left {
         return Err(Error::new(
             ErrorKind::Domain,

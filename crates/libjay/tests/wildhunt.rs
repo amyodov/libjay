@@ -192,8 +192,8 @@ fn a_gerund_under_an_adverb_cycles_through_its_verbs() {
     assert_eq!(j("(+`-`*)/ 1 2 3 4"), Array::scalar_i64(-9));
     // With no items there is no insertion, so the answer is the identity
     // element of the verb the fold would have reached first.
-    assert_eq!(j("(+`-)/ i.0"), Array::scalar_i64(0));
-    assert_eq!(j("(*`-)/ i.0"), Array::scalar_i64(1));
+    assert_eq!(j("(+`-)/ i.0"), Array::scalar_bool(false));
+    assert_eq!(j("(*`-)/ i.0"), Array::scalar_bool(true));
     // The other three give one verb to each piece in turn.
     assert_eq!(j("(+`-)\\ 1 2 3"), i64s(&[3, 3], &[1, 0, 0, -1, -2, 0, 1, 2, 3]));
     assert_eq!(j("(+`-)\\. 1 2 3"), i64s(&[3, 3], &[1, 2, 3, -2, -3, 0, 3, 0, 0]));

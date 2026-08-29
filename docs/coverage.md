@@ -1152,7 +1152,17 @@ Six element types, ordered:
     boolean < integer < extended < rational < float < complex
 
 A dyadic pair computes in the higher of its two types, which is what keeps
-`1x + 1r2` exact and lets `1x + 1.5` round. The two EXACT types are J's:
+`1x + 1r2` exact and lets `1x + 1.5` round.
+
+BOOLEAN is where a J literal starts when every one of its atoms is 0 or 1:
+`3!:0 (1 0 1)` is 1, as it is in jconsole, and the type travels with the
+value through the structural verbs. The arithmetic widens it exactly where
+J's does — `+` and `-` answer integers, while `*` `<.` `>.` `^` `|` `!`
+stay boolean because they cannot leave `{0, 1}` — and the identity element
+an empty reduction reaches is boolean too, whatever it was folding. An
+empty SCAN takes its type from the argument wherever that identity is all
+it would otherwise have to go on, so `+/\ 0$'a'` is an empty CHARACTER
+list and `+/\ i. 0` an empty integer one. The two EXACT types are J's:
 `extended` is an arbitrary-precision integer and `rational` an exact ratio
 of two of them, held in lowest terms with a positive denominator. Both are
 heap-backed pointer arrays, like boxes — never foreign memory, never fused,
@@ -1299,6 +1309,14 @@ storage kind. J propagates it — `s + 1` there is sparse with a sparse
 element of 1 — where libjay gives back the dense array. `-:` compares
 values, so a sparse array and the dense one it stands for match. Indexed
 assignment writes into the expansion, and a fused chain reads it.
+
+The same holds where results are COLLECTED rather than passed on: `u^:n y`
+over a list of counts, the scans, the cuts and every ranked application
+frame their cells into one array, and a cell is made dense on the way in.
+A sparse cell holds only its stored entries while its shape is the logical
+one, so framing it as it lies would size the answer from a shape its buffer
+cannot fill; the corpus rows for `$.^:(1 1) 1 0 1` and its relatives ask
+the shape and the sum, which are the questions storage does not decide.
 
 **At the boundaries.** Neither Python, Arrow nor the C ABI has a sparse
 carrier, so a sparse result crosses as the array it stands for.
@@ -1797,12 +1815,6 @@ oracle directly, one entry per line of
   `6686425096436r2128355211423` there). Both are within tolerance of the
   argument, and every value with a nice rational nearby — `0.1`, `1.5`,
   `2.5` — agrees exactly.
-- `3!:0` reports the storage a value actually has, and libjay's storage of
-  a J LITERAL is not always J's: jconsole narrows one whose atoms are all 0
-  or 1 to boolean and answers 1, where libjay keeps `1` and `1 0 1` as
-  integers and answers 4. Everything computed agrees — `3!:0 (1=1)` is 1 on
-  both sides, `3!:0 (i.5)` is 4 on both — and every other type code matches
-  exactly.
 - Neither `⍞` nor `⎕` is in the APL corpus: `jay-corpus` runs one process
   per sentence with nowhere to put a line of input for it. Two things they
   would pin if it could. GNU APL prints a `⎕:` prompt before reading an

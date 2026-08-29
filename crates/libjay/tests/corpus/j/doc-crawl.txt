@@ -1651,3 +1651,165 @@ $ 3!:0 (2 2 $ 1)
 5!:1 < 'i.'
 5!:1 < '+/'
 5!:1 < '+'
+
+// ---------------------------------------------------------------------
+// Doc-crawl pass 2, the answers: the sentences the pass found disagreeing,
+// now that they agree. Each block names the fault it stands guard over.
+
+// u^:(n0 n1) over a sparse array laminated the stored entries against the
+// logical shape. Every result is sparse in the reference and dense here
+// (the storage divergence the $. row records), so the rows below ask the
+// questions whose answers do not turn on storage: the shape, and the sum.
+$ $.^:(1 1) 1 0 1
++/ , $.^:(1 1) 1 0 1
++/^:2 $.^:(1 1) 1 0 1
+$ $.^:(1 2) 1 0
+# $.^:(1 2) i. 2 2
++/ +/ , $.^:(1 2) i. 2 2
+$ $.^:(_1 2) $. 1 0 2 0 3
++/ , $.^:(_1 2) $. 1 0 2 0 3
+$ $.^:_1 2 * $. 1 0 2 0 3
+$ $.^:(1 2) 1 1 1
+$ (, $.)^:(1) 1 0 1
+$ $.^:(0 1) 1 0 1
+$ $.^:(1 1 1) 1 0 1
+
+// u . v — the determinant expands down the first column, and its base case
+// is u applied to the LAST column's own values. A vector and an atom are
+// each read as one column, so `u . v y` there is `u y`.
+(< . >) 1 2
+(< . >) 5
+(< . >) 1 1 $ 5
+(< . >) 2 1 $ 5 6
+(< . >) 3 1 $ 1 2 3
+(< . >) 'ab'
+(< . >) i. 0
+(< . >) i. 0 0
+(*: . >) 1 2
+(*: . >) 3 1 $ 1 2 3
+(*: . >) 2 2 $ 1 2 3 4
+(*: . >) 3 2 $ i. 6
+(*: . >) 2 2 2 $ i. 8
+(*: . >) 2 0 $ 0
+(*: . >) 'ab'
+(<"0 . >) 1 2
+($ . >) 1 2
+(# . >) 1 2 3
+($ . *) 3 1 $ 1 2 3
+(+/ . *) 3 1 $ 1 2 3
+(-/ . *) 3 1 $ 1 2 3
+(-/ . *) 1 1 $ 5
+(-/ . *) 2 2 $ 1 2 3 4
+(+/ . *) 2 2 $ 1 2 3 4
+(-/ . *) 3 2 $ i. 6
+(-/ . *) 2 0 $ 0
+(+/ . *) 0 0 $ 0
+(-/ . *) 3 3 $ 1 2 3 4 5 6 7 8 10
+(+/ . *) 3 3 $ 1 2 3 4 5 6 7 8 10
+(< . >) 1 2 $ 5 6
+(< . *) 2 2 $ 1 2 3 4
+$ > (< . >) 5
+$ (*: . >) 2 2 $ 1 2 3 4
+
+// x (m H. n) y — the series stopped after x terms. The count is a whole
+// nonnegative number and pairs with the argument element by element.
+8 (1 H. 1) i. 6
+3 (1 H. 1) 1
+1 (1 H. 1) 1
+0 (1 H. 1) 5
+_1 (1 H. 1) 1
+2.5 (1 H. 1) 1
+1 2 3 (1 H. 1) 1
+1 2 3 (1 H. 1) 1 2 3
+3 (1 H. 1) 1j1
+3 (0 H. 0) 1
+2 (2 H. 3) 1
+1 2 (1 H. 1) i. 2 2
+1e6 (1 H. 1) 1
+3 (1 H. 0) 1
+(1 H. 1) b. 0
+
+// An explicit definition with no sentences in its body has neither valence.
+// A body that RAN and produced nothing is a different thing: an untaken
+// branch yields J's empty result.
+(3 : '') 5
+(3 : ' ') 5
+(3 : 'NB. nothing') 5
+(4 : '') 3 4
+(3 : 'a =. 1') 5
+(3 : 'if. 0 do. 1 end.') 5
+$ (3 : 'if. 0 do. 1 end.') 5
+
+// m : n with a BOXED n: the multi-line body written on one line, one box
+// per line, with a lone `:` between the monad case and the dyad case.
+(3 : ('a =. *: y' ; 'a + a')) 3
+(3 : ('y + 1' ; ':' ; 'x * y')) 5
+2 (3 : ('y + 1' ; ':' ; 'x * y')) 5
+(3 : ('n =. 0' ; 'select. y' ; 'case. 1 do. n =. 10' ; 'case. do. n =. 20' ; 'end.' ; 'n')) 1
+(3 : ('n =. 0' ; 'select. y' ; 'case. 1 do. n =. 10' ; 'case. do. n =. 20' ; 'end.' ; 'n')) 2
+(4 : ('x + y' ; 'x * y')) 3
+3 (4 : ('x + y' ; 'x * y')) 4
+(3 : 'a =. y ^ 2 [ a + a') 3
+
+// A numeric literal whose atoms are all 0 or 1 is BOOLEAN, and the type
+// travels with it: through the structural verbs, through the operations
+// that cannot leave {0,1}, and out again through `+` and `-`, which widen.
+3!:0 (0)
+3!:0 (1)
+3!:0 (0 1)
+3!:0 (1 0 1)
+3!:0 (2 2 $ 1 0 0 1)
+3!:0 (, 1)
+3!:0 ('' $ 1)
+3!:0 (0 $ 1)
+3!:0 (_1 1)
+3!:0 (1 2)
+3!:0 (|. 1 0 1)
+3!:0 (}. 1 0 1)
+3!:0 (~. 1 0 1)
+3!:0 (0 { 1 0 1)
+3!:0 (-. 1 0 1)
+3!:0 (, 1 0 1)
+3!:0 ($ 1 0 1)
+3!:0 (1 0 1 * 1)
+3!:0 (1 0 1 * 2)
+3!:0 (1 0 1 <. 1)
+3!:0 (1 0 1 >. 1)
+3!:0 (1 0 1 ^ 0)
+3!:0 (0 | 1 0 1)
+3!:0 (1 0 1 ! 1)
+3!:0 (1 0 1 - 1)
+3!:0 (*./ 1 0 1)
+3!:0 (1 0 1 % 1)
+3!:0 (1 0 1 * 1x)
+3!:0 (1 0 1 * 1.0)
+3!:0 (+/ i. 0)
+3!:0 (*/ i. 0)
+3!:0 (+/ 0 $ 'a')
+3!:0 (+/ 0 $ 1.5)
+3!:0 (+/\\ i. 0)
+3!:0 (+/\\ 0 $ 'a')
+3!:0 (+/\\ 0 $ 1.5)
+3!:0 (+/\\. 0 $ 'a')
+3!:0 (<\\ i. 0)
+3!:0 (":\\ i. 0)
+3!:0 (#\\ 0 $ 'a')
+3!:0 (0 +/\\ 1 2 3 4 5)
+
+// A name ends in an underscore only as the locative `name_locale_`, and
+// the locale is empty, all digits, or a letter followed by alphanumerics.
+a_ =: 3
+a_ + a_ =: 3
+1 + ab_ =: 3
+1 + a1_ =: 3
+1 + a_2b_ =: 3
+1 + a___ =: 3
+1 + a_b =: 3
+1 + a__ =: 3
+1 + a_b_ =: 3
+1 + a_b_c_ =: 3
+1 + a_b__ =: 3
+1 + aa_bb_ =: 3
+1 + cc__ =: 3
+1 + e_e_e_ =: 3
+1 + c_d_ =: 3

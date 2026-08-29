@@ -144,7 +144,7 @@ fn an_empty_axis_yields_one_identity_per_cell() {
     let big = 1.7976e308;
     assert_eq!(apl("⌈⌿0 3⍴0").to_f64_vec().unwrap(), vec![-big; 3]);
     assert_eq!(apl("⌊⌿0 3⍴0").to_f64_vec().unwrap(), vec![big; 3]);
-    assert_eq!(apl("÷⌿0 3⍴0"), i64s(&[3], &[1, 1, 1]));
+    assert_eq!(apl("÷⌿0 3⍴0"), bits(&[3], &[1, 1, 1]));
     assert_eq!(j(">./ 0 3 $ 0").to_f64_vec().unwrap(), vec![f64::NEG_INFINITY; 3]);
 }
 

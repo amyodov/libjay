@@ -183,13 +183,10 @@ fn the_type_foreign_answers_js_own_numbers() {
     for (src, code) in cases {
         assert_eq!(value(Lang::J, src, &[]), Array::scalar_i64(*code), "{src}");
     }
-    // The one divergence: jconsole narrows a literal whose atoms are all 0
-    // or 1 to boolean storage and answers 1, where libjay stores the same
-    // literal as integers. The foreign reports the storage each engine
-    // actually uses, so the answers differ on the literal and agree
-    // everywhere the value was computed.
-    assert_eq!(value(Lang::J, "3!:0 (1)", &[]), Array::scalar_i64(4));
-    assert_eq!(value(Lang::J, "3!:0 (1 0 1)", &[]), Array::scalar_i64(4));
+    // A literal whose atoms are all 0 or 1 is stored as booleans, which is
+    // the storage jconsole reports for it too.
+    assert_eq!(value(Lang::J, "3!:0 (1)", &[]), Array::scalar_i64(1));
+    assert_eq!(value(Lang::J, "3!:0 (1 0 1)", &[]), Array::scalar_i64(1));
 }
 
 // --- the refusals ----------------------------------------------------------
