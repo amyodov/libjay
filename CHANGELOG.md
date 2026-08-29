@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.4.0 — 2026-08-29
+
+### Added
+
 - Operands the program computes. A `⍣` or `^:` count, an `f[K]` axis and an
   array standing where a function operand belongs may now be a name or an
   expression instead of a literal, and are read where the derived function
