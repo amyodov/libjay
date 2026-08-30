@@ -1,0 +1,90 @@
+// Programs rather than sentences.
+//
+// Every line here is a whole program: several assignments feeding one
+// another, a dfn or a ∇-definition, a labelled loop where the program wants
+// one, and a final value small enough to read. The rest of the corpus asks
+// what one primitive does; this theme asks what happens when twenty of them
+// are asked to cooperate.
+//
+// The J theme of the same name poses the same problems in the other
+// language, and the two answer alike wherever the problem does not depend on
+// the index origin. Where it does — a rank, an index-of, a character code —
+// the answers differ by one, and that is the ⎕IO the reference is run with
+// showing through rather than a disagreement.
+//
+// Floats are rounded into integers before the last sentence, so the recorded
+// answer is exact rather than merely within tolerance.
+
+// --- primes ---------------------------------------------------------------
+// A sieve as a ∇-definition: a boolean vector, a label, → branching on a
+// condition, indexed assignment of a computed index vector. Answers pi(60),
+// the sum of those primes, and the largest.
+∇Z←SIEVE N;B;I;J\nB←N⍴1\nB[1]←0\nI←2\nL:→(N<I×I)/D\n→(0=B[I])/S\nJ←(I×I)+I×0,⍳⌊(N-I×I)÷I\nB[J]←0\nS:I←I+1\n→L\nD:Z←B/⍳N\n∇\nP←SIEVE 60\n(⍴P),(+/P),(¯1↑P)
+// The same question without a loop: a composite is a product of two numbers
+// at least two, so the table of products is the sieve. Adds the prime gaps
+// and how many of them are twins.
+N←40\nC←1↓⍳N\nX←,C∘.×C\nP←(~C∊X)/C\nG←(1↓P)-¯1↓P\n(⍴P),(¯1↑P),(+/P),(⌈/G),(+/2=G)
+
+// --- a discrete Fourier transform ------------------------------------------
+// The transform is one inner product against the roots of unity, and the
+// inverse is the conjugate matrix over n. The round trip is compared with ≡
+// after rounding, so the recorded answer is 1 and the magnitudes.
+N←8\nK←¯1+⍳N\nW←*(0J¯1)×(2×○1)×(K∘.×K)÷N\nX←3 1 4 1 5 9 2 6\nF←W+.×X\nG←((+W)+.×F)÷N\nR←⌊0.5+9○G\nM←⌊0.5+|F\n(R≡X),M
+
+// --- an OHLCV pipeline -----------------------------------------------------
+// Closes and volumes into returns, a three-bar moving average by n-wise
+// reduction, a running peak by scan and the drawdown from it, and a
+// volume-weighted price. Reported in basis points and cents.
+C←100 102 101 105 110 108 112 109 115 120 118 125\nV←12 14 9 20 25 11 30 17 22 40 13 28\nR←((1↓C)÷¯1↓C)-1\nMA←(3+/C)÷3\nPK←⌈\\C\nDD←(C-PK)÷PK\nVW←(+/C×V)÷+/V\nBP←⌊0.5+10000×R\n(⌊0.5+10000×⌊/DD),(⌊0.5+100×¯1↑MA),(⌊0.5+100×VW),(⌈/BP),(⌊/BP)
+
+// --- text statistics -------------------------------------------------------
+// Partitioned enclose splits the sentence on its spaces — the partition
+// vector numbers the words and zeroes the separators — and an outer product
+// of ≡ counts each distinct one. The winner is reported by its ⎕AV indices.
+T←'the cat sat on the mat and the cat ran'\nM←T≠' '\nP←M×+\\M>¯1↓0,M\nW←P⊂T\nU←∪W\nN←+/U∘.≡W\nO←⍒N\nTOP←(O[1])⊃U\n(⍴W),(⍴U),(⌈/N),(⍴TOP),⎕AV⍳TOP
+// The same counting reached by index-of into the distinct keys and a
+// boolean membership table summed two ways: one inner product for the
+// totals, one reduction for the counts.
+K←'ab' 'cd' 'ab' 'ef' 'cd' 'ab'\nQ←3 1 4 1 5 9\nU←∪K\nIX←U⍳K\nE←IX∘.=⍳⍴U\nTOT←Q+.×E\nCNT←+⌿E\nO←⍒TOT\n(⎕AV⍳(O[1])⊃U),(TOT[O]),(CNT[O]),⍴U
+
+// --- Game of Life ----------------------------------------------------------
+// The neighbour count is separable: sum the three vertical shifts, then the
+// three horizontal ones, then take the centre back out. Two dfns, a glider
+// on a 6 by 6 board, four generations under the power operator. The board is
+// small enough that the wrap never reaches the pattern.
+B←6 6⍴0\nB[2;3]←1\nB[3;4]←1\nB[4;2]←1\nB[4;3]←1\nB[4;4]←1\nNBR←{V←(¯1⊖⍵)+⍵+1⊖⍵ ⋄ ((¯1⌽V)+V+1⌽V)-⍵}\nSTEP←{T←NBR ⍵ ⋄ (T=3)∨⍵∧T=2}\nH←STEP⍣4⊢B\n(+/,H),,H
+
+// --- sorting and ranking ---------------------------------------------------
+// A grade, the sort it induces, the rank of each element (grade of the
+// grade), a dense rank against the distinct sorted values, the two middle
+// elements and the three largest.
+S←5 3 9 1 7 3 8 2 9 4\nG←⍋S\nSR←S[G]\nRK←⍋G\nD←∪SR\nDR←D⍳S\nMID←SR[5 6]\nT3←3↑⍒S\nSR,RK,DR,(+/MID),S[T3]
+
+// --- base conversion -------------------------------------------------------
+// Hexadecimal and binary expansions of a vector — the radix axis leads, so
+// the digit sums come from a reduction along the first axis — a mixed radix
+// for a clock, and every one of them folded back with ⊥.
+N←12345 4095 255 1000000\nH←(6⍴16)⊤N\nB←(20⍴2)⊤N\nT←24 60 60⊤86399\nBACK←(16⊥H),(2⊥B),(24 60 60⊥T)\nOK←N≡16⊥H\nDIGS←+⌿H\nBACK,OK,DIGS,T
+
+// --- run-length coding -----------------------------------------------------
+// Encode by the positions where the value changes, decode by replication,
+// and compare the decoding with the original.
+S←1 1 1 2 2 3 3 3 3 1 1 4\nM←1,(1↓S)≠¯1↓S\nV←M/S\nI←M/⍳⍴S\nC←(1↓I,1+⍴S)-I\nDEC←C/V\n(V,C),(DEC≡S),⍴V
+
+// --- a regression by inner product -----------------------------------------
+// Means, deviations, and three inner products give the slope, the
+// intercept, the coefficient of determination and the sample variance. The
+// data is an exact line, so the first three are exact.
+X←1 2 3 4 5 6 7 8 9 10\nY←3 5 7 9 11 13 15 17 19 21\nN←⍴X\nMX←(+/X)÷N\nMY←(+/Y)÷N\nDX←X-MX\nDY←Y-MY\nSXX←DX+.×DX\nSXY←DX+.×DY\nSYY←DY+.×DY\nSL←SXY÷SXX\nIC←MY-SL×MX\nR2←(SXY×SXY)÷SXX×SYY\nVAR←SXX÷N-1\nSL,IC,R2,VAR,(⌊0.5+100×VAR*0.5)
+
+// --- matrix powers ---------------------------------------------------------
+// The Fibonacci matrix raised by a dfn under the power operator, a square of
+// a small integer matrix, its trace along the leading diagonal, and the
+// identity checked by multiplying through it.
+M←2 2⍴1 1 1 0\nP←{M+.×⍵}⍣9⊢M\nFIB←P[1;]\nID←3 3⍴1 0 0 0 1 0 0 0 1\nA←3 3⍴2 0 1 1 3 0 0 1 4\nA2←A+.×A\nTR←+/1 1⍉A2\n(,P),FIB,TR,(+/,A+.×ID),(A2≡A+.×A)
+
+// --- a loop with a branch inside it ----------------------------------------
+// Collatz chain lengths for the first thirty naturals: two labels and three
+// branches inside a ∇-definition, applied with ¨ across the vector, then the
+// longest chain, where it starts, the total and the mean.
+∇Z←CHAIN N;M;C\nM←N\nC←0\nL:→(M≤1)/D\n→(0≠2|M)/O\nM←M÷2\n→S\nO:M←1+3×M\nS:C←C+1\n→L\nD:Z←C\n∇\nV←CHAIN¨⍳30\n(⌈/V),(V⍳⌈/V),(+/V),(⌊(+/V)÷⍴V)

@@ -2223,9 +2223,15 @@ sections above is also collected here.
 - Catenating items whose shapes differ fills in J and is refused in APL, as
   each reference has it: `1 2 3 , i. 2 2` overtakes both sides to 3 columns,
   while `(2 2⍴⍳4) ⍪ 1 2 3` is a length error.
-- A bonded noun (`n&v`, `u&n`) has to be a literal, as a noun fork's left
-  tine does; a computed one says "bonds over a non-literal noun is not
-  supported yet".
+- A bonded noun (`n&v`, `u&n`) and an amend's indices (`m}`) may be
+  COMPUTED in J: `mp =. +/ . *` then `(m & mp) ^: 9 m`, or `j =. 2 * i. 5`
+  then `0 j } b`, are read where the derived verb is applied, as a `^:`
+  count is. A noun fork's left tine still has to be a literal, and so does
+  APL's `∘` bind (`(⍳3)∘+`), whose operand is folded at the token level
+  before any expression exists to defer. A computed GERUND amend —
+  `` u`v`w} `` where the gerund is a name — stays a gap on purpose: which
+  three verbs the gerund holds decides how the amend PARSES, so it has to
+  be known while the program compiles.
 - A COMPLEX array grades by (real, imaginary), which is what J's `/:`
   answers and GNU APL refuses; the ordering verbs still refuse complex
   operands, because a permutation is not a claim about size. Ordering

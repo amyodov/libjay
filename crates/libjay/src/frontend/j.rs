@@ -2432,9 +2432,27 @@ fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
                 }
                 return Ok(Frag::Verb(VerbFrag::V(Verb::AmendGerund(verbs)), span));
             }
-            let m = noun_value(&u)
-                .ok_or_else(|| Error::not_yet("amend over a computed index", span))?;
-            return Ok(Frag::Verb(VerbFrag::V(Verb::Amend(m)), span));
+            if let Some(m) = noun_value(&u) {
+                return Ok(Frag::Verb(VerbFrag::V(Verb::Amend(m)), span));
+            }
+            // Indices the program computes are read where the amend is
+            // APPLIED, so `j =. i. 3` then `0 j } b` amends at whatever `j`
+            // holds by then. What the value may not be is a gerund: which
+            // three verbs it names decides how the amend PARSES, and that
+            // has to be known now.
+            let Some(operand) = noun_expr(&u) else {
+                return Err(Error::not_yet("amend over a computed index", span));
+            };
+            let deferred = crate::verb::Deferred {
+                operand,
+                template: Verb::Amend(Array::scalar_i64(0)),
+                build: built_amend,
+                spelling: "n}".to_string(),
+            };
+            return Ok(Frag::Verb(
+                VerbFrag::V(Verb::Deferred(std::sync::Arc::new(deferred))),
+                span,
+            ));
         }
         let (v, _) = as_verb(u)?;
         return Ok(Frag::Verb(VerbFrag::V(Verb::AmendVerb(Box::new(v))), span));
@@ -2819,13 +2837,64 @@ fn compose(u: Frag, v: Frag, infinite: bool, span: Span) -> Result<Frag> {
     // reports `_ _ _`, and `1 2&+ i. 2 2` agrees row by row rather than
     // pairing the noun with every atom.
     if u.is_noun() {
-        let m = bond_noun(&u, span)?;
+        let bound = bond_noun(&u, span);
         let g = as_verb(v)?.0;
-        return verb(Verb::BondLeft(m, Box::new(g)));
+        if let Ok(m) = bound {
+            return verb(Verb::BondLeft(m, Box::new(g)));
+        }
+        return deferred_bond(noun_expr(&u), g, true, span).map(|v| Frag::Verb(VerbFrag::V(v), span));
     }
     let f = as_verb(u)?.0;
-    let n = bond_noun(&v, span)?;
-    verb(Verb::BondRight(Box::new(f), n))
+    if let Ok(n) = bond_noun(&v, span) {
+        return verb(Verb::BondRight(Box::new(f), n));
+    }
+    deferred_bond(noun_expr(&v), f, false, span).map(|v| Frag::Verb(VerbFrag::V(v), span))
+}
+
+/// A bond whose noun the program computes: `(}: c)&+`, `m&mp`, `%&(+/ y)`.
+///
+/// The noun is read where the derived verb is APPLIED rather than while the
+/// program compiles, so a name assigned in an earlier sentence — or a
+/// definition's own argument — may stand where a literal does. Everything
+/// else about the bond is what it was.
+fn deferred_bond(operand: Option<Expr>, f: Verb, left: bool, span: Span) -> Result<Verb> {
+    let Some(operand) = operand else {
+        return Err(Error::not_yet("bonds over a non-literal noun", span));
+    };
+    let spelling = if left { format!("n&{}", f.name()) } else { format!("{}&n", f.name()) };
+    let build = if left { built_bond_left } else { built_bond_right };
+    let deferred = crate::verb::Deferred { operand, template: f, build, spelling };
+    Ok(Verb::Deferred(std::sync::Arc::new(deferred)))
+}
+
+fn built_amend(
+    _template: &Verb,
+    a: &Array,
+    span: Span,
+    _d: crate::frontend::Rules,
+) -> Result<Verb> {
+    if is_gerund(a) {
+        return Err(Error::not_yet("a computed gerund amend (u`v`w})", span));
+    }
+    Ok(Verb::Amend(a.clone()))
+}
+
+fn built_bond_left(
+    g: &Verb,
+    a: &Array,
+    _span: Span,
+    _d: crate::frontend::Rules,
+) -> Result<Verb> {
+    Ok(Verb::BondLeft(a.clone(), Box::new(g.clone())))
+}
+
+fn built_bond_right(
+    f: &Verb,
+    a: &Array,
+    _span: Span,
+    _d: crate::frontend::Rules,
+) -> Result<Verb> {
+    Ok(Verb::BondRight(Box::new(f.clone()), a.clone()))
 }
 
 /// The largest comparison tolerance `!.` accepts, as J's does: 2^-34.
@@ -3756,11 +3825,30 @@ mod tests {
     // `&.,` needs no obverse — the shape is put back instead — so the
     // verb whose obverse is missing has to be the one on the RIGHT.
     #[case("+: &. (+/ % #) y", "the obverse of")]
-    #[case("(1 + 2) & , y", "bonds over a non-literal noun")]
+    // A cut's kind chooses which function the glyph stands for, so it stays
+    // a literal whole number and an unsupported one is a named gap.
+    #[case("+/ ;. (1.5) y", "cut")]
         fn other_conjunctions_are_not_supported_yet(#[case] src: &str, #[case] msg: &str) {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);
         assert!(e.msg.contains(msg), "{}", e.msg);
+    }
+
+    /// A bond whose noun the program computes is deferred, not refused: the
+    /// noun is read where the derived verb is applied. tests/computed.rs
+    /// holds what it then answers.
+    #[test]
+    fn a_computed_bond_noun_is_read_at_each_application() {
+        let (v, _) = monad_of(&one("(1 + 2) & , y"));
+        match &v {
+            Verb::Deferred(d) => assert_eq!(d.spelling, "n&,"),
+            other => panic!("expected a deferred bond, got {other:?}"),
+        }
+        let (v, _) = monad_of(&one(", & (1 + 2) y"));
+        match &v {
+            Verb::Deferred(d) => assert_eq!(d.spelling, ",&n"),
+            other => panic!("expected a deferred bond, got {other:?}"),
+        }
     }
 
     #[test]

@@ -141,6 +141,40 @@ jconsole, `oracle_apl.rs` holds it to GNU APL, and `oracle_dyalog.rs` holds
 first two gate the dialects libjay ships; the third gates a preset, and has
 an exemption list ("The third gate").
 
+## Programs
+
+`corpus/j/programs.txt` and `corpus/apl/programs.txt` are the theme where a
+corpus line is a whole PROGRAM rather than a sentence: several assignments
+feeding one another, a defined verb or two, control flow where the language
+has it, and a final value small enough to read. A sieve, a discrete Fourier
+transform and its inverse, an OHLCV pipeline, text statistics through key or
+partitioned enclose, Game of Life, sorting and ranking, base-conversion round
+trips, run-length coding, a regression by inner product, matrix powers, and a
+loop with a branch inside it. The two files pose the same problems in the two
+languages and answer alike wherever the problem does not turn on the index
+origin.
+
+They are recorded and replayed exactly like every other theme —
+`cargo run -p libjay-devtools -- record j programs` — and the multi-line
+programs are written the way the format has always allowed, one line with
+`\n` between sentences.
+
+Two rules make a program worth keeping:
+
+- **The final value is modest.** Intermediates are as large as the program
+  needs; what is recorded is a short vector, so the snapshot diff stays
+  readable and a changed answer names itself.
+- **Floats are rounded before the last sentence.** The replay's tolerance
+  would cover them, but a recorded answer of `_268 12100 11266` is a fact
+  and `9.16667` is a rounding of the printer's. Where a float is the point —
+  a variance, a round trip — the program reports `-:` or `≡` of the
+  comparison rather than the number.
+
+A new program goes in the same way a new expression does: write it, run it
+past the oracle by recording the theme, read the snapshot diff, and commit
+the corpus and the snapshot together. The reference's verdict is the answer,
+including its verdict that the program is illegal.
+
 ## Divergences
 
 `corpus/apl/divergences.txt` and `corpus/j/divergences.txt` are where libjay
@@ -421,10 +455,59 @@ whose count is unbounded is deliberately absent from the pools — `u^:_`,
 ## The rest of the suite
 
 `tests/eval.rs`, `coverage.rs`, `boxes.rs`, `definitions.rs`, `fuse.rs`,
-`timeseries.rs`, `simd.rs` and `explain.rs` are hand-written expectations: values checked by
+`timeseries.rs`, `simd.rs`, `stress.rs` and `explain.rs` are hand-written expectations: values checked by
 hand, parametrised over data, never asserting on call wiring. They are the
 place for a primitive's edge cases and for the exact text of a diagnostic. The
 corpora are for breadth; these are for intent.
+
+## The usage stress suite
+
+The corpora ask what a sentence means. The stress suite asks what happens
+when the same sentence is asked ten thousand times, from eight threads at
+once, with the pool sized differently, and with refusals interleaved. It
+answers in the only currency the rest of the suite uses — data — plus one
+measurement that is not data:
+
+```
+crates/libjay/tests/stress.rs         the Rust surface
+crates/libjay-capi/tests/stress.rs    the C ABI
+python/tests/test_stress.py           the Python surface
+```
+
+Nothing in it is `#[ignore]`d and nothing needs an interpreter; it is part of
+`cargo test` and `pytest` like everything else, and each binary is well under
+a minute.
+
+What each file holds:
+
+- **Repetition.** Hundreds of compile-and-run cycles over the same handful of
+  programs, every answer held to the first one's, with a failed compile and a
+  failed run inside the cycle so that the error paths are exercised as often
+  as the good ones.
+- **Resident memory.** The one non-answer. It is read after a warm-up and
+  again at the end, and compared as a RATIO (1.5, with a small additive slack)
+  rather than a megabyte figure: a byte count is a property of the machine and
+  its allocator, a ratio is a property of the code. Where the reading cannot
+  be taken the case says so and passes — an environment without `ps` is not a
+  regression. The baseline comes after the warm-up because what a first pass
+  costs (the pool, the lazily built tables) is not a leak.
+- **The pool.** `LIBJAY_THREADS` is read once per process and frozen, so the
+  1/2/4 sweep is three CHILD PROCESSES, not three loops: the Rust case
+  re-execs its own test binary with `--exact` and a marker in the
+  environment, the Python case runs `sys.executable -c`. All three must print
+  the same digest. The programs answer integers so that "the same" is exact
+  and no reassociated float sum can make the case flap.
+- **Concurrency.** One compiled program shared by eight threads, every thread
+  checking every answer. A `Program` is read-only, and a `Kernel` bound in one
+  thread must not be visible from another.
+- **Refusals.** Every kind of refusal the surface offers, in a loop, each one
+  held to its `ErrorKind` and to carrying a message — and after each round the
+  good programs still answer what they answered.
+
+Adding a case: put the program in the file's own work list rather than
+writing a fresh one beside it, so that every case gains it. A program belongs
+there if it ends in an integer, runs in milliseconds, and touches more than
+one stage of the engine.
 
 ## CI
 

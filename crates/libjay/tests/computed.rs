@@ -184,6 +184,53 @@ fn an_operator_takes_a_computed_array_operand() {
     assert_eq!(apl("∇Z←F N\nZ←N{⍺⍺+⍵}1\n∇\nF 9"), Array::scalar_i64(10));
 }
 
+// --- J's bond and amend ---------------------------------------------------
+
+/// `n&v` and `u&n` read their noun where the derived verb is APPLIED, so a
+/// name — or an expression, or a definition's own argument — may stand
+/// where a literal does. These are the two spellings whole programs reach
+/// for: a matrix power is `(m&mp)^:k m`, and a rolling return is
+/// `(%&(}: c) - 1:) }. c`.
+#[test]
+fn a_bonded_noun_may_be_computed() {
+    assert_eq!(j("n =. 1 2 3\nf =. n & +\nf 10"), i64s(&[3], &[11, 12, 13]));
+    assert_eq!(j("n =. 3\nf =. + & n\nf 10"), Array::scalar_i64(13));
+    assert_eq!(j("c =. 2 4 8\n<. (%&(}: c) - 1:) }. c"), i64s(&[2], &[1, 1]));
+    assert_eq!(
+        j("mp =. +/ . *\nm =. 2 2 $ 1 1 1 0\n, (m & mp) ^: 3 m"),
+        i64s(&[4], &[5, 3, 3, 2])
+    );
+}
+
+/// Nothing is cached: the noun is read afresh at every application, so a
+/// name reassigned between two of them moves the answer.
+#[test]
+fn a_bonded_noun_is_read_at_every_application() {
+    assert_eq!(j("n =. 1\nf =. n & +\na =. f 10\nn =. 2\nb =. f 10\na , b"), i64s(&[2], &[11, 12]));
+    assert_eq!(j("g =. 3 : '(y & +) 100'\ng 5"), Array::scalar_i64(105));
+}
+
+/// The indices `m}` amends at may be computed for the same reason, which is
+/// what lets a sieve cross off a stride it worked out for itself.
+#[test]
+fn an_amend_index_may_be_computed() {
+    assert_eq!(j("j =. 1 3\nb =. i. 5\n0 j } b"), i64s(&[5], &[0, 0, 2, 0, 4]));
+    assert_eq!(j("j =. 2 * i. 3\n9 j } i. 6"), i64s(&[6], &[9, 1, 9, 3, 9, 5]));
+    assert_eq!(j("k =. < 0 1\n, 7 k } 2 2 $ 0"), i64s(&[4], &[0, 7, 0, 0]));
+    assert_eq!(j("j =. 0\nb =. i. 3\nx =. 9 j } b\nj =. 2\n(, x) , 9 j } b"), i64s(&[6], &[9, 1, 2, 0, 1, 9]));
+}
+
+/// The one part of the amend that cannot wait: a GERUND operand decides how
+/// the amend parses — which three verbs compute the replacement, the
+/// indices and the array — so a gerund reached through a name is refused
+/// rather than misread as a list of indices.
+#[test]
+fn a_computed_gerund_amend_is_still_a_named_gap() {
+    let e = err(Lang::J, "h =. 3 : '2 (y}) i. 3'\nh 0:`1:`]");
+    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert!(e.msg.contains("gerund amend"), "{}", e.msg);
+}
+
 // --- indexed assignment as an expression ---------------------------------
 
 /// `A[i]←v` is an expression like any other. Its value is the value

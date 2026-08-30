@@ -1,0 +1,90 @@
+// Programs rather than sentences.
+//
+// Every line here is a whole program: several assignments feeding one
+// another, a defined verb or two, control flow where the program wants it,
+// and a final value small enough to read. The rest of the corpus asks what
+// one primitive does; this theme asks what happens when twenty of them are
+// asked to cooperate — a name bound in one sentence and read in the next, a
+// verb defined and then applied under rank, a matrix built and then reduced.
+//
+// The final value is deliberately modest. Intermediates are as large as the
+// program needs; what gets recorded is a short vector, so a diff of this
+// snapshot is readable and a change of answer names itself.
+//
+// Where floats are unavoidable the program rounds them into integers before
+// the last sentence, so the recorded answer is exact rather than merely
+// within tolerance.
+
+// --- primes ---------------------------------------------------------------
+// A sieve written the imperative way: a boolean vector, a while. loop, an
+// if. inside it, amend with a computed index vector. Answers pi(60), the
+// sum of those primes, and the largest.
+sieve =. 3 : 0\nb =. (y+1) $ 1\nb =. 0 (0 1) } b\ni =. 2\nwhile. (i*i) <: y do.\n  if. i { b do.\n    j =. i * i + i. >. (1 + y - i*i) % i\n    b =. 0 j } b\n  end.\n  i =. i + 1\nend.\nI. b\n)\np =. sieve 60\n(# p) , (+/ p) , ({: p)
+// The same question asked without a loop: a composite is a product of two
+// numbers at least two, so the table of products is the sieve. Adds the
+// prime gaps and how many of them are twins.
+n =. 40\nc =. 2 + i. n - 1\nprod =. , c */ c\np =. (-. c e. prod) # c\ng =. 2 -~/\\ p\n(# p) , ({: p) , (+/ p) , (>./ g) , (+/ 2 = g)
+
+// --- a discrete Fourier transform ------------------------------------------
+// The transform is one matrix product against the roots of unity, and the
+// inverse is the conjugate matrix over n. The round trip is compared with
+// -: after rounding, so the recorded answer is 1 and the magnitudes.
+n =. 8\nk =. i. n\nw =. ^ 0j_1 * 2p1 * (k */ k) % n\nx =. 3 1 4 1 5 9 2 6\nf =. w +/ . * x\ng =. ((+ w) +/ . * f) % n\nr =. <. 0.5 + 9 o. g\nmag =. <. 0.5 + | f\n(r -: x) , mag
+
+// --- an OHLCV pipeline -----------------------------------------------------
+// Closes and volumes into returns, a three-bar moving average, a running
+// peak and the drawdown from it, and a volume-weighted price. Everything is
+// scaled to basis points or cents before it is reported.
+c =. 100 102 101 105 110 108 112 109 115 120 118 125\nv =. 12 14 9 20 25 11 30 17 22 40 13 28\nret =. (%&(}: c) - 1:) }. c\nma =. (3 +/\\ c) % 3\npeak =. >./\\ c\ndd =. (c - peak) % peak\nvwap =. (+/ c * v) % +/ v\nbp =. <. 0.5 + 10000 * ret\n(<. 0.5 + 10000 * <./ dd) , (<. 0.5 + 100 * {: ma) , (<. 0.5 + 100 * vwap) , (>./ bp) , (<./ bp)
+
+// --- text statistics -------------------------------------------------------
+// Cut a sentence into boxed words, count each distinct one with the key
+// adverb, sort the counts down, and report the winner by its character
+// codes so the answer is a number vector.
+t =. 'the cat sat on the mat and the cat ran'\nw =. <;._1 ' ' , t\nu =. ~. w\nn =. #/.~ w\no =. \\: n\ntop =. > 0 { o { u\n(# w) , (# u) , (>./ n) , (#top) , (a. i. top)
+// The same counting reached through boxes as keys and two aggregations.
+k =. 'ab';'cd';'ab';'ef';'cd';'ab'\nq =. 3 1 4 1 5 9\ntot =. k +//. q\ncnt =. k #/. q\nu =. ~. k\no =. \\: tot\n(> {. o { u) ; (o { tot) ; (o { cnt) ; (# u)
+
+// --- Game of Life ----------------------------------------------------------
+// The neighbour count is the sum of the nine shifted boards less the board
+// itself; the shift is a defined dyad applied under rank 1. A glider on a
+// 6 by 6 torus-free board, four generations, reported as the flat board.
+shift =. 4 : '(0{x) |.!.0 ((1{x) |.!.0"1 y)'\noff =. ,/ (i:1) ,"0 0/ (i:1)\nnb =. 3 : '(+/ off shift"1 _ y) - y'\nstep =. 3 : '(3 = nb y) +. y *. 2 = nb y'\nb =. 6 6 $ 0\nb =. 1 (1 2 ; 2 3 ; 3 1 ; 3 2 ; 3 3) } b\ng =. step ^: 4 b\n(+/ , g) , (, g)
+// Five generations of the same glider on a larger board, kept as a rank-3
+// history by ^: with a vector left argument; the population per generation
+// and the bounding box of the fourth are what is reported.
+shift =. 4 : '(0{x) |.!.0 ((1{x) |.!.0"1 y)'\noff =. ,/ (i:1) ,"0 0/ (i:1)\nnb =. 3 : '(+/ off shift"1 _ y) - y'\nstep =. 3 : '(3 = nb y) +. y *. 2 = nb y'\nb =. 8 8 $ 0\nb =. 1 (1 2 ; 2 3 ; 3 1 ; 3 2 ; 3 3) } b\nh =. step ^: (i. 5) b\nc =. +/"1 +/"2 h\nr =. 4 $. $. step ^: 4 b\nc , (<./ r) , (>./ r)
+
+// --- sorting and ranking ---------------------------------------------------
+// A grade, the sort it induces, the rank of each element (grade of the
+// grade), a dense rank against the distinct sorted values, the two middle
+// elements and the three largest.
+s =. 5 3 9 1 7 3 8 2 9 4\ng =. /: s\nsrt =. g { s\nrk =. /: g\nd =. ~. srt\ndr =. d i. s\nmid =. 4 5 { srt\ntop3 =. 3 {. \\: s\nsrt , rk , dr , (+/ mid) , (top3 { s)
+
+// --- base conversion -------------------------------------------------------
+// Hexadecimal and binary expansions of a vector, a mixed radix for a clock,
+// and every one of them folded back with #. to show the round trip holds.
+n =. 12345 4095 255 1000000\nh =. (6 $ 16) #: n\nb =. (20 $ 2) #: n\nt =. 24 60 60 #: 86399\nback =. (16 #. h) , (2 #. b) , (24 60 60 #. t)\nok =. (16 #. h) -: n\ndigs =. +/"1 h\n(back) , ok , digs , (, t)
+
+// --- run-length coding -----------------------------------------------------
+// Encode by the positions where the value changes, decode by copy, and
+// compare the decoding with the original.
+s =. 1 1 1 2 2 3 3 3 3 1 1 4\nm =. 1 , 2 ~:/\\ s\nv =. m # s\ni =. I. m\nc =. (}. i , # s) - i\ndec =. c # v\n(v , c) , (dec -: s) , (# v)
+
+// --- a regression by inner product -----------------------------------------
+// Means, deviations, and three inner products give the slope, the
+// intercept, the coefficient of determination and the sample variance. The
+// data is an exact line, so the first three are exact.
+x =. 1 2 3 4 5 6 7 8 9 10\ny =. 3 5 7 9 11 13 15 17 19 21\nn =. # x\nmx =. (+/ x) % n\nmy =. (+/ y) % n\ndx =. x - mx\ndy =. y - my\nsxx =. dx +/ . * dx\nsxy =. dx +/ . * dy\nsyy =. dy +/ . * dy\nslope =. sxy % sxx\nicpt =. my - slope * mx\nr2 =. (sxy * sxy) % sxx * syy\nvar =. sxx % <: n\nslope , icpt , r2 , var , (<. 0.5 + 100 * %: var)
+
+// --- matrix powers ---------------------------------------------------------
+// The Fibonacci matrix raised by a bonded inner product under ^:, a square
+// of a small integer matrix, its trace along the leading diagonal, and the
+// identity checked by multiplying through it.
+mp =. +/ . *\nm =. 2 2 $ 1 1 1 0\np =. (m & mp) ^: 9 m\nfib =. 0 1 { , p\nid =. 3 3 $ 1 0 0 0 1 0 0 0 1\na =. 3 3 $ 2 0 1 1 3 0 0 1 4\na2 =. a mp a\ntr =. +/ (< 0 1) |: a2\n(, p) , fib , tr , (+/ , a mp id) , (a2 -: a mp a)
+
+// --- a loop with a branch inside it ----------------------------------------
+// Collatz chain lengths for the first thirty naturals: a while. with an if.
+// choosing the step, the verb applied at rank 0 across the vector, and the
+// longest chain, where it starts, the total and the mean.
+chain =. 3 : 0\nn =. y\nc =. 0\nwhile. n > 1 do.\n  if. 0 = 2 | n do. n =. n % 2 else. n =. 1 + 3 * n end.\n  c =. c + 1\nend.\nc\n)\nv =. chain "0 >: i. 30\n(>./ v) , (>: v i. >./ v) , (+/ v) , (<. (+/ v) % # v)

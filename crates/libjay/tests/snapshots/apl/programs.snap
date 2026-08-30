@@ -1,0 +1,47 @@
+# libjay reference snapshot: APL — corpus/apl/programs.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= ∇Z←SIEVE N;B;I;J\nB←N⍴1\nB[1]←0\nI←2\nL:→(N<I×I)/D\n→(0=B[I])/S\nJ←(I×I)+I×0,⍳⌊(N-I×I)÷I\nB[J]←0\nS:I←I+1\n→L\nD:Z←B/⍳N\n∇\nP←SIEVE 60\n(⍴P),(+/P),(¯1↑P)
+> gnu: 17 440 59
+= N←40\nC←1↓⍳N\nX←,C∘.×C\nP←(~C∊X)/C\nG←(1↓P)-¯1↓P\n(⍴P),(¯1↑P),(+/P),(⌈/G),(+/2=G)
+> gnu: 12 37 197 6 5
+= N←8\nK←¯1+⍳N\nW←*(0J¯1)×(2×○1)×(K∘.×K)÷N\nX←3 1 4 1 5 9 2 6\nF←W+.×X\nG←((+W)+.×F)÷N\nR←⌊0.5+9○G\nM←⌊0.5+|F\n(R≡X),M
+> gnu: 1 31 8 4 11 3 11 4 8
+= C←100 102 101 105 110 108 112 109 115 120 118 125\nV←12 14 9 20 25 11 30 17 22 40 13 28\nR←((1↓C)÷¯1↓C)-1\nMA←(3+/C)÷3\nPK←⌈\\C\nDD←(C-PK)÷PK\nVW←(+/C×V)÷+/V\nBP←⌊0.5+10000×R\n(⌊0.5+10000×⌊/DD),(⌊0.5+100×¯1↑MA),(⌊0.5+100×VW),(⌈/BP),(⌊/BP)
+> gnu: ¯268 12100 11266 593 ¯268
+= T←'the cat sat on the mat and the cat ran'\nM←T≠' '\nP←M×+\\M>¯1↓0,M\nW←P⊂T\nU←∪W\nN←+/U∘.≡W\nO←⍒N\nTOP←(O[1])⊃U\n(⍴W),(⍴U),(⌈/N),(⍴TOP),⎕AV⍳TOP
+> gnu: 10 7 3 3 117 105 102
+= K←'ab' 'cd' 'ab' 'ef' 'cd' 'ab'\nQ←3 1 4 1 5 9\nU←∪K\nIX←U⍳K\nE←IX∘.=⍳⍴U\nTOT←Q+.×E\nCNT←+⌿E\nO←⍒TOT\n(⎕AV⍳(O[1])⊃U),(TOT[O]),(CNT[O]),⍴U
+> gnu: 98 99 16 6 1 3 2 1 3
+= B←6 6⍴0\nB[2;3]←1\nB[3;4]←1\nB[4;2]←1\nB[4;3]←1\nB[4;4]←1\nNBR←{V←(¯1⊖⍵)+⍵+1⊖⍵ ⋄ ((¯1⌽V)+V+1⌽V)-⍵}\nSTEP←{T←NBR ⍵ ⋄ (T=3)∨⍵∧T=2}\nH←STEP⍣4⊢B\n(+/,H),,H
+> gnu: 5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 1 1 1 0 0 0 0 0 0 0
+= S←5 3 9 1 7 3 8 2 9 4\nG←⍋S\nSR←S[G]\nRK←⍋G\nD←∪SR\nDR←D⍳S\nMID←SR[5 6]\nT3←3↑⍒S\nSR,RK,DR,(+/MID),S[T3]
+> gnu: 1 2 3 3 4 5 7 8 9 9 6 3 9 1 7 4 8 2 10 5 5 3 8 1 6 3 7 2 8 4 9 9 9 8
+= N←12345 4095 255 1000000\nH←(6⍴16)⊤N\nB←(20⍴2)⊤N\nT←24 60 60⊤86399\nBACK←(16⊥H),(2⊥B),(24 60 60⊥T)\nOK←N≡16⊥H\nDIGS←+⌿H\nBACK,OK,DIGS,T
+> gnu: 12345 4095 255 1000000 12345 4095 255 1000000 86399 1 15 45 30 25 23 59 59
+= S←1 1 1 2 2 3 3 3 3 1 1 4\nM←1,(1↓S)≠¯1↓S\nV←M/S\nI←M/⍳⍴S\nC←(1↓I,1+⍴S)-I\nDEC←C/V\n(V,C),(DEC≡S),⍴V
+> gnu: 1 2 3 1 4 3 2 4 2 1 1 5
+= X←1 2 3 4 5 6 7 8 9 10\nY←3 5 7 9 11 13 15 17 19 21\nN←⍴X\nMX←(+/X)÷N\nMY←(+/Y)÷N\nDX←X-MX\nDY←Y-MY\nSXX←DX+.×DX\nSXY←DX+.×DY\nSYY←DY+.×DY\nSL←SXY÷SXX\nIC←MY-SL×MX\nR2←(SXY×SXY)÷SXX×SYY\nVAR←SXX÷N-1\nSL,IC,R2,VAR,(⌊0.5+100×VAR*0.5)
+> gnu: 2 1 1 9.166666667 303
+= M←2 2⍴1 1 1 0\nP←{M+.×⍵}⍣9⊢M\nFIB←P[1;]\nID←3 3⍴1 0 0 0 1 0 0 0 1\nA←3 3⍴2 0 1 1 3 0 0 1 4\nA2←A+.×A\nTR←+/1 1⍉A2\n(,P),FIB,TR,(+/,A+.×ID),(A2≡A+.×A)
+> gnu: 89 55 55 34 89 55 29 12 1
+= ∇Z←CHAIN N;M;C\nM←N\nC←0\nL:→(M≤1)/D\n→(0≠2|M)/O\nM←M÷2\n→S\nO:M←1+3×M\nS:C←C+1\n→L\nD:Z←C\n∇\nV←CHAIN¨⍳30\n(⌈/V),(V⍳⌈/V),(+/V),(⌊(+/V)÷⍴V)
+> gnu: 111 27 441 14

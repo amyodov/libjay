@@ -7,6 +7,41 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- J's bond reads a noun the program computes. `mp =. +/ . *` then
+  `(m & mp) ^: 9 m` raises the Fibonacci matrix to a power, and
+  `(%&(}: c) - 1:) }. c` turns a series of closes into returns; both used
+  to say "bonds over a non-literal noun is not supported yet". The noun is
+  read where the derived verb is APPLIED, as a `^:` count is, so a
+  definition's own argument may decide it and a name reassigned between two
+  applications is read afresh at each.
+- J's amend reads indices the program computes. `j =. 2 * i. 3` then
+  `9 j } i. 6` amends at whatever `j` holds, which is how a sieve crosses
+  off a stride. A computed GERUND amend (`` u`v`w} `` reached through a
+  name) stays a named gap and says so: which three verbs the gerund holds
+  decides how the amend parses.
+- A program-scale corpus. `corpus/j/programs.txt` and
+  `corpus/apl/programs.txt` hold whole programs rather than sentences —
+  several assignments feeding one another, a defined verb or two, control
+  flow where the language has it, and a final value small enough to read —
+  recorded against jconsole and GNU APL like every other theme. A sieve
+  written both as a loop and as a table of products, a discrete Fourier
+  transform with its inverse, an OHLCV pipeline (returns, moving average,
+  running peak, drawdown, volume-weighted price), text statistics through
+  J's key adverb and APL's partitioned enclose, Game of Life, sorting and
+  ranking, base-conversion round trips, run-length coding, a regression by
+  inner product, matrix powers, and a Collatz loop with a branch inside it.
+  The two files pose the same problems in the two languages and answer
+  alike wherever the answer does not turn on the index origin.
+- A usage stress suite: `crates/libjay/tests/stress.rs`,
+  `crates/libjay-capi/tests/stress.rs` and `python/tests/test_stress.py`.
+  Hundreds of compile-and-run cycles with refusals interleaved, resident
+  memory held to a growth RATIO rather than a megabyte figure, a
+  `LIBJAY_THREADS` 1/2/4 sweep run as child processes (the pool size is
+  frozen per process) that must agree exactly, one compiled program shared
+  by eight threads, and every kind of refusal in a loop with the good
+  programs still answering after each round. No interpreter, no new
+  dependency, seconds to run.
+
 ### Changed
 
 ### Fixed

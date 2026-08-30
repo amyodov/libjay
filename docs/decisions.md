@@ -4172,3 +4172,36 @@ the register.
   shape of the `⎕FX` bug the 0.4.0 audit found. Closing that means the
   compiler taking its function table from the running environment, which is
   the name-resolution redesign, and it is not this wave.
+- 2026-08-29 — A bond's noun and an amend's indices may be COMPUTED in J,
+  by the mechanism the `^:` count already uses. Writing programs rather
+  than sentences found both within one page of each other: `mp =. +/ . *`
+  then `(m & mp) ^: 9 m` is how a matrix power is written, and
+  `j =. i * i + i. n` then `0 j } b` is how a sieve crosses off a stride,
+  and libjay refused each with "not supported yet". `Verb::Deferred`
+  already holds an operand as an EXPRESSION and reads it where the derived
+  verb is applied, so the fix is two `build` functions and a fallback where
+  `as_const` used to be the only path; nothing new runs when the operand IS
+  a literal, and nothing is cached, so a name reassigned between two
+  applications is read afresh at each. The gaps left standing are named
+  rather than incidental. A computed GERUND amend — `` u`v`w} `` reached
+  through a name — is refused at the point the value arrives, because which
+  three verbs the gerund holds decides how the amend PARSES and a parse
+  cannot wait for a value. APL's `∘` bind keeps its own gap for a
+  structural reason: it is folded in a TOKEN pass, before the sentence has
+  become an expression there is nothing to defer, so `(⍳3)∘+` still says so.
+- 2026-08-29 — The differential corpus gains a PROGRAM scale, and the suite
+  a stress battery. Two questions the per-sentence corpus cannot ask: what
+  happens when twenty primitives cooperate over several sentences, and what
+  happens when the same program is asked ten thousand times, from eight
+  threads, with the pool sized differently. The first is `programs.txt` in
+  both languages, recorded against the oracles like any other theme — the
+  discipline that makes it work is that the FINAL value is small and any
+  float is rounded before it, so the snapshot is a fact rather than a
+  rounding. The second is `stress.rs` (twice) and `test_stress.py`, which
+  compare answers like everything else and measure only one thing that is
+  not an answer: resident memory, as a RATIO against the process's own
+  post-warm-up baseline. A megabyte ceiling would be a claim about the
+  machine; a ratio is a claim about the code, and where the reading cannot
+  be taken at all the case says so and passes. The `LIBJAY_THREADS` sweep
+  is child processes rather than loops because the pool size is frozen at
+  the first read, which is a property of the design and not of the test.
