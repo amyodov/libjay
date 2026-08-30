@@ -98,7 +98,30 @@ fn rank_noun(r: &[i64; 3]) -> Array {
     if r[0] == r[1] && r[1] == r[2] {
         return Array::new(vec![], Data::F64(vec![one(r[0])].into()));
     }
+    // Two atoms are the left rank and the right one, and the monadic rank
+    // is the right one again: the shorter spelling wherever it says the
+    // same thing.
+    if r[0] == r[2] {
+        return Array::from_f64(vec![one(r[1]), one(r[2])]);
+    }
     Array::from_f64(vec![one(r[0]), one(r[1]), one(r[2])])
+}
+
+/// The word a constant verb is spelled as: `_9:` through `9:` for the
+/// atoms that have one, `_:` for infinity, and nothing for the rest.
+fn constant_word(n: &Array) -> Option<String> {
+    if n.rank() != 0 {
+        return None;
+    }
+    let v = *n.to_f64_vec()?.first()?;
+    if v == f64::INFINITY {
+        return Some("_:".to_string());
+    }
+    if v.fract() != 0.0 || !(-9.0..=9.0).contains(&v) {
+        return None;
+    }
+    let k = v as i64;
+    Some(if k < 0 { format!("_{}:", -k) } else { format!("{k}:") })
 }
 
 fn power_noun(p: &Power) -> Option<Array> {
@@ -131,6 +154,22 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         Verb::PowerN(u, p) => der("^:", vec![verb_ar(u)?, Ar::Noun(power_noun(p)?)]),
         Verb::PowerV(u, w) => der("^:", vec![verb_ar(u)?, verb_ar(w)?]),
         Verb::Fork(f, g, h) => Some(Ar::Train(vec![verb_ar(f)?, verb_ar(g)?, verb_ar(h)?])),
+        // `n [ ]` is how the constant verb is built here, and `n:` is how
+        // it is spelled where the noun is one of the atoms that has such a
+        // spelling.
+        Verb::NounFork(n, g, h)
+            if matches!(&**g, Verb::Prim(p) if p.name == "[")
+                && matches!(&**h, Verb::Prim(p) if p.name == "]") =>
+        {
+            match constant_word(n) {
+                Some(w) => Some(Ar::Prim(w)),
+                None => Some(Ar::Train(vec![
+                    Ar::Noun(n.clone()),
+                    verb_ar(g)?,
+                    verb_ar(h)?,
+                ])),
+            }
+        }
         Verb::NounFork(n, g, h) => {
             Some(Ar::Train(vec![Ar::Noun(n.clone()), verb_ar(g)?, verb_ar(h)?]))
         }
@@ -175,6 +214,141 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
     }
 }
 
+// --------------------------------------------- the linear representation
+
+/// What a spelling looks like from outside, which is what decides where a
+/// parenthesis has to go.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// One word: a primitive or a noun. Nothing binds it apart.
+    Word,
+    /// A phrase a modifier derived. A conjunction's RIGHT operand is the
+    /// one word beside it, so this needs parentheses there.
+    Modified,
+    /// A train. Only the last tine of another train may stand unbracketed,
+    /// and only when the words still count out the same way.
+    Train,
+}
+
+/// How J writes an entity back out — the LINEAR REPRESENTATION a session
+/// shows for a name that stands for a verb. Parentheses go only where the
+/// spelling would otherwise read as something else.
+///
+/// None where libjay has no spelling to give: a noun of rank 2 or more,
+/// which the reference writes as an expression that BUILDS the value, and
+/// anything [`verb_ar`] itself cannot name.
+pub fn linear(ar: &Ar) -> Option<String> {
+    spell(ar).map(|(text, _)| text)
+}
+
+fn spell(ar: &Ar) -> Option<(String, Shape)> {
+    match ar {
+        Ar::Prim(s) => Some((word(s), Shape::Word)),
+        Ar::Noun(a) => Some((noun_text(a)?, Shape::Word)),
+        Ar::Derived(sp, ops) => {
+            let text = match ops.as_slice() {
+                [u] => join(&left(u)?, &word(sp)),
+                [u, v] => {
+                    let head = join(&left(u)?, &word(sp));
+                    let tail = right(v)?;
+                    format!("{head}{tail}")
+                }
+                _ => return None,
+            };
+            Some((text, Shape::Modified))
+        }
+        Ar::Train(_) => {
+            let parts = tines(ar);
+            let mut out = String::new();
+            for (i, t) in parts.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                out.push_str(&left(t)?);
+            }
+            Some((out, Shape::Train))
+        }
+    }
+}
+
+/// The tines a train is written as. A train in the last place is written
+/// out flat where the words still count out to the same tree — three tines
+/// and then a fork, five and then a fork — and bracketed where they do not.
+fn tines(ar: &Ar) -> Vec<&Ar> {
+    let Ar::Train(ops) = ar else { return vec![ar] };
+    let (last, head) = ops.split_last().expect("a train has parts");
+    let mut out: Vec<&Ar> = head.iter().collect();
+    if matches!(last, Ar::Train(_)) {
+        let inner = tines(last);
+        if inner.len() % 2 == 1 {
+            out.extend(inner);
+            return out;
+        }
+    }
+    out.push(last);
+    out
+}
+
+/// A spelling standing to the LEFT of a modifier, or as a tine of a train:
+/// a modifier's left scope is everything before it, so only a train needs
+/// bracketing there.
+fn left(ar: &Ar) -> Option<String> {
+    let (text, shape) = spell(ar)?;
+    Some(if shape == Shape::Train { format!("({text})") } else { text })
+}
+
+/// A spelling standing to the RIGHT of a conjunction, which takes the one
+/// word beside it: anything a modifier made needs bracketing there too.
+fn right(ar: &Ar) -> Option<String> {
+    let (text, shape) = spell(ar)?;
+    // `{` carries a space of its own, and the reference brackets it here
+    // rather than letting the space end the phrase.
+    let bare = shape == Shape::Word && !text.ends_with(' ');
+    Some(if bare { text } else { format!("({text})") })
+}
+
+/// One spelling written against the next. `{` and `}` carry a space of
+/// their own so that two of them never read as J's `{{` or `}}`, and a
+/// word that starts with an inflection is held off the one before it for
+/// the same reason.
+fn word(s: &str) -> String {
+    if s == "{" || s == "}" {
+        return format!("{s} ");
+    }
+    s.to_string()
+}
+
+fn join(head: &str, tail: &str) -> String {
+    let split = tail.starts_with(['.', ':']) && !head.ends_with(' ');
+    if split { format!("{head} {tail}") } else { format!("{head}{tail}") }
+}
+
+/// A noun as the linear representation writes it: the value itself for a
+/// list or an atom, quoted where it is text. Higher ranks have no such
+/// spelling here.
+fn noun_text(a: &Array) -> Option<String> {
+    if a.rank() > 1 {
+        return None;
+    }
+    if let Data::Char(v) = a.row_major_data() {
+        let mut out = String::from("'");
+        for c in v.as_slice() {
+            if *c == '\'' {
+                out.push('\'');
+            }
+            out.push(*c);
+        }
+        out.push('\'');
+        return Some(out);
+    }
+    if a.count() == 0 || matches!(a.row_major_data(), Data::Box(_)) {
+        return None;
+    }
+    let text = crate::fmt::format_array(a, &crate::fmt::FmtOpts::J);
+    let text = text.trim_end_matches('\n');
+    if text.contains('\n') { None } else { Some(text.to_string()) }
+}
+
 /// `u"n`, and the three conjunctions J spells by applying at an operand's
 /// own rank: `u@v`, `u&v` and `u&.v` are each a rank around what `@:`,
 /// `&:` and `&.:` derive, so the rank they set is what tells them apart.
@@ -189,6 +363,8 @@ fn rank_ar(inner: &Verb, r: &[i64; 3]) -> Option<Ar> {
         return Some(ar);
     }
     match inner {
+        // `m"n`: the constant verb, whose left operand is the noun itself.
+        Verb::Constant(m) => der("\"", vec![Ar::Noun(m.clone()), Ar::Noun(rank_noun(r))]),
         Verb::Atop(f, g) if *r == g.ranks() => der("@", vec![verb_ar(f)?, verb_ar(g)?]),
         Verb::Compose(f, g) if *r == [g.ranks()[0]; 3] => {
             der("&", vec![verb_ar(f)?, verb_ar(g)?])

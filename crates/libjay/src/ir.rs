@@ -228,6 +228,10 @@ pub struct ExplicitDef {
     /// back. Empty for a definition that has no such lines — a J one, or a
     /// `{…}`, which is an expression rather than a listing.
     pub source: Vec<String>,
+    /// How a session writes the definition back out on ONE line, where the
+    /// source spells it in a way that can be given back: J's `3 : '…'` and
+    /// its relatives. None for a definition whose text is not kept.
+    pub spelling: Option<String>,
 }
 
 impl Expr {

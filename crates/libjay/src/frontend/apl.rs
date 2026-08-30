@@ -3768,6 +3768,7 @@ fn build_dfn(body: &[Token], d: Rules, verbs: &HashMap<String, Verb>) -> Result<
             pure,
             // A dfn is an expression, not a listing of lines.
             source: Vec::new(),
+            spelling: None,
         })))
     };
     if !(alpha_op || omega_op) {
@@ -4095,6 +4096,7 @@ fn build_tradfn(
         lines,
         pure,
         source,
+        spelling: None,
     }));
     verbs.insert(name.clone(), verb.clone());
     Ok(Expr::VerbDef { name, verb, span })

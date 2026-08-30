@@ -63,6 +63,16 @@ impl Modifier {
             Modifier::Explicit(src) => src.name.clone(),
         }
     }
+
+    /// How a session writes the modifier back out. None where the source
+    /// spells it in a way libjay does not keep — a body written on the
+    /// lines below, or a `{{ }}`.
+    fn display_text(&self) -> Option<String> {
+        match self {
+            Modifier::Prim(g) => Some((*g).to_string()),
+            Modifier::Explicit(src) => src.spelling.clone(),
+        }
+    }
 }
 
 /// The parts of speech a sentence is read against. A name's part of speech
@@ -108,7 +118,7 @@ impl Names {
             self.nouns.remove(&name);
             return Ok(Expr::ModDef { name, spelling, conjunction: conj, span });
         }
-        let stmt = lower_sentence(frag, whole)?;
+        let stmt = lower_sentence(frag, whole, self.char_bytes)?;
         self.record(&stmt);
         Ok(stmt)
     }
@@ -317,6 +327,10 @@ fn take_colon_definition(
         13.0 => return Err(Error::not_yet("tacit definitions (13 : '...')", span)),
         v => return Err(Error::domain(format!("{v} is not an explicit definition"), span)),
     };
+    // How a session writes the definition back out: the header and the
+    // body, as the source spells it. Only the inline form has one — the
+    // lines of a `3 : 0` are not kept as text.
+    let mut spelling = None;
     let body = match &body_arr.data {
         // `3 : 0`: the body is written on the lines below, ending with `)`.
         Data::I64(_)
@@ -342,6 +356,7 @@ fn take_colon_definition(
             // The body sits one character past the opening quote; a doubled
             // quote inside it shifts what follows by one column.
             lex_line(&text, body_span.start + 1, scope.char_bytes, &mut frags)?;
+            spelling = Some(format!("{} : '{}'", valence as i64, text.replace('\'', "''")));
             vec![frags]
         }
         Data::Symbol(_) | Data::Box(_) => {
@@ -350,7 +365,8 @@ fn take_colon_definition(
     };
     if let Some(conjunction) = modifier {
         let name = if conjunction { "2 : '...'" } else { "1 : '...'" };
-        let src = mod_source(name, conjunction, body, self_name);
+        let mut src = mod_source(name, conjunction, body, self_name);
+        src.spelling = spelling;
         let frag = if conjunction {
             Frag::Conj(Modifier::Explicit(Arc::new(src)), span)
         } else {
@@ -360,10 +376,11 @@ fn take_colon_definition(
         return Ok(());
     }
     let name = if dyadic { "4 : '...'" } else { "3 : '...'" };
-    let verb = build_definition(body, dyadic, name, scope, self_name)?;
+    let verb = build_definition(body, dyadic, name, spelling, scope, self_name)?;
     sentence.splice(at - 1..at + 2, [Frag::Verb(VerbFrag::V(verb), span)]);
     Ok(())
 }
+
 
 /// The lines of a `3 : 0` body: everything up to a line that is a lone `)`.
 fn take_lines_until_paren(
@@ -476,7 +493,7 @@ fn take_direct_definition(
                 Some('m') => false,
                 _ => mentions(&body, "x"),
             };
-            let verb = build_definition(body, dyadic, "{{ ... }}", scope, self_name)?;
+            let verb = build_definition(body, dyadic, "{{ ... }}", None, scope, self_name)?;
             Frag::Verb(VerbFrag::V(verb), span)
         }
     };
@@ -537,7 +554,7 @@ fn boxed_body_definition(u: &Frag, v: &Frag, scope: &Names, span: Span) -> Resul
         body.push(frags);
     }
     let name = if dyadic { "4 : '...'" } else { "3 : '...'" };
-    let verb = build_definition(body, dyadic, name, scope, None)?;
+    let verb = build_definition(body, dyadic, name, None, scope, None)?;
     Ok(Frag::Verb(VerbFrag::V(verb), span))
 }
 
@@ -551,6 +568,7 @@ fn build_definition(
     body: Vec<Vec<Frag>>,
     dyadic: bool,
     name: &str,
+    spelling: Option<String>,
     scope: &Names,
     self_name: Option<&str>,
 ) -> Result<Verb> {
@@ -558,8 +576,10 @@ fn build_definition(
     // case: what precedes it is applied with y alone, what follows with x
     // and y both, and the definition is one verb out of the two.
     if let Some(cut) = body.iter().position(|l| is_case_separator(l)) {
-        let monad = build_definition(body[..cut].to_vec(), false, name, scope, self_name)?;
-        let dyad = build_definition(body[cut + 1..].to_vec(), true, name, scope, self_name)?;
+        let monad =
+            build_definition(body[..cut].to_vec(), false, name, None, scope, self_name)?;
+        let dyad =
+            build_definition(body[cut + 1..].to_vec(), true, name, None, scope, self_name)?;
         return Ok(Verb::Ambivalent(Box::new(monad), Box::new(dyad)));
     }
     // The body reads the names the program has already given, and binds its
@@ -623,6 +643,7 @@ fn build_definition(
         pure,
         // J has no `⎕CR`, and nothing else asks a definition for its text.
         source: Vec::new(),
+        spelling,
     })))
 }
 
@@ -651,6 +672,9 @@ struct ModSource {
     /// The name this definition is being given, so that its body can
     /// mention it.
     self_name: Option<String>,
+    /// How a session writes the modifier back out, where the source spells
+    /// it in a way that can be given back.
+    spelling: Option<String>,
 }
 
 fn mod_source(
@@ -666,6 +690,7 @@ fn mod_source(
         deferred: dyadic || mentions(&body, "y"),
         dyadic,
         self_name: self_name.map(str::to_string),
+        spelling: None,
         body,
     }
 }
@@ -744,7 +769,7 @@ fn derive_explicit(
         inner.mods.insert(n.clone(), (src.conjunction, Modifier::Explicit(Arc::clone(src))));
     }
     if src.deferred {
-        let verb = build_definition(body, src.dyadic, &src.name, &inner, None)?;
+        let verb = build_definition(body, src.dyadic, &src.name, None, &inner, None)?;
         return Ok(Frag::Verb(VerbFrag::V(verb), span));
     }
     // The derivation-time phase: the body is a sentence, parsed here and
@@ -2320,22 +2345,44 @@ fn reduce_to_fragment(tokens: Vec<Frag>, scope: &Names) -> Result<Option<Frag>> 
 
 /// The IR statement a finished sentence stands for. `whole` is the span of
 /// the sentence, for the complaint that it has no reading at all.
-fn lower_sentence(frag: Option<Frag>, whole: Span) -> Result<Expr> {
+fn lower_sentence(frag: Option<Frag>, whole: Span, char_bytes: bool) -> Result<Expr> {
     match frag {
         Some(f @ (Frag::Noun(_) | Frag::Name(..))) => as_noun(f),
         Some(Frag::VerbDef(name, verb, span)) => Ok(Expr::VerbDef { name, verb, span }),
         Some(Frag::ModDef(name, conjunction, m, span)) => {
             Ok(Expr::ModDef { name, spelling: m.spelling(), conjunction, span })
         }
-        Some(Frag::Verb(VerbFrag::V(_), span)) => {
-            Err(Error::not_yet("tacit verb definitions (a sentence that is a verb)", span))
+        // A sentence that IS a verb or a modifier displays the entity, and
+        // what a session shows for it is its linear representation: the
+        // text it would be written as. The value is that text.
+        Some(Frag::Verb(VerbFrag::V(v), span)) => match verb_display(&v) {
+            Some(text) => Ok(Expr::Const(literal_text(&text, char_bytes), span)),
+            None => Err(Error::not_yet(
+                format!("writing {} back out as J source", v.name()),
+                span,
+            )),
+        },
+        Some(Frag::Adverb(m, span) | Frag::Conj(m, span)) => match m.display_text() {
+            Some(text) => Ok(Expr::Const(literal_text(&text, char_bytes), span)),
+            None => Err(Error::not_yet(
+                "writing this modifier back out as J source",
+                span,
+            )),
+        },
+        Some(Frag::Verb(VerbFrag::Cap, span)) => {
+            Err(Error::parse("`[:` caps a fork; it has no verb of its own", span))
         }
-        Some(Frag::Adverb(_, span) | Frag::Conj(_, span)) => Err(Error::not_yet(
-            "displaying a modifier (a sentence that is an adverb or a conjunction)",
-            span,
-        )),
         _ => Err(Error::parse("syntax error", whole)),
     }
+}
+
+/// The text a session displays for a verb: the linear representation, or
+/// the definition's own spelling where it has one.
+fn verb_display(v: &Verb) -> Option<String> {
+    if let Verb::Explicit(def) = v {
+        return def.spelling.clone();
+    }
+    crate::gerund::linear(&crate::gerund::verb_ar(v)?)
 }
 
 /// Report an unbalanced parenthesis at the parenthesis itself, before the
