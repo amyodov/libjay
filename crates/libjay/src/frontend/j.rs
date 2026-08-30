@@ -670,10 +670,17 @@ fn mod_source(
     }
 }
 
+/// How deep one explicit modifier may derive another — itself included.
+/// A modifier whose body derives the modifier again is how J writes a
+/// recursive one, and it terminates only when a case of the body stops
+/// asking; the bound is what turns the one that never stops into a
+/// diagnostic rather than a parse that runs out of machine stack.
+const DERIVATION_LIMIT: usize = 16;
+
 thread_local! {
     /// The explicit modifiers whose bodies are being parsed right now, by
-    /// address. A body that derives the modifier it belongs to would parse
-    /// for ever, so the nesting is what catches it.
+    /// address. The derivation of a modifier by its own body is a parse
+    /// within a parse, so the nesting is counted here.
     static DERIVING: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
@@ -704,19 +711,21 @@ fn derive_explicit(
     span: Span,
 ) -> Result<Frag> {
     let addr = Arc::as_ptr(src) as usize;
-    let recursive = DERIVING.with(|d| {
+    let deep = DERIVING.with(|d| {
         let mut d = d.borrow_mut();
-        if d.contains(&addr) {
+        if d.len() >= DERIVATION_LIMIT {
             return true;
         }
         d.push(addr);
         false
     });
-    if recursive {
-        return Err(Error::not_yet(
-            "an explicit modifier whose body derives the modifier itself",
-            span,
-        ));
+    if deep {
+        return Err(Error::new(
+            ErrorKind::Domain,
+            format!("modifiers derived each other more than {DERIVATION_LIMIT} deep"),
+            Some(span),
+        )
+        .note("a modifier whose body derives the modifier itself needs a case that stops"));
     }
     let _guard = Deriving;
     let mut body = src.body.clone();
@@ -748,15 +757,20 @@ fn derive_explicit(
             lines.push(line);
         }
     }
-    if lines.len() != 1 {
+    // The operands are known here, so a condition over them is too: the
+    // `if.` is settled now and only the branch that holds is parsed. That
+    // is what lets a body which derives its own modifier again stop.
+    let items = split_items(&lines);
+    let mut chosen: Vec<Vec<Frag>> = Vec::new();
+    derivation_block(&items, &inner, &mut chosen)?;
+    if chosen.len() != 1 {
         return Err(Error::not_yet(
             "an explicit modifier that names no argument and is more than one sentence",
             span,
         ));
     }
-    let mut sentence = lines.pop().expect("checked length");
-    substitute_names(&mut sentence, &inner.verbs, &inner.mods);
-    match reduce_to_fragment(sentence, &inner)? {
+    let sentence = chosen.pop().expect("checked length");
+    match derivation_fragment(sentence, &inner)? {
         Some(f) if f.is_real_verb() || f.is_noun() => Ok(respan(f, span)),
         Some(f) => Err(Error::not_yet(
             format!("an explicit modifier that produces {}", part_of_speech(&f)),
@@ -764,6 +778,123 @@ fn derive_explicit(
         )),
         None => Err(Error::parse("syntax error", span)),
     }
+}
+
+/// The control words that open a block, for the scan that finds the one
+/// that closes it.
+const BLOCK_OPENERS: [&str; 6] = ["if.", "while.", "whilst.", "for.", "select.", "try."];
+
+/// The index of the first of `stop` that belongs to this block level, or
+/// the end of the items. Nested blocks are stepped over whole.
+fn scan_to(items: &[Item], mut at: usize, stop: &[&str]) -> usize {
+    let mut depth = 0usize;
+    while at < items.len() {
+        if let Some(w) = items[at].word() {
+            if depth == 0 && stop.contains(&w) {
+                return at;
+            }
+            if BLOCK_OPENERS.contains(&w) {
+                depth += 1;
+            } else if w == "end." {
+                depth = depth.saturating_sub(1);
+            }
+        }
+        at += 1;
+    }
+    at
+}
+
+/// The sentences a derivation-time body actually runs: its own, with each
+/// `if.` replaced by the arm that holds. Only that arm is looked at, which
+/// is what keeps a recursive derivation from parsing its own base case and
+/// its step at once.
+fn derivation_block(items: &[Item], scope: &Names, out: &mut Vec<Vec<Frag>>) -> Result<()> {
+    let mut at = 0usize;
+    while at < items.len() {
+        match &items[at] {
+            Item::Sentence(f) => {
+                out.push(f.clone());
+                at += 1;
+            }
+            Item::Word { word: "if.", span, .. } => {
+                at = derivation_if(items, at + 1, *span, scope, out)?;
+            }
+            Item::Word { word, span, .. } => {
+                return Err(Error::not_yet(
+                    format!("`{word}` in a modifier body that runs where the modifier is derived"),
+                    *span,
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One `if.` block, from just past the word to just past its `end.`.
+fn derivation_if(
+    items: &[Item],
+    mut at: usize,
+    span: Span,
+    scope: &Names,
+    out: &mut Vec<Vec<Frag>>,
+) -> Result<usize> {
+    let mut taken = false;
+    loop {
+        let test_end = scan_to(items, at, &["do."]);
+        if test_end >= items.len() {
+            return Err(Error::parse("this `if.` has no `do.`", span));
+        }
+        let holds = !taken && derivation_condition(&items[at..test_end], scope, span)?;
+        at = test_end + 1;
+        let body_end = scan_to(items, at, &["elseif.", "else.", "end."]);
+        if body_end >= items.len() {
+            return Err(Error::parse("this `if.` has no `end.`", span));
+        }
+        if holds {
+            taken = true;
+            derivation_block(&items[at..body_end], scope, out)?;
+        }
+        at = body_end;
+        match items[at].word() {
+            Some("elseif.") => at += 1,
+            Some("else.") => {
+                at += 1;
+                let end = scan_to(items, at, &["end."]);
+                if end >= items.len() {
+                    return Err(Error::parse("this `if.` has no `end.`", span));
+                }
+                if !taken {
+                    derivation_block(&items[at..end], scope, out)?;
+                }
+                return Ok(end + 1);
+            }
+            _ => return Ok(at + 1),
+        }
+    }
+}
+
+/// Whether a derivation-time condition holds. It is settled where the
+/// modifier is derived, so its value has to be known there.
+fn derivation_condition(items: &[Item], scope: &Names, span: Span) -> Result<bool> {
+    let mut lines: Vec<Vec<Frag>> = Vec::new();
+    derivation_block(items, scope, &mut lines)?;
+    let Some(last) = lines.pop() else { return Ok(true) };
+    let Some(frag) = derivation_fragment(last, scope)? else {
+        return Err(Error::parse("syntax error", span));
+    };
+    let Some(v) = noun_value(&frag) else {
+        return Err(Error::not_yet(
+            "a condition in a modifier body that the operands do not settle",
+            span,
+        ));
+    };
+    crate::ir::is_true(&v, span)
+}
+
+/// One sentence of a derivation-time body as the fragment it stands for.
+fn derivation_fragment(mut sentence: Vec<Frag>, scope: &Names) -> Result<Option<Frag>> {
+    substitute_names(&mut sentence, &scope.verbs, &scope.mods);
+    reduce_to_fragment(sentence, scope)
 }
 
 /// What part of speech a fragment belongs to, for a diagnostic.

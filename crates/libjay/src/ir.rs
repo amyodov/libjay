@@ -685,7 +685,7 @@ pub(crate) fn empty_result() -> Array {
 
 /// J's truth: an empty condition is true, and otherwise the first atom
 /// decides. Characters count by their code point, as the reference does.
-fn is_true(a: &Array, span: Span) -> Result<bool> {
+pub(crate) fn is_true(a: &Array, span: Span) -> Result<bool> {
     if a.is_sparse() {
         return is_true(&a.densified(), span);
     }
