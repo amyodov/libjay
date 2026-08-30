@@ -15005,13 +15005,27 @@ fn sequential_machine(x: &Array, y: &Array, span: Span) -> Result<Array> {
         (_, None) => y
             .to_i64_vec()
             .ok_or_else(|| Error::domain("a sequential machine over characters needs a map", span))?,
+        // A map turns a character into a class, and only a character: the
+        // reference refuses one beside a numeric argument, whose values
+        // are the classes themselves.
         _ => {
-            return Err(Error::not_yet(
-                "a sequential machine's map over a numeric argument (x's third box)",
+            return Err(Error::domain(
+                "a sequential machine's map reads characters, and this argument is numeric",
                 span,
             ));
         }
     };
+    // The map is one class per byte, so it has 256 entries and no other
+    // count will do.
+    if let Some(m) = &codes
+        && m.len() != 256
+    {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("a sequential machine's map has 256 entries, not {}", m.len()),
+            Some(span),
+        ));
+    }
     let class_at = |at: i64| -> Result<i64> {
         let raw = values[at as usize];
         let Some(m) = &codes else { return Ok(raw) };

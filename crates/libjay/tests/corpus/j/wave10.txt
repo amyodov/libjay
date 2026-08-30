@@ -81,3 +81,10 @@ $ 9 u: ''
 3 u: 9 u: 955
 3 u: 9 u: 128
 3 u: 9 u: 240 159 152 128
+
+// A sequential machine's map turns a character into a class: it has one
+// entry per byte, and a numeric argument carries its classes itself.
+(2;(2 2 2 $ 0 0 1 3 0 1 1 0);(256$0 1);0 _1 1 _1) ;: 1 1 2 3
+(2;(2 2 2 $ 0 0 1 3 0 1 1 0);(128$0 1);0 _1 1 _1) ;: 'ab cd'
+(2;(2 2 2 $ 0 0 1 3 0 1 1 0);(256$0 1);0 _1 1 _1) ;: 'ab cd'
+(0;(2 2 2 $ 0 0 1 3 0 1 1 0);(256$0 1);0 _1 1 _1) ;: 'ab cd'
