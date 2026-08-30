@@ -165,11 +165,12 @@ fn tessellation_moves_a_block_over_the_argument() {
     assert_eq!(val(Lang::J, "2 2 (+/@,);._3 i.3 3"), i64s(&[2, 2], &[8, 12, 20, 24]));
     // Only the axes the sizes cover are cut.
     assert_eq!(val(Lang::J, "$ 2 2 <;.3 i.3 4 5"), i64s(&[2], &[3, 4]));
-    // A negative size needs the movement written out (see wave7.rs), and a
-    // positive step is required.
-    let e = err(Lang::J, "_2 <;.3 i.5");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("movement row"), "{}", e.msg);
+    // With the movement row left out a negative size does not measure the
+    // block: it runs to the end of its axis and comes back reversed, so
+    // the magnitude plays no part.
+    assert_eq!(val(Lang::J, "_2 <;.3 i.5"), val(Lang::J, "_3 <;.3 i.5"));
+    assert_eq!(val(Lang::J, "$ _2 <;._3 i.5"), i64s(&[1], &[1]));
+    // A positive step is required.
     assert_eq!(err(Lang::J, "(0 0,:2 2) <;.3 i.4 4").kind, ErrorKind::Domain);
 }
 

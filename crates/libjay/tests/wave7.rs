@@ -233,11 +233,12 @@ fn a_negative_block_size_reverses_its_axis() {
     assert_eq!(j("> 0 { (1 ,: _2) <;.3 i.5"), i64s(&[2], &[1, 0]));
     assert_eq!(j("> 4 { (1 ,: _2) <;.3 i.5"), i64s(&[1], &[4]));
     assert_eq!(j("$ (2 ,: _2) <;.3 i.5"), i64s(&[1], &[3]));
-    // Without one the reference answers something its magnitude plays no
-    // part in, so libjay names the gap rather than guessing.
-    let e = err(Lang::J, "_2 <;.3 i.5");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("movement row"), "{}", e.msg);
+    // Without one the size does not measure the block at all: it runs to
+    // the end of its axis and comes back reversed, so the magnitude plays
+    // no part and the frame is the axis's own length.
+    assert_eq!(j("> 0 { _2 <;.3 i.5"), i64s(&[5], &[4, 3, 2, 1, 0]));
+    assert_eq!(j("> 3 { _2 <;.3 i.5"), i64s(&[2], &[4, 3]));
+    assert_eq!(j("$ _2 <;.3 i.5"), i64s(&[1], &[5]));
 }
 
 // --- APL's under and stencil ----------------------------------------------
