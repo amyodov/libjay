@@ -11389,21 +11389,23 @@ fn ravel_axes(y: &Array, spec: &AxisSpec, table: bool, span: Span) -> Result<Arr
         shape.insert(*pos, 1);
         return Ok(reshaped(y, shape));
     }
+    // No axis named: a new one of length one, at the end the glyph works
+    // from — after the last axis for `,`, before the first for `⍪`, which
+    // is where each puts the axis it makes when no axis is named at all.
+    // `⍴,[⍳0]2 3⍴⍳6` is `2 3 1` in GNU APL and `⍴⍪[⍳0]2 3⍴⍳6` is `1 2 3`.
+    // It is also the one axis a SCALAR takes: `⍴,[⍳0]5` is `1` there, where
+    // `⍴,[1]5` is the empty.
+    if matches!(spec, AxisSpec::Axes(ks) if ks.is_empty()) {
+        let mut shape = y.shape.clone();
+        shape.insert(if table { 0 } else { shape.len() }, 1);
+        return Ok(reshaped(y, shape));
+    }
     // A scalar has no axis to name, and GNU APL answers it with itself
     // rather than refusing.
     if r == 0 {
         return Ok(y.clone());
     }
     let ks = axis_list(spec, r, span)?;
-    // No axis named: a new one of length one, at the end the glyph works
-    // from — after the last axis for `,`, before the first for `⍪`, which
-    // is where each puts the axis it makes when no axis is named at all.
-    // `⍴,[⍳0]2 3⍴⍳6` is `2 3 1` in GNU APL and `⍴⍪[⍳0]2 3⍴⍳6` is `1 2 3`.
-    if ks.is_empty() {
-        let mut shape = y.shape.clone();
-        shape.insert(if table { 0 } else { shape.len() }, 1);
-        return Ok(reshaped(y, shape));
-    }
     // The axes must be a run, ascending: only neighbours can be laid end to
     // end without moving an element.
     if ks.windows(2).any(|w| w[1] != w[0] + 1) {
