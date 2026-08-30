@@ -296,10 +296,11 @@ fn control_lines(c: &Control, depth: usize, p: &Program, tr: &Trace, out: &mut S
                 );
             }
         }
-        Control::Try { body, catch } => {
+        Control::Try { body, catch, catcht } => {
             let _ = writeln!(out, "{pad}try");
             block("body", body, out);
             block("catch", catch, out);
+            block("catcht", catcht, out);
         }
         Control::Return => {
             let _ = writeln!(out, "{pad}return");
@@ -309,6 +310,15 @@ fn control_lines(c: &Control, depth: usize, p: &Program, tr: &Trace, out: &mut S
         }
         Control::Continue => {
             let _ = writeln!(out, "{pad}continue");
+        }
+        Control::Label(name) => {
+            let _ = writeln!(out, "{pad}label {name}");
+        }
+        Control::Goto { name, .. } => {
+            let _ = writeln!(out, "{pad}goto {name}");
+        }
+        Control::Throw => {
+            let _ = writeln!(out, "{pad}throw");
         }
     }
 }

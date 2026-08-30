@@ -44,6 +44,10 @@ pub enum ErrorKind {
     Sandbox,
     /// Larger than libjay will allocate.
     Limit,
+    /// J's `throw.`, on its way out to a caller's `catcht.`. It is an error
+    /// rather than a control signal because it unwinds calls, not blocks,
+    /// and a program that never catches it stops with this.
+    Throw,
     Internal,
 }
 
@@ -62,6 +66,7 @@ impl ErrorKind {
             ErrorKind::Language => "not in the language",
             ErrorKind::Sandbox => "closed by the sandbox",
             ErrorKind::Limit => "limit error",
+            ErrorKind::Throw => "uncaught throw",
             ErrorKind::Internal => "internal error",
         }
     }

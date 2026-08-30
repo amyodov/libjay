@@ -118,9 +118,10 @@ pub enum Control {
     /// `select. T case. S do. B end.` and `:Select`. A case with no test is
     /// the default (`case. do.`, `:Else`); `fall_through` is `fcase.`.
     Select { subject: Box<Expr>, cases: Vec<Branch> },
-    /// `try. B catch. B end.`. The catch block runs on a language error;
-    /// a gap in libjay itself is never caught.
-    Try { body: Vec<Expr>, catch: Vec<Expr> },
+    /// `try. B catch. B catcht. B end.`. The `catch` block runs on a
+    /// language error; the `catcht` block runs on a `throw.` raised by
+    /// something the body CALLED. A gap in libjay itself is never caught.
+    Try { body: Vec<Expr>, catch: Vec<Expr>, catcht: Vec<Expr> },
     /// `return.` / `:Return`: leave the definition with the value in hand.
     Return,
     /// `break.` / `:Leave`: leave the innermost loop.
@@ -136,6 +137,20 @@ pub enum Control {
     BranchBy { by: Box<Expr>, test: Box<Expr> },
     /// `continue.` / `:Continue`: start the innermost loop's next iteration.
     Continue,
+    /// J's `label_name.`: a place in a definition's body that a
+    /// `goto_name.` reaches. It runs nothing, and — unlike every other
+    /// control sentence — it yields nothing at all, so the value the body
+    /// had in hand survives it.
+    Label(String),
+    /// J's `goto_name.`: continue at the body statement the matching
+    /// `label_name.` stands on. The target is settled while the definition
+    /// is built, which is why a label that is missing, doubled, or written
+    /// inside a control structure is refused there rather than here.
+    Goto { name: String, to: usize },
+    /// J's `throw.`: leave the definition at once and hand the exception to
+    /// the nearest `catcht.` in a CALLER's `try.` block. A `catcht.` in the
+    /// same definition does not catch it, and `catch.` never does.
+    Throw,
     /// A dfn's guard, `cond:expr`: the body is the dfn's answer when the
     /// condition holds, and the definition returns there.
     ///
@@ -651,6 +666,11 @@ fn eval_stmt(
     };
     ctx.shy = false;
     let (v, flow) = eval_control(c, *span, ctx, rec)?;
+    // A label is not a sentence that ran: it produces nothing, not even the
+    // empty value an untaken branch yields, so the value in hand survives.
+    if matches!(**c, Control::Label(_)) {
+        return Ok((v, flow));
+    }
     // A branch that ran and produced nothing yields whatever the language
     // gives an untaken branch: J's empty `i. 0 0`, and nothing at all in
     // APL, where a function with no result is an error. A branch that left
@@ -840,6 +860,17 @@ fn eval_control(
         }
         Control::Break => Ok((None, Flow::Break)),
         Control::Continue => Ok((None, Flow::Continue)),
+        Control::Label(_) => Ok((None, Flow::Normal)),
+        Control::Goto { to, .. } => Ok((None, Flow::Goto(*to))),
+        // `throw.` unwinds definition frames until a caller's `catcht.`
+        // takes it, so it travels as an error rather than as a `Flow`,
+        // which only ever leaves one body. The depth it was raised at is
+        // what tells a `catcht.` in the SAME definition — which does not
+        // catch it — from one in a caller, which does.
+        Control::Throw => {
+            ctx.env.thrown = Some(ctx.env.depth());
+            Err(Error::new(ErrorKind::Throw, "uncaught throw.".to_string(), Some(span)))
+        }
         Control::Guard { test, body } => {
             let (t, flow) = run_block(test, None, ctx, rec)?;
             if flow != Flow::Normal {
@@ -994,13 +1025,27 @@ fn eval_control(
             }
             Ok((last, Flow::Normal))
         }
-        Control::Try { body, catch } => {
+        Control::Try { body, catch, catcht } => {
             // The catch block answers for the languages' own errors. A gap
             // in libjay is not one of them: swallowing a "not supported
             // yet" would turn a promise into a wrong answer.
+            let here = ctx.env.depth();
             match run_block(body, None, ctx, rec) {
                 Ok(r) => Ok(r),
                 Err(e) if matches!(e.kind, ErrorKind::NotYet | ErrorKind::Internal) => Err(e),
+                Err(e) if e.kind == ErrorKind::Throw => {
+                    // A `throw.` written in THIS definition is not caught
+                    // here: the reference lets it out to the caller, and a
+                    // `try.` with no `catcht.` never takes one either.
+                    if catcht.is_empty() || ctx.env.thrown.is_none_or(|d| d <= here) {
+                        return Err(e);
+                    }
+                    ctx.env.thrown = None;
+                    run_block(catcht, None, ctx, rec)
+                }
+                // `try. B catcht. C end.` with no `catch.` lets an ordinary
+                // error out: only a throw is that block's business.
+                Err(e) if catch.is_empty() && !catcht.is_empty() => Err(e),
                 Err(_) => run_block(catch, None, ctx, rec),
             }
         }

@@ -462,6 +462,11 @@ pub struct Env {
     running: Vec<std::sync::Arc<crate::ir::ExplicitDef>>,
     verbs: HashMap<String, Verb>,
     args: Vec<Array>,
+    /// The definition depth a `throw.` now travelling was raised at, which
+    /// is what a `catcht.` reads to tell a throw from something it CALLED —
+    /// which it catches — from one written in its own definition, which
+    /// the reference lets past it.
+    pub thrown: Option<usize>,
 }
 
 impl Env {
@@ -472,6 +477,7 @@ impl Env {
             running: Vec::new(),
             verbs: HashMap::new(),
             args,
+            thrown: None,
         }
     }
 
@@ -577,6 +583,13 @@ impl Env {
     /// The innermost definition now running; `$:` and `∇` name it.
     pub fn current_def(&self) -> Option<std::sync::Arc<crate::ir::ExplicitDef>> {
         self.running.last().cloned()
+    }
+
+    /// How many explicit definitions are running, innermost included. A
+    /// `throw.` is caught by a `catcht.` that is running SHALLOWER than the
+    /// definition that raised it, and this is what the two compare.
+    pub fn depth(&self) -> usize {
+        self.frames.len()
     }
 }
 

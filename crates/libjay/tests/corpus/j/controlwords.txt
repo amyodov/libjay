@@ -1,0 +1,70 @@
+// J's remaining control words: the branch pair `goto_name.` / `label_name.`
+// and the exception pair `throw.` / `catcht.`.
+//
+// A program is one line with `\n` for the newlines in it, so a definition
+// written on the lines below its header fits on one corpus line.
+
+// --- goto and label ----------------------------------------------------
+f =. 3 : 0\nr =. 0\ngoto_skip.\nr =. 999\nlabel_skip.\nr + y\n)\nf 5
+f =. 3 : 0\nr =. 0\ni =. 0\nlabel_top.\ni =. i + 1\nr =. r + i\nif. i < y do. goto_top. end.\nr\n)\nf 5
+f =. 3 : 0\nlabel_a.\ny + 1\n)\nf 1
+f =. 3 : 0\n5\nlabel_a.\n)\nf 0
+f =. 3 : 0\n5\nlabel_a.\n)\n$ f 0
+f =. 3 : 0\n7\ngoto_z.\n9\nlabel_z.\n)\nf 0
+
+// A branch out of a loop leaves the loop and lands on the body's own line.
+f =. 3 : 0\nr =. 0\nfor_i. i.10 do.\n  r =. r + i\n  if. i = 3 do. goto_done. end.\nend.\nr =. r + 100\nlabel_done.\nr\n)\nf 0
+f =. 3 : 0\nn =. 0\nwhile. 1 do.\n  n =. n + 1\n  if. n = 4 do. goto_out. end.\nend.\nlabel_out.\nn\n)\nf 0
+
+// From inside `try.`, from inside `catch.`, and from inside `select.`.
+f =. 3 : 0\ntry.\n  goto_out.\ncatch.\n  1\nend.\n9\nlabel_out.\n5\n)\nf 0
+f =. 3 : 0\ntry.\n  13 + 'x'\ncatch.\n  goto_out.\nend.\n9\nlabel_out.\n5\n)\nf 0
+f =. 3 : 0\nselect. y\ncase. 1 do. goto_one.\ncase. do. 0\nend.\n99\nlabel_one.\n111\n)\nf 1
+f =. 3 : 0\nselect. y\ncase. 1 do. goto_one.\ncase. do. 0\nend.\n99\nlabel_one.\n111\n)\nf 2
+
+// A label may stand inside a control structure; it is simply not a target.
+f =. 3 : 0\nif. 1 do.\nlabel_in.\n7\nend.\n)\nf 0
+
+// A definition with a dyadic valence branches the same way.
+f =. 4 : 0\nif. x > y do. goto_big. end.\ny\nreturn.\nlabel_big.\nx\n)\n9 f 2
+f =. 4 : 0\nif. x > y do. goto_big. end.\ny\nreturn.\nlabel_big.\nx\n)\n2 f 9
+
+// A branch with no label, a label written twice, and a target inside a
+// control structure are all refused when the definition is built.
+f =. 3 : 0\ngoto_nope.\n1\n)\nf 0
+f =. 3 : 0\ngoto_d.\nlabel_d.\n1\nlabel_d.\n2\n)\nf 0
+f =. 3 : 0\ngoto_body.\nfor_i. i.3 do.\nlabel_body.\n  y + i\nend.\n)\nf 10
+
+// --- throw. and catcht. ------------------------------------------------
+// A `throw.` leaves the definition it stands in; a `catcht.` in a CALLER's
+// `try.` block takes it, and one in the same definition does not.
+g =. 3 : 'throw.'\nf =. 3 : 0\ntry.\n  g y\ncatcht.\n  'caught'\nend.\n)\nf 0
+f =. 3 : 0\ntry.\n  throw.\ncatcht.\n  'caught'\nend.\n)\nf 0
+g =. 3 : 'throw.'\nf =. 3 : 0\ntry.\n  g y\ncatch.\n  'wrong'\nend.\n'after'\n)\nf 0
+f =. 3 : 0\ntry.\n  13 + 'x'\ncatcht.\n  'caught'\nend.\n)\nf 0
+
+// The value a throw carries is not the catch block's answer.
+g =. 3 : '42 throw.'\nf =. 3 : 0\ntry.\n  g y\ncatcht.\n  'caught'\nend.\n)\nf 0
+
+// It travels through frames that have no `try.` of their own, and the
+// innermost `catcht.` takes it.
+g =. 3 : 'throw.'\nh =. 3 : 'g y'\nf =. 3 : 0\ntry.\n  h y\ncatcht.\n  'deep'\nend.\n)\nf 0
+g =. 3 : 'throw.'\nm =. 3 : 0\ntry.\n  g y\ncatcht.\n  'mid'\nend.\n)\nf =. 3 : 0\ntry.\n  m y\ncatcht.\n  'outer'\nend.\n)\nf 0
+
+// A `throw.` raised inside a `catcht.` block goes out to the next one.
+g =. 3 : 'throw.'\ns =. 3 : 0\ntry.\n  g y\ncatcht.\n  throw.\nend.\n)\nf =. 3 : 0\ntry.\n  s y\ncatcht.\n  'outer got it'\nend.\n)\nf 0
+
+// Both rescue blocks in one `try.`, in either order.
+g =. 3 : 'throw.'\nf =. 3 : 0\ntry.\n  g y\ncatch.\n  'c'\ncatcht.\n  't'\nend.\n)\nf 0
+f =. 3 : 0\ntry.\n  13 + 'x'\ncatch.\n  'c'\ncatcht.\n  't'\nend.\n)\nf 0
+g =. 3 : 'throw.'\nf =. 3 : 0\ntry.\n  g y\ncatcht.\n  't'\ncatch.\n  'c'\nend.\n)\nf 0
+f =. 3 : 0\ntry.\n  13 + 'x'\ncatcht.\n  't'\ncatch.\n  'c'\nend.\n)\nf 0
+
+// Nothing thrown: the try block's own value stands.
+g =. 3 : 'y + 1'\nf =. 3 : 0\ntry.\n  g y\ncatcht.\n  'caught'\nend.\n)\nf 4
+
+// An uncaught throw stops the program.
+g =. 3 : 'throw.'\nf =. 3 : 'g y'\nf 0
+
+// A throw out of a loop, and out of a nested definition inside a loop.
+g =. 3 : 'if. y > 2 do. throw. end.\ny'\nf =. 3 : 0\nr =. 0\ntry.\n  for_i. i.6 do.\n    r =. r + g i\n  end.\ncatcht.\n  r\nend.\n)\nf 0

@@ -3893,6 +3893,7 @@ fn is_pure_control(c: &Control) -> bool {
     let all = |b: &Vec<Expr>| b.iter().all(is_pure_stmt);
     match c {
         Control::Return | Control::Break | Control::Continue => true,
+        Control::Label(_) | Control::Goto { .. } | Control::Throw => true,
         Control::Branch(target) => is_pure_stmt(target),
         Control::BranchBy { by, test } => is_pure_stmt(by) && is_pure_stmt(test),
         Control::Cond { test, body, otherwise } => all(test) && all(body) && all(otherwise),
@@ -3906,7 +3907,7 @@ fn is_pure_control(c: &Control) -> bool {
             is_pure_stmt(subject)
                 && cases.iter().all(|c| c.test.as_ref().is_none_or(all) && all(&c.body))
         }
-        Control::Try { body, catch } => all(body) && all(catch),
+        Control::Try { body, catch, catcht } => all(body) && all(catch) && all(catcht),
         Control::Guard { test, body } => all(test) && all(body),
     }
 }
@@ -4652,11 +4653,17 @@ fn set_scopes(e: &mut Expr, own: &[String]) {
                         walk(&mut case.body);
                     }
                 }
-                Control::Try { body, catch } => {
+                Control::Try { body, catch, catcht } => {
                     walk(body);
                     walk(catch);
+                    walk(catcht);
                 }
-                Control::Return | Control::Break | Control::Continue => {}
+                Control::Return
+                | Control::Break
+                | Control::Continue
+                | Control::Label(_)
+                | Control::Goto { .. }
+                | Control::Throw => {}
             }
         }
         Expr::Const(..)

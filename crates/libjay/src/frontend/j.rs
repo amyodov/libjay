@@ -823,13 +823,14 @@ fn build_definition(
     }
     let items = split_items(&lines);
     let mut cursor = Cursor { items: &items, at: 0 };
-    let stmts = parse_block(&mut cursor, &mut inner, &[])?;
+    let mut stmts = parse_block(&mut cursor, &mut inner, &[])?;
     if let Some(item) = cursor.peek() {
         return Err(Error::parse(
             format!("`{}` has no matching opening word", item.word().unwrap_or("word")),
             item.span(),
         ));
     }
+    resolve_labels(&mut stmts)?;
     let pure = stmts.iter().all(block_is_pure);
     Ok(Verb::Explicit(Arc::new(ExplicitDef {
         name: name.to_string(),
@@ -857,6 +858,98 @@ fn build_definition(
         source: Vec::new(),
         spelling,
     })))
+}
+
+/// Point every `goto_name.` in a definition at the statement its
+/// `label_name.` stands on.
+///
+/// A label is a target only where it stands on the body's own statement
+/// list: one written inside a control structure has no place to branch to,
+/// so the reference refuses the definition rather than the branch. So does
+/// a name that no label carries, and a name that two of them carry.
+fn resolve_labels(stmts: &mut [Expr]) -> Result<()> {
+    let mut at: HashMap<String, usize> = HashMap::new();
+    for (k, stmt) in stmts.iter().enumerate() {
+        if let Expr::Control(c, span) = stmt
+            && let Control::Label(name) = &**c
+            && at.insert(name.clone(), k).is_some()
+        {
+            return Err(Error::parse(
+                format!("`label_{name}.` is written twice in this definition"),
+                *span,
+            ));
+        }
+    }
+    for stmt in stmts.iter_mut() {
+        point_gotos(stmt, &at)?;
+    }
+    Ok(())
+}
+
+fn point_gotos(stmt: &mut Expr, at: &HashMap<String, usize>) -> Result<()> {
+    let Expr::Control(c, span) = stmt else { return Ok(()) };
+    let span = *span;
+    let block = |b: &mut Vec<Expr>| -> Result<()> {
+        for s in b.iter_mut() {
+            point_gotos(s, at)?;
+        }
+        Ok(())
+    };
+    match &mut **c {
+        Control::Goto { name, to } => match at.get(name) {
+            Some(k) => *to = *k,
+            None => {
+                return Err(Error::parse(
+                    format!("`goto_{name}.` has no `label_{name}.` to go to"),
+                    span,
+                )
+                .note("a label is a target only on a line of its own in the body, \
+                       not inside a control structure"))
+            }
+        },
+        Control::If { arms, otherwise } => {
+            for arm in arms {
+                if let Some(t) = &mut arm.test {
+                    block(t)?;
+                }
+                block(&mut arm.body)?;
+            }
+            if let Some(b) = otherwise {
+                block(b)?;
+            }
+        }
+        Control::While { test, body, .. } | Control::Guard { test, body } => {
+            block(test)?;
+            block(body)?;
+        }
+        Control::Cond { test, body, otherwise } => {
+            block(test)?;
+            block(body)?;
+            block(otherwise)?;
+        }
+        Control::For { body, .. } => block(body)?,
+        Control::Select { cases, .. } => {
+            for case in cases {
+                if let Some(t) = &mut case.test {
+                    block(t)?;
+                }
+                block(&mut case.body)?;
+            }
+        }
+        Control::Try { body, catch, catcht } => {
+            block(body)?;
+            block(catch)?;
+            block(catcht)?;
+        }
+        Control::Return
+        | Control::Break
+        | Control::Continue
+        | Control::Throw
+        | Control::Label(_)
+        | Control::Branch(_)
+        | Control::BranchBy { .. } => {}
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------- explicit modifiers
@@ -1196,6 +1289,9 @@ fn control_is_pure(c: &Control) -> bool {
     let all = |b: &Vec<Expr>| b.iter().all(block_is_pure);
     match c {
         Control::Return | Control::Break | Control::Continue => true,
+        // A branch computes nothing, and a `throw.` only leaves: neither
+        // can be seen from outside the definition it stands in.
+        Control::Label(_) | Control::Goto { .. } | Control::Throw => true,
         // J has no branch; the variant only reaches this frontend through
         // the shared IR, and reading its target is as pure as any read.
         Control::Branch(target) => block_is_pure(target),
@@ -1216,7 +1312,7 @@ fn control_is_pure(c: &Control) -> bool {
             block_is_pure(subject)
                 && cases.iter().all(|c| c.test.as_ref().is_none_or(all) && all(&c.body))
         }
-        Control::Try { body, catch } => all(body) && all(catch),
+        Control::Try { body, catch, catcht } => all(body) && all(catch) && all(catcht),
     }
 }
 
@@ -1336,26 +1432,49 @@ fn parse_control(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Expr> {
             Control::For { names: suffix.iter().cloned().collect(), source: Box::new(source), body }
         }
         "select." => parse_select(cur, scope, start)?,
+        // `try.` takes its two rescue blocks in either order: `catch.`
+        // answers for the languages' errors, `catcht.` for a `throw.`.
         "try." => {
             let body = parse_block(cur, scope, &["catch.", "catcht.", "end."])?;
-            if cur.peek_word() == Some("catcht.") {
-                return Err(Error::not_yet("throw. and catcht.", cur.last_span()));
+            let mut catch = Vec::new();
+            let mut catcht = Vec::new();
+            loop {
+                match cur.peek_word() {
+                    Some(w @ ("catch." | "catcht.")) => {
+                        cur.at += 1;
+                        let block = parse_block(cur, scope, &["catch.", "catcht.", "end."])?;
+                        if w == "catch." {
+                            catch = block;
+                        } else {
+                            catcht = block;
+                        }
+                    }
+                    _ => break,
+                }
             }
-            let catch = if cur.peek_word() == Some("catch.") {
-                cur.expect("catch.")?;
-                parse_block(cur, scope, &["end."])?
-            } else {
-                Vec::new()
-            };
             cur.expect("end.")?;
-            Control::Try { body, catch }
+            Control::Try { body, catch, catcht }
         }
         "return." => Control::Return,
         "break." => Control::Break,
         "continue." => Control::Continue,
-        "throw." | "catcht." => return Err(Error::not_yet("throw. and catcht.", start)),
-        "goto." | "label." => {
-            return Err(Error::not_yet("goto_name. and label_name.", start))
+        "throw." => Control::Throw,
+        "catcht." => {
+            return Err(Error::parse("`catcht.` has no matching opening word", start))
+        }
+        "goto." => {
+            let Some(name) = suffix else {
+                return Err(Error::parse("a branch is spelled `goto_name.`", start));
+            };
+            // The statement is settled once the whole body is known; the
+            // name is all there is to go on here.
+            Control::Goto { name: name.clone(), to: usize::MAX }
+        }
+        "label." => {
+            let Some(name) = suffix else {
+                return Err(Error::parse("a branch target is spelled `label_name.`", start));
+            };
+            Control::Label(name.clone())
         }
         other => {
             return Err(Error::parse(

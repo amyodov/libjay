@@ -654,9 +654,10 @@ impl Walker<'_> {
                     block(self, &arm.body);
                 }
             }
-            Control::Try { body, catch } => {
+            Control::Try { body, catch, catcht } => {
                 block(self, body);
                 block(self, catch);
+                block(self, catcht);
             }
             Control::Branch(e) => self.expr(e, None),
             Control::BranchBy { by, test } => {
@@ -668,7 +669,12 @@ impl Walker<'_> {
                 block(self, body);
                 block(self, otherwise);
             }
-            Control::Return | Control::Break | Control::Continue => {}
+            Control::Return
+            | Control::Break
+            | Control::Continue
+            | Control::Label(_)
+            | Control::Goto { .. }
+            | Control::Throw => {}
         }
     }
 
