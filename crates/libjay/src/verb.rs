@@ -264,6 +264,93 @@ pub(crate) fn j_number(v: f64) -> String {
     }
 }
 
+/// One atom of a simple type: the fill J's `u!.f` specifies.
+///
+/// It is carried by value so that the evaluation config stays copyable and
+/// a fill survives into the cells a parallel pass runs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FillAtom {
+    Bool(u8),
+    I64(i64),
+    F64(f64),
+    Complex(crate::complex::Cx),
+    Char(char),
+}
+
+impl FillAtom {
+    /// The fill an array of one simple element stands for, or nothing where
+    /// the value is not one element or not of a type a fill can be.
+    pub(crate) fn of(a: &Array) -> Option<FillAtom> {
+        if a.count() != 1 || a.rank() > 1 {
+            return None;
+        }
+        let a = a.to_row_major();
+        match &a.data {
+            Data::Bool(v) => Some(FillAtom::Bool(v[0])),
+            Data::I64(v) => Some(FillAtom::I64(v[0])),
+            Data::F64(v) => Some(FillAtom::F64(v[0])),
+            Data::Complex(v) => Some(FillAtom::Complex(v[0])),
+            Data::Char(v) => Some(FillAtom::Char(v[0])),
+            _ => None,
+        }
+    }
+
+    fn dtype(self) -> DType {
+        match self {
+            FillAtom::Bool(_) => DType::Bool,
+            FillAtom::I64(_) => DType::I64,
+            FillAtom::F64(_) => DType::F64,
+            FillAtom::Complex(_) => DType::Complex,
+            FillAtom::Char(_) => DType::Char,
+        }
+    }
+
+    /// The fill as a rank-0 array.
+    fn array(self) -> Array {
+        let data = match self {
+            FillAtom::Bool(b) => Data::Bool(vec![b].into()),
+            FillAtom::I64(n) => Data::I64(vec![n].into()),
+            FillAtom::F64(x) => Data::F64(vec![x].into()),
+            FillAtom::Complex(z) => Data::Complex(vec![z].into()),
+            FillAtom::Char(c) => Data::Char(vec![c].into()),
+        };
+        Array::new(Vec::new(), data)
+    }
+}
+
+impl std::fmt::Display for FillAtom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FillAtom::Bool(b) => write!(f, "{b}"),
+            FillAtom::I64(n) => write!(f, "{n}"),
+            FillAtom::F64(x) => write!(f, "{x}"),
+            FillAtom::Complex(z) => write!(f, "{}j{}", z[0], z[1]),
+            FillAtom::Char(c) => write!(f, "{c:?}"),
+        }
+    }
+}
+
+/// An argument and a fill brought to one type, so that a fill of a wider
+/// type widens what it fills: `5 {.!.9.5 ] 1 2 3` answers floats.
+fn fitted_fill(a: &Array, f: FillAtom, span: Span) -> Result<(Array, Array)> {
+    let wrong = || {
+        Error::new(
+            ErrorKind::Type,
+            format!(
+                "a fill of type {} does not fit {} data",
+                f.dtype().name(),
+                a.dtype().name()
+            ),
+            Some(span),
+        )
+    };
+    let t = DType::promote(a.dtype(), f.dtype()).ok_or_else(wrong)?;
+    let (Some(widened), Some(atom)) = (a.to_row_major().cast(t), f.array().cast(t)) else {
+        return Err(wrong());
+    };
+    Ok((widened.to_row_major(), atom))
+}
+
 /// The effect-free half of the execution context. Copyable, so a path that
 /// runs cells on other threads can carry it there; neither the output sink
 /// nor the input source can go along, which is what keeps those paths pure
@@ -275,6 +362,10 @@ pub struct EvalCfg {
     /// Comparison tolerance in force; it starts as the dialect's and `u!.n`
     /// overrides it inside the verb it is attached to.
     pub tol: Tol,
+    /// The element J's `u!.f` puts where a value runs out, for the verbs
+    /// whose fit specifies a fill rather than a tolerance. `None` leaves
+    /// each type's own fill — a zero, a blank, an empty box.
+    pub fill: Option<FillAtom>,
     /// The dialect's settings, resolved once at compile time. A rule that
     /// only bites at run time reads it from here rather than deducing it.
     pub rules: Rules,
@@ -562,6 +653,20 @@ impl Drop for Nesting {
 }
 
 impl Ctx<'_> {
+    /// Run `f` in this context with the fill J's `u!.f` specifies in force.
+    fn with_fill<R>(&mut self, fill: FillAtom, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
+        let cfg = EvalCfg { fill: Some(fill), ..self.cfg };
+        f(&mut Ctx {
+            cfg,
+            out: &mut *self.out,
+            inp: reborrow_input(&mut self.inp),
+            env: &mut *self.env,
+            device: self.device,
+            shy: self.shy,
+            axis: self.axis.clone(),
+        })
+    }
+
     /// Run `f` in this context with the comparison tolerance replaced.
     fn with_tol<R>(&mut self, tol: Tol, f: impl FnOnce(&mut Ctx<'_>) -> R) -> R {
         let cfg = EvalCfg { tol, ..self.cfg };
@@ -1411,6 +1516,9 @@ pub enum Verb {
     UnderRavel(Box<Verb>),
     /// J `u!.n`: apply u with the comparison tolerance replaced by n.
     Fit(Box<Verb>, f64),
+    /// J `u!.f` on a verb whose fit is a FILL: apply u with f standing
+    /// wherever a value would otherwise run out.
+    Fill(Box<Verb>, FillAtom),
     /// J `x m} y`: y with the items at the indices m replaced by x.
     Amend(Array),
     /// GNU APL `x ⊢[m] y`: the selection function — a 1 in m takes the
@@ -1550,7 +1658,7 @@ impl Verb {
                 [RANK_INF, 0, RANK_INF]
             }
             Verb::Each(..) => [0, 0, 0],
-            Verb::Fit(v, _) => v.ranks(),
+            Verb::Fit(v, _) | Verb::Fill(v, _) => v.ranks(),
             // Amend reads the whole argument, and the rest run their own
             // verb over the argument as a whole.
             Verb::Amend(_)
@@ -1623,6 +1731,7 @@ impl Verb {
             Verb::Each(v, Enclose::Always) => format!("({}&.>)", v.name()),
             Verb::Each(v, _) => format!("({}¨)", v.name()),
             Verb::Fit(v, n) => format!("{}!.{n}", v.name()),
+            Verb::Fill(v, f) => format!("{}!.{f}", v.name()),
             Verb::Amend(_) => "(m})".to_string(),
             Verb::AmendGerund(vs) => {
                 format!("({}}})", vs.iter().map(Verb::name).collect::<Vec<_>>().join("`"))
@@ -1724,6 +1833,7 @@ impl Verb {
             | Verb::Each(v, _)
             | Verb::UnderRavel(v)
             | Verb::Fit(v, _)
+            | Verb::Fill(v, _)
             | Verb::Key(v)
             | Verb::Cut(v, _)
             | Verb::AlongAxis(v, _) => v.uses_tolerance(),
@@ -1815,7 +1925,8 @@ impl Verb {
             | Verb::BondRight(v, _)
             | Verb::Each(v, _)
             | Verb::UnderRavel(v)
-            | Verb::Fit(v, _) => v.is_pure(),
+            | Verb::Fit(v, _)
+            | Verb::Fill(v, _) => v.is_pure(),
             Verb::Key(v) | Verb::Cut(v, _) | Verb::AlongAxis(v, _) => v.is_pure(),
             Verb::Hypergeometric { .. } | Verb::Constant(_) => true,
             Verb::PowerV(v, w) | Verb::PowerUntil(v, w) => v.is_pure() && w.is_pure(),
@@ -1959,7 +2070,7 @@ impl Verb {
                 // Mix — `⊃` or `↑` at cell rank 0, whichever the dialect
                 // spells it — is where APL frames characters beside numbers.
                 if p.monad == MonadOp::Open && ctx.cfg.rules.lang == crate::Lang::Apl {
-                    return assemble_mixed(&frame, cells, span);
+                    return assemble_mixed(&frame, cells, ctx.cfg.fill, span);
                 }
                 assemble(&frame, cells, span)
             }
@@ -2028,12 +2139,25 @@ impl Verb {
                 let flat = Array::new(vec![y.count()], y.data.clone());
                 let r = u.monad(&flat, ctx, span)?;
                 let shape = Array::from_i64(y.shape.iter().map(|&n| n as i64).collect());
-                reshape(&shape, &r, false, false, ctx.cfg.near(), span)
+                reshape(&shape, &r, false, false, None, ctx.cfg.near(), span)
             }
             Verb::Fit(v, n) => {
                 let tol = Tol { ct: *n, ..ctx.cfg.tol };
                 ctx.with_tol(tol, |c| v.monad(y, c, span))
             }
+            // `>` frames the opened boxes, and a frame pads with the
+            // type's own fill wherever it is built; bringing the contents
+            // to one shape first is what puts `!.f`'s element there.
+            Verb::Fill(v, f)
+                if y.dtype() == DType::Box
+                    && matches!(&**v, Verb::Prim(p) if p.monad == MonadOp::Open) =>
+            {
+                let cells: Vec<Array> = (0..y.count()).map(|i| open_cell(&atom(y, i))).collect();
+                let padded = padded_with(cells, *f, span)?;
+                let held = Array::new(y.shape.clone(), Data::Box(padded.into()));
+                ctx.with_fill(*f, |c| v.monad(&held, c, span))
+            }
+            Verb::Fill(v, f) => ctx.with_fill(*f, |c| v.monad(y, c, span)),
             Verb::Choose(_) => {
                 Err(Error::domain("⊢[m] selects between two arguments and needs both", span))
             }
@@ -2266,6 +2390,7 @@ impl Verb {
                 let tol = Tol { ct: *n, ..ctx.cfg.tol };
                 ctx.with_tol(tol, |c| v.dyad(x, y, c, span))
             }
+            Verb::Fill(v, f) => ctx.with_fill(*f, |c| v.dyad(x, y, c, span)),
             Verb::Amend(m) => amend(m, x, y, ctx.cfg.near(), span),
             Verb::AmendGerund(vs) => amend_gerund(vs, x, y, ctx, span),
             Verb::Choose(m) => choose(m, x, y, span),
@@ -2726,7 +2851,12 @@ fn assemble_items(frame: &[usize], mut cells: Vec<Array>, span: Span) -> Result<
 /// scalars — and every cell is padded to the common shape with ITS OWN
 /// fill first, so `↑(1 2)('abc')` pads the numeric row with a zero and the
 /// character row with nothing.
-fn assemble_mixed(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
+fn assemble_mixed(
+    frame: &[usize],
+    cells: Vec<Array>,
+    filled: Option<FillAtom>,
+    span: Span,
+) -> Result<Array> {
     let mut mixed = cells.iter().all(|c| c.dtype() != DType::Box);
     if mixed {
         let mut dt = None;
@@ -2765,11 +2895,42 @@ fn assemble_mixed(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Arra
         let fit = if c.shape == common {
             c.clone()
         } else {
-            take(&counts, c, false, true, true, NearInt::J, span)?
+            take(&counts, c, false, true, true, filled, NearInt::J, span)?
         };
         padded.push(boxed_elements(&fit));
     }
     assemble(frame, padded, span).map(tightened_mixed)
+}
+
+/// The cells brought to one shape with the element `!.f` names, so that a
+/// frame that would have padded with a zero or a blank pads with that.
+fn padded_with(cells: Vec<Array>, filled: FillAtom, span: Span) -> Result<Vec<Array>> {
+    let rank = cells.iter().map(Array::rank).max().unwrap_or(0);
+    let raised: Vec<Array> = cells
+        .iter()
+        .map(|c| {
+            let mut s = vec![1usize; rank - c.rank()];
+            s.extend_from_slice(&c.shape);
+            Array::new(s, c.to_row_major().data.clone())
+        })
+        .collect();
+    let mut common = vec![0usize; rank];
+    for c in &raised {
+        for (k, slot) in common.iter_mut().enumerate() {
+            *slot = (*slot).max(c.shape[k]);
+        }
+    }
+    let counts = Array::from_i64(common.iter().map(|&n| n as i64).collect());
+    raised
+        .iter()
+        .map(|c| {
+            if c.shape == common {
+                fitted_fill(c, filled, span).map(|(a, _)| a)
+            } else {
+                take(&counts, c, false, false, true, Some(filled), NearInt::J, span)
+            }
+        })
+        .collect()
 }
 
 /// The same array with every element held as its own value, so that it can
@@ -3080,7 +3241,7 @@ fn wider_shape(a: &[usize], b: &[usize]) -> Vec<usize> {
 /// among them spreads over the common item shape, as catenation does; the
 /// rest are padded with fill, which is what makes raze accept items that
 /// plain catenation would refuse.
-fn raze(y: &Array, span: Span) -> Result<Array> {
+fn raze(y: &Array, filled: Option<FillAtom>, span: Span) -> Result<Array> {
     let opened: Vec<Array> = (0..y.count()).map(|i| open_cell(&atom(y, i))).collect();
     let mut common: Option<Vec<usize>> = None;
     for a in opened.iter().filter(|a| a.rank() > 0) {
@@ -3096,6 +3257,19 @@ fn raze(y: &Array, span: Span) -> Result<Array> {
             cells.push(spread(a, &common));
             continue;
         }
+        // An opened value whose items have fewer axes than the common item
+        // shape is ONE item of that shape rather than several of a smaller
+        // one: `; ('ab';(2 2$'wxyz'))` is three rows, not four.
+        let raise = (common.len() + 1).saturating_sub(a.rank());
+        let raised;
+        let a = if raise > 0 {
+            let mut shape = vec![1usize; raise];
+            shape.extend_from_slice(&a.shape);
+            raised = reshaped(a, shape);
+            &raised
+        } else {
+            a
+        };
         for i in 0..a.items() {
             cells.push(a.item(i));
         }
@@ -3104,6 +3278,10 @@ fn raze(y: &Array, span: Span) -> Result<Array> {
         return Ok(Array::new(vec![0], Data::empty(DType::I64)));
     }
     let n = cells.len();
+    let cells = match filled {
+        Some(f) => padded_with(cells, f, span)?,
+        None => cells,
+    };
     assemble(&[n], cells, span)
 }
 
@@ -5953,14 +6131,24 @@ fn iota_j(y: &Array, near: NearInt, span: Span) -> Result<Array> {
 }
 
 /// The first item, or a cell of fills when there are no items.
-fn head(y: &Array) -> Array {
+fn head(y: &Array, filled: Option<FillAtom>) -> Array {
     if y.rank() == 0 {
         return y.clone();
     }
     if y.items() == 0 {
         let cell_shape = y.shape[1..].to_vec();
         let n: usize = cell_shape.iter().product();
-        return Array::new(cell_shape, fill_data(y.dtype(), n));
+        // There is no first item, so the fill stands in for it: the type's
+        // own where none was named, and `!.f`'s element where one was.
+        let Some(f) = filled else {
+            return Array::new(cell_shape, fill_data(y.dtype(), n));
+        };
+        let atom = f.array();
+        let mut data = Data::empty(atom.dtype());
+        for _ in 0..n {
+            push_elem(&mut data, &atom.data, 0);
+        }
+        return Array::new(cell_shape, data);
     }
     y.item(0)
 }
@@ -6739,7 +6927,7 @@ fn catalogue(y: &Array, span: Span) -> Result<Array> {
 /// `e. y`: for every element of y, which items of the raze of y it holds —
 /// so the answer is shaped `($y), #items of the raze`.
 fn raze_in(y: &Array, tol: Tol, span: Span) -> Result<Array> {
-    let all = raze(y, span)?;
+    let all = raze(y, None, span)?;
     let n = if all.rank() == 0 { 1 } else { all.items() };
     let elements: Vec<Array> = (0..y.count())
         .map(|i| {
@@ -7220,15 +7408,35 @@ pub(crate) fn catenate(
     fill: bool,
     span: Span,
 ) -> Result<Array> {
+    catenate_filled(x, y, leading, fill, None, span)
+}
+
+/// [`catenate`] with the element `!.f` names standing where a ragged join
+/// runs out, instead of the type's own fill.
+pub(crate) fn catenate_filled(
+    x: &Array,
+    y: &Array,
+    leading: bool,
+    fill: bool,
+    filled: Option<FillAtom>,
+    span: Span,
+) -> Result<Array> {
     let rank = x.rank().max(y.rank()).max(1);
     let axis = if leading { 0 } else { rank - 1 };
-    catenate_at(x, y, axis, fill, span)
+    catenate_at(x, y, axis, fill, filled, span)
 }
 
 /// Catenate along a named axis. The two arguments join there and must agree
 /// on every other axis; one of them may be a scalar, or one axis short, in
 /// which case it is a single item of the join.
-fn catenate_at(x: &Array, y: &Array, axis: usize, fill: bool, span: Span) -> Result<Array> {
+fn catenate_at(
+    x: &Array,
+    y: &Array,
+    axis: usize,
+    fill: bool,
+    filled: Option<FillAtom>,
+    span: Span,
+) -> Result<Array> {
     let rank = x.rank().max(y.rank()).max(1);
     check_axis(axis, rank, span)?;
     let deep = fill && axis == 0;
@@ -7281,7 +7489,7 @@ fn catenate_at(x: &Array, y: &Array, axis: usize, fill: bool, span: Span) -> Res
             to[axis] = a.shape[axis] as i64;
             // The lengths are ours, not the program's: no float
             // reaches the near-integer admission on this path.
-            take(&Array::from_i64(to), a, false, false, true, NearInt::J, span)
+            take(&Array::from_i64(to), a, false, false, true, filled, NearInt::J, span)
         };
         (fit(&xa)?, fit(&ya)?)
     } else {
@@ -7822,7 +8030,7 @@ fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
 /// spreads over the other argument's shape, and two scalars become
 /// one-element lists (`1 ,: 2` has shape 2 1); otherwise the framing
 /// machinery's own fill brings the two cells to a common shape.
-fn laminate(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn laminate(x: &Array, y: &Array, filled: Option<FillAtom>, span: Span) -> Result<Array> {
     let spread = |a: &Array, other: &Array| -> Array {
         if a.rank() != 0 {
             return a.clone();
@@ -7835,7 +8043,12 @@ fn laminate(x: &Array, y: &Array, span: Span) -> Result<Array> {
         }
         Array::new(shape, data)
     };
-    assemble(&[2], vec![spread(x, y), spread(y, x)], span)
+    let cells = vec![spread(x, y), spread(y, x)];
+    let cells = match filled {
+        Some(f) => padded_with(cells, f, span)?,
+        None => cells,
+    };
+    assemble(&[2], cells, span)
 }
 
 /// `⍪ y`: one row per item, holding that item's elements.
@@ -7985,6 +8198,7 @@ pub(crate) fn with_origin(v: &Verb, origin: i64) -> Option<Verb> {
         Verb::Commute(u) => Some(Verb::Commute(Box::new(with_origin(u, origin)?))),
         Verb::Each(u, e) => Some(Verb::Each(Box::new(with_origin(u, origin)?), *e)),
         Verb::Fit(u, n) => Some(Verb::Fit(Box::new(with_origin(u, origin)?), *n)),
+        Verb::Fill(u, f) => Some(Verb::Fill(Box::new(with_origin(u, origin)?), *f)),
         Verb::AlongAxis(u, k) => {
             Some(Verb::AlongAxis(Box::new(with_origin(u, origin)?), k.clone()))
         }
@@ -8503,7 +8717,7 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             Ok(Array::new(vec![items, width], y.to_row_major().data))
         }
         MonadOp::TransposeAxes => Ok(transpose_axes(y)),
-        MonadOp::Head => Ok(head(y)),
+        MonadOp::Head => Ok(head(y, ctx.cfg.fill)),
         MonadOp::Behead => behead(y, span),
         MonadOp::Tail => Ok(tail(y)),
         MonadOp::Curtail => Ok(curtail(y)),
@@ -8556,7 +8770,7 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         MonadOp::TableOf => Ok(table_of(y)),
         MonadOp::Enclose(rule) => Ok(enclose(y, rule)),
         MonadOp::Open => Ok(open_cell(y)),
-        MonadOp::Raze => raze(y, span),
+        MonadOp::Raze => raze(y, ctx.cfg.fill, span),
         MonadOp::Catalogue => catalogue(y, span),
         MonadOp::AtomicRep => atomic_rep(y, ctx, span),
         MonadOp::RazeIn => raze_in(y, ctx.cfg.tol, span),
@@ -8675,9 +8889,21 @@ fn reshape(
     y: &Array,
     by_items: bool,
     apl: bool,
+    filled: Option<FillAtom>,
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
+    // A fill of a wider type widens the result, and once one is named the
+    // ravel is not repeated: what runs out is filled.
+    let widened;
+    let (y, filled) = match filled {
+        Some(f) => {
+            let (a, atom) = fitted_fill(y, f, span)?;
+            widened = a;
+            (&widened, Some(atom))
+        }
+        None => (y, None),
+    };
     let dims = axis_counts(x, "reshape", near, span)?;
     if dims.iter().any(|&d| d < 0) {
         return Err(Error::domain("reshape lengths must be nonnegative", span));
@@ -8694,13 +8920,26 @@ fn reshape(
     let n = crate::limits::elements(&shape, span)?;
     let mut data = Data::empty(y.dtype());
     if n > 0 && src == 0 {
-        if by_items {
+        if by_items && filled.is_none() {
             return Err(Error::new(ErrorKind::Length, "reshape of an empty array", Some(span)));
         }
-        let fill = if apl { prototype_of(y) } else { None };
+        let fill = filled.clone().or_else(|| if apl { prototype_of(y) } else { None });
         let mut data = Data::empty(y.dtype());
         for _ in 0..n {
             push_gap(&mut data, &fill);
+        }
+        return Ok(Array::new(shape, data));
+    }
+    // With a fill named, the ravel is not repeated: the result takes the
+    // argument's elements once and the fill stands for the rest.
+    if let Some(atom) = &filled {
+        let have = unit * src;
+        for i in 0..n {
+            if i < have {
+                push_elem(&mut data, &y.data, i);
+            } else {
+                push_gap(&mut data, &Some(atom.clone()));
+            }
         }
         return Ok(Array::new(shape, data));
     }
@@ -8768,14 +9007,24 @@ fn take(
     prototype_fill: bool,
     apl: bool,
     per_axis: bool,
+    filled: Option<FillAtom>,
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
     let counts = axis_counts(x, "take", near, span)?;
     // APL overtakes a nested array with the PROTOTYPE of its first item —
     // that item's shape, with a zero for every number and a blank for every
-    // character. J fills with the empty box instead.
-    let fill = if prototype_fill { prototype_of(y) } else { None };
+    // character. J fills with the empty box instead, or with the element
+    // `!.f` names where one was given.
+    let widened;
+    let (y, fill) = match filled {
+        Some(f) => {
+            let (a, atom) = fitted_fill(y, f, span)?;
+            widened = a;
+            (&widened, Some(atom))
+        }
+        None => (y, if prototype_fill { prototype_of(y) } else { None }),
+    };
     let promoted;
     // A scalar right argument is treated as a one-item array of whatever
     // rank the count list asks for: `1 2 {. 5` is a 1 by 2 table.
@@ -8826,10 +9075,8 @@ fn take(
         }
         if inside {
             push_elem(&mut data, &base.data, idx);
-        } else if let (Data::Box(v), Some(p)) = (&mut data, &fill) {
-            v.push(p.clone());
         } else {
-            data.push_fill();
+            push_gap(&mut data, &fill);
         }
         odometer(&mut coord, &out_shape);
     }
@@ -8879,6 +9126,9 @@ fn keep_proto(out: Array, src: &Array, apl: bool) -> Array {
 fn push_gap(data: &mut Data, fill: &Option<Array>) {
     match (data, fill) {
         (Data::Box(v), Some(p)) => v.push(p.clone()),
+        // J's `!.f`: one atom of the buffer's own type, written in place of
+        // the type's fill.
+        (d, Some(p)) if p.count() == 1 && p.dtype() == d.dtype() => push_elem(d, &p.data, 0),
         (d, _) => d.push_fill(),
     }
 }
@@ -8947,12 +9197,12 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::Scalar(op) => scalar_dyad(op, x, y, cfg, span),
         DyadOp::Reshape => {
             let apl = cfg.rules.lang == crate::Lang::Apl;
-            reshape(x, y, cfg.agreement == Agreement::LeadingPrefix, apl, cfg.near(), span)
+            reshape(x, y, cfg.agreement == Agreement::LeadingPrefix, apl, cfg.fill, cfg.near(), span)
         }
         DyadOp::Take => {
             let apl = cfg.rules.lang == crate::Lang::Apl;
             let per_axis = cfg.rules.axis_counts == AxisCounts::PerAxis;
-            take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, per_axis, cfg.near(), span)
+            take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, per_axis, cfg.fill, cfg.near(), span)
         }
         DyadOp::Drop => drop_(
             x,
@@ -8969,10 +9219,10 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         // Only J fills a ragged catenation; APL's conformability rule
         // refuses it, as the reference does.
         DyadOp::AppendLeading => {
-            catenate(x, y, true, cfg.agreement == Agreement::LeadingPrefix, span)
+            catenate_filled(x, y, true, cfg.agreement == Agreement::LeadingPrefix, cfg.fill, span)
         }
         DyadOp::AppendLast => {
-            catenate(x, y, false, cfg.agreement == Agreement::LeadingPrefix, span)
+            catenate_filled(x, y, false, cfg.agreement == Agreement::LeadingPrefix, cfg.fill, span)
         }
         DyadOp::IndexOf { origin, major_cells } => {
             let (x, y) = align_mixed(x, y, apl);
@@ -9027,7 +9277,7 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         }
         DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Encode => encode(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
-        DyadOp::Laminate => laminate(x, y, span),
+        DyadOp::Laminate => laminate(x, y, cfg.fill, span),
         DyadOp::Link => link(x, y, span),
         DyadOp::Strand => strand(x, y, span),
         DyadOp::IntervalIndex { offset, closed } => {
@@ -11184,7 +11434,7 @@ fn axis_prim(
                 for &a in &axes {
                     counts[a] = 1;
                 }
-                take(&Array::from_i64(counts), y, true, true, true, near, span)?
+                take(&Array::from_i64(counts), y, true, true, true, None, near, span)?
             }
             _ => return Ok(None),
         },
@@ -11202,14 +11452,14 @@ fn axis_prim(
                     AxisSpec::Axes(_) => {
                         let rank = x.rank().max(y.rank()).max(1);
                         let k = one_axis(spec, u, rank, span)?;
-                        catenate_at(x, y, k, fill, span)?
+                        catenate_at(x, y, k, fill, None, span)?
                     }
                 }
             }
             DyadOp::Take => {
                 let counts = axis_counts_at(x, y, spec, "take", true, near, span)?;
                 let apl = cfg.rules.lang == crate::Lang::Apl;
-                take(&counts, y, cfg.agreement == Agreement::ExactOrScalar, apl, true, near, span)?
+                take(&counts, y, cfg.agreement == Agreement::ExactOrScalar, apl, true, cfg.fill, near, span)?
             }
             DyadOp::Drop => {
                 let counts = axis_counts_at(x, y, spec, "drop", false, near, span)?;
@@ -11467,7 +11717,7 @@ fn laminate_axis(x: &Array, y: &Array, pos: usize, fill: bool, span: Span) -> Re
     };
     let xa = widen(x, y)?;
     let ya = widen(y, x)?;
-    catenate_at(&xa, &ya, pos, fill, span)
+    catenate_at(&xa, &ya, pos, fill, None, span)
 }
 
 /// `⊂[K]y` and Dyalog's `↓[K]y`: every subarray over the named axes
@@ -15755,6 +16005,7 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
         }
         Verb::Rank(f, r) => Verb::Rank(Box::new(obverse(f)?), *r),
         Verb::Fit(f, n) => Verb::Fit(Box::new(obverse(f)?), *n),
+        Verb::Fill(f, a) => Verb::Fill(Box::new(obverse(f)?), *a),
         // `u&.>` and `u¨` undo box by box: the boxing is its own inverse,
         // so only the verb inside one has to be turned round.
         Verb::Each(f, rule) => Verb::Each(Box::new(obverse(f)?), *rule),
@@ -17105,7 +17356,7 @@ fn apl_matrix_product(x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<
     };
     let grow = |a: Array, shape: [usize; 2]| -> Result<Array> {
         let want = Array::from_i64(vec![shape[0] as i64, shape[1] as i64]);
-        take(&want, &a, false, true, true, cfg.near(), span)
+        take(&want, &a, false, true, true, None, cfg.near(), span)
     };
     let left = grow(square(x, [rows, xk]), [rows, k])?;
     let right = grow(square(y, [yk, cols]), [k, cols])?;
@@ -18216,6 +18467,7 @@ mod tests {
                     agreement: $agreement,
                     fmt: FmtOpts::J,
                     tol: Tol::J,
+                    fill: None,
                     // The agreement names the language here, so the rules
                     // a verb reads are that language's shipped dialect.
                     rules: crate::frontend::Dialect::default()
@@ -19296,6 +19548,7 @@ mod tests {
                 agreement: Agreement::LeadingPrefix,
                 fmt: FmtOpts::J,
                 tol: Tol::J,
+                fill: None,
                 rules: Rules::default(),
             },
             out: &mut sink,

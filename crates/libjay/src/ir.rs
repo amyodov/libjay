@@ -523,6 +523,7 @@ impl Program {
             agreement: self.agreement,
             fmt: self.fmt,
             tol: self.rules.tol(),
+            fill: None,
             rules: self.rules,
         };
         let mut env = Env::new(args.to_vec());

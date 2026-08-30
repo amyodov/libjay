@@ -2833,6 +2833,7 @@ fn noun_value(f: &Frag) -> Option<Array> {
         agreement: crate::verb::Agreement::LeadingPrefix,
         fmt: crate::fmt::FmtOpts::J,
         tol: crate::verb::Tol::J,
+        fill: None,
         rules: crate::frontend::Rules::default(),
     };
     crate::ir::fold_const(e, cfg)
@@ -3097,12 +3098,24 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                     .ok_or_else(|| Error::not_yet("a computed fill (|.!.n)", span))?;
                 return Ok(Frag::Verb(VerbFrag::V(Verb::ShiftFill(fill)), span));
             }
+            // On the verbs that fill, the fit names the ELEMENT a value
+            // runs out into. `>` does both: its dyad compares, so a fit
+            // that is a tolerance is one there too.
+            if let Some(fill) = fill_taking(&f).then(|| as_const(&v).and_then(crate::verb::FillAtom::of)).flatten()
+            {
+                let inner = match one_atom(&v, "fit", span) {
+                    Ok(n) if f.uses_tolerance() && (0.0..=LARGEST_TOLERANCE).contains(&n) => {
+                        Verb::Fit(Box::new(f), n)
+                    }
+                    _ => f,
+                };
+                return Ok(Frag::Verb(VerbFrag::V(Verb::Fill(Box::new(inner), fill)), span));
+            }
             let n = one_atom(&v, "fit", span)?;
             if !f.uses_tolerance() {
-                return Err(Error::not_yet(
-                    format!("fill specification ({}!.n)", f.name()),
-                    span,
-                ));
+                // Every verb J gives a fit to is one of the two above; the
+                // rest refuse one outright, and so does libjay.
+                return Err(Error::domain(format!("{} takes no fit (u!.n)", f.name()), span));
             }
             // J refuses a tolerance above 2^-34, and so does libjay.
             if !(0.0..=LARGEST_TOLERANCE).contains(&n) {
@@ -3455,6 +3468,16 @@ fn is_open(f: &Frag) -> bool {
 
 fn is_ravel(f: &Frag) -> bool {
     matches!(f, Frag::Verb(VerbFrag::V(Verb::Prim(p)), _) if p.monad == MonadOp::Ravel)
+}
+
+/// Whether `u!.f` specifies a FILL on this verb rather than a tolerance.
+///
+/// These are the verbs whose answer can reach past what their argument
+/// holds: take and reshape, the three joins, the copy, the raze and the
+/// open. J refuses a fit on anything else that has no tolerance.
+fn fill_taking(f: &Verb) -> bool {
+    let Verb::Prim(p) = f else { return false };
+    matches!(p.name, "{." | "$" | "," | ",." | ",:" | "#" | ";" | ">")
 }
 
 fn verb_operand(f: Frag, span: Span) -> Result<Verb> {
@@ -4292,10 +4315,11 @@ mod tests {
     }
 
     #[test]
-    fn verb_rank_is_not_supported_yet() {
-        let e = err("+\"- m");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("verb rank"), "{}", e.msg);
+    fn a_verb_on_the_right_of_rank_lends_its_own_ranks() {
+        // `u"v` is u at v's own three ranks, so it parses where it once
+        // named a gap.
+        one("+\"- m");
+        one("<\"(<\"1) m");
     }
 
     #[test]

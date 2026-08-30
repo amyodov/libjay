@@ -448,6 +448,10 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             head(out, &format!("fit !.{n} (comparison tolerance)"));
             verb_lines(u, depth + 1, p, tr, out);
         }
+        Verb::Fill(u, f) => {
+            head(out, &format!("fit !.{f} (the element a value runs out into)"));
+            verb_lines(u, depth + 1, p, tr, out);
+        }
         Verb::Amend(m) => head(out, &format!("amend at {} index(es)", m.count())),
         Verb::Choose(m) => head(out, &format!("select between two arguments by a {}-position mask", m.count())),
         Verb::AmendVerb(u) => {

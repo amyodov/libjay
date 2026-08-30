@@ -2671,6 +2671,7 @@ fn const_cfg(d: Rules) -> crate::verb::EvalCfg {
         agreement: crate::verb::Agreement::ExactOrScalar,
         fmt: crate::fmt::FmtOpts::APL,
         tol: d.tol(),
+        fill: None,
         rules: d,
     }
 }
