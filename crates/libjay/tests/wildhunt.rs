@@ -288,11 +288,11 @@ fn the_gerund_amend_computes_all_three_of_its_arguments() {
     // u makes the replacement, v the indices, w the array they go into.
     assert_eq!(j("1 3 (+:@:{`[`]}) 9 8 7 6"), i64s(&[4], &[9, 16, 7, 12]));
     assert_eq!(j("1 (0:`[`]}) 5 6 7"), i64s(&[3], &[5, 0, 7]));
-    // The reference gives the monad a meaning that is not this amend; it
-    // is a named gap rather than a wrong answer.
-    let e = err(Lang::J, "(0:`0:`]}) 1 2 3");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("gerund amend"), "{}", e.msg);
+    // The monad amends nothing: it is the noun amend's own monad over what
+    // v and w answer, a SELECTION, and u is not applied at all.
+    assert_eq!(j("(0:`0:`]}) 1 2 3"), Array::scalar_i64(1));
+    assert_eq!(j("(+:)`(1&{)`]} i.5"), Array::scalar_i64(1));
+    assert_eq!(j("(-:)`(0&{)`]} 1 2 3"), Array::scalar_i64(2));
 }
 
 #[test]
