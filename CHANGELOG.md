@@ -44,7 +44,29 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `jay-corpus fuzz --compare --signature` now cuts every mismatch down to
+  the smallest sentence that still parts libjay from the oracle the same
+  way, and reports and signs THAT sentence — a composed sentence names eight
+  or ten primitives that are a property of the draw, so signing it made one
+  cause into one finding per subset it could be drawn inside. The signature
+  also names how the two sides parted, and at most three primitives. A
+  wrapper that deduplicates on it now converges instead of growing without
+  end.
+
 ### Fixed
+
+- The least common multiple of two EXACT numbers keeps its sign. `_5x *. 2`
+  is `_10` in J and `¯5∧2` is `¯10` in APL; both answered `10`. The
+  machine-integer path was always right; the extended and rational one took
+  the positive LCM of the numerators.
+- J's `I.` (interval index) compares exactly. It is the one comparison in J
+  that does not consult the comparison tolerance:
+  `1 2 3 I. 1.9999999999999998` is 1, the answer flipping at the bound
+  itself. APL's `⍸` does consult `⎕CT` and is unchanged.
+- An EMPTY axis list on `,` and `⍪` adds an axis of length one at the end
+  each glyph works from — after the last for `,`, before the first for `⍪`.
+  `⍴⍪[⍳0]2 4 6` is `1 3`. It is also the one axis a scalar takes:
+  `⍴,[⍳0]5` is `1` where `⍴,[1]5` is the empty.
 
 ## 0.4.0 — 2026-08-29
 

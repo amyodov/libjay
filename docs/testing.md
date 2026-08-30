@@ -436,16 +436,31 @@ a regression.
 cargo run -p libjay-devtools -- fuzz apl --compare --count 500 --seed 1 --signature
 ```
 
-`--signature` prefixes every mismatch with a cluster signature —
-`<what libjay made of it>|<the primitives the sentence names>` — and counts
-the run's distinct causes as well as its distinct signatures. The class
-before the bar is the level that answers "did this batch find anything new":
-a composed sentence names eight or ten primitives, so the whole signature is
-nearly unique, while the class collapses a batch's rows into a handful of
-buckets. A wrapper that sweeps continuously should key on the class, since
-deduplicating on the expression text can never say "nothing new" — the space
-of compositions is effectively infinite, so a fresh string is always
-available.
+`--signature` first CUTS each mismatch down. A composed sentence is a tree
+with a bug somewhere inside it, so the run takes it apart by parenthesised
+group — the inside of one on its own, or that group replaced by a plain `2`
+— shortest candidate first, and keeps whatever still parts the two sides the
+same way, repeating until nothing smaller does. What is reported, and what a
+corpus line should be pasted from, is that smallest sentence; where it
+differs from the drawn one a `cut from:` line names what it came out of.
+
+The signature is then `<how the two sides parted>:<what libjay made of
+it>|<the primitives the sentence names>`, and the summary counts the run's
+distinct causes (the part before the bar) as well as its distinct
+signatures. Because the sentence was cut down first, it names one or two
+primitives rather than the eight or ten of the draw, which is what makes the
+whole signature a name for the CAUSE — and a sentence still naming more than
+three after the cut is one the cut could not take apart, so its field
+becomes `…` and every such sentence of one class is one finding. A wrapper
+that sweeps continuously should keep a set of whole signatures:
+deduplicating on the expression text can never say "nothing new", the space
+of compositions being effectively infinite, and deduplicating on the class
+alone puts every numeric-vector wrong answer in one bucket.
+
+Cutting costs one run of libjay and one of the oracle per candidate, and
+only mismatches are cut, so a 150-expression batch pays about a second for
+it. Candidates whose libjay answer already rules the verdict out are thrown
+away without starting an interpreter.
 
 The grammar carries a generation number (`fuzz::GENERATION`, printed in the
 summary): two runs' find rates are comparable only when it matches. Anything
