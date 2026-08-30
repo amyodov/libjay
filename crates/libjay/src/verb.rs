@@ -566,6 +566,26 @@ pub fn split_indirect(name: &str) -> Option<(&str, &str)> {
     (ok(head) && ok(var)).then_some((head, var))
 }
 
+/// The locale a value names for an indirect locative: one box holding the
+/// locale's name.
+pub fn locale_of_value(v: &Array, var: &str, span: Span) -> Result<String> {
+    let wrong = || {
+        Error::new(
+            ErrorKind::Rank,
+            format!("{var} names a locale for an indirect locative, so it holds one box"),
+            Some(span),
+        )
+    };
+    let inner = match &v.data {
+        Data::Box(b) if v.count() == 1 => b[0].clone(),
+        _ => return Err(wrong()),
+    };
+    match &inner.data {
+        Data::Char(c) => Ok(c.as_slice().iter().collect()),
+        _ => Err(wrong()),
+    }
+}
+
 impl Env {
     pub fn new(args: Vec<Array>) -> Env {
         let mut locales = HashMap::new();
@@ -621,24 +641,7 @@ impl Env {
         let v = self.get(var).ok_or_else(|| {
             Error::new(ErrorKind::Value, format!("undefined name: {var}"), Some(span))
         })?;
-        let inner = match &v.data {
-            Data::Box(b) if v.count() == 1 => b[0].clone(),
-            _ => {
-                return Err(Error::new(
-                    ErrorKind::Rank,
-                    format!("{var} names a locale for an indirect locative, so it holds one box"),
-                    Some(span),
-                ))
-            }
-        };
-        match &inner.data {
-            Data::Char(c) => Ok(c.as_slice().iter().collect()),
-            _ => Err(Error::new(
-                ErrorKind::Rank,
-                format!("{var} names a locale for an indirect locative, so it holds one box"),
-                Some(span),
-            )),
-        }
+        locale_of_value(&v, var, span)
     }
 
     /// A global name in a locale named at run time.
@@ -1823,6 +1826,12 @@ pub struct Deferred {
     pub build: fn(&Verb, &Array, Span, Rules) -> Result<Verb>,
     /// How the whole reads in a diagnostic.
     pub spelling: String,
+    /// The verbs one HEAD names, by the locale each is defined in, for J's
+    /// indirect locative `f__v`: the locale is whatever v holds where the
+    /// verb is applied, so which of them the name stands for waits for the
+    /// program to run. Empty for every other deferral, where `build` makes
+    /// the derived function from the operand's value instead.
+    pub choices: std::collections::HashMap<String, Verb>,
 }
 
 /// Apply `F[K]` where F is an explicit definition: the bracket's value
@@ -1864,11 +1873,32 @@ fn apply_deferred(
     span: Span,
 ) -> Result<Array> {
     let value = crate::ir::eval_operand(&d.operand, ctx)?;
-    let f = (d.build)(&d.template, &value, span, ctx.cfg.rules)?;
+    let f = if d.choices.is_empty() {
+        (d.build)(&d.template, &value, span, ctx.cfg.rules)?
+    } else {
+        locative_choice(d, &value, span)?
+    };
     match x {
         Some(x) => f.dyad(x, y, ctx, span),
         None => f.monad(y, ctx, span),
     }
+}
+
+/// The verb an indirect locative names, once the locale has a value: the
+/// one that locale defines under the head, or the one `z` does, since `z`
+/// stands on every other locale's search path.
+fn locative_choice(d: &Deferred, value: &Array, span: Span) -> Result<Verb> {
+    let (head, var) = split_indirect(&d.spelling)
+        .ok_or_else(|| Error::internal("a locative verb without a locative name"))?;
+    let locale = locale_of_value(value, var, span)?;
+    if let Some(v) = d.choices.get(&locale).or_else(|| d.choices.get(Z_LOCALE)) {
+        return Ok(v.clone());
+    }
+    Err(Error::new(
+        ErrorKind::Value,
+        format!("undefined name: {head}_{locale}_"),
+        Some(span),
+    ))
 }
 
 /// An operator dfn's body, parsed once for each reading of its operands.

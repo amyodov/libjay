@@ -1897,6 +1897,7 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                         template,
                         build: if is_alpha { built_alpha } else { built_omega },
                         spelling: "(n {…})".to_string(),
+                        choices: std::collections::HashMap::new(),
                     }))
                 }
             };
@@ -2659,6 +2660,7 @@ impl ValueOperand {
                     template,
                     build,
                     spelling,
+                    choices: std::collections::HashMap::new(),
                 })))
             }
         }

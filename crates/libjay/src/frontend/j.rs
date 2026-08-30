@@ -202,6 +202,38 @@ impl Names {
         self.lookup_keys(name).iter().find_map(|k| self.verbs.get(k))
     }
 
+    /// The verb an INDIRECT locative names, where some locale defines one
+    /// under its head.
+    ///
+    /// The locale is a value, so which of them the name stands for is not
+    /// known while the sentence is read; the verbs the head names in every
+    /// locale travel with the name and the one the locale holds is chosen
+    /// where the verb is applied. `None` where no locale defines the head,
+    /// which leaves the name a noun as it was.
+    fn locative_verb(&self, name: &str, span: Span) -> Option<Verb> {
+        let (head, var) = crate::verb::split_indirect(name)?;
+        let mut choices: HashMap<String, Verb> = HashMap::new();
+        for (key, verb) in &self.verbs {
+            if key == head {
+                choices.insert(crate::verb::BASE_LOCALE.to_string(), verb.clone());
+            } else if let Some((h, locale)) = crate::verb::split_locative(key)
+                && h == head
+            {
+                choices.insert(locale.to_string(), verb.clone());
+            }
+        }
+        // The template stands for the ranks and the tolerance question; the
+        // verb itself is chosen by the locale at every application.
+        let template = choices.values().next()?.clone();
+        Some(Verb::Deferred(Arc::new(crate::verb::Deferred {
+            operand: Expr::Name(var.to_string(), span),
+            template,
+            build: built_locative,
+            spelling: name.to_string(),
+            choices,
+        })))
+    }
+
     fn mod_named(&self, name: &str) -> Option<&(bool, Modifier)> {
         self.lookup_keys(name).iter().find_map(|k| self.mods.get(k))
     }
@@ -1810,6 +1842,8 @@ fn substitute_names(sentence: &mut [Frag], scope: &Names) {
         }
         if let Some(v) = scope.verb_named(&name) {
             sentence[i] = Frag::Verb(VerbFrag::V(v.clone()), span);
+        } else if let Some(v) = scope.locative_verb(&name, span) {
+            sentence[i] = Frag::Verb(VerbFrag::V(v), span);
         } else if let Some((conj, m)) = scope.mod_named(&name) {
             sentence[i] = if *conj {
                 Frag::Conj(m.clone(), span)
@@ -3317,6 +3351,7 @@ fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
                 template: Verb::Amend(Array::scalar_i64(0)),
                 build: built_amend,
                 spelling: "n}".to_string(),
+                choices: HashMap::new(),
             };
             return Ok(Frag::Verb(
                 VerbFrag::V(Verb::Deferred(std::sync::Arc::new(deferred))),
@@ -3501,6 +3536,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                 template: f,
                 build: built_power,
                 spelling,
+                choices: HashMap::new(),
             };
             Ok(Frag::Verb(
                 VerbFrag::V(Verb::Deferred(std::sync::Arc::new(deferred))),
@@ -3774,7 +3810,8 @@ fn deferred_bond(operand: Option<Expr>, f: Verb, left: bool, span: Span) -> Resu
     };
     let spelling = if left { format!("n&{}", f.name()) } else { format!("{}&n", f.name()) };
     let build = if left { built_bond_left } else { built_bond_right };
-    let deferred = crate::verb::Deferred { operand, template: f, build, spelling };
+    let deferred =
+        crate::verb::Deferred { operand, template: f, build, spelling, choices: HashMap::new() };
     Ok(Verb::Deferred(std::sync::Arc::new(deferred)))
 }
 
@@ -4373,10 +4410,22 @@ fn apply_fork(f: Frag, g: Frag, h: Frag, scope: &Names) -> Result<Frag> {
                 template: Verb::NounFork(Array::scalar_i64(0), Box::new(gv), Box::new(hv)),
                 build: built_noun_fork,
                 spelling,
+                choices: HashMap::new(),
             };
             Ok(Frag::Verb(VerbFrag::V(Verb::Deferred(Arc::new(deferred))), span))
         }
     }
+}
+
+/// An indirect locative's verb is chosen by the locale its operand names,
+/// so nothing is built from the value here.
+fn built_locative(
+    _template: &Verb,
+    _a: &Array,
+    _span: Span,
+    _d: crate::frontend::Rules,
+) -> Result<Verb> {
+    Err(Error::internal("a locative verb is chosen by its locale, not built"))
 }
 
 /// The noun fork a deferred left tine stands for, once the operand the

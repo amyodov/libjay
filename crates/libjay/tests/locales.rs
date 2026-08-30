@@ -180,8 +180,19 @@ fn an_indirect_locative_whose_name_holds_no_box_is_a_rank_error() {
 }
 
 #[test]
-fn a_verb_named_by_an_indirect_locative_names_itself_a_gap() {
-    let e = refusal("n =: <'cc'\ng_cc_ =: 3 : 'y * 3'\ng__n 4");
+fn a_verb_named_by_an_indirect_locative_is_the_one_the_locale_holds() {
+    assert_eq!(ints("n =: <'cc'\ng_cc_ =: 3 : 'y * 3'\ng__n 4"), vec![12]);
+    // The locale is read where the verb is APPLIED, so moving the name to
+    // another locale moves which verb the same sentence runs.
+    assert_eq!(
+        ints("g_cc_ =: 3 : 'y * 3'\ng_dd_ =: 3 : 'y + 3'\nn =: <'dd'\ng__n 4"),
+        vec![7]
+    );
+}
+
+#[test]
+fn a_verb_named_by_an_indirect_locative_that_no_locale_defines_is_a_gap() {
+    let e = refusal("n =: <'cc'\nq__n 4");
     assert_eq!(e.kind, ErrorKind::NotYet, "{}", e.msg);
     assert!(e.msg.contains("indirect locative"), "{}", e.msg);
 }

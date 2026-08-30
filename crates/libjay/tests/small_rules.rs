@@ -312,7 +312,16 @@ fn an_empty_is_acceptable_numeric_data(
     assert_eq!(shown(lang, src), want);
 }
 
-#[test]
-fn an_empty_box_is_not_numeric_data() {
-    assert_eq!(err(Lang::J, "2 #. 0$<1").kind, jay::ErrorKind::Domain);
+/// An empty of BOXES holds no element to be the wrong type either, so it
+/// is numeric data wherever an empty of characters is. jconsole reads one
+/// the same way — `#. 0$<1` is 0 and `A. 0$<1` is 0 — and refuses only the
+/// one dyadic decode, which `corpus/j/divergences.txt` pins.
+#[rstest]
+#[case("#. 0$<1", "0")]
+#[case("2 #. 0$<1", "0")]
+#[case("i. 0$<1", "0")]
+#[case("A. 0$<1", "0")]
+#[case("$ #: 0$<1", "0 0")]
+fn an_empty_box_is_numeric_data(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::J, src), want);
 }
