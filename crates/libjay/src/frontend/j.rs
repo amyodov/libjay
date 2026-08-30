@@ -319,18 +319,19 @@ fn take_colon_definition(
         sentence.splice(at - 1..at + 2, [Frag::Noun(Expr::Const(body_arr, span))]);
         return Ok(());
     }
+    // `13 : '…'` reads its valence off the body, so it is settled below.
     let (dyadic, modifier) = match valence {
         3.0 => (false, None),
         4.0 => (true, None),
         1.0 => (false, Some(false)),
         2.0 => (false, Some(true)),
-        13.0 => return Err(Error::not_yet("tacit definitions (13 : '...')", span)),
+        13.0 => (false, None),
         v => return Err(Error::domain(format!("{v} is not an explicit definition"), span)),
     };
     // How a session writes the definition back out: the header and the
     // body, as the source spells it. Only the inline form has one — the
     // lines of a `3 : 0` are not kept as text.
-    let mut spelling = None;
+    let mut body_text = None;
     let body = match &body_arr.data {
         // `3 : 0`: the body is written on the lines below, ending with `)`.
         Data::I64(_)
@@ -356,13 +357,19 @@ fn take_colon_definition(
             // The body sits one character past the opening quote; a doubled
             // quote inside it shifts what follows by one column.
             lex_line(&text, body_span.start + 1, scope.char_bytes, &mut frags)?;
-            spelling = Some(format!("{} : '{}'", valence as i64, text.replace('\'', "''")));
+            body_text = Some(text);
             vec![frags]
         }
         Data::Symbol(_) | Data::Box(_) => {
             return Err(Error::parse("an explicit definition takes 0 or a string", body_span))
         }
     };
+    if valence == 13.0 {
+        let verb = tacit_definition(body, body_text.as_deref(), scope, span)?;
+        sentence.splice(at - 1..at + 2, [Frag::Verb(VerbFrag::V(verb), span)]);
+        return Ok(());
+    }
+    let spelling = body_text.map(|t| definition_spelling(valence as i64, &t));
     if let Some(conjunction) = modifier {
         let name = if conjunction { "2 : '...'" } else { "1 : '...'" };
         let mut src = mod_source(name, conjunction, body, self_name);
@@ -381,6 +388,201 @@ fn take_colon_definition(
     Ok(())
 }
 
+
+/// How a definition written inline is given back: the header and the body,
+/// with a quote inside the body doubled as the source had to write it.
+fn definition_spelling(valence: i64, text: &str) -> String {
+    format!("{valence} : '{}'", text.replace('\'', "''"))
+}
+
+// ------------------------------------------------------- tacit definitions
+
+/// `13 : '…'` — the TACIT verb a body's use of `x` and `y` translates to.
+///
+/// The body is parsed as an ordinary sentence with the two arguments
+/// standing as names, and the tree that comes back is abstracted over
+/// them: a part that reads neither is folded to its value, `y` becomes `]`
+/// and `x` becomes `[`, and every application becomes the train, noun fork
+/// or composition that computes the same thing without naming an argument.
+/// A body the abstraction cannot reach becomes the ordinary explicit
+/// definition instead, which is what the reference falls back to as well.
+fn tacit_definition(
+    body: Vec<Vec<Frag>>,
+    text: Option<&str>,
+    scope: &Names,
+    span: Span,
+) -> Result<Verb> {
+    // The reference reads a control word in a tacit body as a word with an
+    // inflection it does not have, and refuses the body outright.
+    if let Some(f) = body.iter().flatten().find(|f| matches!(f, Frag::Control(..))) {
+        let _ = span;
+        return Err(Error::parse("a tacit definition has no control words", f.span()));
+    }
+    let dyadic = mentions(&body, "x");
+    let name = if dyadic { "4 : '...'" } else { "3 : '...'" };
+    let spelling = text.map(|t| definition_spelling(if dyadic { 4 } else { 3 }, t));
+    let mut inner = scope.clone();
+    for arg in ["x", "y"] {
+        inner.nouns.insert(arg.to_string());
+        inner.verbs.remove(arg);
+        inner.mods.remove(arg);
+        inner.consts.remove(arg);
+    }
+    let translated = match body.as_slice() {
+        [line] => {
+            let mut sentence = line.clone();
+            substitute_names(&mut sentence, &inner.verbs, &inner.mods);
+            match reduce_to_fragment(sentence, &inner) {
+                Ok(Some(f @ (Frag::Noun(_) | Frag::Name(..)))) => {
+                    as_noun(f).ok().and_then(|e| translate_tacit(&e, dyadic))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    match translated {
+        Some(Tacit::Verb(v)) => Ok(v),
+        Some(Tacit::Const(a)) => Ok(constant_of(a)),
+        None => build_definition(body, dyadic, name, spelling, scope, None),
+    }
+}
+
+/// What one part of a tacit body stands for.
+enum Tacit {
+    /// It reads neither argument, so its value is settled here.
+    Const(Array),
+    /// A verb that computes it from the arguments.
+    Verb(Verb),
+}
+
+/// The verb that answers a constant whatever its arguments are. An integer
+/// atom small enough has a word of its own; everything else is `m"_`.
+fn constant_of(a: Array) -> Verb {
+    if a.rank() == 0
+        && matches!(a.data, Data::I64(_))
+        && a.to_f64_vec().is_some_and(|v| v[0].abs() <= 9.0)
+    {
+        return constant_verb(a);
+    }
+    Verb::Rank(Box::new(Verb::Constant(a)), [crate::verb::RANK_INF; 3])
+}
+
+/// Whether an expression reads either argument.
+fn reads_args(e: &Expr) -> bool {
+    match e {
+        Expr::Name(name, _) => name == "x" || name == "y",
+        Expr::Monad { y, .. } => reads_args(y),
+        Expr::Dyad { x, y, .. } => reads_args(x) || reads_args(y),
+        Expr::Assign { value, .. } => reads_args(value),
+        _ => false,
+    }
+}
+
+/// The abstraction itself: the verb (or the value) one part of the body
+/// stands for. None where nothing in the tacit vocabulary computes it.
+fn translate_tacit(e: &Expr, dyadic: bool) -> Option<Tacit> {
+    if !reads_args(e) {
+        return noun_value(&Frag::Noun(e.clone())).map(Tacit::Const);
+    }
+    match e {
+        Expr::Name(n, _) if n == "y" => Some(Tacit::Verb(verb_for("]")?)),
+        Expr::Name(n, _) if n == "x" => Some(Tacit::Verb(verb_for("[")?)),
+        // The name an assignment gives is not part of what the body
+        // computes; its value is.
+        Expr::Assign { value, .. } => translate_tacit(value, dyadic),
+        Expr::Monad { verb, y, .. } => {
+            let Tacit::Verb(v) = translate_tacit(y, dyadic)? else { return None };
+            // A body that never names `x` derives a monad, and there the
+            // argument arrives whole: `f y` is f itself. A body that does
+            // name `x` has to keep both valences apart, so the argument is
+            // selected first.
+            let out = if !dyadic && is_prim(&v, "]") {
+                verb.clone()
+            } else {
+                Verb::Atop(Box::new(verb.clone()), Box::new(v))
+            };
+            Some(Tacit::Verb(out))
+        }
+        Expr::Dyad { verb, x, y, .. } => {
+            let l = translate_tacit(x, dyadic)?;
+            let r = translate_tacit(y, dyadic)?;
+            Some(Tacit::Verb(join_tacit(l, verb, r, dyadic)?))
+        }
+        _ => None,
+    }
+}
+
+/// Two abstracted parts with a verb between them.
+fn join_tacit(l: Tacit, f: &Verb, r: Tacit, dyadic: bool) -> Option<Verb> {
+    let (u, v) = match (l, r) {
+        // One side is a value: the noun fork answers `m f (…)` in both
+        // valences, so a constant on the RIGHT changes places with the
+        // verb rather than staying where it was written.
+        (Tacit::Const(m), Tacit::Verb(v)) => {
+            return Some(Verb::NounFork(m, Box::new(f.clone()), Box::new(v)))
+        }
+        (Tacit::Verb(u), Tacit::Const(n)) => {
+            return Some(Verb::NounFork(n, Box::new(flip(f)), Box::new(u)))
+        }
+        (Tacit::Const(_), Tacit::Const(_)) => return None,
+        (Tacit::Verb(u), Tacit::Verb(v)) => (u, v),
+    };
+    // `x f y` is f, and `y f x` is its commutation: the fork that would
+    // say the same thing is written the short way.
+    if is_prim(&u, "[") && is_prim(&v, "]") {
+        return Some(f.clone());
+    }
+    if is_prim(&u, "]") && is_prim(&v, "[") {
+        return Some(flip(f));
+    }
+    // `y f y` is the REFLEXIVE, which is written with the commutation
+    // whether or not the verb says the same thing both ways round.
+    if !dyadic && is_prim(&u, "]") && is_prim(&v, "]") {
+        return Some(Verb::Commute(Box::new(f.clone())));
+    }
+    // A train needs brackets as the LEFT tine and none as the right one,
+    // so a left tine that is one changes places where the other is not.
+    if is_train(&u) && !is_train(&v) {
+        return Some(Verb::Fork(Box::new(v), Box::new(flip(f)), Box::new(u)));
+    }
+    Some(Verb::Fork(Box::new(u), Box::new(f.clone()), Box::new(v)))
+}
+
+/// The verb that takes the same two arguments the other way round. A verb
+/// that says the same thing either way is itself; one whose mirror has a
+/// spelling of its own is that spelling; everything else commutes.
+fn flip(f: &Verb) -> Verb {
+    if let Verb::Prim(p) = f {
+        if COMMUTATIVE.contains(&p.name) {
+            return f.clone();
+        }
+        if let Some(other) = CONVERSE.iter().find(|(a, _)| *a == p.name)
+            && let Some(v) = verb_for(other.1)
+        {
+            return v;
+        }
+    }
+    Verb::Commute(Box::new(f.clone()))
+}
+
+/// The dyads that answer the same thing whichever way round the arguments
+/// come, so that a commutation of them is written without one.
+const COMMUTATIVE: [&str; 11] =
+    ["+", "*", "<.", ">.", "=", "~:", "+.", "*.", "+:", "*:", "-:"];
+
+/// The dyads whose mirror is another spelling rather than a commutation.
+const CONVERSE: [(&str, &str); 4] = [("<", ">"), (">", "<"), ("<:", ">:"), (">:", "<:")];
+
+fn is_prim(v: &Verb, name: &str) -> bool {
+    matches!(v, Verb::Prim(p) if p.name == name)
+}
+
+/// Whether the verb is written as a train, which is what decides where a
+/// bracket has to go.
+fn is_train(v: &Verb) -> bool {
+    matches!(crate::gerund::verb_ar(v), Some(crate::gerund::Ar::Train(_)))
+}
 
 /// The lines of a `3 : 0` body: everything up to a line that is a lone `)`.
 fn take_lines_until_paren(
