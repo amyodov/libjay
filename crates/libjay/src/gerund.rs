@@ -175,7 +175,14 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         Verb::Memo(u, _) => der("M.", vec![verb_ar(u)?]),
         Verb::Level { u, level, spread } => der(
             if *spread { "S:" } else { "L:" },
-            vec![verb_ar(u)?, Ar::Noun(Array::scalar_i64(*level))],
+            vec![
+                verb_ar(u)?,
+                Ar::Noun(if *level == crate::verb::RANK_INF {
+                    Array::scalar_f64(f64::INFINITY)
+                } else {
+                    Array::scalar_i64(*level)
+                }),
+            ],
         ),
         Verb::Characteristics(u) => der("b.", vec![verb_ar(u)?]),
         Verb::Key(u) => der("/.", vec![verb_ar(u)?]),

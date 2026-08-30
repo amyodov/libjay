@@ -3303,11 +3303,22 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             };
             // `m"n` is the CONSTANT verb: a noun on the left is the answer
             // itself, whatever the arguments are, and n says how large a
-            // cell each copy stands for.
+            // cell each copy stands for. A GERUND of two verbs or more is
+            // the one noun the rank conjunction does not read that way —
+            // it cycles the verbs over the cells the rank names, one verb
+            // per cell — and only a rank that is infinite in all three
+            // places leaves it a constant. One box is a constant whatever
+            // it holds, so `` (<'+:')"0 `` is that box three times.
             let f = if u.is_noun() {
-                match noun_value(&u) {
-                    Some(m) => Verb::Constant(m),
-                    None => return Err(Error::not_yet("a computed constant verb (m\"n)", span)),
+                if ranks != [RANK_INF; 3] && gerund_operand(&u, scope) {
+                    Verb::Cycle(gerund_verbs(&u, scope, span)?)
+                } else {
+                    match noun_value(&u) {
+                        Some(m) => Verb::Constant(m),
+                        None => {
+                            return Err(Error::not_yet("a computed constant verb (m\"n)", span));
+                        }
+                    }
                 }
             } else {
                 verb_operand(u, span)?
@@ -3394,7 +3405,13 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             ))
         }
         ";." => {
-            let f = verb_operand(u, span)?;
+            // A gerund cuts with one verb per piece, as the cycling
+            // adverbs do; anything else is the one verb every piece gets.
+            let f = if gerund_operand(&u, scope) {
+                Verb::Cycle(gerund_verbs(&u, scope, span)?)
+            } else {
+                verb_operand(u, span)?
+            };
             let n = one_atom(&v, "cut", span)?;
             if n.fract() != 0.0 || !matches!(n as i64, -3..=3) {
                 return Err(Error::not_yet(format!("cut (u;.{n})"), span));
@@ -3492,12 +3509,21 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         "L:" | "S:" => {
             let f = verb_operand(u, span)?;
             let n = one_atom(&v, "level", span)?;
-            if n.fract() != 0.0 || !n.is_finite() {
+            // The two infinities are the two ends of the descent: `_` is
+            // the whole argument, boxed however deeply, and `__` is its
+            // leaves, which is level 0 written the other way round.
+            let level = if n == f64::INFINITY {
+                RANK_INF
+            } else if n == f64::NEG_INFINITY {
+                0
+            } else if n.fract() != 0.0 {
                 return Err(Error::not_yet(format!("a level of {n} ({glyph})"), span));
-            }
+            } else {
+                n as i64
+            };
             let level = Verb::Level {
                 u: Box::new(f),
-                level: n as i64,
+                level,
                 spread: glyph == "S:",
             };
             Ok(Frag::Verb(VerbFrag::V(level), span))
@@ -3982,6 +4008,16 @@ fn noun_in_scope(f: &Frag, scope: &Names) -> Option<Array> {
         return scope.const_named(n);
     }
     noun_value(f)
+}
+
+/// Whether a modifier's operand is a GERUND to be cycled over the pieces
+/// rather than a noun to be read as data: two atomic representations or
+/// more. ONE box is data whatever it holds, which is why `` (<'+:')"0 ``
+/// is that box once per cell and `` (+:`*:)"0 `` doubles and squares in
+/// turn.
+fn gerund_operand(u: &Frag, scope: &Names) -> bool {
+    !u.is_real_verb()
+        && noun_in_scope(u, scope).is_some_and(|a| a.count() > 1 && is_gerund(&a))
 }
 
 /// Whether this value is a GERUND rather than data: a non-empty boxed

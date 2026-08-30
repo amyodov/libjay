@@ -2096,7 +2096,8 @@ impl Verb {
             },
             Verb::Memo(v, _) => format!("{} M.", v.name()),
             Verb::Level { u, level, spread } => {
-                format!("{} {} {level}", u.name(), if *spread { "S:" } else { "L:" })
+                let n = one_rank(*level);
+                format!("{} {} {n}", u.name(), if *spread { "S:" } else { "L:" })
             }
             Verb::Key(v) => format!("{}/.", v.name()),
             Verb::Cut(v, n) => format!("{};.{n}", v.name()),
@@ -3283,7 +3284,7 @@ fn rank_monad(
         return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| v.monad(cell, c, span)));
     }
     let cells = each_cell(n, y.count(), pure, ctx, |i, c| {
-        v.monad(&y.cell_at(frame_rank, i), c, span)
+        cycled(v, i).monad(&y.cell_at(frame_rank, i), c, span)
     })?;
     assemble(&frame, cells, span)
 }
@@ -4306,6 +4307,13 @@ fn binomial(x: f64, y: f64) -> f64 {
         }
         if xi <= BINOMIAL_PRODUCT_LIMIT {
             return binomial_product(xi, y);
+        }
+        // Past the product limit the gamma quotient stands in, and it reads
+        // a pole over a pole as a NaN where the product would have found a
+        // zero factor and stopped: every whole y under a whole x is one of
+        // those, so `100000000 ! 2` is 0 rather than "no value".
+        if y.fract() == 0.0 && y >= 0.0 && y < x {
+            return 0.0;
         }
     }
     gamma(y + 1.0) / (gamma(x + 1.0) * gamma(y - x + 1.0))
@@ -11577,7 +11585,7 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
         let w = k.unsigned_abs() as usize;
         let count = n.div_ceil(w);
         let cells = each_cell(count, n * m, u.is_pure(), ctx, |i, c| {
-            u.monad(&section(base, i * w, ((i + 1) * w).min(n)), c, span)
+            cycled(u, i).monad(&section(base, i * w, ((i + 1) * w).min(n)), c, span)
         })?;
         return assemble(&[count], cells, span);
     }
@@ -11595,7 +11603,7 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     }
     let work = count.saturating_mul(w).saturating_mul(m);
     let cells = each_cell(count, work, u.is_pure(), ctx, |i, c| {
-        u.monad(&section(base, i, i + w), c, span)
+        cycled(u, i).monad(&section(base, i, i + w), c, span)
     })?;
     assemble(&[count], cells, span)
 }
@@ -13679,8 +13687,8 @@ fn cut(
         return Ok(empty_frame(&[0], items.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
     }
     let mut cells = Vec::with_capacity(ranges.len());
-    for (s, e) in &ranges {
-        cells.push(u.monad(&section(&items, *s, *e), ctx, span)?);
+    for (piece, (s, e)) in ranges.iter().enumerate() {
+        cells.push(cycled(u, piece).monad(&section(&items, *s, *e), ctx, span)?);
     }
     assemble(&[ranges.len()], cells, span)
 }
@@ -13760,7 +13768,7 @@ fn per_axis_cut(
     }
     let mut cells = Vec::with_capacity(total);
     let mut coord = vec![0usize; frame.len()];
-    for _ in 0..total {
+    for piece in 0..total {
         let mut origin = Vec::with_capacity(frame.len());
         let mut size = Vec::with_capacity(frame.len());
         for k in 0..frame.len() {
@@ -13768,7 +13776,7 @@ fn per_axis_cut(
             origin.push(s as i64);
             size.push((e - s) as i64);
         }
-        cells.push(u.monad(&subarray(y, &origin, &size, span)?, ctx, span)?);
+        cells.push(cycled(u, piece).monad(&subarray(y, &origin, &size, span)?, ctx, span)?);
         odometer(&mut coord, &frame);
     }
     assemble(&frame, cells, span)
@@ -14571,6 +14579,12 @@ fn at_level(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
+    // A level of `_` is the whole argument, however deeply it is boxed:
+    // there is nothing to descend into and nothing to collect, so both
+    // valences of both spellings are u applied to what they were given.
+    if level == RANK_INF {
+        return u.monad(y, ctx, span);
+    }
     // A negative level counts down from the argument's own top.
     let n = if level < 0 { (boxing_level(y) + level).max(0) } else { level };
     if !spread {
@@ -14607,6 +14621,9 @@ fn at_level_dyad(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
+    if level == RANK_INF {
+        return u.dyad(x, y, ctx, span);
+    }
     // A negative level counts down from each argument's own top, so the
     // two sides can stop at different depths.
     let depth = |a: &Array| if level < 0 { (boxing_level(a) + level).max(0) } else { level };
@@ -16513,11 +16530,11 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
         return Ok(empty_frame(&[0], list.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
     }
     let mut cells = Vec::with_capacity(starts.len());
-    for start in starts {
+    for (piece, start) in starts.into_iter().enumerate() {
         let start = start as usize;
         let keep: Vec<usize> =
             (0..n as usize).filter(|&i| i < start || i >= start + width).collect();
-        cells.push(u.monad(&select_items(&list, &keep), ctx, span)?);
+        cells.push(cycled(u, piece).monad(&select_items(&list, &keep), ctx, span)?);
     }
     assemble(&[cells.len()], cells, span)
 }

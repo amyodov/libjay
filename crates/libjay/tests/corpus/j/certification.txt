@@ -1,0 +1,107 @@
+// What the 0.5.0 certification sweep against jconsole found and fixed.
+//
+// Three families, each measured against the oracle before it was
+// implemented: the two infinite levels of `L:` and `S:`, a gerund given one
+// verb per piece by the conjunctions that had been reading it as data, and
+// the binomial below its diagonal for a left argument too large for the
+// falling-factorial form.
+
+// --- the infinite levels of L: and S: --------------------------------------
+// `_` is the whole argument, however deeply it is boxed: there is nothing
+// to descend into and nothing to collect, so both spellings and both
+// valences are the operand applied to what they were given. `__` is the
+// other end — the leaves, which is level 0 written the other way round.
+<. L:_ (i. 3 4)
+<. L:__ (i. 3 4)
+< L:_ (1;2;(<3 4))
+< L:0 (1;2;(<3 4))
+< L:__ (1;2;(<3 4))
+# L:_ (1;2;(<3 4))
+# L:0 (1;2;(<3 4))
+# L:1 (1;2;(<3 4))
+# L:_1 (1;2;(<3 4))
+# S:_ (1;2;(<3 4))
+# S:0 (1;2;(<3 4))
+# S:__ (1;2;(<3 4))
+,. S:_ 'hello'
+<. S:_ (i. 3 4)
+<. L:_ (1;2;(<3 4))
+1 + L:_ (1;2)
+1 + L:0 (1;2)
+1 + S:_ (1;2)
+1 + S:__ (1;2)
++ L:_ (0 $ <0)
++ S:_ (0 $ <0)
+< L:_ (<<1 2)
+> L:_ (<<1 2)
+L. L:_ (1;2;(<3 4))
+$ L:_ (2 2 $ 1;2;3;4)
+
+// --- a gerund given one verb per piece -------------------------------------
+// The rank conjunction reads a boxed left operand as the constant verb
+// `m"n` — one box is data whatever it holds — but TWO atomic
+// representations or more are a gerund, and it gives one verb to each cell
+// the rank names. A rank infinite in all three places leaves the constant
+// verb standing; every other rank cycles. The dyad has no meaning.
+(+:`*:)"0 ] 1 2 3
+(+:`*:)"0 ] 1 2
+(+:`*:)"1 ] 2 3 $ i. 6
+(+:`*:)"2 ] 2 3 $ i. 6
+(+:`-:)"0 ] 1 2 3 4
+(+:`*:`-:)"0 ] 1 2 3 4 5
+(+:`*:)"0 i. 2 3
+(+:`*:)"3 ] 1 2 3
+(+:`*:)"_1 ] 1 2 3
+(+:`*:)"__ ] 1 2 3
+(+:`*:)"0 _ ] 1 2 3
+(+:`*:)"_ 0 ] 1 2 3
+(+:`*:)"_ ] 1 2 3
+(+:`*:)"_ _ ] 1 2 3
+(+:`*:)"_ _ _ ] 1 2 3
+(+:`*:)"_ ] 5
+(+:`*:)"0 ] 5
+(<'+:')"0 ] 1 2 3
+(<'abc')"0 ] 1 2 3
+(<0)"0 ] 1 2 3
+(1;2)"0 ] 1 2 3
+g =: +:`*:\ng"0 ] 1 2 3
+1 (+:`*:)"0 ] 1 2 3
+// The same cycling in the cut and in the dyadic windows, where the pieces
+// are what the verbs are handed out to.
+(+:`*:) ;. 1 ] 1 2 3
+(+:`*:) ;. 2 ] 1 2 3
+(+:`*:) ;. _1 ] 1 2 3
+1 (+:`*:) ;. 1 ] 1 2 3
+2 (+:`*:) \\ 1 2 3 4
+2 (+:`*:) \\. 1 2 3 4
+_2 (+:`*:) \\ 1 2 3 4
+(+:`*:) \\ 1 2 3
+(+:`*:) \\. 1 2 3
+(1 1 2) (+:`*:) /. 1 2 3
+(+:`*:) /. i. 2 3
+
+// --- the binomial below its diagonal ---------------------------------------
+// `x ! y` is zero wherever a whole y sits under a whole x: the falling
+// factorial meets a zero factor there. Past the width at which that product
+// is taken, the gamma quotient stands in and reads a pole over a pole as no
+// value at all, which is what these lines hold it to. The other two shapes
+// that quotient cannot reach are named rather than answered and are not
+// here: a NEGATIVE whole y under such an x (`100000000 ! _2` is 100000001
+// there) and a fractional y under one (`1e10 ! 2.5` is _1.05786e_35), both
+// of which need the logarithms of the gamma function rather than its
+// values.
+100000000 ! 2
+1e10 ! 2
+2147483648 ! 2
+5000 ! 2
+4097 ! 4096
+100000000 ! 0
+3 ! 2
+5 ! 2
+6 ! 5
+5 ! 5
+3 ! _2
+_2 ! 3
+1 ! 0.5
+2.5 ! 1.5
+3 ! 2.5
