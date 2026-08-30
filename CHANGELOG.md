@@ -7,6 +7,35 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The J foreigns that only compute. `3!:1` writes an array as the bytes
+  that stand for it and `3!:2` reads them back — booleans, literals,
+  integers, floats, complex numbers and boxes nested to any depth — with
+  `3!:3` giving the same bytes as hexadecimal, a word to a row. `x 3!:4 y`
+  and `x 3!:5 y` write whole numbers and floating-point numbers as bytes at
+  the widths J gives (`1` two bytes, `2` four, `3` eight, `4` four
+  unsigned) and the negative of each reads them back.
+- J's `4!:` name table: `4!:0` says what class each boxed name has — 0 a
+  noun, 1 an adverb, 2 a conjunction, 3 a verb, `_1` a name with no meaning
+  yet, `_2` text that is no name — `4!:1` lists the names of the classes
+  asked for, sorted, and `4!:55` erases them. A name has one class at a
+  time: `n =: 5` then `n =: +/` leaves `n` a verb.
+- J's `5!:` representations. `5!:2` draws what a name stands for as the
+  words it is spelled with, one box a part; `5!:5` writes it back as J
+  source with a bracket only where one is needed (`+/ % #`); and `5!:6`
+  brackets every part that is more than one word (`(+/) % #`). `5!:0` is
+  the adverb that reads an atomic representation back: `(5!:1 <'f') 5!:0`
+  is `f` again. A name with no meaning yet is its own representation, as
+  the reference answers.
+- J's `8!:` formats — `8!:0` a box an atom, `8!:1` a box a column, `8!:2` a
+  character array — which spell a number for the world outside J: `-1.5`
+  where J writes `_1.5`, columns padded to one width, and a literal
+  `width.decimals` on the left setting the field, with `*` where the width
+  is too narrow.
+- J's `9!:10` and `9!:11` (print precision) and `9!:18` and `9!:19`
+  (comparison tolerance), read and written. A setting takes effect on every
+  sentence after it in the same program: `9!:11 ] 3` then `% 3` shows
+  `0.333`, and `9!:19 ] 0` makes every comparison exact.
+- J's `128!:3`, the CRC-32 of a byte string.
 - J's locales — named namespaces for the program's globals. `V_alpha_ =. 5`
   puts `V` in locale `alpha` and `V_alpha_` reads it back; `f_alpha_ =. 3 :
   'y + 100'` defines a verb there, and its body reads the names of ITS OWN
@@ -152,6 +181,10 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   wherever a whole y sits under a whole x, and past the width at which the
   falling factorial is taken the gamma quotient read a pole over a pole as
   no value at all: `100000000 ! 2` raised a NaN error and is 0.
+- `5!:1 <'zz'` for a name with no meaning yet. It answers `<'zz'` — the
+  name stands for itself — where it used to stop with a value error; text
+  that is no name at all, such as `5!:1 <'i.'`, is now refused as an
+  ill-formed name, which is what J calls it.
 - `;` (raze) over boxes whose contents have unequal rank. An opened value
   whose items have fewer axes than the others is ONE item of the common
   shape, not several of a smaller one, so `; ('ab';(2 2$'wxyz'))` is three

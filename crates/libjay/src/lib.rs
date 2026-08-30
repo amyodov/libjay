@@ -13,6 +13,7 @@ pub mod exact;
 mod explain;
 pub mod extensions;
 pub mod fmt;
+pub mod foreign;
 pub mod frontend;
 pub mod fuse;
 pub mod gerund;

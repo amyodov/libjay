@@ -118,7 +118,10 @@ fn the_foreign_answers_with_a_representation() {
     // A value stands for itself, so its representation is the noun pair.
     assert_eq!(j("f =. 1 2 3\n> 0 { > 5!:1 <'f'"), chars("0"));
     assert_eq!(j("f =. 1 2 3\n> 1 { > 5!:1 <'f'"), i64s(&[3], &[1, 2, 3]));
-    assert_eq!(err(Lang::J, "5!:1 <'zz'").kind, ErrorKind::Value);
+    // A name with no meaning yet represents ITSELF, as the reference
+    // answers; text that is no name at all represents nothing.
+    assert_eq!(j("> 5!:1 <'zz'"), chars("zz"));
+    assert_eq!(err(Lang::J, "5!:1 <'i.'").kind, ErrorKind::Domain);
     assert_eq!(err(Lang::J, "5!:1 'f'").kind, ErrorKind::Domain);
 }
 

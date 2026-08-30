@@ -3170,6 +3170,56 @@ fn dyad(x: Frag, v: Frag, y: Frag) -> Result<Frag> {
     Ok(Frag::Noun(Expr::Dyad { verb, x: Box::new(x), y: Box::new(y), span }))
 }
 
+/// The atomic representation `5!:0` is given, settled while the sentence is
+/// read. It is either a literal, or the `5!:1` that made one — the name's
+/// own part of speech is in the table already, so the two together read as
+/// one phrase rather than as a value the run would have to hand back.
+///
+/// `None` where nothing settles it now; `Some(Err)` where what settles it
+/// is not a representation.
+fn representation_now(u: &Frag, scope: &Names) -> Option<Result<crate::gerund::Ar>> {
+    let span = u.span();
+    if let Some(name) = atomic_rep_of(u) {
+        return Some(named_ar(&name, scope, span));
+    }
+    let m = noun_in_scope(u, scope)?;
+    let inner = match m.as_boxes() {
+        Some([one]) if m.rank() == 0 => one.clone(),
+        _ => m,
+    };
+    Some(
+        crate::gerund::Ar::from_array(&inner)
+            .ok_or_else(|| Error::domain("5!:0 takes an atomic representation", span)),
+    )
+}
+
+/// The name a `5!:1` in this fragment asks about.
+fn atomic_rep_of(u: &Frag) -> Option<String> {
+    let Frag::Noun(Expr::Monad { verb, y, .. }) = u else { return None };
+    let Verb::Prim(p) = verb else { return None };
+    if p.monad != MonadOp::AtomicRep {
+        return None;
+    }
+    let a = noun_value(&Frag::Noun((**y).clone()))?;
+    match a.as_boxes() {
+        Some([one]) if a.rank() == 0 => crate::gerund::text_of(one),
+        _ => None,
+    }
+}
+
+/// What a name stands for, as an atomic representation, by the part of
+/// speech the table gives it. A name with no meaning stands for itself.
+fn named_ar(name: &str, scope: &Names, span: Span) -> Result<crate::gerund::Ar> {
+    if let Some(v) = scope.verb_named(name) {
+        return crate::gerund::verb_ar(v)
+            .ok_or_else(|| Error::not_yet(format!("the atomic representation of {name}"), span));
+    }
+    match scope.const_named(name) {
+        Some(a) => Ok(crate::gerund::Ar::Noun(a)),
+        None => Ok(crate::gerund::Ar::Prim(name.to_string())),
+    }
+}
+
 fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
     let Frag::Adverb(m, aspan) = a else {
         return Err(Error::internal("expected an adverb fragment"));
@@ -3179,6 +3229,15 @@ fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
         Modifier::Prim(g) => g,
         Modifier::Explicit(src) => return derive_explicit(&src, u, None, scope, span),
     };
+    // `5!:0` is the inverse of `5!:1`: it takes an atomic representation
+    // and gives back the entity it represents. The representation has to be
+    // known now, since what it names decides how the sentence parses.
+    if glyph == "5!:0" {
+        let Some(ar) = representation_now(&u, scope) else {
+            return Err(Error::not_yet("5!:0 over a representation computed at run time", span));
+        };
+        return ar_frag(&ar?, scope, span);
+    }
     // `}` takes either operand: `m}` amends at the indices m, and `u}`
     // computes them from the arguments instead.
     if glyph == "}" {
@@ -3749,13 +3808,57 @@ fn foreign(u: &Frag, v: &Frag, span: Span) -> Result<Frag> {
     let closed = |what: &str| {
         Err(Error::sandbox(format!("{family}!:{member} {what}, which is outside the program"), span))
     };
+    use crate::foreign::FormatKind;
     match (family, member) {
         (1, 1) => prim("1!:1", MonadOp::ReadStream, DyadOp::None),
         (1, 2) => prim("1!:2", MonadOp::None, DyadOp::WriteStream),
         (3, 0) => prim("3!:0", MonadOp::TypeCode, DyadOp::None),
+        // The binary form: an array as the bytes that stand for it, the
+        // value those bytes stand for, and the same bytes in hexadecimal.
+        (3, 1) => prim("3!:1", MonadOp::BinaryRep, DyadOp::None),
+        (3, 2) => prim("3!:2", MonadOp::FromBinaryRep, DyadOp::None),
+        (3, 3) => prim("3!:3", MonadOp::HexRep, DyadOp::None),
+        // The two byte conversions, which read and write the machine
+        // spellings of a number rather than J's own.
+        (3, 4) => prim("3!:4", MonadOp::None, DyadOp::IntBytes),
+        (3, 5) => prim("3!:5", MonadOp::None, DyadOp::FloatBytes),
+        // The name table: what class a name has, which names have one, and
+        // erasing them.
+        (4, 0) => prim("4!:0", MonadOp::NameClasses, DyadOp::None),
+        (4, 1) => prim("4!:1", MonadOp::NamesOfClass, DyadOp::None),
+        (4, 55) => prim("4!:55", MonadOp::EraseNames, DyadOp::None),
         // `5!:1 <'name'` is the atomic representation of what the name
-        // stands for — the same boxed data a gerund is made of.
+        // stands for — the same boxed data a gerund is made of, and `5!:0`
+        // is the adverb that reads one back.
+        (5, 0) => Ok(Frag::Adverb(Modifier::Prim("5!:0"), span)),
         (5, 1) => prim("5!:1", MonadOp::AtomicRep, DyadOp::None),
+        (5, 2) => prim("5!:2", MonadOp::BoxedRep, DyadOp::None),
+        (5, 5) => prim("5!:5", MonadOp::LinearRep, DyadOp::None),
+        (5, 6) => prim("5!:6", MonadOp::ParenRep, DyadOp::None),
+        // The three formats, which spell a number for the world outside J:
+        // a leading `-` rather than `_`, and columns of one width.
+        (8, 0) => prim(
+            "8!:0",
+            MonadOp::FormatForeign(FormatKind::PerAtom),
+            DyadOp::FormatForeign(FormatKind::PerAtom),
+        ),
+        (8, 1) => prim(
+            "8!:1",
+            MonadOp::FormatForeign(FormatKind::PerColumn),
+            DyadOp::FormatForeign(FormatKind::PerColumn),
+        ),
+        (8, 2) => prim(
+            "8!:2",
+            MonadOp::FormatForeign(FormatKind::Chars),
+            DyadOp::FormatForeign(FormatKind::Chars),
+        ),
+        // The two global parameters libjay HONOURS: what a display shows of
+        // a float, and how near two numbers have to be to compare equal.
+        (9, 10) => prim("9!:10", MonadOp::PrintPrecision, DyadOp::None),
+        (9, 11) => prim("9!:11", MonadOp::SetPrintPrecision, DyadOp::None),
+        (9, 18) => prim("9!:18", MonadOp::Tolerance, DyadOp::None),
+        (9, 19) => prim("9!:19", MonadOp::SetTolerance, DyadOp::None),
+        (128, 3) => prim("128!:3", MonadOp::Crc32, DyadOp::None),
         // The locale family. Every member of it reads or writes the
         // namespace table and nothing outside the program.
         (18, 0) => prim("18!:0", MonadOp::LocaleKind, DyadOp::None),
@@ -3786,6 +3889,34 @@ fn foreign(u: &Frag, v: &Frag, span: Span) -> Result<Frag> {
         (2, _) => closed("reaches the host — its environment, its shell, its processes"),
         (6, _) => closed("reads the clock"),
         (15, _) => closed("calls into a shared library"),
+        // The interpreter's own machinery. Space is what the reference's
+        // allocator holds, and the debug family drives its session; neither
+        // is a meaning a second implementation could answer.
+        (7, _) => Err(Error::language(
+            format!(
+                "{family}!:{member} measures the reference interpreter's own memory, \
+                 which libjay does not have"
+            ),
+            span,
+        )),
+        (13, _) => Err(Error::language(
+            format!(
+                "{family}!:{member} drives the reference interpreter's debugger, \
+                 which libjay does not have"
+            ),
+            span,
+        )),
+        // The random seed is a global parameter libjay has and has not
+        // wired up; everything else in the family is the interpreter's own.
+        (9, 0 | 1) => Err(Error::not_yet(format!("the foreign {family}!:{member}"), span)),
+        (9, _) => Err(Error::language(
+            format!(
+                "{family}!:{member} is a setting of the reference interpreter's own \
+                 machinery; libjay honours 9!:10 and 9!:11 (print precision) and \
+                 9!:18 and 9!:19 (comparison tolerance)"
+            ),
+            span,
+        )),
         _ => Err(Error::not_yet(format!("the foreign {family}!:{member}"), span)),
     }
 }

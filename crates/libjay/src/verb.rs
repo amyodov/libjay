@@ -470,6 +470,10 @@ pub struct Env {
     /// APL's `∇` name the last of them.
     running: Vec<std::sync::Arc<crate::ir::ExplicitDef>>,
     verbs: HashMap<String, Verb>,
+    /// The names given an adverb or a conjunction, and which of the two.
+    /// A modifier is applied while a sentence is parsed, so the run keeps
+    /// only the CLASS — which is all `4!:0` and `4!:1` ask for.
+    mods: HashMap<String, bool>,
     args: Vec<Array>,
     /// The definition depth a `throw.` now travelling was raised at, which
     /// is what a `catcht.` reads to tell a throw from something it CALLED —
@@ -522,6 +526,27 @@ pub fn split_locative(name: &str) -> Option<(&str, &str)> {
     Some((head, if locale.is_empty() { BASE_LOCALE } else { locale }))
 }
 
+/// Whether text is a name a J program could have written: a letter, then
+/// letters, digits and underscores, and possibly a locative's tail. What is
+/// not one is what `4!:0` answers `_2` for.
+pub fn is_name(text: &str) -> bool {
+    let body = match split_locative(text) {
+        Some((head, _)) => head,
+        None => text,
+    };
+    body.starts_with(|c: char| c.is_ascii_alphabetic())
+        && body.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// A name without the locale it is stored under, which is the spelling
+/// `4!:1` lists it by.
+pub fn bare_name(name: &str) -> &str {
+    match split_locative(name) {
+        Some((head, _)) => head,
+        None => name,
+    }
+}
+
 /// Split `name__var` into the name and the NAME OF THE VARIABLE that holds
 /// the locale it belongs to.
 ///
@@ -556,6 +581,7 @@ impl Env {
             frames: Vec::new(),
             running: Vec::new(),
             verbs: HashMap::new(),
+            mods: HashMap::new(),
             args,
             thrown: None,
         }
@@ -788,6 +814,81 @@ impl Env {
 
     pub fn define(&mut self, name: String, verb: Verb) {
         self.verbs.insert(name, verb);
+    }
+
+    /// Record that a name stands for an adverb or a conjunction. A modifier
+    /// is resolved while a sentence is PARSED, so nothing at run time needs
+    /// the modifier itself; what the run does need is that `4!:0` and
+    /// `4!:1` can say a name has that class.
+    pub fn define_mod(&mut self, name: String, conjunction: bool) {
+        self.mods.insert(name, conjunction);
+    }
+
+    /// The class `4!:0` gives a name: 0 a noun, 1 an adverb, 2 a
+    /// conjunction, 3 a verb, `_1` a name with no meaning yet, and `_2`
+    /// text that is no name at all.
+    pub fn name_class(&self, name: &str) -> i64 {
+        if !is_name(name) {
+            return -2;
+        }
+        if self.get(name).is_some() {
+            return 0;
+        }
+        match self.mods.get(name) {
+            Some(true) => return 2,
+            Some(false) => return 1,
+            None => {}
+        }
+        if self.verbs.contains_key(name) {
+            return 3;
+        }
+        -1
+    }
+
+    /// The names of the given classes that have a meaning now, sorted. Only
+    /// the current locale's own names are listed, which is where a program
+    /// puts them.
+    pub fn names_of_class(&self, classes: &[i64]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        if classes.contains(&0)
+            && let Some(l) = self.locales.get(&self.current)
+        {
+            out.extend(l.values.keys().filter(|n| is_name(n)).cloned());
+        }
+        for (n, conj) in &self.mods {
+            let class = if *conj { 2 } else { 1 };
+            if classes.contains(&class) && self.locale_of(n) == self.current {
+                out.push(bare_name(n).to_string());
+            }
+        }
+        if classes.contains(&3) {
+            for n in self.verbs.keys() {
+                if self.locale_of(n) == self.current {
+                    out.push(bare_name(n).to_string());
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// The locale a name belongs to, by the spelling it is stored under.
+    fn locale_of(&self, name: &str) -> String {
+        match split_locative(name) {
+            Some((_, locale)) => locale.to_string(),
+            None => self.current.clone(),
+        }
+    }
+
+    /// Erase a name whatever class it has, as `4!:55` does.
+    pub fn erase_name(&mut self, name: &str) {
+        self.unset_global(name);
+        self.verbs.remove(name);
+        self.mods.remove(name);
+        if let Some(frame) = self.frames.last_mut() {
+            frame.remove(name);
+        }
     }
 
     /// A global by name, reached past any frame. An operator's array
@@ -1190,6 +1291,43 @@ pub enum MonadOp {
     LocaleErase,
     /// J `3!:0 y`: the code J gives the argument's element type.
     TypeCode,
+    /// J `4!:0 y`: the name class of each boxed name — 0 a noun, 1 an
+    /// adverb, 2 a conjunction, 3 a verb, `_1` a name with no meaning and
+    /// `_2` text that is no name.
+    NameClasses,
+    /// J `4!:1 y`: the names of the given classes that have a meaning now,
+    /// sorted, each boxed.
+    NamesOfClass,
+    /// J `4!:55 y`: erase each boxed name, whatever class it has. The
+    /// answer is 1 for each, a name that stood for nothing included.
+    EraseNames,
+    /// J `5!:2 y`: the boxed representation of what a boxed name stands
+    /// for — the parts of the spelling, one box each, nested as they bind.
+    BoxedRep,
+    /// J `5!:5 y`: the linear representation — the J source that spells the
+    /// entity, with a bracket only where one is needed.
+    LinearRep,
+    /// J `5!:6 y`: the parenthesised representation — the same source with
+    /// a bracket around every part that is more than one word.
+    ParenRep,
+    /// J `9!:10 ''`: the print precision now in force.
+    PrintPrecision,
+    /// J `9!:11 y`: set the print precision for the rest of the run.
+    SetPrintPrecision,
+    /// J `9!:18 ''`: the comparison tolerance now in force.
+    Tolerance,
+    /// J `9!:19 y`: set the comparison tolerance for the rest of the run.
+    SetTolerance,
+    /// J `128!:3 y`: the CRC-32 of a byte string.
+    Crc32,
+    /// J `3!:1 y`: the argument as the bytes that stand for it.
+    BinaryRep,
+    /// J `3!:2 y`: the value those bytes stand for.
+    FromBinaryRep,
+    /// J `3!:3 y`: the same bytes as hexadecimal, a word to a row.
+    HexRep,
+    /// J `8!:0`, `8!:1` and `8!:2` applied without a specification.
+    FormatForeign(crate::foreign::FormatKind),
     /// The argument itself (APL `⊢`).
     Same,
     /// J `":` / APL `⍕`: the argument as the characters that display it.
@@ -1517,6 +1655,14 @@ pub enum DyadOp {
     /// newline, to the stream y; the value is x. Stream 2 is stdout, which
     /// the sandbox opens, and everything else is a file, which it does not.
     WriteStream,
+    /// J `x 3!:4 y`: whole numbers to their bytes and back. A positive x
+    /// writes the bytes, the matching negative one reads them.
+    IntBytes,
+    /// J `x 3!:5 y`: floating-point numbers to their bytes and back.
+    FloatBytes,
+    /// J `x 8!:0`, `x 8!:1` and `x 8!:2`: the same three formats their
+    /// monads give, under the literal `width.decimals` specification x.
+    FormatForeign(crate::foreign::FormatKind),
     /// J `x $.`: the numbered sparse forms. `_1` gives the shape, the
     /// sparse axes and the sparse element boxed; 0 converts between the two
     /// storage kinds; 1 makes a new sparse array from a shape; 2 to 5 and 7
@@ -2268,6 +2414,19 @@ impl Verb {
                         | MonadOp::LocaleCreate
                         | MonadOp::LocaleCurrent
                         | MonadOp::LocaleErase
+                        // The name table and the two global parameters are
+                        // read and written in the order the sentences run.
+                        | MonadOp::AtomicRep
+                        | MonadOp::NameClasses
+                        | MonadOp::NamesOfClass
+                        | MonadOp::EraseNames
+                        | MonadOp::BoxedRep
+                        | MonadOp::LinearRep
+                        | MonadOp::ParenRep
+                        | MonadOp::PrintPrecision
+                        | MonadOp::SetPrintPrecision
+                        | MonadOp::Tolerance
+                        | MonadOp::SetTolerance
                 ) && !matches!(
                     p.dyad,
                     DyadOp::Deal { .. } | DyadOp::WriteStream | DyadOp::LocalePathSet
@@ -7310,14 +7469,14 @@ fn atomic_rep(y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<Array> {
         })?;
         return Ok(Array::boxed(ar.to_array()));
     }
-    match ctx.env.get(&name) {
-        Some(a) => Ok(Array::boxed(crate::gerund::Ar::Noun(a).to_array())),
-        None => Err(Error::new(
-            ErrorKind::Value,
-            format!("undefined name: {name}"),
-            Some(span),
-        )),
-    }
+    // A name that stands for nothing yet represents ITSELF, which is what
+    // lets a representation carry a name the program has not written yet.
+    // Text that is no name at all represents nothing.
+    let ar = match ctx.env.get(&name) {
+        Some(a) => crate::gerund::Ar::Noun(a),
+        None => crate::gerund::Ar::Prim(ill_formed(name, span)?),
+    };
+    Ok(Array::boxed(ar.to_array()))
 }
 
 /// `{ y`: the catalogue — every way of taking one element from each item
@@ -9292,6 +9451,79 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             Ok(Array::new(y.shape.clone(), Data::I64(ones.into())))
         }
         MonadOp::TypeCode => Ok(Array::scalar_i64(type_code(y))),
+        MonadOp::NameClasses => {
+            let names = boxed_name_arg(y, "4!:0", span)?;
+            let classes: Vec<i64> = names.iter().map(|n| ctx.env.name_class(n)).collect();
+            Ok(Array::new(y.shape.clone(), Data::I64(classes.into())))
+        }
+        MonadOp::NamesOfClass => {
+            let classes = y.to_i64_vec().ok_or_else(|| {
+                Error::domain("4!:1 takes the name classes to list, as numbers", span)
+            })?;
+            if let Some(bad) = classes.iter().find(|c| !(0..=3).contains(*c)) {
+                return Err(Error::domain(format!("4!:1 knows no name class {bad}"), span));
+            }
+            Ok(boxed_names(ctx.env.names_of_class(&classes)))
+        }
+        MonadOp::EraseNames => {
+            let names = boxed_name_arg(y, "4!:55", span)?;
+            for n in &names {
+                ctx.env.erase_name(n);
+            }
+            let ones = vec![1i64; names.len()];
+            Ok(Array::new(y.shape.clone(), Data::I64(ones.into())))
+        }
+        MonadOp::BoxedRep | MonadOp::LinearRep | MonadOp::ParenRep => {
+            representation(p.monad, y, ctx, span)
+        }
+        MonadOp::PrintPrecision => {
+            empty_argument(y, "9!:10", span)?;
+            Ok(Array::scalar_i64(i64::from(ctx.cfg.fmt.precision)))
+        }
+        MonadOp::SetPrintPrecision => {
+            let n = whole_setting(y, "9!:11", span)?;
+            let (lo, hi) = (i64::from(crate::fmt::MIN_PRECISION), i64::from(crate::fmt::MAX_PRECISION));
+            if !(lo..=hi).contains(&n) {
+                return Err(Error::domain(
+                    format!("9!:11 sets a print precision of {lo} to {hi} digits, not {n}"),
+                    span,
+                ));
+            }
+            ctx.cfg.fmt.precision = n as u8;
+            Ok(crate::ir::empty_result())
+        }
+        MonadOp::Tolerance => {
+            empty_argument(y, "9!:18", span)?;
+            Ok(Array::scalar_f64(ctx.cfg.tol.ct))
+        }
+        MonadOp::SetTolerance => {
+            let vals = y
+                .to_f64_vec()
+                .ok_or_else(|| Error::domain("9!:19 takes one number", span))?;
+            let [t] = vals[..] else {
+                return Err(Error::new(
+                    ErrorKind::Rank,
+                    "9!:19 takes one number".to_string(),
+                    Some(span),
+                ));
+            };
+            if !(0.0..TOLERANCE_BOUND).contains(&t) {
+                return Err(Error::domain(
+                    format!(
+                        "9!:19 sets a comparison tolerance from 0 up to but not \
+                         including {TOLERANCE_BOUND}, and {t} is outside that"
+                    ),
+                    span,
+                ));
+            }
+            ctx.cfg.tol.ct = t;
+            Ok(crate::ir::empty_result())
+        }
+        MonadOp::Crc32 => crate::foreign::crc32(y, span),
+        MonadOp::BinaryRep => crate::foreign::binary_rep(y, span),
+        MonadOp::FromBinaryRep => crate::foreign::from_binary_rep(y, span),
+        MonadOp::HexRep => crate::foreign::hex_rep(y, span),
+        MonadOp::FormatForeign(kind) => crate::foreign::format_foreign(y, kind, None, span),
         MonadOp::Sparse => crate::sparse::sparsify(y, span),
         MonadOp::Dense => Ok(y.densified()),
         MonadOp::PrimeCount => {
@@ -9923,6 +10155,21 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::WriteStream => Err(Error::internal("1!:2 reached the pure dyad dispatcher")),
         DyadOp::LocalePathSet => {
             Err(Error::internal("18!:2 reached the pure dyad dispatcher"))
+        }
+        DyadOp::IntBytes => {
+            crate::foreign::int_bytes(byte_conversion_kind(x, "3!:4", span)?, y, span)
+        }
+        DyadOp::FloatBytes => {
+            crate::foreign::float_bytes(byte_conversion_kind(x, "3!:5", span)?, y, span)
+        }
+        DyadOp::FormatForeign(kind) => {
+            let Some(spec) = crate::gerund::text_of(x) else {
+                return Err(Error::domain(
+                    "an 8!: format specification is text: write it as width.decimals",
+                    span,
+                ));
+            };
+            crate::foreign::format_foreign(y, kind, Some(&spec), span)
         }
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
@@ -18901,6 +19148,141 @@ fn one_locale_name(y: &Array, what: &str, span: Span) -> Result<String> {
 }
 
 /// The locale names a boxed argument holds, one per box.
+/// The comparison tolerance `9!:19` stops short of, 2^-34. Two numbers that
+/// far apart in relative terms are already as good as equal; the reference
+/// refuses the bound itself and everything above it.
+pub const TOLERANCE_BOUND: f64 = 5.820_766_091_346_741e-11;
+
+/// A name a representation may stand for, or the reference's own complaint
+/// about text that is no name.
+fn ill_formed(name: String, span: Span) -> Result<String> {
+    if is_name(&name) {
+        return Ok(name);
+    }
+    Err(Error::domain(format!("ill-formed name: {name}"), span))
+}
+
+/// The one whole number that says which way and how wide a `3!:` byte
+/// conversion goes.
+fn byte_conversion_kind(x: &Array, what: &str, span: Span) -> Result<i64> {
+    match x.to_i64_vec().as_deref() {
+        Some([n]) => Ok(*n),
+        _ => Err(Error::domain(
+            format!("{what} takes one whole number on the left, saying which conversion"),
+            span,
+        )),
+    }
+}
+
+/// The boxed names a `4!:` foreign takes, in order.
+fn boxed_name_arg(y: &Array, what: &str, span: Span) -> Result<Vec<String>> {
+    let Data::Box(cells) = y.row_major_data() else {
+        return Err(Error::domain(format!("{what} takes boxed names"), span));
+    };
+    cells
+        .as_slice()
+        .iter()
+        .map(|c| {
+            crate::gerund::text_of(c)
+                .ok_or_else(|| Error::domain(format!("{what} takes boxed names"), span))
+        })
+        .collect()
+}
+
+/// The empty argument a `9!:` reader is written with.
+fn empty_argument(y: &Array, what: &str, span: Span) -> Result<()> {
+    if y.count() == 0 {
+        return Ok(());
+    }
+    Err(Error::new(
+        ErrorKind::Rank,
+        format!("{what} reads a setting, and is written with an empty argument"),
+        Some(span),
+    ))
+}
+
+/// The one whole number a `9!:` setter takes.
+fn whole_setting(y: &Array, what: &str, span: Span) -> Result<i64> {
+    match y.to_i64_vec().as_deref() {
+        Some([n]) => Ok(*n),
+        Some(_) | None if y.count() != 1 => Err(Error::new(
+            ErrorKind::Rank,
+            format!("{what} takes one number"),
+            Some(span),
+        )),
+        _ => Err(Error::domain(format!("{what} takes a whole number"), span)),
+    }
+}
+
+/// `5!:2`, `5!:5` and `5!:6`: what a boxed name stands for, written back
+/// out. The three differ only in how the same tree is drawn.
+#[inline(never)]
+fn representation(op: MonadOp, y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<Array> {
+    let what = match op {
+        MonadOp::BoxedRep => "5!:2",
+        MonadOp::LinearRep => "5!:5",
+        _ => "5!:6",
+    };
+    let name = match y.as_boxes() {
+        Some([b]) if y.rank() == 0 => crate::gerund::text_of(b),
+        _ => None,
+    };
+    let Some(name) = name else {
+        return Err(Error::domain(format!("{what} takes a boxed name"), span));
+    };
+    let text = |s: String| Ok(Array::from_chars(s.chars().collect()));
+    if let Some(v) = ctx.env.verb(&name) {
+        // An explicit definition is written back as the source it was
+        // given, which is the spelling a session shows for it.
+        if let Verb::Explicit(def) = v
+            && let Some(spelling) = &def.spelling
+        {
+            return match op {
+                MonadOp::BoxedRep => Err(Error::not_yet(
+                    "the boxed representation of an explicit definition",
+                    span,
+                )),
+                _ => text(spelling.clone()),
+            };
+        }
+        let ar = crate::gerund::verb_ar(v).ok_or_else(|| {
+            Error::not_yet(format!("the representation of {}", v.name()), span)
+        })?;
+        return match op {
+            MonadOp::BoxedRep => Ok(crate::gerund::boxed_rep(&ar)),
+            MonadOp::LinearRep => match crate::gerund::linear(&ar) {
+                Some(s) => text(s),
+                None => Err(Error::not_yet(
+                    format!("the linear representation of {}", v.name()),
+                    span,
+                )),
+            },
+            _ => match crate::gerund::parenthesised(&ar) {
+                Some(s) => text(s),
+                None => Err(Error::not_yet(
+                    format!("the parenthesised representation of {}", v.name()),
+                    span,
+                )),
+            },
+        };
+    }
+    // A name that stands for nothing yet represents ITSELF.
+    let ar = match ctx.env.get(&name) {
+        Some(a) => crate::gerund::Ar::Noun(a),
+        None => crate::gerund::Ar::Prim(ill_formed(name, span)?),
+    };
+    match op {
+        MonadOp::BoxedRep => Ok(crate::gerund::boxed_rep(&ar)),
+        _ => match crate::gerund::linear(&ar) {
+            Some(s) => text(s),
+            None => Err(Error::not_yet(
+                format!("the {what} representation of a value of this shape"),
+                span,
+            )),
+        },
+    }
+}
+
 fn locale_names_arg(y: &Array, what: &str, span: Span) -> Result<Vec<String>> {
     let Data::Box(cells) = &y.data else {
         return Err(Error::domain(

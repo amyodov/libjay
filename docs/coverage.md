@@ -1834,6 +1834,81 @@ ones, sorted), `18!:2`, `18!:3`, `18!:5` and `18!:55`. `18!:4` is not a
 verb there at all, and `18!:6` answers a dump of the interpreter's own name
 tables; both are refused by name here rather than guessed at.
 
+## The foreigns that compute
+
+`m !: n` is chosen by two numbers that have to be known while the sentence
+is read, so neither may be computed. What each family answers:
+
+**`3!:` — types, bytes and the binary form.** `3!:0` is the type code
+(boolean 1, character 2, integer 4, float 8, complex 16, box 32, extended
+64, rational 128). `3!:1` writes an array as the bytes that stand for it and
+`3!:2` reads them back; `3!:3` is the same bytes in hexadecimal, a word to
+a row. The form is the reference's, measured from it: each block opens with
+the word 227, then the type code, the element count and the rank, then the
+shape, then the elements — byte-wide types padded out to a whole word with
+room for a terminator, wider ones a word or two apiece. A boxed block
+carries one OFFSET word a box, each measured from the start of the block it
+sits in, and then the nested blocks in order, so boxes nest to any depth.
+The exact types are the one hole left: the reference stores an extended
+integer and a rational as digit blocks of its own, and libjay names that
+rather than guessing at it.
+
+`x 3!:4 y` writes whole numbers as bytes and reads them back: `1` two bytes
+each, `2` four, `3` eight, `4` four unsigned, and the negative of each reads
+that width back — `_4` unsigned, everything else two's complement. `x 3!:5
+y` does the same for floating point, `1` a single and `2` a double. Writing
+takes a list, and reading needs a length that divides by the width.
+
+**`4!:` — the name table.** `4!:0` gives each boxed name its class: 0 a
+noun, 1 an adverb, 2 a conjunction, 3 a verb, `_1` a name with no meaning
+yet, `_2` text that is no name at all. `4!:1` lists the names of the classes
+asked for, sorted and boxed, from the locale in force. `4!:55` erases, and
+answers 1 for each name whether or not it stood for anything. A name has ONE
+class at a time: giving a name a verb takes away the value it held, which is
+what `4!:0` then reports. A modifier is applied while a sentence is parsed,
+so what the run keeps of `m =: /` is the class alone — enough for these two
+and for nothing else.
+
+**`5!:` — representations.** `5!:1` is the atomic representation, the same
+boxed data a gerund is made of: a verb gives its spelling or its box tree,
+a value gives the noun pair `('0'; <value)`, and a name that stands for
+nothing yet stands for ITSELF, as the reference answers. Text that is no
+name is an ill-formed name and is refused. `5!:2` draws the same tree as
+the words it is spelled with, one box a part; `5!:5` is the linear
+representation, the J source with a bracket only where one is needed; and
+`5!:6` is the parenthesised one, with a bracket around every part that is
+more than one word and no flattening of a train. An explicit definition
+writes back as the source it was given.
+
+`5!:0` is an ADVERB — the inverse of `5!:1` — and libjay settles it while
+the sentence is read, because what the representation names decides how the
+rest of the sentence parses. It therefore reads a literal representation,
+or the `5!:1` that made one (`(5!:1 <'f') 5!:0`), and names a
+representation the program computes some other way as a gap.
+
+**`8!:` — formats for the world outside J.** `8!:0` boxes each atom, `8!:1`
+boxes each column with its rows in it, and `8!:2` is a plain character
+array. All three spell a number as C does, `-1.5` where J writes `_1.5`, and
+pad each column to one width. Without a specification a number keeps the
+shortest decimal digits that read back as itself, cut to fourteen
+significant digits and nine decimal places; outside `1e_9` to `2e9` it is
+written in exponential form with ten significant digits in the mantissa —
+all measured from the reference. A literal `width.decimals` on the left sets
+the field instead, right-aligned, and a width too narrow for the answer is
+filled with `*`. Characters, boxes and symbols are a named gap; a complex
+number has no format here, and the reference refuses one too.
+
+**`9!:` — the two global parameters libjay honours.** `9!:10` reads the
+print precision and `9!:11` sets it, from 1 to 17 digits; `9!:18` reads the
+comparison tolerance and `9!:19` sets it, from 0 up to but not including
+2⁻³⁴. Both take effect on every sentence AFTER them in the same program, so
+`9!:11 ] 3` then `% 3` shows `0.333` and `9!:19 ] 0` makes every comparison
+exact. Everything else in the family is the interpreter's own machinery.
+
+**`128!:3` — the crc.** The CRC-32 of a byte string, the reflected
+polynomial, answered as a SIGNED 32-bit number. The decompositions the rest
+of the family holds are named gaps.
+
 ## Indexed assignment
 
 APL's `A[i]←v` and `A[i;j]←v` read the named value, copy it, write the
@@ -2034,17 +2109,18 @@ forms — a boxed file name and any stream number but 1 and 2 alike), scripts
 `⎕FIO` and their relatives). Each names what it would have reached: "1!:21
 reaches the filesystem, which is outside the program".
 
-**Neither.** A foreign that only computes is an ordinary queue position and
-says "not supported yet" with its number: `9!:18` (the settings), `3!:1`
-and the rest of the conversions, `4!:` (names), and the rest of `5!:`
-(representation).
-`3!:0` is implemented — it is the type code J reports for an element type
-(boolean 1, character 2, integer 4, float 8, complex 16, box 32, extended
-64, rational 128), which is cheap and useful for a test that wants to name
-a type. `5!:1` is too: `5!:1 <'name'` answers with the ATOMIC
-REPRESENTATION of whatever the name stands for, boxed — the same data a
-gerund is made of, so a verb gives its spelling or its box tree and a value
-gives the noun pair `('0'; <value)`.
+**Machinery.** Three families are the reference interpreter's own workings
+rather than a meaning a second implementation could answer: `7!:` measures
+its allocator, `13!:` drives its debugger, and most of `9!:` sets things
+that belong to the interpreter and not to J — its error message table, its
+box-drawing characters, its build string, its jitter settings. Those are
+refused permanently and by name, in the same words a `⎕`-name libjay will
+never have is refused: not a promise, and not a queue position.
+
+**Neither.** What is left is arithmetic on the argument alone, and it is
+implemented — see "The foreigns that compute" below. A member of one of
+those families that is still missing is an ordinary queue position and
+says "not supported yet" with its number.
 
 Executing a string (`". y`, `⍎ y`) is inside the sandbox rather than a hole
 in it: the nested program reaches exactly what the caller reaches, and `⎕`

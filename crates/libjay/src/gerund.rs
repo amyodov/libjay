@@ -76,6 +76,43 @@ impl Ar {
     }
 }
 
+/// The BOXED REPRESENTATION `5!:2` answers: the same tree the atomic
+/// representation holds, drawn as the words it is spelled with rather than
+/// as the pairs a gerund is made of. A modifier's phrase is its operands
+/// with the modifier's own spelling between them, a train is its tines, and
+/// a noun stands as the value itself.
+pub fn boxed_rep(ar: &Ar) -> Array {
+    match ar {
+        // A whole entity that is one word is still a list of parts, of one.
+        Ar::Prim(_) | Ar::Noun(_) => boxes(vec![part_rep(ar)]),
+        _ => part_rep(ar),
+    }
+}
+
+fn part_rep(ar: &Ar) -> Array {
+    match ar {
+        Ar::Prim(s) => chars(s),
+        Ar::Noun(a) => a.clone(),
+        Ar::Derived(sp, ops) => {
+            let mut items = Vec::with_capacity(ops.len() + 1);
+            match ops.as_slice() {
+                [u] => {
+                    items.push(part_rep(u));
+                    items.push(chars(sp));
+                }
+                [u, v] => {
+                    items.push(part_rep(u));
+                    items.push(chars(sp));
+                    items.push(part_rep(v));
+                }
+                _ => items.push(chars(sp)),
+            }
+            boxes(items)
+        }
+        Ar::Train(ops) => boxes(ops.iter().map(part_rep).collect()),
+    }
+}
+
 /// A character vector or atom as a string; `None` for anything else.
 pub fn text_of(a: &Array) -> Option<String> {
     if a.rank() > 1 {
@@ -232,17 +269,65 @@ pub fn linear(ar: &Ar) -> Option<String> {
     spell(ar).map(|(text, _)| text)
 }
 
+/// The PARENTHESISED REPRESENTATION `5!:6` answers: the same words the
+/// linear representation writes, with a bracket around every part that is
+/// not one word. Nothing is left to the reader's knowledge of how the parts
+/// bind, and a train keeps the tines it was built from rather than the flat
+/// spelling that reparses to the same tree.
+pub fn parenthesised(ar: &Ar) -> Option<String> {
+    paren_spell(ar).map(|(text, _)| text)
+}
+
+fn paren_spell(ar: &Ar) -> Option<(String, bool)> {
+    if let Some(w) = constant_shortcut(ar) {
+        return Some((w, true));
+    }
+    match ar {
+        Ar::Prim(s) => Some((word(s), true)),
+        Ar::Noun(a) => Some((noun_text(a)?, true)),
+        Ar::Derived(sp, ops) => {
+            let text = match ops.as_slice() {
+                [u] => join(&bracketed(u)?, &word(sp)),
+                [u, v] => {
+                    let head = join(&bracketed(u)?, &word(sp));
+                    format!("{head}{}", bracketed(v)?)
+                }
+                _ => return None,
+            };
+            Some((text, false))
+        }
+        Ar::Train(ops) => {
+            let parts: Option<Vec<String>> = ops.iter().map(bracketed).collect();
+            Some((parts?.join(" "), false))
+        }
+    }
+}
+
+/// One part of a parenthesised representation: bracketed unless it is a
+/// single word already.
+fn bracketed(ar: &Ar) -> Option<String> {
+    let (text, one_word) = paren_spell(ar)?;
+    Some(if one_word { text } else { format!("({text})") })
+}
+
+/// `n [ ]` written as `n:` where the noun is one of the atoms that has such
+/// a word. The representation itself keeps the three parts; only the
+/// spelling takes the shortcut.
+fn constant_shortcut(ar: &Ar) -> Option<String> {
+    let Ar::Train(ops) = ar else { return None };
+    let [Ar::Noun(n), Ar::Prim(g), Ar::Prim(h)] = ops.as_slice() else { return None };
+    if g != "[" || h != "]" {
+        return None;
+    }
+    constant_word(n)
+}
+
 fn spell(ar: &Ar) -> Option<(String, Shape)> {
     // `n [ ]` is how the constant verb is built, and `n:` is how it is
     // spelled where the noun is one of the atoms that has such a word. The
     // shortcut belongs to the spelling alone: the representation itself
     // has to keep the three parts, which is what a gerund reads back.
-    if let Ar::Train(ops) = ar
-        && let [Ar::Noun(n), Ar::Prim(g), Ar::Prim(h)] = ops.as_slice()
-        && g == "["
-        && h == "]"
-        && let Some(w) = constant_word(n)
-    {
+    if let Some(w) = constant_shortcut(ar) {
         return Some((w, Shape::Word));
     }
     match ar {

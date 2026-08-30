@@ -196,7 +196,9 @@ const J_PROMISES: &[Case] = &[
     j("* b. _1", ErrorKind::NotYet, "* b. _1", &["obverse"]),
     j("$. 'abc'", ErrorKind::NotYet, "$. 'abc'", &["sparse"]),
     j("+/ . * i. 17 17", ErrorKind::NotYet, "+/ . * i. 17 17", &["determinant"]),
-    j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign 9!:18"]),
+    j("9!:1 ] 5", ErrorKind::NotYet, "9!:1", &["foreign 9!:1"]),
+    j("128!:0 i. 2 2", ErrorKind::NotYet, "128!:0", &["foreign 128!:0"]),
+    j("3!:6 ] 1 2 3", ErrorKind::NotYet, "3!:6", &["foreign 3!:6"]),
     j(
         "m =. {{ u/ y }}\nm",
         ErrorKind::NotYet,
@@ -238,6 +240,12 @@ const J_PERMANENT: &[Case] = &[
     j("2!:5 <'HOME'", ErrorKind::Sandbox, "2!:5", &["closed by the sandbox", "host"]),
     j("0!:0 <'x'", ErrorKind::Sandbox, "0!:0", &["closed by the sandbox", "script"]),
     j("6!:2 'i.5'", ErrorKind::Sandbox, "6!:2", &["closed by the sandbox", "clock"]),
+    j("15!:0 <'x'", ErrorKind::Sandbox, "15!:0", &["closed by the sandbox", "shared library"]),
+    // The interpreter's own machinery: its allocator, its debugger, and the
+    // settings that belong to neither language.
+    j("7!:0 ''", ErrorKind::Language, "7!:0", &["7!:0", "memory"]),
+    j("13!:0 ] 1", ErrorKind::Language, "13!:0", &["13!:0", "debugger"]),
+    j("9!:14 ''", ErrorKind::Language, "9!:14", &["9!:14", "9!:10"]),
 ];
 
 #[test]

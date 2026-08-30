@@ -358,7 +358,17 @@ class TestSandbox:
 
     def test_a_foreign_that_only_computes_is_a_promise(self):
         with pytest.raises(JayError, match="not supported yet"):
-            j("9!:18 ''")
+            j("128!:0 (i.2 2)")
+
+    def test_the_interpreters_own_machinery_is_permanent(self):
+        for src in ["7!:0 ''", "13!:0 (1)"]:
+            with pytest.raises(JayError, match="libjay does not have"):
+                j(src)
+
+    def test_the_foreigns_that_compute(self):
+        assert j("128!:3 'abc'") == 891568578
+        assert j("4!:0 (<'nosuch')") == -1
+        assert j("_2 (3!:4) 2 (3!:4) (_7)").tolist() == [-7]
 
     def test_the_type_foreign(self):
         assert j("3!:0 (1.5)") == 8

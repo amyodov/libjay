@@ -4423,3 +4423,50 @@ the register.
   under such an x — are named rather than guessed at: both want the
   LOGARITHMS of the gamma function, which is a different implementation and
   not this fix.
+- 2026-08-31 — The `!:` foreigns divide THREE ways, not two. The sandbox
+  closes what reaches a file, a script, the host, the clock or a shared
+  library. What only computes is implemented. Between them sits a third
+  kind that the earlier two-way split had no name for: `7!:` measures the
+  reference interpreter's own allocator, `13!:` drives its debugger, and
+  most of `9!:` sets things that belong to that interpreter rather than to
+  J — its error message table, its box characters, its build string. Those
+  are refused permanently, in the words a `⎕`-name libjay will never have
+  is refused, because there is no second implementation's answer to give.
+- 2026-08-31 — The `8!:` default number format was measured, not derived.
+  It keeps the SHORTEST decimal digits that read back as the same double,
+  cut to fourteen significant digits and nine decimal places, and switches
+  to exponential form with ten significant digits outside `1e_9` to `2e9`.
+  Rounding the digit string rather than the double is what the reference
+  does and the two differ: `1234567.89012345` is `1234567.8901235` there
+  and `1234567.8901234` if the double is rounded, because the double is
+  really `1234567.890123449…`. The bounds are the reference's own; `2e9`
+  in particular is not a power of two and not derivable from anything.
+- 2026-08-31 — A name with no meaning yet is its OWN representation:
+  `5!:1 <'zz'` answers `<'zz'` rather than a value error, and so do `5!:2`,
+  `5!:5` and `5!:6`. Text that is no name at all — `'i.'`, `'a b'` — is an
+  ill-formed name and refused. This corrects what libjay answered before,
+  which was a value error for both; the oracle wins. It also made `5!:1`
+  IMPURE for the constant folder, which it should always have been: it
+  reads the name table, and folding it against an empty one was only ever
+  invisible because it used to fail.
+- 2026-08-31 — `5!:0` is an adverb and libjay settles it while the sentence
+  is READ. What the representation names decides how the rest of the
+  sentence parses — a verb, a noun, a modifier's operand — so it cannot
+  wait for the run. It therefore takes a literal representation or the
+  `5!:1` that made one, `(5!:1 <'f') 5!:0`, resolving the name against the
+  parse-time table; a representation the program computes some other way is
+  a named gap. The same reasoning already governs a computed `cocurrent`.
+- 2026-08-31 — Giving a name a verb ERASES the value it held, at run time
+  and not only in the parse table. The reference answers 3 for `4!:0 <'n'`
+  after `n =: 5` then `n =: +/`, and it can only do that if one meaning
+  displaced the other. The run also records the CLASS of a named modifier,
+  which is all `4!:0` and `4!:1` need of one: the modifier itself is a
+  parser object and never reaches the run.
+- 2026-08-31 — The `3!:1` binary form is the reference's byte layout,
+  measured: the word 227, the type code, the element count, the rank, the
+  shape, then the elements — byte-wide types padded to a whole word with
+  room for a terminator, and a boxed block carrying one offset word a box,
+  measured from the start of the block it sits in. Extended integers and
+  rationals are stored there as digit blocks whose header does not follow
+  the same count-and-shape rule, and rather than guess at a layout that
+  would silently write the wrong bytes, those two types are a named gap.

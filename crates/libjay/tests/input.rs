@@ -222,7 +222,7 @@ fn the_foreigns_that_reach_outside_are_refused_by_name() {
 
 #[test]
 fn the_foreigns_that_only_compute_are_a_queue_position() {
-    for src in ["9!:18 ''", "3!:1 ]5", "4!:0 <'x'", "5!:5 <'x'"] {
+    for src in ["3!:6 ]5", "4!:5 ''", "5!:4 <'x'", "9!:0 ''", "128!:0 i. 2 2"] {
         let e = failure(Lang::J, src, &[]);
         assert_eq!(e.kind, ErrorKind::NotYet, "{src}: {}", e.msg);
         assert!(e.msg.contains("foreign"), "{src}: {}", e.msg);

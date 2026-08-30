@@ -1524,12 +1524,22 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
         // Naming a verb records it so that a definition can call itself by
         // name; the sentence is silent, so the value is never read.
         Expr::VerbDef { name, verb, .. } => {
+            // A name has ONE meaning: giving it a verb takes away whatever
+            // value it held, which is what `4!:0` then reports of it.
+            ctx.env.erase_name(name);
             ctx.env.define(name.clone(), verb.clone());
             Ok(Array::scalar_i64(0))
         }
-        // A record of what the program was, and a named modifier, which the
-        // parser has already applied everywhere it is used: silent
-        // sentences whose value is never read.
-        Expr::Elided { .. } | Expr::ModDef { .. } => Ok(Array::scalar_i64(0)),
+        // The parser has already applied a named modifier everywhere it is
+        // used; the run records only the CLASS, which is what `4!:0` and
+        // `4!:1` ask a name for. The sentence is silent either way.
+        Expr::ModDef { name, conjunction, .. } => {
+            ctx.env.erase_name(name);
+            ctx.env.define_mod(name.clone(), *conjunction);
+            Ok(Array::scalar_i64(0))
+        }
+        // A record of what the program was: a silent sentence whose value
+        // is never read.
+        Expr::Elided { .. } => Ok(Array::scalar_i64(0)),
     }
 }
