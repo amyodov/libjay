@@ -17408,8 +17408,31 @@ fn codes_to_chars(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     Ok(Array::new(y.shape.clone(), Data::Char(out.into())))
 }
 
-/// `x u: y`: 3 asks for codepoints, 10 for the characters they name. The
-/// other forms J defines are byte-oriented and are named, not guessed at.
+/// The characters of `y`, or nothing where it holds something else.
+fn chars_of(y: &Array) -> Option<Vec<char>> {
+    let row_major = y.to_row_major();
+    match &row_major.data {
+        Data::Char(v) => Some(v.as_slice().to_vec()),
+        _ => None,
+    }
+}
+
+/// The shape a byte conversion answers with: the argument's own where the
+/// count did not change, and a list otherwise.
+fn recoded_shape(y: &Array, len: usize) -> Vec<usize> {
+    if len == y.count() { y.shape.clone() } else { vec![len] }
+}
+
+/// `x u: y`: J's numbered character conversions.
+///
+/// J has three character types — one byte, two bytes, four bytes — and
+/// libjay has one, whose elements are codepoints. So the conversions that
+/// only change how a character is stored (2 and 10, and 9 over an argument
+/// that is not bytes) are the identity here, and the ones that pack a
+/// codepoint into bytes (1 and 8) or read bytes back (9) do the work they
+/// name. A character list every one of whose codepoints is below 256 is
+/// what stands for J's byte string: that is what 8 leaves alone and what 9
+/// decodes.
 fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let form = x
         .to_i64_vec()
@@ -17417,12 +17440,74 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
         .first()
         .copied()
         .unwrap_or(0);
-    match form {
-        3 if y.dtype() == DType::Char => Ok(chars_to_codes(y)),
-        3 => Err(Error::domain("form 3 converts characters to codepoints", span)),
-        10 => codes_to_chars(y, near, span),
-        n => Err(Error::not_yet(format!("the byte-oriented unicode form ({n} u:)"), span)),
+    let chars = chars_of(y);
+    match (form, chars) {
+        (3, Some(_)) => Ok(chars_to_codes(y)),
+        (3, None) => Err(Error::domain("form 3 converts characters to codepoints", span)),
+        // One byte per character, the codepoint taken modulo 256 — which is
+        // what J's narrowing to a byte string keeps.
+        (1, Some(v)) => {
+            let out: Vec<char> = v
+                .iter()
+                .map(|&c| char::from_u32(c as u32 % 256).unwrap_or('\0'))
+                .collect();
+            Ok(Array::new(y.shape.clone(), Data::Char(out.into())))
+        }
+        // Widening to two bytes changes nothing a codepoint can see.
+        (2, Some(_)) => Ok(y.clone()),
+        (1 | 2, None) => {
+            Err(Error::domain(format!("form {form} converts characters, not numbers"), span))
+        }
+        (8 | 9, _) if y.rank() > 1 => Err(Error::new(
+            ErrorKind::Rank,
+            format!("form {form} converts an atom or a list"),
+            Some(span),
+        )),
+        // 8 packs each codepoint into its UTF-8 bytes; an argument that is
+        // bytes already is left as it stands.
+        (8, Some(v)) => {
+            if v.iter().all(|&c| (c as u32) < 256) {
+                return Ok(y.clone());
+            }
+            Ok(utf8_bytes(&v, y.shape.clone(), y.count()))
+        }
+        (8, None) => {
+            let v = codes_to_chars(y, near, span)?;
+            let chars = chars_of(&v).unwrap_or_default();
+            let out = utf8_bytes(&chars, Vec::new(), usize::MAX);
+            Ok(out)
+        }
+        // 9 reads UTF-8 bytes back; anything that is not bytes is a
+        // codepoint already.
+        (9, Some(v)) => {
+            if v.iter().any(|&c| (c as u32) >= 256) {
+                return Ok(y.clone());
+            }
+            let bytes: Vec<u8> = v.iter().map(|&c| c as u32 as u8).collect();
+            let text = std::str::from_utf8(&bytes)
+                .map_err(|_| Error::domain("form 9 reads UTF-8, and these bytes are not", span))?;
+            let out: Vec<char> = text.chars().collect();
+            let shape = recoded_shape(y, out.len());
+            Ok(Array::new(shape, Data::Char(out.into())))
+        }
+        (9 | 10, None) => codes_to_chars(y, near, span),
+        (10, Some(_)) => Ok(y.clone()),
+        (n, _) => Err(Error::not_yet(format!("the unicode conversion form ({n} u:)"), span)),
     }
+}
+
+/// The UTF-8 bytes of `chars`, one byte per element, shaped `shape` where
+/// the count came out the same and as a list otherwise.
+fn utf8_bytes(chars: &[char], shape: Vec<usize>, count: usize) -> Array {
+    let mut out: Vec<char> = Vec::with_capacity(chars.len());
+    let mut buf = [0u8; 4];
+    for &c in chars {
+        for &b in c.encode_utf8(&mut buf).as_bytes() {
+            out.push(b as char);
+        }
+    }
+    let shape = if out.len() == count { shape } else { vec![out.len()] };
+    Array::new(shape, Data::Char(out.into()))
 }
 
 /// `s: y`: the argument's text, interned.

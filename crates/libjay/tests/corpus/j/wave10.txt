@@ -45,3 +45,39 @@ $"(,:) i.2 3
 (i.2 3 2) %. (2 2$ 2 0 0 1)
 $ (i.2 3 2) %. (2 2$ 2 0 0 1)
 (i.2 2 2) %. (i.2 2)
+
+// The byte-oriented `u:` conversions. libjay has one character type, whose
+// elements are codepoints, so 2 and 10 change nothing; 1 keeps a codepoint
+// modulo 256, 8 packs one into its UTF-8 bytes and 9 reads them back.
+3 u: 1 u: u: 955
+3 u: 1 u: u: 256
+3 u: 1 u: u: 300
+3 u: 1 u: 'abc'
+$ 1 u: 2 2$ u: 955
+$ 2 u: 2 2$'ab'
+2 u: 'abc'
+3 u: 2 u: u: 955
+3 u: 8 u: u: 955
+3 u: 8 u: ('ab' , u: 955)
+8 u: 'abc'
+8 u: u: 955
+$ 8 u: u: 955
+$ 8 u: 'a'
+$ 8 u: 97
+$ 8 u: 'ab'
+$ 8 u: ''
+3 u: 8 u: 955
+3 u: 8 u: 300
+3 u: 8 u: 65536
+3 u: 8 u: 97 98 99
+3 u: 8 u: 8 u: u: 955
+3 u: 9 u: 8 u: u: 955
+9 u: 8 u: u: 955
+9 u: 'abc'
+3 u: 9 u: 'abc'
+$ 9 u: 'a'
+$ 9 u: 97
+$ 9 u: ''
+3 u: 9 u: 955
+3 u: 9 u: 128
+3 u: 9 u: 240 159 152 128

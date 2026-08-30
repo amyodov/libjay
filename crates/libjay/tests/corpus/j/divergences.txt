@@ -23,3 +23,12 @@ u: 233
 ? a character between 128 and 255 writes as its byte here
 3!:0 u: 'é'
 ? libjay has one character type, so widening does not change it
+
+// The same one-character-type reading over the byte conversions: `2 u:`
+// widens bytes into characters in J, which is where the two writings part,
+// and a codepoint between 128 and 255 that `9 u:` answers with writes as
+// its byte here and as its character there.
+2 u: 8 u: u: 955
+? widening bytes to characters changes only how they are written out
+9 u: 200 200
+? a character between 128 and 255 writes as its byte here

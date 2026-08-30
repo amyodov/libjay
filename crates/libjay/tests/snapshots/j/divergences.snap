@@ -35,3 +35,11 @@
 ? libjay has one character type, so widening does not change it
 < 2
 > j: 131072
+= 2 u: 8 u: u: 955
+? widening bytes to characters changes only how they are written out
+< λ
+> j: Î»
+= 9 u: 200 200
+? a character between 128 and 255 writes as its byte here
+< ��
+> j: ÈÈ
