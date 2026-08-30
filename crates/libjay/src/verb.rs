@@ -4474,8 +4474,109 @@ fn binomial(x: f64, y: f64) -> f64 {
         if y.fract() == 0.0 && y >= 0.0 && y < x {
             return 0.0;
         }
+        // A NEGATIVE whole y has no `!y` at all — Γ(y+1) sits on a pole —
+        // so the upper negation moves the question onto two whole numbers
+        // that do: `x ! _k` is `(_1^x) * (k-1) ! x+k-1`, which is a product
+        // of k−1 factors and is exact wherever the answer is.
+        if y.fract() == 0.0 && y < 0.0 {
+            let k = -y - 1.0;
+            let sign = if xi % 2 == 0 { 1.0 } else { -1.0 };
+            if k <= BINOMIAL_PRODUCT_LIMIT as f64 {
+                return sign * binomial_product(k as i64, x - y - 1.0);
+            }
+        }
     }
-    gamma(y + 1.0) / (gamma(x + 1.0) * gamma(y - x + 1.0))
+    let direct = gamma(y + 1.0) / (gamma(x + 1.0) * gamma(y - x + 1.0));
+    // Past a few thousand the gammas themselves leave the double range and
+    // their quotient reads as no value, where the value it stands for is an
+    // ordinary small number: `1e10 ! 2.5` is `_1.05786e_35`. The logarithms
+    // reach it.
+    if direct.is_finite() { direct } else { binomial_by_logs(x, y) }
+}
+
+/// The natural logarithm of |Γ(x)| and the sign of Γ(x), by the same
+/// Lanczos series [`gamma`] uses, taken in logarithms so that an argument
+/// whose gamma overflows still has an answer. Γ is positive above 0.5 and
+/// takes its sign from the reflection below it.
+fn log_gamma(x: f64) -> (f64, f64) {
+    use std::f64::consts::PI;
+    if x < 0.5 {
+        let s = sin_pi(x);
+        let (lg, sign) = log_gamma(1.0 - x);
+        return (PI.ln() - s.abs().ln() - lg, if s < 0.0 { -sign } else { sign });
+    }
+    let z = x - 1.0;
+    let mut a = LANCZOS[0];
+    for (i, &c) in LANCZOS.iter().enumerate().skip(1) {
+        a += c / (z + i as f64);
+    }
+    let t = z + 7.5;
+    (0.5 * (2.0 * PI).ln() + (z + 0.5) * t.ln() - t + a.ln(), 1.0)
+}
+
+/// `sin(πx)`, with the argument folded into one period first so that a
+/// large x keeps the sign and the magnitude the multiplication would round
+/// away.
+fn sin_pi(x: f64) -> f64 {
+    let r = x - 2.0 * (x * 0.5).floor();
+    let t = if r > 1.0 { r - 2.0 } else { r };
+    (std::f64::consts::PI * t).sin()
+}
+
+/// The argument above which the Stirling series is taken for the ratio of
+/// two gammas; below it the series' own corrections are the larger error.
+const STIRLING_RATIO_FLOOR: f64 = 16.0;
+
+/// `lnΓ(a+d) − lnΓ(a)` for a positive a, written so that no step is ever
+/// the difference of two enormous logarithms.
+///
+/// Taking the two separately loses the answer's own digits: at a of 10¹⁰
+/// each logarithm is 2·10¹¹ and a double keeps the difference to five
+/// figures, where the ratio itself is an ordinary number. Stirling's
+/// expansion of the difference has no such cancellation.
+fn log_gamma_ratio(a: f64, d: f64) -> f64 {
+    if a < STIRLING_RATIO_FLOOR || a + d < STIRLING_RATIO_FLOOR {
+        return log_gamma(a + d).0 - log_gamma(a).0;
+    }
+    let b = a + d;
+    d * a.ln() + (b - 0.5) * (d / a).ln_1p() - d + 1.0 / (12.0 * b) - 1.0 / (12.0 * a)
+        - 1.0 / (360.0 * b * b * b)
+        + 1.0 / (360.0 * a * a * a)
+}
+
+/// `x ! y` in logarithms, for the arguments whose gamma quotient leaves the
+/// double range entirely. The value it stands for is often an ordinary
+/// number — `5000 ! 2.5` is `_1.19787e_13` — so the quotient is taken as a
+/// difference of logarithms and exponentiated once at the end.
+fn binomial_by_logs(x: f64, y: f64) -> f64 {
+    use std::f64::consts::PI;
+    // A whole y below zero has no Γ(y+1); the upper negation moves the
+    // question onto `Γ(x−y) ÷ Γ(x+1)·Γ(−y)`, whose three arguments are all
+    // above zero.
+    if y.fract() == 0.0 && y < 0.0 && x.fract() == 0.0 && x >= 0.0 && x < 1e17 {
+        let sign = if (x as i64) % 2 == 0 { 1.0 } else { -1.0 };
+        let ln = -log_gamma_ratio(x - y, y + 1.0) - log_gamma(-y).0;
+        return sign * ln.exp();
+    }
+    let z = y - x + 1.0;
+    let (ly, sy) = log_gamma(y + 1.0);
+    if z < 0.5 {
+        // Below the diagonal Γ(y−x+1) is a reflection away from the Γ of a
+        // large POSITIVE argument, and that one pairs with Γ(x+1) as a
+        // ratio: `Γ(y+1)·sin(π(y−x+1))·Γ(x−y) ÷ π·Γ(x+1)`.
+        let s = sin_pi(z);
+        let ln = ly + s.abs().ln() - PI.ln() - log_gamma_ratio(x - y, y + 1.0);
+        return sy * s.signum() * ln.exp();
+    }
+    let (lx, sx) = log_gamma(x + 1.0);
+    // Above the diagonal Γ(y+1) and Γ(y−x+1) are the pair that has to be
+    // taken as a ratio: at a y of 10³⁰⁰ each logarithm is 10³⁰² and their
+    // difference — the answer itself — rounds away entirely.
+    if z >= STIRLING_RATIO_FLOOR && y + 1.0 >= STIRLING_RATIO_FLOOR {
+        return sx * (log_gamma_ratio(z, x) - lx).exp();
+    }
+    let (lz, sz) = log_gamma(z);
+    sy * sx * sz * (ly - lx - lz).exp()
 }
 
 /// One integer step. None means the result left i64 — an overflow, or a
@@ -8347,6 +8448,67 @@ fn digits_of(a: &Array, what: &str, span: Span) -> Result<Vec<f64>> {
     a.to_f64_vec().ok_or_else(|| Error::domain(format!("{what} needs numeric data"), span))
 }
 
+/// Numeric data widened to complex, refusing characters.
+fn complex_digits_of(a: &Array, what: &str, span: Span) -> Result<Vec<Cx>> {
+    a.to_complex_vec().ok_or_else(|| Error::domain(format!("{what} needs numeric data"), span))
+}
+
+/// True where the array carries an imaginary part the real path cannot
+/// read. A complex value whose imaginary part is zero IS the real it
+/// displays as, so only a nonzero one turns a base conversion complex.
+fn has_imaginary(a: &Array) -> bool {
+    matches!(&a.data, Data::Complex(v) if v.iter().any(|z| z[1] != 0.0))
+}
+
+/// A finished complex buffer as an array of that shape, real where every
+/// imaginary part is zero.
+fn complex_shaped(shape: Vec<usize>, values: Vec<Cx>) -> Array {
+    if values.iter().all(|z| z[1] == 0.0) {
+        let reals: Vec<f64> = values.iter().map(|z| z[0]).collect();
+        let integral = reals.iter().all(|v| v.fract() == 0.0 && fits_i64(*v));
+        return Array::new(shape, narrow(reals, integral));
+    }
+    Array::new(shape, Data::Complex(values.into()))
+}
+
+/// The array's contents as exact whole numbers, and `None` where any
+/// element is not one.
+///
+/// A double past 2⁵³ is still exactly an integer, and both references write
+/// its digits out in full: `2 #: 4503599627370497` is 1, which the same
+/// value taken through a division by two cannot see.
+fn whole_i128_vec(a: &Array) -> Option<Vec<i128>> {
+    let whole = |v: f64| -> Option<i128> {
+        (v.is_finite() && v.fract() == 0.0 && v.abs() < 1.7e38).then(|| v as i128)
+    };
+    match &a.data {
+        Data::Bool(v) => Some(v.iter().map(|&x| x as i128).collect()),
+        Data::I64(v) => Some(v.iter().map(|&x| x as i128).collect()),
+        Data::F64(v) => v.iter().map(|&x| whole(x)).collect(),
+        Data::Ext(v) => v.iter().map(|x| exact::ext_to_i64(x).map(i128::from)).collect(),
+        Data::Rat(v) => v
+            .iter()
+            .map(|x| x.to_int().as_ref().and_then(exact::ext_to_i64).map(i128::from))
+            .collect(),
+        Data::Complex(v) => v.iter().map(|z| (z[1] == 0.0).then(|| whole(z[0]))?).collect(),
+        Data::Char(_) | Data::Symbol(_) | Data::Box(_) if a.count() == 0 => Some(Vec::new()),
+        Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
+    }
+}
+
+/// `x | y` in exact whole numbers: the residue takes its sign from the left
+/// argument, as [`i64_op`]'s does.
+fn residue_i128(x: i128, y: i128) -> i128 {
+    if x == 0 {
+        return y;
+    }
+    let mut r = y % x;
+    if r != 0 && (r < 0) != (x < 0) {
+        r += x;
+    }
+    r
+}
+
 /// Narrow a finished digit or value buffer back to integers when the inputs
 /// were whole and nothing left the exact range, which is what both languages
 /// do with integer arguments.
@@ -8410,6 +8572,9 @@ fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     if let Some(exact) = decode_exact(x, y) {
         return Ok(exact);
     }
+    if has_imaginary(y) || x.is_some_and(has_imaginary) {
+        return decode_complex(x, y, span);
+    }
     let mut digits = digits_of(y, "decode", span)?;
     let radix: Vec<f64> = match x {
         None => vec![2.0; digits.len()],
@@ -8442,6 +8607,90 @@ fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     }
     let integral = is_integral(y) && x.is_none_or(is_integral);
     Ok(Array::new(vec![], narrow(vec![acc], integral)))
+}
+
+/// `x #. y` where a radix or a digit is complex: the same Horner's rule,
+/// run in the complex arithmetic. jconsole answers these — `#. 3j4 1j_1` is
+/// `7j7` and `2j1 #. 1 2 3` is `10j6` — and nothing about the weighing
+/// changes; only the type the running total is kept in does.
+fn decode_complex(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
+    let mut digits = complex_digits_of(y, "decode", span)?;
+    let radix: Vec<Cx> = match x {
+        None => vec![[2.0, 0.0]; digits.len()],
+        Some(x) => {
+            let r = complex_digits_of(x, "decode", span)?;
+            // An atom of digits fills every position the radices name, as
+            // it does on the real path.
+            if y.rank() == 0 && r.len() != 1 {
+                digits = vec![digits[0]; r.len()];
+            }
+            match r.len() {
+                1 => vec![r[0]; digits.len()],
+                n if n == digits.len() => r,
+                n => {
+                    return Err(Error::new(
+                        ErrorKind::Length,
+                        format!("{n} radices for {} digits", digits.len()),
+                        Some(span),
+                    ));
+                }
+            }
+        }
+    };
+    let mut acc = cx::ZERO;
+    for (d, b) in digits.iter().zip(&radix) {
+        acc = cx::add(cx::mul(acc, *b), *d);
+    }
+    Ok(complex_shaped(Vec::new(), vec![acc]))
+}
+
+/// `x #: y` where a radix or a value is complex. Each digit is a residue,
+/// and the complex residue rounds with McDonnell's complex floor, which is
+/// what makes `2 #: 5j1` the `_1j1` jconsole answers.
+fn encode_complex(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let radix = complex_digits_of(x, "encode", span)?;
+    let values = complex_digits_of(y, "encode", span)?;
+    let (k, n) = (radix.len(), values.len());
+    let mut out = vec![cx::ZERO; k * n];
+    for (j, &v) in values.iter().enumerate() {
+        let mut rem = v;
+        for i in (0..k).rev() {
+            let b = radix[i];
+            if b == cx::ZERO {
+                out[i * n + j] = rem;
+                rem = cx::ZERO;
+            } else {
+                let r = cx::residue(b, rem);
+                out[i * n + j] = r;
+                rem = cx::div(cx::sub(rem, r), b);
+            }
+        }
+    }
+    let mut shape = if x.rank() == 0 { Vec::new() } else { vec![k] };
+    shape.extend_from_slice(&y.shape);
+    Ok(complex_shaped(shape, out))
+}
+
+/// `#: y` over complex values: the digit count comes from the largest
+/// MAGNITUDE in the whole argument, which is why `#: 3j4` takes the three
+/// binary digits five takes.
+fn encode_bits_complex(y: &Array, span: Span) -> Result<Array> {
+    let values = complex_digits_of(y, "encode", span)?;
+    let magnitudes: Vec<f64> = values.iter().map(|&z| cx::abs(z)).collect();
+    let k = bit_width(&magnitudes, span)?;
+    let two = [2.0, 0.0];
+    let mut out = vec![cx::ZERO; values.len() * k];
+    for (j, &v) in values.iter().enumerate() {
+        let mut rem = v;
+        for i in (0..k).rev() {
+            let r = cx::residue(two, rem);
+            out[j * k + i] = r;
+            rem = cx::div(cx::sub(rem, r), two);
+        }
+    }
+    let mut shape = y.shape.clone();
+    shape.push(k);
+    Ok(complex_shaped(shape, out))
 }
 
 /// `x ⊥ y` on arguments of rank 2 and above: the inner product `+.×` over
@@ -8595,6 +8844,14 @@ fn encode_one(radix: &[f64], v: f64, out: &mut [f64], tol: Tol) {
 /// shape `(#x), $y`. J applies this per atom of y (right rank 0) and APL to
 /// the whole of it (right rank infinite); the operation itself is the same.
 fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
+    if has_imaginary(x) || has_imaginary(y) {
+        return encode_complex(x, y, span);
+    }
+    if let Some(exact) = encode_exact(x, y) {
+        let mut shape = if x.rank() == 0 { Vec::new() } else { vec![x.count()] };
+        shape.extend_from_slice(&y.shape);
+        return Ok(Array::new(shape, exact));
+    }
     let radix = digits_of(x, "encode", span)?;
     let values = digits_of(y, "encode", span)?;
     let k = radix.len();
@@ -8622,8 +8879,79 @@ fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     Ok(Array::new(shape, narrow(out, is_integral(x) && is_integral(y))))
 }
 
+/// `x #: y` where every radix and every value is a whole number: the same
+/// residues taken in exact integers, so that a value past 2⁵³ keeps its
+/// last digit. `2 #: 4503599627370497` is 1, which the division by two a
+/// double takes cannot see.
+///
+/// `None` hands the pass back to the float path, which is where a
+/// fractional radix, a fractional value and the tolerance live.
+fn encode_exact(x: &Array, y: &Array) -> Option<Data> {
+    let radix = whole_i128_vec(x)?;
+    let values = whole_i128_vec(y)?;
+    let (k, n) = (radix.len(), values.len());
+    let mut out = vec![0i128; k * n];
+    for (j, &v) in values.iter().enumerate() {
+        let mut rem = v;
+        for i in (0..k).rev() {
+            let b = radix[i];
+            if b == 0 {
+                out[i * n + j] = rem;
+                rem = 0;
+            } else {
+                let r = residue_i128(b, rem);
+                out[i * n + j] = r;
+                rem = (rem - r) / b;
+            }
+        }
+    }
+    // A digit that leaves the machine word is left to the float path,
+    // which widens rather than refuses.
+    let narrowed: Option<Vec<i64>> = out.iter().map(|&v| i64::try_from(v).ok()).collect();
+    Some(Data::I64(narrowed?.into()))
+}
+
+/// The binary width of a whole number, counting one digit for zero. The
+/// float path's [`bit_width`] reads the same rule off a double.
+fn bit_width_i128(values: &[i128]) -> usize {
+    let mut w = 1usize;
+    for &v in values {
+        let mut n = v.unsigned_abs();
+        let mut d = 1usize;
+        while n > 1 {
+            n /= 2;
+            d += 1;
+        }
+        w = w.max(d);
+    }
+    w
+}
+
 /// `#: y`: base-2 encode of the whole argument, the digits trailing.
 fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
+    if has_imaginary(y) {
+        return encode_bits_complex(y, span);
+    }
+    // Whole numbers keep every digit, past the width a double can divide
+    // its way down: `$ #: 4503599627370497` is 53 and its last digit is 1.
+    if let Some(values) = whole_i128_vec(y) {
+        let k = if values.is_empty() { 0 } else { bit_width_i128(&values) };
+        let mut out = vec![0i128; values.len() * k];
+        for (j, &v) in values.iter().enumerate() {
+            let mut rem = v;
+            for i in (0..k).rev() {
+                let r = residue_i128(2, rem);
+                out[j * k + i] = r;
+                rem = (rem - r) / 2;
+            }
+        }
+        if let Some(digits) = out.iter().map(|&v| i64::try_from(v).ok()).collect::<Option<Vec<_>>>()
+        {
+            let mut shape = y.shape.clone();
+            shape.push(k);
+            return Ok(Array::new(shape, Data::I64(digits.into())));
+        }
+    }
     let values = digits_of(y, "encode", span)?;
     let k = bit_width(&values, span)?;
     let radix = vec![2.0; k];
@@ -18198,7 +18526,10 @@ fn bit_monad(op: BitMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array>
 /// that is not itself a permutation still has an anagram index.
 fn item_ranks(y: &Array, rules: Rules, span: Span) -> Result<Vec<usize>> {
     check_gradable(y, rules, span)?;
-    if !y.dtype().is_numeric() {
+    // An EMPTY holds no item of the wrong type, whatever type it was
+    // written at: `A. ''`, `A. 0$'a'` and `A. 0$<1` are each 0 in jconsole
+    // where `A. 'cab'` is a domain error.
+    if y.count() != 0 && !y.dtype().is_numeric() {
         return Err(Error::domain("an anagram index needs numbers", span));
     }
     let order = grade_order(&as_list(y), false, Grading::of(rules, rules.tol()));

@@ -30,7 +30,8 @@ use crate::verb::{
 pub fn parse(src: &SourceParts, rules: crate::frontend::Rules) -> Result<Vec<Expr>> {
     let char_bytes =
         !rules.extensions.has(crate::extensions::Extensions::J_UNICODE_STRINGS);
-    let mut scope = Names { char_bytes, ..Names::default() };
+    let mut scope =
+        Names { char_bytes, source: Arc::from(src.display.as_str()), ..Names::default() };
     let lines = lex(src, char_bytes)?;
     let mut out = Vec::new();
     let mut i = 0usize;
@@ -111,6 +112,12 @@ struct Names {
     /// literal type holds and what the frontend does unless the
     /// `j_unicode_strings` extension says otherwise.
     char_bytes: bool,
+    /// The source every span indexes into. A definition whose body is
+    /// written on the LINES BELOW keeps no text of its own, and a session
+    /// displaying it by name gives the text back, so the lines are read
+    /// out of the source again — leading spaces and all, which is what
+    /// jconsole shows.
+    source: Arc<str>,
 }
 
 /// The verb the two locale words stand for. Both make the locale they name
@@ -144,6 +151,7 @@ impl Default for Names {
             nouns: HashSet::new(),
             consts: HashMap::new(),
             char_bytes: false,
+            source: Arc::from(""),
         }
     }
 }
@@ -504,9 +512,11 @@ fn take_colon_definition(
         v => return Err(Error::domain(format!("{v} is not an explicit definition"), span)),
     };
     // How a session writes the definition back out: the header and the
-    // body, as the source spells it. Only the inline form has one — the
-    // lines of a `3 : 0` are not kept as text.
+    // body, as the source spells it. A body written on ONE line is given
+    // back inline whichever way it was typed, and a longer one keeps the
+    // `0` header and the lines below it.
     let mut body_text = None;
+    let mut block_text = None;
     let body = match &body_arr.data {
         // `3 : 0`: the body is written on the lines below, ending with `)`.
         Data::I64(_)
@@ -518,7 +528,17 @@ fn take_colon_definition(
             if body_arr.to_f64_vec().as_deref() != Some(&[0.0]) {
                 return Err(Error::parse("an explicit definition takes 0 or a string", body_span));
             }
-            take_lines_until_paren(lines, i, body_span)?
+            let (body, texts) = take_lines_until_paren(lines, i, body_span, &scope.source)?;
+            // One line is written back inline, as the reference does:
+            // `3 : 0` over `y + 1` displays as `3 : 'y + 1'`. Two or more
+            // keep the header and the lines, because there is no inline
+            // spelling that holds them.
+            match texts.len() {
+                0 => body_text = Some(String::new()),
+                1 => body_text = Some(texts.into_iter().next().expect("one line")),
+                _ => block_text = Some(texts.join("\n")),
+            }
+            body
         }
         Data::Char(chars) => {
             // A body written as a literal is source text again, so where a
@@ -544,7 +564,11 @@ fn take_colon_definition(
         sentence.splice(at - 1..at + 2, [Frag::Verb(VerbFrag::V(verb), span)]);
         return Ok(());
     }
-    let spelling = body_text.map(|t| definition_spelling(valence as i64, &t));
+    let spelling = match (&body_text, &block_text) {
+        (Some(t), _) => Some(definition_spelling(valence as i64, t)),
+        (None, Some(b)) => Some(format!("{} : 0\n{b}\n)", valence as i64)),
+        (None, None) => None,
+    };
     if let Some(conjunction) = modifier {
         let name = if conjunction { "2 : '...'" } else { "1 : '...'" };
         let mut src = mod_source(name, conjunction, body, self_name);
@@ -774,18 +798,38 @@ fn take_lines_until_paren(
     lines: &[Vec<Frag>],
     i: &mut usize,
     span: Span,
-) -> Result<Vec<Vec<Frag>>> {
+    source: &str,
+) -> Result<(Vec<Vec<Frag>>, Vec<String>)> {
     let mut body = Vec::new();
+    let mut texts = Vec::new();
     loop {
         let Some(line) = lines.get(*i) else {
             return Err(Error::parse("this definition's body has no closing `)`", span));
         };
         *i += 1;
         if line.len() == 1 && matches!(line[0], Frag::RParen(_)) {
-            return Ok(body);
+            return Ok((body, texts));
+        }
+        if let Some(text) = source_line(source, line) {
+            texts.push(text);
         }
         body.push(line.clone());
     }
+}
+
+/// The whole source LINE a sentence was written on, from the newline before
+/// its first word to the newline after its last. A definition's body is
+/// given back exactly as it was typed, indentation included, so the text
+/// comes from the source rather than from the words the lexer made of it.
+fn source_line(source: &str, line: &[Frag]) -> Option<String> {
+    let (first, last) = (line.first()?, line.last()?);
+    let (from, to) = (first.span().start, last.span().end);
+    if to > source.len() || from > to {
+        return None;
+    }
+    let start = source[..from].rfind('\n').map_or(0, |n| n + 1);
+    let end = source[to..].find('\n').map_or(source.len(), |n| to + n);
+    Some(source[start..end].to_string())
 }
 
 /// `{{ … }}` — the body is the words between the braces, on this line or on
@@ -3075,7 +3119,7 @@ fn apply(stack: &mut Vec<Frag>, scope: &Names) -> Result<bool> {
             let h = t.pop().expect("three slots");
             let g = t.pop().expect("three slots");
             let f = t.pop().expect("three slots");
-            let frag = apply_fork(f, g, h)?;
+            let frag = apply_fork(f, g, h, scope)?;
             stack.insert(1, frag);
         }
         Rule::Bident7 => {
@@ -4224,7 +4268,7 @@ fn ar_frag(ar: &crate::gerund::Ar, scope: &Names, span: Span) -> Result<Frag> {
                     let h = frags.pop().expect("three parts");
                     let g = frags.pop().expect("three parts");
                     let f = frags.pop().expect("three parts");
-                    apply_fork(f, g, h)
+                    apply_fork(f, g, h, scope)
                 }
                 _ => Err(Error::domain("a train is two or three parts", span)),
             }
@@ -4258,31 +4302,34 @@ fn ar_frag(ar: &crate::gerund::Ar, scope: &Names, span: Span) -> Result<Frag> {
 /// The train a gerund spells: `` `:6 `` groups the verbs from the right,
 /// three at a time, which is how J reads a train written out.
 fn train_of(vs: Vec<Verb>, span: Span) -> Result<Frag> {
+    // Every part is already a verb, so no tine of this train is ever a
+    // noun and the empty table settles nothing.
+    let scope = Names::default();
     let mut frags: Vec<Frag> =
         vs.into_iter().map(|v| Frag::Verb(VerbFrag::V(v), span)).collect();
     while frags.len() > 3 {
         let h = frags.pop().expect("three or more");
         let g = frags.pop().expect("three or more");
         let f = frags.pop().expect("three or more");
-        frags.push(apply_fork(f, g, h)?);
+        frags.push(apply_fork(f, g, h, &scope)?);
     }
     match frags.len() {
         1 => Ok(frags.pop().expect("one")),
         2 => {
             let b = frags.pop().expect("two");
             let a = frags.pop().expect("two");
-            apply_bident(a, b, &Names::default())
+            apply_bident(a, b, &scope)
         }
         _ => {
             let h = frags.pop().expect("three");
             let g = frags.pop().expect("three");
             let f = frags.pop().expect("three");
-            apply_fork(f, g, h)
+            apply_fork(f, g, h, &scope)
         }
     }
 }
 
-fn apply_fork(f: Frag, g: Frag, h: Frag) -> Result<Frag> {
+fn apply_fork(f: Frag, g: Frag, h: Frag, scope: &Names) -> Result<Frag> {
     let span = Span::merge(Span::merge(f.span(), g.span()), h.span());
     let (gv, _) = as_verb(g)?;
     let (hv, _) = as_verb(h)?;
@@ -4296,15 +4343,54 @@ fn apply_fork(f: Frag, g: Frag, h: Frag) -> Result<Frag> {
             span,
         )),
         noun => {
-            let Some(arr) = as_const(&noun) else {
+            // A name here is not a verb, or it would have been substituted;
+            // a name that holds nothing at all is the undefined name the
+            // reference reports rather than a form libjay has yet to learn.
+            if let Frag::Name(n, nspan) = &noun
+                && !scope.is_noun(n)
+            {
+                return Err(Error::new(
+                    ErrorKind::Value,
+                    format!("undefined name: {n}"),
+                    Some(*nspan),
+                ));
+            }
+            // The left tine holds the VALUE the name has where the fork is
+            // written, not the name: `c =: 5` then `f =: c + ]` displays as
+            // `5 + ]` and stays 5 when c is given another value.
+            if let Some(arr) = noun_in_scope(&noun, scope) {
+                return Ok(Frag::Verb(
+                    VerbFrag::V(Verb::NounFork(arr, Box::new(gv), Box::new(hv))),
+                    span,
+                ));
+            }
+            let Some(operand) = noun_expr(&noun) else {
                 return Err(Error::not_yet("noun forks over a non-literal noun", span));
             };
-            Ok(Frag::Verb(
-                VerbFrag::V(Verb::NounFork(arr.clone(), Box::new(gv), Box::new(hv))),
-                span,
-            ))
+            let spelling = format!("n {} {}", gv.name(), hv.name());
+            let deferred = crate::verb::Deferred {
+                operand,
+                template: Verb::NounFork(Array::scalar_i64(0), Box::new(gv), Box::new(hv)),
+                build: built_noun_fork,
+                spelling,
+            };
+            Ok(Frag::Verb(VerbFrag::V(Verb::Deferred(Arc::new(deferred))), span))
         }
     }
+}
+
+/// The noun fork a deferred left tine stands for, once the operand the
+/// program computes has a value.
+fn built_noun_fork(
+    template: &Verb,
+    a: &Array,
+    _span: Span,
+    _d: crate::frontend::Rules,
+) -> Result<Verb> {
+    let Verb::NounFork(_, g, h) = template else {
+        return Err(Error::internal("a noun fork's template is not one"));
+    };
+    Ok(Verb::NounFork(a.clone(), g.clone(), h.clone()))
 }
 
 fn apply_bident(a: Frag, b: Frag, scope: &Names) -> Result<Frag> {

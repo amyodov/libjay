@@ -1116,6 +1116,11 @@ impl Array {
             Data::Rat(v) => Some(v.iter().map(|x| [x.to_f64(), 0.0]).collect()),
             Data::F64(v) => Some(v.iter().map(|&x| [x, 0.0]).collect()),
             Data::Complex(v) => Some(v.to_vec()),
+            // An empty holds no element of the wrong type, whatever type it
+            // was written at; [`Array::to_f64_vec`] reads one the same way.
+            Data::Char(_) | Data::Symbol(_) | Data::Box(_) if self.count() == 0 => {
+                Some(Vec::new())
+            }
             Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
@@ -1138,9 +1143,13 @@ impl Array {
             }
             // An EMPTY array carries no value of the wrong type, so it is
             // acceptable numeric data whatever type it was written at:
-            // `#. ''` is 0 in J and `¯3⊥''` is 0 in GNU APL. An empty BOX
-            // is not: J refuses `2 #. 0$<1` where it answers `2 #. ''`.
-            Data::Char(_) | Data::Symbol(_) if self.count() == 0 => Some(Vec::new()),
+            // `#. ''` is 0 in J and `¯3⊥''` is 0 in GNU APL. An empty of
+            // BOXES holds no element to be the wrong type either, and
+            // jconsole reads one the same way: `#. 0$<1` is 0, `i. 0$<1`
+            // is 0 and `<. 0$<1` is the empty.
+            Data::Char(_) | Data::Symbol(_) | Data::Box(_) if self.count() == 0 => {
+                Some(Vec::new())
+            }
             Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
@@ -1176,7 +1185,9 @@ impl Array {
                         .then_some(z[0] as i64)
                 })
                 .collect(),
-            Data::Char(_) | Data::Symbol(_) if self.count() == 0 => Some(Vec::new()),
+            Data::Char(_) | Data::Symbol(_) | Data::Box(_) if self.count() == 0 => {
+                Some(Vec::new())
+            }
             Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
         }
     }
