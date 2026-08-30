@@ -122,6 +122,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   by eight threads, and every kind of refusal in a loop with the good
   programs still answering after each round. No interpreter, no new
   dependency, seconds to run.
+- The two infinite levels of `L:` and `S:`. `u L:_ y` is u applied to the
+  whole argument, however deeply it is boxed — there is nothing to descend
+  into and nothing to collect — so `# L:_ (1;2;<3 4)` is 3 where `# L:0` is
+  `1;1;2`; `L:__` is the leaves, which is level 0 written the other way
+  round. Both valences, both spellings.
+- A GERUND under the cut and under the rank conjunction, one verb per
+  piece: `` (+:`*:);.1 ] 1 2 3 `` is `2 4 6`, and `` (+:`*:)"1 ] 2 3$i.6 ``
+  doubles the first row and squares the second. A boxed left operand of `"`
+  is still the constant verb `m"n` where it holds ONE box, or where the
+  rank is infinite in all three places; the dyad has no meaning, as it has
+  none in the reference. The dyadic infix and outfix hand their verbs out
+  per window too, which they did not before.
 
 ### Changed
 
@@ -136,6 +148,10 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `x ! y` below its diagonal for a large left argument. The answer is zero
+  wherever a whole y sits under a whole x, and past the width at which the
+  falling factorial is taken the gamma quotient read a pole over a pole as
+  no value at all: `100000000 ! 2` raised a NaN error and is 0.
 - `;` (raze) over boxes whose contents have unequal rank. An opened value
   whose items have fewer axes than the others is ONE item of the common
   shape, not several of a smaller one, so `; ('ab';(2 2$'wxyz'))` is three

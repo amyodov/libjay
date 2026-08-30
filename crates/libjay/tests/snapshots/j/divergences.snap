@@ -55,3 +55,29 @@
 ? jconsole divides exactly here and libjay in f64
 < 0 1 0.5 0.333333
 > j: 0 1 1r2 1r3
+= 5 <./\\. (1;2)
+? the reference types this fold for + and not for <.
+< <error>
+> j:
+= 5 */\\. (2;5)
+? the reference types this fold for + and not for *
+< <error>
+> j:
+= 3 <./\\. (1;2;3)
+? the reference types this fold for + and not for <.
+< <error>
+> j: _
+= 0 >./\\. (<'abc')
+? the reference types this fold for + and not for >.
+< <error>
+> j: +---+---+
+> j: |abc|abc|
+> j: +---+---+
+= (9007199254740992) *. (9007199254740993)
+? jconsole holds both in one double and libjay keeps them exact
+< 8.11296e31
+> j: 9.0072e15
+= *: &.#. (1r2 1r3)
+? jconsole keeps the rationals through the obverse and libjay computes in f64
+< 1.77778
+> j: 16r9

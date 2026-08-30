@@ -4391,3 +4391,35 @@ the register.
   other control sentence that produces no value yields J's `i. 0 0`, and a
   label doing that would wipe out the value the body had in hand — the
   reference answers 5 for a body of `5` followed by `label_a.`.
+- 2026-08-30 — A GERUND left of the rank conjunction cycles. The 0.5.0
+  certification sweep found `` (+:`*:)"0 ] 1 2 3 `` answering the gerund's
+  own boxes here and `2 4 6` in the reference: every boxed noun left of `"`
+  had been the constant verb `m"n`. Nineteen probes of the oracle settled
+  where the line runs, and it is not where a document would have put it.
+  ONE box is data whatever it holds — `` (<'+:')"0 `` is that box once per
+  cell — and two atomic representations or more are a gerund. A rank that
+  is infinite in all three places leaves the constant verb standing
+  (`"_`, `"_ _`, `"_ _ _`), and every other rank cycles, `"3` and `"__` and
+  the mixed `"0 _` included, so the test is on the rank SPEC and not on the
+  monadic rank alone. The dyad has no meaning there and none here. The same
+  cycling reaches the cut and the dyadic infix and outfix, which had been
+  giving every piece the first verb; `cycled()` already existed for the
+  monadic prefix, suffix, key and oblique, so each of those was one index
+  threaded through a loop.
+- 2026-08-30 — `L:_` and `S:_` are the whole argument, `L:__` its leaves.
+  The two infinite levels were the largest single cause in the 0.5.0 sweep
+  — 707 of 1722 mismatches — and both are one line of semantics: there is
+  nothing to descend into at `_`, so both spellings and both valences are
+  the operand applied to what they were given, and `__` is level 0 written
+  from the other end. `_` is carried as `RANK_INF` rather than as a level
+  the descent could compute, because `boxing_level(y) + level` for a level
+  of minus infinity underflows before it can be clamped.
+- 2026-08-30 — `x ! y` is zero wherever a whole y sits under a whole x, at
+  every size. libjay takes the falling factorial for a whole x up to 4096
+  and the gamma quotient past that, and the quotient reads a pole over a
+  pole as a NaN where the product would have found a zero factor and
+  stopped: `100000000 ! 2` was "no value" and is 0. The two shapes the
+  quotient still cannot reach — a negative whole y and a fractional one
+  under such an x — are named rather than guessed at: both want the
+  LOGARITHMS of the gamma function, which is a different implementation and
+  not this fix.

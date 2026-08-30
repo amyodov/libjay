@@ -235,7 +235,11 @@ need of it); `` ` `` (tie) and `@.` (agenda).
 `u L: n` and `u S: n` apply u at a boxing level: u runs on every subarray
 whose `L.` is n or below, and `L:` puts each answer back in the box its
 operand came from while `S:` spreads them into the items of one array. A
-negative n counts down from the argument's own level. Dyadically both
+negative n counts down from the argument's own level, and the two
+infinities are the two ends of that descent: `_` is the whole argument,
+however deeply it is boxed, so `# L:_ (1;2;<3 4)` is 3 where `# L:0` is
+`1;1;2`, and `__` is its leaves, which is level 0 written the other way
+round. Dyadically both
 arguments are descended together and u is applied to each pair; a side that
 has already reached its level is held while the other descends, so `1 ,L:0
 (3;4)` reaches every leaf with the same left argument. Two sides that both
@@ -272,8 +276,22 @@ each PIECE, monadically: `` u`v\ `` to each prefix, `` u`v\. `` to each
 suffix, and `` u`v/. `` to each diagonal of the oblique or, dyadically, to
 each group of the key. The pieces have different lengths, so the answers
 are framed and padded as any other list of cells is — `` (+`-)\ 1 2 3 ``
-is a three-by-three whose rows are `+1`, `-(1 2)` and `+(1 2 3)`. Under any
-other adverb a gerund is still a named gap.
+is a three-by-three whose rows are `+1`, `-(1 2)` and `+(1 2 3)`. The
+DYADIC infix and outfix hand their verbs out the same way, one per window
+(`` 2 (+:`*:)\ 1 2 3 4 `` doubles the first window and squares the second).
+Under any other adverb a gerund is still a named gap.
+
+Two CONJUNCTIONS hand a gerund out per piece as well. The cut gives one
+verb to each piece the frets make — `` (+:`*:);.1 ] 1 2 3 `` is `2 4 6` —
+and the rank conjunction gives one to each cell the rank names, so
+`` (+:`*:)"1 ] 2 3$i.6 `` doubles the first row and squares the second.
+The rank conjunction is the one place where the reading has to be chosen:
+a boxed left operand is ordinarily the CONSTANT verb `m"n`, and it stays
+that where the gerund holds one box (`` (<'+:')"0 ] 1 2 3 `` is that box
+three times) or where the rank is infinite in all three places
+(`` (+:`*:)"_ `` is the gerund itself, `` (+:`*:)"_ 0 `` cycles). The dyad
+has no meaning: `` 1 (+:`*:)"0 ] 1 2 3 `` is a domain error, as it is in
+the reference.
 
 The representation is reconstructed from the verb tree rather than kept
 from the source, so the spellings that differ only by the rank they set are
@@ -2091,6 +2109,27 @@ oracle directly, one entry per line of
   integral work in f64 throughout, so `p. 1r2 _3r2 1` is `1 1r2` there and
   `1 0.5` here, and `0 p.. 1 1 1x` is `0 1 1r2 1r3` there and
   `0 1 0.5 0.333333` here. The numbers are the same; their storage is not.
+  The obverse of a base conversion reads the same way: `*: &.#. (1r2 1r3)`
+  is `16r9` there and `1.77778` here.
+- The dyadic outfix types its whole argument before any piece is cut, which
+  is what makes `2 +/\. 'abc'` a domain error although every piece it
+  leaves behind holds one character. Over BOXES the reference does not
+  follow that rule of its own: `5 +/\. (1;2)` is a domain error there while
+  `5 <./\. (1;2)` and `5 */\. (2;5)` — the same shape, the same argument,
+  no piece left over — are the empty, and `0 >./\. (<'abc')` answers a pair
+  of boxes no maximum was ever taken of. Two of those cannot both be a
+  rule. libjay asks the operand once, of the whole argument, whichever fold
+  it is, and refuses where that has no meaning.
+- Two whole numbers a double cannot tell apart. Once the verb is not one of
+  jconsole's integer special cases it holds every number in a double, so
+  `9007199254740992` and `9007199254740993` are one value to its `*.` and
+  `9007199254740992 *. 9007199254740993` is `9.0072e15` there; libjay keeps
+  them as the integers they were written as and answers their real least
+  common multiple. The comparison tolerance is not what parts the two — the
+  numbers are equal in the reference's arithmetic before any tolerance is
+  consulted. The same boundary runs the other way for `2 #:`, where the
+  reference is the exact one and libjay is not; that one is a gap and is
+  listed above rather than here.
 - APL dyadic `⌽` and `⊖` reduce a large rotate amount whole; GNU APL
   truncates it to a signed 32-bit integer first, so `9223372036854775806⌽1 2 3`
   is `1 2 3` here and `2 3 1` there.
@@ -2472,7 +2511,14 @@ sections above is also collected here.
   the word being collected rather than ending it, and what the machine
   emits at the end of the input after them followed from no rule the probes
   could confirm; and the atomic representation of a
-  capped fork or an explicit definition. In APL: a variant option other than `⎕CT` and `⎕IO`, or one that is
+  capped fork or an explicit definition. The 2026-08-30 certification sweep
+  added three more: `#.` and `#:` over COMPLEX numbers, which the reference
+  answers (`#. 3j4 1j_1` is `7j7`) and libjay refuses by name; `x ! y` for
+  a whole x past the width at which the falling factorial is taken with a
+  negative or fractional y, which needs the logarithms of the gamma
+  function rather than its values; and `2 #: y` for a whole y past 2⁵², where
+  libjay converts to a double and loses the last digit that the reference
+  keeps (`2 #: 4503599627370497` is 1 there and 0 here). In APL: a variant option other than `⎕CT` and `⎕IO`, or one that is
   not settled when the program is compiled; a nested argument to dyadic
   `⍕`; a stencil with a movement row; a label sharing a definition with
   a control structure; and an axis specification on a function that is not
