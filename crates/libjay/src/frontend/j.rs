@@ -2976,10 +2976,14 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
     };
     match glyph {
         "\"" => {
-            if v.is_verb() {
-                return Err(Error::not_yet("verb rank (u\"v)", span));
-            }
-            let ranks = rank_spec(&v, span)?;
+            // A VERB on the right lends its own three ranks: `u"v` is
+            // `u"(v b. 0)`, which is what makes `<"(+/)` box the whole
+            // argument and `<"(<"1)` box each of its rows.
+            let ranks = if v.is_verb() {
+                verb_operand(v.clone(), span)?.ranks()
+            } else {
+                rank_spec(&v, span)?
+            };
             // `m"n` is the CONSTANT verb: a noun on the left is the answer
             // itself, whatever the arguments are, and n says how large a
             // cell each copy stands for.

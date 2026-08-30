@@ -12135,7 +12135,18 @@ fn matrix_inverse(y: &Array, span: Span) -> Result<Array> {
 /// `x %. y` / `x ⌹ y`: the least-squares solution of `y a = x`.
 fn matrix_divide(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let (a, m, n) = as_matrix(y, span)?;
-    let (b, bm, k) = as_matrix(x, span)?;
+    // `%.` takes its right-hand side WHOLE — its left rank is infinite —
+    // so a right-hand side of rank 3 or more is one column per element of
+    // an item, solved together and given the item's own axes back.
+    let (b, bm, k) = if x.rank() > 2 {
+        let v = x
+            .to_f64_vec()
+            .ok_or_else(|| Error::domain("matrix division needs numeric data", span))?;
+        let rows = x.shape[0];
+        (v, rows, x.count() / rows.max(1))
+    } else {
+        as_matrix(x, span)?
+    };
     if bm != m {
         return Err(Error::new(
             ErrorKind::Length,
@@ -12153,8 +12164,15 @@ fn matrix_divide(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let sol = lstsq(&a, m, n, &b, k)
         .ok_or_else(|| Error::domain("the system is singular", span))?;
     // The right-hand side's own rank decides the answer's: a vector in gives
-    // one solution vector, a matrix in gives one column per column.
-    let shape = if x.rank() == 2 { vec![n, k] } else { vec![n] };
+    // one solution vector, and anything of a higher rank keeps every axis
+    // but the leading one, which the solution's own length replaces.
+    let shape = if x.rank() >= 2 {
+        let mut s = vec![n];
+        s.extend_from_slice(&x.shape[1..]);
+        s
+    } else {
+        vec![n]
+    };
     Ok(Array::new(shape, Data::F64(sol.into())))
 }
 

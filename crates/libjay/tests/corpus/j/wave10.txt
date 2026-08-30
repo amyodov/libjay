@@ -26,3 +26,22 @@ $ (<0 0 0) <;.1 i.3 3
 $ ((<0 0 0),(<1 0 0)) <;.1 i.3 3
 ((<1 0 1),(<1 0 0)) +/;.1 i.3 3
 (<1 0 1) <;.1 (i.3 3 3)
+
+// Ranks taken from a verb: `u"v` runs u at the three ranks v has.
+<"(+/) i.2 3
+<"(<"1) i.2 3
+<"(+/"1) i.2 3
+$"(,:) i.2 3
+2 (+"(<"1)) i.2 3
+<"(0:) i.2 3
++/"(<"1) i.2 3
+
+// Matrix divide takes its right-hand side whole, so one of rank 3 or more
+// is one column per element of an item.
+(i.2 2) %. (i.2 2 2)
+(2 2 $ 1 0 0 1) %. (i.2 2 2)
+(i.2 2 2) %. (2 2 $ 1 0 0 1)
+(i.2 2 2) %. (2 2$ 2 0 0 1)
+(i.2 3 2) %. (2 2$ 2 0 0 1)
+$ (i.2 3 2) %. (2 2$ 2 0 0 1)
+(i.2 2 2) %. (i.2 2)
