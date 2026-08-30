@@ -156,10 +156,21 @@ fn unicode_converts_in_the_direction_the_form_asks_for() {
     assert_eq!(val(Lang::J, "3 u: 'abc'"), i64s(&[3], &[97, 98, 99]));
     assert_eq!(val(Lang::J, "10 u: 955"), text(&[], "λ"));
     assert_eq!(val(Lang::Apl, "⎕UCS 955"), text(&[], "λ"));
-    // The byte-oriented forms are named, not guessed at.
-    let e = err(Lang::J, "8 u: 'ab'");
+    // The byte-oriented forms. libjay's one character type holds
+    // codepoints, so a list every one of whose codepoints is a byte is
+    // what stands for J's byte string: 8 leaves that alone and packs
+    // anything else into its UTF-8 bytes, and 9 reads those bytes back.
+    assert_eq!(val(Lang::J, "8 u: 'ab'"), text(&[2], "ab"));
+    assert_eq!(val(Lang::J, "3 u: 8 u: 10 u: 955"), i64s(&[2], &[206, 187]));
+    assert_eq!(val(Lang::J, "9 u: 8 u: 10 u: 955"), text(&[1], "λ"));
+    assert_eq!(val(Lang::J, "3 u: 1 u: 10 u: 955"), i64s(&[], &[187]));
+    assert_eq!(val(Lang::J, "2 u: 'ab'"), text(&[2], "ab"));
+    // A form the reference gives no meaning to, and a fit only characters
+    // can take.
+    let e = err(Lang::J, "4 u: 'ab'");
     assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("unicode form"), "{}", e.msg);
+    assert!(e.msg.contains("unicode conversion form"), "{}", e.msg);
+    assert_eq!(err(Lang::J, "1 u: 955").kind, ErrorKind::Domain);
     // Not a codepoint at all.
     assert_eq!(err(Lang::J, "10 u: _1").kind, ErrorKind::Domain);
 }
