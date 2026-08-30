@@ -9053,6 +9053,12 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
                     LookupLeft::AnyRank => {}
                 }
             }
+            // J's `I.` compares EXACTLY, where APL's `⍸` consults ⎕CT:
+            // `1 2 3 I. 1.9999999999999998` is 1 in jconsole and
+            // `(1 2 3)⍸1.9999999999999998` is 2 in GNU APL, the bound being
+            // tolerantly equal to the value in both. Grade, which orders
+            // the non-numeric bounds, is already exact for J.
+            let tol = if apl { tol } else { Tol::EXACT };
             interval_index(x, y, offset, closed, tol, Grading::of(cfg.rules, tol), span)
         }
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
@@ -11137,7 +11143,9 @@ fn axis_prim(
         None => match p.monad {
             // `,[K]` and `⍪[K]`: the reference reads an axis on either
             // glyph as the ravel's, whichever axis the glyph picks alone.
-            MonadOp::Ravel | MonadOp::TableOf => ravel_axes(y, spec, span)?,
+            MonadOp::Ravel | MonadOp::TableOf => {
+                ravel_axes(y, spec, p.monad == MonadOp::TableOf, span)?
+            }
             // `⊂[K]`: the named axes become the shape of each item, the
             // rest the shape of the answer. Dyalog's `↓[k]` is the same
             // function, and splits ONE axis off.
@@ -11367,7 +11375,7 @@ fn reshaped(y: &Array, shape: Vec<usize>) -> Array {
 
 /// `,[K]y`: the named axes run together into one, and a FRACTIONAL K adds a
 /// new axis of length one at the gap it names.
-fn ravel_axes(y: &Array, spec: &AxisSpec, span: Span) -> Result<Array> {
+fn ravel_axes(y: &Array, spec: &AxisSpec, table: bool, span: Span) -> Result<Array> {
     let r = y.rank();
     if let AxisSpec::Between(pos) = spec {
         if *pos > r {
@@ -11387,10 +11395,13 @@ fn ravel_axes(y: &Array, spec: &AxisSpec, span: Span) -> Result<Array> {
         return Ok(y.clone());
     }
     let ks = axis_list(spec, r, span)?;
-    // No axis named: a new one of length one, after the last.
+    // No axis named: a new one of length one, at the end the glyph works
+    // from — after the last axis for `,`, before the first for `⍪`, which
+    // is where each puts the axis it makes when no axis is named at all.
+    // `⍴,[⍳0]2 3⍴⍳6` is `2 3 1` in GNU APL and `⍴⍪[⍳0]2 3⍴⍳6` is `1 2 3`.
     if ks.is_empty() {
         let mut shape = y.shape.clone();
-        shape.push(1);
+        shape.insert(if table { 0 } else { shape.len() }, 1);
         return Ok(reshaped(y, shape));
     }
     // The axes must be a run, ascending: only neighbours can be laid end to

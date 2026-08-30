@@ -357,3 +357,37 @@ i. 3j0
 #: ''
 i. ''
 2 #. 0$<1
+
+// The interval index compares EXACTLY. It is the one comparison in J that
+// does not consult the comparison tolerance: a bound tolerantly equal to
+// the value is still counted when it is exactly less, so the answer flips
+// at the bound itself rather than a tolerance either side of it. APL's `⍸`
+// does consult ⎕CT, so the two are not one function with two spellings.
+0.3 I. (0.1 + 0.2)
+0.3 I. 0.3
+1 2 3 I. 2
+1 2 3 I. 2.0000000000000004
+1 2 3 I. 1.9999999999999998
+1 2 3 I. (2 + 2e_14)
+1 2 3 I. (2 - 2e_14)
+100000000 I. 100000000.00000001
+1 2 3 I. 2.5
+
+// The least common multiple of exact numbers keeps its sign, as the
+// machine-integer path always has: the sign of an LCM is the product's,
+// the divisor being the positive greatest common divisor.
+_5 *. 2
+_5x *. 2
+_5x *. 2x
+_5x *. 5x
+5 *. _5x
+_5x *. _5x
+_4x *. 6x
+0x *. _5x
+(_5x , 5x) *. 2
+_1r2 *. 1r3
+1r2 *. _1r3
+_1r2 *. _1r3
+_5x +. 5x
+_5x +. 2x
+_1r2 +. 1r3

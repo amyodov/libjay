@@ -311,3 +311,17 @@
 +/[¯1]2 3⍴⍳6
 ⊂[2]2 3⍴⍳6
 ,[¯1]2 3⍴⍳6
+
+// An EMPTY axis list names no axis, so the answer is the argument with a
+// new axis of length one — at the end the glyph works from. `,` lays its
+// axis after the last, `⍪` before the first, which is where each puts the
+// axis it makes when no axis is named at all.
+⍴,[⍳0](2 3⍴⍳6)
+⍴⍪[⍳0](2 3⍴⍳6)
+⍴,[⍬](2 3⍴⍳6)
+⍴⍪[⍬](2 3⍴⍳6)
+⍪[⍳0](2 3⍴⍳6)
+,[⍳0](2 3⍴⍳6)
+⍴⍪[⍳0]'abc'
+⍴,[⍳0]'abc'
+⍴⍪[⍳0]5

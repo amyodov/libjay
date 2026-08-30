@@ -80,3 +80,13 @@
 0○0.5
 2○○1
 1 2 3○1
+
+// The least common multiple keeps the sign of the product; the greatest
+// common divisor is positive.
+¯5∧2
+¯5∧5
+5∧¯5
+¯5∧¯5
+¯4∧6
+¯5∨5
+¯5∨2

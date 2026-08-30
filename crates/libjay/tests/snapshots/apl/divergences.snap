@@ -374,12 +374,6 @@
 > gnu: 4
 > gnu: 5
 > gnu: 6
-= ⍪[⍳0]2 4 6
-? an empty axis list is refused here, ignored there
-< 2
-< 4
-< 6
-> gnu: 2 4 6
 = 1 2↓[⍳0]2 3⍴⍳6
 ? an empty axis list is refused here, ignored there
 < <error>

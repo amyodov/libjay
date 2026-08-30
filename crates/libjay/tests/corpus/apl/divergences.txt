@@ -268,7 +268,10 @@ N←{42} ⋄ N 5
 // `1↓[0]M` aborts the interpreter outright with an internal C++ assertion
 // (`r < rho_rho`). An EMPTY axis list splits the same way: `⍪[⍳0]v`,
 // `,[⍳0]v`, `1 2↓[⍳0]M` and `⊂[⍳0]M` are accepted there, `⌽[⍳0]M`,
-// `+/[⍳0]M` and `2⌽[⍳0]M` are not, and `2↑[⍳0]M` is a LENGTH ERROR. A
+// `+/[⍳0]M` and `2⌽[⍳0]M` are not, and `2↑[⍳0]M` is a LENGTH ERROR. The
+// two catenate glyphs are no longer part of that: an empty axis list names
+// no axis, so `,[⍳0]` and `⍪[⍳0]` add one of length one at the end each
+// glyph works from, which is what GNU APL answers and what libjay does. A
 // FRACTIONAL axis outside the range is clamped rather than refused:
 // `,[¯0.5]M` is the argument and `,[3.5]M` is `,[2.5]M`.
 //
@@ -296,8 +299,6 @@ N←{42} ⋄ N 5
 ? a fractional axis outside the range is refused here, clamped there
 ,[3.5]2 3⍴⍳6
 ? a fractional axis outside the range is refused here, clamped there
-⍪[⍳0]2 4 6
-? an empty axis list is refused here, ignored there
 1 2↓[⍳0]2 3⍴⍳6
 ? an empty axis list is refused here, ignored there
 
