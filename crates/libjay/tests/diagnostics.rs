@@ -205,12 +205,6 @@ const J_PROMISES: &[Case] = &[
         "m",
         &["writing this modifier back out"],
     ),
-    j(
-        "f =. 3 : 0\ny + 1\n)\nf",
-        ErrorKind::NotYet,
-        "f",
-        &["back out as J source"],
-    ),
     j("0 s: s: <'a'", ErrorKind::NotYet, "0 s: s: <'a'", &["symbol-table form"]),
     j(
         "(0;(2 2 2 $ 0 0 1 4 0 1 1 0);(' ' = a.)) ;: 'a b'",

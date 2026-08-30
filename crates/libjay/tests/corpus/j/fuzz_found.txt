@@ -350,13 +350,21 @@ i. 3j0
 1 <. 3j4
 
 // An EMPTY holds no value of the wrong type, so it is acceptable numeric
-// data wherever numeric data is wanted. An empty BOX is not.
+// data wherever numeric data is wanted — an empty of BOXES included.
 #. ''
 2 #. ''
 '' #. ''
 #: ''
 i. ''
-2 #. 0$<1
+#. 0$<1
+i. 0$<1
+#: 0$<1
+$ #: 0$<1
+2 #: 0$<1
+(0$<1) #. 0$<1
+(0$0) #. 0$<1
+A. 0$<1
++/ . * (0$<1)
 
 // The interval index compares EXACTLY. It is the one comparison in J that
 // does not consult the comparison tolerance: a bound tolerantly equal to

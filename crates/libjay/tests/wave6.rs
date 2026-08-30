@@ -257,9 +257,6 @@ fn the_hypergeometric_series_sums_its_parameters() {
 #[test]
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
-        // A definition whose body is written on the lines below keeps no
-        // text of its own, so a sentence that is one has nothing to show.
-        (Lang::J, "f =. 3 : 0\ny + 1\n)\nf", "back out as J source"),
         (Lang::J, "m =. {{ u/ y }}\nm", "writing this modifier back out"),
         (Lang::Apl, "(A+×)4", "computed value"),
         (Lang::Apl, "3+F←+/", "inside a larger sentence"),

@@ -77,3 +77,11 @@ p. 1r2 _3r2 1
 // the conversion in f64, as `p.`'s roots and `p..`'s integral do above.
 *: &.#. (1r2 1r3)
 ? jconsole keeps the rationals through the obverse and libjay computes in f64
+// An empty of BOXES is acceptable numeric data on both sides — `#. 0$<1`
+// is 0 there and here — but jconsole refuses the one dyadic decode whose
+// left argument is not empty itself. It answers `(0$0) #. 0$<1` and
+// `(0$<1) #. 0$<1` with the same 0, and `2 #: 0$<1` with the empty, so the
+// refusal is not a rule about boxes; libjay reads an empty the one way
+// everywhere.
+2 #. 0$<1
+? jconsole refuses this one dyadic decode and answers every other empty

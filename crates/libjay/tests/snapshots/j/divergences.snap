@@ -81,3 +81,7 @@
 ? jconsole keeps the rationals through the obverse and libjay computes in f64
 < 1.77778
 > j: 16r9
+= 2 #. 0$<1
+? jconsole refuses this one dyadic decode and answers every other empty
+< 0
+> j: <error>

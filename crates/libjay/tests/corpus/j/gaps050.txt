@@ -1,0 +1,117 @@
+// The 0.5.0 claim audit: spellings jconsole answers and libjay named.
+
+// `#.` and `#:` run in the complex arithmetic where a radix or a digit
+// carries an imaginary part. The decode is the same Horner's rule; each
+// digit of the encode is a residue, and the complex residue rounds with
+// the complex floor, which is what puts a NEGATIVE digit in the answer.
+#. 3j4 1j_1
+#. 1j2 3j4 5j6
+#. 0j1 0j1
+#. 3j4 1j_1 2j2
+#. 2j0 3j0
+10 #. 1j1 2j2
+2j1 #. 1 2 3
+1j1 #. 1 2 3
+0j1 #. 1 2 3
+#. 3j4 1r2
+2 #: 3j4 1j_1
+2 #: 5j1
+2 #: _1j1
+2 #: 1j2 3j4
+2 2 2 #: 5j1
+0 2 #: 3j4
+2j1 #: 5
+2j1 #: 5j2
+#: 3j4
+#: 5j0
+#: 1j1
+#: 2j2
+#: 0j5
+#: 0j8
+$ #: 0j8
+#: 3j4 1j_1
+$ #: 3j4 1j_1
+
+// A whole value keeps every binary digit it has, past the width at which
+// a double can no longer divide its way down one at a time.
+2 #: 4503599627370497
+2 #: 4503599627370496
+2 #: 9007199254740993
+2 #: 1234567890123456789
+2 #: 12345678901234567890
+2 #: _4503599627370497
+32 #: 4503599627370497
+2 2 #: 4503599627370497
+2 2 2 #: 9007199254740995
+10 10 10 #: 1234567890123456789
+1000000 1000000 1000000 #: 1234567890123456789
+2 #: 4503599627370497 4503599627370496
+#: 4503599627370497
+$ #: 4503599627370497
+#: 9007199254740993
+#: 4503599627370497 3
+#: 1e15
+#: 1e18
+$ #: 1e18
+#: 12345678901234567890
+#: _5
+2 2 #: 4 - 1e_14
+
+// `x ! y` past the width the falling factorial is taken at. A negative
+// whole y goes through the upper negation and stays exact; a fractional
+// one is the gamma quotient read in logarithms.
+100000000 ! _2
+100000001 ! _2
+1e10 ! _2
+5000 ! _3
+5001 ! _3
+4097 ! _1
+10000 ! _1
+5000 ! _2.5
+5000 ! _0.5
+5000 ! 2.5
+5000 ! 0.5
+4097 ! 0.5
+100000000 ! 2.5
+1e10 ! 2.5
+1e5 ! 3.7
+1e5 ! _3.7
+0.5 ! 5000
+2.5 ! 5000
+_2.5 ! 5000
+1e6 ! 1e6
+1e6 ! 1e6 + 0.5
+5000 ! 5000.5
+5000 ! 10000.5
+20000 ! 1e6
+_5000 ! _10000
+_5000 ! 2.5
+5000 ! 1e300
+5000 ! __
+100000000 ! 2
+
+// A named noun in a fork's LEFT tine is the value the name holds where
+// the fork is written, and it stays that value when the name is given
+// another one.
+c =: 5\nf =: c + ]\nf 3
+c =: 2 3\nf =: c * ]\nf 4
+c =: 5\nf =: c + ]\nc =: 100\nf 3
+c =: 5\nf =: c + ]\nf
+c =: 5\nf =: c + ] + ]\nf 3
+c =: 5\n(c + ]) 3
+c =: 'ab'\nf =: c , ]\nf 'z'
+c =: 5\ng =: +\nf =: c g ]\nf 3
+c =: 1 2 3\nf =: (+/ c) + ]\nf 3
+
+// A definition whose body is written on the LINES BELOW is given back by
+// those lines: one of them inline, more of them under the header again.
+g =: 3 : 0\ny + 1\n)\ng
+g =: 3 : 0\n  y + 1\n)\ng
+g =: 3 : 0\n'don''t' , y\n)\ng
+g =: 3 : 0\nif. y > 0 do. 1 else. 0 end.\n)\ng
+g =: 3 : 0\n)\ng
+g =: 4 : 0\nx + y\n)\ng
+h =: 1 : 0\nu y\n)\nh
+g =: 3 : 0\na =. y + 1\na * 2\n)\ng
+g =: 3 : 0\ny + 1\n)\ng 3
+g =: 3 : 0\ny+1\ny+2\n)\ng 3

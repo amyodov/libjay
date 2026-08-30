@@ -5143,10 +5143,11 @@ mod tests {
     }
 
     #[test]
-    fn a_noun_fork_needs_a_literal_noun() {
-        let e = err("({n} + #) 1 2 3");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("noun forks"), "{}", e.msg);
+    fn a_noun_fork_over_a_parameter_waits_for_its_value() {
+        // A tine whose value arrives with the data derives the fork where
+        // it is applied rather than where it is written.
+        let (v, _) = monad_of(&one("({n} + #) 1 2 3"));
+        assert!(matches!(v, Verb::Deferred(_)), "got {v:?}");
     }
 
     #[test]
