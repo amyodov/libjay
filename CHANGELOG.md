@@ -7,6 +7,32 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- J's tacit definition, `13 : '…'`. It reads an explicit body and answers
+  the tacit verb that computes the same thing: `13 : '(+/y) % #y'` is
+  `+/ % #`, `13 : 'y+1'` is `1 + ]`, `13 : 'x - y - 1'` is `[ - 1 -~ ]`,
+  and `13 : '3'` is `3:`. A body the translation cannot reach becomes the
+  ordinary `3 : '…'` or `4 : '…'`, which is what J itself falls back to,
+  and the verb computes the same thing either way.
+- A sentence that is a verb or a modifier displays it. `mean =. +/ % #` and
+  then `mean` on a line of its own answers `+/ % #`; `m =. /` and then `m`
+  answers `/`; `f =. 3 : 'y + 1'` and then `f` gives the definition's own
+  text back. Brackets appear only where the spelling would otherwise read
+  as something else.
+- `'a b' =. 1 2` names several nouns at once. The value's items are shared
+  out along its leading axis whatever its rank, a scalar goes to every
+  name, a boxed item is opened, and one name on the left takes the whole
+  value. `=:` names globals the same way, and a mismatched count is a
+  length error naming both numbers.
+- `{{)n`, the direct-definition spelling of `0 : 0`. The lines below it are
+  its text: `b =. {{)n` … `}}` gives `b` those lines with their newlines,
+  the `}}` that ends it starts a line, and whatever follows it there
+  belongs to the sentence again.
+- A modifier whose body derives the modifier again — J's way of writing a
+  recursive one. `pw =. 2 : 'if. n = 0 do. ] else. u @ (u pw (n-1)) end.'`
+  and then `(+: pw 3) 1` is 8: the condition is settled where the modifier
+  is derived, so the recursion stops at its base case. A body with no base
+  case says so instead of running out of stack.
+
 - J's bond reads a noun the program computes. `mp =. +/ . *` then
   `(m & mp) ^: 9 m` raises the Fibonacci matrix to a power, and
   `(%&(}: c) - 1:) }. c` turns a series of closes into returns; both used

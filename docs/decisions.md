@@ -4205,3 +4205,59 @@ the register.
   be taken at all the case says so and passes. The `LIBJAY_THREADS` sweep
   is child processes rather than loops because the pool size is frozen at
   the first read, which is a property of the design and not of the test.
+- 2026-08-30 — The definitions wave: `13 : '…'`, the linear representation,
+  `{{)n`, multiple assignment, and a modifier that derives itself.
+  `13 : '…'` is not a second parser. The body is parsed as an ordinary
+  sentence with `x` and `y` standing as names, and the `Expr` tree that
+  comes back — which already carries a real `Verb` at every application —
+  is abstracted over those two leaves: a subtree that reads neither is
+  folded by the constant folder that was already there, `y` becomes `]`,
+  `x` becomes `[`, and each application becomes the train, noun fork or
+  composition that says the same thing. What the translation is HELD TO is
+  the reference's own answer, which is where the rules that are not
+  guessable came from: a body that mentions `x` keeps both valences apart
+  (`f y` is `f@:]` there, `f` where the body is a monad); a constant on the
+  right of a verb changes places with it, with the commutation dropped for
+  the eleven dyads that read the same either way round and replaced by the
+  other spelling where the mirror has one; and a fork whose left tine would
+  need brackets and whose right one would not is written the other way
+  round. Where the abstraction cannot reach, the ordinary explicit
+  definition is the answer, which is the reference's own fallback — libjay
+  falls back in more places, and the verb computes the same thing either
+  way.
+- 2026-08-30 — A sentence that IS a verb or a modifier yields the TEXT it
+  would be written as, as an ordinary character vector, rather than a new
+  kind of value. The alternative — teaching `Outcome` about entities —
+  would have reached the C ABI, the Python surface and every consumer of a
+  program's result, for a display. The text is built from the atomic
+  representation `5!:1` already produces, so one tree serves both, and the
+  bracketing rule is stated once: a train needs brackets as a modifier's
+  left operand, anything a modifier made needs them as a conjunction's
+  right one, and a train in a train's last place is written flat only where
+  the words still count out to the same tree. Two places where J keeps two
+  spellings and libjay's tree keeps one node — the cap fork `[: f g` beside
+  `f@:g`, and `u"b a b` beside `u"a b` — are written the shorter way and
+  recorded in docs/coverage.md as divergences; the `n:` shortcut for a
+  small integer constant lives in the SPELLING and not in the
+  representation, because a gerund reads the representation back and
+  `verb_named "0:"` finds nothing.
+- 2026-08-30 — A modifier body that derives its own modifier is allowed
+  where the derivation happens at parse time, and the guard becomes a DEPTH
+  BOUND rather than a refusal on re-entry. What makes the recursion stop is
+  the body's own `if.`, and its condition is settled by the operands, which
+  are known at derivation: so the derivation phase resolves its control
+  blocks itself and parses only the arm that holds. Parsing both arms is
+  what would loop. The bound is 16, measured rather than chosen — 40 levels
+  of parse-within-a-parse overflowed a test thread's stack in an
+  unoptimised build — and it turns a body with no base case into a
+  diagnostic, which is what the reference's own stack error is. A body that
+  names an argument is still refused: that body belongs to the derived
+  verb, and the reference parses it only where the verb is applied.
+- 2026-08-30 — J's distributed assignment and APL's are one IR node with a
+  flag, not two. `'a b' =. 1 2` shares the value out along its LEADING AXIS
+  whatever its rank and opens each share, so `'a b' =. 2 2 $ i.4` gives `a`
+  a vector; GNU APL calls the same thing a rank error. The flag says which
+  reading is in force, because the difference is the languages' and not an
+  accident — and one name on the left is an ordinary assignment there, the
+  whole value and not its first item.
+

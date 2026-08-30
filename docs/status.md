@@ -202,11 +202,11 @@ conjunctions above:
 | Cap forks `([: g h)` | 🟢 |
 | Noun forks `(n g h)` | 🟡 literal noun only |
 | Verb (tacit) assignment `mean =. +/ % #` | 🟢 |
-| Displaying a bare tacit-verb name (`mean` after `mean =. +/ % #`) | 🔴 named not-yet |
-| Displaying a bare modifier name (`m` after `m =. /`) | 🔴 named not-yet |
+| Displaying a bare tacit-verb name (`mean` after `mean =. +/ % #`) | 🟡 the linear representation, bracketed where the spelling would otherwise read as something else; a cap fork is written `f@:g` and `u"b a b` as `u"a b`, which are the same functions under another spelling, and a definition whose body is on the lines below keeps no text to give back |
+| Displaying a bare modifier name (`m` after `m =. /`) | 🟡 a primitive modifier and an explicit one written inline; one whose body is on the lines below, or a `{{ }}`, keeps no text to give back |
 | `explain` facility | 🟢 |
 | Adverb and conjunction assignment `m =. /` | 🟢 the name is that modifier from the next sentence on |
-| Multiple assignment `'a b' =. …` | 🔴 |
+| Multiple assignment `'a b' =. …` | 🟢 the value's items are shared out whatever its rank, a scalar goes to every name, one name takes the whole value |
 | `=.` vs `=:` scoping | 🟢 a definition has its own frame; `=:` names a global |
 | Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🟢 a body with no sentences at all has neither valence, and refuses |
 | Multi-line definition body `3 : 0` … `)` | 🟢 a lone `:` line separates the monad case from the dyad case |
@@ -214,9 +214,9 @@ conjunctions above:
 | Multi-line modifier body `1 : 0` / `2 : 0` … `)` | 🟢 |
 | `{{ }}` modifier forms | 🟢 the part of speech is read off the operand names the body uses |
 | `{{)a` `{{)c` `{{)v` `{{)d` `{{)m` markers | 🟢 the marker line states the part of speech |
-| `{{)n` noun direct definition | 🔴 named |
-| A modifier body that derives the modifier itself | 🔴 named; the derivation happens at parse time |
-| Tacit definition `13 : '…'` | 🔴 named |
+| `{{)n` noun direct definition | 🟢 the lines below are text, and the `}}` that ends it starts a line |
+| A modifier body that derives the modifier itself | 🟡 a body that names no argument settles its `if.` where the modifier is derived and stops at its base case, bounded at 16 deep; one that names an argument belongs to the derived verb, which libjay parses whole here, and stays a named gap |
+| Tacit definition `13 : '…'` | 🟡 the translation and what it computes; a cap fork is displayed `f@:g` where the reference writes `[: f g`, and a body the abstraction cannot reach becomes the explicit definition, as the reference's own fallback does |
 | Control words `if. while. for. select. try.` | 🟢 `whilst.`, `for_i.`, `fcase.`, `elseif.` included |
 | Control words `throw. catcht. goto_x. label_x.` | 🔴 named |
 | Locales and `18!:` | 🔴 a locative is read as an ordinary name |

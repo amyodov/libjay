@@ -1506,9 +1506,58 @@ J writes it four ways. `3 : '…'` is a monad whose argument arrives as `y`;
 `4 : '…'` is a dyad with `x` and `y` as well. Either with `0` in place of
 the string takes its body from the lines below, ending at a line that is a
 lone `)`. `{{ … }}` is the direct form, on one line or over several, and its
-own words decide its valence: a body that mentions `x` is a dyad. `13 : '…'`,
-which reads an explicit body and writes the tacit verb that matches it, is
-named as a gap.
+own words decide its valence: a body that mentions `x` is a dyad.
+
+### `13 : '…'`, the tacit definition
+
+`13 : '…'` reads an explicit body and answers the TACIT verb that computes
+the same thing. The body is parsed as an ordinary sentence with `x` and `y`
+standing as names, and the tree that comes back is abstracted over them: a
+part that reads neither argument is folded to its value, `y` becomes `]` and
+`x` becomes `[`, and each application becomes the train, noun fork or
+composition that says the same thing without naming an argument. A body that
+mentions `x` derives a dyad, and there both valences are kept apart — `f y`
+becomes `f@:]` rather than `f` — while a body that mentions only `y` derives
+a monad, where the argument arrives whole.
+
+Three shortenings follow the reference. A constant that is an integer atom
+between `_9` and `9` is written `n:` and everything else `m"_`. `x f y` is
+written `f` and `y f x` its commutation, with the commutation dropped for
+the dyads that say the same thing either way round (`+ * <. >. = ~: +. *.
++: *: -:`) and replaced by the other spelling where the mirror has one
+(`<`/`>`, `<:`/`>:`). And a fork whose LEFT tine would need brackets and
+whose right one would not is written the other way round.
+
+A body the abstraction cannot reach becomes the ordinary explicit definition
+— `3 : '…'` or `4 : '…'` — which is what the reference falls back to as
+well; libjay falls back in more places than it does, and the verb computes
+the same thing either way. A control word in a tacit body is refused, as the
+reference refuses it.
+
+The one difference in what is DISPLAYED is the cap fork. `[: f g` and
+`f@:g` are one function in J and two spellings, and libjay's tree keeps only
+the one node, so a translation that composes monadically is displayed
+`f@:g` where the reference writes `[: f g`. The corpus records the
+translations that have no cap, and the application of the ones that do.
+
+### The linear representation
+
+A sentence that reduces to a verb or a modifier displays it, and what a
+session shows is the LINEAR REPRESENTATION: the text the entity would be
+written as. `mean =. +/ % #` and then `mean` answers `+/ % #`; `m =. /` and
+then `m` answers `/`. Brackets go only where the spelling would otherwise
+read as something else — a train as a modifier's left operand, anything a
+modifier made as a conjunction's right one, a train in a train's last place
+whose words would count out differently — and `{` and `}` carry a space of
+their own so that two never read as `{{` or `}}`.
+
+Three spellings are libjay's own where the reference has two. A cap fork is
+written `f@:g`; `u"b a b` is written `u"a b`, the shorter of the two
+spellings of one rank; and a noun of rank 2 or more has no spelling here at
+all, where the reference writes an expression that BUILDS the value. An
+explicit definition gives back its own header and body where it was written
+inline (`3 : 'y + 1'`); one whose body is on the lines below, or a `{{ }}`,
+keeps no text and is a named gap.
 
 ### Explicit adverbs and conjunctions
 
@@ -1524,7 +1573,12 @@ mentions `v` or `n` is a conjunction, one that mentions `u` or `m` is an
 adverb, and one that mentions neither is a verb. A marker line — `{{)a`,
 `{{)c`, `{{)v`, `{{)d`, `{{)m` — states it outright instead, and the
 reference takes a marker only where nothing else stands on its line.
-`{{)n`, which makes a noun of the body's text, is named as a gap.
+
+`{{)n` makes a noun of the body's text, which is the direct-definition
+spelling of `0 : 0`. Its body is text and not source, so the lexer takes the
+lines below whole: the `}}` that ends it has to START a line, whatever
+follows it there belongs to the sentence again, and every line of the body
+keeps its own newline. An empty body is the empty vector, not one newline.
 
 The body runs at one of two moments, and which one it is depends on whether
 it mentions an argument. A body that mentions `x` or `y` becomes the body of
@@ -1538,9 +1592,16 @@ applied to `+:` is the tacit verb `+:@+:`, and `1 : '3 + 4'` is the noun 7.
 libjay derives at parse time, so both phases are settled before the program
 runs: the operands are substituted into the body's words and the body is
 parsed with them in place, which is what J's substitution rule describes.
-The consequence is that a body which derives its own modifier — J's way of
-writing a recursive one — would parse for ever, and libjay names it as a gap
-rather than looping.
+The derivation phase settles its own `if.` blocks: the operands are known
+there, so the condition is read now and only the arm that holds is parsed.
+That is what lets a body which derives its own modifier — J's way of writing
+a recursive one — stop at its base case, as in
+`2 : 'if. n = 0 do. ] else. u @ (u pw (n-1)) end.'`. The nesting is bounded
+at 16, which is a diagnostic for a body with no base case rather than a
+parse that runs out of machine stack; the reference raises a stack error for
+the same body. A body that names an argument belongs to the DERIVED verb,
+which the reference parses only where that verb is applied and libjay parses
+whole here, so a recursion written there is still a named gap.
 
 APL writes it two ways. `{…}` is a dfn: `⍵` is the right argument, `⍺` the
 left, `⋄` and a line break separate its statements, and it nests. `∇ Z←L F R;a`
@@ -1893,6 +1954,11 @@ language and reference each entry compares against is named inline;
 oracle directly, one entry per line of
 `crates/libjay/tests/corpus/apl/divergences.txt`.
 
+- The linear representation writes one spelling where J keeps two. `[: f g`
+  and `f@:g` are one function, and libjay's tree holds one node for both, so
+  a verb built either way is displayed `f@:g` — which matters most for
+  `13 : '…'`, whose translations compose monadically. `u"b a b` is displayed
+  `u"a b` for the same reason: two spellings of one rank, one node.
 - J's `u:` widens a literal to a wider character type, which libjay does
   not have: the widened value has the same items and the same codes here
   (`# u: 'é'` is 2 and `3 u: u: 'é'` is `195 169` in both), and only the
@@ -2254,10 +2320,17 @@ sections above is also collected here.
   the indices, w the array they go into — is implemented.
 - APL's dyadic `@`: `x f@g y`, where both operands read the left argument
   too. The monad is implemented.
-- An explicit modifier whose body derives the modifier itself is refused:
-  libjay derives at parse time, so the body would be parsed for ever.
-  Recursion inside the derived verb's own body, by `$:` or by a verb's name,
-  works as it does anywhere else. `13 : '…'` and `{{)n` are gaps too.
+- An explicit modifier whose body NAMES AN ARGUMENT and derives the
+  modifier itself is refused: that body belongs to the derived verb, which
+  the reference parses only where the verb is applied and libjay parses
+  whole at parse time, so it would be parsed for ever. A body that names no
+  argument derives at parse time and does stop at its base case, bounded at
+  16 deep. Recursion inside the derived verb's own body, by `$:` or by a
+  verb's name, works as it does anywhere else.
+- Displaying a definition whose body is written on the LINES BELOW, and a
+  `{{ }}`: libjay keeps a definition's text only where it was written
+  inline, so `f =. 3 : 0` … `)` and then `f` is a named gap where the
+  reference gives the listing back. The inline forms display.
 - Named on their own, beyond what
   the tables above already mark "not supported yet": a sparse array of
   CHARACTERS or of BOXES, which J has a type code for and refuses to make
