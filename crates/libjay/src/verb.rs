@@ -330,6 +330,38 @@ impl std::fmt::Display for FillAtom {
     }
 }
 
+/// What a take, a join or a frame writes where a value runs out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Gap {
+    /// The type's own fill: a zero, a blank, an empty box.
+    Type,
+    /// APL's prototype of the argument's first item.
+    Prototype,
+    /// The element J's `!.f` names.
+    Atom(FillAtom),
+}
+
+impl Gap {
+    fn of(prototype: bool, atom: Option<FillAtom>) -> Gap {
+        match atom {
+            Some(f) => Gap::Atom(f),
+            None if prototype => Gap::Prototype,
+            None => Gap::Type,
+        }
+    }
+
+    fn prototype(self) -> bool {
+        self == Gap::Prototype
+    }
+
+    fn atom(self) -> Option<FillAtom> {
+        match self {
+            Gap::Atom(f) => Some(f),
+            _ => None,
+        }
+    }
+}
+
 /// An argument and a fill brought to one type, so that a fill of a wider
 /// type widens what it fills: `5 {.!.9.5 ] 1 2 3` answers floats.
 fn fitted_fill(a: &Array, f: FillAtom, span: Span) -> Result<(Array, Array)> {
@@ -2842,7 +2874,7 @@ fn assemble_mixed(
         let fit = if c.shape == common {
             c.clone()
         } else {
-            take(&counts, c, false, true, true, filled, NearInt::J, span)?
+            take(&counts, c, Gap::of(false, filled), true, true, NearInt::J, span)?
         };
         padded.push(boxed_elements(&fit));
     }
@@ -2977,7 +3009,7 @@ fn padded_with(cells: Vec<Array>, filled: FillAtom, span: Span) -> Result<Vec<Ar
             if c.shape == common {
                 fitted_fill(c, filled, span).map(|(a, _)| a)
             } else {
-                take(&counts, c, false, false, true, Some(filled), NearInt::J, span)
+                take(&counts, c, Gap::Atom(filled), false, true, NearInt::J, span)
             }
         })
         .collect()
@@ -7539,7 +7571,7 @@ fn catenate_at(
             to[axis] = a.shape[axis] as i64;
             // The lengths are ours, not the program's: no float
             // reaches the near-integer admission on this path.
-            take(&Array::from_i64(to), a, false, false, true, filled, NearInt::J, span)
+            take(&Array::from_i64(to), a, Gap::of(false, filled), false, true, NearInt::J, span)
         };
         (fit(&xa)?, fit(&ya)?)
     } else {
@@ -9072,10 +9104,9 @@ fn count_rank(verb: &str, counts: usize, rank: usize, span: Span) -> Error {
 fn take(
     x: &Array,
     y: &Array,
-    prototype_fill: bool,
+    gap: Gap,
     apl: bool,
     per_axis: bool,
-    filled: Option<FillAtom>,
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
@@ -9085,13 +9116,13 @@ fn take(
     // character. J fills with the empty box instead, or with the element
     // `!.f` names where one was given.
     let widened;
-    let (y, fill) = match filled {
+    let (y, fill) = match gap.atom() {
         Some(f) => {
             let (a, atom) = fitted_fill(y, f, span)?;
             widened = a;
             (&widened, Some(atom))
         }
-        None => (y, if prototype_fill { prototype_of(y) } else { None }),
+        None => (y, if gap.prototype() { prototype_of(y) } else { None }),
     };
     let promoted;
     // A scalar right argument is treated as a one-item array of whatever
@@ -9113,7 +9144,7 @@ fn take(
         return Err(count_rank("take", counts.len(), base.rank(), span));
     }
     if let Some(run) = leading_run(base, &counts, false) {
-        return Ok(keep_proto(run, base, prototype_fill));
+        return Ok(keep_proto(run, base, gap.prototype()));
     }
     let mut out_shape = base.shape.clone();
     for (a, &k) in counts.iter().enumerate() {
@@ -9148,7 +9179,7 @@ fn take(
         }
         odometer(&mut coord, &out_shape);
     }
-    Ok(keep_proto(Array::new(out_shape, data), base, prototype_fill))
+    Ok(keep_proto(Array::new(out_shape, data), base, gap.prototype()))
 }
 
 /// APL's prototype of a nested array: the first item's own shape, with a
@@ -9270,7 +9301,8 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::Take => {
             let apl = cfg.rules.lang == crate::Lang::Apl;
             let per_axis = cfg.rules.axis_counts == AxisCounts::PerAxis;
-            take(x, y, cfg.agreement == Agreement::ExactOrScalar, apl, per_axis, cfg.fill, cfg.near(), span)
+            let gap = Gap::of(cfg.agreement == Agreement::ExactOrScalar, cfg.fill);
+            take(x, y, gap, apl, per_axis, cfg.near(), span)
         }
         DyadOp::Drop => drop_(
             x,
@@ -9380,7 +9412,7 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             interval_index(x, y, offset, closed, tol, Grading::of(cfg.rules, tol), span)
         }
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
-        DyadOp::MatrixDivide => matrix_divide(x, y, span),
+        DyadOp::MatrixDivide => matrix_divide(x, y, cfg.rules.lang == crate::Lang::J, span),
         DyadOp::PartitionEnclose => partition_enclose(x, y, cfg.near(), span),
         DyadOp::PartitionCounts => partition_counts(x, y, cfg.near(), span),
         DyadOp::Squad { origin, leading } => {
@@ -11502,7 +11534,7 @@ fn axis_prim(
                 for &a in &axes {
                     counts[a] = 1;
                 }
-                take(&Array::from_i64(counts), y, true, true, true, None, near, span)?
+                take(&Array::from_i64(counts), y, Gap::Prototype, true, true, near, span)?
             }
             _ => return Ok(None),
         },
@@ -11527,7 +11559,7 @@ fn axis_prim(
             DyadOp::Take => {
                 let counts = axis_counts_at(x, y, spec, "take", true, near, span)?;
                 let apl = cfg.rules.lang == crate::Lang::Apl;
-                take(&counts, y, cfg.agreement == Agreement::ExactOrScalar, apl, true, cfg.fill, near, span)?
+                take(&counts, y, Gap::of(cfg.agreement == Agreement::ExactOrScalar, cfg.fill), apl, true, near, span)?
             }
             DyadOp::Drop => {
                 let counts = axis_counts_at(x, y, spec, "drop", false, near, span)?;
@@ -12451,12 +12483,15 @@ fn matrix_inverse(y: &Array, span: Span) -> Result<Array> {
 }
 
 /// `x %. y` / `x ⌹ y`: the least-squares solution of `y a = x`.
-fn matrix_divide(x: &Array, y: &Array, span: Span) -> Result<Array> {
+///
+/// `planes` is J's reading of a right-hand side of rank 3 or more, which
+/// APL's `⌹` refuses instead.
+fn matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array> {
     let (a, m, n) = as_matrix(y, span)?;
     // `%.` takes its right-hand side WHOLE — its left rank is infinite —
     // so a right-hand side of rank 3 or more is one column per element of
     // an item, solved together and given the item's own axes back.
-    let (b, bm, k) = if x.rank() > 2 {
+    let (b, bm, k) = if planes && x.rank() > 2 {
         let v = x
             .to_f64_vec()
             .ok_or_else(|| Error::domain("matrix division needs numeric data", span))?;
@@ -17424,7 +17459,7 @@ fn apl_matrix_product(x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<
     };
     let grow = |a: Array, shape: [usize; 2]| -> Result<Array> {
         let want = Array::from_i64(vec![shape[0] as i64, shape[1] as i64]);
-        take(&want, &a, false, true, true, None, cfg.near(), span)
+        take(&want, &a, Gap::Type, true, true, cfg.near(), span)
     };
     let left = grow(square(x, [rows, xk]), [rows, k])?;
     let right = grow(square(y, [yk, cols]), [k, cols])?;

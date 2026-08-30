@@ -199,9 +199,11 @@ fn an_empty_fret_list_is_the_whole_argument() {
     // Frets that are there are read as always.
     assert_empty(Lang::J, "0 0 0 <;.1 'abc'");
     assert_eq!(err(Lang::J, "1 0 <;.1 'abc'").kind, ErrorKind::Length);
-    // A boxed left argument is J's per-axis form, which libjay names as a
-    // gap rather than refusing as a domain.
-    assert_eq!(err(Lang::J, "(<1) <;.1 'abc'").kind, ErrorKind::NotYet);
+    // A boxed left argument is J's per-axis form: one box of frets per
+    // leading axis, and a scalar in it marks every item.
+    assert_eq!(j("(<1) <;.1 'abc'"), j("<\"1 (3 1$'abc')"));
+    // A box holding no fret at all leaves its axis in one piece.
+    assert_eq!(j("(<0$0) <;.1 'abc'"), j(",<'abc'"));
 }
 
 /// With nothing to weigh, write or partition, APL never reads the argument

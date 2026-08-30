@@ -4329,3 +4329,7 @@ the register.
   being threaded through it: an opened value whose items have fewer axes
   than the common item shape is ONE item of that shape, not several of a
   smaller one, so `; ('ab';(2 2$'wxyz'))` is three rows and was four.
+- 2026-08-30 — `%.`'s rank-3 right-hand side is J's alone. APL's `⌹` reads
+  its argument as it stands and calls that shape a rank error, which its
+  own reference does; the dispatch tells the two apart by language rather
+  than by the verb's ranks, since both spell the left rank infinite.

@@ -186,11 +186,15 @@ fn the_fit_conjunction_sets_the_tolerance() {
     assert_eq!(ints(&val(Lang::J, "(<.!.0) 2.9999999999999")), vec![2]);
 }
 
+/// On a verb that does not compare, the fit is the FILL — and on a verb
+/// the reference gives no fit at all, it is refused outright.
 #[test]
-fn fit_on_a_verb_without_a_tolerance_names_the_other_meaning() {
-    let e = err(Lang::J, "4 {.!.0 (1 2)");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("fill specification"), "{}", e.msg);
+fn fit_on_a_verb_without_a_tolerance_is_the_fill() {
+    assert_eq!(ints(&val(Lang::J, "4 {.!.0 (1 2)")), vec![1, 2, 0, 0]);
+    assert_eq!(ints(&val(Lang::J, "4 {.!.9 (1 2)")), vec![1, 2, 9, 9]);
+    let e = err(Lang::J, "3 }.!.9 (1 2)");
+    assert_eq!(e.kind, ErrorKind::Domain);
+    assert!(e.msg.contains("no fit"), "{}", e.msg);
 }
 
 #[test]

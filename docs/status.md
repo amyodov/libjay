@@ -55,7 +55,7 @@ inventory. Nothing in APL's primitive tables is red.**
 | `*.` | 🟢 length/angle | 🟢 LCM (reals and Gaussian integers) |
 | `!` | 🟢 factorial — the gamma function, in the complex plane as well as on the reals | 🟢 out of |
 | `o.` | 🟢 pi times | 🟢 circle; `_12` to `12`, real and complex |
-| `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟢 matrix divide. Its left rank is infinite, so a right-hand side of rank 3 or more is solved whole — one column per element of an item — and the answer keeps every axis but the leading one |
+| `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟢 matrix divide. Its left rank is infinite, so a right-hand side of rank 3 or more is solved whole — one column per element of an item — and the answer keeps every axis but the leading one. APL's `⌹` refuses that shape, which is its own reference's rule |
 | `j.` | 🟢 imaginary | 🟢 complex |
 | `r.` | 🟢 angle | 🟢 polar |
 | `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative. The numbers agree with jconsole; their STORAGE need not. jconsole factors a polynomial of degree 2 or more over the coefficients' own exact type and answers rationals where it succeeds — whole roots for whole coefficients (`p. 6 _5 1` is `3 2`), rational ones for rational coefficients (`p. 1r2 _3r2 1` is `1 1r2`) — and falls back to floats for a linear polynomial, or where one root is not of that type (`p. 1 _3 2` is `1 0.5` there too). libjay computes in f64 throughout; the two cases that part are pinned in `corpus/j/divergences.txt`. A boxed argument is the root form and answers the coefficients; the multiplier may go unsaid, so `p. (<1 2)` is `2 _3 1` | 🟢 polynomial; a boxed `multiplier ; roots` left argument too, the multiplier optional |
