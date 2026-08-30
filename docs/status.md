@@ -55,7 +55,7 @@ inventory. Nothing in APL's primitive tables is red.**
 | `*.` | 🟢 length/angle | 🟢 LCM (reals and Gaussian integers) |
 | `!` | 🟢 factorial — the gamma function, in the complex plane as well as on the reals | 🟢 out of |
 | `o.` | 🟢 pi times | 🟢 circle; `_12` to `12`, real and complex |
-| `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟡 matrix divide; a right-hand side of rank 3 or more is refused |
+| `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟢 matrix divide. Its left rank is infinite, so a right-hand side of rank 3 or more is solved whole — one column per element of an item — and the answer keeps every axis but the leading one |
 | `j.` | 🟢 imaginary | 🟢 complex |
 | `r.` | 🟢 angle | 🟢 polar |
 | `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative; jconsole answers an exact rational for some quadratics and libjay a float. A boxed argument is the root form and answers the coefficients; the multiplier may go unsaid, so `p. (<1 2)` is `2 _3 1` | 🟢 polynomial; a boxed `multiplier ; roots` left argument too, the multiplier optional |
@@ -153,7 +153,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 
 | Spelling | Status |
 |---|---|
-| `"` rank | 🟡 noun ranks on the right, and a noun on the LEFT is the constant verb `m"n` — it ignores both arguments and answers m at rank n; `u"v` not yet |
+| `"` rank | 🟢 noun ranks on the right; a VERB on the right lends its own three (`u"v` is `u"(v b. 0)`, so `<"(+/)` boxes the whole argument and `<"(<"1)` boxes each row); and a noun on the LEFT is the constant verb `m"n` — it ignores both arguments and answers m at rank n |
 | `@` atop | 🟢 |
 | `@:` at | 🟢 |
 | `&` bond / compose | 🟡 verbs compose, literal nouns bond; computed nouns not yet |
@@ -163,8 +163,8 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `^:` power | 🟢 a count the program COMPUTES as readily as a literal one — a name, an expression, a definition's own argument — read where the derived verb is applied and not while the program compiles; a list of counts (mixed signs included), `_`, the traces `u^:(<n)` and `u^:a:`, a verb count, and negatives — which obverse a negative count runs is settled when the arguments arrive, so `x u^:_1 y` undoes the bond `x&u` and the monad undoes u |
 | `.` dot product | 🟡 both valences: `x u . v y` at every rank, with `+/ . *` (the matrix product) a blocked parallel pass over the two buffers; the monad is the determinant by minors down the first column, whose base case is `u` applied to the last column's own values — so `u . v y` of a vector or an atom, each read as one column, is `u y` — and `-/ . *` over machine numbers goes by elimination instead. A determinant by minors of more than 16 rows is named — the expansion is exponential |
 | `:` explicit definition | 🟡 `0 :` (the noun definition, whose lines below are its text), `1 :`, `2 :`, `3 :`, `4 :`, the `m : 0` body on the lines below, the same body given as a BOXED list of lines (`3 : ('a =. *: y' ; 'a + a')`), and `u : v`, which joins two VERBS into one ambivalent verb; `13 :` not yet, and an explicit MODIFIER (`1 :`, `2 :`) whose body is boxed is named |
-| `;.` cut | 🟡 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3`, negative block sizes included where the movement row is written out; a negative size with the movement left implicit is named. The left rank is finite — 2 for the rectangles, 1 for the frets — so a longer left argument is a FRAME of cuts, one per cell. An empty fret list is the whole argument in one piece; a BOXED left argument — J's per-axis frets — is named |
-| `!.` fit | 🟡 the tolerance meaning, and the fill for `\|.` (the shift); a fill on any other verb is named |
+| `;.` cut | 🟢 frets (`;.1` `;._1` `;.2` `;._2`), the rectangle `;.0` in both valences, and the tessellations `;.3` `;._3` with negative block sizes. With the movement row written out a negative size measures the block and reverses its axis; with the movement left implicit it does not measure it at all — the block runs to the END of its axis, reversed, whatever the magnitude said, which is what the reference answers. The left rank is finite — 2 for the rectangles, 1 for the frets — so a longer left argument is a FRAME of cuts, one per cell. An empty fret list is the whole argument in one piece, and a BOXED left argument is J's per-axis frets: one box per leading axis, the rest of the axes taken whole |
+| `!.` fit | 🟢 both meanings. On a verb that compares it is the tolerance; on one whose answer can reach past what its argument holds — `{.` `$` `,` `,.` `,:` `#` `;` `>` `\|.` — it is the ELEMENT that stands where the value runs out. A fill of a wider type widens the answer, one of another kind entirely is refused, and a verb J gives no fit to refuses one here too |
 | `!:` foreign | 🟡 `1!:1` (read a line from stdin), `1!:2` (write a line to stdout), `3!:0` (type code) and `5!:1` (the atomic representation of a name); the ones that reach a file, a script, the host, the clock or a shared library are ⚪ closed by the sandbox, and the ones that only compute are 🔴 named |
 | `` ` `` tie (gerund) | 🟡 the gerund is boxed data — one atomic representation per box, so it can be named, computed and displayed; a verb the representation cannot spell (a capped fork, an explicit definition) is named. As an ADVERB'S operand it cycles: `` u`v/ `` inserts the verbs between the items and `` u`v\ ``, `` u`v\. `` and `` u`v/. `` give one verb to each prefix, suffix, group or diagonal in turn; under any other adverb it is still named |
 | `` `: `` evoke gerund | 🟢 the three forms J gives it: `0` applies each verb, `3` inserts them, `6` is the train |

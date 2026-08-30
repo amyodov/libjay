@@ -192,7 +192,7 @@ fn j_name_and_valence_errors_name_the_word() {
 // --- J: the gaps --------------------------------------------------------
 
 const J_PROMISES: &[Case] = &[
-    j("_2 <;.3 i. 5", ErrorKind::NotYet, "_2 <;.3 i. 5", &["movement row"]),
+    j("<;.4 i. 5", ErrorKind::NotYet, "<;.4", &["cut (u;.4)"]),
     j("* b. _1", ErrorKind::NotYet, "* b. _1", &["obverse"]),
     j("$. 'abc'", ErrorKind::NotYet, "$. 'abc'", &["sparse"]),
     j("+/ . * i. 17 17", ErrorKind::NotYet, "+/ . * i. 17 17", &["determinant"]),

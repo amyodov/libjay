@@ -201,3 +201,12 @@ _2 |.!.9 ] 1 2 3 4
 ; !.9 (1 2;3 4 5)
 (i.2 3) ,!.9 (i.2 2)
 (i.2 3) ,.!.9 (i.3 2)
+
+// The gerund amend's monadic valence amends nothing: v gives the indices
+// and w the array they index, and u is not applied at all.
+(<@[)`(1&{)`]} i.5
+(2:)`(1&{)`]} i.5
+(-:)`(0&{)`]} 1 2 3
+(>:)`(2:)`]} 1 2 3
+(+:)`(1&{)`]} i.5
+(<@[)`(0&{)`(|.)} 1 2 3

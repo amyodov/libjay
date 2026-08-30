@@ -43,3 +43,15 @@
 ? a character between 128 and 255 writes as its byte here
 < ��
 > j: ÈÈ
+= p. 1r2 _3r2 1
+? jconsole factors this one over the rationals and libjay computes in f64
+< +-+-----+
+< |1|1 0.5|
+< +-+-----+
+> j: +-+-----+
+> j: |1|1 1r2|
+> j: +-+-----+
+= 0 p.. 1 1 1x
+? jconsole divides exactly here and libjay in f64
+< 0 1 0.5 0.333333
+> j: 0 1 1r2 1r3

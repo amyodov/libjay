@@ -32,3 +32,15 @@ u: 233
 ? widening bytes to characters changes only how they are written out
 9 u: 200 200
 ? a character between 128 and 255 writes as its byte here
+
+// jconsole computes a polynomial's roots exactly where it can factor it
+// over the coefficients' own exact type — a degree of 2 or more whose
+// every root is whole, for whole coefficients, and a rational one for
+// rational coefficients — and stores the answer as rationals. libjay's
+// Durand-Kerner works in f64 throughout, so the two name the same numbers
+// and write them differently. The polynomial INTEGRAL divides by the
+// power, which jconsole keeps exact for an extended or rational argument.
+p. 1r2 _3r2 1
+? jconsole factors this one over the rationals and libjay computes in f64
+0 p.. 1 1 1x
+? jconsole divides exactly here and libjay in f64

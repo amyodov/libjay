@@ -2056,49 +2056,9 @@ impl Verb {
                 if frame_rank == 0 {
                     return monad_op(p, y, ctx, span);
                 }
-                let frame = y.shape[..frame_rank].to_vec();
-                let n: usize = frame.iter().product();
-                if n == 0 {
-                    let cell = fill_cell(y, frame_rank, self.is_pure());
-                    return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| {
-                        monad_op(p, cell, c, span)
-                    }));
-                }
-                let cells = each_cell(n, y.count(), self.is_pure(), ctx, |i, c| {
-                    monad_op(p, &y.cell_at(frame_rank, i), c, span)
-                })?;
-                // Mix — `⊃` or `↑` at cell rank 0, whichever the dialect
-                // spells it — is where APL frames characters beside numbers.
-                if p.monad == MonadOp::Open && ctx.cfg.rules.lang == crate::Lang::Apl {
-                    return assemble_mixed(&frame, cells, ctx.cfg.fill, span);
-                }
-                assemble(&frame, cells, span)
+                prim_monad_frame(p, frame_rank, self.is_pure(), y, ctx, span)
             }
-            Verb::Rank(v, r) => {
-                let frame_rank = y.rank() - effective_rank(r[0], y.rank());
-                if frame_rank == 0 {
-                    // The inner verb applies its own rank machinery to the
-                    // whole argument; that is what `"` means.
-                    return v.monad(y, ctx, span);
-                }
-                // A reduction over vector cells is every row of the buffer
-                // folded in place, without an array per cell.
-                if let Some(a) = reduce_vector_cells(v, y, frame_rank) {
-                    return Ok(a);
-                }
-                let frame = y.shape[..frame_rank].to_vec();
-                let n: usize = frame.iter().product();
-                if n == 0 {
-                    let cell = fill_cell(y, frame_rank, self.is_pure());
-                    return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| {
-                        v.monad(cell, c, span)
-                    }));
-                }
-                let cells = each_cell(n, y.count(), self.is_pure(), ctx, |i, c| {
-                    v.monad(&y.cell_at(frame_rank, i), c, span)
-                })?;
-                assemble(&frame, cells, span)
-            }
+            Verb::Rank(v, r) => rank_monad(v, r[0], self.is_pure(), y, ctx, span),
             Verb::Reduce(v) | Verb::NWise(v) => reduce(v, y, ctx, span),
             Verb::Windowed(v, kind) => {
                 runs(v, y, *kind == WindowKind::Suffix, ctx, span)
@@ -2148,16 +2108,7 @@ impl Verb {
             // `>` frames the opened boxes, and a frame pads with the
             // type's own fill wherever it is built; bringing the contents
             // to one shape first is what puts `!.f`'s element there.
-            Verb::Fill(v, f)
-                if y.dtype() == DType::Box
-                    && matches!(&**v, Verb::Prim(p) if p.monad == MonadOp::Open) =>
-            {
-                let cells: Vec<Array> = (0..y.count()).map(|i| open_cell(&atom(y, i))).collect();
-                let padded = padded_with(cells, *f, span)?;
-                let held = Array::new(y.shape.clone(), Data::Box(padded.into()));
-                ctx.with_fill(*f, |c| v.monad(&held, c, span))
-            }
-            Verb::Fill(v, f) => ctx.with_fill(*f, |c| v.monad(y, c, span)),
+            Verb::Fill(v, f) => monad_filled(v, f, y, ctx, span),
             Verb::Choose(_) => {
                 Err(Error::domain("⊢[m] selects between two arguments and needs both", span))
             }
@@ -2229,12 +2180,8 @@ impl Verb {
             Verb::At { left, right } => at(left, right, y, ctx, span),
             // `u : v` applies u monadically.
             Verb::Ambivalent(u, _) => u.monad(y, ctx, span),
-            // The gerund amend has a monadic valence in the reference, and
-            // it is not this amend at all: `` (0:`0:`]}) 1 2 3 `` is 1.
-            // What it IS has not been worked out here.
-            Verb::AmendGerund(_) => {
-                Err(Error::not_yet("the monadic gerund amend (u`v`w} y)", span))
-            }
+            // The gerund amend's monadic valence amends nothing: it SELECTS.
+            Verb::AmendGerund(vs) => amend_gerund_monad(vs, y, ctx, span),
             // `monad` reads the operand and applies what it built, so the
             // deferred verb itself never reaches this far.
             Verb::Deferred(_) => {
@@ -2390,7 +2337,7 @@ impl Verb {
                 let tol = Tol { ct: *n, ..ctx.cfg.tol };
                 ctx.with_tol(tol, |c| v.dyad(x, y, c, span))
             }
-            Verb::Fill(v, f) => ctx.with_fill(*f, |c| v.dyad(x, y, c, span)),
+            Verb::Fill(v, f) => dyad_filled(v, f, x, y, ctx, span),
             Verb::Amend(m) => amend(m, x, y, ctx.cfg.near(), span),
             Verb::AmendGerund(vs) => amend_gerund(vs, x, y, ctx, span),
             Verb::Choose(m) => choose(m, x, y, span),
@@ -2900,6 +2847,109 @@ fn assemble_mixed(
         padded.push(boxed_elements(&fit));
     }
     assemble(frame, padded, span).map(tightened_mixed)
+}
+
+/// A primitive applied over the cells its own rank names, framed back
+/// together. Out of line for the same reason [`rank_monad`] is.
+#[inline(never)]
+fn prim_monad_frame(
+    p: &Prim,
+    frame_rank: usize,
+    pure: bool,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let frame = y.shape[..frame_rank].to_vec();
+    let n: usize = frame.iter().product();
+    if n == 0 {
+        let cell = fill_cell(y, frame_rank, pure);
+        return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| monad_op(p, cell, c, span)));
+    }
+    let cells =
+        each_cell(n, y.count(), pure, ctx, |i, c| monad_op(p, &y.cell_at(frame_rank, i), c, span))?;
+    // Mix — `⊃` or `↑` at cell rank 0, whichever the dialect spells it —
+    // is where APL frames characters beside numbers.
+    if p.monad == MonadOp::Open && ctx.cfg.rules.lang == crate::Lang::Apl {
+        return assemble_mixed(&frame, cells, ctx.cfg.fill, span);
+    }
+    assemble(&frame, cells, span)
+}
+
+/// `u"n y`: u over the cells the rank names, framed back together.
+///
+/// Out of line so that the evaluator's own frame stays small — every local
+/// an arm of that match holds is stack paid for at every level of a
+/// recursion, and `RECURSION_LIMIT` is set by exactly that cost.
+#[inline(never)]
+fn rank_monad(
+    v: &Verb,
+    rank: i64,
+    pure: bool,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let frame_rank = y.rank() - effective_rank(rank, y.rank());
+    if frame_rank == 0 {
+        // The inner verb applies its own rank machinery to the whole
+        // argument; that is what `"` means.
+        return v.monad(y, ctx, span);
+    }
+    // A reduction over vector cells is every row of the buffer folded in
+    // place, without an array per cell.
+    if let Some(a) = reduce_vector_cells(v, y, frame_rank) {
+        return Ok(a);
+    }
+    let frame = y.shape[..frame_rank].to_vec();
+    let n: usize = frame.iter().product();
+    if n == 0 {
+        let cell = fill_cell(y, frame_rank, pure);
+        return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| v.monad(cell, c, span)));
+    }
+    let cells = each_cell(n, y.count(), pure, ctx, |i, c| {
+        v.monad(&y.cell_at(frame_rank, i), c, span)
+    })?;
+    assemble(&frame, cells, span)
+}
+
+/// `u!.f y`: u run with f standing wherever a value runs out.
+///
+/// Out of line so that the evaluator's own frame stays small — a deep
+/// recursion is limited by how much stack one application costs.
+#[inline(never)]
+fn monad_filled(
+    v: &Verb,
+    f: &FillAtom,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let f = *f;
+    // `>` frames the opened boxes, and a frame pads with the type's own
+    // fill wherever it is built; bringing the contents to one shape first
+    // is what puts `!.f`'s element there.
+    if y.dtype() == DType::Box && matches!(v, Verb::Prim(p) if p.monad == MonadOp::Open) {
+        let cells: Vec<Array> = (0..y.count()).map(|i| open_cell(&atom(y, i))).collect();
+        let padded = padded_with(cells, f, span)?;
+        let held = Array::new(y.shape.clone(), Data::Box(padded.into()));
+        return ctx.with_fill(f, |c| v.monad(&held, c, span));
+    }
+    ctx.with_fill(f, |c| v.monad(y, c, span))
+}
+
+/// `x u!.f y`: the dyad of [`monad_filled`], kept out of line for the same
+/// reason.
+#[inline(never)]
+fn dyad_filled(
+    v: &Verb,
+    f: &FillAtom,
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    ctx.with_fill(*f, |c| v.dyad(x, y, c, span))
 }
 
 /// The cells brought to one shape with the element `!.f` names, so that a
@@ -7561,6 +7611,24 @@ fn catenate_at(
 /// count is APL's: it contributes that many fills. J has no such reading
 /// and refuses it.
 /// `` x u`v`w} y ``: each part computes one of the amend's arguments.
+/// `` u`v`w} y ``: the gerund amend's monadic valence, which amends
+/// nothing. v gives the indices and w the array they index — the noun
+/// amend's own monad, `m} y` — and u is not applied at all.
+#[inline(never)]
+fn amend_gerund_monad(
+    vs: &[Verb],
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let [_, v, w] = vs else {
+        return Err(Error::not_yet("a gerund amend of other than three verbs", span));
+    };
+    let at = v.monad(y, ctx, span)?;
+    let into = w.monad(y, ctx, span)?;
+    Verb::Amend(at).monad(&into, ctx, span)
+}
+
 fn amend_gerund(
     vs: &[Verb],
     x: &Array,
