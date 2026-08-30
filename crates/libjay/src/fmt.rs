@@ -172,20 +172,60 @@ fn format_sparse(a: &Array, s: &crate::sparse::Sparse, opts: &FmtOpts) -> String
         return String::new();
     }
     let k = s.axes.len();
-    let width = s.cell_size(&a.shape);
     let index: Vec<String> = s.indices.iter().map(|&i| format_i64(i as i64, opts)).collect();
-    let value: Vec<String> =
-        (0..s.entries * width).map(|i| format_atom(&a.data, i, opts)).collect();
     let index_widths = column_widths(&index, k.max(1), opts);
-    let value_widths = column_widths(&value, width.max(1), opts);
-    let mut out = String::new();
+    let mut heads = Vec::with_capacity(s.entries);
     for e in 0..s.entries {
-        if e > 0 {
+        let mut row = String::new();
+        push_row(&mut row, &index[e * k..(e + 1) * k], &index_widths, Cells::Right, opts);
+        row.push_str(" | ");
+        heads.push(row);
+    }
+    let cell_shape = s.cell_shape(&a.shape);
+    // Every axis sparse: the cell is one element, so one entry is one line
+    // and the values line up as a single table of them.
+    if cell_shape.is_empty() {
+        let value: Vec<String> = (0..s.entries).map(|i| format_atom(&a.data, i, opts)).collect();
+        let widths = column_widths(&value, 1, opts);
+        let mut out = String::new();
+        for (e, head) in heads.iter().enumerate() {
+            if e > 0 {
+                out.push('\n');
+            }
+            out.push_str(head);
+            push_row(&mut out, &value[e..e + 1], &widths, Cells::Right, opts);
+        }
+        return out;
+    }
+    // A cell of its own shape is drawn as the array of all the cells is,
+    // which lines the columns up across every entry and separates the
+    // planes the way the display of that array does. The position stands
+    // beside the cell's first line and blanks stand beside the rest.
+    let mut shape = vec![s.entries];
+    shape.extend_from_slice(&cell_shape);
+    let block = format_raw(&Array::new(shape, a.data.clone()), opts);
+    let lines: Vec<&str> = block.split('\n').collect();
+    let gap = cell_shape.len() - 1;
+    let per = (lines.len().saturating_sub((s.entries - 1) * gap)) / s.entries;
+    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    // The column itself is drawn on every line; only the position is not
+    // repeated.
+    let blank: String = " ".repeat(heads[0].chars().count() - 3) + " | ";
+    let mut out = String::new();
+    for (n, line) in lines.iter().enumerate() {
+        if n > 0 {
             out.push('\n');
         }
-        push_row(&mut out, &index[e * k..(e + 1) * k], &index_widths, Cells::Right, opts);
-        out.push_str(" | ");
-        push_row(&mut out, &value[e * width..(e + 1) * width], &value_widths, Cells::Right, opts);
+        match (per > 0).then(|| n % (per + gap)).filter(|r| *r == 0) {
+            Some(_) if n / (per + gap) < s.entries => out.push_str(&heads[n / (per + gap)]),
+            _ => out.push_str(&blank),
+        }
+        out.push_str(line);
+        // A line the plane separation left blank still carries the column,
+        // so it is padded out to the width of the cells beside it.
+        for _ in line.chars().count()..width {
+            out.push(' ');
+        }
     }
     out
 }

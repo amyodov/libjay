@@ -267,6 +267,140 @@ pub fn create(y: &Array, span: Span) -> Result<Array> {
     Ok(Array::sparse(shape, Data::empty(empty.dtype()), s))
 }
 
+/// The sparse element `y` stands on: its own where it is sparse already,
+/// and a zero where it is dense and every position is therefore stored.
+fn element_of(y: &Array) -> Data {
+    match y.sparse_parts() {
+        Some(s) => s.fill.clone(),
+        None => zero_of(y.dtype()),
+    }
+}
+
+/// Which cells of `y` would be stored under the sparse axes `axes`, and
+/// where each of them begins in the dense buffer.
+///
+/// A cell is one position along the sparse axes and the whole of every
+/// other axis; it is stored where any of its elements differs from the
+/// sparse element.
+fn cells_under(
+    dense: &Array,
+    axes: &[usize],
+    fill: &Data,
+) -> (Vec<Vec<usize>>, Vec<usize>, Vec<usize>) {
+    let rank = dense.rank();
+    let mut strides = vec![1usize; rank];
+    for k in (0..rank.saturating_sub(1)).rev() {
+        strides[k] = strides[k + 1] * dense.shape[k + 1];
+    }
+    let other: Vec<usize> = (0..rank).filter(|k| !axes.contains(k)).collect();
+    // The offsets inside one cell, in the order its elements are stored.
+    let cell_size: usize = other.iter().map(|&k| dense.shape[k]).product();
+    let mut offsets = Vec::with_capacity(cell_size);
+    let mut coord = vec![0usize; other.len()];
+    for _ in 0..cell_size {
+        offsets.push(coord.iter().zip(&other).map(|(&c, &k)| c * strides[k]).sum::<usize>());
+        step(&mut coord, &other, &dense.shape);
+    }
+    let positions: usize = axes.iter().map(|&k| dense.shape[k]).product();
+    let mut kept = Vec::new();
+    let mut bases = Vec::new();
+    let mut coord = vec![0usize; axes.len()];
+    for _ in 0..positions {
+        let base: usize = coord.iter().zip(axes).map(|(&c, &k)| c * strides[k]).sum();
+        if offsets.iter().any(|&o| !same_as_fill(&dense.data, base + o, fill)) {
+            kept.push(coord.clone());
+            bases.push(base);
+        }
+        step(&mut coord, axes, &dense.shape);
+    }
+    (kept, bases, offsets)
+}
+
+/// One step of an odometer over the axes `axes` of `shape`.
+fn step(coord: &mut [usize], axes: &[usize], shape: &[usize]) {
+    let mut j = axes.len();
+    while j > 0 {
+        j -= 1;
+        coord[j] += 1;
+        if coord[j] < shape[axes[j]] {
+            return;
+        }
+        coord[j] = 0;
+    }
+}
+
+/// `(2;a) $. y`: the same value stored under the sparse axes `a`.
+///
+/// The value does not change — only which axes an entry is indexed by, and
+/// so how many entries there are. A dense argument is stored the same way,
+/// with zero the sparse element.
+pub fn store_under(y: &Array, axes: &Array, span: Span) -> Result<Array> {
+    let fill = element_of(y);
+    let dense = y.densified().to_row_major();
+    check_storable(&dense, span)?;
+    let axes = sparse_axes(axes, dense.rank(), span)?;
+    let (kept, bases, offsets) = cells_under(&dense, &axes, &fill);
+    let mut indices = Vec::with_capacity(kept.len() * axes.len());
+    let mut values = Data::empty(dense.dtype());
+    for (coord, base) in kept.iter().zip(&bases) {
+        indices.extend_from_slice(coord);
+        for &o in &offsets {
+            values.push_from(&dense.data, base + o);
+        }
+    }
+    let s = Sparse { axes, indices, fill, entries: kept.len() };
+    Ok(Array::sparse(dense.shape.clone(), values, s))
+}
+
+/// `(2 2;a) $. y`: how many cells the array would store under the sparse
+/// axes `a`. Nothing is built — the answer is the count alone.
+pub fn stored_under(y: &Array, axes: &Array, span: Span) -> Result<Array> {
+    let fill = element_of(y);
+    let dense = y.densified().to_row_major();
+    check_storable(&dense, span)?;
+    let axes = sparse_axes(axes, dense.rank(), span)?;
+    let (kept, _, _) = cells_under(&dense, &axes, &fill);
+    Ok(Array::scalar_i64(kept.len() as i64))
+}
+
+/// `(3;e) $. y`: the same stored entries under another sparse element.
+///
+/// The entries stay exactly as they are, so every position none of them
+/// names now holds `e` — the array's VALUE changes, which is what the
+/// reference does.
+pub fn store_element(y: &Array, e: &Array, span: Span) -> Result<Array> {
+    let Some(s) = y.sparse_parts() else {
+        return Err(Error::domain("the sparse element belongs to a sparse array", span));
+    };
+    if e.rank() != 0 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "the element that fills a sparse array is one atom",
+            Some(span),
+        ));
+    }
+    // The array holds both kinds of value once the element joins it, so it
+    // takes the wider of the two types.
+    let wrong = || {
+        Error::new(
+            ErrorKind::Type,
+            format!(
+                "a sparse array of {} has no sparse element of type {}",
+                y.dtype().name(),
+                e.dtype().name()
+            ),
+            Some(span),
+        )
+    };
+    let t = DType::promote(y.dtype(), e.dtype()).ok_or_else(wrong)?;
+    let (Some(values), Some(fill)) = (y.data.cast(t), e.data.slice(0, 1).cast(t)) else {
+        return Err(wrong());
+    };
+    let out =
+        Sparse { axes: s.axes.clone(), indices: s.indices.clone(), fill, entries: s.entries };
+    Ok(Array::sparse(y.shape.clone(), values, out))
+}
+
 /// A shape argument: an atom or a list of non-negative axis lengths.
 fn axis_lengths(a: &Array, span: Span) -> Result<Vec<usize>> {
     if a.rank() > 1 {
@@ -306,14 +440,17 @@ fn sparse_axes(a: &Array, rank: usize, span: Span) -> Result<Vec<usize>> {
     };
     let mut axes: Vec<usize> = Vec::with_capacity(v.len());
     for k in v {
-        if k < 0 || k as usize >= rank || axes.contains(&(k as usize)) {
+        // A negative axis counts from the end, as everywhere else J names
+        // an axis.
+        let at = if k < 0 { k + rank as i64 } else { k };
+        if at < 0 || at as usize >= rank || axes.contains(&(at as usize)) {
             return Err(Error::new(
                 ErrorKind::Domain,
                 format!("{k} is not an axis of a rank-{rank} array, or names one twice"),
                 Some(span),
             ));
         }
-        axes.push(k as usize);
+        axes.push(at as usize);
     }
     axes.sort_unstable();
     Ok(axes)

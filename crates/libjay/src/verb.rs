@@ -17640,17 +17640,53 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// are stored, and `8` the same array with the entries that hold the sparse
 /// element dropped. `2` also answers a dense argument, which has all of its
 /// axes conceptually sparse; the others refuse one.
+/// `x $. y` where x is BOXED: the forms that respecify a sparse array's
+/// storage, or price it under storage it does not have.
+#[inline(never)]
+fn boxed_sparse_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    let parts = x.as_boxes().expect("a boxed sparse form holds boxes");
+    if x.rank() > 1 || parts.len() != 2 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            "a boxed sparse form is two boxes: the form and what it names",
+            Some(span),
+        ));
+    }
+    let (which, arg) = (parts[0].densified(), parts[1].densified());
+    let code = which
+        .to_i64_vec_near(near)
+        .filter(|v| which.rank() <= 1 && !v.is_empty() && v.len() <= 2)
+        .ok_or_else(|| Error::domain("a sparse form is one or two integers", span))?;
+    match code.as_slice() {
+        [2] => crate::sparse::store_under(y, &arg, span),
+        [3] => crate::sparse::store_element(y, &arg, span),
+        [2, 2] => crate::sparse::stored_under(y, &arg, span),
+        // How many bytes another storage would take is a measurement of the
+        // interpreter that answers it, not of the language: libjay's own
+        // layout is not J's and a number from it would mean nothing.
+        [2, 1] => Err(Error::domain(
+            "(2 1;a) $. y reports one interpreter's own storage size in bytes, \
+             which is not a fact about the language",
+            span,
+        )),
+        _ => {
+            let named: Vec<String> = code.iter().map(i64::to_string).collect();
+            Err(Error::not_yet(
+                format!("the boxed sparse form (({} ;a) $. y)", named.join(" ")),
+                span,
+            ))
+        }
+    }
+}
+
 fn sparse_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     // `(2;a) $. y` respecifies which axes are stored sparsely, `(3;e) $. y`
-    // which element is the sparse one, and `(2 1;a)` and `(2 2;a)` ask what
-    // the array would cost under other axes. The storage they respecify is
-    // here; the forms themselves are not written yet.
+    // which element is the sparse one, and `(2 2;a)` asks how many cells
+    // other axes would store. `(2 1;a)` asks how many BYTES they would take,
+    // which is one interpreter's own storage layout and not a fact about
+    // the language, so libjay has no answer to give.
     if x.dtype() == DType::Box {
-        return Err(Error::not_yet(
-            "a boxed sparse form ((2;a) $. y and its relatives), which respecifies \
-             a sparse array's axes or element",
-            span,
-        ));
+        return boxed_sparse_form(x, y, near, span);
     }
     if x.rank() != 0 {
         return Err(Error::new(ErrorKind::Rank, "a sparse form is one atom", Some(span)));
