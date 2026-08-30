@@ -1,0 +1,224 @@
+// The definitions wave: tacit definition `13 : '…'`, the display of a verb
+// or a modifier a sentence reduces to, the `{{)n` noun direct definition,
+// multiple assignment, and a modifier body that derives its own modifier.
+//
+// A verb libjay writes with `@:` where the reference writes the cap fork
+// `[: f g` is out of this file on purpose: the two spell one function, and
+// docs/coverage.md records which is written here.
+
+// --- `13 : '…'`: what the translation answers ---------------------------
+
+f =. 13 : '(+/y) % #y'\nf
+f =. 13 : 'y+1'\nf
+f =. 13 : 'x+y'\nf
+f =. 13 : '+/y'\nf
+f =. 13 : 'y'\nf
+f =. 13 : 'x'\nf
+f =. 13 : '#y'\nf
+f =. 13 : '2*y'\nf
+f =. 13 : 'y*2'\nf
+f =. 13 : 'y-x'\nf
+f =. 13 : '(#y) % 2'\nf
+f =. 13 : '3'\nf
+f =. 13 : 'x + y + 1'\nf
+f =. 13 : '+/ % #'\nf
+f =. 13 : 'y + y'\nf
+f =. 13 : 'y * y'\nf
+f =. 13 : 'y % 2'\nf
+f =. 13 : '2 % y'\nf
+f =. 13 : '<. y'\nf
+f =. 13 : '- y'\nf
+f =. 13 : 'x + 1'\nf
+f =. 13 : '1 + x'\nf
+f =. 13 : 'x , y'\nf
+f =. 13 : 'y , x'\nf
+f =. 13 : 'x + y * 2'\nf
+f =. 13 : '(x + y) * 2'\nf
+f =. 13 : 'x (+/) y'\nf
+f =. 13 : '2 3 4'\nf
+f =. 13 : 'i. y'\nf
+f =. 13 : 'y + 1 + 2'\nf
+f =. 13 : '*: y'\nf
+f =. 13 : 'x *: y'\nf
+f =. 13 : '+/\\ y'\nf
+f =. 13 : '(3 * y) + 4'\nf
+f =. 13 : 'y ^ 2'\nf
+f =. 13 : '2 ^ y'\nf
+f =. 13 : '<y'\nf
+f =. 13 : '>y'\nf
+f =. 13 : 'a =. y'\nf
+f =. 13 : '$ y'\nf
+f =. 13 : 'y - 2'\nf
+f =. 13 : 'y , 2'\nf
+f =. 13 : 'y <. 2'\nf
+f =. 13 : 'y >. 2'\nf
+f =. 13 : 'y = 2'\nf
+f =. 13 : 'y | 2'\nf
+f =. 13 : 'y +. 2'\nf
+f =. 13 : 'y *. 2'\nf
+f =. 13 : 'y ~: 2'\nf
+f =. 13 : 'y # 2'\nf
+f =. 13 : 'y $ 2'\nf
+f =. 13 : 'y ! 2'\nf
+f =. 13 : 'y < 2'\nf
+f =. 13 : 'y > 2'\nf
+f =. 13 : 'y <: 2'\nf
+f =. 13 : 'y >: 2'\nf
+f =. 13 : 'y +: 2'\nf
+f =. 13 : 'y *: 2'\nf
+f =. 13 : 'y -: 2'\nf
+f =. 13 : 'y -. 2'\nf
+f =. 13 : 'y e. 2'\nf
+f =. 13 : 'y ^. 2'\nf
+f =. 13 : 'y %: 2'\nf
+f =. 13 : 'y i. 2'\nf
+f =. 13 : '(+/ y) , y'\nf
+f =. 13 : 'y , +/ y'\nf
+f =. 13 : '(+/ y) , # y'\nf
+f =. 13 : 'y , y'\nf
+f =. 13 : 'x , x'\nf
+f =. 13 : '(# y) + # y'\nf
+f =. 13 : 'y + x'\nf
+f =. 13 : '2 + x + y'\nf
+f =. 13 : 'x - y - 1'\nf
+f =. 13 : '10'\nf
+f =. 13 : '_3'\nf
+f =. 13 : '3.5'\nf
+f =. 13 : '9'\nf
+f =. 13 : '_9'\nf
+f =. 13 : '_10'\nf
+f =. 13 : '2 3'\nf
+f =. 13 : 'a =. y + 1'\nf
+f =. 13 : '(i. y) , i. y'\nf
+f =. 13 : '(2*y) + i. y'\nf
+f =. 13 : '(y+1) , y+2'\nf
+f =. 13 : 'y + +/ y'\nf
+f =. 13 : '2 3 + y'\nf
+f =. 13 : 'y + 2 3'\nf
+f =. 13 : '] y'\nf
+f =. 13 : '[ y'\nf
+f =. 13 : '2 (+/) y'\nf
+f =. 13 : '0'\nf
+f =. 13 : '1'\nf
+f =. 13 : '2'\nf
+f =. 13 : '_1'\nf
+f =. 13 : 'if. y do. 1 else. 2 end.'\nf
+
+// --- and what the verbs it makes compute --------------------------------
+
+f =. 13 : '(+/y) % #y'\nf 1 2 3 4
+f =. 13 : 'y+1'\nf 5
+f =. 13 : 'x+y'\n2 f 3
+f =. 13 : '(*: x) + *: y'\n3 f 4
+f =. 13 : '*: +/ y'\nf 1 2 3
+f =. 13 : '+/ x , y'\n1 2 f 3 4
+f =. 13 : 'i. # y'\nf 5 6 7
+f =. 13 : '(i. # y) , y'\nf 5 6 7
+f =. 13 : 'x - y - 1'\n10 f 4
+f =. 13 : '3'\nf 99
+f =. 13 : '2 3 4'\nf 0
+f =. 13 : 'y % 2'\nf 9
+f =. 13 : '(+/ y) % x'\n2 f 1 2 3
+f =. 13 : 'x % +/ y'\n2 f 1 2 3
+f =. 13 : '+/ % # y'\nf 1 2 3 4
+
+// --- a body the translation cannot reach, and one written on lines below -
+f =. 13 : 0\ny + 1\n)\nf
+f =. 13 : 0\ny + 1\n)\nf 5
+a =. 5\ng =. 13 : 'y + a'\ng
+
+// --- a verb or a modifier a sentence reduces to displays itself ----------
+
+mean =. +/ % #\nmean
+f =. +/\nf
+f =. 3 : 'y+1'\nf
+f =. 4 : 'x + y'\nf
+m =. /\nm
+c =. &\nc
+f =. +/ % # % ]\nf
+f =. 2&+\nf
+f =. +&2\nf
+f =. +\nf
+p =. 1 : 'u/ y'\np
+q =. 2 : 'u v y'\nq
+f =. -~\nf
+f =. +/\\\nf
+f =. *:@+/\nf
+f =. (+/ % #) @ *:\nf
+f =. +/@(2&*)\nf
+f =. (+ , -) , *\nf
+f =. + , (- , *)\nf
+f =. { , +\nf
+f =. + , {\nf
+f =. + }\nf
+f =. 1 2 3}\nf
+f =. 2 3 4"_\nf
+f =. 'ab'"_\nf
+f =. 3:\nf
+f =. _9:\nf
+f =. 10"_\nf
+f =. 2.5"_\nf
+f =. +^:_1\nf
+f =. +&_1\nf
+f =. +&2 3\nf
+f =. i.@#\nf
+f =. +/ % + , -\nf
+f =. (+ , -) % #\nf
+f =. + (- , *) %\nf
+f =. + % (- *)\nf
+f =. (+ %) , -\nf
+f =. 2 3 { ~ ]\nf
+f =. {~\nf
+f =. 2&{\nf
+f =. {/\nf
+f =. {.~\nf
+f =. }.~\nf
+f =. <@{\nf
+f =. {@<\nf
+f =. <@:(+/)\nf
+f =. <@:+/\nf
+f =. <@(2&*)\nf
+f =. (2&*)@<\nf
+f =. 2 * ]\nf
+f =. 2 %~ ]\nf
+f =. [ + 1 + ]\nf
+f =. +"0 2\nf
+f =. +"2 0 1\nf
+f =. <@}.\nf
+f =. 2&{.\nf
+
+// --- `{{)n`, the noun direct definition ---------------------------------
+b =. {{)n\none\ntwo\n}}\n$ b
+b =. {{)n\n}}\n$ b
+b =. {{)n\none\n}}\n$ b
+b =. 3 + # {{)n\nxy\n}}\nb
+b =. {{)n\ntwo\n}} , 'X'\nb
+b =. {{)n\none }}\n}}\n$ b
+b =. {{)n abc }}\n}}\n1
+b =. {{)n\none\ntwo\n}}\nc =. 0 : 0\none\ntwo\n)\nb -: c
+
+// --- multiple assignment -------------------------------------------------
+'a b' =. 1 2\na , b
+'a b' =. 5\na , b
+'a b' =. 2 2 $ i.4\na ; b
+'a b' =. (i.2 3) ; 'xy'\na ; b
+'g' =. 1 2 3\ng
+'h i' =. <1 2\nh ; i
+'j k l' =. 'abc'\nj ; k ; l
+'m  n' =. 1 2\nm , n
+'c d' =. 1 2 3\nc
+'e f g' =. 1 2\ne
+'r+' =. 1 2\nr
+'' =. 1 2\n1
+'p q' =. +\n1
+'x y' =: 3 4\nx * y
+f =. 3 : 0\n'p q' =. y\np - q\n)\nf 10 3
+
+// --- a modifier body that derives its own modifier again -----------------
+pw =. 2 : 'if. n = 0 do. ] else. u @ (u pw (n-1)) end.'\n(+: pw 3) 1
+pw =. 2 : 'if. n = 0 do. ] else. u @ (u pw (n-1)) end.'\n(+: pw 0) 5
+pw =. 2 : 'if. n = 0 do. ] else. u @ (u pw (n-1)) end.'\n(+: pw 10) 1
+rep =. 2 : 0\nif. n = 0 do. ]\nelse. u @ (u rep (n-1))\nend.\n)\n(>: rep 4) 0
+bad =. 1 : 'u bad'\n(+ bad) 1
+sq =. 1 : 'u@u'\n(*: sq) 3
+

@@ -154,22 +154,6 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         Verb::PowerN(u, p) => der("^:", vec![verb_ar(u)?, Ar::Noun(power_noun(p)?)]),
         Verb::PowerV(u, w) => der("^:", vec![verb_ar(u)?, verb_ar(w)?]),
         Verb::Fork(f, g, h) => Some(Ar::Train(vec![verb_ar(f)?, verb_ar(g)?, verb_ar(h)?])),
-        // `n [ ]` is how the constant verb is built here, and `n:` is how
-        // it is spelled where the noun is one of the atoms that has such a
-        // spelling.
-        Verb::NounFork(n, g, h)
-            if matches!(&**g, Verb::Prim(p) if p.name == "[")
-                && matches!(&**h, Verb::Prim(p) if p.name == "]") =>
-        {
-            match constant_word(n) {
-                Some(w) => Some(Ar::Prim(w)),
-                None => Some(Ar::Train(vec![
-                    Ar::Noun(n.clone()),
-                    verb_ar(g)?,
-                    verb_ar(h)?,
-                ])),
-            }
-        }
         Verb::NounFork(n, g, h) => {
             Some(Ar::Train(vec![Ar::Noun(n.clone()), verb_ar(g)?, verb_ar(h)?]))
         }
@@ -242,6 +226,18 @@ pub fn linear(ar: &Ar) -> Option<String> {
 }
 
 fn spell(ar: &Ar) -> Option<(String, Shape)> {
+    // `n [ ]` is how the constant verb is built, and `n:` is how it is
+    // spelled where the noun is one of the atoms that has such a word. The
+    // shortcut belongs to the spelling alone: the representation itself
+    // has to keep the three parts, which is what a gerund reads back.
+    if let Ar::Train(ops) = ar
+        && let [Ar::Noun(n), Ar::Prim(g), Ar::Prim(h)] = ops.as_slice()
+        && g == "["
+        && h == "]"
+        && let Some(w) = constant_word(n)
+    {
+        return Some((w, Shape::Word));
+    }
     match ar {
         Ar::Prim(s) => Some((word(s), Shape::Word)),
         Ar::Noun(a) => Some((noun_text(a)?, Shape::Word)),

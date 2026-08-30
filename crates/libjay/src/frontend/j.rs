@@ -432,6 +432,16 @@ fn tacit_definition(
         [line] => {
             let mut sentence = line.clone();
             substitute_names(&mut sentence, &inner.verbs, &inner.mods);
+            // A name the program has already given a value stands for that
+            // value here: the translation reads it now, so what it holds
+            // becomes part of the verb rather than a name the verb looks up.
+            for f in sentence.iter_mut() {
+                if let Frag::Name(n, sp) = f
+                    && let Some(a) = inner.consts.get(n)
+                {
+                    *f = Frag::Noun(Expr::Const(a.clone(), *sp));
+                }
+            }
             match reduce_to_fragment(sentence, &inner) {
                 Ok(Some(f @ (Frag::Noun(_) | Frag::Name(..)))) => {
                     as_noun(f).ok().and_then(|e| translate_tacit(&e, dyadic))
@@ -3786,9 +3796,10 @@ fn apply_assign(target: Frag, value: Frag, scope: Scope, names: &Names) -> Resul
     if let Some(list) = name_list(&target, names)? {
         let v = match value {
             v if v.is_noun() => as_noun(v)?,
+            // The reference shares out a NOUN and refuses anything else.
             Frag::Verb(..) | Frag::Adverb(..) | Frag::Conj(..) => {
-                return Err(Error::not_yet(
-                    "naming several verbs or modifiers at once",
+                return Err(Error::domain(
+                    "a list of names is given a noun, not a verb or a modifier",
                     span,
                 ))
             }
