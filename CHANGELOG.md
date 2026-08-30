@@ -32,6 +32,34 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   and then `(+: pw 3) 1` is 8: the condition is settled where the modifier
   is derived, so the recursion stops at its base case. A body with no base
   case says so instead of running out of stack.
+- J's `!.` gives a FILL to every verb the language gives one to, not only
+  to the shift. `5 {. !.9 ] 1 2 3` is `1 2 3 9 9`, `(2 2) $!.9 ] 1 2 3` is
+  `1 2` over `3 9`, `'ab' ,:!.'z' 'cde'` pads the short row with `z`, and
+  `>` and `;` pad the pieces they frame the same way. A fill of a wider
+  kind widens the answer, so `5 {.!.9.5 ] 1 2 3` is a list of floats; a
+  fill of another kind entirely is refused, and so is a fit on a verb that
+  takes none.
+- A cut takes J's per-axis frets. A BOXED left argument holds one list of
+  frets per leading axis and leaves the rest whole, so
+  `` ((<1 0 1),(<1 0 0)) <;.1 i.3 3 `` cuts a table both ways at once. A
+  negative block size now works with the movement row left out too: the
+  block runs to the end of its axis and comes back reversed.
+- `u"v` — a verb on the right of the rank conjunction lends its own three
+  ranks, so `<"(+/)` boxes the whole argument and `<"(<"1)` boxes each row.
+- `%.` divides a right-hand side of rank 3 or more instead of refusing it:
+  it is solved whole, one column per element of an item, and the answer
+  keeps the item's own axes.
+- The byte-oriented `u:` conversions: `1 u:` keeps a codepoint modulo 256,
+  `2 u:` widens, `8 u:` packs a codepoint into its UTF-8 bytes and `9 u:`
+  reads those bytes back.
+- `$.` takes the boxed forms that respecify storage: `(2;a)` stores the
+  same value under other sparse axes, `(3;e)` gives it another sparse
+  element, and `(2 2;a)` says how many cells other axes would store. A
+  stored cell with axes of its own is now drawn as the array of all the
+  cells is.
+- The gerund amend's monadic valence. `` u`v`w} y `` amends nothing: v
+  gives the indices, w the array they index, and the answer is the
+  selection — `` (+:)`(1&{)`]} i.5 `` is 1.
 
 - J's bond reads a noun the program computes. `mp =. +/ . *` then
   `(m & mp) ^: 9 m` raises the Fibonacci matrix to a power, and
@@ -81,6 +109,13 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `;` (raze) over boxes whose contents have unequal rank. An opened value
+  whose items have fewer axes than the others is ONE item of the common
+  shape, not several of a smaller one, so `; ('ab';(2 2$'wxyz'))` is three
+  rows and was four.
+- A sequential machine's map is refused beside a numeric argument, whose
+  values are its classes already, and must have one entry per byte — which
+  is what the reference does, where libjay used to name a gap.
 - The least common multiple of two EXACT numbers keeps its sign. `_5x *. 2`
   is `_10` in J and `¯5∧2` is `¯10` in APL; both answered `10`. The
   machine-integer path was always right; the extended and rational one took

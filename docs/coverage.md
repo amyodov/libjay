@@ -82,7 +82,7 @@ feature — that is a promise, not a refusal.
 | `E.` | — | find: 1 at each position of y where a copy of x begins, shaped like y's items; a pattern longer than y matches nowhere |
 | `A.` | anagram index: where the permutation y's items RANK as stands among the permutations of that length, lexicographically | the x-th permutation of y's items; a negative x counts back from the last. Characters have no anagram index monadically, as in J |
 | `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation. A list shorter than the permutation it names stands for one over `1 + >./ y` items | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation of y's items, ABBREVIATED where it is shorter — the items it never names come first, in ascending order, so `0 1 C. 'abcde'` is `cdeab`, `3 4 2 C. 'abcde'` is `abdec` and an atom is such a list of one. An element of a cycle is an index INTO y and counts back from the end where it is negative, so `(<_1 0) C. 1 2 3` is `3 2 1`; an index y has no item for is refused before the permutation is built |
-| `u:` | codepoints become characters; characters are answered with themselves | form 3 gives codepoints, form 10 gives the characters they name; the byte-oriented forms are a named gap |
+| `u:` | codepoints become characters; characters are answered with themselves | form 3 gives codepoints, 10 the characters they name, 1 a codepoint modulo 256, 2 the same characters widened, 8 the UTF-8 bytes of a codepoint and 9 the codepoints a run of UTF-8 bytes spells |
 | `;:` | words: J's own tokeniser over a string, one box per word. A run of numeric literals separated by blanks is ONE word (`;: '1 2 3'` has one), `NB.` swallows the rest of the line, and an unclosed quote is a parse error | the sequential machine — see below |
 | `s:` | symbols: the argument's text, interned. A character LIST carries its own delimiter in its first position, so ``s: '`a`b'`` is the two symbols `` `a `` and `` `b `` while `s: 'a b'` is the one name `" b"`, and the empty list has no delimiter and no names. A character TABLE gives one name per row with trailing blanks trimmed, the leading axes becoming the result's shape. A BOXED argument gives one name per box, the characters taken exactly as they stand — trailing blank and all. Anything else is a domain error; a box holding a rank-2 array is a rank error | the name forms: `4 s:` lays the names out as a character table, blank-padded to the longest (the shape gains that width as a trailing axis), and `5 s:` boxes them one apiece, keeping the shape. `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report on an interpreter's own symbol table — how many slots it holds, which are in use, how it hashes them — and are named gaps rather than guesses |
 | `L.` | the boxing level: 0 for anything unboxed, one more than the deepest content otherwise. APL's `≡` counts the array itself as well, so the two differ by one on a simple array | — |
@@ -146,7 +146,12 @@ them or one each; a negative index counts from the end, an out-of-range one
 is an error, and `m} y` with a single index selects instead; a BOXED m is
 the index specification `{` reads, so `99 (<a:;1)} i.3 3` replaces a whole
 column). `u}` computes the indices instead of naming them: `u} y` is
-`(u y)} y` and `x u} y` is `x (x u y)} y`. `f.` (fix) answers the verb
+`(u y)} y` and `x u} y` is `x (x u y)} y`. A GERUND operand amends only
+dyadically — `` x u`v`w} y `` has u make the replacement, v the indices and
+w the array they go into — while `` u`v`w} y `` amends nothing: it is the
+noun amend's own monad, `(v y) m} (w y)`, a SELECTION at the indices v
+gives from the array w gives, and u is not applied at all.
+`f.` (fix) answers the verb
 itself — names are substituted where they are used, so there is nothing
 left to fix — and `M.` (memo) keeps every answer u has given and returns it
 again for the same arguments, in a cache that belongs to the derived verb.
@@ -169,7 +174,9 @@ is the fold's identity. The exception is J's own: `+/`, `*/`, `<./`, `>./`
 and `+./` have special code that types the whole argument before any piece
 is cut, so those five refuse the same characters.
 
-Conjunctions: `"` (rank, 1–3 atoms, `_` = infinite); `@:` (atop: monad
+Conjunctions: `"` (rank: 1–3 atoms, `_` = infinite, or a VERB on the right,
+which lends its own three — `u"v` is `u"(v b. 0)`, so `<"(+/)` boxes the
+whole argument and `<"(<"1)` boxes each row); `@:` (atop: monad
 `u v y`, dyad `u (x v y)`, at infinite rank) and `@` (the same thing at v's
 own ranks — one v-cell at a time, u run on each result, which is the entire
 difference between the two); `&:` (compose: monad `u v y`, dyad
@@ -189,23 +196,36 @@ sizes, or two rows of origins and sizes, and a negative size reverses that
 axis; `x u;.3 y` and `x u;._3 y` tessellate: x is the block size, or two
 rows of movement and size, and u runs on every block — `;.3` keeps the short
 blocks at the far edge, `;._3` takes only the whole ones. A negative block
-size reverses its axis there too, but only where the movement row is
-written out: given a bare vector of sizes the reference answers with
-something its magnitude plays no part in, so libjay names that gap rather
-than guessing at it. The cut's LEFT RANK is finite — 2 for the rectangle
+size reverses its axis there too where the movement row is written out.
+With the movement left implicit a negative size does not measure the block
+at all: the reference runs it to the END of its axis and reverses it,
+whatever the magnitude said, so `_2 <;.3 i.6` and `_3 <;.3 i.6` answer the
+same six reversed prefixes of the reversed argument and `_2 <;._3 i.6` the
+one complete block. The cut's LEFT RANK is finite — 2 for the rectangle
 and tessellation forms, whose cell is two rows of origins and sizes, and 1
 for the interval forms, whose cell is one list of frets — so a longer left
 argument is an ordinary frame of cuts, one cut per cell:
 `(2 2 2$…) <;.0 i.5 5` is two blocks and `(2 3$…) <;.1 i.3 3` two
 cuttings. A fret list with no frets in it is the whole argument
 in ONE piece, and an empty fret list of rank 2 or more — J's per-axis form
-with no axis named — is no piece at all; a BOXED left argument, which is
-that per-axis form written out, is a named gap); `!.` (fit: on the verbs whose
+with no axis named — is no piece at all. A BOXED left argument is that
+per-axis form written out: one box of frets per leading axis, the rest of
+the axes taken whole, and the result framed by how many intervals each
+named axis was cut into — `((<1 0 1),(<1 0 0)) <;.1 i.3 3` is a 2 by 1
+frame of blocks); `!.` (fit: on the verbs whose
 meaning uses the comparison tolerance it replaces that tolerance, so `=!.0`
-compares exactly; on `|.` it gives the FILL instead — `x |.!.f y` shifts
+compares exactly; on a verb whose answer can reach past what its argument
+holds it gives the FILL instead — the element that stands where the value
+runs out. Those verbs are `{.` (`5 {.!.9 ] 1 2 3` is `1 2 3 9 9`), `$`
+(which then stops repeating the ravel: `(2 2) $!.9 ] 1 2 3` is
+`1 2 / 3 9`), `,` `,.` and `,:` (which pad a ragged join), `;` and `>`
+(which pad the pieces they frame), `#` (which accepts one and has nothing
+to put it in), and `|.` — `x |.!.f y` shifts
 rather than rotates, an item moved past an end is dropped and the place it
-left takes f, and the monad `|.!.f y` is `_1 |.!.f y`. On any other verb
-J's `!.` fill is a named gap); `[:` (cap); `&.` and `&.:` (under, see
+left takes f, and the monad `|.!.f y` is `_1 |.!.f y`. A fill of a wider
+type widens the answer (`5 {.!.9.5 ] 1 2 3` is a float list), one of
+another kind entirely is refused, and a verb the reference gives no fit to
+refuses one here too); `[:` (cap); `&.` and `&.:` (under, see
 below); `::` (adverse: `u :: v` applies u, and if the LANGUAGE refuses it
 applies v to the same arguments instead — a gap in libjay is a promise, not
 an error a program may handle, and goes straight through); `:.` (obverse:
@@ -674,7 +694,7 @@ Dyalog line". The largest item is `⎕R`/`⎕S`.
 | `⊂` | enclose — except that a simple scalar is its own enclosure, so `⊂5` is `5` | partitioned enclose: a partition opens where x rises (`x[i] > x[i-1]`, reading `x[¯1]` as 0) and an item flagged 0 is dropped. Rank 2 and above partitions the LAST axis, once per cross section, and the axes ahead of it frame the answer. No flag against no item is the empty nested vector, and nothing about the flags has to be a flag; where there ARE items the flags are read as always |
 | `⍸` | where: index `i` repeated `y[i]` times, from `⎕IO`; a rank-2 or higher argument gives one boxed coordinate vector per occurrence. `Dialect.where_rank` names Dyalog's reading, where an index is a vector as long as the rank at rank 0 too, so `⍸1` is a one-item nested vector holding `⍬` | interval index: how many items of the ascending x are at or below each cell, plus `⎕IO - 1`. The interval is closed on the left here and open in J's `I.`: `1 3 5⍸3` is 2 where `1 3 5 I. 3` is 1. `Dialect.lookup_left` names Dyalog's reading, where the bounds are the left argument's MAJOR CELLS — a matrix of them searches rows — and a scalar is a rank error |
 | `⌷` | materialise: the argument itself (no oracle — see "Which APL" above) | index: one item of x per axis of y, and the count must equal the rank. An item is a scalar, which drops its axis, or an ENCLOSED vector, which keeps it and selects that many — `(⊂1 2)⌷5 6 7 8` is `5 6` |
-| `⌹` | matrix inverse — the pseudo-inverse of a taller matrix; wider is refused, singular is a domain error. APL's `⌹` reads the whole argument, so rank 3 or more is a rank error; J's `%.` has rank 2 and runs over the 2-cells | matrix divide: the least-squares solution of `y a = x`, under the same rank rule |
+| `⌹` | matrix inverse — the pseudo-inverse of a taller matrix; wider is refused, singular is a domain error. APL's `⌹` reads the whole argument, so rank 3 or more is a rank error; J's `%.` has rank 2 and runs over the 2-cells | matrix divide: the least-squares solution of `y a = x`, under the same rank rule. J's `%.` takes its right-hand side WHOLE — its left rank is infinite — so one of rank 3 or more is solved as one column per element of an item and the answer keeps every axis but the leading one |
 | `?` | roll: a random value in `⎕IO .. ⎕IO+y-1` (`?0` is a domain error) | deal: x distinct values from that range |
 | `⊃` | disclose: the items mixed into one array, filled where their shapes differ; a character item beside a numeric one gives a MIXED SIMPLE array, each cell padded with its own prototype | pick: each item of x is one LEVEL of a path, and holds one index per axis of the value at that level — so an empty index picks from a scalar and nothing else, and `(2 2)⊃matrix` asks for two levels where `(⊂2 2)⊃matrix` asks for one two-axis index. Indices count upwards from `⎕IO`; one below it is out of range, not an index from the end |
 | `↑` | first: the first element of the ravel, disclosed; the type's fill when there is none. Under `Dialect.first_disclose` it is MIX instead, which is `⊃`'s monad here | take; overtaking a NESTED array fills with the first item's prototype — that item's shape with a zero for every number and a blank for every character, nested to the same depth. One count per axis; `Dialect.axis_counts` names Dyalog's reading, where fewer counts take the trailing axes whole |
@@ -1346,7 +1366,11 @@ values.
 
 The display is one line per stored entry — its position, `|`, then what it
 holds — with the positions and the values each aligned in their own column.
-An array with nothing stored shows nothing, whatever its sparse element is.
+Where the stored cell has axes of its own it is drawn as the ARRAY of all
+the cells is, so a cell keeps its rows and the planes keep the blank line
+between them; the position stands beside the cell's first line and the
+column is drawn down the rest. An array with nothing stored shows nothing,
+whatever its sparse element is.
 `":` gives that display as a table of lines whatever the array's own rank.
 
 **The verb.** `$. y` converts a dense array; a scalar has no axis to store
@@ -1360,6 +1384,21 @@ entries that hold the sparse element dropped, and `_1` the shape, axes and
 element boxed together. `2 $.` answers a DENSE argument with all of its
 axes; every other query refuses one, as J does. `3!:0` reports the sparse
 type codes: the dense code times 1024.
+
+A BOXED left argument respecifies the storage rather than asking about it.
+`(2;a) $. y` stores the same value under the sparse axes a — a dense
+argument too, with zero the sparse element, and a negative axis counting
+from the end — so the value does not change, only which axes an entry is
+indexed by and therefore how many entries there are. `(3;e) $. y` gives a
+sparse array another sparse element, keeping every stored entry exactly as
+it is, so every position none of them names now holds e and the array's own
+VALUE changes: `0 $. (3;5) $. $. 2 3 $ 0 1 0 2 0 3` is `5 1 5 / 2 5 3`.
+The element takes the wider of the two types, as an amendment does.
+`(2 2;a) $. y` says how many cells the array would store under the sparse
+axes a, without building it. `(2 1;a) $. y` asks how many BYTES they would
+take: that is a measurement of the interpreter that answers it and not of
+the language, so libjay refuses it by name — its own layout is not J's and
+a number from it would mean nothing.
 
 **Which element types.** Boolean, integer, floating and complex. J has a
 code for a sparse literal and a sparse box and makes neither — libjay names
@@ -1966,7 +2005,20 @@ oracle directly, one entry per line of
   So `u: 'é'` shows `é` here and `Ã©` there, `u: 233` shows a byte no text
   can hold, and `3!:0 u: 'é'` reports the one character type. Every code at
   256 or above — the ones that need the wide type to exist — displays alike.
+  The byte conversions read the same way: `8 u:` leaves alone a character
+  list every one of whose codepoints is a byte and packs any other into its
+  UTF-8 bytes, `9 u:` reads such a list back, and `2 u:` — which WIDENS
+  bytes into characters in J — is the identity here, so `2 u: 8 u: u: 955`
+  writes as `λ` here and as `Î»` there.
   One entry per line of `crates/libjay/tests/corpus/j/divergences.txt`.
+- jconsole computes a polynomial's roots exactly where it can factor it
+  over the coefficients' own exact type — degree 2 or more, whole roots for
+  whole coefficients and rational ones for rational coefficients — and
+  stores the answer as rationals; its polynomial INTEGRAL divides exactly
+  for an extended or rational argument. libjay's Durand–Kerner and its
+  integral work in f64 throughout, so `p. 1r2 _3r2 1` is `1 1r2` there and
+  `1 0.5` here, and `0 p.. 1 1 1x` is `0 1 1r2 1r3` there and
+  `0 1 0.5 0.333333` here. The numbers are the same; their storage is not.
 - APL dyadic `⌽` and `⊖` reduce a large rotate amount whole; GNU APL
   truncates it to a signed 32-bit integer first, so `9223372036854775806⌽1 2 3`
   is `1 2 3` here and `2 3 1` there.
@@ -2314,10 +2366,6 @@ sections above is also collected here.
   a recursion is written with an agenda), and applying one outside a
   definition says "a self-reference in a tacit verb" rather than calling it
   an error in the program.
-- The MONADIC gerund amend, `` u`v`w} y ``: the reference gives it a
-  meaning that is not the amend at all (`` (0:`0:`]}) 1 2 3 `` is `1`),
-  and what it is has not been worked out. The dyad — u the replacement, v
-  the indices, w the array they go into — is implemented.
 - APL's dyadic `@`: `x f@g y`, where both operands read the left argument
   too. The monad is implemented.
 - An explicit modifier whose body NAMES AN ARGUMENT and derives the
@@ -2339,11 +2387,12 @@ sections above is also collected here.
   (`0 s:` … `3 s:`, `6 s:`, `7 s:`, `_1 s:`), which describe an
   interpreter's own table rather than the language; a determinant by minors
   of more than 16 rows (the expansion is exponential, and only `-/ . *` over machine numbers has a
-  direct method); the two vector output codes of the sequential machine and
-  its map over a numeric argument; a NEGATIVE block size in a tessellation
-  with the movement row left implicit; the atomic representation of a
-  capped fork or an explicit definition; and `!.` as a fill on any verb but
-  `|.`. In APL: a variant option other than `⎕CT` and `⎕IO`, or one that is
+  direct method); the two vector output codes of the sequential machine,
+  which black-box probing did not pin down — they mark a boundary inside
+  the word being collected rather than ending it, and what the machine
+  emits at the end of the input after them followed from no rule the probes
+  could confirm; and the atomic representation of a
+  capped fork or an explicit definition. In APL: a variant option other than `⎕CT` and `⎕IO`, or one that is
   not settled when the program is compiled; a nested argument to dyadic
   `⍕`; a stencil with a movement row; a label sharing a definition with
   a control structure; and an axis specification on a function that is not

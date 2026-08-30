@@ -23,7 +23,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 153 green / 22 partial / 2 absent by design, of 177 valences in the
+**J: 159 green / 16 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
 **APL: 107 green / 18 partial / 3 absent by design, of 128 valences in the
@@ -58,8 +58,8 @@ inventory. Nothing in APL's primitive tables is red.**
 | `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟢 matrix divide. Its left rank is infinite, so a right-hand side of rank 3 or more is solved whole — one column per element of an item — and the answer keeps every axis but the leading one |
 | `j.` | 🟢 imaginary | 🟢 complex |
 | `r.` | 🟢 angle | 🟢 polar |
-| `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative; jconsole answers an exact rational for some quadratics and libjay a float. A boxed argument is the root form and answers the coefficients; the multiplier may go unsaid, so `p. (<1 2)` is `2 _3 1` | 🟢 polynomial; a boxed `multiplier ; roots` left argument too, the multiplier optional |
-| `p..` | 🟢 poly. derivative; a boxed argument is the root form | 🟡 poly. integral, x the constant term; a boxed argument is the root form, but its coefficients come out in floats where jconsole keeps exact rationals |
+| `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative. The numbers agree with jconsole; their STORAGE need not. jconsole factors a polynomial of degree 2 or more over the coefficients' own exact type and answers rationals where it succeeds — whole roots for whole coefficients (`p. 6 _5 1` is `3 2`), rational ones for rational coefficients (`p. 1r2 _3r2 1` is `1 1r2`) — and falls back to floats for a linear polynomial, or where one root is not of that type (`p. 1 _3 2` is `1 0.5` there too). libjay computes in f64 throughout; the two cases that part are pinned in `corpus/j/divergences.txt`. A boxed argument is the root form and answers the coefficients; the multiplier may go unsaid, so `p. (<1 2)` is `2 _3 1` | 🟢 polynomial; a boxed `multiplier ; roots` left argument too, the multiplier optional |
+| `p..` | 🟢 poly. derivative; a boxed argument is the root form | 🟡 poly. integral, x the constant term; a boxed argument is the root form. The integral divides by the power, and jconsole keeps that division exact for an EXTENDED or rational argument (`0 p.. 1 1 1x` is `0 1 1r2 1r3`) where libjay answers floats — pinned in `corpus/j/divergences.txt` |
 | `p:` | 🟢 the y-th prime; extended where y is | 🟢 the prime queries: `_1` `0` `1` `2` `3` `4` `_4` |
 | `q:` | 🟢 prime factors, exact however many digits the number has — trial division, then Miller–Rabin and Pollard's rho. The whole argument is read at once: one row per item, padded with 1s | 🟢 prime exponents: the first `x` primes' exponents, and for a negative `x` the last `\|x\|` columns of the factor table, all of them for `__` |
 | `?` | 🟡 roll; libjay's own stream, not J's | 🟡 deal; same |
@@ -118,11 +118,11 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | Spelling | Monad | Dyad |
 |---|---|---|
 | `;` | 🟢 raze | 🟢 link |
-| `;:` | 🟢 words | 🟡 sequential machine: the table-driven form `(f;s;m;ijrd) ;: y`, with output codes 0 to 3 and 6 and every result form 0 to 5; the two vector codes (4 and 5) and a map over a numeric argument are named |
+| `;:` | 🟢 words | 🟡 sequential machine: the table-driven form `(f;s;m;ijrd) ;: y`, with output codes 0 to 3 and 6 and every result form 0 to 5. The map turns a CHARACTER into a class — it has one entry per byte, and beside a numeric argument, whose values are the classes themselves, the reference refuses it, as libjay now does. The two vector codes (4 and 5) are named: black-box probing showed them marking a boundary inside the word being collected rather than ending it — a later code 3 then emits the pieces the marks divide — but what the machine emits at the END of the input after them did not follow from any rule the probes could confirm, and libjay will not guess at it |
 | `L.` | 🟢 level of | — |
 | `":` | 🟢 default format | 🟢 format by specification: `w j d` per column, width 0 for what the values need, a negative width for the exponential form, asterisks for what does not fit |
 | `".` | 🟢 do; the string runs over the names around it | 🟢 numbers, x standing in for a word that is not one |
-| `u:` | 🟡 unicode: the widened value has the same items and the same codes, and libjay has one character type where J has three, so the two differ only in DISPLAY — pinned in `corpus/j/divergences.txt` | 🟡 unicode; forms 3 and 10, the byte-oriented ones named |
+| `u:` | 🟡 unicode: the widened value has the same items and the same codes, and libjay has one character type where J has three, so the two differ only in DISPLAY — pinned in `corpus/j/divergences.txt` | 🟢 unicode, every form the reference defines: 3 (codepoints) and 10 (the characters they name), and the byte-oriented 1, 2, 8 and 9. libjay's one character type holds codepoints, so 2 and 10 change nothing, 1 keeps a codepoint modulo 256, 8 packs one into its UTF-8 bytes and 9 reads them back — a character list every one of whose codepoints is below 256 is what stands for J's byte string. The same one-type divergence in DISPLAY is pinned beside the monad's |
 | `s:` | 🟢 symbol: a character list cut on its own leading delimiter, a character table one name per row, a boxed argument one name per box | 🟡 the name forms `4 s:` (a blank-padded character table) and `5 s:` (boxes); the symbol-table queries `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report an interpreter's internal table and are named |
 | `[` | 🟢 same | 🟢 left |
 | `]` | 🟢 same | 🟢 right |
@@ -147,7 +147,7 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `\.` | 🟢 suffix | 🟢 outfix; a piece of one item applies nothing, and only the five folds J has special code for (`+/` `*/` `<./` `>./` `+./`) type the whole argument first |
 | `/.` | 🟢 oblique | 🟢 key |
 | `~` | 🟢 reflex | 🟢 passive |
-| `}` | 🟡 noun or verb operand, a boxed index specification, and a LIST of them; a gerund operand has a monadic valence in the reference that is named here | 🟢 the same, plus the gerund `` u`v`w} ``: u makes the replacement, v the indices, w the array they go into |
+| `}` | 🟢 noun or verb operand, a boxed index specification, and a LIST of them. A gerund operand amends nothing monadically: it SELECTS — v gives the indices and w the array they index, and u is not applied at all | 🟢 the same, plus the gerund `` u`v`w} ``: u makes the replacement, v the indices, w the array they go into |
 
 ## J — conjunctions
 
@@ -183,7 +183,7 @@ conjunctions above:
 | `L:` level | 🟢 both valences; the dyad descends both arguments together |
 | `S:` spread | 🟢 both valences, as `L:` |
 | `b.` boolean / characteristics | 🟢 `m b.` (the 32 boolean and bitwise functions) and all three characteristics: `0` the ranks, `1` the identity function, `_1` the obverse. `_1` answers a SPELLING, and libjay writes its own — a derived verb whose operand is a noun spells as `(n&+)` here where the reference writes the noun out |
-| `$.` sparse | 🟡 the storage kind, the monad and the dyad's atomic forms `_1 0 1 2 3 4 5 7 8`, and the display. The BOXED left arguments — `(2;a)` and `(3;e)`, which respecify a sparse array's axes or element, and `(2 1;a)` and `(2 2;a)`, which price it under other axes — are named gaps. A sparse array reaching any other verb is expanded first, so the ANSWER always matches and the storage kind does not survive the step — where J keeps `s + 1` sparse, libjay gives the dense array. Sparse characters and boxes are named gaps, as they are in J |
+| `$.` sparse | 🟡 the storage kind, the monad, the dyad's atomic forms `_1 0 1 2 3 4 5 7 8`, and the display — including a stored cell of its own shape, which is drawn as the array of all the cells is. The BOXED left arguments too: `(2;a)` stores the same value under other sparse axes, `(3;e)` gives it another sparse element — which changes what every position it does not store holds — and `(2 2;a)` says how many cells other axes would store. `(2 1;a)`, which asks how many BYTES they would take, is ⚪ not in the language: it reports one interpreter's own storage layout, which another implementation has no counterpart to. A sparse array reaching any other verb is expanded first, so the ANSWER always matches and the storage kind does not survive the step — where J keeps `s + 1` sparse, libjay gives the dense array. Sparse characters and boxes are named gaps, as they are in J |
 | `H.` hypergeometric | 🟢 both valences: the monad sums the series to its limit, with the shared parameters cancelled, and `x (m H. n) y` stops after x terms — a whole nonnegative count, paired with the argument element by element. A series that neither converges nor overflows is refused by name |
 | `t.` task | ⚪ the reference spells `t.` the TASK conjunction — it runs a verb in one of J's thread pools and answers with a pyx. The sandbox does not open those threads, as it does not for `T.` |
 | `t:` | — the reference rejects the spelling as an invalid inflection, as it does `d.`, `D.` and `D:` |

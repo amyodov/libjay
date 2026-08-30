@@ -4261,3 +4261,71 @@ the register.
   accident — and one name on the left is an ordinary assignment there, the
   whole value and not its first item.
 
+- 2026-08-30 — J's `!.` names two different things, and which one it names
+  is decided by the VERB it is attached to. On a verb that compares it
+  replaces the comparison tolerance, which is what libjay already had; on
+  one whose answer can reach past what its argument holds it names the
+  ELEMENT that stands where the value runs out. The reference gives such a
+  fit to exactly `{. $ , ,. ,: # ; > |.` and refuses one anywhere else
+  (`3 }.!.9 ] 1 2` is a domain error there, and now here), and `>` takes
+  both, so a numeric fit on it is a tolerance for the dyad AND a fill for
+  the monad. The fill rides in `EvalCfg` beside the tolerance, as a `Copy`
+  `FillAtom`, so that a cell run on another thread carries it; the verbs
+  that fill read it where they would have written the type's own. A fill of
+  a wider type widens the answer — `5 {.!.9.5 ] 1 2 3` is a float list —
+  because that is what jconsole answers, and a fill of another kind is a
+  type error there too. Adding the field cost enough stack per recursion
+  level to take the runaway-recursion test over the cliff again, so the
+  rank-framing bodies of `Verb::monad_rows` moved out into `rank_monad` and
+  `prim_monad_frame`: the same remedy, and it left more headroom than the
+  branch started with.
+- 2026-08-30 — Three sub-forms the reference decides differently from any
+  rule that could be guessed, all settled by probing. A cut's negative
+  block size with the MOVEMENT row left implicit does not measure the block
+  at all: `_2 <;.3 i.6` and `_3 <;.3 i.6` answer the same thing, which is
+  the block run to the end of its axis and reversed — writing the axis's
+  own length in the size's place says exactly that. A sequential machine's
+  map is refused beside a NUMERIC argument (jconsole: domain error) and has
+  one entry per byte, so libjay's "not supported yet" there was a gap that
+  was never a gap. And `%.` takes its right-hand side whole, its left rank
+  being infinite, so one of rank 3 or more is solved as one column per
+  element of an item and the answer keeps the item's own axes.
+- 2026-08-30 — libjay has ONE character type where J has three, and that
+  decides how the byte-oriented `u:` conversions read: a character list
+  every one of whose codepoints is below 256 is what stands for J's byte
+  string. So `2 u:` and `10 u:` are the identity, `1 u:` keeps a codepoint
+  modulo 256, `8 u:` leaves such a list alone and packs anything else into
+  its UTF-8 bytes, and `9 u:` reads such a list back and leaves anything
+  else alone. Every probe agrees on the numbers; the two writings that part
+  — `2 u:` widening bytes into characters there, and a codepoint between
+  128 and 255 — join the divergence file beside the monad's.
+- 2026-08-30 — The two vector output codes of the sequential machine (4 and
+  5) stay named after a day of black-box probing. What the probes did
+  establish: they emit nothing where they fire, they mark a boundary inside
+  the word being collected, and a later code 3 emits the pieces those marks
+  divide — `(2;(2 2 2$0 0 1 4 1 0 1 3);(' '=a.);0 0 0 _1) ;: 'ab cd ef'` is
+  the two words `ab` and ` cd`. What they did not establish is what the
+  machine emits at the END of the input after them: the same table over a
+  one-state machine answers one word spanning the whole argument, which no
+  reading of the boundary marks accounts for. A wrong answer would be worse
+  than a named gap, so the gap is named.
+- 2026-08-30 — `$.`'s boxed left arguments respecify storage, and one of
+  them is not a fact about the language. `(2;a)` stores the same value
+  under other sparse axes, `(3;e)` gives it another sparse element — which
+  changes what every position it does not store holds, so the array's VALUE
+  changes — and `(2 2;a)` counts the cells other axes would store. `(2 1;a)`
+  asks how many BYTES they would take: that measures the interpreter that
+  answers it, libjay's layout is not J's, and a number from it would mean
+  nothing, so it is refused by name rather than invented. Implementing
+  `(2;a)` needed the sparse display to draw a stored cell of its own shape,
+  which it does by drawing the array of ALL the cells and putting the
+  position beside each cell's first line.
+- 2026-08-30 — Two long-standing gaps turned out to be one line each once
+  the reference was asked. `u"v` is `u"(v b. 0)` — the verb on the right
+  lends its own three ranks. And the gerund amend's MONADIC valence amends
+  nothing: it is the noun amend's own monad over what v and w answer,
+  `(v y) m} (w y)`, and u is not applied at all, which is why
+  `` (0:`0:`]}) 1 2 3 `` is 1. Raze was found wrong while the fill was
+  being threaded through it: an opened value whose items have fewer axes
+  than the common item shape is ONE item of that shape, not several of a
+  smaller one, so `; ('ab';(2 2$'wxyz'))` is three rows and was four.
