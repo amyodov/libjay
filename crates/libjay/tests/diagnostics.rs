@@ -197,7 +197,18 @@ const J_PROMISES: &[Case] = &[
     j("$. 'abc'", ErrorKind::NotYet, "$. 'abc'", &["sparse"]),
     j("+/ . * i. 17 17", ErrorKind::NotYet, "+/ . * i. 17 17", &["determinant"]),
     j("9!:18", ErrorKind::NotYet, "9!:18", &["foreign 9!:18"]),
-    j("m =. /\nm", ErrorKind::NotYet, "m", &["displaying a modifier"]),
+    j(
+        "m =. {{ u/ y }}\nm",
+        ErrorKind::NotYet,
+        "m",
+        &["writing this modifier back out"],
+    ),
+    j(
+        "f =. 3 : 0\ny + 1\n)\nf",
+        ErrorKind::NotYet,
+        "f",
+        &["back out as J source"],
+    ),
     j("0 s: s: <'a'", ErrorKind::NotYet, "0 s: s: <'a'", &["symbol-table form"]),
     j(
         "(0;(2 2 2 $ 0 0 1 4 0 1 1 0);(' ' = a.)) ;: 'a b'",

@@ -35,6 +35,10 @@ fn err(lang: Lang, src: &str) -> jay::Error {
     program.run(&[], &mut sink).expect_err("expected an error")
 }
 
+fn chars(text: &str) -> Array {
+    Array::new(vec![text.chars().count()], Data::Char(text.chars().collect::<Vec<_>>().into()))
+}
+
 fn i64s(shape: &[usize], values: &[i64]) -> Array {
     Array::new(shape.to_vec(), Data::I64(values.to_vec().into()))
 }
@@ -178,10 +182,8 @@ fn assignment_names_an_adverb_or_a_conjunction() {
     assert_eq!(j("m =. /\nmean =. + m % #\nmean 1 2 3 4"), Array::scalar_f64(2.5));
     // A name may change part of speech; the last assignment wins.
     assert_eq!(j("m =. /\nm =. 5\nm + 1"), Array::scalar_i64(6));
-    // A sentence that IS a modifier has nothing to display yet.
-    let e = err(Lang::J, "m =. /\nm");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("displaying a modifier"), "{}", e.msg);
+    // A sentence that IS a modifier displays it.
+    assert_eq!(j("m =. /\nm"), chars("/"));
 }
 
 #[test]
@@ -255,11 +257,10 @@ fn the_hypergeometric_series_sums_its_parameters() {
 #[test]
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
-        // The tacit translator: naming a primitive modifier and writing a
-        // new one both landed, reading an explicit body back as a tacit
-        // verb has not.
-        (Lang::J, "f =. 13 : 'y + 1'", "tacit definitions"),
-        (Lang::J, "m =. /\nm", "displaying a modifier"),
+        // A definition whose body is written on the lines below keeps no
+        // text of its own, so a sentence that is one has nothing to show.
+        (Lang::J, "f =. 3 : 0\ny + 1\n)\nf", "back out as J source"),
+        (Lang::J, "m =. {{ u/ y }}\nm", "writing this modifier back out"),
         (Lang::Apl, "(A+×)4", "computed value"),
         (Lang::Apl, "3+F←+/", "inside a larger sentence"),
         // A glyph the language has and libjay has not reached is a queue

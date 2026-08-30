@@ -5,7 +5,7 @@
 //! body's words decide, the two moments a body can run at, the
 //! diagnostics, and the forms libjay does not have yet.
 
-use jay::{compile, Array, Dialect, ErrorKind, Lang};
+use jay::{compile, Array, Data, Dialect, ErrorKind, Lang};
 use rstest::rstest;
 
 fn run(src: &str) -> Option<Array> {
@@ -24,6 +24,15 @@ fn j(src: &str) -> Vec<i64> {
 fn floats(src: &str) -> Vec<f64> {
     let a = run(src).unwrap_or_else(|| panic!("{src:?} yielded no value"));
     a.to_f64_vec().unwrap_or_else(|| panic!("{src:?} is not numeric: {a:?}"))
+}
+
+/// The text a sentence that reduces to a verb or a modifier displays.
+fn text(src: &str) -> String {
+    let a = run(src).unwrap_or_else(|| panic!("{src:?} yielded no value"));
+    match a.row_major_data() {
+        Data::Char(v) => v.as_slice().iter().collect(),
+        other => panic!("{src:?} is not text: {other:?}"),
+    }
 }
 
 /// The error a program raises, at compile time or at run time.
@@ -200,27 +209,49 @@ fn a_modifier_body_is_an_explicit_definition(#[case] src: &str, #[case] want: i6
 
 // --- what is named but not implemented ------------------------------------
 
+/// A body that names an argument belongs to the DERIVED verb, and the
+/// reference parses it only where that verb is applied — so a recursion
+/// written there terminates for it and not here, where the whole body is
+/// parsed at once.
 #[test]
-fn a_modifier_that_derives_itself_is_a_named_gap() {
+fn a_deferred_body_that_derives_itself_is_a_named_gap() {
     let e = fails("f =. 1 : 'if. y<1 do. 1 else. y * u f y-1 end.'\n] f 4");
     assert_eq!(e.kind, ErrorKind::NotYet);
     assert!(e.msg.contains("derives the modifier itself"), "{}", e.msg);
 }
 
-#[test]
-fn a_tacit_definition_is_a_named_gap() {
-    let e = fails("f =. 13 : 'y + 1'\nf 3");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("tacit definitions"), "{}", e.msg);
+/// A body that names no argument runs where the modifier is derived, and
+/// there a recursion over the operands does stop.
+#[rstest]
+#[case("pw =. 2 : 'if. n = 0 do. ] else. u @ (u pw (n-1)) end.'\n(+: pw 3) 1", 8)]
+#[case("pw =. 2 : 'if. n = 0 do. ] else. u @ (u pw (n-1)) end.'\n(+: pw 0) 5", 5)]
+fn a_derivation_that_derives_itself_stops_at_its_base_case(
+    #[case] src: &str,
+    #[case] want: i64,
+) {
+    assert_eq!(j(src), vec![want]);
 }
 
-/// A modifier is still a modifier, and a sentence that is one has no value
-/// to display yet.
 #[test]
-fn a_sentence_that_is_an_explicit_modifier_is_a_named_gap() {
-    let e = fails("f =. 1 : 'u u y'\nf");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("displaying a modifier"), "{}", e.msg);
+fn a_derivation_with_no_base_case_is_stopped_with_a_diagnostic() {
+    let e = fails("bad =. 1 : 'u bad'\n(+ bad) 1");
+    assert_eq!(e.kind, ErrorKind::Domain);
+    assert!(e.msg.contains("deep"), "{}", e.msg);
+}
+
+#[rstest]
+#[case("f =. 13 : 'y + 1'\nf 3", 4)]
+#[case("f =. 13 : 'x + y'\n2 f 3", 5)]
+#[case("f =. 13 : '(+/ y) % # y'\nf 2 4 6", 4)]
+fn a_tacit_definition_applies_like_any_verb(#[case] src: &str, #[case] want: i64) {
+    assert_eq!(j(src), vec![want]);
+}
+
+/// A sentence that is a modifier displays it, and an explicit one gives
+/// back the text it was written as.
+#[test]
+fn a_sentence_that_is_an_explicit_modifier_displays_it() {
+    assert_eq!(text("f =. 1 : 'u u y'\nf"), "1 : 'u u y'");
 }
 
 /// `explain` names what the sentence defined.

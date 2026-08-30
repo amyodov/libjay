@@ -948,14 +948,27 @@ fn derive_explicit(
     span: Span,
 ) -> Result<Frag> {
     let addr = Arc::as_ptr(src) as usize;
-    let deep = DERIVING.with(|d| {
+    // A DEFERRED body is the derived verb's, and the reference parses it
+    // only where that verb is applied: a body which derives its own
+    // modifier inside it therefore terminates there and not here, where
+    // the whole body is parsed at once.
+    let (again, deep) = DERIVING.with(|d| {
         let mut d = d.borrow_mut();
+        if d.contains(&addr) && src.deferred {
+            return (true, false);
+        }
         if d.len() >= DERIVATION_LIMIT {
-            return true;
+            return (false, true);
         }
         d.push(addr);
-        false
+        (false, false)
     });
+    if again {
+        return Err(Error::not_yet(
+            "an explicit modifier whose body names an argument and derives the modifier itself",
+            span,
+        ));
+    }
     if deep {
         return Err(Error::new(
             ErrorKind::Domain,
@@ -4524,10 +4537,19 @@ mod tests {
     }
 
     #[test]
-    fn a_sentence_that_is_a_verb_is_not_supported_yet() {
-        let e = err("+/ % #");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("tacit"), "{}", e.msg);
+    fn a_sentence_that_is_a_verb_displays_it() {
+        assert_eq!(text_of_const(&one("+/ % #")), "+/ % #");
+    }
+
+    /// The text a sentence that reduces to an entity yields.
+    fn text_of_const(e: &Expr) -> String {
+        match e {
+            Expr::Const(a, _) => match a.row_major_data() {
+                Data::Char(v) => v.as_slice().iter().collect(),
+                other => panic!("expected text, got {other:?}"),
+            },
+            other => panic!("expected a literal, got {other:?}"),
+        }
     }
 
     // ----------------------------------------------------------- assignment
@@ -4677,10 +4699,9 @@ mod tests {
     }
 
     #[test]
-    fn a_sentence_that_is_a_modifier_is_a_named_gap() {
-        let e = err("insert =. /\ninsert");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("displaying a modifier"), "{}", e.msg);
+    fn a_sentence_that_is_a_modifier_displays_it() {
+        let s = stmts("insert =. /\ninsert");
+        assert_eq!(text_of_const(s.last().expect("two sentences")), "/");
     }
 
     #[rstest]
@@ -4700,12 +4721,16 @@ mod tests {
         }
     }
 
+    /// `13 : '…'` answers a tacit verb, and the sentence that names it
+    /// displays the train it translated to.
     #[rstest]
-    #[case("f =. 13 : 'y + 1'", "tacit definitions")]
-    fn definition_forms_libjay_has_not_are_named(#[case] src: &str, #[case] msg: &str) {
-        let e = err(src);
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains(msg), "{}", e.msg);
+    #[case("f =. 13 : 'y + 1'", "1 + ]")]
+    #[case("f =. 13 : 'x + y'", "+")]
+    #[case("f =. 13 : '(+/ y) % # y'", "+/ % #")]
+    #[case("f =. 13 : '3'", "3:")]
+    fn a_tacit_definition_translates_its_body(#[case] src: &str, #[case] want: &str) {
+        let s = stmts(&format!("{src}\nf"));
+        assert_eq!(text_of_const(s.last().expect("two sentences")), want);
     }
 
     /// `1 :` and `2 :` say the part of speech; a `{{ }}` leaves it to the
@@ -4742,10 +4767,14 @@ mod tests {
     }
 
     #[test]
-    fn multiple_assignment_is_not_supported_yet() {
-        let e = err("'a b' =. 1 2");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("multiple assignment"), "{}", e.msg);
+    fn multiple_assignment_names_each() {
+        match one("'a b' =. 1 2") {
+            Expr::AssignMany { names, by_items, .. } => {
+                assert_eq!(names, ["a", "b"]);
+                assert!(by_items);
+            }
+            other => panic!("expected a distributed assignment, got {other:?}"),
+        }
     }
 
     // -------------------------------------------------------- interpolation
