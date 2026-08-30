@@ -38,9 +38,11 @@ class TestCache:
         assert j.compile("2+2")._inner is not first
 
     def test_a_refusal_is_raised_every_time(self):
+        # An unbalanced parenthesis: "+ + +" no longer serves here, since a
+        # bare train is a displayable verb, as it is in J.
         for _ in range(3):
             with pytest.raises(JayError):
-                j.compile("+ + +")
+                j.compile("+/ (")
 
     def test_kernels_from_one_source_stay_independent(self):
         x = np.arange(4, dtype=np.float64)
