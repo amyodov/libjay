@@ -847,27 +847,149 @@ fn apl_primitives(expr: &str) -> Vec<String> {
     out
 }
 
-/// A stable name for the cause a mismatch is likely to have. Two sentences
-/// with the same signature are two spellings of one finding, which is what
-/// lets a sweeper say "nothing new" instead of counting rows; deduplicating
-/// on the expression text can never say that, because the space of
-/// expressions is effectively infinite.
+/// A stable name for the cause a mismatch has. Two sentences with the same
+/// signature are two spellings of one finding, which is what lets a sweeper
+/// say "nothing new" instead of counting rows; deduplicating on the
+/// expression text can never say that, because the space of expressions is
+/// effectively infinite.
 ///
-/// The field has two levels, coarse first: what libjay made of the sentence,
-/// then the primitives the sentence names, separated by `|`. A composed
-/// sentence names eight or ten primitives, so the whole set is nearly unique
-/// and only ever collapses exact re-findings; the class before the bar is
-/// the level that says whether a batch found a cause the sweeper has not
-/// seen. A wrapper deduplicates on the first field to answer "is this new"
-/// and on the whole to answer "is this the same sentence again".
+/// The field names how the two sides parted and what libjay made of the
+/// sentence, then, after `|`, the primitives the sentence names.
+///
+/// `expr` is meant to be a sentence [`reduce`] has already cut down to the
+/// smallest one that still parts the two sides the same way. That is what
+/// keeps the part after the bar bounded: a cut-down sentence names one or
+/// two primitives, where the composed sentence it came from names eight or
+/// ten, and a set of eight is a property of the draw rather than of the
+/// cause — one cause spread over every subset it can be drawn inside is what
+/// makes a seen-set grow without end.
 ///
 /// `ours` is libjay's side as the comparison printed it: `<panic>`,
 /// `<no value>`, `<error> …`, or the value.
-pub fn signature(lang: Lang, expr: &str, ours: &str) -> String {
-    format!("{}|{}", answer_class(ours), primitives(lang, expr).join(","))
+pub fn signature(lang: Lang, verdict: Verdict, expr: &str, ours: &str) -> String {
+    format!("{}:{}|{}", verdict.label(), answer_class(ours), primitives(lang, expr).join(","))
 }
 
-/// The coarse half of a signature on its own.
+/// How far a sentence is cut down in search of the smallest one that parts
+/// the two sides the same way. Every step costs the caller one run of libjay
+/// and one of the oracle, so the ceiling is what keeps one mismatch from
+/// costing more than the batch it was found in.
+pub const REDUCE_BUDGET: usize = 24;
+
+/// The smallest sentence reachable from `expr` by cutting parenthesised
+/// groups out of it that `holds` is still true of — where `holds`, for a
+/// sweep, is "libjay and the oracle still part the same way".
+///
+/// A composed sentence is a tree with a bug somewhere inside it: the
+/// signature of the whole tree is a property of the draw, and the signature
+/// of the cut-down sentence is a property of the bug. Candidates are tried
+/// shortest first and the search repeats from whatever held, so the answer
+/// is the smallest sentence in reach rather than merely a smaller one.
+/// `holds` is never asked about `expr` itself, and is asked at most `budget`
+/// times.
+pub fn reduce(expr: &str, budget: usize, mut holds: impl FnMut(&str) -> bool) -> String {
+    let mut best = expr.to_string();
+    let mut spent = 0usize;
+    loop {
+        let mut cut = false;
+        for candidate in reductions(&best) {
+            if spent >= budget {
+                return best;
+            }
+            spent += 1;
+            if holds(&candidate) {
+                best = candidate;
+                cut = true;
+                break;
+            }
+        }
+        if !cut {
+            return best;
+        }
+    }
+}
+
+/// The sentences one cut from `expr` reaches, shortest first and without
+/// repeats: the inside of each parenthesised group on its own, and the
+/// sentence with each such group replaced by a plain `2`. The first isolates
+/// a sub-sentence, the second keeps the outer verb and takes the argument
+/// that fed it down to something nobody can blame.
+fn reductions(expr: &str) -> Vec<String> {
+    let chars: Vec<char> = expr.chars().collect();
+    let mut out: Vec<String> = Vec::new();
+    for (open, close) in paren_groups(&chars) {
+        out.push(chars[open + 1..close].iter().collect());
+        let mut replaced: String = chars[..open].iter().collect();
+        replaced.push('2');
+        replaced.extend(&chars[close + 1..]);
+        out.push(replaced);
+    }
+    for candidate in &mut out {
+        *candidate = candidate.trim().to_string();
+    }
+    out.retain(|c| c.chars().count() < chars.len() && !c.chars().all(is_slack));
+    out.sort_by(|a, b| a.chars().count().cmp(&b.chars().count()).then_with(|| a.cmp(b)));
+    out.dedup();
+    out
+}
+
+/// A character no sentence can be made of on its own, so that a cut down to
+/// `( )` is never offered as one.
+fn is_slack(c: char) -> bool {
+    c.is_whitespace() || c == '(' || c == ')'
+}
+
+/// Every balanced parenthesised group, as the index of its `(` and of its
+/// `)`. A parenthesis inside a quoted literal is a character, not structure.
+fn paren_groups(chars: &[char]) -> Vec<(usize, usize)> {
+    let mut opens: Vec<usize> = Vec::new();
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '\'' => {
+                i = skip_literal(chars, i);
+                continue;
+            }
+            '(' => opens.push(i),
+            ')' => {
+                if let Some(open) = opens.pop() {
+                    out.push((open, i));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Whether libjay's side of a candidate could still part the way `verdict`
+/// says, before the oracle has been asked. A reduction whose libjay side
+/// already rules the verdict out is not worth an interpreter run, and most
+/// of them are: the pruning is what keeps a cut-down search inside a batch.
+pub fn could_part(verdict: Verdict, ours: Option<&libjay_testkit::eval::Answer>) -> bool {
+    use libjay_testkit::eval::Answer;
+    let Some(ours) = ours else {
+        return verdict == Verdict::Panicked;
+    };
+    match verdict {
+        Verdict::Panicked => false,
+        Verdict::Differ | Verdict::TheyRefuse => matches!(ours, Answer::Value(_) | Answer::NoValue),
+        Verdict::Gap => {
+            matches!(ours, Answer::Refused(e) if matches!(e.kind, ErrorKind::NotYet | ErrorKind::Language))
+        }
+        Verdict::WeRefuse => match ours {
+            Answer::NoValue => true,
+            Answer::Refused(e) => !matches!(e.kind, ErrorKind::NotYet | ErrorKind::Language),
+            Answer::Value(_) => false,
+        },
+        Verdict::Agree | Verdict::Unfinished => false,
+    }
+}
+
+/// The half of a signature before the primitives: how the two sides parted
+/// and what libjay made of the sentence.
 pub fn cause_class(signature: &str) -> &str {
     signature.split('|').next().unwrap_or(signature)
 }
@@ -1067,17 +1189,50 @@ mod tests {
     /// to sentence, so they are the part that is taken out.
     #[test]
     fn a_signature_names_the_cause_rather_than_the_sentence() {
-        let one = signature(Lang::J, "3 + 4", "<error> length error: 3 and 4 do not agree");
-        let two = signature(Lang::J, "5 + 6", "<error> length error: 7 and 9 do not agree");
+        let we = Verdict::WeRefuse;
+        let one = signature(Lang::J, we, "3 + 4", "<error> length error: 3 and 4 do not agree");
+        let two = signature(Lang::J, we, "5 + 6", "<error> length error: 7 and 9 do not agree");
         assert_eq!(one, two);
-        let other = signature(Lang::J, "3 + 4", "<error> domain error: not a number");
+        let other = signature(Lang::J, we, "3 + 4", "<error> domain error: not a number");
         assert_ne!(one, other);
-        let elsewhere = signature(Lang::J, "3 - 4", "<error> length error: 3 and 4 do not agree");
+        let elsewhere = signature(Lang::J, we, "3 - 4", "<error> length error: 3 and 4 do not agree");
         assert_ne!(one, elsewhere);
-        assert_eq!(signature(Lang::J, "i. 3", "0 1 2"), "val:vector/num|i.");
-        assert_eq!(signature(Lang::Apl, "⍳0", ""), "val:empty/num|⍳");
-        assert_eq!(signature(Lang::Apl, "⍕3", "<panic>"), "panic|⍕");
-        assert_eq!(cause_class(&one), "err:length_error:_#_and_#_do_not_agree");
+        // How the two sides parted is part of the cause: the same answer
+        // against an oracle that refused and against one that did not are
+        // two findings, not one.
+        let they = signature(Lang::J, Verdict::TheyRefuse, "i. 3", "0 1 2");
+        assert_eq!(they, "they-refuse:val:vector/num|i.");
+        assert_ne!(they, signature(Lang::J, Verdict::Differ, "i. 3", "0 1 2"));
+        assert_eq!(signature(Lang::Apl, Verdict::Differ, "⍳0", ""), "differ:val:empty/num|⍳");
+        assert_eq!(signature(Lang::Apl, Verdict::Panicked, "⍕3", "<panic>"), "panic:panic|⍕");
+        assert_eq!(cause_class(&one), "we-refuse:err:length_error:_#_and_#_do_not_agree");
+    }
+
+    /// A cut-down sentence is the smallest one in reach that the predicate
+    /// still holds of, not merely a smaller one, and the search never
+    /// proposes a sentence made of nothing.
+    #[test]
+    fn a_sentence_is_cut_down_to_the_smallest_that_still_parts() {
+        // The cause is `⌊/` over an empty vector; everything wrapped around
+        // it is the draw.
+        let drawn = "(2 3⍴⍳6) + (⌊/(0⍴(¯2/(⊂''))))";
+        assert_eq!(reduce(drawn, 64, |c| c.contains("⌊/")), "⌊/(0⍴(¯2/(⊂'')))");
+        // With nothing to preserve, one cut is as good as another and the
+        // shortest wins.
+        assert_eq!(reduce("(1+2) × (3+4)", 64, |_| true), "2");
+        // A predicate nothing satisfies leaves the sentence as drawn, and
+        // the budget bounds what was spent finding that out.
+        let mut asked = 0;
+        assert_eq!(
+            reduce(drawn, 3, |_| {
+                asked += 1;
+                false
+            }),
+            drawn
+        );
+        assert_eq!(asked, 3);
+        // A parenthesis inside a literal is a character, not structure.
+        assert!(reductions("'(a' , ⍳3").is_empty());
     }
 
     /// Generation 2's axes are reachable at the depths a sweep uses: a run

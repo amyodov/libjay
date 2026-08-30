@@ -546,11 +546,21 @@ pub fn rat_gcd(a: &Rat, b: &Rat) -> Rat {
 
 /// The least common multiple of two rationals, `lcm(numerators)` over
 /// `gcd(denominators)`; zero when either is zero.
+///
+/// The magnitude is the usual one; the sign is `a × b`'s, which is what
+/// `a × b ÷ gcd(a, b)` comes to when the divisor is the positive greatest
+/// common divisor. Both references agree on it — `_5x *. 2` is `_10` and
+/// `_1r2 *. _1r3` is `1` in jconsole, `¯5∧2` is `¯10` in GNU APL — and it is
+/// the only place the exact path differed from the machine-integer one,
+/// which has always carried the sign through `a % g × b`.
 pub fn rat_lcm(a: &Rat, b: &Rat) -> Rat {
     if a.is_zero() || b.is_zero() {
         return Rat::zero();
     }
-    let num = a.num.lcm(&b.num);
+    let mut num = a.num.lcm(&b.num);
+    if (a.num.sign() == Sign::Minus) != (b.num.sign() == Sign::Minus) {
+        num = -num;
+    }
     let den = a.den.gcd(&b.den);
     Rat::new(num, den).expect("denominators are positive")
 }
@@ -624,6 +634,14 @@ mod tests {
         assert_eq!(rat_gcd(&r(1, 2), &r(1, 3)), r(1, 6));
         assert_eq!(rat_lcm(&r(1, 2), &r(1, 3)), r(1, 1));
         assert_eq!(rat_gcd(&r(5, 1), &r(15, 1)), r(5, 1));
+        // A negative multiple keeps its sign, and two of them cancel; the
+        // divisor stays positive.
+        assert_eq!(rat_lcm(&r(-5, 1), &r(2, 1)), r(-10, 1));
+        assert_eq!(rat_lcm(&r(5, 1), &r(-5, 1)), r(-5, 1));
+        assert_eq!(rat_lcm(&r(-5, 1), &r(-5, 1)), r(5, 1));
+        assert_eq!(rat_lcm(&r(-1, 2), &r(1, 3)), r(-1, 1));
+        assert_eq!(rat_gcd(&r(-5, 1), &r(5, 1)), r(5, 1));
+        assert_eq!(rat_lcm(&r(0, 1), &r(-5, 1)), r(0, 1));
     }
 
     #[test]

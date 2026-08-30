@@ -42,9 +42,10 @@ jay-corpus — record what the reference interpreters answer to the corpus.
                                         print composed expressions
       --compare    run libjay and the oracle over them, report the mismatches
       --quiet      with --compare, the summary only
-      --signature  with --compare, prefix every mismatch with a cluster
-                   signature and count the run's distinct signatures, so a
-                   wrapper can deduplicate by cause rather than by text
+      --signature  with --compare, cut every mismatch down to the smallest
+                   sentence that still parts the two sides the same way,
+                   report that sentence, and prefix it with a cause
+                   signature, so a wrapper can deduplicate by cause
       --exprs FILE read the expressions from a corpus file instead, under
                    the index origin its `@ io=` directives give them
   jay-corpus coverage <j|apl>           which primitive × operand cells the
@@ -472,69 +473,69 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
 
     let oracle = oracle::Oracle::find(lang, libjay_testkit::followed_impl(lang))
         .map_err(|absent| absent.message().to_string())?;
-    let verdicts: Vec<(String, u8, fuzz::Verdict, String, String)> = probes
+    let findings: Vec<Finding> = probes
         .par_iter()
         .map(|probe| {
             let (expr, io) = (probe.expr.as_str(), probe.io);
-            // A panic is a crash, not a diagnostic: catching it here keeps
-            // one bad sentence from ending a run of thousands, and reports
-            // it under its own name.
-            let ours = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                libjay_testkit::eval::eval_detail(lang, expr, io)
-            }));
-            let theirs = oracle.eval(expr, io);
-            // A run the oracle never answered — killed at the limit, or cut
-            // off for printing more than one run may hold — was not
-            // compared, and neither side is at fault for it.
-            let unanswered = !theirs.is_comparable();
-            let theirs = theirs.answer();
-            let verdict = match (&ours, unanswered) {
-                (Err(_), _) => fuzz::Verdict::Panicked,
-                (_, true) => fuzz::Verdict::Unfinished,
-                (Ok(ours), false) => fuzz::triage(lang, ours, theirs.as_deref()),
-            };
-            let ours_text = match &ours {
-                Err(_) => "<panic>".to_string(),
-                Ok(libjay_testkit::eval::Answer::Value(v)) => v.clone(),
-                Ok(libjay_testkit::eval::Answer::NoValue) => "<no value>".to_string(),
-                Ok(libjay_testkit::eval::Answer::Refused(e)) => format!("<error> {e}"),
-            };
-            let theirs_text = theirs.unwrap_or_else(|| {
-                if unanswered { "<unfinished>".to_string() } else { "<error>".to_string() }
+            let drawn = put(lang, &oracle, expr, io);
+            if !signatures || !drawn.verdict.is_mismatch() {
+                return Finding { expr: expr.to_string(), io, drawn: drawn.verdict, seen: drawn };
+            }
+            // A composed sentence is a tree with a bug somewhere inside it,
+            // and the whole tree names eight or ten primitives that are a
+            // property of the draw. Cutting it down to the smallest sentence
+            // that still parts the two sides the same way is what makes the
+            // signature name the cause: without it one cause is signed once
+            // per subset it can be drawn inside, and a seen-set grows for
+            // ever without learning anything.
+            let smallest = fuzz::reduce(expr, fuzz::REDUCE_BUDGET, |candidate| {
+                let ours = ours_of(lang, candidate, io);
+                fuzz::could_part(drawn.verdict, ours.as_ref())
+                    && compare(lang, &oracle, candidate, io, ours).verdict == drawn.verdict
             });
-            (expr.to_string(), io, verdict, ours_text, theirs_text)
+            let verdict = drawn.verdict;
+            let seen = if smallest == expr { drawn } else { put(lang, &oracle, &smallest, io) };
+            Finding { expr: smallest, io, drawn: verdict, seen }
         })
         .collect();
 
     let mut counts = std::collections::BTreeMap::<&str, usize>::new();
     let mut by_signature = std::collections::BTreeMap::<String, usize>::new();
-    for (expr, io, verdict, ours, theirs) in &verdicts {
-        *counts.entry(verdict.label()).or_default() += 1;
-        if !verdict.is_mismatch() {
+    for (finding, probe) in findings.iter().zip(&probes) {
+        *counts.entry(finding.drawn.label()).or_default() += 1;
+        if !finding.drawn.is_mismatch() {
             continue;
         }
+        let seen = &finding.seen;
         // The signature names the cause rather than the sentence, so a
         // wrapper that keeps a set of them can tell a batch that found
-        // nothing new from a batch that found a thousandth spelling of a
+        // something new from a batch that found another spelling of a
         // finding it already has.
-        let sig = if signatures { fuzz::signature(lang, expr, ours) } else { String::new() };
+        let sig = if signatures {
+            fuzz::signature(lang, seen.verdict, &finding.expr, &seen.ours_text)
+        } else {
+            String::new()
+        };
         if signatures {
             *by_signature.entry(sig.clone()).or_default() += 1;
         }
         if !quiet {
             // A reported line is meant to be pasted into a corpus file, and
             // at origin 0 it means nothing without the directive.
-            let origin = if *io == 1 { String::new() } else { format!(" [io={io}]") };
+            let origin = if finding.io == 1 { String::new() } else { format!(" [io={}]", finding.io) };
             let field = if signatures { format!("sig={sig} ") } else { String::new() };
-            println!("--- {field}{}{origin} : {expr}", verdict.label());
-            println!("  libjay:    {}", one_line(ours));
-            println!("  reference: {}", one_line(theirs));
+            println!("--- {field}{}{origin} : {}", seen.verdict.label(), finding.expr);
+            println!("  libjay:    {}", one_line(&seen.ours_text));
+            println!("  reference: {}", one_line(&seen.theirs_text));
+            if finding.expr != probe.expr {
+                println!("  cut from:  {}", probe.expr);
+            }
         }
     }
-    let mismatches: usize = verdicts.iter().filter(|v| v.2.is_mismatch()).count();
+    let mismatches: usize = findings.iter().filter(|f| f.drawn.is_mismatch()).count();
     // An expression the oracle never finished was not compared, so it is
     // not in the denominator either.
-    let total = verdicts.iter().filter(|v| v.2.is_compared()).count();
+    let total = findings.iter().filter(|f| f.drawn.is_compared()).count();
     println!(
         "\ngeneration {}: {total} expressions, {mismatches} mismatches ({:.1}%)",
         fuzz::GENERATION,
@@ -562,6 +563,84 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         println!("\n{} distinct signatures", ranked.len());
     }
     Ok(())
+}
+
+/// One sentence put to both sides.
+struct Outcome {
+    verdict: fuzz::Verdict,
+    /// libjay's answer as a printed line: `<panic>`, `<no value>`,
+    /// `<error> …`, or the value.
+    ours_text: String,
+    theirs_text: String,
+}
+
+/// What a probe came to: the sentence a reader should look at — the drawn
+/// one, or the smallest cut of it that parts the two sides the same way —
+/// what that sentence came to, and how the drawn sentence itself parted,
+/// which is what the run's tallies count.
+struct Finding {
+    expr: String,
+    io: u8,
+    drawn: fuzz::Verdict,
+    seen: Outcome,
+}
+
+/// libjay's answer to one sentence, or `None` where it panicked. A panic is
+/// a crash, not a diagnostic: catching it keeps one bad sentence from ending
+/// a run of thousands, and reports it under its own name.
+fn ours_of(
+    lang: libjay_testkit::Lang,
+    expr: &str,
+    io: u8,
+) -> Option<libjay_testkit::eval::Answer> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        libjay_testkit::eval::eval_detail(lang, expr, io)
+    }))
+    .ok()
+}
+
+/// One sentence put to both sides.
+fn put(
+    lang: libjay_testkit::Lang,
+    oracle: &oracle::Oracle,
+    expr: &str,
+    io: u8,
+) -> Outcome {
+    let ours = ours_of(lang, expr, io);
+    compare(lang, oracle, expr, io, ours)
+}
+
+/// The oracle's half of a comparison, over an answer libjay has already
+/// given. Splitting it from [`put`] is what lets a cut-down search throw a
+/// candidate away on libjay's answer alone, without starting an interpreter
+/// for it.
+fn compare(
+    lang: libjay_testkit::Lang,
+    oracle: &oracle::Oracle,
+    expr: &str,
+    io: u8,
+    ours: Option<libjay_testkit::eval::Answer>,
+) -> Outcome {
+    let theirs = oracle.eval(expr, io);
+    // A run the oracle never answered — killed at the limit, or cut off for
+    // printing more than one run may hold — was not compared, and neither
+    // side is at fault for it.
+    let unanswered = !theirs.is_comparable();
+    let theirs = theirs.answer();
+    let verdict = match (&ours, unanswered) {
+        (None, _) => fuzz::Verdict::Panicked,
+        (_, true) => fuzz::Verdict::Unfinished,
+        (Some(ours), false) => fuzz::triage(lang, ours, theirs.as_deref()),
+    };
+    let ours_text = match &ours {
+        None => "<panic>".to_string(),
+        Some(libjay_testkit::eval::Answer::Value(v)) => v.clone(),
+        Some(libjay_testkit::eval::Answer::NoValue) => "<no value>".to_string(),
+        Some(libjay_testkit::eval::Answer::Refused(e)) => format!("<error> {e}"),
+    };
+    let theirs_text = theirs
+        .unwrap_or_else(|| if unanswered { "<unfinished>".to_string() } else { "<error>".to_string() });
+    Outcome { verdict, ours_text, theirs_text }
 }
 
 /// Measure the corpus against the primitive × operand grid and report it.
