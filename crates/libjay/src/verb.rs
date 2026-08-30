@@ -12799,21 +12799,19 @@ fn cut(
     if !matches!(mode, 1 | -1 | 2 | -2) {
         return Err(Error::not_yet(format!("cut (u;.{mode})"), span));
     }
+    // A boxed left argument is J's per-axis form: one box of frets per
+    // leading axis, the rest of the axes taken whole.
+    if let Some(x) = x.filter(|x| x.dtype() == DType::Box) {
+        return per_axis_cut(u, x, y, mode, ctx, span);
+    }
     let items = if y.rank() == 0 { Array::new(vec![1], y.data.clone()) } else { y.clone() };
     let n = items.items();
     let tol = ctx.cfg.tol;
     let frets: Vec<bool> = match x {
         Some(x) => {
-            let flags = x.to_i64_vec().ok_or_else(|| {
-                if x.dtype() == DType::Box {
-                    // A boxed left argument is J's per-axis form, one box of
-                    // frets per leading axis. Saying so is the contract:
-                    // this is a gap, not a domain.
-                    Error::not_yet("per-axis cut frets (a boxed left argument)", span)
-                } else {
-                    Error::domain("cut frets must be integers", span)
-                }
-            })?;
+            let flags = x
+                .to_i64_vec()
+                .ok_or_else(|| Error::domain("cut frets must be integers", span))?;
             // A fret is a flag, and only 0 and 1 are flags: `2 u;.1 y` is
             // a domain error, as the reference has it.
             if let Some(&bad) = flags.iter().find(|&&f| f != 0 && f != 1) {
@@ -12875,6 +12873,95 @@ fn cut(
         cells.push(u.monad(&section(&items, *s, *e), ctx, span)?);
     }
     assemble(&[ranges.len()], cells, span)
+}
+
+/// Where one axis's frets cut it, given the axis's own length.
+///
+/// A scalar marks every item, an empty fret list leaves the axis in one
+/// piece, and any other list must have one flag per item.
+fn axis_ranges(flags: &Array, len: usize, mode: i64, span: Span) -> Result<Vec<(usize, usize)>> {
+    let values = flags
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("cut frets must be integers", span))?;
+    if let Some(&bad) = values.iter().find(|&&f| f != 0 && f != 1) {
+        return Err(Error::domain(format!("{bad} is not a fret: a fret is 0 or 1"), span));
+    }
+    if flags.rank() > 1 {
+        return Err(Error::new(ErrorKind::Rank, "a box of cut frets holds a list", Some(span)));
+    }
+    if flags.rank() == 1 && values.is_empty() {
+        return Ok(if len > 0 { vec![(0, len)] } else { Vec::new() });
+    }
+    let frets: Vec<bool> = if flags.rank() == 0 {
+        vec![values[0] != 0; len]
+    } else {
+        if values.len() != len {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!("{} fret(s) for {len} item(s)", values.len()),
+                Some(span),
+            ));
+        }
+        values.iter().map(|&f| f != 0).collect()
+    };
+    Ok(cut_ranges(&frets, mode))
+}
+
+/// `x u;.n y` where x is BOXED: J's per-axis frets, one box per leading
+/// axis of y. The axes no box names are taken whole, and the result is
+/// framed by how many intervals each named axis was cut into.
+#[inline(never)]
+fn per_axis_cut(
+    u: &Verb,
+    x: &Array,
+    y: &Array,
+    mode: i64,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let boxes = x.as_boxes().expect("a boxed left argument holds boxes");
+    if x.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "per-axis cut frets are a list of boxes, one per axis",
+            Some(span),
+        ));
+    }
+    if boxes.len() > y.rank() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("{} box(es) of frets for a rank-{} value", boxes.len(), y.rank()),
+            Some(span),
+        ));
+    }
+    let mut ranges = Vec::with_capacity(boxes.len());
+    for (k, flags) in boxes.iter().enumerate() {
+        ranges.push(axis_ranges(flags, y.shape[k], mode, span)?);
+    }
+    let frame: Vec<usize> = ranges.iter().map(Vec::len).collect();
+    let total: usize = frame.iter().product();
+    // No interval on some axis, so no piece at all: the verb run on an
+    // empty piece says what shape the pieces would have had.
+    if total == 0 {
+        let origin = vec![0i64; frame.len()];
+        let size = vec![0i64; frame.len()];
+        let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
+        return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
+    }
+    let mut cells = Vec::with_capacity(total);
+    let mut coord = vec![0usize; frame.len()];
+    for _ in 0..total {
+        let mut origin = Vec::with_capacity(frame.len());
+        let mut size = Vec::with_capacity(frame.len());
+        for k in 0..frame.len() {
+            let (s, e) = ranges[k][coord[k]];
+            origin.push(s as i64);
+            size.push((e - s) as i64);
+        }
+        cells.push(u.monad(&subarray(y, &origin, &size, span)?, ctx, span)?);
+        odometer(&mut coord, &frame);
+    }
+    assemble(&frame, cells, span)
 }
 
 /// The left argument of `;.0` and `;.3`: one row of origins (or movements)
@@ -12964,17 +13051,8 @@ fn tessellate(
     span: Span,
 ) -> Result<Array> {
     // A single vector gives the sizes; the blocks then move one at a time.
-    let (movement, size) = rectangle(x, span)?;
-    // A negative size reverses its axis, which is well defined only where
-    // the movement is written out: given a bare vector of sizes the
-    // reference answers with something the magnitude plays no part in, and
-    // libjay will not guess at it.
-    if size.iter().any(|&s| s < 0) && movement.is_none() {
-        return Err(Error::not_yet(
-            "a negative block size without a movement row (x u;.3 y)",
-            span,
-        ));
-    }
+    let (movement, mut size) = rectangle(x, span)?;
+    let implicit = movement.is_none();
     let movement = movement.unwrap_or_else(|| vec![1; size.len()]);
     if size.len() > y.rank() {
         return Err(Error::new(
@@ -12982,6 +13060,18 @@ fn tessellate(
             format!("a tessellation of {} axis/axes into a rank-{} value", size.len(), y.rank()),
             Some(span),
         ));
+    }
+    // With the movement row left out, a negative size does not measure the
+    // block: the reference answers with everything the axis has left from
+    // where the block starts, that axis reversed, whatever the magnitude
+    // said. Writing the axis's own length in its place says exactly that,
+    // since a block is cut short by what is left of the axis anyway.
+    if implicit {
+        for (k, s) in size.iter_mut().enumerate() {
+            if *s < 0 {
+                *s = -(y.shape[k] as i64);
+            }
+        }
     }
     // The block size and the step are the program's own numbers and may be
     // any i64, so how many blocks fit is counted in i128: `size` has no
