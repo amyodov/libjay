@@ -1086,6 +1086,10 @@ fn assigned_names(e: &Expr, out: &mut Vec<String>) {
             out.push(name.clone());
             assigned_names(value, out);
         }
+        Expr::AssignMany { names, value, .. } => {
+            out.extend(names.iter().cloned());
+            assigned_names(value, out);
+        }
         Expr::Monad { y, .. } => assigned_names(y, out),
         Expr::Dyad { x, y, .. } => {
             assigned_names(x, out);
@@ -1476,6 +1480,47 @@ fn lex(src: &SourceParts, char_bytes: bool) -> Result<Vec<Vec<Frag>>> {
                             literal_text(&body, char_bytes),
                             span,
                         )));
+                    }
+                    // `{{)n` is the same here-document written as a direct
+                    // definition: the lines below it are its value, and the
+                    // `}}` that ends it starts a line. Whatever follows the
+                    // `}}` on that line belongs to the sentence again.
+                    let noun_dd = match cur.last() {
+                        Some(Frag::DdOpen(Some('n'), s)) => Some(*s),
+                        _ => None,
+                    };
+                    if let Some(open_span) = noun_dd {
+                        let open = pos;
+                        let mut body = String::new();
+                        let mut rest: Option<(&str, usize)> = None;
+                        while n < lines.len() {
+                            let l = lines[n];
+                            let at = pos;
+                            pos += l.len() + 1;
+                            n += 1;
+                            if let Some(tail) = l.strip_prefix("}}") {
+                                rest = Some((tail, offset + at + 2));
+                                break;
+                            }
+                            body.push_str(l);
+                            body.push('\n');
+                        }
+                        let Some((tail, tail_at)) = rest else {
+                            return Err(Error::parse(
+                                "this noun definition has no closing `}}`",
+                                Span::new(offset + open, offset + pos),
+                            ));
+                        };
+                        let span = Span::merge(
+                            open_span,
+                            Span::new(offset + open, offset + pos),
+                        );
+                        cur.pop();
+                        cur.push(Frag::Noun(Expr::Const(
+                            literal_text(&body, char_bytes),
+                            span,
+                        )));
+                        lex_line(tail, tail_at, char_bytes, &mut cur)?;
                     }
                 }
             }
@@ -2326,11 +2371,12 @@ fn apply(stack: &mut Vec<Frag>, scope: &Names) -> Result<bool> {
             let value = t.pop().expect("three slots");
             let assign = t.pop().expect("three slots");
             let target = t.pop().expect("three slots");
+            let names = scope;
             let scope = match assign {
                 Frag::AssignGlobal(_) => Scope::Global,
                 _ => Scope::Local,
             };
-            let frag = apply_assign(target, value, scope)?;
+            let frag = apply_assign(target, value, scope, names)?;
             stack.insert(0, frag);
         }
         Rule::Paren9 => {
@@ -3352,8 +3398,36 @@ fn apply_bident(a: Frag, b: Frag, nouns: &HashSet<String>) -> Result<Frag> {
     Err(Error::parse("syntax error", span))
 }
 
-fn apply_assign(target: Frag, value: Frag, scope: Scope) -> Result<Frag> {
+fn apply_assign(target: Frag, value: Frag, scope: Scope, names: &Names) -> Result<Frag> {
     let span = Span::merge(target.span(), value.span());
+    // `'a b' =. 1 2` names several nouns at once. The left side is a
+    // literal string of names, which is why it is read here rather than
+    // when the sentence runs.
+    if let Some(list) = name_list(&target, names)? {
+        let v = match value {
+            v if v.is_noun() => as_noun(v)?,
+            Frag::Verb(..) | Frag::Adverb(..) | Frag::Conj(..) => {
+                return Err(Error::not_yet(
+                    "naming several verbs or modifiers at once",
+                    span,
+                ))
+            }
+            other => return Err(Error::internal(format!("cannot assign {other:?}"))),
+        };
+        // One name is an ordinary assignment: the whole value is its, and
+        // the value's items are not shared out.
+        if let [only] = list.as_slice() {
+            let name = only.clone();
+            return Ok(Frag::Noun(Expr::Assign { name, value: Box::new(v), scope, span }));
+        }
+        return Ok(Frag::Noun(Expr::AssignMany {
+            names: list,
+            value: Box::new(v),
+            scope,
+            by_items: true,
+            span,
+        }));
+    }
     match target {
         // `=.` names a local and `=:` a global; the two differ only inside
         // an explicit definition, which is the only thing with a local
@@ -3373,9 +3447,35 @@ fn apply_assign(target: Frag, value: Frag, scope: Scope) -> Result<Frag> {
             }
             other => Err(Error::internal(format!("cannot assign {other:?}"))),
         },
-        Frag::Noun(_) => Err(Error::not_yet("multiple assignment", span)),
+        Frag::Noun(_) => Err(Error::not_yet(
+            "assignment to a value that is not a literal list of names",
+            span,
+        )),
         other => Err(Error::internal(format!("expected an assignment target, got {other:?}"))),
     }
+}
+
+/// The names a multiple assignment's left side spells, or None where the
+/// target is not a string at all. The words are separated by whitespace and
+/// each has to be a name; an empty list is no more a target than `1` is.
+fn name_list(target: &Frag, names: &Names) -> Result<Option<Vec<String>>> {
+    let Some(a) = as_const(target) else { return Ok(None) };
+    let Data::Char(chars) = &a.data else { return Ok(None) };
+    if a.rank() > 1 {
+        return Ok(None);
+    }
+    let span = target.span();
+    let text = crate::fmt::text_of(chars.as_slice().iter().copied(), names.char_bytes);
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
+        return Err(Error::parse("this assignment names nothing", span));
+    }
+    for w in &words {
+        if !is_well_formed_name(w) || verb_for(w).is_some() {
+            return Err(Error::parse(format!("ill-formed name: {w}"), span));
+        }
+    }
+    Ok(Some(words.into_iter().map(str::to_string).collect()))
 }
 
 #[cfg(test)]

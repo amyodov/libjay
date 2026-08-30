@@ -3245,6 +3245,7 @@ fn parse_range(toks: &[Token], lo: usize, hi: usize, hint: Span, d: Rules) -> Re
                             names,
                             value: Box::new(acc),
                             scope: Scope::Local,
+                            by_items: false,
                             span,
                         };
                         start = l + 2;

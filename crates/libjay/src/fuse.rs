@@ -705,9 +705,13 @@ fn fuse_expr(e: Expr, tol: Tol) -> Expr {
         Expr::Assign { name, value, scope, span } => {
             Expr::Assign { name, value: Box::new(fuse_expr(*value, tol)), scope, span }
         }
-        Expr::AssignMany { names, value, scope, span } => {
-            Expr::AssignMany { names, value: Box::new(fuse_expr(*value, tol)), scope, span }
-        }
+        Expr::AssignMany { names, value, scope, by_items, span } => Expr::AssignMany {
+            names,
+            value: Box::new(fuse_expr(*value, tol)),
+            scope,
+            by_items,
+            span,
+        },
         Expr::Monad { verb, y, span } => {
             Expr::Monad { verb, y: Box::new(fuse_expr(*y, tol)), span }
         }

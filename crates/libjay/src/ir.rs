@@ -34,11 +34,22 @@ pub enum Expr {
     /// Yields the assigned value in expression position; a whole sentence
     /// that is an assignment displays nothing at the top level.
     Assign { name: String, value: Box<Expr>, scope: Scope, span: Span },
-    /// APL `(a b)←values`: distributed assignment. Each name takes the
-    /// item of the value that stands in its place, and a scalar value goes
-    /// to every one of them. The whole expression yields the value, as a
-    /// plain assignment does.
-    AssignMany { names: Vec<String>, value: Box<Expr>, scope: Scope, span: Span },
+    /// Distributed assignment — APL `(a b)←values`, J `'a b' =. values`.
+    /// Each name takes the item of the value that stands in its place, and
+    /// a scalar value goes to every one of them. The whole expression
+    /// yields the value, as a plain assignment does.
+    ///
+    /// `by_items` says the value is shared out along its LEADING AXIS
+    /// whatever its rank, and that each share is opened; without it the
+    /// value has to be a scalar or a vector. The two are what the languages
+    /// ask for: J takes the items of a matrix, APL calls that a rank error.
+    AssignMany {
+        names: Vec<String>,
+        value: Box<Expr>,
+        scope: Scope,
+        by_items: bool,
+        span: Span,
+    },
     /// APL `A[i;j]←v`: the named value with the part the brackets select
     /// replaced. The name is read, a copy is written, and the copy takes
     /// the name's place. An elided slot selects its whole axis.
@@ -1244,12 +1255,13 @@ fn assign_many(
     names: &[String],
     value: &Expr,
     scope: Scope,
+    by_items: bool,
     ctx: &mut Ctx<'_>,
     rec: &mut Option<Trace>,
     span: Span,
 ) -> Result<Array> {
     let v = eval(value, ctx, rec)?;
-    if v.rank() > 1 {
+    if v.rank() > 1 && !by_items {
         return Err(Error::new(
             ErrorKind::Rank,
             format!(
@@ -1261,8 +1273,9 @@ fn assign_many(
         ));
     }
     if v.rank() == 0 {
+        let one = if by_items { crate::verb::open_cell(&v) } else { v.clone() };
         for n in names {
-            ctx.env.assign(n.clone(), v.clone(), scope);
+            ctx.env.assign(n.clone(), one.clone(), scope);
         }
         return Ok(v);
     }
@@ -1293,8 +1306,8 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
         Expr::Assign { name, value, scope, span } => {
             assign_one(name, value, *scope, *span, ctx, rec)
         }
-        Expr::AssignMany { names, value, scope, span } => {
-            assign_many(names, value, *scope, ctx, rec, *span)
+        Expr::AssignMany { names, value, scope, by_items, span } => {
+            assign_many(names, value, *scope, *by_items, ctx, rec, *span)
         }
         Expr::AmendIndex { name, slots, value, origin, scope, span } => {
             let base = ctx.env.get(name).ok_or_else(|| {
