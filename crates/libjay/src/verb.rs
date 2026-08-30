@@ -455,7 +455,16 @@ pub const RECURSION_LIMIT: usize = 64;
 /// the frame before the globals. Frames do not nest — a definition called
 /// from another sees only its own locals, which is what both references do.
 pub struct Env {
-    globals: HashMap<String, Array>,
+    /// The program's global names, one table per locale. `base` and `z` are
+    /// there from the start; every other locale is made by naming it.
+    locales: HashMap<String, Locale>,
+    /// The locale a bare global name is read and written in. A definition
+    /// runs in its own, which is what makes a locale a namespace rather
+    /// than a prefix.
+    current: String,
+    /// The name the next `18!:3 ''` hands out. Numbered locales are handed
+    /// out in order and never reused while one is alive.
+    next_numbered: u64,
     frames: Vec<HashMap<String, Array>>,
     /// The definitions currently running, innermost last; J's `$:` and
     /// APL's `∇` name the last of them.
@@ -469,15 +478,246 @@ pub struct Env {
     pub thrown: Option<usize>,
 }
 
+/// One namespace: the names it holds, and where it looks when it does not
+/// hold the one asked for.
+#[derive(Default)]
+struct Locale {
+    values: HashMap<String, Array>,
+    /// The locales searched after this one, in order. A search goes ONE
+    /// step down the path and no further: the reference does not follow the
+    /// path of a locale the path names.
+    path: Vec<String>,
+    /// A locale `18!:3 ''` handed out rather than one a name created.
+    /// Only these can be erased.
+    numbered: bool,
+}
+
+/// The locale a name in `base`'s own namespace belongs to. `name__`, whose
+/// locale part is empty, means this one.
+pub const BASE_LOCALE: &str = "base";
+
+/// The locale a fresh one's search path holds, and where J's own library
+/// words live.
+pub const Z_LOCALE: &str = "z";
+
+/// Split `name_locale_` into the name and the locale it names.
+///
+/// The empty locale of `name__` is `base`, which is what the reference
+/// answers. A name with no trailing underscore is nobody's locative, and
+/// neither is one the lexer would have refused.
+pub fn split_locative(name: &str) -> Option<(&str, &str)> {
+    let body = name.strip_suffix('_')?;
+    let cut = body.rfind('_')?;
+    let (head, locale) = (&body[..cut], &body[cut + 1..]);
+    if head.is_empty() {
+        return None;
+    }
+    let named = locale.is_empty()
+        || locale.bytes().all(|b| b.is_ascii_digit())
+        || (locale.starts_with(|c: char| c.is_ascii_alphabetic())
+            && locale.bytes().all(|b| b.is_ascii_alphanumeric()));
+    if !named {
+        return None;
+    }
+    Some((head, if locale.is_empty() { BASE_LOCALE } else { locale }))
+}
+
+/// Split `name__var` into the name and the NAME OF THE VARIABLE that holds
+/// the locale it belongs to.
+///
+/// An indirect locative is settled while the program runs, because the
+/// locale is a value: `V__n` where n holds `<'bb'` is `V_bb_`. A name that
+/// ends in an underscore is an ordinary locative and never this.
+pub fn split_indirect(name: &str) -> Option<(&str, &str)> {
+    if name.ends_with('_') {
+        return None;
+    }
+    let cut = name.rfind("__")?;
+    let (head, var) = (&name[..cut], &name[cut + 2..]);
+    let ok = |s: &str| {
+        s.starts_with(|c: char| c.is_ascii_alphabetic())
+            && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    };
+    (ok(head) && ok(var)).then_some((head, var))
+}
+
 impl Env {
     pub fn new(args: Vec<Array>) -> Env {
+        let mut locales = HashMap::new();
+        locales.insert(
+            BASE_LOCALE.to_string(),
+            Locale { path: vec![Z_LOCALE.to_string()], ..Locale::default() },
+        );
+        locales.insert(Z_LOCALE.to_string(), Locale::default());
         Env {
-            globals: HashMap::new(),
+            locales,
+            current: BASE_LOCALE.to_string(),
+            next_numbered: 0,
             frames: Vec::new(),
             running: Vec::new(),
             verbs: HashMap::new(),
             args,
             thrown: None,
+        }
+    }
+
+    /// The locale a name belongs to and the name inside it: the locale a
+    /// locative spells out, or the one running now.
+    fn place<'a>(&self, name: &'a str) -> (&'a str, String) {
+        match split_locative(name) {
+            Some((head, locale)) => (head, locale.to_string()),
+            None => (name, self.current.clone()),
+        }
+    }
+
+    /// A global name, looked for in its locale and then in that locale's
+    /// search path.
+    fn in_locale(&self, locale: &str, name: &str) -> Option<Array> {
+        let home = self.locales.get(locale)?;
+        if let Some(v) = home.values.get(name) {
+            return Some(v.clone());
+        }
+        home.path
+            .iter()
+            .find_map(|l| self.locales.get(l).and_then(|d| d.values.get(name)))
+            .cloned()
+    }
+
+    /// The locale a name is read and written in now.
+    pub fn current_locale(&self) -> &str {
+        &self.current
+    }
+
+    /// The locale an indirect locative's variable names. The variable holds
+    /// ONE boxed locale name; the reference calls anything else a rank
+    /// error, and a variable with no value a value error under its own name.
+    pub fn indirect_locale(&self, var: &str, span: Span) -> Result<String> {
+        let v = self.get(var).ok_or_else(|| {
+            Error::new(ErrorKind::Value, format!("undefined name: {var}"), Some(span))
+        })?;
+        let inner = match &v.data {
+            Data::Box(b) if v.count() == 1 => b[0].clone(),
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::Rank,
+                    format!("{var} names a locale for an indirect locative, so it holds one box"),
+                    Some(span),
+                ))
+            }
+        };
+        match &inner.data {
+            Data::Char(c) => Ok(c.as_slice().iter().collect()),
+            _ => Err(Error::new(
+                ErrorKind::Rank,
+                format!("{var} names a locale for an indirect locative, so it holds one box"),
+                Some(span),
+            )),
+        }
+    }
+
+    /// A global name in a locale named at run time.
+    pub fn get_in_locale(&self, locale: &str, name: &str) -> Option<Array> {
+        self.in_locale(locale, name)
+    }
+
+    /// Put a global into a locale named at run time, creating a NAMED
+    /// locale that is not there yet.
+    pub fn set_in_locale(&mut self, locale: &str, name: &str, value: Array) {
+        self.ensure_locale(locale);
+        if let Some(l) = self.locales.get_mut(locale) {
+            l.values.insert(name.to_string(), value);
+        }
+    }
+
+    /// Make the named locale current and hand back the one that was. A
+    /// locale that does not exist yet is created, which is what `cocurrent`
+    /// does.
+    pub fn set_current_locale(&mut self, name: &str) -> String {
+        self.ensure_locale(name);
+        std::mem::replace(&mut self.current, name.to_string())
+    }
+
+    /// Create a named locale if it is not there yet. A NUMBERED one is
+    /// never created this way: the reference refuses a name in a numbered
+    /// locale that `18!:3 ''` did not hand out.
+    fn ensure_locale(&mut self, name: &str) {
+        if self.locales.contains_key(name) {
+            return;
+        }
+        self.locales.insert(
+            name.to_string(),
+            Locale { path: vec![Z_LOCALE.to_string()], ..Locale::default() },
+        );
+    }
+
+    /// Whether the locale exists, and whether it is numbered — what
+    /// `18!:0` answers, and what tells a name in a locale nobody made from
+    /// one in a numbered locale that was never handed out.
+    pub fn locale_kind(&self, name: &str) -> Option<bool> {
+        self.locales.get(name).map(|l| l.numbered)
+    }
+
+    /// Whether a locale name is one only `18!:3 ''` hands out.
+    pub fn is_numbered_name(name: &str) -> bool {
+        !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit())
+    }
+
+    /// The locale names now alive, sorted, either the named ones or the
+    /// numbered ones — what `18!:1` answers.
+    pub fn locale_names(&self, numbered: bool) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .locales
+            .iter()
+            .filter(|(_, l)| l.numbered == numbered)
+            .map(|(n, _)| n.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Hand out a locale: a fresh numbered one for an empty name, or the
+    /// named one, created if it is not there.
+    pub fn create_locale(&mut self, name: Option<&str>) -> String {
+        let Some(name) = name else {
+            let n = loop {
+                let n = self.next_numbered.to_string();
+                self.next_numbered += 1;
+                if !self.locales.contains_key(&n) {
+                    break n;
+                }
+            };
+            self.locales.insert(
+                n.clone(),
+                Locale {
+                    path: vec![Z_LOCALE.to_string()],
+                    numbered: true,
+                    ..Locale::default()
+                },
+            );
+            return n;
+        };
+        self.ensure_locale(name);
+        name.to_string()
+    }
+
+    /// Destroy a numbered locale. A NAMED one survives, which is what the
+    /// reference does: `18!:55` answers 1 either way.
+    pub fn erase_locale(&mut self, name: &str) {
+        if self.locales.get(name).is_some_and(|l| l.numbered) {
+            self.locales.remove(name);
+        }
+    }
+
+    /// A locale's search path, empty for one that does not exist.
+    pub fn locale_path(&self, name: &str) -> Vec<String> {
+        self.locales.get(name).map_or_else(Vec::new, |l| l.path.clone())
+    }
+
+    /// Replace a locale's search path, creating the locale if it is new.
+    pub fn set_locale_path(&mut self, name: &str, path: Vec<String>) {
+        self.ensure_locale(name);
+        if let Some(l) = self.locales.get_mut(name) {
+            l.path = path;
         }
     }
 
@@ -501,18 +741,49 @@ impl Env {
                 }
             }
         }
-        self.globals.get(name).cloned()
+        let (head, locale) = self.place(name);
+        self.in_locale(&locale, head)
+    }
+
+    /// Whether a locative names a locale that does not exist. Reading one
+    /// CREATES a named locale, so only a numbered one can be missing, and
+    /// that is a locale error rather than a value error.
+    pub fn missing_numbered(&self, name: &str) -> Option<String> {
+        let (_, locale) = split_locative(name)?;
+        match Env::is_numbered_name(locale) && !self.locales.contains_key(locale) {
+            true => Some(locale.to_string()),
+            false => None,
+        }
+    }
+
+    /// Create the named locale a locative mentions. The reference makes one
+    /// the moment a name in it is READ, not only when one is written.
+    pub fn touch_locative(&mut self, name: &str) {
+        if let Some((_, locale)) = split_locative(name)
+            && !Env::is_numbered_name(locale)
+        {
+            self.ensure_locale(locale);
+        }
     }
 
     pub fn assign(&mut self, name: String, value: Array, scope: crate::ir::Scope) {
         if scope == crate::ir::Scope::LocalDefault && self.get(&name).is_some() {
             return;
         }
-        let target = match (scope, self.frames.last_mut()) {
-            (crate::ir::Scope::Local | crate::ir::Scope::LocalDefault, Some(frame)) => frame,
-            _ => &mut self.globals,
-        };
-        target.insert(name, value);
+        // A locative is a global wherever it is written: `A_x_ =. 1` inside
+        // a definition puts the name in locale x, not in the frame.
+        let local = matches!(scope, crate::ir::Scope::Local | crate::ir::Scope::LocalDefault)
+            && split_locative(&name).is_none();
+        if local && let Some(frame) = self.frames.last_mut() {
+            frame.insert(name, value);
+            return;
+        }
+        let (head, locale) = self.place(&name);
+        let head = head.to_string();
+        self.ensure_locale(&locale);
+        if let Some(l) = self.locales.get_mut(&locale) {
+            l.values.insert(head, value);
+        }
     }
 
     pub fn define(&mut self, name: String, verb: Verb) {
@@ -523,15 +794,24 @@ impl Env {
     /// operand lives here for as long as its body runs, so that the body's
     /// own frame does not hide it.
     pub fn global(&self, name: &str) -> Option<Array> {
-        self.globals.get(name).cloned()
+        let (head, locale) = self.place(name);
+        self.in_locale(&locale, head)
     }
 
     pub fn set_global(&mut self, name: String, value: Array) {
-        self.globals.insert(name, value);
+        let (head, locale) = self.place(&name);
+        let head = head.to_string();
+        self.ensure_locale(&locale);
+        if let Some(l) = self.locales.get_mut(&locale) {
+            l.values.insert(head, value);
+        }
     }
 
     pub fn unset_global(&mut self, name: &str) {
-        self.globals.remove(name);
+        let (head, locale) = self.place(name);
+        if let Some(l) = self.locales.get_mut(&locale) {
+            l.values.remove(head);
+        }
     }
 
     pub fn undefine(&mut self, name: &str) {
@@ -888,6 +1168,26 @@ pub enum MonadOp {
     /// the terminator dropped. `y` names the stream: 1 is stdin, which the
     /// sandbox opens, and everything else is a file, which it does not.
     ReadStream,
+    /// J `cocurrent y` and `coclass y`: make the locale y names current for
+    /// what is left of the definition running, or of the program at the top
+    /// level. A locale that does not exist yet is created.
+    CoCurrent,
+    /// J `18!:0 y`: 0 where each boxed name is a named locale that exists,
+    /// 1 where it is a numbered one, and _1 where there is no such locale.
+    LocaleKind,
+    /// J `18!:1 y`: the locale names alive now, sorted. `,0` asks for the
+    /// named ones and `,1` for the numbered ones.
+    LocaleNames,
+    /// J `18!:2 y`: the search path of the locale each boxed name names.
+    LocalePath,
+    /// J `18!:3 y`: create a locale and answer its name boxed. An empty
+    /// argument hands out a fresh NUMBERED locale.
+    LocaleCreate,
+    /// J `18!:5 ''`: the current locale's name, boxed.
+    LocaleCurrent,
+    /// J `18!:55 y`: destroy the numbered locale each boxed name names. A
+    /// named locale survives, and the answer is 1 either way.
+    LocaleErase,
     /// J `3!:0 y`: the code J gives the argument's element type.
     TypeCode,
     /// The argument itself (APL `⊢`).
@@ -1029,6 +1329,9 @@ pub enum MonadOp {
 /// Dyadic meaning of a primitive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DyadOp {
+    /// J `x 18!:2 y`: replace the search path of the locale y names with
+    /// the locale names x holds, and answer the path assigned.
+    LocalePathSet,
     Scalar(ScalarDyad),
     /// x $ y / x ⍴ y: lay out shape x, reusing y — its ITEMS in J, its
     /// ravel in APL.
@@ -1950,10 +2253,24 @@ impl Verb {
             // Output and the random source are the two effects a verb can
             // have; both fix the order its cells must run in.
             Verb::Prim(p) => {
+                // The locale words are the third: each of them reads or
+                // writes the namespace table, so their order is fixed too.
                 !matches!(
                     p.monad,
-                    MonadOp::Echo | MonadOp::Roll { .. } | MonadOp::ReadStream
-                ) && !matches!(p.dyad, DyadOp::Deal { .. } | DyadOp::WriteStream)
+                    MonadOp::Echo
+                        | MonadOp::Roll { .. }
+                        | MonadOp::ReadStream
+                        | MonadOp::CoCurrent
+                        | MonadOp::LocaleKind
+                        | MonadOp::LocaleNames
+                        | MonadOp::LocalePath
+                        | MonadOp::LocaleCreate
+                        | MonadOp::LocaleCurrent
+                        | MonadOp::LocaleErase
+                ) && !matches!(
+                    p.dyad,
+                    DyadOp::Deal { .. } | DyadOp::WriteStream | DyadOp::LocalePathSet
+                )
             }
             Verb::Rank(v, _)
             | Verb::Reduce(v)
@@ -2505,6 +2822,19 @@ impl Verb {
                 stream_number(y, 2, "1!:2 writes", span)?;
                 (ctx.out)(&format!("{}\n", crate::fmt::format_array(x, &ctx.cfg.fmt)));
                 Ok(x.clone())
+            }
+            // Setting a search path reaches the locale table, which the
+            // pure dispatcher below does not carry either.
+            Verb::Prim(p) if p.dyad == DyadOp::LocalePathSet => {
+                let target = one_locale_name(y, "x 18!:2 y names one locale", span)?;
+                let path = match x.count() {
+                    0 => Vec::new(),
+                    _ => locale_names_arg(x, "x 18!:2 y", span)?,
+                };
+                ctx.env.set_locale_path(&target, path);
+                // Setting a path answers nothing a session displays, which
+                // is what the reference does.
+                Ok(crate::ir::empty_result())
             }
             Verb::Prim(p) => dyad_op(p, x, y, ctx.cfg, span),
             Verb::Rank(v, _) => v.dyad(x, y, ctx, span),
@@ -8860,6 +9190,99 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             let line = ctx.read_line(span)?;
             Ok(Array::from_chars(line.chars().collect()))
         }
+        MonadOp::CoCurrent => {
+            let name = one_locale_name(y, "cocurrent names one locale", span)?;
+            ctx.env.set_current_locale(&name);
+            Ok(crate::ir::empty_result())
+        }
+        MonadOp::LocaleKind => {
+            let names = locale_names_arg(y, "18!:0", span)?;
+            let kinds: Vec<i64> = names
+                .iter()
+                .map(|n| match ctx.env.locale_kind(n) {
+                    None => -1,
+                    Some(false) => 0,
+                    Some(true) => 1,
+                })
+                .collect();
+            Ok(Array::new(y.shape.clone(), Data::I64(kinds.into())))
+        }
+        MonadOp::LocaleNames => {
+            let which = y
+                .to_i64_vec()
+                .filter(|v| v.len() == 1)
+                .and_then(|v| v.first().copied())
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::Rank,
+                        "18!:1 takes a one-item list: `,0` for the named locales, \
+                         `,1` for the numbered ones"
+                            .to_string(),
+                        Some(span),
+                    )
+                })?;
+            let numbered = match which {
+                0 => false,
+                1 => true,
+                _ => {
+                    return Err(Error::domain(
+                        format!("18!:1 knows no locale class {which}"),
+                        span,
+                    ))
+                }
+            };
+            Ok(boxed_names(ctx.env.locale_names(numbered)))
+        }
+        MonadOp::LocalePath => {
+            let names = locale_names_arg(y, "18!:2", span)?;
+            let paths: Vec<Vec<String>> =
+                names.iter().map(|n| ctx.env.locale_path(n)).collect();
+            // One locale answers its path as a list; several answer a
+            // table, a row each, padded with empty boxes.
+            if y.rank() == 0 {
+                return Ok(boxed_names(paths.into_iter().next().unwrap_or_default()));
+            }
+            let wide = paths.iter().map(Vec::len).max().unwrap_or(0);
+            let mut cells: Vec<Array> = Vec::with_capacity(paths.len() * wide);
+            for p in &paths {
+                for k in 0..wide {
+                    cells.push(match p.get(k) {
+                        Some(n) => Array::from_chars(n.chars().collect()),
+                        None => Array::from_chars(Vec::new()),
+                    });
+                }
+            }
+            Ok(Array::new(vec![paths.len(), wide], Data::Box(cells.into())))
+        }
+        MonadOp::LocaleCreate => {
+            let made = match y.count() {
+                0 => ctx.env.create_locale(None),
+                _ => {
+                    let name = one_locale_name(y, "18!:3 names one locale", span)?;
+                    if Env::is_numbered_name(&name) {
+                        return Err(Error::domain(
+                            "18!:3 makes a numbered locale from an EMPTY name; \
+                             a name of digits is not one it will make"
+                                .to_string(),
+                            span,
+                        ));
+                    }
+                    ctx.env.create_locale(Some(&name))
+                }
+            };
+            Ok(Array::boxed(Array::from_chars(made.chars().collect())))
+        }
+        MonadOp::LocaleCurrent => Ok(Array::boxed(Array::from_chars(
+            ctx.env.current_locale().chars().collect(),
+        ))),
+        MonadOp::LocaleErase => {
+            let names = locale_names_arg(y, "18!:55", span)?;
+            for n in &names {
+                ctx.env.erase_locale(n);
+            }
+            let ones = vec![1i64; names.len()];
+            Ok(Array::new(y.shape.clone(), Data::I64(ones.into())))
+        }
         MonadOp::TypeCode => Ok(Array::scalar_i64(type_code(y))),
         MonadOp::Sparse => crate::sparse::sparsify(y, span),
         MonadOp::Dense => Ok(y.densified()),
@@ -9490,6 +9913,9 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         // Writing needs the output sink, which this dispatcher does not
         // carry; `dyad_cell` takes it before the call gets here.
         DyadOp::WriteStream => Err(Error::internal("1!:2 reached the pure dyad dispatcher")),
+        DyadOp::LocalePathSet => {
+            Err(Error::internal("18!:2 reached the pure dyad dispatcher"))
+        }
         DyadOp::NotYet(what) => Err(Error::not_yet(what, span)),
         DyadOp::None => Err(Error::domain(format!("{} has no dyadic meaning", p.name), span)),
     }
@@ -18429,6 +18855,49 @@ pub(crate) fn execute_source(
 /// J numbers its streams and its open files alike, so a number that is not
 /// the standard one is a file handle; a boxed argument is a file NAME. Both
 /// are the filesystem, which the sandbox closes.
+/// A boxed list of locale names, as the locale foreigns hand them back.
+fn boxed_names(names: Vec<String>) -> Array {
+    let cells: Vec<Array> =
+        names.into_iter().map(|n| Array::from_chars(n.chars().collect())).collect();
+    Array::new(vec![cells.len()], Data::Box(cells.into()))
+}
+
+/// The characters a box holds, as a locale name.
+fn locale_name_of(a: &Array, what: &str, span: Span) -> Result<String> {
+    let inner = match &a.data {
+        Data::Box(v) if a.count() == 1 => v[0].clone(),
+        Data::Char(_) => a.clone(),
+        _ => return Err(Error::domain(format!("{what}, spelled as characters"), span)),
+    };
+    match &inner.data {
+        Data::Char(c) => Ok(c.as_slice().iter().collect()),
+        _ => Err(Error::domain(format!("{what}, spelled as characters"), span)),
+    }
+}
+
+/// One locale name, from a boxed scalar or from a character list.
+fn one_locale_name(y: &Array, what: &str, span: Span) -> Result<String> {
+    if matches!(y.data, Data::Box(_)) && y.count() != 1 {
+        return Err(Error::new(ErrorKind::Rank, what.to_string(), Some(span)));
+    }
+    locale_name_of(y, what, span)
+}
+
+/// The locale names a boxed argument holds, one per box.
+fn locale_names_arg(y: &Array, what: &str, span: Span) -> Result<Vec<String>> {
+    let Data::Box(cells) = &y.data else {
+        return Err(Error::domain(
+            format!("{what} takes boxed locale names"),
+            span,
+        ));
+    };
+    cells
+        .as_slice()
+        .iter()
+        .map(|c| locale_name_of(c, &format!("{what} takes boxed locale names"), span))
+        .collect()
+}
+
 fn stream_number(y: &Array, open: i64, what: &str, span: Span) -> Result<()> {
     let closed = || {
         Err(Error::sandbox(

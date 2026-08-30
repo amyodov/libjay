@@ -1,0 +1,237 @@
+# libjay reference snapshot: J — corpus/j/locales.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= V_alpha_ =. 5\nV_alpha_
+> j: 5
+= V_alpha_ =. 5\nV_alpha_ + 1
+> j: 6
+= f_alpha_ =. 3 : 'y + 100'\nf_alpha_ 5
+> j: 105
+= f_alpha_ =. 4 : 'x + y'\n2 f_alpha_ 3
+> j: 5
+= V_alpha_ =. 5\nV_beta_ =. 7\nV_alpha_ , V_beta_
+> j: 5 7
+= V =. 5\nV_base_
+> j: 5
+= V_base_ =. 5\nV
+> j: 5
+= V =. 5\nV__
+> j: 5
+= f =. 3 : 'R_cc_ =. y'\nq =. f 5\nR_cc_
+> j: 5
+= f =. 3 : 'S_cc_ =: y'\nq =. f 6\nS_cc_
+> j: 6
+= V_aa_ =. 1\nV =. 999\nf_aa_ =. 3 : 'V'\nf_aa_ ''
+> j: 1
+= V_aa_ =. 1\nV =. 999\ng =. 3 : 'V'\ng ''
+> j: 999
+= V_bb_ =. 111\nV =. 999\nh_bb_ =. 3 : 'V'\nh_bb_ ''
+> j: 111
+= W_bb_ =: 3 : 'Q =: y'\nq =. W_bb_ 7\nQ_bb_
+> j: 7
+= W_bb_ =: 3 : 'Q =. y'\nW_bb_ 7
+> j: 7
+= cocurrent 'p2'\nW =: 10\nb =: 3 : 'W + y'\ncocurrent 'p1'\nW =: 1\na =: 3 : 'W + b_p2_ y'\ncocurrent 'base'\na_p1_ 100
+> j: 111
+= cocurrent 'zz'\n18!:5 ''
+> j: +--+
+> j: |zz|
+> j: +--+
+= cocurrent 'zz'\nA =: 42\ncocurrent 'base'\nA_zz_
+> j: 42
+= cocurrent 'zz'\nA =: 42\ncocurrent 'base'\n18!:5 ''
+> j: +----+
+> j: |base|
+> j: +----+
+= coclass 'cc'\nX =: 5\ncocurrent 'base'\nX_cc_
+> j: 5
+= 18!:5 ''
+> j: +----+
+> j: |base|
+> j: +----+
+= $ 18!:5 ''
+> j:
+= p =: 3 : 0\ncocurrent 'pp'\nQ =: y\n18!:5 ''\n)\np 3
+> j: +--+
+> j: |pp|
+> j: +--+
+= p =: 3 : 0\ncocurrent 'pp'\nQ =: y\n18!:5 ''\n)\nq =. p 3\n18!:5 ''
+> j: +----+
+> j: |base|
+> j: +----+
+= p =: 3 : 0\ncocurrent 'pp'\nQ =: y\n18!:5 ''\n)\nq =. p 3\nQ_pp_
+> j: 3
+= G_z_ =: 3 : 'y + 1000'\nG 5
+> j: 1005
+= G_z_ =: 3 : 'y + 1000'\ncocurrent 'ee'\nG 5
+> j: 1005
+= V_z_ =: 7\nV_ee_
+> j: 7
+= 18!:2 <'base'
+> j: +-+
+> j: |z|
+> j: +-+
+= 18!:2 <'z'
+> j:
+= $ 18!:2 <'z'
+> j: 0
+= cocurrent 'ee'\ncocurrent 'base'\n18!:2 <'ee'
+> j: +-+
+> j: |z|
+> j: +-+
+= (<'bb') 18!:2 <'ee'
+> j:
+= (<'bb') 18!:2 <'ee'\n18!:2 <'ee'
+> j: +--+
+> j: |bb|
+> j: +--+
+= V_bb_ =: 111\n((<'bb')) 18!:2 <'ee'\ncocurrent 'ee'\nV
+> j: 111
+= ((<'z'),(<'base')) 18!:2 <'ff'\n18!:2 <'ff'
+> j: +-+----+
+> j: |z|base|
+> j: +-+----+
+= ((<'z'),(<'base')) 18!:2 <'ff'\n$ 18!:2 <'ff'
+> j: 2
+= Z_z_ =: 42\n(<'r1') 18!:2 <'r2'\n(<'z') 18!:2 <'r1'\ncocurrent 'r2'\nZ_r2_ =: 1\nZ
+> j: 1
+= 18!:0 <'base'
+> j: 0
+= 18!:0 <'z'
+> j: 0
+= V_gg_ =: 1\n18!:0 <'gg'
+> j: 0
+= 18!:0 <'nope'
+> j: _1
+= q =. 18!:3 ''\n18!:0 <'0'
+> j: 1
+= 18!:0 (<'base'),(<'nope')
+> j: 0 _1
+= V_gg_ =: 1\n18!:0 (<'base'),(<'gg'),(<'nope')
+> j: 0 0 _1
+= 18!:1 ,0
+> j: +----+-+
+> j: |base|z|
+> j: +----+-+
+= 18!:1 ,1
+> j:
+= V_gg_ =: 1\n18!:1 ,0
+> j: +----+--+-+
+> j: |base|gg|z|
+> j: +----+--+-+
+= cocurrent 'yy'\ncocurrent 'base'\n18!:1 ,0
+> j: +----+--+-+
+> j: |base|yy|z|
+> j: +----+--+-+
+= q =. 18!:3 ''\n18!:1 ,1
+> j: +-+
+> j: |0|
+> j: +-+
+= q =. 18!:3 ''\nq =. 18!:3 ''\n18!:1 ,1
+> j: +-+-+
+> j: |0|1|
+> j: +-+-+
+= q =. 18!:3 ''\n18!:1 ,0
+> j: +----+-+
+> j: |base|z|
+> j: +----+-+
+= 18!:3 <'made'
+> j: +----+
+> j: |made|
+> j: +----+
+= q =. 18!:3 <'made'\n18!:1 ,0
+> j: +----+----+-+
+> j: |base|made|z|
+> j: +----+----+-+
+= 18!:3 ''
+> j: +-+
+> j: |0|
+> j: +-+
+= q =. 18!:3 ''\n18!:3 ''
+> j: +-+
+> j: |1|
+> j: +-+
+= $ 18!:3 ''
+> j:
+= q =. 18!:3 ''\nW_0_ =: 9\n18!:55 <'0'
+> j: 1
+= q =. 18!:3 ''\nW_0_ =: 9\nq =. 18!:55 <'0'\n18!:1 ,1
+> j:
+= q =. 18!:3 ''\nq =. 18!:3 ''\n18!:55 (<'0'),(<'1')
+> j: 1 1
+= q =. 18!:3 ''\nq =. 18!:3 ''\nq =. 18!:55 (<'0'),(<'1')\n18!:1 ,1
+> j:
+= V_kk_ =: 5\nq =. 18!:55 <'kk'\nV_kk_
+> j: 5
+= V_kk_ =: 5\nq =. 18!:55 <'kk'\n18!:1 ,0
+> j: +----+--+-+
+> j: |base|kk|z|
+> j: +----+--+-+
+= 18!:55 <'nosuch'
+> j: 1
+= q =. 18!:3 ''\nV_0_ =: 7\nV_0_
+> j: 7
+= q =. 18!:3 ''\nV_0_ =: 7\ncocurrent '0'\nV
+> j: 7
+= q =. 18!:3 ''\nq =. 18!:3 ''\nV_1_ =: 3\nV_1_ + 1
+> j: 4
+= V_5_ =: 3
+> j: <error>
+= V_5_
+> j: <error>
+= V_qq_ =: 1\n18!:1 ,0
+> j: +----+--+-+
+> j: |base|qq|z|
+> j: +----+--+-+
+= g_cc_ =: 3 : 'y * 3'\ng_cc_ 4
+> j: 12
+= cocurrent 'cc'\ng =: 3 : 'y * 3'\ncocurrent 'base'\ng_cc_ 4
+> j: 12
+= cocurrent 'cc'\nc =: 5\nf =: +&c\ncocurrent 'base'\nf_cc_ 1
+> j: 6
+= cocurrent 'cc'\nc =: 5\nf =: +&c\ncocurrent 'base'\nc =: 100\nf_cc_ 1
+> j: 6
+= cocurrent 'cc'\nc =: 5\nf =: 3 : 'c + y'\ncocurrent 'base'\nc =: 100\nf_cc_ 1
+> j: 6
+= fact_mm_ =: 3 : 'if. y <: 1 do. 1 else. y * fact_mm_ y - 1 end.'\nfact_mm_ 5
+> j: 120
+= cocurrent 'mm'\nfact =: 3 : 'if. y <: 1 do. 1 else. y * fact y - 1 end.'\ncocurrent 'base'\nfact_mm_ 5
+> j: 120
+= V_aa_ =: 1\nV_aa_ =: 2\nV_aa_
+> j: 2
+= cocurrent 'aa'\nV =: 1\ncocurrent 'base'\nV =: 2\nV , V_aa_
+> j: 2 1
+= n =: <'bb'\nV_bb_ =: 111\nV__n
+> j: 111
+= n =: <'bb'\nV_bb_ =: 111\nn =: <'cc'\nV_cc_ =: 222\nV__n
+> j: 222
+= n =: <'bb'\nW__n =: 9\nW_bb_
+> j: 9
+= n =: <'bb'\nW__n =: 9\nW__n + 1
+> j: 10
+= q =. 18!:3 ''\nm =: <'0'\nK_0_ =: 3\nK__m
+> j: 3
+= n =: 'bb'\nV_bb_ =: 1\nV__n
+> j: <error>
+= V__zz
+> j: <error>
+= n =: <'bb'\nV__n
+> j: <error>

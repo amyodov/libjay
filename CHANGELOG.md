@@ -7,6 +7,33 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- J's locales — named namespaces for the program's globals. `V_alpha_ =. 5`
+  puts `V` in locale `alpha` and `V_alpha_` reads it back; `f_alpha_ =. 3 :
+  'y + 100'` defines a verb there, and its body reads the names of ITS OWN
+  locale whichever locale the caller is in. `cocurrent 'alpha'` (and
+  `coclass`, which does the same) makes a locale current for the sentences
+  after it, and a `cocurrent` inside a definition lasts only as long as the
+  call. `V__` and `V_base_` are the same name as `V` in the base locale, a
+  locative on the left of an assignment writes a global wherever it stands,
+  and `V__n` reads and writes the locale the name `n` holds. A name not
+  found in its own locale is looked for in the locales on that locale's
+  search path, `z` by default.
+- The `18!:` locale foreigns: `18!:0` says whether a locale exists and
+  whether it is numbered, `18!:1` lists the ones alive, `18!:2` reads a
+  search path and `x 18!:2 y` writes one, `18!:3` makes a locale — an empty
+  argument hands out a numbered one — `18!:5` names the current locale, and
+  `18!:55` destroys a numbered one.
+- J's branch words `goto_name.` and `label_name.`. A branch lands on the
+  body line its label stands on, forwards or backwards, and out of an `if.`,
+  a `for.`, a `while.`, a `select.` or a `try.` block. A `goto_` with no
+  label, a label written twice, and a label written inside a control
+  structure are all refused where the definition is written, with a message
+  that says which.
+- J's `throw.` and `catcht.`. A `throw.` leaves the definition it stands in
+  at once and is caught by a `catcht.` block in a CALLER's `try.` — never by
+  one in the same definition, and never by a `catch.`, which answers only
+  for the language's own errors. A `try.` may carry both rescue blocks, in
+  either order, and a throw nothing catches stops the program and says so.
 - J's tacit definition, `13 : '…'`. It reads an explicit body and answers
   the tacit verb that computes the same thing: `13 : '(+/y) % #y'` is
   `+/ % #`, `13 : 'y+1'` is `1 + ]`, `13 : 'x - y - 1'` is `[ - 1 -~ ]`,

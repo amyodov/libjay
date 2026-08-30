@@ -78,8 +78,20 @@ impl Modifier {
 /// The parts of speech a sentence is read against. A name's part of speech
 /// decides how the sentence around it parses, so the table is carried from
 /// sentence to sentence and into every definition body.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Names {
+    /// The locale the sentences being parsed belong to. A name's part of
+    /// speech is the one it has THERE, so the table is keyed by the
+    /// spelling the name would be written with from `base` and a bare name
+    /// is qualified with this before it is looked up.
+    current: String,
+    /// The names a definition's own frame holds: its arguments, its
+    /// operands, the names a `for_i.` binds and the ones `=.` gave it. They
+    /// belong to no locale, so they are looked up under the bare spelling.
+    locals: HashSet<String>,
+    /// Whether these are the sentences of a definition BODY, where `=.`
+    /// writes a local rather than a global.
+    in_definition: bool,
     verbs: HashMap<String, Verb>,
     /// Names given an adverb or a conjunction (`m =. /`), by what they
     /// stand for and whether it is a conjunction. A modifier is applied
@@ -101,11 +113,113 @@ struct Names {
     char_bytes: bool,
 }
 
+/// The verb the two locale words stand for. Both make the locale they name
+/// current, creating it if it is new; the reference gives them the same
+/// meaning and libjay follows it.
+fn co_verb(name: &'static str) -> Verb {
+    Verb::Prim(Prim {
+        name,
+        monad: MonadOp::CoCurrent,
+        dyad: DyadOp::None,
+        ranks: [RANK_INF; 3],
+    })
+}
+
+impl Default for Names {
+    fn default() -> Names {
+        // `cocurrent` and `coclass` are the interpreter's own, and the
+        // reference answers them with a bare profile: they live in `z`,
+        // which every locale's search path holds, so a program is free to
+        // give either name a meaning of its own in a locale of its own.
+        let verbs = HashMap::from([
+            ("cocurrent_z_".to_string(), co_verb("cocurrent")),
+            ("coclass_z_".to_string(), co_verb("coclass")),
+        ]);
+        Names {
+            current: crate::verb::BASE_LOCALE.to_string(),
+            locals: HashSet::new(),
+            in_definition: false,
+            verbs,
+            mods: HashMap::new(),
+            nouns: HashSet::new(),
+            consts: HashMap::new(),
+            char_bytes: false,
+        }
+    }
+}
+
 impl Names {
+    /// The table key a name has: the spelling it would be written with from
+    /// `base`. A bare name belongs to the locale being parsed, and the
+    /// locative that spells `base` out is the same name as the bare one.
+    fn key(&self, name: &str) -> String {
+        // An indirect locative names a locale that is not known until the
+        // program runs, so no key stands for it.
+        if self.locals.contains(name) || crate::verb::split_indirect(name).is_some() {
+            return name.to_string();
+        }
+        match crate::verb::split_locative(name) {
+            Some((head, crate::verb::BASE_LOCALE)) => head.to_string(),
+            Some(..) => name.to_string(),
+            None if self.current == crate::verb::BASE_LOCALE => name.to_string(),
+            None => format!("{name}_{}_", self.current),
+        }
+    }
+
+    /// The keys a name is looked for under, in order: its own locale, then
+    /// the locales that locale's search path names. The path is not
+    /// followed past one step, which is what the reference does.
+    fn lookup_keys(&self, name: &str) -> Vec<String> {
+        if self.locals.contains(name) || crate::verb::split_indirect(name).is_some() {
+            return vec![name.to_string()];
+        }
+        let (head, locale) = match crate::verb::split_locative(name) {
+            Some((head, locale)) => (head, locale.to_string()),
+            None => (name, self.current.clone()),
+        };
+        let mut keys = vec![match locale == crate::verb::BASE_LOCALE {
+            true => head.to_string(),
+            false => format!("{head}_{locale}_"),
+        }];
+        // Every locale but `z` itself starts with `z` on its path, and a
+        // program that changes a path changes where a name is FOUND at run
+        // time, not what part of speech it has.
+        if locale != crate::verb::Z_LOCALE {
+            keys.push(format!("{head}_{}_", crate::verb::Z_LOCALE));
+        }
+        keys
+    }
+
+    fn verb_named(&self, name: &str) -> Option<&Verb> {
+        self.lookup_keys(name).iter().find_map(|k| self.verbs.get(k))
+    }
+
+    fn mod_named(&self, name: &str) -> Option<&(bool, Modifier)> {
+        self.lookup_keys(name).iter().find_map(|k| self.mods.get(k))
+    }
+
+    fn is_noun(&self, name: &str) -> bool {
+        self.lookup_keys(name).iter().any(|k| self.nouns.contains(k))
+    }
+
+    fn const_named(&self, name: &str) -> Option<Array> {
+        self.lookup_keys(name).iter().find_map(|k| self.consts.get(k)).cloned()
+    }
+
+    /// Forget everything the table knows about a name, under the key it has
+    /// in the locale being parsed.
+    fn forget(&mut self, name: &str) {
+        let key = self.key(name);
+        self.verbs.remove(&key);
+        self.mods.remove(&key);
+        self.nouns.remove(&key);
+        self.consts.remove(&key);
+    }
+
     /// Parse one sentence against the table and note what it did to the
     /// names it mentions.
     fn parse_sentence(&mut self, mut sentence: Vec<Frag>) -> Result<Expr> {
-        substitute_names(&mut sentence, &self.verbs, &self.mods);
+        substitute_names(&mut sentence, self);
         let whole = sentence_span(&sentence);
         let frag = reduce_to_fragment(sentence, self)?;
         // A sentence that names a modifier is settled here rather than in
@@ -113,9 +227,8 @@ impl Names {
         // node the sentence lowers to carries only its spelling.
         if let Some(Frag::ModDef(name, conj, m, span)) = frag {
             let spelling = m.spelling();
-            self.mods.insert(name.clone(), (conj, m));
-            self.verbs.remove(&name);
-            self.nouns.remove(&name);
+            self.forget(&name);
+            self.mods.insert(self.key(&name), (conj, m));
             return Ok(Expr::ModDef { name, spelling, conjunction: conj, span });
         }
         let stmt = lower_sentence(frag, whole, self.char_bytes)?;
@@ -123,13 +236,17 @@ impl Names {
         Ok(stmt)
     }
 
-    /// Note what a parsed sentence did to the names it mentions.
+    /// Note what a parsed sentence did to the names it mentions, and to the
+    /// locale the sentences after it belong to.
     fn record(&mut self, stmt: &Expr) {
+        if let Some(locale) = locale_switch(stmt) {
+            self.current = locale;
+        }
         match stmt {
             Expr::VerbDef { name, verb, .. } => {
-                self.verbs.insert(name.clone(), verb.clone());
-                self.mods.remove(name);
-                self.nouns.remove(name);
+                let verb = verb.clone();
+                self.forget(name);
+                self.verbs.insert(self.key(name), verb);
             }
             // A name given a noun stops being a verb, at any depth: J lets
             // a name change part of speech, and the oracle agrees.
@@ -137,16 +254,74 @@ impl Names {
                 let mut assigned = Vec::new();
                 assigned_names(other, &mut assigned);
                 for name in assigned {
-                    self.verbs.remove(&name);
-                    self.mods.remove(&name);
-                    self.nouns.insert(name.clone());
-                    match literal_assigned(other, &name) {
-                        Some(a) => self.consts.insert(name, a),
-                        None => self.consts.remove(&name),
-                    };
+                    // Inside a definition, `=.` writes the frame: the name
+                    // belongs to no locale from here on.
+                    if self.in_definition
+                        && assigns_locally(other, &name)
+                        && crate::verb::split_locative(&name).is_none()
+                    {
+                        self.forget(&name);
+                        self.locals.insert(name.clone());
+                    }
+                    self.forget(&name);
+                    let key = self.key(&name);
+                    self.nouns.insert(key.clone());
+                    if let Some(a) = literal_assigned(other, &name) {
+                        self.consts.insert(key, a);
+                    }
                 }
             }
         }
+    }
+}
+
+/// The locale a sentence makes current for the sentences after it.
+///
+/// `cocurrent` and `coclass` are answered at run time like any other verb;
+/// this is the compile-time half of the same switch, because the locale a
+/// sentence belongs to decides what part of speech its names have. Only a
+/// whole sentence that is one of the two applied to a LITERAL counts: a
+/// computed locale name is not known while the program is being read.
+fn locale_switch(stmt: &Expr) -> Option<String> {
+    let Expr::Monad { verb, y, .. } = stmt else { return None };
+    let Verb::Prim(p) = verb else { return None };
+    if p.monad != MonadOp::CoCurrent {
+        return None;
+    }
+    let Expr::Const(a, _) = &**y else { return None };
+    locale_literal(a)
+}
+
+/// The locale name a literal spells, boxed or bare.
+fn locale_literal(a: &Array) -> Option<String> {
+    let inner = match &a.data {
+        Data::Box(v) if a.count() == 1 => v[0].clone(),
+        Data::Char(_) => a.clone(),
+        _ => return None,
+    };
+    match &inner.data {
+        Data::Char(c) => Some(c.as_slice().iter().collect()),
+        _ => None,
+    }
+}
+
+/// Whether the sentence gave this name a value with `=.` rather than `=:`.
+/// Inside a definition that is the frame, which no locale reaches.
+fn assigns_locally(stmt: &Expr, name: &str) -> bool {
+    match stmt {
+        Expr::Assign { name: n, scope, value, .. } => {
+            (n == name && *scope != crate::ir::Scope::Global) || assigns_locally(value, name)
+        }
+        Expr::AssignMany { names, scope, value, .. } => {
+            (names.iter().any(|n| n == name) && *scope != crate::ir::Scope::Global)
+                || assigns_locally(value, name)
+        }
+        Expr::Monad { y, .. } => assigns_locally(y, name),
+        Expr::Dyad { x, y, .. } => {
+            assigns_locally(x, name) || assigns_locally(y, name)
+        }
+        Expr::PrintPass { value, .. } => assigns_locally(value, name),
+        _ => false,
     }
 }
 
@@ -431,7 +606,7 @@ fn tacit_definition(
     let translated = match body.as_slice() {
         [line] => {
             let mut sentence = line.clone();
-            substitute_names(&mut sentence, &inner.verbs, &inner.mods);
+            substitute_names(&mut sentence, &inner);
             // A name the program has already given a value stands for that
             // value here: the translation reads it now, so what it holds
             // becomes part of the verb rather than a name the verb looks up.
@@ -797,18 +972,31 @@ fn build_definition(
     // The body reads the names the program has already given, and binds its
     // own arguments over them.
     let mut inner = scope.clone();
+    // A definition belongs to the locale its NAME puts it in — `f_x_ =.`
+    // makes it x's — or, failing that, to the one the sentence that defines
+    // it belongs to. Its body's bare global names are that locale's,
+    // whatever locale a caller happens to be in.
+    let home = self_name
+        .and_then(crate::verb::split_locative)
+        .map_or_else(|| scope.current.clone(), |(_, l)| l.to_string());
+    inner.current = home.clone();
+    inner.in_definition = true;
+    // Frames do not nest in J, so the body starts with only its own.
+    inner.locals = HashSet::new();
+    inner.locals.insert("y".to_string());
     inner.nouns.insert("y".to_string());
     inner.verbs.remove("y");
     inner.consts.remove("y");
     if dyadic {
+        inner.locals.insert("x".to_string());
         inner.nouns.insert("x".to_string());
         inner.verbs.remove("x");
         inner.consts.remove("x");
     }
     if let Some(n) = self_name {
-        inner.nouns.remove(n);
-        inner.consts.remove(n);
-        inner.verbs.insert(n.to_string(), Verb::Named(n.to_string()));
+        inner.forget(n);
+        let key = inner.key(n);
+        inner.verbs.insert(key, Verb::Named(n.to_string()));
     }
     // A body may hold definitions of its own, and one of them may run past
     // the end of its line, so the lines are collected before they are split
@@ -857,6 +1045,7 @@ fn build_definition(
         // J has no `⎕CR`, and nothing else asks a definition for its text.
         source: Vec::new(),
         spelling,
+        home: Some(home),
     })))
 }
 
@@ -1236,7 +1425,7 @@ fn derivation_condition(items: &[Item], scope: &Names, span: Span) -> Result<boo
 
 /// One sentence of a derivation-time body as the fragment it stands for.
 fn derivation_fragment(mut sentence: Vec<Frag>, scope: &Names) -> Result<Option<Frag>> {
-    substitute_names(&mut sentence, &scope.verbs, &scope.mods);
+    substitute_names(&mut sentence, scope);
     reduce_to_fragment(sentence, scope)
 }
 
@@ -1419,10 +1608,14 @@ fn parse_control(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Expr> {
         }
         "for." => {
             if let Some(name) = suffix {
+                // The loop's two names are the frame's, like any other `=.`.
+                let index = format!("{name}_index");
+                scope.forget(name);
+                scope.forget(&index);
+                scope.locals.insert(name.clone());
+                scope.locals.insert(index.clone());
                 scope.nouns.insert(name.clone());
-                scope.nouns.insert(format!("{name}_index"));
-                scope.verbs.remove(name);
-                scope.consts.remove(name);
+                scope.nouns.insert(index);
             }
             let source = parse_block(cur, scope, &["do."])?;
             cur.expect("do.")?;
@@ -1438,18 +1631,13 @@ fn parse_control(cur: &mut Cursor<'_>, scope: &mut Names) -> Result<Expr> {
             let body = parse_block(cur, scope, &["catch.", "catcht.", "end."])?;
             let mut catch = Vec::new();
             let mut catcht = Vec::new();
-            loop {
-                match cur.peek_word() {
-                    Some(w @ ("catch." | "catcht.")) => {
-                        cur.at += 1;
-                        let block = parse_block(cur, scope, &["catch.", "catcht.", "end."])?;
-                        if w == "catch." {
-                            catch = block;
-                        } else {
-                            catcht = block;
-                        }
-                    }
-                    _ => break,
+            while let Some(w @ ("catch." | "catcht.")) = cur.peek_word() {
+                cur.at += 1;
+                let block = parse_block(cur, scope, &["catch.", "catcht.", "end."])?;
+                if w == "catch." {
+                    catch = block;
+                } else {
+                    catcht = block;
                 }
             }
             cur.expect("end.")?;
@@ -1556,20 +1744,29 @@ fn one_expr(mut stmts: Vec<Expr>, span: Span) -> Result<Expr> {
 /// Replace every name known to be a verb or a modifier by what it stands
 /// for, except where the name is the target of an assignment, which is a
 /// definition of the name rather than a use of it.
-fn substitute_names(
-    sentence: &mut [Frag],
-    verbs: &HashMap<String, Verb>,
-    mods: &HashMap<String, (bool, Modifier)>,
-) {
+fn substitute_names(sentence: &mut [Frag], scope: &Names) {
     for i in 0..sentence.len() {
         let Frag::Name(name, span) = &sentence[i] else { continue };
         let (name, span) = (name.clone(), *span);
         if sentence.get(i + 1).is_some_and(Frag::is_assign) {
             continue;
         }
-        if let Some(v) = verbs.get(&name) {
+        // A GLOBAL name read in a locale other than `base` is written out
+        // as the locative it stands for. The locale a name belongs to is
+        // settled where the sentence is READ, and a value that outlives the
+        // sentence — a tacit verb built from the name, above all — must
+        // carry the locale with it rather than take the caller's.
+        if !scope.locals.contains(&name)
+            && scope.current != crate::verb::BASE_LOCALE
+            && crate::verb::split_locative(&name).is_none()
+            && crate::verb::split_indirect(&name).is_none()
+            && !name.starts_with('⎕')
+        {
+            sentence[i] = Frag::Name(scope.key(&name), span);
+        }
+        if let Some(v) = scope.verb_named(&name) {
             sentence[i] = Frag::Verb(VerbFrag::V(v.clone()), span);
-        } else if let Some((conj, m)) = mods.get(&name) {
+        } else if let Some((conj, m)) = scope.mod_named(&name) {
             sentence[i] = if *conj {
                 Frag::Conj(m.clone(), span)
             } else {
@@ -2885,7 +3082,7 @@ fn apply(stack: &mut Vec<Frag>, scope: &Names) -> Result<bool> {
             let mut t = take(stack, 1..3);
             let b = t.pop().expect("two slots");
             let a = t.pop().expect("two slots");
-            let frag = apply_bident(a, b, &scope.nouns)?;
+            let frag = apply_bident(a, b, scope)?;
             stack.insert(1, frag);
         }
         Rule::Assign8 => {
@@ -3533,6 +3730,29 @@ fn foreign(u: &Frag, v: &Frag, span: Span) -> Result<Frag> {
         // `5!:1 <'name'` is the atomic representation of what the name
         // stands for — the same boxed data a gerund is made of.
         (5, 1) => prim("5!:1", MonadOp::AtomicRep, DyadOp::None),
+        // The locale family. Every member of it reads or writes the
+        // namespace table and nothing outside the program.
+        (18, 0) => prim("18!:0", MonadOp::LocaleKind, DyadOp::None),
+        (18, 1) => prim("18!:1", MonadOp::LocaleNames, DyadOp::None),
+        (18, 2) => prim("18!:2", MonadOp::LocalePath, DyadOp::LocalePathSet),
+        (18, 3) => prim("18!:3", MonadOp::LocaleCreate, DyadOp::None),
+        (18, 5) => prim("18!:5", MonadOp::LocaleCurrent, DyadOp::None),
+        (18, 55) => prim("18!:55", MonadOp::LocaleErase, DyadOp::None),
+        // `18!:4` is not in the reference build libjay is measured against
+        // at all, and `18!:6` answers a dump of the interpreter's own name
+        // tables, which is machinery rather than a meaning.
+        (18, 4) => Err(Error::language(
+            "18!:4 is not a foreign the reference defines; `cocurrent` is how a \
+             program changes locale"
+                .to_string(),
+            span,
+        )),
+        (18, 6) => Err(Error::language(
+            "18!:6 answers the interpreter's own name tables, which libjay does \
+             not have"
+                .to_string(),
+            span,
+        )),
         (0, _) => closed("runs a script file"),
         // The rest of the file family: stdin and stdout are the streams the
         // sandbox opens, and every other member of it is the filesystem.
@@ -3759,7 +3979,7 @@ fn verb_ar(v: &Verb, span: Span) -> Result<crate::gerund::Ar> {
 /// is data, so `` g =. +`- `` and then `g@.1` has to find what g holds.
 fn noun_in_scope(f: &Frag, scope: &Names) -> Option<Array> {
     if let Frag::Name(n, _) = f {
-        return scope.consts.get(n).cloned();
+        return scope.const_named(n);
     }
     noun_value(f)
 }
@@ -3831,7 +4051,7 @@ fn ar_frag(ar: &crate::gerund::Ar, scope: &Names, span: Span) -> Result<Frag> {
                 2 => {
                     let b = frags.pop().expect("two parts");
                     let a = frags.pop().expect("two parts");
-                    apply_bident(a, b, &scope.nouns)
+                    apply_bident(a, b, scope)
                 }
                 3 => {
                     let h = frags.pop().expect("three parts");
@@ -3884,7 +4104,7 @@ fn train_of(vs: Vec<Verb>, span: Span) -> Result<Frag> {
         2 => {
             let b = frags.pop().expect("two");
             let a = frags.pop().expect("two");
-            apply_bident(a, b, &HashSet::new())
+            apply_bident(a, b, &Names::default())
         }
         _ => {
             let h = frags.pop().expect("three");
@@ -3920,12 +4140,22 @@ fn apply_fork(f: Frag, g: Frag, h: Frag) -> Result<Frag> {
     }
 }
 
-fn apply_bident(a: Frag, b: Frag, nouns: &HashSet<String>) -> Result<Frag> {
+fn apply_bident(a: Frag, b: Frag, scope: &Names) -> Result<Frag> {
     let span = Span::merge(a.span(), b.span());
     // A name here is not a verb, or it would have been substituted; if it
     // is not a value either, that is what is wrong with the sentence, and
     // it is what the reference reports.
-    if let Frag::Name(n, nspan) = &a && !nouns.contains(n) {
+    if let Frag::Name(n, nspan) = &a && !scope.is_noun(n) {
+        // An indirect locative's locale is a value, so what part of speech
+        // the name has is not known until the program runs. libjay reads
+        // one as a noun; a VERB spelled that way is a named gap rather than
+        // the syntax error the reading would otherwise produce.
+        if crate::verb::split_indirect(n).is_some() {
+            return Err(Error::not_yet(
+                format!("a verb named by the indirect locative `{n}`"),
+                *nspan,
+            ));
+        }
         return Err(Error::new(
             ErrorKind::Value,
             format!("undefined name: {n}"),

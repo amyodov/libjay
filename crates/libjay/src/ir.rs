@@ -247,6 +247,11 @@ pub struct ExplicitDef {
     /// source spells it in a way that can be given back: J's `3 : '…'` and
     /// its relatives. None for a definition whose text is not kept.
     pub spelling: Option<String>,
+    /// J's locale for this definition: the namespace its body's bare global
+    /// names are read and written in, whatever locale the CALLER is in.
+    /// None for a definition that belongs to no locale in particular —
+    /// every APL one, and a J one written in `base`.
+    pub home: Option<String>,
 }
 
 impl Expr {
@@ -1106,9 +1111,18 @@ pub(crate) fn call_explicit(
         frame.insert(label.clone(), Array::scalar_i64(*line as i64));
     }
     ctx.env.enter(frame, Arc::clone(def), span)?;
+    // The body runs in the definition's own locale: a bare global name in
+    // it is the home locale's, and `18!:5` inside it answers that name.
+    // A `cocurrent` the body runs lasts only as long as the call, so the
+    // locale is put back whether or not the definition named a home.
+    let outer = match &def.home {
+        Some(home) => ctx.env.set_current_locale(home),
+        None => ctx.env.current_locale().to_string(),
+    };
     let mut rec = None;
     let out = run_body(&def.body, ctx, &mut rec);
     let frame = ctx.env.leave();
+    ctx.env.set_current_locale(&outer);
     let value = out?;
     // The body's shyness, which `run_body` left in the context, is the
     // call's: a definition whose answer came from an assignment answers
@@ -1290,6 +1304,21 @@ fn assign_one(
     if name.starts_with('⎕') {
         crate::sysvar::apply(name, &v, ctx, span)?;
     }
+    if ctx.cfg.rules.lang == Lang::J
+        && let Some((head, var)) = crate::verb::split_indirect(name)
+    {
+        let locale = ctx.env.indirect_locale(var, span)?;
+        ctx.env.set_in_locale(&locale, head, v.clone());
+        return Ok(v);
+    }
+    if let Some(locale) = ctx.env.missing_numbered(name) {
+        return Err(Error::new(
+            ErrorKind::Value,
+            format!("there is no locale {locale}, so {name} names nothing"),
+            Some(span),
+        )
+        .note("a numbered locale comes from `18!:3 ''` and from nowhere else"));
+    }
     ctx.env.assign(name.to_string(), v.clone(), scope);
     Ok(v)
 }
@@ -1350,9 +1379,39 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
     match e {
         Expr::Const(a, _) => Ok(a.clone()),
         Expr::Param(i, _) => ctx.env.arg(*i),
-        Expr::Name(n, span) => ctx.env.get(n).ok_or_else(|| {
-            Error::new(ErrorKind::Value, format!("undefined name: {n}"), Some(*span))
-        }),
+        Expr::Name(n, span) => {
+            // `V__n` names V in the locale n holds. The locale is a value,
+            // so the name is resolved here rather than while the program is
+            // read, and the frame is not searched: it is a locative.
+            if ctx.cfg.rules.lang == Lang::J
+                && let Some((head, var)) = crate::verb::split_indirect(n)
+            {
+                let locale = ctx.env.indirect_locale(var, *span)?;
+                return ctx.env.get_in_locale(&locale, head).ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::Value,
+                        format!("undefined name: {head}_{locale}_"),
+                        Some(*span),
+                    )
+                });
+            }
+            // Naming a locale is what makes it: the reference creates the
+            // named locale the moment a name in it is read. A NUMBERED one
+            // is never made this way — only `18!:3 ''` hands those out —
+            // so a name in one that was never handed out is a locale error.
+            if let Some(locale) = ctx.env.missing_numbered(n) {
+                return Err(Error::new(
+                    ErrorKind::Value,
+                    format!("there is no locale {locale}, so {n} names nothing"),
+                    Some(*span),
+                )
+                .note("a numbered locale comes from `18!:3 ''` and from nowhere else"));
+            }
+            ctx.env.touch_locative(n);
+            ctx.env.get(n).ok_or_else(|| {
+                Error::new(ErrorKind::Value, format!("undefined name: {n}"), Some(*span))
+            })
+        }
         Expr::Assign { name, value, scope, span } => {
             assign_one(name, value, *scope, *span, ctx, rec)
         }

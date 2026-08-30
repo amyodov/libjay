@@ -1,0 +1,139 @@
+// J's locales: named namespaces, the locative spellings that reach into
+// them, `cocurrent`, and the `18!:` family that computes over them.
+//
+// A program is one line with `\n` for the newlines in it. The locale table
+// starts fresh for each one: `base` and `z` and nothing else.
+//
+// `18!:1 ,0` is not recorded after a sentence that FAILED: the reference
+// creates a locale of its own to report an error in, and the list would
+// carry it.
+
+// --- the locative spelling reaches into a locale ------------------------
+V_alpha_ =. 5\nV_alpha_
+V_alpha_ =. 5\nV_alpha_ + 1
+f_alpha_ =. 3 : 'y + 100'\nf_alpha_ 5
+f_alpha_ =. 4 : 'x + y'\n2 f_alpha_ 3
+V_alpha_ =. 5\nV_beta_ =. 7\nV_alpha_ , V_beta_
+
+// A name in `base` is the same name whether the locale is spelled or not.
+V =. 5\nV_base_
+V_base_ =. 5\nV
+V =. 5\nV__
+
+// A locative on the left of an assignment is a GLOBAL wherever it stands.
+f =. 3 : 'R_cc_ =. y'\nq =. f 5\nR_cc_
+f =. 3 : 'S_cc_ =: y'\nq =. f 6\nS_cc_
+
+// --- a definition's body reads its own locale ---------------------------
+V_aa_ =. 1\nV =. 999\nf_aa_ =. 3 : 'V'\nf_aa_ ''
+V_aa_ =. 1\nV =. 999\ng =. 3 : 'V'\ng ''
+V_bb_ =. 111\nV =. 999\nh_bb_ =. 3 : 'V'\nh_bb_ ''
+W_bb_ =: 3 : 'Q =: y'\nq =. W_bb_ 7\nQ_bb_
+W_bb_ =: 3 : 'Q =. y'\nW_bb_ 7
+
+// Two locales, each definition reading its own.
+cocurrent 'p2'\nW =: 10\nb =: 3 : 'W + y'\ncocurrent 'p1'\nW =: 1\na =: 3 : 'W + b_p2_ y'\ncocurrent 'base'\na_p1_ 100
+
+// --- cocurrent and coclass ---------------------------------------------
+cocurrent 'zz'\n18!:5 ''
+cocurrent 'zz'\nA =: 42\ncocurrent 'base'\nA_zz_
+cocurrent 'zz'\nA =: 42\ncocurrent 'base'\n18!:5 ''
+coclass 'cc'\nX =: 5\ncocurrent 'base'\nX_cc_
+18!:5 ''
+$ 18!:5 ''
+
+// `cocurrent` inside a definition lasts as long as the call.
+p =: 3 : 0\ncocurrent 'pp'\nQ =: y\n18!:5 ''\n)\np 3
+p =: 3 : 0\ncocurrent 'pp'\nQ =: y\n18!:5 ''\n)\nq =. p 3\n18!:5 ''
+p =: 3 : 0\ncocurrent 'pp'\nQ =: y\n18!:5 ''\n)\nq =. p 3\nQ_pp_
+
+// --- the search path ----------------------------------------------------
+G_z_ =: 3 : 'y + 1000'\nG 5
+G_z_ =: 3 : 'y + 1000'\ncocurrent 'ee'\nG 5
+V_z_ =: 7\nV_ee_
+18!:2 <'base'
+18!:2 <'z'
+$ 18!:2 <'z'
+cocurrent 'ee'\ncocurrent 'base'\n18!:2 <'ee'
+(<'bb') 18!:2 <'ee'
+(<'bb') 18!:2 <'ee'\n18!:2 <'ee'
+V_bb_ =: 111\n((<'bb')) 18!:2 <'ee'\ncocurrent 'ee'\nV
+((<'z'),(<'base')) 18!:2 <'ff'\n18!:2 <'ff'
+((<'z'),(<'base')) 18!:2 <'ff'\n$ 18!:2 <'ff'
+
+// The path is followed one step and no further.
+Z_z_ =: 42\n(<'r1') 18!:2 <'r2'\n(<'z') 18!:2 <'r1'\ncocurrent 'r2'\nZ_r2_ =: 1\nZ
+
+// --- 18!:0, the locale class -------------------------------------------
+18!:0 <'base'
+18!:0 <'z'
+V_gg_ =: 1\n18!:0 <'gg'
+18!:0 <'nope'
+q =. 18!:3 ''\n18!:0 <'0'
+18!:0 (<'base'),(<'nope')
+V_gg_ =: 1\n18!:0 (<'base'),(<'gg'),(<'nope')
+
+// --- 18!:1, the locale names -------------------------------------------
+18!:1 ,0
+18!:1 ,1
+V_gg_ =: 1\n18!:1 ,0
+cocurrent 'yy'\ncocurrent 'base'\n18!:1 ,0
+q =. 18!:3 ''\n18!:1 ,1
+q =. 18!:3 ''\nq =. 18!:3 ''\n18!:1 ,1
+q =. 18!:3 ''\n18!:1 ,0
+
+// --- 18!:3, making a locale --------------------------------------------
+18!:3 <'made'
+q =. 18!:3 <'made'\n18!:1 ,0
+18!:3 ''
+q =. 18!:3 ''\n18!:3 ''
+$ 18!:3 ''
+
+// --- 18!:55, erasing ----------------------------------------------------
+q =. 18!:3 ''\nW_0_ =: 9\n18!:55 <'0'
+q =. 18!:3 ''\nW_0_ =: 9\nq =. 18!:55 <'0'\n18!:1 ,1
+q =. 18!:3 ''\nq =. 18!:3 ''\n18!:55 (<'0'),(<'1')
+q =. 18!:3 ''\nq =. 18!:3 ''\nq =. 18!:55 (<'0'),(<'1')\n18!:1 ,1
+V_kk_ =: 5\nq =. 18!:55 <'kk'\nV_kk_
+V_kk_ =: 5\nq =. 18!:55 <'kk'\n18!:1 ,0
+18!:55 <'nosuch'
+
+// --- numbered locales ---------------------------------------------------
+q =. 18!:3 ''\nV_0_ =: 7\nV_0_
+q =. 18!:3 ''\nV_0_ =: 7\ncocurrent '0'\nV
+q =. 18!:3 ''\nq =. 18!:3 ''\nV_1_ =: 3\nV_1_ + 1
+
+// A numbered locale nobody handed out is not made by naming a name in it.
+V_5_ =: 3
+V_5_
+
+// A NAMED locale is made by naming a name in it, even where the name has
+// no value.
+V_qq_ =: 1\n18!:1 ,0
+
+// --- verbs across locales -----------------------------------------------
+g_cc_ =: 3 : 'y * 3'\ng_cc_ 4
+cocurrent 'cc'\ng =: 3 : 'y * 3'\ncocurrent 'base'\ng_cc_ 4
+cocurrent 'cc'\nc =: 5\nf =: +&c\ncocurrent 'base'\nf_cc_ 1
+cocurrent 'cc'\nc =: 5\nf =: +&c\ncocurrent 'base'\nc =: 100\nf_cc_ 1
+cocurrent 'cc'\nc =: 5\nf =: 3 : 'c + y'\ncocurrent 'base'\nc =: 100\nf_cc_ 1
+
+// A definition that recurses by name finds itself in its own locale.
+fact_mm_ =: 3 : 'if. y <: 1 do. 1 else. y * fact_mm_ y - 1 end.'\nfact_mm_ 5
+cocurrent 'mm'\nfact =: 3 : 'if. y <: 1 do. 1 else. y * fact y - 1 end.'\ncocurrent 'base'\nfact_mm_ 5
+
+// --- locale and the ordinary name rules ---------------------------------
+V_aa_ =: 1\nV_aa_ =: 2\nV_aa_
+cocurrent 'aa'\nV =: 1\ncocurrent 'base'\nV =: 2\nV , V_aa_
+
+// --- indirect locatives -------------------------------------------------
+// `V__n` is V in the locale n holds, and the locale is a value: it is
+// settled while the program runs rather than while it is read.
+n =: <'bb'\nV_bb_ =: 111\nV__n
+n =: <'bb'\nV_bb_ =: 111\nn =: <'cc'\nV_cc_ =: 222\nV__n
+n =: <'bb'\nW__n =: 9\nW_bb_
+n =: <'bb'\nW__n =: 9\nW__n + 1
+q =. 18!:3 ''\nm =: <'0'\nK_0_ =: 3\nK__m
+n =: 'bb'\nV_bb_ =: 1\nV__n
+V__zz
+n =: <'bb'\nV__n

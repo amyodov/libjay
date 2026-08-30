@@ -1671,8 +1671,24 @@ Implemented: `if. do. elseif. else. end.`, `while. do. end.`,
 `whilst. do. end.` (body first), `for. do. end.` and `for_i. do. end.`
 (`i` is the item, `i_index` its position), `select. case. fcase. do. end.`
 (a `case.` with no test is the default; `fcase.` runs the next body too),
-`return.`, `break.`, `continue.`, and `try. catch. end.`. `throw.`,
-`catcht.`, `goto_name.` and `label_name.` are named gaps.
+`return.`, `break.`, `continue.`, `try. catch. catcht. end.`, and the
+branch pair `goto_name.` / `label_name.`.
+
+A `label_name.` is a target only where it stands on the body's own statement
+list: the target is settled while the definition is BUILT, so a
+`goto_name.` with no label, a label written twice, and a label inside a
+control structure are all refused there rather than when the branch runs —
+which is where the reference refuses them too. A label yields nothing at
+all, not even the empty value an untaken branch gives, so the value the body
+had in hand survives it. A branch out of a `for.`, `while.`, `select.`,
+`try.` or `catch.` block leaves the block and lands on the body's own line.
+
+`throw.` leaves the definition it stands in at once. A `catcht.` block in a
+CALLER's `try.` takes it — never one in the same definition, which the
+reference lets the throw straight past, and never a `catch.`, which answers
+only for the languages' own errors. A `try.` may carry both rescue blocks,
+in either order. A `throw.` nothing catches stops the program with an
+uncaught-throw diagnostic.
 
 A test is true when the argument is empty, or when its first atom is not
 zero — J's rule, checked against the reference. `select.` matches with `-:`
@@ -1743,6 +1759,62 @@ local to the call. A `∇`-definition follows APL's own rule instead — a name
 the header does not declare is GLOBAL, and `;a;b` after the header is what
 makes names local, along with the result name and the two argument names.
 Both rules are the reference's; the corpus records them.
+
+## Locales
+
+J's globals live in namespaces, and every name belongs to one. `base` and
+`z` exist from the start; a locale is made by naming it — a locative
+mentioned anywhere, `cocurrent`, `coclass`, or `18!:3`. Reading `V_qq_` is
+enough: the reference creates `qq` at that moment and then reports that `V`
+in it has no value.
+
+`name_locale_` is the locative spelling. It is a GLOBAL wherever it stands,
+so `R_cc_ =. y` inside a definition writes locale `cc` rather than the
+call's frame, whichever assignment arrow it uses. `name__` names `base`,
+and `name_base_` is the same name as the bare `name` there.
+
+`name__var` is the INDIRECT locative: `var` holds one boxed locale name and
+the locale is settled while the program runs. It reads and writes; a VERB
+spelled that way is a named gap, because what part of speech the name has
+would not be known until the locale is.
+
+A definition's body reads and writes ITS OWN locale, not the caller's: the
+locale is the one the definition's name put it in (`f_x_ =. …` makes it
+x's), or the one the sentence that defined it belonged to. `18!:5` inside
+the body answers that locale, and the one in force outside comes back when
+the call returns — a `cocurrent` the body runs lasts only as long as the
+call.
+
+A name not found in its own locale is looked for in the locales that
+locale's search path names, ONE step and no further: a path that names a
+locale whose own path names `z` does not reach `z`. Every locale but `z`
+starts with `z` on its path, which is where the language's own words live.
+`18!:2` reads a path and its dyad writes one.
+
+Numbered locales come from `18!:3 ''` and from nowhere else: naming
+`V_5_` where `18!:3` never handed out a `5` is refused rather than creating
+one. `18!:55` destroys a numbered locale; a NAMED one survives it, and the
+answer is 1 either way — which is what the reference does.
+
+`cocurrent` and `coclass` are the same verb here, as they are in the
+reference with a bare profile: each makes the locale it names current,
+creating it if it is new, and answers an empty value. Both live in `z`, so
+a program is free to give either name a meaning of its own.
+
+The locale a sentence belongs to decides what part of speech its names
+have, so libjay follows a `cocurrent` while it READS the program as well as
+while it runs it. Only a whole sentence that applies `cocurrent` or
+`coclass` to a literal counts: one whose locale name is computed still
+switches the locale at run time, but the sentences after it are read in the
+locale that was in force, and a name whose part of speech only that switch
+would settle is a named gap.
+
+Of the `18!:` family, the reference build libjay is measured against
+defines `18!:0` (0 for a named locale that exists, 1 for a numbered one,
+_1 for none), `18!:1` (`,0` the named locales alive, `,1` the numbered
+ones, sorted), `18!:2`, `18!:3`, `18!:5` and `18!:55`. `18!:4` is not a
+verb there at all, and `18!:6` answers a dump of the interpreter's own name
+tables; both are refused by name here rather than guessed at.
 
 ## Indexed assignment
 
@@ -2368,6 +2440,14 @@ sections above is also collected here.
   an error in the program.
 - APL's dyadic `@`: `x f@g y`, where both operands read the left argument
   too. The monad is implemented.
+- A `cocurrent` or `coclass` whose locale name is COMPUTED: the sentence
+  changes the locale at run time, but the sentences after it are READ in the
+  locale that was in force, so a name whose part of speech only that switch
+  would settle is refused by name. A literal locale name is followed at both
+  times.
+- A VERB named by an indirect locative (`f__var y`): the locale is a value,
+  so what part of speech the name has is not known while the sentence is
+  read. Reading and writing a NOUN through one works.
 - An explicit modifier whose body NAMES AN ARGUMENT and derives the
   modifier itself is refused: that body belongs to the derived verb, which
   the reference parses only where the verb is applied and libjay parses

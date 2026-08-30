@@ -122,6 +122,10 @@ fn definition_forms_libjay_has_not_are_named(#[case] src: &str, #[case] msg: &st
 #[case("if. 1 do. 2 end.")]
 #[case("while. 0 do. 1 end.")]
 #[case("return.")]
+#[case("throw.")]
+#[case("catcht.")]
+#[case("goto_end.")]
+#[case("label_end.")]
 fn a_control_word_outside_a_definition_is_refused(#[case] src: &str) {
     let e = fails(Lang::J, src);
     assert_eq!(e.kind, ErrorKind::Parse);
@@ -139,14 +143,12 @@ fn an_unbalanced_control_word_is_reported(#[case] src: &str, #[case] msg: &str) 
     assert!(e.msg.contains(msg), "{src}: {}", e.msg);
 }
 
-#[rstest]
-#[case("f =. 3 : 'throw. 1'", "throw.")]
-#[case("f =. 3 : 0\ntry.\ny\ncatcht.\n0\nend.\n)\nf 1", "catcht.")]
-#[case("f =. 3 : 'goto_end. 1'", "goto_name.")]
-fn control_words_libjay_has_not_are_named(#[case] src: &str, #[case] msg: &str) {
-    let e = fails(Lang::J, src);
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains(msg), "{src}: {}", e.msg);
+/// `catcht.` is one of `try.`'s two rescue blocks and closes nothing on its
+/// own.
+#[test]
+fn a_catcht_with_no_try_has_no_opening_word() {
+    let e = fails(Lang::J, "f =. 3 : 0\ncatcht.\n0\nend.\n)\nf 1");
+    assert_eq!(e.kind, ErrorKind::Parse, "{}", e.msg);
 }
 
 /// `try.` answers for the languages' errors. A gap in libjay is a promise,

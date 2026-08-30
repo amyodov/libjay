@@ -4333,3 +4333,61 @@ the register.
   its argument as it stands and calls that shape a rank error, which its
   own reference does; the dispatch tells the two apart by language rather
   than by the verb's ranks, since both spell the left rank infinite.
+- 2026-08-30 — A locale is a table in the run-time `Env` and a KEY PREFIX in
+  the frontend's name table, and the two halves answer different questions.
+  At run time `Env` holds one namespace per locale, a current locale, and a
+  search path per locale; `Expr::Name` carries the spelling the source
+  wrote, and the environment routes it — a locative to the locale it names,
+  a bare name to the one running. That is what lets `18!:2` change a path
+  while the program runs. At compile time the question is a name's PART OF
+  SPEECH, which decides how the sentence around it parses, so the frontend
+  keeps its own current locale and keys the table by the spelling a name
+  would have from `base`: `V` in locale `bb` and `V_bb_` are one entry. A
+  bare lookup tries the current locale and then `z`, which is where every
+  locale's default path points. The compile-time name-table pre-pass is
+  untouched by this — it gained a dimension, not a second pass.
+- 2026-08-30 — A definition's body runs in the definition's own locale, so
+  `ExplicitDef` carries a `home` and `call_explicit` makes it current for
+  the length of the call. The home is the locale the definition's NAME put
+  it in (`f_x_ =.` makes it x's) or, failing that, the locale the defining
+  sentence belonged to; the frontend parses the body with the same locale
+  current, so the two halves agree about which `V` a body's `V` is. The
+  current locale is restored on the way out whether or not a home was
+  named, which is what makes a `cocurrent` inside a body last exactly as
+  long as the call — the reference's rule.
+- 2026-08-30 — A name a definition made local with `=.` belongs to no
+  locale, so the frontend keeps a set of the frame's names — the arguments,
+  a `for_i.` pair, and every `=.` target — and looks those up under the
+  bare spelling. Without it a body in locale `bb` would key its own `y`
+  as `y_bb_` and lose it.
+- 2026-08-30 — The reference was asked what its `18!:` family actually
+  holds with a null profile, and the answer settles the row: `18!:0 1 2 3 5
+  55` are verbs, `18!:4` does not even FORM (so `cocurrent`, which is a
+  built-in of the `z` locale there, is the only way to change locale), and
+  `18!:6` answers a few hundred bytes of the interpreter's own name tables.
+  libjay implements the six and refuses the other two by name: one is not a
+  meaning the reference defines, the other measures an interpreter libjay
+  is not. Two more measured rules that a document would not have given:
+  `18!:55` destroys a NUMBERED locale and leaves a named one standing while
+  answering 1 either way, and a search path is followed exactly one step —
+  a locale whose path names a locale whose path names `z` does not reach
+  `z`, which is how `cocurrent` itself becomes unreachable from such a
+  locale.
+- 2026-08-30 — `throw.` travels as an ERROR, not as a `Flow`. A `Flow`
+  leaves one block; a throw leaves every definition between where it was
+  raised and the `catcht.` that takes it, which is call unwinding. The
+  measured rule that shapes the implementation is that a `catcht.` does NOT
+  catch a `throw.` written in its own definition — the reference lets that
+  one out to the caller — so the environment records the definition depth
+  the throw was raised at and a `try.` catches only a throw raised deeper
+  than itself. `catch.` never takes a throw, and a `try.` that has a
+  `catcht.` and no `catch.` lets an ordinary error out.
+- 2026-08-30 — `goto_name.` resolves to a body statement INDEX while the
+  definition is built, which is where the reference refuses the three ways
+  it can go wrong: no label of that name, two labels of that name, and a
+  label inside a control structure, which the body's statement list has no
+  place for. That reuses the `Flow::Goto` the APL `→` already had. The one
+  thing a label needed of its own is that it yields nothing at all: every
+  other control sentence that produces no value yields J's `i. 0 0`, and a
+  label doing that would wipe out the value the body had in hand — the
+  reference answers 5 for a body of `5` followed by `label_a.`.

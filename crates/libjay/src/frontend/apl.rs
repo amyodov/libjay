@@ -3763,6 +3763,7 @@ fn build_dfn(body: &[Token], d: Rules, verbs: &HashMap<String, Verb>) -> Result<
             // A dfn that reaches its end without a value has no result.
             empty: None,
             labels: Vec::new(),
+        home: None,
             lines: Vec::new(),
             enclosing,
             id,
@@ -4095,6 +4096,7 @@ fn build_tradfn(
         body,
         empty: None,
         labels,
+        home: None,
         lines,
         pure,
         source,
