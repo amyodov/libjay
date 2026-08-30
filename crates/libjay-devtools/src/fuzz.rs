@@ -867,8 +867,19 @@ fn apl_primitives(expr: &str) -> Vec<String> {
 /// `ours` is libjay's side as the comparison printed it: `<panic>`,
 /// `<no value>`, `<error> …`, or the value.
 pub fn signature(lang: Lang, verdict: Verdict, expr: &str, ours: &str) -> String {
-    format!("{}:{}|{}", verdict.label(), answer_class(ours), primitives(lang, expr).join(","))
+    let named = primitives(lang, expr);
+    let named =
+        if named.len() > NAMED_PRIMITIVES { "…".to_string() } else { named.join(",") };
+    format!("{}:{}|{}", verdict.label(), answer_class(ours), named)
 }
+
+/// How many primitives a signature will name. A cause is a verb, what
+/// derived it and what it was handed — three names reach that. A sentence
+/// still naming more than three after [`reduce`] has run is one the cut
+/// could not take apart, and naming its primitives would sign the draw
+/// rather than the cause, so they are dropped for a `…` and every such
+/// sentence of one class becomes one finding.
+const NAMED_PRIMITIVES: usize = 3;
 
 /// How far a sentence is cut down in search of the smallest one that parts
 /// the two sides the same way. Every step costs the caller one run of libjay
@@ -1206,6 +1217,10 @@ mod tests {
         assert_eq!(signature(Lang::Apl, Verdict::Differ, "⍳0", ""), "differ:val:empty/num|⍳");
         assert_eq!(signature(Lang::Apl, Verdict::Panicked, "⍕3", "<panic>"), "panic:panic|⍕");
         assert_eq!(cause_class(&one), "we-refuse:err:length_error:_#_and_#_do_not_agree");
+        // A sentence the cut could not take apart names the draw rather
+        // than the cause, so it names nothing.
+        let uncut = signature(Lang::J, we, "(+/ % #) @: (i. 3) , }: 4", "<error> domain error: x");
+        assert_eq!(uncut, "we-refuse:err:domain_error:_x|…");
     }
 
     /// A cut-down sentence is the smallest one in reach that the predicate
@@ -1213,13 +1228,16 @@ mod tests {
     /// proposes a sentence made of nothing.
     #[test]
     fn a_sentence_is_cut_down_to_the_smallest_that_still_parts() {
-        // The cause is `⌊/` over an empty vector; everything wrapped around
-        // it is the draw.
+        // The cause is the `¯2/` buried three groups deep; everything
+        // wrapped around it is the draw. Lifting a group out reaches it,
+        // and cutting the argument down reaches the smallest sentence that
+        // still names it.
         let drawn = "(2 3⍴⍳6) + (⌊/(0⍴(¯2/(⊂''))))";
-        assert_eq!(reduce(drawn, 64, |c| c.contains("⌊/")), "⌊/(0⍴(¯2/(⊂'')))");
-        // With nothing to preserve, one cut is as good as another and the
-        // shortest wins.
-        assert_eq!(reduce("(1+2) × (3+4)", 64, |_| true), "2");
+        assert_eq!(reduce(drawn, 64, |c| c.contains("¯2/")), "¯2/2");
+        assert_eq!(reduce(drawn, 64, |c| c.contains("⍴(¯2/")), "0⍴(¯2/2)");
+        // With nothing to preserve, the shortest cut wins, and a sentence
+        // with no group left in it is as far as cutting goes.
+        assert_eq!(reduce("(1+2) × (3+4)", 64, |_| true), "1+2");
         // A predicate nothing satisfies leaves the sentence as drawn, and
         // the budget bounds what was spent finding that out.
         let mut asked = 0;
