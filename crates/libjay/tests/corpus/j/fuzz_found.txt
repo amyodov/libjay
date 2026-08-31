@@ -659,3 +659,38 @@ $ _2 <;.3 (i. 5)
 (0 2 $ 0) A. (i. 3)
 0 A. 2
 (<i. 0) %: (0 $ 123x)
+
+// A COMPLEX bound or value is searched by the same total order the grades
+// use: the real part first and the imaginary part after it. Bounds and
+// values must be comparable, so a numeric bound against a boxed value is
+// refused whatever their ranks.
+2 I. (3j4 1j_1)
+(3j4 1j_1) I. 2
+5 I. (3j4 1j_1)
+4 I. (3j4 1j_1)
+6 I. (3j4 1j_1)
+0 I. (0j5)
+2 I. (0j5)
+2 I. (_3j5)
+1 2 3 I. (0j5)
+2 I. (2j5)
+2 I. (2j_5)
+2 I. (1j500)
+(0j1) I. (0j2)
+(0j2) I. (0j1)
+(2j5 2j6) I. (2j5)
+('abc') I. ('b')
+(1;2;3) I. (<2)
+(3 3 $ 1 0 0 0 1 0 0 0 1) I. (1;'ab';2)
+(3 3 $ 1 0 0 0 1 0 0 0 1) I. (1 2 3)
+(1 2 3) I. (1;'ab';2)
+
+// A polynomial value the arithmetic could not make is no value, as its
+// roots already were.
+(_ __ 0) p. 2
+(_ 1) p. 2
+1 2 3 p. _
+(_. 1) p. 2
+p. (_ __ 0)
+2 p. (_ __ 0)
+(0 1) p. 2

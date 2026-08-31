@@ -13724,6 +13724,16 @@ fn interval_index(
     if !x.dtype().is_numeric() || !y.dtype().is_numeric() {
         return ordered_interval_index(x, y, offset, closed, bisect, ord, span);
     }
+    // A COMPLEX bound or value is searched by the same total order, which
+    // reads the real part first and the imaginary part after it: the
+    // reference answers `2 I. (3j4 1j_1)` with `1 0` and `2 I. (2j_5)`
+    // with 0, where no tolerance and no magnitude fits both.
+    if x.dtype() == DType::Complex || y.dtype() == DType::Complex {
+        let (mut tx, mut ty) = (Vec::new(), Vec::new());
+        let xc = Array::new(x.shape.clone(), Data::Complex(borrow_cx(&x.data, &mut tx).to_vec().into()));
+        let yc = Array::new(y.shape.clone(), Data::Complex(borrow_cx(&y.data, &mut ty).to_vec().into()));
+        return ordered_interval_index(&xc, &yc, offset, closed, bisect, ord, span);
+    }
     // Two whole numbers a double cannot tell apart are still two numbers to
     // an integer comparison: `9007199254740992 I. 9007199254740993` is 1 in
     // jconsole and would be 0 through f64.
@@ -13816,6 +13826,19 @@ fn interval_index_cells(
     ord: Grading,
     span: Span,
 ) -> Result<Array> {
+    // Bounds and values are compared, so they must be comparable: the
+    // reference refuses `(3 3 $ 0) I. (1;'ab';2)`, where a numeric bound
+    // meets a boxed value, exactly as it refuses the same pair as lists.
+    if x.dtype().is_numeric() != y.dtype().is_numeric() {
+        return Err(Error::domain(
+            format!(
+                "interval index compares {} bounds with {} values",
+                x.dtype().name(),
+                y.dtype().name()
+            ),
+            span,
+        ));
+    }
     let cell_rank = major_cell_rank(what, x, y, span)?;
     let frame_rank = y.rank() - cell_rank;
     let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
@@ -13850,6 +13873,14 @@ fn interval_index_cells(
 /// [`interval_index`] over the element types that are ordered but not
 /// numeric. Both sides must be the same type — a character bound has
 /// nothing to say about where a symbol falls.
+/// Two complex numbers in the total order the reference searches them by:
+/// the real part first, the imaginary part after it. It is an order and not
+/// a comparison — `<` refuses a complex pair — so it lives here rather than
+/// beside the arithmetic.
+fn cmp_complex(a: Cx, b: Cx) -> std::cmp::Ordering {
+    a[0].total_cmp(&b[0]).then_with(|| a[1].total_cmp(&b[1]))
+}
+
 fn ordered_interval_index(
     x: &Array,
     y: &Array,
@@ -13864,6 +13895,7 @@ fn ordered_interval_index(
     let cmp = |i: usize, j: usize| -> Option<std::cmp::Ordering> {
         match (bounds, vals) {
             (Data::Char(p), Data::Char(q)) => Some(p[i].cmp(&q[j])),
+            (Data::Complex(p), Data::Complex(q)) => Some(cmp_complex(p[i], q[j])),
             (Data::Symbol(p), Data::Symbol(q)) => Some(crate::symbol::cmp(p[i], q[j])),
             // J orders boxed values against each other by the same total
             // order `/:` grades them with, so `I.` can search among them.
@@ -13881,6 +13913,7 @@ fn ordered_interval_index(
             Data::Char(p) => p[i].cmp(&p[k]),
             Data::Symbol(p) => crate::symbol::cmp(p[i], p[k]),
             Data::Box(p) => cmp_items_total(&p[i], &p[k], ord),
+            Data::Complex(p) => cmp_complex(p[i], p[k]),
             _ => std::cmp::Ordering::Equal,
         }
     };
@@ -16622,6 +16655,15 @@ fn poly_eval(x: &Array, y: &Array, span: Span) -> Result<Array> {
             v
         }
     };
+    // A value the arithmetic could not make is no value: the reference
+    // answers `(_ __ 0) p. 2` with a NaN error rather than with `_.`, as it
+    // does for the roots. A NaN the arguments carried travels on.
+    if (value[0].is_nan() || value[1].is_nan())
+        && !data_holds_nan(&x.data)
+        && !data_holds_nan(&y.data)
+    {
+        return Err(Error::nan("this polynomial has no value here", span));
+    }
     Ok(scalar_complex_or_real(value))
 }
 

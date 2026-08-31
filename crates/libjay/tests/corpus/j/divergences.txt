@@ -134,3 +134,20 @@ C. (_2 0 2)
 ? jconsole answers this one with no output at all and refuses 2 ^. (<1)
 (_3) ^. (1;2)
 ? jconsole answers this one with no output at all and refuses 2 ^. (<1)
+
+// `x I. y` over BOXES. The Dictionary defines the interval index for a
+// sorted numeric list; libjay extends it to every element type that has an
+// order, which is the same total order `/:` grades by — and for characters
+// and symbols the reference agrees. For BOXES it does not: its comparison
+// there tells apart only equal from unequal, so `(<2) I. (1;2;3)` is
+// `1 0 1` — a 1 on both sides of the 0 — which no order can produce, and
+// `(<5) I. (1;2;3)` is `1 1 1` although `/: ((<5);1;2;3)` puts the 5 last
+// in both. libjay answers by the order it grades with.
+(<'') I. (1;2;3)
+? the reference's box comparison here tells apart only equal from unequal
+(<'a') I. (1;2;3)
+? the reference's box comparison here tells apart only equal from unequal
+(<5) I. (1;2;3)
+? the reference's box comparison here tells apart only equal from unequal
+(<2) I. (1;2;3)
+? the reference's box comparison here tells apart only equal from unequal

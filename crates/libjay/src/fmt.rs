@@ -426,6 +426,17 @@ fn format_boxed(a: &Array, opts: &FmtOpts) -> String {
     for (i, (_, w)) in blocks.iter().enumerate() {
         widths[i % ncols] = widths[i % ncols].max(*w);
     }
+    // Row heights span the whole array as the column widths do: row 1 of
+    // every plane is as tall as the tallest cell any plane's row 1 holds,
+    // which is what keeps the rules of a rank-3 answer aligned.
+    // A cell with no lines in it leaves the row with none, which is how
+    // an empty of a rank of two or more draws; a row with no CELLS still
+    // has one line.
+    let mut heights = vec![usize::from(ncols == 0); nrows];
+    for (i, (lines, _)) in blocks.iter().enumerate() {
+        let r = (i / ncols) % nrows;
+        heights[r] = heights[r].max(lines.len());
+    }
     let frame: &[usize] = if rank > 2 { &a.shape[..rank - 2] } else { &[] };
     let planes: usize = frame.iter().product();
     let plane_size = nrows * ncols;
@@ -440,6 +451,7 @@ fn format_boxed(a: &Array, opts: &FmtOpts) -> String {
             nrows,
             ncols,
             &widths,
+            &heights,
             opts,
         );
     }
@@ -476,6 +488,7 @@ fn push_boxed_plane(
     nrows: usize,
     ncols: usize,
     widths: &[usize],
+    heights: &[usize],
     opts: &FmtOpts,
 ) {
     let fence = opts.boxes == BoxStyle::Fenced;
@@ -495,9 +508,9 @@ fn push_boxed_plane(
             lines.push(border.clone());
         }
         let row = &blocks[r * ncols..(r + 1) * ncols];
-        // A row is as tall as its tallest cell; the others are padded
-        // underneath, which is where J puts the blanks.
-        let height = row.iter().map(|(lines, _)| lines.len()).max().unwrap_or(1);
+        // A row is as tall as the tallest cell any plane puts in it; the
+        // others are padded underneath, which is where J puts the blanks.
+        let height = heights[r];
         for k in 0..height {
             let mut line = String::new();
             line.push(if fence { '|' } else { ' ' });
