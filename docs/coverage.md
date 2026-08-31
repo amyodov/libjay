@@ -1872,8 +1872,8 @@ asked for, sorted and boxed, from the locale in force. `4!:55` erases, and
 answers 1 for each name whether or not it stood for anything. A name has ONE
 class at a time: giving a name a verb takes away the value it held, which is
 what `4!:0` then reports. A modifier is applied while a sentence is parsed,
-so what the run keeps of `m =: /` is the class alone — enough for these two
-and for nothing else.
+so what the run keeps of `m =: /` is the class and the spelling it was
+given, which is what these two and the representation forms read.
 
 **`5!:` — representations.** `5!:1` is the atomic representation, the same
 boxed data a gerund is made of: a verb gives its spelling or its box tree,
@@ -1883,8 +1883,13 @@ name is an ill-formed name and is refused. `5!:2` draws the same tree as
 the words it is spelled with, one box a part; `5!:5` is the linear
 representation, the J source with a bracket only where one is needed; and
 `5!:6` is the parenthesised one, with a bracket around every part that is
-more than one word and no flattening of a train. An explicit definition
-writes back as the source it was given.
+more than one word and no flattening of a train. An explicit definition is
+the `:` conjunction over its valence and its body in all four — the body a
+character vector for a body of one line, a character matrix for more, and
+the `0 1` matrix for none — whichever way the source spelled it, and a
+`{{ … }}` therefore represents itself as `3 : '…'` although a session
+DISPLAYS it as the words between its braces. A name of modifier class
+answers for the modifier it holds: `5!:5 <'m'` after `m =: /` is `/`.
 
 `5!:0` is an ADVERB — the inverse of `5!:1` — and libjay settles it while
 the sentence is read, because what the representation names decides how the
