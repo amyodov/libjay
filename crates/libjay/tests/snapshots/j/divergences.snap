@@ -129,3 +129,19 @@
 ? the reference keeps this length error and drops it for (i. 0 0) #. (,5)
 <
 > j: <error>
+= p.. (1r2 1r3)
+? jconsole keeps the rationals through the integral and libjay computes in f64
+< 0.333333
+> j: 1r3
+= (1r2 1r3) - &.:#. 2
+? jconsole keeps the rationals through the obverse and libjay computes in f64
+< 1.33333
+> j: 4r3
+= +"1 &.:#: (2 ,/ (1r2 1r3))
+? jconsole keeps the rationals through the obverse and libjay computes in f64
+< 2 0.5 0.333333
+> j: 2 1r2 1r3
+= 2 #: (1r2)
+? jconsole keeps the rational through the residue and libjay computes in f64
+< 0.5
+> j: 1r2

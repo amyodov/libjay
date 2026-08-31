@@ -127,3 +127,17 @@ p. 1r2 _3r2 1
 // cells and no others.
 (0 $ 0.5) #. (i. 2 0 3)
 ? the reference keeps this length error and drops it for (i. 0 0) #. (,5)
+
+// The exact-storage family, in the spellings a sweep reaches: jconsole
+// factors and divides over the coefficients' own type where libjay computes
+// in f64, so the same numbers are written differently. `p.. 1r2 1r3` is
+// `0 1r2 1r6` there and `0 0.5 0.166667` here; the obverses of the base
+// conversions read the same way.
+p.. (1r2 1r3)
+? jconsole keeps the rationals through the integral and libjay computes in f64
+(1r2 1r3) - &.:#. 2
+? jconsole keeps the rationals through the obverse and libjay computes in f64
++"1 &.:#: (2 ,/ (1r2 1r3))
+? jconsole keeps the rationals through the obverse and libjay computes in f64
+2 #: (1r2)
+? jconsole keeps the rational through the residue and libjay computes in f64

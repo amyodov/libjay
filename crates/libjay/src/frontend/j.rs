@@ -3621,6 +3621,11 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                 return Ok(Frag::Verb(VerbFrag::V(Verb::Fill(Box::new(inner), fill)), span));
             }
             let n = one_atom(&v, "fit", span)?;
+            // `^!.n` is the STOPE rather than a tolerance, and takes any
+            // step: `2 ^!.5 3` is `2 × 7 × 12`.
+            if matches!(&f, Verb::Prim(p) if p.name == "^") {
+                return Ok(Frag::Verb(VerbFrag::V(Verb::Fit(Box::new(f), n)), span));
+            }
             if !f.uses_tolerance() {
                 // Every verb J gives a fit to is one of the two above; the
                 // rest refuse one outright, and so does libjay.

@@ -2940,6 +2940,11 @@ impl Verb {
                 f.dyad(&l, &r, ctx, span)
             }
             Verb::Fit(v, n) => {
+                // `x ^!.n y` is not a tolerance at all: it is the STOPE,
+                // the product of y terms starting at x and stepping by n.
+                if matches!(&**v, Verb::Prim(p) if p.name == "^") {
+                    return stope(x, y, *n, ctx.cfg, span);
+                }
                 let tol = Tol { ct: *n, ..ctx.cfg.tol };
                 ctx.with_tol(tol, |c| v.dyad(x, y, c, span))
             }
@@ -4932,6 +4937,37 @@ fn circle_escapes(k: f64, y: f64) -> bool {
 /// are answered here for the reals they also accept. A pair whose answer
 /// leaves the reals never reaches this function: [`escapes_reals`] sends the
 /// whole pass to the complex path first.
+/// `x ^!.n y`: the STOPE — the product of `y` terms starting at `x` and
+/// stepping by `n`, so `2 ^!.5 3` is `2 × 7 × 12`. A step of 0 is the
+/// ordinary power, a count of 0 is 1, and a count that is negative or
+/// fractional has no meaning, as it has none in the reference.
+fn stope(x: &Array, y: &Array, step: f64, cfg: EvalCfg, span: Span) -> Result<Array> {
+    let base = x
+        .to_f64_vec()
+        .ok_or_else(|| Error::domain("the stope needs numeric data", span))?;
+    let count = y
+        .to_f64_vec()
+        .ok_or_else(|| Error::domain("the stope needs numeric data", span))?;
+    let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
+    let mut out = Vec::with_capacity(p.n);
+    for i in 0..p.n {
+        let b = base[(i / p.x_div) % base.len().max(1)];
+        let k = count[(i / p.y_div) % count.len().max(1)];
+        if k < 0.0 || k.fract() != 0.0 || !k.is_finite() {
+            return Err(Error::domain(
+                format!("the stope counts whole terms, and {} is not one", j_number(k)),
+                span,
+            ));
+        }
+        let mut v = 1.0f64;
+        for t in 0..(k as u64) {
+            v *= b + step * t as f64;
+        }
+        out.push(v);
+    }
+    Ok(Array::new(p.frame, Data::F64(out.into())))
+}
+
 /// The largest angle a sine, a cosine or a tangent will be taken of:
 /// `π × 2^27.5`, measured between `1 o. 596313649`, which jconsole answers,
 /// and `1 o. 596314000`, which is a limit error there. Past it an argument
@@ -19674,6 +19710,10 @@ fn sparse_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array>
 fn boxing_level(y: &Array) -> i64 {
     match y.as_boxes() {
         None => 0,
+        // An EMPTY of boxes holds no box, so there is nothing to descend
+        // into and no level to count: `L. 0$<0` is 0 in jconsole, where
+        // `L. a:` is 1.
+        Some(bs) if bs.is_empty() => 0,
         Some(bs) => 1 + bs.iter().map(boxing_level).max().unwrap_or(0),
     }
 }
