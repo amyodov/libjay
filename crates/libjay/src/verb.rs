@@ -5160,6 +5160,23 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
     })
 }
 
+/// Whether every complex value here is tolerantly equal to its own real
+/// part, which is what lets an ordering read it as that real number.
+fn tolerantly_real(d: &Data, tol: Tol) -> bool {
+    let one = |z: &Cx| {
+        // Every finite imaginary part is negligible beside an infinite real
+        // one, which is what makes `^. __` — `_j3.14159` — order as `_`.
+        if z[0].is_infinite() && z[1].is_finite() {
+            return true;
+        }
+        tol.eq_cx(*z, [z[0], 0.0])
+    };
+    match d {
+        Data::Complex(v) => v.iter().all(one),
+        _ => true,
+    }
+}
+
 /// The complaint an ordering makes about complex operands. Both references
 /// refuse it: complex numbers carry no order, only equality.
 fn no_complex_order(span: Span) -> Error {
@@ -5772,7 +5789,11 @@ fn compare_data(
         return Ok(d);
     }
     if dx == DType::Complex || dy == DType::Complex {
-        if !equality && !total {
+        // A complex value whose imaginary part is negligible beside its own
+        // magnitude IS the real number it tolerantly equals, and orders as
+        // one: `2 <: _j3.14159` is 1 and `2 <: 1j1e_14` is 0, where
+        // `2 <: 1e10j1` and `2 <: 0j1e_20` carry no order at all.
+        if !equality && !total && !(tolerantly_real(x, tol) && tolerantly_real(y, tol)) {
             return Err(no_complex_order(span));
         }
         let (mut tx, mut ty) = (Vec::new(), Vec::new());

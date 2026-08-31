@@ -472,3 +472,24 @@ $ +/ S:_ (2 3 $ i. 6)
 +. 9223372036854775806
 +. 3j4
 +. 1.5
+
+// A complex value whose imaginary part is negligible beside its own
+// magnitude IS the real number it tolerantly equals, and orders as one.
+// The tolerance is the dialect's, so the pair is read as `|imaginary|
+// against tolerance times the magnitude`, and an infinite real part swallows
+// every finite imaginary one.
+2 <: (_j3.14159)
+2 <: (1j0)
+2 <: (1j1e_20)
+2 <: (1j1e_16)
+2 <: (1j1e_15)
+2 <: (1j1e_14)
+2 <: (1e10j1)
+2 <: (1e10j1000)
+1j1e_20 <: 2
+2 <: (0j1e_20)
+2 <: (0j1)
+2 <: (^. (_ __ 0))
+1j2 <: 1j3
+1j1 < 2
+2 > "_1 0 1 (*. ^:_1 ((1e_15) * (2.0 4.0 6.0)))
