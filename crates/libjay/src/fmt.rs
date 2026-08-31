@@ -39,6 +39,14 @@ pub struct FmtOpts {
     /// it for the rest of the run; [`DEFAULT_PRECISION`] is where both
     /// languages start.
     pub precision: u8,
+    /// Whether a float takes an exponent as soon as it needs more digits
+    /// before the point than [`precision`](Self::precision) keeps. J does:
+    /// `1234567.5` is `1.23457e6` at six significant digits and
+    /// `1234567.5` at nine, because writing it out in full at six would
+    /// show padding zeros as though they were measured. The small end is
+    /// fixed rather than tied to the precision — `0.0001234` is written
+    /// out and `0.00001234` is `1.234e_5` at every precision.
+    pub sci_at_precision: bool,
 }
 
 impl FmtOpts {
@@ -48,6 +56,7 @@ impl FmtOpts {
         boxes: BoxStyle::Fenced,
         bytes: true,
         precision: DEFAULT_PRECISION,
+        sci_at_precision: true,
     };
     pub const APL: FmtOpts = FmtOpts {
         neg: '¯',
@@ -55,6 +64,7 @@ impl FmtOpts {
         boxes: BoxStyle::Spaced,
         bytes: false,
         precision: DEFAULT_PRECISION,
+        sci_at_precision: false,
     };
 
     /// J's conventions under a set of rules: the extensions decide whether
@@ -642,7 +652,9 @@ fn format_f64(x: f64, opts: &FmtOpts) -> String {
     let (mantissa, exponent) = sci.split_once('e').expect("scientific form has an exponent");
     let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
     let exponent: i32 = exponent.parse().expect("exponent is an integer");
-    let body = if exponent >= 12 || exponent <= -6 {
+    let (wide, small) =
+        if opts.sci_at_precision { (digits_kept as i32, -5) } else { (12, -6) };
+    let body = if exponent >= wide || exponent <= small {
         let mut s = trim_fraction(&place_point(&digits, 1));
         s.push('e');
         if exponent < 0 {

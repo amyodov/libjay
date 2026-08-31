@@ -288,14 +288,23 @@ fn round_half_away(x: f64) -> f64 {
 
 // --------------------------------------------------------- transcendentals
 
+/// One factor of a hyperbolic product, where a zero beats an infinity.
+/// `1 o. 0j1e10` is `0j_` in jconsole: the sine of the real part is zero
+/// and the hyperbolic cosine of the imaginary part has overflowed, and the
+/// answer follows the zero rather than the NaN the multiplication makes.
+#[inline]
+fn scaled(a: f64, b: f64) -> f64 {
+    if a == 0.0 && b.is_infinite() { 0.0 } else { a * b }
+}
+
 #[inline]
 pub fn sin(z: Cx) -> Cx {
-    [z[0].sin() * z[1].cosh(), z[0].cos() * z[1].sinh()]
+    [scaled(z[0].sin(), z[1].cosh()), scaled(z[0].cos(), z[1].sinh())]
 }
 
 #[inline]
 pub fn cos(z: Cx) -> Cx {
-    [z[0].cos() * z[1].cosh(), -z[0].sin() * z[1].sinh()]
+    [scaled(z[0].cos(), z[1].cosh()), -scaled(z[0].sin(), z[1].sinh())]
 }
 
 #[inline]
@@ -305,12 +314,12 @@ pub fn tan(z: Cx) -> Cx {
 
 #[inline]
 pub fn sinh(z: Cx) -> Cx {
-    [z[0].sinh() * z[1].cos(), z[0].cosh() * z[1].sin()]
+    [scaled(z[1].cos(), z[0].sinh()), scaled(z[1].sin(), z[0].cosh())]
 }
 
 #[inline]
 pub fn cosh(z: Cx) -> Cx {
-    [z[0].cosh() * z[1].cos(), z[0].sinh() * z[1].sin()]
+    [scaled(z[1].cos(), z[0].cosh()), scaled(z[1].sin(), z[0].sinh())]
 }
 
 #[inline]

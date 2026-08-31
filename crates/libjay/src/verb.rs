@@ -4874,6 +4874,32 @@ fn circle_escapes(k: f64, y: f64) -> bool {
 /// are answered here for the reals they also accept. A pair whose answer
 /// leaves the reals never reaches this function: [`escapes_reals`] sends the
 /// whole pass to the complex path first.
+/// The largest angle a sine, a cosine or a tangent will be taken of:
+/// `π × 2^27.5`, measured between `1 o. 596313649`, which jconsole answers,
+/// and `1 o. 596314000`, which is a limit error there. Past it an argument
+/// carries fewer bits than a reduction modulo 2π needs, and the reference
+/// refuses rather than answer noise. `^` of a complex number and `r.` are
+/// held to it too, the angle being the exponent's imaginary part.
+const TURN_LIMIT: f64 = std::f64::consts::PI * 134_217_728.0 * std::f64::consts::SQRT_2;
+
+/// Refuse an angle too large to take a circle function of. An infinity is
+/// past the limit like any other magnitude; a NaN is not, since it is no
+/// magnitude at all and the arithmetic that made it reports itself.
+fn turns(y: f64, span: Span) -> Result<()> {
+    if y.abs() >= TURN_LIMIT {
+        return Err(Error::new(
+            ErrorKind::Limit,
+            format!(
+                "{} is too large an angle: a circle function needs one under {}",
+                j_number(y),
+                j_number(TURN_LIMIT)
+            ),
+            Some(span),
+        ));
+    }
+    Ok(())
+}
+
 #[inline]
 fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
     if k.fract() != 0.0 {
@@ -4887,9 +4913,18 @@ fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
             }
             (1.0 - y * y).max(0.0).sqrt()
         }
-        1 => y.sin(),
-        2 => y.cos(),
-        3 => y.tan(),
+        1 => {
+            turns(y, span)?;
+            y.sin()
+        }
+        2 => {
+            turns(y, span)?;
+            y.cos()
+        }
+        3 => {
+            turns(y, span)?;
+            y.tan()
+        }
         4 => (1.0 + y * y).sqrt(),
         5 => y.sinh(),
         6 => y.cosh(),
@@ -4975,13 +5010,23 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
         Lcm => cx::lcm(a, b),
         Gcd => cx::gcd(a, b),
         MakeComplex => cx::add(a, cx::mul(cx::I, b)),
-        PolarBy => cx::mul(a, cx::exp(cx::mul(cx::I, b))),
+        PolarBy => {
+            // `a r. b` turns by the angle `b`, which is the exponent's
+            // imaginary part.
+            turns(b[0], span)?;
+            cx::mul(a, cx::exp(cx::mul(cx::I, b)))
+        }
         Circle => {
             if a[1] != 0.0 || a[0].fract() != 0.0 {
                 return Err(Error::domain(
                     "the circle function needs an integer left argument",
                     span,
                 ));
+            }
+            // A complex sine turns by the argument's REAL part:
+            // `2 o. 1e10j1` is a limit error and `1 o. 0j1e10` is not.
+            if matches!(a[0] as i64, 1 | 2 | 3) {
+                turns(b[0], span)?;
             }
             cx::circle(a[0] as i64, b).ok_or_else(|| {
                 Error::domain("the circle functions run from _12 to 12", span)
@@ -6605,6 +6650,22 @@ fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
     let v = borrow_cx(&y.data, &mut tmp);
     if y.count() > 0 && v.is_empty() {
         return Err(wrong_type(y.dtype(), span));
+    }
+    // `^ z` turns by the imaginary part and `r. z` by the real one, and
+    // neither will turn further than a circle function reaches: `^ 0j1e10`
+    // and `r. 1e10` are limit errors in jconsole.
+    match op {
+        Exp => {
+            for z in v.iter() {
+                turns(z[1], span)?;
+            }
+        }
+        Polar => {
+            for z in v.iter() {
+                turns(z[0], span)?;
+            }
+        }
+        _ => {}
     }
     let data = match op {
         // Magnitude is the one that leaves the complex domain again.
@@ -10504,6 +10565,10 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             // the numeric path below already searches.
             let what = if apl { "⍸" } else { "I." };
             let by_cells = if apl { cfg.rules.lookup_left == LookupLeft::MajorCells } else { true };
+            // J takes its bounds for sorted and BISECTS them, where APL
+            // counts: the two agree on sorted bounds and part on any other,
+            // and `3 1 4 1 5 I. 2` is 0 rather than 2.
+            let bisect = !apl;
             if by_cells {
                 if x.rank() >= 2 {
                     return interval_index_cells(
@@ -10512,6 +10577,7 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
                         y,
                         offset,
                         closed,
+                        bisect,
                         Grading::of(cfg.rules, tol),
                         span,
                     );
@@ -10528,7 +10594,16 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             // tolerantly equal to the value in both. Grade, which orders
             // the non-numeric bounds, is already exact for J.
             let tol = if apl { tol } else { Tol::EXACT };
-            interval_index(x, y, offset, closed, tol, Grading::of(cfg.rules, tol), span)
+            interval_index(
+                x,
+                y,
+                offset,
+                closed,
+                bisect,
+                tol,
+                Grading::of(cfg.rules, tol),
+                span,
+            )
         }
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
         DyadOp::MatrixDivide => matrix_divide(x, y, cfg.rules.lang == crate::Lang::J, span),
@@ -13180,6 +13255,7 @@ fn interval_index(
     y: &Array,
     offset: i64,
     closed: bool,
+    bisect: bool,
     tol: Tol,
     ord: Grading,
     span: Span,
@@ -13187,7 +13263,27 @@ fn interval_index(
     // Characters, symbols and boxes have an order of their own, and no
     // tolerance: the bounds are searched by that order instead of by value.
     if !x.dtype().is_numeric() || !y.dtype().is_numeric() {
-        return ordered_interval_index(x, y, offset, closed, ord, span);
+        return ordered_interval_index(x, y, offset, closed, bisect, ord, span);
+    }
+    // Two whole numbers a double cannot tell apart are still two numbers to
+    // an integer comparison: `9007199254740992 I. 9007199254740993` is 1 in
+    // jconsole and would be 0 through f64.
+    if bisect
+        && matches!(x.dtype(), DType::I64 | DType::Bool)
+        && matches!(y.dtype(), DType::I64 | DType::Bool)
+        && let (Some(bounds), Some(vals)) = (x.to_i64_vec(), y.to_i64_vec())
+    {
+        let n = bounds.len();
+        let down = descending_bounds(n, |i, j| bounds[j] < bounds[i]);
+        let out: Vec<i64> = vals
+            .iter()
+            .map(|&v| {
+                offset
+                    + bisect_bounds(n, |i| if down { v < bounds[i] } else { bounds[i] < v })
+                        as i64
+            })
+            .collect();
+        return Ok(Array::new(y.shape.clone(), Data::I64(out.into())));
     }
     let bounds = x
         .to_f64_vec()
@@ -13195,9 +13291,17 @@ fn interval_index(
     let vals = y
         .to_f64_vec()
         .ok_or_else(|| Error::domain("interval index needs numeric values", span))?;
+    let down = descending_bounds(bounds.len(), |i, j| tol.lt(bounds[j], bounds[i]));
     let out: Vec<i64> = vals
         .iter()
         .map(|&v| {
+            if bisect {
+                let n = bounds.len();
+                return offset
+                    + bisect_bounds(n, |i| {
+                        if down { tol.lt(v, bounds[i]) } else { tol.lt(bounds[i], v) }
+                    }) as i64;
+            }
             // APL counts a bound EQUAL to the value, J does not: `1 3 5⍸3`
             // is 2 where `1 3 5 I. 3` is 1.
             let count =
@@ -13206,6 +13310,36 @@ fn interval_index(
         })
         .collect();
     Ok(Array::new(y.shape.clone(), Data::I64(out.into())))
+}
+
+/// Whether a run of bounds is to be read as DESCENDING: J takes the ends
+/// for the order, so `3 1 4 1 5` is ascending (3 before 5) although its
+/// second bound is below its first, and a tie — one bound, or a first equal
+/// to a last — is ascending.
+fn descending_bounds(n: usize, last_below_first: impl Fn(usize, usize) -> bool) -> bool {
+    n > 1 && last_below_first(0, n - 1)
+}
+
+/// J's `I.` SEARCHES its bounds where APL's `⍸` counts them: it takes them
+/// for sorted and bisects, which is the same answer for bounds that are
+/// sorted and something else for bounds that are not — `3 1 4 1 5 I. 2` is
+/// 0, not the 2 a count would give. The midpoint is the LOWER one of the
+/// range, which is what parts the two readings at an even length:
+/// `(10 50 30 20 40 60) I. 25` is 1.
+///
+/// `before(i)` answers whether bound `i` comes before the value in the
+/// direction the bounds run.
+fn bisect_bounds(n: usize, mut before: impl FnMut(usize) -> bool) -> usize {
+    let (mut lo, mut hi) = (0usize, n);
+    while lo < hi {
+        let mid = (lo + hi - 1) / 2;
+        if before(mid) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
 }
 
 /// `x ⍸ y` and `x I. y` where the bounds are MAJOR CELLS: a table of them
@@ -13218,6 +13352,7 @@ fn interval_index_cells(
     y: &Array,
     offset: i64,
     closed: bool,
+    bisect: bool,
     ord: Grading,
     span: Span,
 ) -> Result<Array> {
@@ -13226,9 +13361,20 @@ fn interval_index_cells(
     let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
     let nf: usize = frame.iter().product();
     let bounds: Vec<Array> = (0..x.items()).map(|i| item_or_self(x, i)).collect();
+    let n = bounds.len();
+    let down =
+        descending_bounds(n, |i, j| cmp_items_total(&bounds[j], &bounds[i], ord).is_lt());
     let mut out = Vec::with_capacity(nf);
     for i in 0..nf {
         let cell = y.cell_at(frame_rank, i);
+        if bisect {
+            let at = bisect_bounds(n, |k| {
+                let o = cmp_items_total(&bounds[k], &cell, ord);
+                if down { o.is_gt() } else { o.is_lt() }
+            });
+            out.push(offset + at as i64);
+            continue;
+        }
         let count = bounds
             .iter()
             .filter(|b| {
@@ -13249,6 +13395,7 @@ fn ordered_interval_index(
     y: &Array,
     offset: i64,
     closed: bool,
+    bisect: bool,
     ord: Grading,
     span: Span,
 ) -> Result<Array> {
@@ -13268,20 +13415,56 @@ fn ordered_interval_index(
             _ => None,
         }
     };
+    // Bound against bound, for the direction the run of them is read in.
+    let among = |i: usize, k: usize| -> std::cmp::Ordering {
+        match bounds {
+            Data::Char(p) => p[i].cmp(&p[k]),
+            Data::Symbol(p) => crate::symbol::cmp(p[i], p[k]),
+            Data::Box(p) => cmp_items_total(&p[i], &p[k], ord),
+            _ => std::cmp::Ordering::Equal,
+        }
+    };
+    let n = x.count();
+    let down = descending_bounds(n, |i, k| among(k, i).is_lt());
+    let wrong_pair = || {
+        Error::domain(
+            format!(
+                "interval index compares {} bounds with {} values",
+                x.dtype().name(),
+                y.dtype().name()
+            ),
+            span,
+        )
+    };
     let mut out = Vec::with_capacity(y.count());
     for j in 0..y.count() {
+        if bisect {
+            // A refused comparison has to leave the loop, so the bisection
+            // is run over a closure that records it rather than one that
+            // can fail.
+            let mut refused = false;
+            let at = bisect_bounds(n, |i| match cmp(i, j) {
+                Some(o) => {
+                    if down {
+                        o.is_gt()
+                    } else {
+                        o.is_lt()
+                    }
+                }
+                None => {
+                    refused = true;
+                    false
+                }
+            });
+            if refused {
+                return Err(wrong_pair());
+            }
+            out.push(offset + at as i64);
+            continue;
+        }
         let mut count = 0i64;
-        for i in 0..x.count() {
-            let ord = cmp(i, j).ok_or_else(|| {
-                Error::domain(
-                    format!(
-                        "interval index compares {} bounds with {} values",
-                        x.dtype().name(),
-                        y.dtype().name()
-                    ),
-                    span,
-                )
-            })?;
+        for i in 0..n {
+            let ord = cmp(i, j).ok_or_else(wrong_pair)?;
             // APL counts a bound EQUAL to the value, J does not.
             count += i64::from(if closed { ord.is_le() } else { ord.is_lt() });
         }
@@ -15489,11 +15672,32 @@ fn root_form_coeffs(parts: &[Array], span: Span) -> Result<Vec<Cx>> {
 fn root_form(parts: &[Array], span: Span) -> Result<(Cx, &Array)> {
     match parts {
         [roots] => Ok((cx::ONE, roots)),
-        [multiplier, roots] => Ok((
-            poly_coeffs_relaxed(multiplier, span)?.first().copied().unwrap_or(cx::ONE),
-            roots,
+        [multiplier, roots] => {
+            // One multiplier, so one number: `((1 2);2 3) p. 2` is a rank
+            // error, not the first of the two taken quietly.
+            if multiplier.rank() != 0 {
+                return Err(Error::new(
+                    ErrorKind::Rank,
+                    format!(
+                        "a polynomial's multiplier is one number, and this one has rank {}",
+                        multiplier.rank()
+                    ),
+                    Some(span),
+                ));
+            }
+            Ok((
+                poly_coeffs_relaxed(multiplier, span)?.first().copied().unwrap_or(cx::ONE),
+                roots,
+            ))
+        }
+        _ => Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "the root form of a polynomial is `multiplier ; roots`, and this one has {} boxes",
+                parts.len()
+            ),
+            Some(span),
         )),
-        _ => Err(Error::domain("the root form of a polynomial is `multiplier ; roots`", span)),
     }
 }
 
@@ -15721,7 +15925,25 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
     }
     let lead = c[c.len() - 1];
     let monic: Vec<Cx> = c.iter().map(|&k| cx::div(k, lead)).collect();
-    let roots = durand_kerner(&monic);
+    // A polynomial of the first degree has its root outright, which is what
+    // keeps an infinite coefficient exact: `p. _ 1` is `1 ; __` and
+    // `p. 1 _` is `_ ; 0`, where an iteration would find neither.
+    let roots = if monic.len() == 2 {
+        // Negated part by part, so that a zero stays the zero J writes and
+        // does not become the negative one the sign bit would print.
+        let away = |v: f64| if v == 0.0 { 0.0 } else { -v };
+        vec![[away(monic[0][0]), away(monic[0][1])]]
+    } else {
+        durand_kerner(&monic)
+    };
+    // A root the arithmetic could not find is no root: jconsole answers a
+    // NaN error for `p. _ __ 0` and `p. _. 1 2` rather than a list of NaNs.
+    if lead[0].is_nan()
+        || lead[1].is_nan()
+        || roots.iter().any(|r| r[0].is_nan() || r[1].is_nan())
+    {
+        return Err(Error::nan("this polynomial's roots have no value", span));
+    }
     let pair = vec![scalar_complex_or_real(lead), complex_or_real(roots)];
     Ok(Array::new(vec![2], Data::Box(pair.into())))
 }
