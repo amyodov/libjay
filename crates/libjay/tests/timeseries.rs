@@ -45,6 +45,10 @@ fn f64s(shape: &[usize], values: &[f64]) -> Array {
     Array::new(shape.to_vec(), Data::F64(values.to_vec().into()))
 }
 
+fn bools(shape: &[usize], values: &[u8]) -> Array {
+    Array::new(shape.to_vec(), Data::Bool(values.to_vec().into()))
+}
+
 fn text(shape: &[usize], s: &str) -> Array {
     Array::new(shape.to_vec(), Data::Char(s.chars().collect()))
 }
@@ -315,9 +319,11 @@ fn power_to_convergence_stops_when_the_result_stops_changing() {
     close(num(Lang::J, "%:^:_ (100)"), 1.0, "%:^:_ 100");
     close(num(Lang::J, "%:^:_ (0.5)"), 1.0, "%:^:_ 0.5");
     close(num(Lang::J, "%:^:_ (1e300)"), 1.0, "%:^:_ 1e300");
-    // Fixed points reached at once.
-    assert_eq!(val(Lang::J, "%:^:_ (1)"), f64s(&[], &[1.0]));
-    assert_eq!(val(Lang::J, "%:^:_ (0)"), f64s(&[], &[0.0]));
+    // Fixed points reached at once. Zero and one are their own square
+    // roots, so a boolean argument keeps its type through the convergence,
+    // which is what the reference reports of it too.
+    assert_eq!(val(Lang::J, "%:^:_ (1)"), bools(&[], &[1]));
+    assert_eq!(val(Lang::J, "%:^:_ (0)"), bools(&[], &[0]));
     // Doubling runs away, but infinity is a fixed point of doubling.
     assert!(num(Lang::J, "+:^:_ (1)").is_infinite());
     // Flooring converges after one step.

@@ -2713,6 +2713,13 @@ impl Verb {
                     let opened = open_cell(&atom(y, i));
                     Ok(enclose(&u.monad(&opened, c, span)?, *rule))
                 })?;
+                // `u&.>` boxes every answer it makes, so an argument with
+                // no atom to open still leaves BOXED data:
+                // `3!:0 (+: &.> (i. 0))` is the boxed type there, where
+                // `+: &> (i. 0)` keeps the integer one.
+                if cells.is_empty() && *rule == Enclose::Always {
+                    return Ok(Array::new(y.shape.clone(), Data::empty(DType::Box)));
+                }
                 assemble_each(&y.shape, cells, span)
             }
             // `u&., y`: the shape is put back afterwards, so a ravel that
@@ -3060,6 +3067,15 @@ impl Verb {
             return self.dyad_cell(x, y, ctx, span);
         }
         if p.n == 0 {
+            // `x A. y` over an ATOM y answers y itself where x names no
+            // permutation at all: `(i. 0) A. 2` is 2 there, not the empty
+            // its frame asks for. A LIST y keeps the frame.
+            if y.rank() == 0
+                && x.count() == 0
+                && matches!(self, Verb::Prim(Prim { dyad: DyadOp::AnagramFrom, .. }))
+            {
+                return Ok(y.clone());
+            }
             let right = fill_cell(y, fyl, self.is_pure());
             let cell = fill_cell(x, fxl, self.is_pure()).filter(|_| right.is_some());
             let conform = ctx.cfg.rules.lang == crate::Lang::J;
@@ -3073,10 +3089,13 @@ impl Verb {
             // `(i. 0) ^. (<1)` is a domain error in the reference while
             // `(i. 0) ^ (<1)`, `(i. 0) o. (<1)` and `(i. 0) ! (<1)` are
             // not. The set is the oracle's.
-            let eager = matches!(
-                self.scalar_dyad_op(),
-                Some(ScalarDyad::Log | ScalarDyad::MakeComplex | ScalarDyad::PolarBy)
-            ) && [x, y].into_iter().any(|a| !a.dtype().is_numeric() && a.count() > 0);
+            let eager = self.scalar_dyad_op().is_some_and(|op| {
+                [(x, true), (y, false)].into_iter().any(|(a, left)| {
+                    !a.dtype().is_numeric()
+                        && a.count() > 0
+                        && types_before_the_frame(op, left, a.dtype() == DType::Box)
+                })
+            });
             return empty_frame(&p.frame, y.dtype(), cell, conform, eager, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
@@ -4851,7 +4870,16 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
         Max => a.max(b),
         DivJ => {
             if b == 0.0 {
-                if a == 0.0 { 0.0 } else { f64::INFINITY.copysign(a) }
+                // A NEGATIVE zero divisor turns the infinity over, which is
+                // what makes `% ^:_2 (__)` the `__` it started as: `% __`
+                // is a negative zero and dividing by it gives `__` back.
+                if a == 0.0 {
+                    0.0
+                } else if b.is_sign_negative() {
+                    -f64::INFINITY.copysign(a)
+                } else {
+                    f64::INFINITY.copysign(a)
+                }
             } else {
                 a / b
             }
@@ -4916,6 +4944,12 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
             r
         }
         Root => {
+            // The ZEROTH root of a negative has no value at all — the
+            // reference refuses `0 %: _3` where `0 %: 3` is `_` — and the
+            // complex path is not asked about it.
+            if a == 0.0 && b < 0.0 {
+                return Err(Error::domain("a zeroth root of a negative value has no value", span));
+            }
             if b < 0.0 {
                 return Err(Error::not_yet("complex numbers", span));
             }
@@ -4970,7 +5004,7 @@ fn escapes_reals(op: ScalarDyad, a: f64, b: f64) -> bool {
         // `_2 ^ __` with 0 and refuses the rest.
         Pow => a < 0.0 && b.is_finite() && b.fract() != 0.0,
         Log => a < 0.0 || b < 0.0,
-        Root => b < 0.0,
+        Root => b < 0.0 && a != 0.0,
         Circle => circle_escapes(a, b),
         _ => false,
     }
@@ -5351,6 +5385,22 @@ fn complex_dyad_data(
         }
         _ => pass!(borrow_cx(x, &mut tx), borrow_cx(y, &mut ty)),
     })
+}
+
+/// Which type refusals a scalar dyad keeps over an EMPTY frame, and on
+/// which side. Nearly every arithmetic verb answers the empty whatever it
+/// was handed — `(i. 0) ^ (<1)`, `(i. 0) o. (<1)` and `(i. 0) ! (<1)` all
+/// do — while the logarithm and the two that make a complex number settle
+/// their domain from the whole argument. `%:` sits between the two: a
+/// CHARACTER refuses it on either side, and a BOX only on the left, so
+/// `(<1) %: (i. 0)` is a domain error and `(i. 0) %: (<1)` is the empty.
+/// The table is the oracle's, measured verb by verb and side by side.
+fn types_before_the_frame(op: ScalarDyad, left: bool, boxed: bool) -> bool {
+    match op {
+        ScalarDyad::Log | ScalarDyad::MakeComplex | ScalarDyad::PolarBy => true,
+        ScalarDyad::Root => left || !boxed,
+        _ => false,
+    }
 }
 
 /// Whether one buffer holds a NaN anywhere, in either part of a complex
@@ -6625,15 +6675,21 @@ fn scalar_dyad_wide(
     // one exponent, and only as an atom — `4x ^ 0.5 0.5` is a float there,
     // and so is `4 ^ 0.5`, whose base is a machine integer — and only where
     // every cell has a root, one failure widening the whole pass.
-    if op == Pow
-        && matches!(x.dtype(), DType::Ext | DType::Rat)
-        && let Data::F64(e) = y
-        && yoff == 0
-        && e.len() == 1
-        && e[0] == 0.5
-        && let Some(d) = exact_sqrt_data(x, xoff, xdiv, n)
-    {
-        return Ok(d);
+    if op == Pow && let Data::F64(e) = y && yoff == 0 && e.len() == 1 && e[0] == 0.5 {
+        if matches!(x.dtype(), DType::Ext | DType::Rat)
+            && let Some(d) = exact_sqrt_data(x, xoff, xdiv, n)
+        {
+            return Ok(d);
+        }
+        // Zero and one are their own square roots, so a boolean base keeps
+        // its type: `3!:0 ((1 0 1) ^ 0.5)` is the boolean type there.
+        if let Data::Bool(v) = x
+            && xdiv == 1
+            && xoff == 0
+            && v.len() == n
+        {
+            return Ok(x.clone());
+        }
     }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
     if t.is_exact()
@@ -6846,15 +6902,13 @@ fn scalar_dyad(
         // `(i. 0) o. (<1)` and `(i. 0) ! (<1)` are not. The set is the
         // oracle's, measured one verb at a time.
         if cfg.rules.lang == crate::Lang::J
-            && matches!(
-                op,
-                ScalarDyad::Log | ScalarDyad::MakeComplex | ScalarDyad::PolarBy
-            )
-            && let Some(bad) = [x, y]
-                .into_iter()
-                .find(|a| !a.dtype().is_numeric() && a.count() > 0)
+            && let Some(bad) = [(x, true), (y, false)].into_iter().find(|&(a, left)| {
+                !a.dtype().is_numeric()
+                    && a.count() > 0
+                    && types_before_the_frame(op, left, a.dtype() == DType::Box)
+            })
         {
-            return Err(wrong_type(bad.dtype(), span));
+            return Err(wrong_type(bad.0.dtype(), span));
         }
         return Ok(Array::new(p.frame, Data::empty(empty_result_type(x, y))));
     }
@@ -7041,12 +7095,30 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
             if !tol.is_j() && par::any(v, |&x| x == 0.0) {
                 return Err(Error::domain("zero has no reciprocal", span));
             }
-            Data::F64(par::map(v, |&x| if x == 0.0 { f64::INFINITY } else { 1.0 / x }).into())
+            // A negative zero keeps its sign, as the dyad's divisor does:
+            // `% __` is `_0` and `% _0` is `__` again.
+            Data::F64(
+                par::map(v, |&x| {
+                    if x == 0.0 {
+                        if x.is_sign_negative() { f64::NEG_INFINITY } else { f64::INFINITY }
+                    } else {
+                        1.0 / x
+                    }
+                })
+                .into(),
+            )
         }
         Sqrt => {
+            // Zero and one are their own square roots, so a BOOLEAN keeps
+            // its type: `3!:0 (%: 1 0 1)` is the boolean type there, and
+            // `(1 0 1) ^ 0.5` reads as this same verb.
+            if let Data::Bool(_) = d {
+                d.clone()
+            } else {
             // A negative value went to the complex path before this point.
             let v = as_f64(d, &mut tmp, span)?;
             Data::F64(par::map(v, |&x| x.sqrt()).into())
+            }
         }
         Exp => {
             let v = as_f64(d, &mut tmp, span)?;

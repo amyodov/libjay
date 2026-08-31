@@ -404,7 +404,9 @@ fn helpers(needs: &Needs, tol: Tol, p: Precision) -> String {
         s.push_str(&format!("fn divj(x: {t}, y: {t}) -> {t} {{\n"));
         s.push_str(&format!("  if (y == {zero}) {{\n"));
         s.push_str(&format!("    if (x == {zero}) {{ return {zero}; }}\n"));
-        s.push_str("    return sign(x) / abs(y);\n  }\n");
+        // A NEGATIVE zero divisor turns the infinity over, as it does
+        // on the host: `1 % (% __)` is `__`.
+        s.push_str("    return sign(x) / y;\n  }\n");
         s.push_str("  return x / y;\n}\n");
     }
     if needs.residue {

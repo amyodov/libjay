@@ -59,10 +59,6 @@
 ? jconsole refuses this one dyadic decode and answers every other empty
 < 0
 > j: <error>
-= (<i. 0) %: (0 $ 123x)
-? the reference refuses a boxed left here and answers (i. 0) %: (<1)
-<
-> j: <error>
 = (1;2;3) #. (i. 2 0 3)
 ? the reference refuses this decode and answers (<1) #. (i. 0)
 <

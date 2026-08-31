@@ -601,3 +601,61 @@ $ _2 <;.3 (i. 5)
 0 p.;._3 (2;5)
 0 {:;._3 (i. 0)
 0 |:&:L.;._3 (1 # 2)
+
+// Which type refusals survive an EMPTY frame, verb by verb and side by
+// side: `%:` keeps a character's on either side and a box's only on the
+// left, while `^`, `o.`, `!` and the rest answer the empty whatever they
+// were handed. The zeroth root of a negative value has none at all.
+(i. 0) %: (<1)
+(i. 0) %: (0 $ <1)
+(0 $ <1) %: (i. 0)
+(<1) %: (i. 0)
+(<1) %: 2
+2 %: (<1)
+'a' %: (i. 0)
+(i. 0) %: 'a'
+(i. 0) %: (0 $ 'a')
+(<<1 2) %: (i. 0)
+(<<1 2) %: (0 $ 3j4)
+(<i. 0) %: (0 $ 123x)
+(0) %: (_3)
+0 %: 3
+0 %: 0
+(<1) ^ (i. 0)
+(<1) + (i. 0)
+(<1) ! (i. 0)
+(<1) o. (i. 0)
+(<1) | (i. 0)
+(<1) <. (i. 0)
+'a' + (i. 0)
+(i. 0) + 'a'
+
+// A NEGATIVE zero divisor turns the infinity over, so the reciprocal is
+// its own inverse all the way to the ends of the line.
+% __
+1 % (% __)
+% ^:_2 (_ __ 0)
+
+// Zero and one are their own square roots, so a boolean keeps its type
+// under `%:` and under the `^ 0.5` that reads as it.
+(1 0 1) ^ 2
+(1 0 1) ^ _1
+(1 0 1) ^ 0.5
+3!:0 ((1 0 1) ^ 0.5)
+(1 0 1) ^ 2.5
+(1 0) ^ 1.5
+(1 0 1) ^ 0.5 0.5 0.5
+%: (1 0 1)
+3!:0 (%: 1 0 1)
+(% (_5x)) + ((3 3 $ 1 0 0 0 1 0 0 0 1) ^ 0.5)
+
+// `x A. y` over an ATOM y answers y itself where x names no permutation at
+// all; a list y keeps the empty frame.
+(i. 0) A. 2
+(0 $ 'a') A. 2
+(2 >. !.0 (i. 0 0)) A. 2
+(i. 0) A. (i. 3)
+(i. 0) A. 'abc'
+(0 2 $ 0) A. (i. 3)
+0 A. 2
+(<i. 0) %: (0 $ 123x)

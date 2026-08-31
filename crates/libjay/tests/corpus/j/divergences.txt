@@ -70,8 +70,6 @@ p. 1r2 _3r2 1
 // `(i. 0) #. 'ab'` are 0 and the empty. libjay keeps one rule: a refusal
 // about a fill's type never survives an empty frame, and one about the
 // cells' SHAPES always does.
-(<i. 0) %: (0 $ 123x)
-? the reference refuses a boxed left here and answers (i. 0) %: (<1)
 (1;2;3) #. (i. 2 0 3)
 ? the reference refuses this decode and answers (<1) #. (i. 0)
 (2 0 3 $ 0) #. ('hello')

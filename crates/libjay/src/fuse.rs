@@ -2106,8 +2106,16 @@ fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64], tol: Tol
         Mul => zip!(a, b, dst, |x: f64, y: f64| x * y),
         Min => zip!(a, b, dst, f64::min),
         Max => zip!(a, b, dst, f64::max),
+        // A NEGATIVE zero divisor turns the infinity over, exactly as
+        // unfused: `1 % (% __)` is `__`.
         DivJ => zip!(a, b, dst, |x: f64, y: f64| if y == 0.0 {
-            if x == 0.0 { 0.0 } else { f64::INFINITY.copysign(x) }
+            if x == 0.0 {
+                0.0
+            } else if y.is_sign_negative() {
+                -f64::INFINITY.copysign(x)
+            } else {
+                f64::INFINITY.copysign(x)
+            }
         } else {
             x / y
         }),
@@ -2372,9 +2380,13 @@ fn step_f64(op: ScalarDyad, a: f64, b: f64) -> Option<f64> {
     use ScalarDyad::*;
     match op {
         // None here abandons the fused fold for the plain one, which is
-        // where the dialect's rule for the value lives.
-        Add => Some(a + b).filter(|r| !r.is_nan()),
-        Mul => Some(a * b).filter(|r| !r.is_nan()),
+        // where the dialect's rule for the value lives. An INFINITY is
+        // handed back too: whether a sum or a product of one has a value
+        // depends on the order the fold takes them in — `_ + __` has none
+        // and `_ + 1 + __` reaches the same pair a step later — and the
+        // fused fold does not take them in the language's order.
+        Add => (a.is_finite() && b.is_finite()).then(|| a + b).filter(|r| !r.is_nan()),
+        Mul => (a.is_finite() && b.is_finite()).then(|| a * b).filter(|r| !r.is_nan()),
         Min => Some(a.min(b)),
         Max => Some(a.max(b)),
         _ => None,
