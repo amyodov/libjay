@@ -543,10 +543,12 @@ fn noun_text(a: &Array) -> Option<String> {
         return Some(out);
     }
     // A GERUND is boxed data that stands for verbs, and the tie is how it
-    // is written: one spelling per box, with `` ` `` between them.
+    // is written: one spelling per box, with `` ` `` between them. TWO
+    // representations or more are one, as they are where a modifier reads
+    // its operand — a single box is data whatever it holds.
     if let Some(items) = a.as_boxes()
         && a.rank() == 1
-        && !items.is_empty()
+        && items.len() > 1
     {
         let parts: Option<Vec<String>> =
             items.iter().map(|b| left(&Ar::from_array(b)?)).collect();
