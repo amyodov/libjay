@@ -175,6 +175,38 @@ past the oracle by recording the theme, read the snapshot diff, and commit
 the corpus and the snapshot together. The reference's verdict is the answer,
 including its verdict that the program is illegal.
 
+## Sweeping
+
+`fuzz --compare` draws composed expressions, runs both sides over them and
+reports where they part. With `--signature` each mismatch is first cut down
+to the smallest sentence that still parts the two sides the same way, and
+signed by its CAUSE — the verdict, libjay's answer class, and the
+primitives the sentence names — so a wrapper can tell a batch that found a
+new cause from one that found another spelling of a cause it has.
+
+The run also reads `corpus/<lang>/divergences.txt` and measures each of its
+rows against the oracle before it starts. A mismatch that matches a row —
+by the minimised sentence, or by the cause signature — is a difference the
+corpus already records with both answers and a reason, so it is counted
+under `accepted`, kept out of the signature ranking, and printed with the
+row that excused it. Both numbers are reported:
+
+```
+generation 2: 5000 expressions, 68 mismatches (1.4%)
+  raw agreement                98.64%
+  accepted-adjusted agreement  98.86%  (11 accepted, 57 unexplained)
+  accepted        11  (0.2%)
+  agree         4932  (98.6%)
+  ...
+accepted divergences matched (…/corpus/j/divergences.txt):
+     10  5 <./\. (1;2)
+      1  0 >./\. (<'abc')
+```
+
+`--no-accepted` turns the list off and counts every mismatch against
+agreement. Nothing but a line of the divergence file is ever excused, and
+each of those is reasoned in docs/coverage.md.
+
 ## Divergences
 
 `corpus/apl/divergences.txt` and `corpus/j/divergences.txt` are where libjay

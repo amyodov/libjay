@@ -61,6 +61,12 @@ p. 1r2 _3r2 1
 ? the reference types this fold for + and not for <.
 0 >./\\. (<'abc')
 ? the reference types this fold for + and not for >.
+// The same contradiction over CHARACTERS, where no piece is left either:
+// `6 +/\\. 'abc'` is a domain error there and `6 */\\. 'abc'` the empty.
+6 */\\. 'abc'
+? the reference types this fold for + and not for *
+5 <./\\. 'hello'
+? the reference types this fold for + and not for <.
 
 // Two whole numbers a double cannot tell apart. jconsole holds every
 // number in a double once the verb is not one of the integer special

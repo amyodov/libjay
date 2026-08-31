@@ -10734,9 +10734,9 @@ fn reduce_identity(v: &Verb, n: usize, lang: crate::Lang) -> Option<Data> {
         ScalarDyad::Max => extreme(-1.0),
         ScalarDyad::Eq | ScalarDyad::Le | ScalarDyad::Ge => bits(1),
         ScalarDyad::Ne | ScalarDyad::Lt | ScalarDyad::Gt => bits(0),
-        // `j.` and `r.` build a complex number out of two reals; neither
-        // reference gives them an identity element.
-        ScalarDyad::MakeComplex | ScalarDyad::PolarBy => return None,
+        // `j.` and `r.` build a complex number out of two reals, and both
+        // fold an empty to 0: `j./ i.0` and `r./ i.0` are 0 in jconsole.
+        ScalarDyad::MakeComplex | ScalarDyad::PolarBy => bits(0),
         // Logarithm and the circle functions have none: both references
         // refuse an empty reduction of them.
         ScalarDyad::Log | ScalarDyad::Circle => return None,
@@ -14481,11 +14481,25 @@ fn cut(
         };
         let (origin, size) = rectangle(x, span)?;
         let origin = origin.unwrap_or_else(|| vec![0; size.len()]);
-        return u.monad(&subarray(y, &origin, &size, span)?, ctx, span);
+        let (start, block) = rectangle_block(y, &origin, &size, span)?;
+        return u.monad(&subarray(y, &start, &block, span)?, ctx, span);
     }
     if mode.abs() == 3 {
-        let Some(x) = x else {
-            return Err(Error::not_yet("monadic tessellation (u;.3 y)", span));
+        // With no left argument the window is a CUBE of the smallest axis,
+        // moved one step at a time along every axis: `<;._3 (i. 2 5)` is
+        // four 2 by 2 blocks and `<;.3 (i. 5)` the five suffixes of it.
+        // A scalar has no axis and is one block of itself.
+        let owned;
+        let x = match x {
+            Some(x) => x,
+            None => {
+                let r = y.rank();
+                let side = y.shape.iter().copied().min().unwrap_or(1) as i64;
+                let mut spec = vec![1i64; r];
+                spec.extend(std::iter::repeat_n(side, r));
+                owned = Array::new(vec![2, r], Data::I64(spec.into()));
+                &owned
+            }
         };
         return tessellate(u, x, y, mode < 0, ctx, span);
     }
@@ -14675,6 +14689,66 @@ fn rectangle(x: &Array, span: Span) -> Result<(Option<Vec<i64>>, Vec<i64>)> {
             Some(span),
         )),
     }
+}
+
+/// Where the rectangle `x u;.0 y` names actually falls, axis by axis.
+///
+/// The ORIGIN must be a position in the axis — `(9 ,: 2) <;.0 (1 2 3 4 5)`
+/// is an index error and `(5 ,: 2) <;.0 (1 2 3 4 5)` the empty, the end of
+/// an axis being a position and anything past it not — and a negative one
+/// counts from the end, where the block runs BACKWARD to meet it:
+/// `(_1 ,: 3) <;.0 (1 2 3 4 5)` is `3 4 5` and `(_5 ,: 2)` is `1`. The SIZE
+/// is then cut down to what the axis has left rather than refused, so
+/// `5 <;.0 (1 2 3)` is the whole of it and `3 <;.0 (0$0)` the empty. A
+/// negative size keeps its sign, which reverses the axis it was measured
+/// along.
+fn rectangle_block(
+    y: &Array,
+    origin: &[i64],
+    size: &[i64],
+    span: Span,
+) -> Result<(Vec<i64>, Vec<i64>)> {
+    if origin.len() != size.len() {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "a cut rectangle names {} origin(s) and {} size(s)",
+                origin.len(),
+                size.len()
+            ),
+            Some(span),
+        ));
+    }
+    if origin.len() > y.rank() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("a cut of {} axis/axes into a rank-{} value", origin.len(), y.rank()),
+            Some(span),
+        ));
+    }
+    let mut starts = Vec::with_capacity(origin.len());
+    let mut blocks = Vec::with_capacity(origin.len());
+    for k in 0..origin.len() {
+        let n = y.shape[k] as i128;
+        let a = i128::from(origin[k]);
+        let from = if a < 0 { n + a } else { a };
+        if from < 0 || from > n {
+            return Err(Error::domain(
+                format!("index {} is out of range: axis {k} has {} item(s)", origin[k], y.shape[k]),
+                span,
+            ));
+        }
+        let want = i128::from(size[k]).abs();
+        let (start, len) = if a < 0 {
+            let len = want.min(from + 1);
+            (from + 1 - len, len)
+        } else {
+            (from, want.min(n - from))
+        };
+        starts.push(start as i64);
+        blocks.push(if size[k] < 0 { -(len as i64) } else { len as i64 });
+    }
+    Ok((starts, blocks))
 }
 
 /// The block of `y` that starts at `origin` and runs `size` along each of

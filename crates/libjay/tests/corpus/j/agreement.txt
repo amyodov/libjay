@@ -59,3 +59,143 @@ $ (1 2 3) +"1 (i. 0 3)
 (3&{) ;._1 (0$0)
 (3&{)/\\ (i. 0 2)
 +/\\ (0$'a')
+
+// `I.` SEARCHES its bounds where APL counts them: it takes them for sorted
+// and bisects. The direction is read off the ENDS — descending when the
+// first bound is above the last, a tie ascending — and the midpoint is the
+// LOWER one of the range, which is what parts a bisection from a count at
+// an even length. Sorted bounds give the same answer either way, which is
+// why only an unsorted one shows the difference.
+(3 1 4 1 5) I. 0 1 2 3 4 5 6
+(5 4 3 2 1) I. 0 1 2 3 4 5 6
+(1 3 2) I. 0 1 2 3 4
+(0 1 2 3 4) I. 0 1 2 3 4 5
+(2 1) I. 0 1 2 3
+(10 50 30 20 40) I. 5 15 25 35 45 55
+(10 50 30 20 40 60) I. 5 15 25 35 45 55 65
+(30 10 20) I. 5 15 25 35
+(1 2 1) I. 0 1 1.5 2 3
+(2 1 2) I. 0 1 1.5 2 3
+(5 5 5) I. 4 5 6
+(1 2 3 2) I. 0 1 1.5 2 2.5 3 4
+(3 2 1 2) I. 0 1 1.5 2 2.5 3 4
+(_ __ 0) I. 2
+(9007199254740992) I. (9007199254740993)
+
+// The trigonometric circle functions refuse an angle of `π × 2^27.5` or
+// more — measured between the two rows below — because past it the
+// argument carries fewer bits than a reduction modulo 2π needs. `^` of a
+// complex number and `r.` are held to it by the exponent's imaginary part;
+// the hyperbolic pair is not held to it at all. A complex sine follows its
+// zero rather than the NaN an overflowed hyperbolic cosine makes.
+1 o. 596313649
+1 o. 596314000
+1 o. 1e8
+1 o. 1e10
+2 o. 1e10
+3 o. 1e10
+5 o. 1e10
+6 o. 1e10
+_1 o. 1e10
+2 o. 1e10j1
+1 o. 0j1e10
+^ 0j1e10
+^ 1e10j1e10
+r. 1e8
+r. 1e10
+r. _1e10
+r. 9223372036854775806
+r. (_ __ 0)
+o. 1e10
+0 o. 1e10
+
+// A first-degree polynomial's root is taken outright rather than iterated,
+// which keeps an infinite coefficient exact; a root the arithmetic could
+// not find is a NaN error; and a root form's multiplier is one number.
+p. (_ 1)
+p. (1 _)
+p. (_ __ 0)
+p. (_. 1 2)
+p. 1 2 3
+p. (0 1 2 3)
+p. (0 $ 0)
+p. (2 2 $ 1 2 3 4)
+p.. (2 2 $ 1 2 3 4)
+p. (2 2 $ 1;2;3;4)
+((1 2);2 3) p. 2
+((i. 0);1) p. 2
+(1;2 3) p. 2
+(<1 2) p. 2
+p. (2 2 $ <i. 2 2)
+p.. (2 2 $ <i. 2 2)
+
+// A float takes an exponent as soon as its exponent reaches the PRECISION,
+// and below `1e_5` at the small end.
+123456.7
+1234567.5
+999999.5
+1000000.5
+12345678.5
+0.001234
+0.0001234
+0.00001234
+0.000001234
+0.0000001234
+_1234567.5
+%: 9223372036854775806
+o. 100000000
+%:&.> (9223372036854775806)
++.&.> (9223372036854775806)
+9!:11 ] 4 [ 0 0 $ 0\n1234567.5\n12345.6789\n0.0001234
+9!:11 ] 9 [ 0 0 $ 0\n1234567.5\n123456789.5\n0.0001234
+
+// `x u;.0 y` CLAMPS its rectangle. The origin must be a position in the
+// axis — its end counts, anything past it is an index error — and a
+// negative origin counts from the end, where the block runs backward to
+// meet it. The size is then cut down to what the axis has left.
+5 <;.0 (1 2 3)
+_5 <;.0 (1 2 3)
+3 <;.0 (0$0)
+3 <;.0 ('')
+_2 <;.0 (,5)
+0 <;.0 (0 $ 1 2 3)
+_2 <;.0 (0 3 $ 0)
+2 2 <;.0 (0 0 $ '')
+2 2 <;.0 (i. 2 0 3)
+2 0 1 <;.0 (i. 0 0 3)
+(4 ,: 3) <;.0 (1 2 3 4 5)
+(0 ,: 9) <;.0 (1 2 3 4 5)
+(9 ,: 2) <;.0 (1 2 3 4 5)
+(_1 ,: 3) <;.0 (1 2 3 4 5)
+(2 ,: _9) <;.0 (1 2 3 4 5)
+(_9 ,: 2) <;.0 (1 2 3 4 5)
+(_2 ,: 2) <;.0 (1 2 3 4 5)
+(_1 ,: 1) <;.0 (1 2 3 4 5)
+(5 ,: 2) <;.0 (1 2 3 4 5)
+(_5 ,: 2) <;.0 (1 2 3 4 5)
+(_1 ,: _3) <;.0 (1 2 3 4 5)
+(0 ,: 0) <;.0 (1 2 3 4 5)
+(1 2 ,: 2 2) <;.0 (i. 4 5)
+1 +:;.0 (0 $ 1 2 3)
+3 !;.0 ('')
+_2 |.;.0 (,5)
+_1 2 |:;.0 (0 0 $ '')
+
+// Monadic tessellation: a cube of the smallest axis, moved one step at a
+// time along every axis, clipped at the edges for `;.3` and dropped there
+// for `;._3`.
+<;.3 (i. 3 4)
+<;._3 (i. 3 4)
+<;.3 (i. 5)
+$ <;._3 (i. 2 5)
+$ > <;._3 (i. 2 5)
+$ <;._3 (i. 5)
+$ <;._3 (i. 4 3)
+$ > <;._3 (i. 4 3)
+$ <;._3 (i. 2 3 4)
+$ > <;._3 (i. 2 3 4)
+<;.3 (2 ^ 3)
+
+// `j.` and `r.` fold an empty to 0.
+r./ (0$0)
+j./ (0$0)

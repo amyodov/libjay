@@ -4554,3 +4554,62 @@ the register.
   letter, after a word ending in a letter or a digit — not on a list of
   modifiers. A GERUND noun operand is written as the tie its boxes stand
   for, which is what gives `` +:`*:`]} `` a linear form.
+- 2026-08-31 — A differential sweep reports TWO agreement numbers, and the
+  accepted list is `corpus/<lang>/divergences.txt` itself. `fuzz --compare`
+  measures every row of that file against the oracle at start-up and
+  recognises a mismatch as an instance of one — by the minimised sentence,
+  or by the CAUSE SIGNATURE, which is the verdict, libjay's answer class
+  and the primitives named. Such a mismatch is counted under `accepted`,
+  kept out of the signature ranking, and printed with the row that excused
+  it, so the exclusion is auditable rather than a number to be trusted.
+  Raw agreement and accepted-adjusted agreement are both printed;
+  `--no-accepted` turns the list off. Signature matching is what keeps the
+  list SHORT: one pinned row stands for every spelling of that one cause a
+  generator can reach, and nothing but a row already reasoned in
+  docs/coverage.md is excused.
+- 2026-08-31 — Rank framing over an EMPTY frame keeps the fill run's SHAPE
+  refusals and drops the rest. J learns the answer's cell shape by running
+  the verb once on a cell of fills; a refusal that fill made about VALUES
+  or TYPES is not the sentence's, because the fill is not the argument's
+  data (`'' { 1 2 3` and `'a' ,"0 (i. 0)` are empties in jconsole), while a
+  refusal about the cells' SHAPES is, because those shapes are the
+  arguments' own (`(1 2) +"1 (i. 0 3)` is a length error with no cell to
+  compute). So a Length or Shape refusal stands and every other one leaves
+  the frame alone. Where the shape is merely being learnt — a scan, a cut,
+  an infix with no piece — none of them stands, which is what jconsole
+  answers there. `2 {"1 (i. 0 2)` is the case the rule does not reach: an
+  index out of range is a shape fact reported as a domain error, and
+  catching it wants `{` to check its indices against the right argument's
+  trailing shape before the framing.
+- 2026-08-31 — J's `I.` SEARCHES where APL's `⍸` counts. It takes its
+  bounds for sorted and bisects them, reading the run's direction off the
+  ENDS (descending when the first bound is above the last, a tie
+  ascending) and taking the LOWER midpoint of the range. The two readings
+  agree on sorted bounds and part on any other: `3 1 4 1 5 I. 2` is 0 and
+  `(10 50 30 20 40 60) I. 25` is 1, which the upper midpoint would make 4.
+  Its bounds are also MAJOR CELLS and its left rank infinite (`I. b. 0` is
+  `1 _ _`), which is Dyalog's rule for `⍸` but for a scalar left argument,
+  which Dyalog refuses and J reads as one bound.
+- 2026-08-31 — The trigonometric circle functions refuse an angle of
+  `π × 2^27.5` or more, which is where jconsole's limit error begins
+  (`1 o. 596313649` answers, `1 o. 596314000` does not). Past it an
+  argument carries fewer bits than a reduction modulo 2π needs, and the
+  reference refuses rather than answer noise. The limit is on the angle,
+  so it holds for `1 2 3 o.` of a real argument and for the REAL part of a
+  complex one, and for `^` of a complex number and `r.` by the exponent's
+  IMAGINARY part; the hyperbolic pair is not held to it.
+- 2026-08-31 — A float takes an exponent as soon as its exponent reaches
+  the PRINT PRECISION, which is J's rule and not the fixed threshold libjay
+  had: `1234567.5` is `1.23457e6` at six significant digits and
+  `1234567.5` at nine, because writing it out in full at six would show
+  padding zeros as though they were measured. The small end is fixed at
+  `1e_5` rather than tied to the precision. APL keeps the thresholds it
+  had, its own references not having been measured for this.
+- 2026-08-31 — `x u;.0 y` CLAMPS its rectangle rather than refusing it. The
+  origin must be a position in the axis — the end of one counts, anything
+  past it is an index error — and a negative origin counts from the end,
+  where the block runs backward to meet it (`(_1 ,: 3) <;.0 (1 2 3 4 5)` is
+  `3 4 5`). The size is then cut down to what the axis has left, so
+  `5 <;.0 (1 2 3)` is the whole of it and `3 <;.0 (0$0)` the empty. Monadic
+  `u;.3 y` is the same conjunction over a CUBE of the smallest axis, moved
+  one step at a time along every axis.

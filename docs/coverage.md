@@ -2164,7 +2164,14 @@ the decimal point, and that is typography, not semantics.
 ## Known divergences (deliberate, revisit later)
 
 Every entry below is a place libjay's answer differs from a reference
-interpreter's on purpose — a documented choice, not an accident. The
+interpreter's on purpose — a documented choice, not an accident. The J half
+of the list is also what a differential sweep excuses: `fuzz --compare`
+measures every line of `crates/libjay/tests/corpus/j/divergences.txt`
+against the oracle and counts a mismatch that matches one — by sentence or
+by cause signature — under `accepted` rather than against agreement,
+printing the raw and the accepted-adjusted number side by side. The list is
+kept short on purpose: a mismatch is excused only where a reasoned entry
+here already accounts for it. The
 language and reference each entry compares against is named inline;
 "Differences from GNU APL" below is the subset checked against that
 oracle directly, one entry per line of
@@ -2202,8 +2209,11 @@ oracle directly, one entry per line of
   `5 <./\. (1;2)` and `5 */\. (2;5)` — the same shape, the same argument,
   no piece left over — are the empty, and `0 >./\. (<'abc')` answers a pair
   of boxes no maximum was ever taken of. Two of those cannot both be a
-  rule. libjay asks the operand once, of the whole argument, whichever fold
-  it is, and refuses where that has no meaning.
+  rule. The same contradiction stands over CHARACTERS, where no piece is
+  left either: `6 +/\. 'abc'` is a domain error there and `6 */\. 'abc'`
+  and `5 <./\. 'hello'` are the empty. libjay asks the operand once, of the
+  whole argument, whichever fold it is, and refuses where that has no
+  meaning.
 - Two whole numbers a double cannot tell apart. Once the verb is not one of
   jconsole's integer special cases it holds every number in a double, so
   `9007199254740992` and `9007199254740993` are one value to its `*.` and

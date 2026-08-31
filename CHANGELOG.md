@@ -212,6 +212,27 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `jay-corpus fuzz --compare` now reports TWO agreement numbers. It measures
+  every line of `corpus/<lang>/divergences.txt` against the oracle before it
+  starts, and a mismatch that matches one — by the minimised sentence, or by
+  the cause signature — is counted under `accepted` rather than against
+  agreement, kept out of the signature ranking, and printed with the row
+  that excused it. Raw and accepted-adjusted agreement are both printed;
+  `--no-accepted` turns the list off.
+- A float takes an exponent as soon as its exponent reaches the print
+  precision, which is what jconsole does: `1234567.5` is `1.23457e6` at six
+  significant digits and `1234567.5` at nine, and `o. 1e8` is `3.14159e8`
+  rather than the `314159000` that showed padding zeros as though they were
+  measured. The small end is fixed at `1e_5`. APL keeps the thresholds it
+  had.
+- The trigonometric circle functions now refuse an angle of `π × 2^27.5` or
+  more, which is where jconsole's limit error begins. `^` of a complex
+  number and `r.` are held to it by the exponent's imaginary part; the
+  hyperbolic pair is not.
+- `x u;.0 y` clamps its rectangle to the axis rather than refusing it:
+  `5 <;.0 (1 2 3)` is the whole of it, `(_1 ,: 3) <;.0 (1 2 3 4 5)` is
+  `3 4 5`, and only an origin that is no position in the axis is an index
+  error.
 - `jay-corpus fuzz --compare --signature` now cuts every mismatch down to
   the smallest sentence that still parts libjay from the oracle the same
   way, and reports and signs THAT sentence — a composed sentence names eight
@@ -223,6 +244,27 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- J's `I.` reads the MAJOR CELLS of its left argument and has an infinite
+  left rank, so `(2 2$1 2 3 4) I. 2 3` is 1 rather than a framed pair, and
+  a right argument with no cell of that shape is a rank error. It also
+  SEARCHES rather than counts — bisecting bounds it takes for sorted, the
+  direction read off the ends — so `3 1 4 1 5 I. 2` is 0; and whole bounds
+  are compared whole, so `9007199254740992 I. 9007199254740993` is 1.
+- Rank framing over an EMPTY frame now keeps the fill run's shape
+  refusals: `(1 2) +"1 (i. 0 3)` is a length error, as it is in jconsole,
+  where it was the empty. A refusal about the fill's own value or type
+  still leaves the frame alone, which is what makes `'' { 1 2 3` an empty.
+- `p.` takes a first-degree polynomial's root outright, which keeps
+  `p. _ 1` at `1 ; __`; a root the arithmetic could not find is a NaN
+  error rather than a list of NaNs; and a root form's multiplier is one
+  number, so `((1 2);2 3) p. 2` is a rank error.
+- A complex sine follows its zero rather than the NaN an overflowed
+  hyperbolic cosine makes: `1 o. 0j1e10` is `0j_`.
+- Monadic tessellation, `u;.3 y` and `u;._3 y`, which was a named gap: the
+  window is a cube of the smallest axis, moved one step at a time along
+  every axis.
+- `j./` and `r./` of an empty are 0, the identity jconsole folds to, where
+  they were refused for having none.
 - `x ! y` below its diagonal for a large left argument. The answer is zero
   wherever a whole y sits under a whole x, and past the width at which the
   falling factorial is taken the gamma quotient read a pole over a pole as
