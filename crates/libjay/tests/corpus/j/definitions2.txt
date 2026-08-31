@@ -2,9 +2,10 @@
 // or a modifier a sentence reduces to, the `{{)n` noun direct definition,
 // multiple assignment, and a modifier body that derives its own modifier.
 //
-// A verb libjay writes with `@:` where the reference writes the cap fork
-// `[: f g` is out of this file on purpose: the two spell one function, and
-// docs/coverage.md records which is written here.
+// The translations that compose monadically — the ones the reference
+// writes with the cap fork `[: f g` — are recorded in capfork.txt, with
+// the rest of what a capped fork and an explicit definition write
+// themselves back out as.
 
 // --- `13 : '…'`: what the translation answers ---------------------------
 

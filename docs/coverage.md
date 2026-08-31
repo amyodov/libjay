@@ -296,10 +296,14 @@ the reference.
 The representation is reconstructed from the verb tree rather than kept
 from the source, so the spellings that differ only by the rank they set are
 recovered by matching that rank: `u@v` is `u@:v` at v's ranks, `u&v` and
-`u&.v` likewise. Two do not survive the trip and are named rather than
-guessed at: a capped fork (`[: f g` is an atop by the time the tree has it,
-so it writes itself out as `@:`) and any verb libjay has no J spelling for,
-which reports "the atomic representation of … is not supported yet".
+`u&.v` likewise. The CAP is carried instead of recovered: `[: f g` and
+`f@:g` are one function, so the tree keeps which of the two was written and
+gives that one back — a capped fork is the three-part train `('3'; ('[:';
+f; g))`. An explicit definition is the `:` conjunction over its valence and
+its body, `('3'; 'y + 1')` for `3 : 'y + 1'`, whichever way the source
+spelled it; a body of several lines is a character matrix, one row a line.
+A verb libjay has no J spelling for reports "the atomic representation of …
+is not supported yet".
 
 ### The inner product (`u . v`, APL `f.g`)
 
@@ -1591,11 +1595,11 @@ well; libjay falls back in more places than it does, and the verb computes
 the same thing either way. A control word in a tacit body is refused, as the
 reference refuses it.
 
-The one difference in what is DISPLAYED is the cap fork. `[: f g` and
-`f@:g` are one function in J and two spellings, and libjay's tree keeps only
-the one node, so a translation that composes monadically is displayed
-`f@:g` where the reference writes `[: f g`. The corpus records the
-translations that have no cap, and the application of the ones that do.
+A translation that composes monadically is written with the cap, as the
+reference writes it: `13 : '*: +/ y'` is `[: *: +/` and `13 : 'i. # y'` is
+`[: i. #`. The cap counts as a TRAIN where the abstraction decides which
+tine needs a bracket, which is why `13 : '(*: +/ y) + y'` is `] + [: *: +/`
+rather than the other way round.
 
 ### The linear representation
 
@@ -1608,13 +1612,15 @@ modifier made as a conjunction's right one, a train in a train's last place
 whose words would count out differently — and `{` and `}` carry a space of
 their own so that two never read as `{{` or `}}`.
 
-Three spellings are libjay's own where the reference has two. A cap fork is
-written `f@:g`; `u"b a b` is written `u"a b`, the shorter of the two
-spellings of one rank; and a noun of rank 2 or more has no spelling here at
-all, where the reference writes an expression that BUILDS the value. An
-explicit definition gives back its own header and body where it was written
-inline (`3 : 'y + 1'`); one whose body is on the lines below, or a `{{ }}`,
-keeps no text and is a named gap.
+Two spellings are libjay's own where the reference has two of its own.
+`u"b a b` is written `u"a b`, the shorter of the two spellings of one rank;
+and a noun of rank 2 or more has no spelling here at all, where the
+reference writes an expression that BUILDS the value. An explicit
+definition gives back its own header and body — inline as `3 : 'y + 1'`
+where the body is one line, and under the `3 : 0` header with the lines
+beneath it where it is longer — and a `{{ }}` shows the words between its
+braces, which is what a session displays it as. `5!:5` writes the header
+form for a `{{ }}` too, as the reference does.
 
 ### Explicit adverbs and conjunctions
 
@@ -2159,11 +2165,8 @@ language and reference each entry compares against is named inline;
 oracle directly, one entry per line of
 `crates/libjay/tests/corpus/apl/divergences.txt`.
 
-- The linear representation writes one spelling where J keeps two. `[: f g`
-  and `f@:g` are one function, and libjay's tree holds one node for both, so
-  a verb built either way is displayed `f@:g` — which matters most for
-  `13 : '…'`, whose translations compose monadically. `u"b a b` is displayed
-  `u"a b` for the same reason: two spellings of one rank, one node.
+- `u"b a b` is displayed `u"a b`: two spellings of one rank and one node in
+  the tree, so the shorter one comes back whichever was written.
 - J's `u:` widens a literal to a wider character type, which libjay does
   not have: the widened value has the same items and the same codes here
   (`# u: 'é'` is 2 and `3 u: u: 'é'` is `195 169` in both), and only the
@@ -2592,8 +2595,10 @@ sections above is also collected here.
   which black-box probing did not pin down — they mark a boundary inside
   the word being collected rather than ending it, and what the machine
   emits at the end of the input after them followed from no rule the probes
-  could confirm; and the atomic representation of a
-  capped fork or an explicit definition. The 2026-08-30 certification sweep
+  could confirm; and `[: g`, the cap in a two-part train, which the
+  reference builds a verb of that raises a valence error when it is
+  applied and libjay refuses where it is written. The 2026-08-30
+  certification sweep
   added three more: `#.` and `#:` over COMPLEX numbers, which the reference
   answers (`#. 3j4 1j_1` is `7j7`) and libjay refuses by name; `x ! y` for
   a whole x past the width at which the falling factorial is taken with a
