@@ -2107,7 +2107,7 @@ pub enum Verb {
     /// J `u L: n` and `u S: n`: apply u to every subarray at boxing level
     /// n or below. `L:` puts each result back where its operand was; `S:`
     /// spreads them into the items of one array.
-    Level { u: Box<Verb>, level: i64, spread: bool },
+    Level { u: Box<Verb>, levels: [i64; 3], spread: bool },
     /// J `u b.`: answers questions about u rather than applying it. `0` asks
     /// for its three ranks.
     Characteristics(Box<Verb>),
@@ -2313,8 +2313,8 @@ impl Verb {
                 None => format!("({} {{…}})", alpha.name()),
             },
             Verb::Memo(v, _) => format!("{} M.", v.name()),
-            Verb::Level { u, level, spread } => {
-                let n = one_rank(*level);
+            Verb::Level { u, levels, spread } => {
+                let n = rank_str(*levels);
                 format!("{} {} {n}", u.name(), if *spread { "S:" } else { "L:" })
             }
             Verb::Key(v) => format!("{}/.", v.name()),
@@ -2750,8 +2750,8 @@ impl Verb {
                 let body = def.pick(alpha, omega.as_ref())?.clone();
                 with_operands(alpha, omega.as_ref(), ctx, |c| body.monad(y, c, span))
             }
-            Verb::Level { u, level, spread } => {
-                at_level(u, *level, *spread, y, ctx, span)
+            Verb::Level { u, levels, spread } => {
+                at_level(u, levels[0], *spread, y, ctx, span)
             }
             Verb::Key(u) => oblique(u, y, ctx, span),
             Verb::Cut(u, n) => cut(u, None, y, *n, ctx, span),
@@ -2971,8 +2971,8 @@ impl Verb {
                 let body = def.pick(alpha, omega.as_ref())?.clone();
                 with_operands(alpha, omega.as_ref(), ctx, |c| body.dyad(x, y, c, span))
             }
-            Verb::Level { u, level, spread } => {
-                at_level_dyad(u, *level, *spread, x, y, ctx, span)
+            Verb::Level { u, levels, spread } => {
+                at_level_dyad(u, levels[1], levels[2], *spread, x, y, ctx, span)
             }
             Verb::Key(u) => key(u, x, y, ctx, span),
             Verb::PowerV(u, v) => power_v(u, v, Some(x), y, ctx, span),
@@ -3183,14 +3183,21 @@ where
 // ---------------------------------------------------------------- naming
 
 fn one_rank(r: i64) -> String {
-    if r == RANK_INF { "_".to_string() } else { r.to_string() }
+    match r {
+        RANK_INF => "_".to_string(),
+        _ if r == -RANK_INF => "__".to_string(),
+        _ => r.to_string(),
+    }
 }
 
-/// The rank list as `"` writes it: one number when all three agree,
-/// otherwise monadic, dyadic-left, dyadic-right.
+/// The rank or level list as `"`, `L:` and `S:` write it. Two atoms are
+/// `left right` with the monadic one taken from the right, so a triple
+/// whose ends agree is written as the pair it came from.
 fn rank_str(r: [i64; 3]) -> String {
     if r[0] == r[1] && r[1] == r[2] {
         one_rank(r[0])
+    } else if r[0] == r[2] {
+        format!("{} {}", one_rank(r[1]), one_rank(r[2]))
     } else {
         format!("{} {} {}", one_rank(r[0]), one_rank(r[1]), one_rank(r[2]))
     }
@@ -15701,20 +15708,29 @@ fn map_level(u: &Verb, n: i64, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
 /// an unboxed left argument reaches every leaf of the right one.
 fn at_level_dyad(
     u: &Verb,
-    level: i64,
+    left: i64,
+    right: i64,
     spread: bool,
     x: &Array,
     y: &Array,
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
-    if level == RANK_INF {
+    if left == RANK_INF && right == RANK_INF {
         return u.dyad(x, y, ctx, span);
     }
     // A negative level counts down from each argument's own top, so the
     // two sides can stop at different depths.
-    let depth = |a: &Array| if level < 0 { (boxing_level(a) + level).max(0) } else { level };
-    let (nx, ny) = (depth(x), depth(y));
+    let depth = |a: &Array, level: i64| {
+        if level == RANK_INF {
+            boxing_level(a)
+        } else if level < 0 {
+            (boxing_level(a) + level).max(0)
+        } else {
+            level
+        }
+    };
+    let (nx, ny) = (depth(x, left), depth(y, right));
     if !spread {
         return map_level_dyad(u, nx, ny, x, y, ctx, span);
     }

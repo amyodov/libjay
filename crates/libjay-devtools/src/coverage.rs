@@ -1000,9 +1000,9 @@ fn modifier(v: &Verb, lang: Lang) -> Option<(Mod, Vec<String>)> {
         Verb::Memo(u, _) => (m("memo", &["M."]), verbs(&[u])),
         Verb::WithObverse(u, w) => (m("obverse", &[":."]), verbs(&[u, w])),
         Verb::Adverse(u, w) => (m("adverse", &["::"]), verbs(&[u, w])),
-        Verb::Level { u, level, spread } => (
+        Verb::Level { u, levels, spread } => (
             if *spread { m("spread", &["S:"]) } else { m("level", &["L:"]) },
-            with(u, format!("level {level}")),
+            with(u, format!("level {}", levels[0])),
         ),
         Verb::Characteristics(u) => (m("characteristics", &["b."]), verbs(&[u])),
         Verb::Key(u) => (m("key / oblique", &["/."]), verbs(&[u])),

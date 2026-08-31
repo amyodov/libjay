@@ -3508,9 +3508,23 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         // `u@v` is `u@:v` applied at v's own ranks: one v-cell at a time,
         // with u run on each result. That difference in rank is all that
         // separates the two spellings.
+        //
+        // A NOUN on the right is the constant verb `n"_`, which is what
+        // makes `*:@_1` a verb answering 1: only `@` reads a noun that way,
+        // and only on the right — `@:` and `&` refuse it, and so does a
+        // noun on the left.
         "@" => {
+            if u.is_noun() {
+                return Err(Error::domain("@ takes a verb on the left", span));
+            }
             let f = verb_operand(u, span)?;
-            let g = verb_operand(v, span)?;
+            let g = if v.is_noun() {
+                let n = noun_value(&v)
+                    .ok_or_else(|| Error::not_yet("a computed noun operand to @", span))?;
+                Verb::Constant(n)
+            } else {
+                verb_operand(v, span)?
+            };
             let ranks = g.ranks();
             let atop = Verb::Atop(Box::new(f), Box::new(g), AtopForm::At);
             Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(atop), ranks)), span))
@@ -3689,22 +3703,10 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         // into one array.
         "L:" | "S:" => {
             let f = verb_operand(u, span)?;
-            let n = one_atom(&v, "level", span)?;
-            // The two infinities are the two ends of the descent: `_` is
-            // the whole argument, boxed however deeply, and `__` is its
-            // leaves, which is level 0 written the other way round.
-            let level = if n == f64::INFINITY {
-                RANK_INF
-            } else if n == f64::NEG_INFINITY {
-                0
-            } else if n.fract() != 0.0 {
-                return Err(Error::not_yet(format!("a level of {n} ({glyph})"), span));
-            } else {
-                n as i64
-            };
+            let levels = level_spec(&v, span)?;
             let level = Verb::Level {
                 u: Box::new(f),
-                level,
+                levels,
                 spread: glyph == "S:",
             };
             Ok(Frag::Verb(VerbFrag::V(level), span))
@@ -4104,6 +4106,53 @@ fn verb_operand(f: Frag, span: Span) -> Result<Verb> {
         return Err(Error::not_yet("noun-operand conjunctions", span));
     }
     Ok(as_verb(f)?.0)
+}
+
+/// `u L: n` and `u S: n`: the level operand is read like a rank — 1 atom for
+/// every valence, 2 atoms `left right` with the monadic level taken from the
+/// right, 3 atoms in full — and the reading happens when the derived verb is
+/// APPLIED, not when the sentence is read, so `] S:_ 2` is a verb and shows
+/// itself. The two infinities are the two ends of the descent: `_` is the
+/// whole argument, boxed however deeply, and `__` its leaves, which is level
+/// 0 written the other way round.
+fn level_spec(f: &Frag, span: Span) -> Result<[i64; 3]> {
+    let Some(arr) = as_const(f) else {
+        return Err(Error::not_yet("a computed level specification", span));
+    };
+    if arr.shape.len() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "a level takes a list of atoms, not a table",
+            Some(span),
+        ));
+    }
+    let Some(vals) = arr.to_f64_vec() else {
+        return Err(Error::domain("a level must be numeric", span));
+    };
+    if vals.is_empty() || vals.len() > 3 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            "a level takes 1 to 3 atoms",
+            Some(span),
+        ));
+    }
+    let mut r = Vec::with_capacity(vals.len());
+    for x in vals {
+        if x == f64::INFINITY {
+            r.push(RANK_INF);
+        } else if x == f64::NEG_INFINITY {
+            r.push(-RANK_INF);
+        } else if x.fract() != 0.0 {
+            return Err(Error::domain("a level must be an integer", span));
+        } else {
+            r.push(x as i64);
+        }
+    }
+    Ok(match r.len() {
+        1 => [r[0], r[0], r[0]],
+        2 => [r[1], r[0], r[1]],
+        _ => [r[0], r[1], r[2]],
+    })
 }
 
 /// `u"n`: 1 atom applies to every valence, 2 atoms are `left right` with the

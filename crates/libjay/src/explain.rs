@@ -475,7 +475,8 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             head(out, "memo M. (answers repeat from a cache)");
             verb_lines(u, depth + 1, p, tr, out);
         }
-        Verb::Level { u, level, spread } => {
+        Verb::Level { u, levels, spread } => {
+            let level = levels[0];
             head(
                 out,
                 &format!(

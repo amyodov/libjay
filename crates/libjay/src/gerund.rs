@@ -131,7 +131,15 @@ pub fn gerund_array(items: &[Ar]) -> Array {
 
 /// A rank specification as the noun `u"n` was given.
 fn rank_noun(r: &[i64; 3]) -> Array {
-    let one = |v: i64| if v == RANK_INF { f64::INFINITY } else { v as f64 };
+    let one = |v: i64| {
+        if v == RANK_INF {
+            f64::INFINITY
+        } else if v == -RANK_INF {
+            f64::NEG_INFINITY
+        } else {
+            v as f64
+        }
+    };
     if r[0] == r[1] && r[1] == r[2] {
         return Array::new(vec![], Data::F64(vec![one(r[0])].into()));
     }
@@ -196,6 +204,9 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         // tree, so it is the one primitive that cannot be written back out.
         Verb::Prim(p) if p.name == "b." => None,
         Verb::Prim(p) => Some(Ar::Prim(p.name.to_string())),
+        // A noun operand to `@` is the constant verb, and writes itself
+        // back out as the noun it was: `*:@_1 2`, not `*:@(_1 2"_)`.
+        Verb::Constant(m) => Some(Ar::Noun(m.clone())),
         Verb::Rank(inner, r) => rank_ar(inner, r),
         Verb::Reduce(u) => der("/", vec![verb_ar(u)?]),
         Verb::Windowed(u, WindowKind::Prefix) => der("\\", vec![verb_ar(u)?]),
@@ -231,16 +242,9 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         Verb::Amend(m) => der("}", vec![Ar::Noun(m.clone())]),
         Verb::AmendVerb(u) => der("}", vec![verb_ar(u)?]),
         Verb::Memo(u, _) => der("M.", vec![verb_ar(u)?]),
-        Verb::Level { u, level, spread } => der(
+        Verb::Level { u, levels, spread } => der(
             if *spread { "S:" } else { "L:" },
-            vec![
-                verb_ar(u)?,
-                Ar::Noun(if *level == crate::verb::RANK_INF {
-                    Array::scalar_f64(f64::INFINITY)
-                } else {
-                    Array::scalar_i64(*level)
-                }),
-            ],
+            vec![verb_ar(u)?, Ar::Noun(rank_noun(levels))],
         ),
         Verb::Characteristics(u) => der("b.", vec![verb_ar(u)?]),
         Verb::Key(u) => der("/.", vec![verb_ar(u)?]),
@@ -518,8 +522,11 @@ fn join(head: &str, tail: &str) -> String {
     if head.ends_with(' ') {
         return format!("{head}{tail}");
     }
+    // `_` ends a number as surely as a digit does — the infinities and the
+    // negative sign are spelled with it — so a letter after one is held off
+    // the same way: `\:"2 _ L:1 2`, not `\:"2 _L:1 2`.
     let runs_on = tail.starts_with(|c: char| c.is_ascii_alphabetic())
-        && head.ends_with(|c: char| c.is_ascii_alphanumeric());
+        && head.ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_');
     let split = tail.starts_with(['.', ':']) || runs_on;
     if split { format!("{head} {tail}") } else { format!("{head}{tail}") }
 }
