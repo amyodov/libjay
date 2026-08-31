@@ -3066,7 +3066,8 @@ impl Verb {
             // A scalar dyad pairs its cells, so their shapes must agree
             // whether or not there is a cell to compute.
             let agreeing = self.scalar_dyad_op().is_some();
-            return empty_frame(&p.frame, y.dtype(), cell, conform, agreeing, conform, &[], ctx, |left, numeric, c| {
+            let indexing = x.count() > 0;
+            return empty_frame(&p.frame, y.dtype(), cell, conform, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
                 let right = if numeric {
@@ -3353,8 +3354,14 @@ fn index_refusal(e: &Error) -> bool {
 /// not pair keeps no such refusal, which is what makes `(i. 0 0) #. (,5)`
 /// and `(0 3 $ 0) # (i. 2 0 3)` empties there although a cell of each would
 /// be a length error. An index out of range stands either way.
-fn shape_refusal(e: &Error, agreeing: bool) -> bool {
-    (agreeing && matches!(e.kind, ErrorKind::Length | ErrorKind::Shape)) || index_refusal(e)
+/// `indexing` says the refusal could have come from an INDEX the argument
+/// itself carries. An index out of range is a fact about an axis and stands,
+/// but only where the index is the program's own number: `2 {"1 (i. 0 2)` is
+/// an index error there, and `(0 $ 1 2 3) { (i. 0 0)` — where the index is
+/// itself a fill, the left argument holding none — is the empty.
+fn shape_refusal(e: &Error, agreeing: bool, indexing: bool) -> bool {
+    (agreeing && matches!(e.kind, ErrorKind::Length | ErrorKind::Shape))
+        || (indexing && index_refusal(e))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3364,6 +3371,7 @@ fn empty_frame(
     cell: Option<Array>,
     conform: bool,
     agreeing: bool,
+    indexing: bool,
     probe: bool,
     refused: &[usize],
     ctx: &mut Ctx<'_>,
@@ -3376,7 +3384,7 @@ fn empty_frame(
                 shape.extend_from_slice(&answer.shape);
                 return Ok(Array::new(shape, Data::empty(answer.dtype())));
             }
-            Err(e) if conform && shape_refusal(&e, agreeing) => return Err(e),
+            Err(e) if conform && shape_refusal(&e, agreeing, indexing) => return Err(e),
             // The verb has nothing to say about these values, but the
             // answer still has a shape: `$ 'a' ,"0 (i. 0)` is `0 2` in
             // jconsole although a character catenates with no number, and
@@ -3587,7 +3595,7 @@ fn prim_monad_frame(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, conform, &[], ctx, |cell, _numeric, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, true, conform, &[], ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
         });
     }
@@ -3631,7 +3639,7 @@ fn rank_monad(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, conform, &[], ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, true, conform, &[], ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
     }
@@ -12503,7 +12511,7 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         // is `0`.
         let refused: &[usize] = if j && !back { &[0] } else { &[] };
         let framed =
-            empty_frame(&[0], base.dtype(), cell, false, false, j, refused, ctx, |cell, _n, c| {
+            empty_frame(&[0], base.dtype(), cell, false, false, true, j, refused, ctx, |cell, _n, c| {
                 u.monad(cell, c, span)
             })?;
         // That run gives the shape, and its type too — except a boolean,
@@ -14853,7 +14861,7 @@ fn cut(
         // A verb with nothing to say about that piece leaves a list of
         // empty lists, as the prefixes do.
         let refused: &[usize] = if j { &[0] } else { &[] };
-        return empty_frame(&[0], items.dtype(), cell, false, false, j, refused, ctx, |cell, _n, c| {
+        return empty_frame(&[0], items.dtype(), cell, false, false, true, j, refused, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -14936,7 +14944,7 @@ fn per_axis_cut(
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, false, false, j, &[], ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, false, false, true, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -15160,7 +15168,7 @@ fn tessellate(
         let block = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &block, span)).transpose()?;
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, false, false, j, &[], ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, false, false, true, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -15981,7 +15989,7 @@ fn level_fill_check(
     let right = if y.dtype() == DType::Box { &b } else { y };
     match u.dyad(left, right, ctx, span) {
         Ok(_) => Ok(()),
-        Err(e) if shape_refusal(&e, true) => Err(e),
+        Err(e) if shape_refusal(&e, true, true) => Err(e),
         Err(_) => Ok(()),
     }
 }
@@ -17960,7 +17968,7 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     if starts.is_empty() {
         let cell = u.is_pure().then(|| select_items(&list, &[]));
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&[0], list.dtype(), cell, false, false, j, &[], ctx, |cell, _n, c| {
+        return empty_frame(&[0], list.dtype(), cell, false, false, true, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }

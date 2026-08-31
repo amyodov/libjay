@@ -561,3 +561,14 @@ p.. (1 2 3x)
 p.. (2 2 $ 0 1 2 3)
 p.. (1 2 3)
 p.. (0.5 1.5)
+
+// An index out of range survives an empty frame only where the index is the
+// program's own number. Where the LEFT argument holds none, the index the
+// fill run complains about is itself a fill, and the sentence is the empty.
+(0 $ 1 2 3) { (i. 0 0)
+(0 $ 1 2 3) { (i. 3)
+(0 $ 1 2 3) { (i. 0)
+(i. 0) { (i. 0 0)
+'' { (i. 0 0)
+(0 $ 1 2 3) { (i. 0 3)
+2 {"1 (i. 0 2)
