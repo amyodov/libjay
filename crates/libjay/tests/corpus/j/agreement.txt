@@ -203,3 +203,48 @@ $ > <;._3 (i. 2 3 4)
 // `j.` and `r.` fold an empty to 0.
 r./ (0$0)
 j./ (0$0)
+
+// A descent with no pair to apply the operand to still asks it once, of
+// the fills the pieces would have been, and a refusal about their shapes is
+// the sentence's: three items against none is a length error, while a
+// scalar agrees with anything.
+(1 2 3) *. L:0 (0 $ a:)
+(0 $ a:) *. L:0 (1 2 3)
+5 *. L:0 (0 $ a:)
+(0 $ a:) *. L:0 5
+(1 2 3) *. L:0 (1;2;3)
+(1 2 3) *. L:0 (1;2)
+(1 2) *. L:0 (1;2)
+5 *. L:0 (1;2)
+(2 7 1 8) *. L:_2 (0 $ a:)
+(i. 3 4) = L:_2 (0 $ a:)
+(0 $ a:) ~: L:_1 (1 0 1 $ 5)
+(0 $ <0) < L:_2 (1.5 2.5 _0.5)
+
+// An empty frame keeps the cells' SHAPE even where the verb has nothing to
+// say about the fill's type: asking again with numbers of the same shapes
+// is what learns it.
+$ 'a' ,"0 (i. 0)
+$ ('a') +"1 1 (0 3 $ 0)
+$ '' { 1 2 3
+$ (2 2$1 2 3 4) +"1 (i. 0 2)
+_2 {. (('a') +"1 1 (0 3 $ 0))
+
+// Euclid's remainder is only a rounding artefact where a subtraction left
+// it: a quotient that floors to zero merely swaps the pair.
+(1 - 1.00000000000001) +. 2
+0.1 +. 0.2
+0.3 +. (0.1 + 0.2)
+2 +. 6
+(1 - 1.00000000000001) *. 2
+
+// The one cut size that has no magnitude.
+(<: _9223372036854775807) ];.0 i. 3 4
+_9223372036854775807 ];.0 i. 3 4
+_1000000 ];.0 i. 3 4
+9223372036854775807 ];.0 i. 3 4
+
+// A conjugate pair multiplies out to a real coefficient.
+p.^:2 (1 2 3x)
+p.^:2 (1 2 3)
+p.^:2 (2 7 1 8)

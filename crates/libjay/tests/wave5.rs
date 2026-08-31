@@ -182,8 +182,12 @@ fn the_rectangle_cut_takes_one_block() {
         val(Lang::J, "(1 1,:_2 2) ];.0 i.4 4"),
         i64s(&[2, 2], &[9, 10, 5, 6])
     );
-    // A block that runs off the end is a domain error, not a short block.
-    assert_eq!(err(Lang::J, "(3 3,:2 2) <;.0 i.4 4").kind, ErrorKind::Domain);
+    // A block that runs off the end is cut down to what the axis has left,
+    // which is what jconsole answers: one item rather than a refusal.
+    assert_eq!(
+        val(Lang::J, "(3 3,:2 2) <;.0 i.4 4"),
+        boxes(&[], vec![i64s(&[1, 1], &[15])])
+    );
 }
 
 #[test]
@@ -249,7 +253,7 @@ fn a_polynomial_evaluates_at_its_argument() {
     // The boxed form is `multiplier ; roots`.
     assert_eq!(val(Lang::J, "(2;1 0.5) p. 3"), Array::scalar_f64(10.0));
     let e = err(Lang::J, "(1;2;3) p. 4");
-    assert_eq!(e.kind, ErrorKind::Domain);
+    assert_eq!(e.kind, ErrorKind::Length);
     assert!(e.msg.contains("multiplier"), "{}", e.msg);
 }
 

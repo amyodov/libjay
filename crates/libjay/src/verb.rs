@@ -3031,8 +3031,15 @@ impl Verb {
             let right = fill_cell(y, fyl, self.is_pure());
             let cell = fill_cell(x, fxl, self.is_pure()).filter(|_| right.is_some());
             let conform = ctx.cfg.rules.lang == crate::Lang::J;
-            return empty_frame(&p.frame, y.dtype(), cell, conform, ctx, |left, c| {
+            return empty_frame(&p.frame, y.dtype(), cell, conform, ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
+                let stand_in;
+                let right = if numeric {
+                    stand_in = numeric_like(right);
+                    &stand_in
+                } else {
+                    right
+                };
                 self.dyad_cell(left, right, c, span)
             });
         }
@@ -3290,7 +3297,9 @@ fn fill_cell(y: &Array, frame_rank: usize, pure: bool) -> Option<Array> {
 /// so the message is what tells it from the rest of that kind.
 fn shape_refusal(e: &Error) -> bool {
     matches!(e.kind, ErrorKind::Length | ErrorKind::Shape)
-        || (e.kind == ErrorKind::Domain && e.msg.starts_with("index "))
+        || (e.kind == ErrorKind::Domain
+            && e.msg.starts_with("index ")
+            && e.msg.contains("out of range"))
 }
 
 fn empty_frame(
@@ -3299,20 +3308,37 @@ fn empty_frame(
     cell: Option<Array>,
     conform: bool,
     ctx: &mut Ctx<'_>,
-    run: impl FnOnce(&Array, &mut Ctx<'_>) -> Result<Array>,
+    mut run: impl FnMut(&Array, bool, &mut Ctx<'_>) -> Result<Array>,
 ) -> Result<Array> {
     let mut shape = frame.to_vec();
     if let Some(cell) = cell {
-        match run(&cell, ctx) {
+        match run(&cell, false, ctx) {
             Ok(answer) => {
                 shape.extend_from_slice(&answer.shape);
                 return Ok(Array::new(shape, Data::empty(answer.dtype())));
             }
             Err(e) if conform && shape_refusal(&e) => return Err(e),
+            // The verb has nothing to say about these values, but the
+            // answer still has a shape: `$ 'a' ,"0 (i. 0)` is `0 2` in
+            // jconsole although a character catenates with no number, and
+            // `$ ('a') +"1 1 (0 3 $ 0)` is `0 3`. Asking again with NUMBERS
+            // of the same shapes is what learns the cells' shape without
+            // asking the verb to mean anything by their types; only the
+            // shape is kept, the argument's own type standing.
+            Err(_) if conform => {
+                if let Ok(answer) = run(&numeric_like(&cell), true, ctx) {
+                    shape.extend_from_slice(&answer.shape);
+                }
+            }
             Err(_) => {}
         }
     }
     Ok(Array::new(shape, Data::empty(dtype)))
+}
+
+/// The same shape, holding zeros: a stand-in whose type no verb objects to.
+fn numeric_like(a: &Array) -> Array {
+    Array::new(a.shape.clone(), Data::I64(vec![0i64; a.count()].into()))
 }
 
 // ------------------------------------------------------------ agreement
@@ -3503,7 +3529,7 @@ fn prim_monad_frame(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, ctx, |cell, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
         });
     }
@@ -3547,7 +3573,9 @@ fn rank_monad(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, ctx, |cell, c| v.monad(cell, c, span));
+        return empty_frame(&frame, y.dtype(), cell, conform, ctx, |cell, _n, c| {
+            v.monad(cell, c, span)
+        });
     }
     let cells = each_cell(n, y.count(), pure, ctx, |i, c| {
         cycled(v, i).monad(&y.cell_at(frame_rank, i), c, span)
@@ -5901,7 +5929,12 @@ fn gcd_f64(a: f64, b: f64, tol: Tol) -> Option<f64> {
             k += 1.0;
         }
         let mut r = a - b * k;
-        if r <= eps || tol.eq(r, b) {
+        // Only a remainder a SUBTRACTION left can be a rounding artefact.
+        // Where the quotient floors to zero the step merely swaps the pair,
+        // and r is `a` itself: zeroing it there would throw the smaller
+        // operand away whole, which read `(1 - 1.00000000000001) +. 2` as
+        // 2 where the answer is that difference.
+        if k > 0.0 && (r <= eps || tol.eq(r, b)) {
             r = 0.0;
         }
         a = b;
@@ -12262,7 +12295,9 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         }
         let cell = u.is_pure().then(|| base.clone());
         let framed =
-            empty_frame(&[0], base.dtype(), cell, false, ctx, |cell, c| u.monad(cell, c, span))?;
+            empty_frame(&[0], base.dtype(), cell, false, ctx, |cell, _n, c| {
+                u.monad(cell, c, span)
+            })?;
         // That run gives the shape, and its type too — except a boolean,
         // which carries no type of its own here: an insert's identity is
         // boolean whatever it was folding, and then the argument's type
@@ -14586,7 +14621,9 @@ fn cut(
     // pieces would have had.
     if ranges.is_empty() {
         let cell = u.is_pure().then(|| section(&items, 0, 0));
-        return empty_frame(&[0], items.dtype(), cell, false, ctx, |cell, c| u.monad(cell, c, span));
+        return empty_frame(&[0], items.dtype(), cell, false, ctx, |cell, _n, c| {
+            u.monad(cell, c, span)
+        });
     }
     let mut cells = Vec::with_capacity(ranges.len());
     for (piece, (s, e)) in ranges.iter().enumerate() {
@@ -14666,7 +14703,9 @@ fn per_axis_cut(
         let origin = vec![0i64; frame.len()];
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
-        return empty_frame(&frame, y.dtype(), cell, false, ctx, |cell, c| u.monad(cell, c, span));
+        return empty_frame(&frame, y.dtype(), cell, false, ctx, |cell, _n, c| {
+            u.monad(cell, c, span)
+        });
     }
     let mut cells = Vec::with_capacity(total);
     let mut coord = vec![0usize; frame.len()];
@@ -14748,6 +14787,15 @@ fn rectangle_block(
         if from < 0 || from > n {
             return Err(Error::domain(
                 format!("index {} is out of range: axis {k} has {} item(s)", origin[k], y.shape[k]),
+                span,
+            ));
+        }
+        // The one size that has no magnitude: negating i64::MIN overflows,
+        // and jconsole reports an index error for it where every other
+        // magnitude, however large, is simply cut down to the axis.
+        if size[k] == i64::MIN {
+            return Err(Error::domain(
+                format!("a cut size of {} has no magnitude", size[k]),
                 span,
             ));
         }
@@ -15652,6 +15700,35 @@ fn level_pairs(
     })
 }
 
+/// A descent with no pair to apply the operand to still asks it once, of
+/// the FILLS the pieces would have been, and a refusal about their shapes
+/// is the sentence's: `(1 2 3) *. L:0 (0 $ a:)` is a length error in
+/// jconsole, three items against none, while `5 *. L:0 (0 $ a:)` is the
+/// empty because a scalar agrees with anything.
+fn level_fill_check(
+    u: &Verb,
+    step: &LevelPairs,
+    x: &Array,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<()> {
+    if !step.left.is_empty() {
+        return Ok(());
+    }
+    let fill = |a: &Array| -> Array {
+        a.proto().cloned().unwrap_or_else(|| Array::new(vec![0], Data::empty(DType::I64)))
+    };
+    let (a, b) = (fill(x), fill(y));
+    let left = if x.dtype() == DType::Box { &a } else { x };
+    let right = if y.dtype() == DType::Box { &b } else { y };
+    match u.dyad(left, right, ctx, span) {
+        Ok(_) => Ok(()),
+        Err(e) if shape_refusal(&e) => Err(e),
+        Err(_) => Ok(()),
+    }
+}
+
 fn map_level_dyad(
     u: &Verb,
     nx: i64,
@@ -15664,6 +15741,7 @@ fn map_level_dyad(
     let Some(step) = level_pairs(nx, ny, x, y, span)? else {
         return u.dyad(x, y, ctx, span);
     };
+    level_fill_check(u, &step, x, y, ctx, span)?;
     let mut cells = Vec::with_capacity(step.left.len());
     for (a, b) in step.left.iter().zip(step.right.iter()) {
         cells.push(map_level_dyad(u, nx, ny, a, b, ctx, span)?);
@@ -15686,6 +15764,7 @@ fn collect_level_dyad(
         out.push(u.dyad(x, y, ctx, span)?);
         return Ok(());
     };
+    level_fill_check(u, &step, x, y, ctx, span)?;
     for (a, b) in step.left.iter().zip(step.right.iter()) {
         collect_level_dyad(u, nx, ny, a, b, ctx, span, out)?;
     }
@@ -15749,6 +15828,16 @@ fn root_form_coeffs(parts: &[Array], span: Span) -> Result<Vec<Cx>> {
             next[k] = cx::sub(next[k], cx::mul(c, r));
         }
         coeffs = next;
+    }
+    // A conjugate pair multiplies out to a real coefficient, and the two
+    // halves agree only to rounding: `p.^:2 (1 2 3x)` is `1 2 3` in
+    // jconsole and was `1j5.55112e_17 2 3` here. An imaginary part below
+    // the rounding of the real one it sits beside is that rounding.
+    let scale = coeffs.iter().fold(0.0f64, |m, c| m.max(c[0].abs()));
+    for c in &mut coeffs {
+        if c[1] != 0.0 && c[1].abs() <= 1e-13 * scale {
+            c[1] = 0.0;
+        }
     }
     Ok(coeffs)
 }
@@ -17534,7 +17623,9 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     // the cell whose shape the answer keeps.
     if starts.is_empty() {
         let cell = u.is_pure().then(|| select_items(&list, &[]));
-        return empty_frame(&[0], list.dtype(), cell, false, ctx, |cell, c| u.monad(cell, c, span));
+        return empty_frame(&[0], list.dtype(), cell, false, ctx, |cell, _n, c| {
+            u.monad(cell, c, span)
+        });
     }
     let mut cells = Vec::with_capacity(starts.len());
     for (piece, start) in starts.into_iter().enumerate() {

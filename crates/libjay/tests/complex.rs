@@ -210,11 +210,13 @@ fn an_integer_exponent_stays_real() {
 #[test]
 fn the_parts_come_out_as_a_trailing_axis() {
     assert_eq!(val(Lang::J, "+. 3j4"), Array::from_f64(vec![3.0, 4.0]));
-    assert_eq!(val(Lang::J, "+. 3"), Array::from_f64(vec![3.0, 0.0]));
+    // The parts of a WHOLE number are whole, which is what `3!:0 (+. 3)`
+    // reports as 4 in jconsole and what keeps a large integer exact.
+    assert_eq!(val(Lang::J, "+. 3"), Array::from_i64(vec![3, 0]));
     // Rank 0, so a vector argument gains an axis rather than losing one.
     let m = val(Lang::J, "+. 3 4");
     assert_eq!(m.shape, vec![2, 2]);
-    assert_eq!(m.as_f64_slice(), Some(&[3.0, 0.0, 4.0, 0.0][..]));
+    assert_eq!(m.to_f64_vec(), Some(vec![3.0, 0.0, 4.0, 0.0]));
     // `*.` is the polar pair: magnitude then angle.
     let p = val(Lang::J, "*. 3j4");
     assert_eq!(p.as_f64_slice().expect("floats")[0], 5.0);

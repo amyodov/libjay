@@ -751,10 +751,8 @@ mod tests {
     #[case(2.0 / 3.0, "0.666667")]
     #[case(1.25, "1.25")]
     #[case(100.0, "100")]
-    #[case(1e-5, "0.00001")]
-    #[case(0.000012345678, "0.0000123457")]
-    #[case(1e11, "100000000000")]
-    #[case(123456789.0, "123457000")]
+    #[case(123456.7, "123457")]
+    #[case(0.0001234, "0.0001234")]
     fn floats_positional(#[case] x: f64, #[case] want: &str) {
         assert_eq!(fj(x), want);
     }
@@ -766,6 +764,14 @@ mod tests {
     #[case(1e12, "1e12")]
     #[case(-2.5e20, "_2.5e20")]
     #[case(1.234567e-9, "1.23457e_9")]
+    // A float takes an exponent as soon as its exponent reaches the
+    // precision, and below 1e_5 at the small end. `1e11` prints in full in
+    // jconsole because it is read there as an INTEGER, not as a float.
+    #[case(1e-5, "1e_5")]
+    #[case(0.000012345678, "1.23457e_5")]
+    #[case(1e11, "1e11")]
+    #[case(123456789.0, "1.23457e8")]
+    #[case(1234567.5, "1.23457e6")]
     fn floats_exponent(#[case] x: f64, #[case] want: &str) {
         assert_eq!(fj(x), want);
     }
