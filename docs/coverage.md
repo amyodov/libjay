@@ -2164,21 +2164,49 @@ the decimal point, and that is typography, not semantics.
 ## Named gaps the differential sweep still finds (J)
 
 These are sentences jconsole answers and libjay refuses by name, or answers
-differently, that a 100 000-expression sweep at depth 3 still reaches. None
-is above ten cases in fifty thousand.
+differently, that a 150 000-expression sweep at depth 3 still reaches. No
+family is above three cases in fifty thousand; most are singletons.
 
-- `S:` and `L:` check their level while the sentence is READ, where the
-  reference checks it when the derived verb is applied: `>./\"_2 S:0 2` is
-  a VERB there, the level being `0 2`, and a parse error here.
-- A NOUN operand to a conjunction is not the constant verb here:
-  `,@_1&* 2` is `_1` there and a named refusal here.
-- The obverse of `!` is named: no inverse is known.
+- **An infinite value inside an EXACT array.** `(3 {. 123x) ^ _2` is
+  `1r15129 _ _` there, a rational array holding an infinity, and
+  `6.60982e_5 _ _` here: libjay's `Rat` has no zero denominator by
+  construction, so an infinity among exact values drops the whole array to
+  f64. `(+. (1 2 3x)) ^ _2` and `((_5x) %"_ 1 1 (3 3 $ 1 0 0 0 1 0 0 0 1))
+  ^ _1` read the same way. Relaxing it is a change to the exact-number
+  model, not to a verb.
+- **An exact ROOT.** `(1r4) ^ 0.5` is `1r2` there and `0.5` here: a
+  rational raised to a rational power comes back exact where the root is.
 - `x ! y` where `y - x` is tiny beside `y`:
   `4503599627370496 ! 4503599627370497` is `4.5036e15` there and
-  `6.23515e27` here. The Stirling ratio loses the answer when the two large
-  arguments are nearly equal.
-- The shape a scan, a cut or an infix leaves when it has NO piece at all:
-  `$ 7 <./\ (1;2;3)` is `0 0` there and `0` here.
+  `6.23515e27` here, and `1e10 ! (1e10 + 1e_4)` is 1.00234 against 1.00238.
+  The Stirling ratio loses the answer when the two large arguments are
+  nearly equal.
+- **`C.` with a left argument that is no permutation of the items.**
+  `(_2 0 2) C. 'hello'` is `eolhl` there and a domain error here, and
+  `(_3) C. (1;2;3)` rotates. The reading is neither the direct form nor the
+  flat cycle form the monad writes, and twenty probes did not settle it.
+- **The obverse of `!` off the principal branch.** `!^:_1` here is the
+  smallest argument at or above zero whose factorial is the value, which is
+  what the reference answers everywhere the sweep reaches. The reference
+  searches from a seed of its own, so for a value just above 1 it lands on
+  a NEGATIVE argument (`!^:_1 ] 1.0000001` is `_1.73245e_7` there and
+  `1.00000024` here) and for a value below the minimum 0.885603 it finds a
+  negative root where libjay has none (`!^:_1 ] 0.8` is `_4.17518` there).
+- **`".` of a bare undefined name.** `". 'hello'` is the empty there — the
+  sentence has no result, rather than failing — and a value error here,
+  which is what libjay's compiler makes of an unbound name. `". 'hello+1'`
+  is an error on both sides.
+- **`p.` and `p..` over a BOXED root form at a level or under each.**
+  `p..&.> ((<i. 2 2);5)` is `0 0 6` there and `_6 22 _18 4` here.
+- **A dyadic `L:` whose two sides reach their level with different shapes.**
+  `(2 2 $ 1;2;3;4) *. L:0 (2;4)` pairs a 2 by 2 of boxes against 2 there
+  and is a length error here.
+- **A fill whose type a non-empty argument does not take, where the join
+  never needs it.** `(0 0 $ 0) , !.0 (2;5)` is the two boxes there and a
+  type error here; `2 {.!.'z' (1 2)` is an error on both sides, so the
+  check is not simply lazy.
+- **`<.` and `>.` over a tolerantly real complex number.** The comparisons
+  read one as the real number it is; the two extrema still refuse it.
 
 ## Known divergences (deliberate, revisit later)
 
@@ -2211,17 +2239,14 @@ oracle directly, one entry per line of
   bytes into characters in J — is the identity here, so `2 u: 8 u: u: 955`
   writes as `λ` here and as `Î»` there.
   One entry per line of `crates/libjay/tests/corpus/j/divergences.txt`.
-- jconsole computes a polynomial's roots exactly where it can factor it
+- jconsole computes a polynomial's ROOTS exactly where it can factor it
   over the coefficients' own exact type — degree 2 or more, whole roots for
   whole coefficients and rational ones for rational coefficients — and
-  stores the answer as rationals; its polynomial INTEGRAL divides exactly
-  for an extended or rational argument. libjay's Durand–Kerner and its
-  integral work in f64 throughout, so `p. 1r2 _3r2 1` is `1 1r2` there and
-  `1 0.5` here, and `0 p.. 1 1 1x` is `0 1 1r2 1r3` there and
-  `0 1 0.5 0.333333` here. The numbers are the same; their storage is not.
-  The obverse of a base conversion reads the same way: `*: &.#. (1r2 1r3)`
-  is `16r9` there and `1.77778` here, as do `(1r2 1r3) - &.:#. 2`,
-  `+"1 &.:#: (2 ,/ (1r2 1r3))` and the residue `2 #: 1r2`.
+  stores the answer as rationals. libjay's Durand–Kerner works in f64
+  throughout, so `p. 1r2 _3r2 1` is `1 1r2` there and `1 0.5` here: the
+  numbers are the same and their storage is not. The polynomial derivative
+  and integral, the base conversions and their obverses no longer diverge —
+  they run in the exact arithmetic where either side is exact.
 - The dyadic outfix types its whole argument before any piece is cut, which
   is what makes `2 +/\. 'abc'` a domain error although every piece it
   leaves behind holds one character. Over BOXES the reference does not

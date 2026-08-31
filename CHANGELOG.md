@@ -244,6 +244,49 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- J's `L:` and `S:` read their level operand like a RANK — 1 atom for every
+  valence, 2 atoms `left right` with the monadic level taken from the
+  right, 3 atoms in full — and read it when the derived verb is APPLIED, so
+  `] S:_ 2` is a verb that shows itself rather than a parse error. The
+  operand's own faults stay the sentence's: a character, a box or a
+  fraction is a domain error, none or more than three atoms a length error,
+  a table a rank error. `S:` also SPREADS at a level of `_`, so
+  `$ *: S:_ (2 3 $ i. 6)` is `1 2 3`.
+- A NOUN operand to J's `@` is the constant verb `n"_`: `*:@_1` answers 1
+  and `,@_1&* 2` answers `_1`, where both were named refusals. Only `@`
+  takes one, and only on the right.
+- The shape a scan, an infix, a cut or a tessellation leaves when it has NO
+  piece at all. The verb is asked what one piece would have come to, and
+  the piece differs by site: a positive infix asks about a run of x fills,
+  a negative one about the empty chunk the argument has left, and a cut or
+  a tessellation about the empty piece — `$ _4 +/\ (0 3 $ 'a')` is `0 3`
+  and `$ 2 2 ];.3 (i. 0 0 5)` is `0 0 0 0 5`. Where the verb has nothing to
+  say about that piece either, the prefixes, the infix and the cut leave a
+  list of empty lists (`$ 3 +/\ ''` is `0 0`) and the suffixes, the outfix
+  and the tessellation a bare empty.
+- J's `;:` has a monadic rank of 1: `;: (2 2 $ 'ab')` is two words, not
+  one, and an empty frame keeps the frame it was given.
+- A fill whose type the argument does not take now stands where the
+  argument holds NOTHING — `2 {.!.'z' (0 $ 2)` is `zz` and
+  `2 {.!.2 (0 $ 'a')` is `2 2` — and a non-empty argument still refuses it.
+- A NaN the weighing itself made is a NaN error: `#. _ __ 0` refuses, as
+  the reference does, where `#. _ 1` is `_`.
+- `i.!.1` is accepted and searches at the default tolerance, which is what
+  the reference does with the one tolerance above 2^-34 it takes.
+- A complex value whose imaginary part is negligible beside its own
+  magnitude orders as the real number it tolerantly equals: `2 <: 1j1e_14`
+  is 0 and `2 <: (^. _ __ 0)` is `1 1 0`, where `2 <: 1e10j1` still carries
+  no order.
+- The obverse of `!` — the smallest argument at or above zero whose
+  factorial is the value — is no longer a named gap: `!^:_1 ] 6` is 3 and
+  `!^:_1 ] 1` is 0.
+- The exact arithmetic runs wherever either side is stored exactly: `p..`
+  differentiates and integrates there and `#:` encodes there, so
+  `p.. (1r2 1r3)` is `1r3`, `1 p.. (1r2 1r3)` is `1 1r2 1r6` and
+  `#: 5r2` is `1 1r2`. `+.` keeps an exact argument's storage as it already
+  kept a whole one's. Six pinned exact-storage divergences are gone.
+- A scan's obverse leaves a SCALAR alone: `+/\ ^:_1 ] 5` is 5, where a
+  difference against a shifted-in fill made 0.
 - J's `I.` reads the MAJOR CELLS of its left argument and has an infinite
   left rank, so `(2 2$1 2 3 4) I. 2 3` is 1 rather than a framed pair, and
   a right argument with no cell of that shape is a rank error. It also

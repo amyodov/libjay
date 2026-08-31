@@ -4635,3 +4635,78 @@ the register.
   the representation `^!.n` without a new verb variant. `*` and `E.` take
   an ordinary fit, which they ignore where the tolerance means nothing:
   `2 (*!.1e_13) 3` is 6 and `'ab' (E.!.0) 'abc'` is `1 0 0`.
+- 2026-08-31 — `L:` and `S:` read their level operand like a RANK — 1 atom
+  for every valence, 2 atoms `left right` with the monadic level taken from
+  the right, 3 atoms in full — and they read it when the derived verb is
+  APPLIED, not when the sentence is read. That is what makes `] S:_ 2` a
+  verb that shows itself rather than a parse error, `_ 2` being two atoms
+  and not one. The operand's own faults are still the sentence's: a
+  character, a box or a fraction is a domain error, none or more than three
+  atoms a length error, a table a rank error. `Verb::Level` therefore holds
+  three levels, and the dyad descends each side to its own.
+- 2026-08-31 — A NOUN operand to `@` is the constant verb `n"_`, which is
+  what makes `*:@_1` a verb answering 1 and `,@_1&* 2` answer `_1`. Only
+  `@` reads a noun that way and only on the right: `@:`, `&`, `&.`, `^:`
+  and the rest refuse one, and so does a noun on `@`'s left. It writes
+  itself back out as the noun it was rather than as `n"_`, so the linear
+  representation had to keep the noun in the tree.
+- 2026-08-31 — The shape a scan, an infix, a cut or a tessellation leaves
+  when it has NO piece at all. The verb is asked what one piece would have
+  come to, and which piece it is asked about differs by site: a positive
+  infix asks about a run of x FILLS, a negative one about the EMPTY chunk
+  the argument has left — `$ _4 +/\ (0 3 $ 'a')` is `0 3`, where four
+  character fills are no sum at all — and a cut or a tessellation about the
+  empty piece. Where the verb has nothing to say about that piece either,
+  the reference leaves a LIST OF EMPTY LISTS for the prefixes, the infix
+  and the cut (`$ 3 +/\ ''` is `0 0`) and a bare empty for the suffixes,
+  the outfix and the tessellation (`$ (4&{)\. (0 3 $ 0)` is `0`). The
+  asymmetry is measured, not derived.
+- 2026-08-31 — `;:` has a monadic rank of 1. A table is a word list per
+  row, and an empty frame keeps the frame it was given, which is what makes
+  `$ ;: (2 0 1 {. 2)` the `2 0` it answers.
+- 2026-08-31 — A fill whose type the argument does not take: where the
+  argument holds NOTHING it has no type of its own to keep, so the fill's
+  type stands (`2 {.!.'z' (0 $ 2)` is `zz`), and a non-empty argument still
+  refuses one (`2 {.!.'z' (1 2)` is a type error although the take never
+  reaches the fill). A cell already at the shape a join raises to needs no
+  fill, so a fill it would not take is no complaint there.
+- 2026-08-31 — A NaN the weighing itself made has no value: `#. _ __ 0` is
+  a NaN error, the same rule the scalar arithmetic already followed, where
+  `#. _ 1` is `_` and a NaN the argument carried travels through.
+- 2026-08-31 — `i.!.1` is the one tolerance above 2^-34 the reference
+  takes, and it searches exactly as the DEFAULT tolerance does:
+  `2 i.!.1 (1 2 3)` is `1 0 1`, not the `0 0 1` a tolerance of one would
+  find. Every other verb refuses it, `e.` and `=` included. The value is
+  taken as a mode the reference happens to spell this way, not as a
+  tolerance, and libjay reads it the same.
+- 2026-08-31 — `S:` SPREADS its answers into the items of ONE array, and a
+  level of `_` leaves one answer, so the answer is framed as one item:
+  `$ *: S:_ (2 3 $ i. 6)` is `1 2 3`. `L:` at the same level hands its
+  answer back as it is.
+- 2026-08-31 — A complex value whose imaginary part is negligible beside
+  its own MAGNITUDE is the real number it tolerantly equals, and the
+  reference orders it as one: `2 <: 1j1e_14` is 0 where `2 <: 1e10j1` and
+  `2 <: 0j1e_20` are domain errors, and an infinite real part swallows
+  every finite imaginary one. Complex numbers still carry no order in
+  general; this is the tolerance saying that some of them are not complex.
+- 2026-08-31 — The obverse of `!` is the SMALLEST argument at or above zero
+  whose factorial is the value, found by bisection on whichever stretch of
+  `!` holds it: the verb falls from `!0` = 1 to its minimum 0.885603 at
+  0.461632 and climbs from there, so a value between the two is answered on
+  the falling stretch (`!^:_1 ] 1` is 0, not 1) and anything above 1 on the
+  rising one. It matches the reference on every value the sweep reaches;
+  the reference searches from a seed of its own and lands on other roots
+  for a value just above 1 and for one below the minimum, which coverage.md
+  names.
+- 2026-08-31 — The exact arithmetic runs wherever either side is stored
+  exactly: `p..` differentiates and integrates there, and `#:` encodes
+  there, the fraction landing in the last digit (`#: 5r2` is `1 1r2`).
+  That closed the whole exact-storage family the 0.5.0 certification had
+  pinned. What is left is the exact array that would have to hold an
+  INFINITY — `(3 {. 123x) ^ _2` is `1r15129 _ _` there — which libjay's
+  `Rat` cannot spell, having no zero denominator by construction.
+- 2026-08-31 — A SCALAR has no axis to scan, so a scan leaves it as it is
+  and the scan's obverse has to leave it alone too: `+/\ ^:_1 ] 5` is 5,
+  not the 0 a difference against a shifted-in fill made. The guard is said
+  in the language itself — the undoing is run `0 < #@$` times — rather than
+  as a new verb variant.
