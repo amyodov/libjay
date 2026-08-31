@@ -2385,8 +2385,8 @@ fn step_f64(op: ScalarDyad, a: f64, b: f64) -> Option<f64> {
         // depends on the order the fold takes them in — `_ + __` has none
         // and `_ + 1 + __` reaches the same pair a step later — and the
         // fused fold does not take them in the language's order.
-        Add => (a.is_finite() && b.is_finite()).then(|| a + b).filter(|r| !r.is_nan()),
-        Mul => (a.is_finite() && b.is_finite()).then(|| a * b).filter(|r| !r.is_nan()),
+        Add => (a.is_finite() && b.is_finite()).then_some(a + b).filter(|r| !r.is_nan()),
+        Mul => (a.is_finite() && b.is_finite()).then_some(a * b).filter(|r| !r.is_nan()),
         Min => Some(a.min(b)),
         Max => Some(a.max(b)),
         _ => None,
