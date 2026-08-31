@@ -15257,6 +15257,10 @@ fn tessellate(
             return Err(Error::domain("a tessellation moves by a positive step", span));
         }
         let count = if complete {
+            // A block of NO items still moves one place at a time rather
+            // than one more than the axis holds: `$ 0 <;._3 (i. 5)` is 5
+            // there, exactly as a block of one is.
+            let block = block.max(1);
             if len < block { 0 } else { (len - block) / step + 1 }
         } else {
             (len + step - 1) / step
