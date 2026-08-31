@@ -257,7 +257,6 @@ fn the_hypergeometric_series_sums_its_parameters() {
 #[test]
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
-        (Lang::J, "m =. {{ u/ y }}\nm", "writing this modifier back out"),
         (Lang::Apl, "(A+×)4", "computed value"),
         (Lang::Apl, "3+F←+/", "inside a larger sentence"),
         // A glyph the language has and libjay has not reached is a queue
