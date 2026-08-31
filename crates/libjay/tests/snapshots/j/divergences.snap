@@ -73,6 +73,14 @@
 > j: +---+---+
 > j: |abc|abc|
 > j: +---+---+
+= 6 */\\. 'abc'
+? the reference types this fold for + and not for *
+< <error>
+> j:
+= 5 <./\\. 'hello'
+? the reference types this fold for + and not for <.
+< <error>
+> j: _
 = (9007199254740992) *. (9007199254740993)
 ? jconsole holds both in one double and libjay keeps them exact
 < 8.11296e31

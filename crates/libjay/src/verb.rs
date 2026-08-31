@@ -3283,6 +3283,16 @@ fn fill_cell(y: &Array, frame_rank: usize, pure: bool) -> Option<Array> {
 /// other one leaves the frame alone; where the answer's shape is merely
 /// being learnt — a scan, a cut, an infix with no piece — none of them
 /// stands.
+/// Whether a refusal is about SHAPES rather than about the values a fill
+/// cell happened to carry. Lengths and shapes say so in their kind; an
+/// index out of range is a shape fact too — it compares a number with an
+/// axis, not with any element — and libjay reports it as a domain error,
+/// so the message is what tells it from the rest of that kind.
+fn shape_refusal(e: &Error) -> bool {
+    matches!(e.kind, ErrorKind::Length | ErrorKind::Shape)
+        || (e.kind == ErrorKind::Domain && e.msg.starts_with("index "))
+}
+
 fn empty_frame(
     frame: &[usize],
     dtype: DType,
@@ -3298,11 +3308,7 @@ fn empty_frame(
                 shape.extend_from_slice(&answer.shape);
                 return Ok(Array::new(shape, Data::empty(answer.dtype())));
             }
-            Err(e)
-                if conform && matches!(e.kind, ErrorKind::Length | ErrorKind::Shape) =>
-            {
-                return Err(e);
-            }
+            Err(e) if conform && shape_refusal(&e) => return Err(e),
             Err(_) => {}
         }
     }
@@ -10124,8 +10130,15 @@ fn complex_parts(y: &Array, polar: bool, span: Span) -> Result<Array> {
         return Err(wrong_type(y.dtype(), span));
     };
     let z = v.first().copied().unwrap_or(cx::ZERO);
-    let pair = if polar { vec![cx::abs(z), cx::arg(z)] } else { vec![z[0], z[1]] };
-    Ok(Array::from_f64(pair))
+    if polar {
+        return Ok(Array::from_f64(vec![cx::abs(z), cx::arg(z)]));
+    }
+    // The parts of a WHOLE number are whole: `+. 9223372036854775806` is
+    // that number and a zero, which an f64 pair could not spell.
+    if let Some(whole) = y.as_i64_slice().and_then(|v| v.first().copied()) {
+        return Ok(Array::from_i64(vec![whole, 0]));
+    }
+    Ok(Array::from_f64(vec![z[0], z[1]]))
 }
 
 fn axis_counts(x: &Array, what: &str, near: NearInt, span: Span) -> Result<Vec<i64>> {
@@ -15998,7 +16011,13 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
         return Err(Error::domain("a polynomial's roots need a coefficient of x", span));
     }
     let lead = c[c.len() - 1];
-    let monic: Vec<Cx> = c.iter().map(|&k| cx::div(k, lead)).collect();
+    // A quotient of two REALS is taken on the reals: the complex division
+    // multiplies an infinity by the zero imaginary part and makes a NaN of
+    // it, which would lose `p. _ 1`.
+    let quotient = |k: Cx| -> Cx {
+        if k[1] == 0.0 && lead[1] == 0.0 { [k[0] / lead[0], 0.0] } else { cx::div(k, lead) }
+    };
+    let monic: Vec<Cx> = c.iter().map(|&k| quotient(k)).collect();
     // A polynomial of the first degree has its root outright, which is what
     // keeps an infinite coefficient exact: `p. _ 1` is `1 ; __` and
     // `p. 1 _` is `_ ; 0`, where an iteration would find neither.
