@@ -574,7 +574,7 @@ fn take_colon_definition(
             // `3 : 0` over `y + 1` displays as `3 : 'y + 1'`. Two or more
             // keep the header and the lines, because there is no inline
             // spelling that holds them.
-            rep_lines = Some(if texts.is_empty() { vec![String::new()] } else { texts });
+            rep_lines = Some(texts);
             body
         }
         Data::Char(chars) => {

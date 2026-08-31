@@ -509,8 +509,18 @@ fn word(s: &str) -> String {
     s.to_string()
 }
 
+/// One spelling written against the one before it. An inflection is held
+/// off the word before it so that the two do not read as one, and so is a
+/// modifier whose spelling STARTS with a letter — `2 H.3` and `2 3 H.4`,
+/// where running the digits into the `H` would make one word of them.
+/// A word ending in anything else takes it directly: `+/M.`, `<L:0`.
 fn join(head: &str, tail: &str) -> String {
-    let split = tail.starts_with(['.', ':']) && !head.ends_with(' ');
+    if head.ends_with(' ') {
+        return format!("{head}{tail}");
+    }
+    let runs_on = tail.starts_with(|c: char| c.is_ascii_alphabetic())
+        && head.ends_with(|c: char| c.is_ascii_alphanumeric());
+    let split = tail.starts_with(['.', ':']) || runs_on;
     if split { format!("{head} {tail}") } else { format!("{head}{tail}") }
 }
 
@@ -531,6 +541,16 @@ fn noun_text(a: &Array) -> Option<String> {
         }
         out.push('\'');
         return Some(out);
+    }
+    // A GERUND is boxed data that stands for verbs, and the tie is how it
+    // is written: one spelling per box, with `` ` `` between them.
+    if let Some(items) = a.as_boxes()
+        && a.rank() == 1
+        && !items.is_empty()
+    {
+        let parts: Option<Vec<String>> =
+            items.iter().map(|b| left(&Ar::from_array(b)?)).collect();
+        return parts.map(|p| p.join("`"));
     }
     if a.count() == 0 || matches!(a.row_major_data(), Data::Box(_)) {
         return None;

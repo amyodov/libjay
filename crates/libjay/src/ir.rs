@@ -215,6 +215,7 @@ impl ExplicitRep {
     pub fn header_form(&self) -> String {
         let n = self.valence;
         match self.lines.as_slice() {
+            [] => format!("{n} : ''"),
             [only] => format!("{n} : '{}'", only.replace('\'', "''")),
             lines => format!("{n} : 0\n{}\n)", lines.join("\n")),
         }
@@ -237,6 +238,11 @@ impl ExplicitRep {
         let rows: Vec<Vec<char>> = self.lines.iter().map(|l| l.chars().collect()).collect();
         if let [only] = rows.as_slice() {
             return Array::from_chars(only.clone());
+        }
+        // A body of NO lines is the empty matrix of one column, which is
+        // what cutting no text into lines leaves.
+        if rows.is_empty() {
+            return Array::new(vec![0, 1], Data::Char(Vec::new().into()));
         }
         let width = rows.iter().map(Vec::len).max().unwrap_or(0);
         let mut flat = Vec::with_capacity(rows.len() * width);
