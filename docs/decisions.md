@@ -4517,3 +4517,40 @@ the register.
   double that is exactly an integer keeps every digit it has — the width of
   `#: 12345678901234567890` is 64 — and a fractional radix or value hands
   the pass back to the float path, which is where the tolerance lives.
+- 2026-08-31 — `[: f g` and `f@:g` are one function and two spellings, and
+  the tree now carries WHICH was written: `Verb::Atop` gained a third
+  field, `AtopForm::At` or `AtopForm::Cap`. A field rather than a
+  `Verb::CapFork` variant, deliberately. A new variant would have been
+  hidden by the ~29 non-exhaustive `Verb::Atop` arms — obverse, fusion,
+  purity, tolerance — that a wildcard already covers, and the 2026-08-30
+  definitions wave reverted exactly that experiment for that reason. A
+  third field makes the compiler stop at every one of the 38 sites instead,
+  and the right treatment at all but seven of them is to ignore the tag,
+  which is what `Verb::Atop(f, g, _)` says in so many words. Only the
+  representation, the display, `explain` and the coverage inventory read
+  it. The obverse of an atop takes `At`: what comes back is a verb nobody
+  wrote.
+- 2026-08-31 — An explicit definition's representation is kept as the
+  VALENCE and the BODY LINES (`ir::ExplicitRep`), not as the text it
+  displays. The reference writes `{{ y + 1 }}` back out as `{{ y + 1 }}`
+  and its `5!:5` as `3 : 'y + 1 '`, so the two are different questions
+  about one definition: the display is the source's own spelling and the
+  representation is always the header form. Keeping the lines answers both,
+  and answers `5!:1` and `5!:2` as well — the atomic representation is the
+  `:` conjunction over the valence and the body, the body being a character
+  vector for one line and a character matrix, rows padded, for more. An
+  EMPTY body is the `0 1` matrix the reference gives, which is what cutting
+  no text into lines leaves; its linear form is `3 : ''`.
+- 2026-08-31 — A name of MODIFIER class answers the representation forms
+  for the modifier it holds. A modifier is applied while a sentence is
+  parsed, so the run had kept only its class; it now keeps its
+  representation too (`Env::mod_reps`), which is what lets `5!:1 <'a'`
+  after `a =. 1 : 'u y'` answer the `:` phrase and `5!:5 <'m'` after
+  `m =. /` answer `/`, as the reference does.
+- 2026-08-31 — The linear representation holds a modifier off the word
+  before it where the two would run together into one word: `2 H.3` and
+  `2 3 H.4`, but `+/M.` and `<L:0`, which is the reference's own spacing.
+  The test is on the characters — a modifier whose spelling starts with a
+  letter, after a word ending in a letter or a digit — not on a list of
+  modifiers. A GERUND noun operand is written as the tie its boxes stand
+  for, which is what gives `` +:`*:`]} `` a linear form.

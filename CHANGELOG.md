@@ -49,6 +49,34 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   the `g` of whatever locale `n` holds, chosen where the verb is applied,
   with `z` on the search path answering where the named locale does not.
   Reading and writing a noun that way already worked.
+- The capped fork gives back the spelling it was written with. `f =: [: +: *:`
+  and then `f` answers `[: +: *:`, not `+:@:*:`, and so do its
+  representations: `5!:1` is the three-part train with `[:` in front,
+  `5!:2` draws the three tines, `5!:5` and `5!:6` write the cap. A
+  `13 : '…'` translation that composes monadically is written the same way
+  — `13 : '*: +/ y'` is `[: *: +/`, `13 : 'i. # y'` is `[: i. #` — and the
+  cap counts as a train where the translation decides which tine needs a
+  bracket, so `13 : '(*: +/ y) + y'` is `] + [: *: +/`. `[: f g` and `f@:g`
+  compute the same thing, as they always did.
+- The representations of an explicit definition. `5!:1` of `3 : 'y + 1'` is
+  the `:` conjunction over the valence and the body, `5!:2` draws the three
+  parts, and `5!:5` and `5!:6` write the header form — for a `4 : '…'`, an
+  adverb `1 : '…'`, a conjunction `2 : '…'`, a body written on the lines
+  below (which comes back as a character matrix, one row a line) and a
+  `{{ … }}` alike. A `{{ … }}` DISPLAYS as the words between its braces and
+  represents itself as `3 : '…'`, which is what the reference answers.
+- A name that holds a modifier answers for the modifier. `m =. /` and then
+  `5!:5 <'m'` is `/`; `a =. 1 : 'u y'` and then `5!:1 <'a'` is the `:`
+  phrase its body was written as. Displaying such a name works however the
+  body was written — inline, on the lines below, or between braces.
+- The atomic representation of the verb shapes that had no words for it:
+  the inner product `+/ . *`, the ambivalent `u : v`, the shift with a fill
+  `|.!.0`, the gerund amend `` +:`*:`]} ``, the under-ravel `+:&.,`, the
+  hypergeometric `2 H. 3` and a fit that is a fill, `{.!.9`.
+- The linear representation holds a modifier off the word before it where
+  running them together would make one word of the two: `2 H.3` and
+  `2 3 H.4`, but `+/M.` and `<L:0`. A gerund operand is written as the tie
+  its boxes stand for.
 - Displaying a definition whose body is written on the LINES BELOW.
   `g =: 3 : 0` over one line of body gives `3 : 'y + 1'` back, indentation
   and doubled quotes included; a longer body comes back under its own
