@@ -48,6 +48,8 @@ jay-corpus — record what the reference interpreters answer to the corpus.
                    signature, so a wrapper can deduplicate by cause
       --exprs FILE read the expressions from a corpus file instead, under
                    the index origin its `@ io=` directives give them
+      --no-accepted  with --compare, do not read the accepted-divergence
+                   list; every mismatch counts against agreement
   jay-corpus coverage <j|apl>           which primitive × operand cells the
                                         recorded corpus exercises, and which
                                         are empty
@@ -417,6 +419,7 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     let mut compare_them = false;
     let mut quiet = false;
     let mut signatures = false;
+    let mut accepted_wanted = true;
     let mut given: Option<String> = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -436,6 +439,7 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
             "--compare" => compare_them = true,
             "--quiet" => quiet = true,
             "--signature" => signatures = true,
+            "--no-accepted" => accepted_wanted = false,
             "--exprs" => {
                 let value = it.next().ok_or("--exprs needs a file")?;
                 given = Some(value.clone());
@@ -473,6 +477,7 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
 
     let oracle = oracle::Oracle::find(lang, libjay_testkit::followed_impl(lang))
         .map_err(|absent| absent.message().to_string())?;
+    let accepted = if accepted_wanted { accepted_divergences(lang, &oracle) } else { Accepted::none() };
     let findings: Vec<Finding> = probes
         .par_iter()
         .map(|probe| {
@@ -501,9 +506,11 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
 
     let mut counts = std::collections::BTreeMap::<&str, usize>::new();
     let mut by_signature = std::collections::BTreeMap::<String, usize>::new();
+    let mut matched_rows = std::collections::BTreeMap::<String, usize>::new();
+    let mut accepted_count = 0usize;
     for (finding, probe) in findings.iter().zip(&probes) {
-        *counts.entry(finding.drawn.label()).or_default() += 1;
         if !finding.drawn.is_mismatch() {
+            *counts.entry(finding.drawn.label()).or_default() += 1;
             continue;
         }
         let seen = &finding.seen;
@@ -511,22 +518,39 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         // wrapper that keeps a set of them can tell a batch that found
         // something new from a batch that found another spelling of a
         // finding it already has.
-        let sig = if signatures {
-            fuzz::signature(lang, seen.verdict, &finding.expr, &seen.ours_text)
-        } else {
-            String::new()
-        };
-        if signatures {
-            *by_signature.entry(sig.clone()).or_default() += 1;
+        let sig = fuzz::signature(lang, seen.verdict, &finding.expr, &seen.ours_text);
+        // A mismatch the divergence file already accounts for is not a
+        // failure to close: it is a difference the corpus records with both
+        // answers and a reason. It keeps its own class rather than the
+        // verdict's, and stays out of the signature ranking, which is the
+        // list of causes still to explain.
+        let row = accepted.row_for(&finding.expr, &sig);
+        match &row {
+            Some(row) => {
+                accepted_count += 1;
+                *counts.entry("accepted").or_default() += 1;
+                *matched_rows.entry((*row).clone()).or_default() += 1;
+            }
+            None => {
+                *counts.entry(finding.drawn.label()).or_default() += 1;
+                *by_signature.entry(sig.clone()).or_default() += 1;
+            }
         }
         if !quiet {
             // A reported line is meant to be pasted into a corpus file, and
             // at origin 0 it means nothing without the directive.
             let origin = if finding.io == 1 { String::new() } else { format!(" [io={}]", finding.io) };
             let field = if signatures { format!("sig={sig} ") } else { String::new() };
-            println!("--- {field}{}{origin} : {}", seen.verdict.label(), finding.expr);
+            let label = match &row {
+                Some(_) => format!("accepted/{}", seen.verdict.label()),
+                None => seen.verdict.label().to_string(),
+            };
+            println!("--- {field}{label}{origin} : {}", finding.expr);
             println!("  libjay:    {}", one_line(&seen.ours_text));
             println!("  reference: {}", one_line(&seen.theirs_text));
+            if let Some(row) = &row {
+                println!("  accepted:  {row}");
+            }
             if finding.expr != probe.expr {
                 println!("  cut from:  {}", probe.expr);
             }
@@ -536,13 +560,29 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     // An expression the oracle never finished was not compared, so it is
     // not in the denominator either.
     let total = findings.iter().filter(|f| f.drawn.is_compared()).count();
+    let unexplained = mismatches - accepted_count;
     println!(
         "\ngeneration {}: {total} expressions, {mismatches} mismatches ({:.1}%)",
         fuzz::GENERATION,
         ratio(mismatches, total)
     );
+    println!("  raw agreement                {:.2}%", ratio(total - mismatches, total));
+    println!(
+        "  accepted-adjusted agreement  {:.2}%  ({accepted_count} accepted, {unexplained} unexplained)",
+        ratio(total - unexplained, total)
+    );
     for (label, n) in counts {
         println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));
+    }
+    if !matched_rows.is_empty() {
+        // Which pinned row each accepted mismatch was excused by, so the
+        // exclusion is auditable rather than a number to be trusted.
+        println!("\naccepted divergences matched ({}):", accepted.path.display());
+        let mut ranked: Vec<(&String, &usize)> = matched_rows.iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (row, n) in ranked {
+            println!("  {n:>5}  {row}");
+        }
     }
     if signatures {
         // The coarse half first: it is the half that answers "did this batch
@@ -552,7 +592,7 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         for (sig, n) in &by_signature {
             *by_class.entry(fuzz::cause_class(sig)).or_default() += n;
         }
-        println!("\n{} distinct causes:", by_class.len());
+        println!("\n{} distinct unexplained causes:", by_class.len());
         let mut ranked: Vec<(&&str, &usize)> = by_class.iter().collect();
         ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
         for (class, n) in ranked {
@@ -560,9 +600,76 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         }
         let mut ranked: Vec<(&String, &usize)> = by_signature.iter().collect();
         ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-        println!("\n{} distinct signatures", ranked.len());
+        println!("\n{} distinct unexplained signatures", ranked.len());
     }
     Ok(())
+}
+
+/// The differences libjay makes on purpose: `corpus/<lang>/divergences.txt`,
+/// every line of it a sentence whose two answers are both recorded and whose
+/// `? ` note says why they part.
+///
+/// A sweep counts a mismatch it matches under its own class rather than
+/// against agreement, so the headline number measures what is still to
+/// explain. Matching is by the sentence and by the CAUSE SIGNATURE: a pinned
+/// row and a sentence the fuzzer drew that parts the same way over the same
+/// primitives are one difference written twice, and the list would otherwise
+/// have to hold every spelling a generator can reach. The list is small and
+/// each row is reasoned in docs/coverage.md; nothing else is excused.
+struct Accepted {
+    path: std::path::PathBuf,
+    exprs: std::collections::HashSet<String>,
+    /// A signature to the row that earned it.
+    signatures: std::collections::HashMap<String, String>,
+}
+
+impl Accepted {
+    fn none() -> Accepted {
+        Accepted {
+            path: std::path::PathBuf::from("(none)"),
+            exprs: std::collections::HashSet::new(),
+            signatures: std::collections::HashMap::new(),
+        }
+    }
+
+    /// The pinned row a mismatch is an instance of, and `None` where it is
+    /// something still to explain.
+    fn row_for(&self, expr: &str, signature: &str) -> Option<&String> {
+        if let Some(row) = self.exprs.get(expr) {
+            return Some(row);
+        }
+        self.signatures.get(signature)
+    }
+}
+
+/// Read the divergence file and measure each of its rows, so that a sweep
+/// can recognise the same difference drawn another way. A row that no longer
+/// parts the two sides contributes nothing — `record --check` is what fails
+/// on that, and a sweep should not pretend it is still a divergence.
+fn accepted_divergences(lang: libjay_testkit::Lang, oracle: &oracle::Oracle) -> Accepted {
+    let path = corpus::root().join(libjay_testkit::lang_dir(lang)).join("divergences.txt");
+    if !path.exists() {
+        return Accepted { path, ..Accepted::none() };
+    }
+    let entries = corpus::read(&path);
+    let mut out = Accepted {
+        path,
+        exprs: std::collections::HashSet::new(),
+        signatures: std::collections::HashMap::new(),
+    };
+    let measured: Vec<(String, Outcome)> = entries
+        .par_iter()
+        .map(|entry| (entry.expr.clone(), put(lang, oracle, &entry.expr, entry.io)))
+        .collect();
+    for (expr, seen) in measured {
+        if !seen.verdict.is_mismatch() {
+            continue;
+        }
+        let sig = fuzz::signature(lang, seen.verdict, &expr, &seen.ours_text);
+        out.signatures.entry(sig).or_insert_with(|| expr.clone());
+        out.exprs.insert(expr);
+    }
+    out
 }
 
 /// One sentence put to both sides.
