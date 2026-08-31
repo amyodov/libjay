@@ -376,6 +376,17 @@ fn fitted_fill(a: &Array, f: FillAtom, span: Span) -> Result<(Array, Array)> {
             Some(span),
         )
     };
+    // A BOXED argument boxes the fill, whatever the fill's own type: an
+    // atom is data, and data goes in a box. And where the argument holds
+    // nothing at all it has no type to keep, so the fill's type stands:
+    // `2 {.!.'z' (0 $ 2)` is `zz` and `2 {.!.2 (0 $ 'a')` is `2 2`.
+    // An argument holding nothing at all has no type to keep, so the fill's
+    // type stands: `2 {.!.'z' (0 $ 2)` is `zz` and `2 {.!.2 (0 $ 'a')` is
+    // `2 2`. A non-empty argument of another type still refuses the fill.
+    if a.count() == 0 && DType::promote(a.dtype(), f.dtype()).is_none() {
+        let empty = Array::new(a.shape.clone(), Data::empty(f.dtype()));
+        return Ok((empty, f.array()));
+    }
     let t = DType::promote(a.dtype(), f.dtype()).ok_or_else(wrong)?;
     let (Some(widened), Some(atom)) = (a.to_row_major().cast(t), f.array().cast(t)) else {
         return Err(wrong());
@@ -3686,7 +3697,10 @@ fn padded_with(cells: Vec<Array>, filled: FillAtom, span: Span) -> Result<Vec<Ar
         .iter()
         .map(|c| {
             if c.shape == common {
-                fitted_fill(c, filled, span).map(|(a, _)| a)
+                // A cell already at the common shape needs no fill, so a
+                // fill whose type it does not take is no complaint of its
+                // own: `(0 0 $ 0) , !.0 (2;5)` is the two boxes.
+                Ok(fitted_fill(c, filled, span).map_or_else(|_| c.clone(), |(a, _)| a))
             } else {
                 take(&counts, c, Gap::Atom(filled), false, true, NearInt::J, span)
             }
@@ -8882,6 +8896,11 @@ fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
         // zero-factor rule `*` does: `_ #. 2` is 2, because the running
         // total is still zero when the infinity multiplies it.
         acc = tol.mul(acc, *b) + d;
+    }
+    // A NaN the weighing itself made has no value, as the arithmetic that
+    // made it has none: `#. _ __ 0` is a NaN error, where `#. _ 1` is `_`.
+    if acc.is_nan() && !digits.iter().chain(&radix).any(|v| v.is_nan()) {
+        return Err(Error::nan("this weighted sum has no value", span));
     }
     let integral = is_integral(y) && x.is_none_or(is_integral);
     Ok(Array::new(vec![], narrow(vec![acc], integral)))

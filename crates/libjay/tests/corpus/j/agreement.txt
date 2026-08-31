@@ -412,3 +412,43 @@ $ ;: (i. 0 0)
 $ ;: (2 0 1 {. 2)
 $ ;: (i. 2 0 3)
 $ ;: (0 $ 0)
+
+// A fill whose type the argument does not take: where the argument holds
+// NOTHING it has no type to keep and the fill's type stands, and a
+// non-empty argument still refuses it. A cell already at the shape a join
+// raises to needs no fill at all, so the fill's type is no complaint there.
+2 {. !.'z' (0 $ 2)
+2 {. !.2 (0 $ 'a')
+2 {. !.'z' (0 $ 'a')
+(0 $ 'a') , !._1 (2 0 3 $ 0)
+2 {. !.'z' (1 2)
+2 {. !.2 ('ab')
+3 {. !.2 ('ab')
+3 {. !.(<0) ('ab')
+('ab') , !._1 (2 0 3 $ 0)
+
+// A NaN the weighing itself made has no value: `#. _ __ 0` is a NaN error,
+// where `#. _ 1` is `_` and `#. _. 1` keeps the NaN it was given.
+#. (_ __ 0)
+#.^:2 (_ __ 0)
+= &.#. (_ __ 0)
+2 >: &.:#. (_ __ 0)
+#. L:_1 (_ __ 0)
+#. (_ 1)
+#. (__ 1)
+2 #. (_ 1)
+_ #. 2
+#. (1 0 1)
+2 #. (1 0 1)
+
+// `i.!.1` is the one tolerance above 2^-34 the reference takes, and it
+// searches exactly as the default tolerance does.
+2 i. !.1 ('hello')
+2 i. !.1 (1 2 3)
+1 i. !.1 (1 2 3)
+2 i. !.1 (2 3)
+2 i. !.1 (2.0000000000000004)
+2 i. !.0.5 ('hello')
+2 i. !.2 ('hello')
+1 e. !.1 (1 2 3)
+1 = !.1 (1 2 3)

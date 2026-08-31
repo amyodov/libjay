@@ -3645,6 +3645,13 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                 // rest refuse one outright, and so does libjay.
                 return Err(Error::domain(format!("{} takes no fit (u!.n)", f.name()), span));
             }
+            // `i.!.1` is the one tolerance above that bound the reference
+            // takes, and it searches exactly as the default tolerance does:
+            // `2 i.!.1 (1 2 3)` is `1 0 1`, not the `0 0 1` a tolerance of
+            // one would find.
+            if n == 1.0 && matches!(&f, Verb::Prim(p) if p.name == "i.") {
+                return Ok(Frag::Verb(VerbFrag::V(f), span));
+            }
             // J refuses a tolerance above 2^-34, and so does libjay.
             if !(0.0..=LARGEST_TOLERANCE).contains(&n) {
                 return Err(Error::domain(
