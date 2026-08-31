@@ -525,3 +525,50 @@ _ ^. 0
 ('') ^. ('')
 (i. 0) ^. (0 $ <1)
 (0 $ <1) ^. 2
+
+// A polynomial's boxed root form is a boxed SCALAR or a two-box LIST, and
+// a TABLE where the roots go is not roots at all: two columns spell the
+// polynomial sparsely, one term per row as `coefficient, exponent`, a later
+// row replacing an earlier one at the same exponent. The exponent is a
+// whole number at or above zero, the coefficient is any number, and the
+// exact types carry through.
+p. (< 1 2 $ 1 2)
+p. (< 1 2 $ 0 1)
+p. (< 1 2 $ 2 0)
+p. (< 1 2 $ 2 3)
+p. (< 3 2 $ 1 2 3 4 5 6)
+p. (< 2 2 $ 0 0 0 0)
+p. (< 2 2 $ 1 0 0 0)
+p. (< 2 2 $ 0 1 0 0)
+p. (< 2 1 $ 2 3)
+p. (< 2 2 $ 1 1 1 1)
+p. (<i. 2 2)
+p.. (<i. 2 2)
+p. (<i. 2 3)
+p.. (<i. 2 3)
+p.."_2 (2 2 $ <i. 2 2)
+p. (<i. 3 3)
+p.. (< 2 2 $ 1 2 3 4)
+p. (< 2 2 $ 1 2 3 4)
+p. (< 2 3 $ 1 2 3 4 5 6)
+p. (2 ; (1 2 $ 1 2))
+p. (2 ; (2 2 $ 1 2 3 4))
+p. (< 1 2 $ 1 2.5)
+p. (< 1 2 $ 1 _2)
+p. (< 1 2 $ 1r2 2)
+p. (< 1 2 $ 1j1 2)
+2 p. (< 1 2 $ 1 2)
+p.. (< 1 2 $ 1 2)
+0 p.. (< 1 2 $ 1 2)
+p.. (< 1 2 $ 1r2 2)
+0 p.. (< 1 2 $ 1r2 2)
+p. (< 1 2 $ 1 2x)
+(< 1 2 $ 1 2) p. 3
+(<2 3) p. 4
+p. (< 2 0 3 $ 0)
+p. (< 0 3 $ 0)
+p.;.2 (a:)
+p..;._1 (2;4)
+p. (,<4)
+p. (<4)
+p. (2 2 $ <i. 2 2)

@@ -16186,12 +16186,90 @@ fn poly_coeffs_relaxed(y: &Array, span: Span) -> Result<Vec<Cx>> {
     poly_coeffs(y, span)
 }
 
+/// The roots a root form's second box holds. They are a list, so a table
+/// is a length error there and anything deeper a rank error — the
+/// reference's own two answers for `p. (< i. 2 3)` and
+/// `p. (< 2 0 3 $ 0)`.
+fn root_list(roots: &Array, span: Span) -> Result<Vec<Cx>> {
+    match roots.rank() {
+        0 | 1 => poly_coeffs_relaxed(roots, span),
+        r => Err(Error::new(
+            ErrorKind::Rank,
+            format!("a polynomial's roots are a list, and these have rank {r}"),
+            Some(span),
+        )),
+    }
+}
+
+/// The coefficients a SPARSE polynomial spells. A two-column table in the
+/// one-box form is one term per row — the coefficient and the exponent it
+/// belongs to — and a later row replaces an earlier one at the same
+/// exponent, which is what makes `p. (< 2 2 $ 1 1 1 1)` the `0 1` the
+/// reference answers rather than `0 2`. The exponent is a whole number at
+/// or above zero; any other column count is a length error.
+fn sparse_poly(terms: &Array, span: Span) -> Result<Vec<Cx>> {
+    if terms.rank() != 2 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("a sparse polynomial is a table of terms, and this has rank {}", terms.rank()),
+            Some(span),
+        ));
+    }
+    if terms.shape[1] != 2 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "a sparse polynomial's rows are `coefficient, exponent`, and these have {} columns",
+                terms.shape[1]
+            ),
+            Some(span),
+        ));
+    }
+    let flat = poly_coeffs_relaxed(terms, span)?;
+    let mut powers = Vec::with_capacity(terms.shape[0]);
+    let mut top = 0u128;
+    for row in 0..terms.shape[0] {
+        let e = flat[2 * row + 1];
+        if e[1] != 0.0 || e[0].fract() != 0.0 || e[0] < 0.0 {
+            return Err(Error::domain(
+                "a sparse polynomial's exponent is a whole number at or above zero",
+                span,
+            ));
+        }
+        let k = e[0] as u128;
+        top = top.max(k + 1);
+        powers.push(k as usize);
+    }
+    let len = crate::limits::count(top.max(1), span)?;
+    let mut coeffs = vec![cx::ZERO; len];
+    for (row, &k) in powers.iter().enumerate() {
+        coeffs[k] = flat[2 * row];
+    }
+    Ok(coeffs)
+}
+
 /// The ascending coefficients a boxed root form stands for: `m × (x-r0) ×
 /// (x-r1) × …`, multiplied out.
-fn root_form_coeffs(parts: &[Array], span: Span) -> Result<Vec<Cx>> {
-    let (multiplier, roots) = root_form(parts, span)?;
+fn root_form_coeffs(y: &Array, span: Span) -> Result<Vec<Cx>> {
+    let (multiplier, roots) = root_form(y, span)?;
+    // A TABLE where the roots go is not roots at all: the one-box form
+    // reads it as the polynomial written sparsely. The two-box form does
+    // not take one — `p. (2 ; (1 2 $ 1 2))` is a rank error there.
+    if roots.rank() >= 2 {
+        if y.rank() == 1 {
+            return Err(Error::new(
+                ErrorKind::Rank,
+                format!(
+                    "a polynomial's roots are a list, and these have rank {}",
+                    roots.rank()
+                ),
+                Some(span),
+            ));
+        }
+        return sparse_poly(roots, span);
+    }
     let mut coeffs = vec![multiplier];
-    for r in poly_coeffs_relaxed(roots, span)? {
+    for r in root_list(roots, span)? {
         let mut next = vec![cx::ZERO; coeffs.len() + 1];
         for (k, &c) in coeffs.iter().enumerate() {
             next[k + 1] = cx::add(next[k + 1], c);
@@ -16215,7 +16293,28 @@ fn root_form_coeffs(parts: &[Array], span: Span) -> Result<Vec<Cx>> {
 /// The multiplier and the roots a boxed polynomial argument holds. J writes
 /// the form as `multiplier ; roots` and lets the multiplier go unsaid: one
 /// box is the roots alone, with a multiplier of 1.
-fn root_form(parts: &[Array], span: Span) -> Result<(Cx, &Array)> {
+fn root_form(y: &Array, span: Span) -> Result<(Cx, &Array)> {
+    let parts = y.as_boxes().expect("a root form is boxed");
+    // The form is a boxed SCALAR or a two-box LIST, and nothing else:
+    // `p. (,<4)` is a length error there where `p. (<4)` answers, and
+    // `p. (2 2 $ <i. 2 2)` is a rank error.
+    if y.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("a polynomial's root form is a list of boxes, and this one has rank {}", y.rank()),
+            Some(span),
+        ));
+    }
+    if y.rank() == 1 && parts.len() != 2 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "the root form of a polynomial is `multiplier ; roots`, and this one has {} boxes",
+                parts.len()
+            ),
+            Some(span),
+        ));
+    }
     match parts {
         [roots] => Ok((cx::ONE, roots)),
         [multiplier, roots] => {
@@ -16422,12 +16521,21 @@ fn poly_eval(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let at = poly_coeffs(y, span)?;
     let at = at.first().copied().unwrap_or(cx::ZERO);
     let value = match x.as_boxes() {
-        Some(parts) => {
-            let (mut v, roots) = root_form(parts, span)?;
-            for r in poly_coeffs_relaxed(roots, span)? {
-                v = cx::mul(v, cx::sub(at, r));
+        Some(_) => {
+            let (mut v, roots) = root_form(x, span)?;
+            if roots.rank() >= 2 {
+                let c = root_form_coeffs(x, span)?;
+                let mut acc = cx::ZERO;
+                for &k in c.iter().rev() {
+                    acc = cx::add(cx::mul(acc, at), k);
+                }
+                acc
+            } else {
+                for r in root_list(roots, span)? {
+                    v = cx::mul(v, cx::sub(at, r));
+                }
+                v
             }
-            v
         }
         None => {
             let c = poly_coeffs_relaxed(x, span)?;
@@ -16452,8 +16560,13 @@ fn scalar_complex_or_real(z: Cx) -> Array {
 /// as `multiplier ; roots`; a y already in that form converts back to
 /// coefficients.
 fn poly_roots(y: &Array, span: Span) -> Result<Array> {
-    if let Some(parts) = y.as_boxes().filter(|p| !p.is_empty()) {
-        return Ok(complex_or_real(root_form_coeffs(parts, span)?));
+    if y.as_boxes().is_some_and(|p| !p.is_empty()) {
+        // A sparse form written in the exact types stays exact, as every
+        // other exact polynomial does: `p. (< 1 2 $ 1r2 2)` is `0 0 1r2`.
+        if let Some(exact) = exact_sparse_poly(y, span)? {
+            return Ok(exact);
+        }
+        return Ok(complex_or_real(root_form_coeffs(y, span)?));
     }
     let mut c = poly_coeffs_relaxed(y, span)?;
     while c.len() > 1 && c[c.len() - 1] == cx::ZERO {
@@ -16710,6 +16823,16 @@ fn coefficient_error(monic: &[Cx], roots: &[Cx]) -> f64 {
 /// `p.. y`: the derivative of the polynomial y's ascending coefficients
 /// describe, again as coefficients.
 fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
+    // A sparse form stored exactly is the exact coefficients it spells,
+    // and the exact path below takes it from there.
+    let spelled;
+    let y = match exact_sparse_poly(y, span)? {
+        Some(c) => {
+            spelled = c;
+            &spelled
+        }
+        None => y,
+    };
     // EXACT coefficients differentiate exactly, since every step is a
     // multiplication by a whole number: `p.. (1r2 1r3)` is `1r3`.
     if let Some(exact) = exact_poly_deriv(y) {
@@ -16717,9 +16840,10 @@ fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
     }
     // A boxed argument is the root form, differentiated through the
     // coefficients it stands for: `p.. (<1 2 3)` is `11 _12 3`.
-    let c = match y.as_boxes().filter(|p| !p.is_empty()) {
-        Some(parts) => root_form_coeffs(parts, span)?,
-        None => poly_coeffs_relaxed(y, span)?,
+    let c = if y.as_boxes().is_some_and(|p| !p.is_empty()) {
+        root_form_coeffs(y, span)?
+    } else {
+        poly_coeffs_relaxed(y, span)?
     };
     if c.len() < 2 {
         return Ok(Array::from_i64(vec![0]));
@@ -16731,12 +16855,21 @@ fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
 
 /// `x p.. y`: the integral of y's coefficients, with x as the constant term.
 fn poly_integral(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let spelled;
+    let y = match exact_sparse_poly(y, span)? {
+        Some(c) => {
+            spelled = c;
+            &spelled
+        }
+        None => y,
+    };
     // A boxed argument is the root form here too. What it does NOT take is
     // an empty of another type: `1 p.. (0$'a')` is a domain error where
     // `p.. (0$'a')` answers, and the oracle's line is the line.
-    let c = match y.as_boxes().filter(|p| !p.is_empty()) {
-        Some(parts) => root_form_coeffs(parts, span)?,
-        None => poly_coeffs(y, span)?,
+    let c = if y.as_boxes().is_some_and(|p| !p.is_empty()) {
+        root_form_coeffs(y, span)?
+    } else {
+        poly_coeffs(y, span)?
     };
     let k = poly_coeffs(x, span)?;
     if let Some(exact) = exact_poly_integral(x, y) {
@@ -16752,6 +16885,46 @@ fn poly_integral(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// The derivative of an EXACT coefficient list, kept exact. None where the
 /// argument is not a list of exact numbers, which is where the float path
 /// runs instead.
+/// A sparse polynomial whose terms are stored exactly, as the exact
+/// coefficients it spells. None where the argument is not that.
+fn exact_sparse_poly(y: &Array, span: Span) -> Result<Option<Array>> {
+    if y.rank() != 0 {
+        return Ok(None);
+    }
+    let Some([terms]) = y.as_boxes() else { return Ok(None) };
+    if terms.rank() != 2 || terms.shape[1] != 2 {
+        return Ok(None);
+    }
+    let flat: Vec<Rat> = match &terms.data {
+        Data::Rat(v) => v.to_vec(),
+        Data::Ext(v) => v.iter().map(|x| Rat::from_int(x.clone())).collect(),
+        _ => return Ok(None),
+    };
+    let mut powers = Vec::with_capacity(terms.shape[0]);
+    let mut top = 0u128;
+    for row in 0..terms.shape[0] {
+        let Some(k) = flat[2 * row + 1]
+            .to_int()
+            .as_ref()
+            .and_then(exact::ext_to_i64)
+            .filter(|&k| k >= 0)
+        else {
+            return Err(Error::domain(
+                "a sparse polynomial's exponent is a whole number at or above zero",
+                span,
+            ));
+        };
+        top = top.max(k as u128 + 1);
+        powers.push(k as usize);
+    }
+    let len = crate::limits::count(top.max(1), span)?;
+    let mut coeffs = vec![Rat::zero(); len];
+    for (row, &k) in powers.iter().enumerate() {
+        coeffs[k] = flat[2 * row].clone();
+    }
+    Ok(Some(narrow_exact(Array::new(vec![len], Data::Rat(coeffs.into())))))
+}
+
 fn exact_poly_deriv(y: &Array) -> Option<Array> {
     if y.rank() > 1 {
         return None;
