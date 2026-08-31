@@ -9217,7 +9217,36 @@ fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
 ///
 /// `None` hands the pass back to the float path, which is where a
 /// fractional radix, a fractional value and the tolerance live.
+/// `x #: y` over exact numbers, kept exact: `2 #: 1r2` is `1r2`.
+fn encode_exact_rational(x: &Array, y: &Array) -> Option<Data> {
+    if !matches!(x.dtype(), DType::Rat) && !matches!(y.dtype(), DType::Rat) {
+        return None;
+    }
+    let radix = exact_coeffs(x)?;
+    let values = exact_coeffs(y)?;
+    let (k, n) = (radix.len(), values.len());
+    let mut out = vec![Rat::zero(); k.checked_mul(n)?];
+    for (j, v) in values.iter().enumerate() {
+        let mut rem = v.clone();
+        for i in (0..k).rev() {
+            let b = &radix[i];
+            if b.is_zero() {
+                out[i * n + j] = rem;
+                rem = Rat::zero();
+            } else {
+                let r = crate::exact::rat_residue(b, &rem);
+                rem = rem.sub(&r).div(b)?;
+                out[i * n + j] = r;
+            }
+        }
+    }
+    Some(Data::Rat(out.into()))
+}
+
 fn encode_exact(x: &Array, y: &Array) -> Option<Data> {
+    if let Some(d) = encode_exact_rational(x, y) {
+        return Some(d);
+    }
     let radix = whole_i128_vec(x)?;
     let values = whole_i128_vec(y)?;
     let (k, n) = (radix.len(), values.len());
@@ -9283,6 +9312,11 @@ fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
             return Ok(Array::new(shape, Data::I64(digits.into())));
         }
     }
+    // EXACT values keep their storage, the fraction landing in the last
+    // digit: `#: 5r2` is `1 1r2`.
+    if let Some(exact) = encode_bits_exact(y) {
+        return Ok(exact);
+    }
     let values = digits_of(y, "encode", span)?;
     let k = bit_width(&values, span)?;
     let radix = vec![2.0; k];
@@ -9293,6 +9327,33 @@ fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let mut shape = y.shape.clone();
     shape.push(k);
     Ok(Array::new(shape, narrow(out, is_integral(y))))
+}
+
+/// `#: y` over exact fractions, kept exact. The digits are the bits of the
+/// integer part with the fraction added to the last one, which is what the
+/// float path's residues come to; None where the argument is not a list of
+/// rationals, and the whole numbers have their own path above.
+fn encode_bits_exact(y: &Array) -> Option<Array> {
+    let Data::Rat(vals) = &y.data else { return None };
+    let two = Rat::from_int(num_bigint::BigInt::from(2));
+    let mut k = 1usize;
+    for v in vals.iter() {
+        k = k.max(v.floor().bits().max(1) as usize);
+    }
+    let mut out: Vec<Rat> = Vec::with_capacity(vals.len().checked_mul(k)?);
+    for v in vals.iter() {
+        let mut digits = vec![Rat::zero(); k];
+        let mut rem = v.clone();
+        for slot in digits.iter_mut().rev() {
+            let r = crate::exact::rat_residue(&two, &rem);
+            rem = rem.sub(&r).div(&two)?;
+            *slot = r;
+        }
+        out.extend(digits);
+    }
+    let mut shape = y.shape.clone();
+    shape.push(k);
+    Some(narrow_exact(Array::new(shape, Data::Rat(out.into()))))
 }
 
 /// `x ,: y`: the two arguments as the items of a new leading axis. A scalar
@@ -16536,6 +16597,11 @@ fn coefficient_error(monic: &[Cx], roots: &[Cx]) -> f64 {
 /// `p.. y`: the derivative of the polynomial y's ascending coefficients
 /// describe, again as coefficients.
 fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
+    // EXACT coefficients differentiate exactly, since every step is a
+    // multiplication by a whole number: `p.. (1r2 1r3)` is `1r3`.
+    if let Some(exact) = exact_poly_deriv(y) {
+        return Ok(exact);
+    }
     // A boxed argument is the root form, differentiated through the
     // coefficients it stands for: `p.. (<1 2 3)` is `11 _12 3`.
     let c = match y.as_boxes().filter(|p| !p.is_empty()) {
@@ -16560,11 +16626,85 @@ fn poly_integral(x: &Array, y: &Array, span: Span) -> Result<Array> {
         None => poly_coeffs(y, span)?,
     };
     let k = poly_coeffs(x, span)?;
+    if let Some(exact) = exact_poly_integral(x, y) {
+        return Ok(exact);
+    }
     let mut out = vec![k.first().copied().unwrap_or(cx::ZERO)];
     for (i, &v) in c.iter().enumerate() {
         out.push(cx::div(v, cx::from_real((i + 1) as f64)));
     }
     Ok(narrow_numbers(complex_or_real(out)))
+}
+
+/// The derivative of an EXACT coefficient list, kept exact. None where the
+/// argument is not a list of exact numbers, which is where the float path
+/// runs instead.
+fn exact_poly_deriv(y: &Array) -> Option<Array> {
+    if y.rank() > 1 {
+        return None;
+    }
+    let c: Vec<Rat> = match &y.data {
+        Data::Rat(v) => v.to_vec(),
+        Data::Ext(v) => v.iter().map(|x| Rat::from_int(x.clone())).collect(),
+        _ => return None,
+    };
+    if c.len() < 2 {
+        return Some(Array::from_i64(vec![0]));
+    }
+    let out: Vec<Rat> = c
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(k, v)| v.mul(&Rat::from_int(num_bigint::BigInt::from(k as i64))))
+        .collect();
+    Some(narrow_exact(Array::new(vec![out.len()], Data::Rat(out.into()))))
+}
+
+/// A rational array whose values are all whole, as the exact integers J
+/// types them: `p.. (1 2 3x)` is `2 6`, not `2r1 6r1`.
+fn narrow_exact(a: Array) -> Array {
+    let Data::Rat(v) = &a.data else { return a };
+    let Some(ints) = v.iter().map(Rat::to_int).collect::<Option<Vec<_>>>() else {
+        return a;
+    };
+    Array::new(a.shape, Data::Ext(ints.into()))
+}
+
+/// The coefficients an array holds as exact fractions, or None where it
+/// does not hold exact numbers.
+fn exact_coeffs(a: &Array) -> Option<Vec<Rat>> {
+    if a.rank() > 1 {
+        return None;
+    }
+    let int = |v: i64| Rat::from_int(num_bigint::BigInt::from(v));
+    match &a.data {
+        Data::Rat(v) => Some(v.to_vec()),
+        Data::Ext(v) => Some(v.iter().map(|x| Rat::from_int(x.clone())).collect()),
+        Data::I64(v) => Some(v.iter().map(|&x| int(x)).collect()),
+        Data::Bool(v) => Some(v.iter().map(|&x| int(i64::from(x))).collect()),
+        _ => None,
+    }
+}
+
+/// Whether an array's own storage is one of the exact ones, which is what
+/// decides whether a computation runs in the exact arithmetic at all.
+fn is_exact_storage(a: &Array) -> bool {
+    matches!(a.dtype(), DType::Ext | DType::Rat)
+}
+
+/// `x p.. y` over exact coefficients, kept exact: every step divides by a
+/// whole number, so `1 p.. (1r2 1r3)` is `1 1r2 1r6`.
+fn exact_poly_integral(x: &Array, y: &Array) -> Option<Array> {
+    if !is_exact_storage(x) && !is_exact_storage(y) {
+        return None;
+    }
+    let c = exact_coeffs(y)?;
+    let k = exact_coeffs(x)?;
+    let mut out = vec![k.first().cloned().unwrap_or_else(Rat::zero)];
+    for (i, v) in c.iter().enumerate() {
+        out.push(v.div(&Rat::from_int(num_bigint::BigInt::from(i as i64 + 1)))?);
+    }
+    Some(narrow_exact(Array::new(vec![out.len()], Data::Rat(out.into()))))
 }
 
 /// A float array whose values are all whole, as integers. Polynomial
@@ -18138,15 +18278,25 @@ fn scan_obverse(f: &Verb, kind: WindowKind) -> Option<Verb> {
     // A prefix fold under subtraction or division alternates, so every
     // second answer is turned round again.
     let alternate = matches!((op, suffix), (SD::Sub, false) | (SD::DivJ | SD::DivApl, false));
-    if !alternate {
-        return Some(differences);
-    }
-    let signs = atop(
-        Verb::BondRight(Box::new(named("$")?), Array::from_i64(vec![1, -1])),
-        named("#")?,
+    let undo = if alternate {
+        let signs = atop(
+            Verb::BondRight(Box::new(named("$")?), Array::from_i64(vec![1, -1])),
+            named("#")?,
+        );
+        let apply = if matches!(op, SD::Sub) { named("*")? } else { named("^")? };
+        Verb::Fork(Box::new(differences), Box::new(apply), Box::new(signs))
+    } else {
+        differences
+    };
+    // A SCALAR has no axis to scan, so the scan leaves it as it is and the
+    // obverse has to leave it alone too: `+/\ ^:_1 ] 5` is 5, not the 0 a
+    // difference against a shifted-in fill would make. Running the undoing
+    // `0 < #@$` times is that guard, said in the language itself.
+    let ranked = atop(
+        Verb::BondLeft(Array::scalar_i64(0), Box::new(named("<")?)),
+        atop(named("#")?, named("$")?),
     );
-    let apply = if matches!(op, SD::Sub) { named("*")? } else { named("^")? };
-    Some(Verb::Fork(Box::new(differences), Box::new(apply), Box::new(signs)))
+    Some(Verb::PowerV(Box::new(undo), Box::new(ranked)))
 }
 
 /// The obverse of a bonded arithmetic verb. `left` says which side the noun

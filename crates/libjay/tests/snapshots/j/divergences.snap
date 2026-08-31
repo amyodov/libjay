@@ -51,10 +51,6 @@
 > j: +-+-----+
 > j: |1|1 1r2|
 > j: +-+-----+
-= 0 p.. 1 1 1x
-? jconsole divides exactly here and libjay in f64
-< 0 1 0.5 0.333333
-> j: 0 1 1r2 1r3
 = 5 <./\\. (1;2)
 ? the reference types this fold for + and not for <.
 < <error>
@@ -85,10 +81,6 @@
 ? jconsole holds both in one double and libjay keeps them exact
 < 8.11296e31
 > j: 9.0072e15
-= *: &.#. (1r2 1r3)
-? jconsole keeps the rationals through the obverse and libjay computes in f64
-< 1.77778
-> j: 16r9
 = 2 #. 0$<1
 ? jconsole refuses this one dyadic decode and answers every other empty
 < 0
@@ -129,19 +121,3 @@
 ? the reference keeps this length error and drops it for (i. 0 0) #. (,5)
 <
 > j: <error>
-= p.. (1r2 1r3)
-? jconsole keeps the rationals through the integral and libjay computes in f64
-< 0.333333
-> j: 1r3
-= (1r2 1r3) - &.:#. 2
-? jconsole keeps the rationals through the obverse and libjay computes in f64
-< 1.33333
-> j: 4r3
-= +"1 &.:#: (2 ,/ (1r2 1r3))
-? jconsole keeps the rationals through the obverse and libjay computes in f64
-< 2 0.5 0.333333
-> j: 2 1r2 1r3
-= 2 #: (1r2)
-? jconsole keeps the rational through the residue and libjay computes in f64
-< 0.5
-> j: 1r2

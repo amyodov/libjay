@@ -521,3 +521,43 @@ $ +/ S:_ (2 3 $ i. 6)
 ! ^:_3 (1 0 1 $ 5)
 (!^:_1) _
 !^:_1 (0 $ a:)
+
+// A SCALAR has no axis to scan, so the scan leaves it as it is and the
+// obverse leaves it alone too: `+/\\ ^:_1 ] 5` is 5, not the difference
+// against a shifted-in fill.
+-/\\. ^:_1 ] 5
+%/\\. ^:_1 ] 2
++/\\ ^:_1 ] 5
+-/\\. ^:(_1 0 1) 2
+%/\\. ^:(_1 0 1) 2
+-/\\. ^:_1 (#"0 1 (i. 5))
++/\\ ^:_1 (1 3 6)
+-/\\ ^:_1 (1 _1 2)
+-/\\. ^:_1 (,5)
+-/\\. ^:_1 (5 3)
+%/\\. ^:_1 (2 3)
+
+// EXACT coefficients differentiate and integrate exactly, and an exact
+// value encodes exactly, the fraction landing in the last digit.
+p.. (1r2 1r3)
+p.."1 1 (1r2 1r3)
+p.. (1 2 3x)
+1 p.. (1r2 1r3)
+0 p.. 1 1 1x
+#: 5r2
+#: (1r2 5r2)
+#: (_1r2)
+#: (7r3)
+#: (2r1 5r2)
+#: (1r2 1r3)
+#: 1r2
+#:^:2 (2 # (1r2 1r3))
+2 #: 1r2
+*: &.#. (1r2 1r3)
+(1r2 1r3) - &.:#. 2
++"1 &.:#: (2 ,/ (1r2 1r3))
+#: 2.5
+#: (1 2 3x)
+p.. (2 2 $ 0 1 2 3)
+p.. (1 2 3)
+p.. (0.5 1.5)
