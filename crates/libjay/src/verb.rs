@@ -4678,6 +4678,15 @@ fn binomial(x: f64, y: f64) -> f64 {
         if y.fract() == 0.0 && y >= 0.0 && y < x {
             return 0.0;
         }
+        // `x ! y` is `(y-x) ! y`, and where the two arguments are close the
+        // SHORT side of that symmetry is the accurate one: the gamma
+        // quotient of two huge factorials cancels to nothing useful, so
+        // `4503599627370496 ! 4503599627370497` reads as 6.2e27 where the
+        // answer is y itself. The product form has as many factors as the
+        // difference, so it is spent only where the difference is small.
+        if y.fract() == 0.0 && y >= x && y - x <= BINOMIAL_PRODUCT_LIMIT as f64 {
+            return binomial_product((y - x) as i64, y);
+        }
         // A NEGATIVE whole y has no `!y` at all — Γ(y+1) sits on a pole —
         // so the upper negation moves the question onto two whole numbers
         // that do: `x ! _k` is `(_1^x) * (k-1) ! x+k-1`, which is a product

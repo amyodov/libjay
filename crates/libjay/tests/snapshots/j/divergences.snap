@@ -95,3 +95,35 @@
 ? the reference keeps this length error and drops it for (i. 0 0) #. (,5)
 <
 > j: <error>
+= (1e10) ! (1e10 + 1e_4)
+? both sides lose this one; the reference's answer is not the value either
+< 1.00238
+> j: 1.00234
+= (_2 0 2) C. 'hello'
+? the reference's answer for a non-permutation is undefined; libjay refuses
+< <error>
+> j: eolhl
+= (_3) C. (1;2;3)
+? the reference's answer for a non-permutation is undefined; libjay refuses
+< <error>
+> j: +-+-+-+
+> j: |2|3|1|
+> j: +-+-+-+
+= (_1 _2) C. i.4
+? the reference's answer for a non-permutation is undefined; libjay refuses
+< <error>
+> j: 0 1 3 2
+= (_2 _1) C. i.4
+? the reference's answer for a non-permutation is undefined; libjay refuses
+< <error>
+> j: 0 1 2 3
+= (_1) C. i.4
+? the reference's answer for a non-permutation is undefined; libjay refuses
+< <error>
+> j: 0 1 2 3
+= C. (_2 0 2)
+? the reference's answer for a non-permutation is undefined; libjay refuses
+< <error>
+> j: +---+-+
+> j: |1 0|2|
+> j: +---+-+

@@ -96,3 +96,37 @@ p. 1r2 _3r2 1
 // cells and no others.
 (0 $ 0.5) #. (i. 2 0 3)
 ? the reference keeps this length error and drops it for (i. 0 0) #. (,5)
+
+// Two large arguments to `!` a double cannot tell apart. jconsole answers
+// `1e10 ! (1e10 + 1e_4)` with 1.00234; the value is 1.0023631, which the
+// digamma series gives independently, and the reference's difference of two
+// log-gammas cancels catastrophically at that size. libjay's own quotient
+// lands on 1.00238, no closer, and matching the reference here would mean
+// matching its arithmetic rather than the mathematics. Where the difference
+// of the two arguments is a small WHOLE number both sides are exact and
+// agree, which is the ordinary case and is recorded in fuzz_found.txt.
+(1e10) ! (1e10 + 1e_4)
+? both sides lose this one; the reference's answer is not the value either
+
+// `x C. y` over a left argument that is no permutation of y's items. The
+// Dictionary defines the dyad for a permutation — a direct one or a boxed
+// list of cycles — and says nothing about anything else. Thirty probes did
+// not find a rule in what the reference does with one: `(_2 0 2) C. 'hello'`
+// is `eolhl` there, `(_1 _2) C. i.4` is `0 1 3 2` and `(_2 _1) C. i.4` is
+// `0 1 2 3`, which is neither the direct reading nor the flat cycle form
+// `C. y` writes, and `(_1) C. i.4` and `(_3) C. (1;2;3)` disagree with both
+// again. libjay refuses instead: an undefined argument is answered with a
+// diagnostic that says which value makes it no permutation, rather than
+// with a number fabricated to match behaviour nobody has specified.
+(_2 0 2) C. 'hello'
+? the reference's answer for a non-permutation is undefined; libjay refuses
+(_3) C. (1;2;3)
+? the reference's answer for a non-permutation is undefined; libjay refuses
+(_1 _2) C. i.4
+? the reference's answer for a non-permutation is undefined; libjay refuses
+(_2 _1) C. i.4
+? the reference's answer for a non-permutation is undefined; libjay refuses
+(_1) C. i.4
+? the reference's answer for a non-permutation is undefined; libjay refuses
+C. (_2 0 2)
+? the reference's answer for a non-permutation is undefined; libjay refuses
