@@ -36,6 +36,24 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   sentence after it in the same program: `9!:11 ] 3` then `% 3` shows
   `0.333`, and `9!:19 ] 0` makes every comparison exact.
 - J's `128!:3`, the CRC-32 of a byte string.
+- J's `#.` and `#:` over COMPLEX numbers. `#. 3j4 1j_1` is `7j7`,
+  `2j1 #. 1 2 3` is `10j6`, and each digit of an encode is a complex
+  residue, which rounds with the complex floor: `2 #: 5j1` is `_1j1` and
+  `#: 3j4` is `0j1 1 1`. The monadic `#:` counts its digits off the largest
+  MAGNITUDE in the whole argument.
+- A NAMED noun in a fork's left tine. `c =: 5` and then `f =: c + ]` gives
+  the fork `5 + ]`, which is the value c held where the fork was written
+  and stays that when c is given another one. A tine the program computes —
+  a bound `{name}` among them — is read where the fork is applied.
+- A VERB named by an indirect locative. `n =: <'cc'` and then `g__n 4` runs
+  the `g` of whatever locale `n` holds, chosen where the verb is applied,
+  with `z` on the search path answering where the named locale does not.
+  Reading and writing a noun that way already worked.
+- Displaying a definition whose body is written on the LINES BELOW.
+  `g =: 3 : 0` over one line of body gives `3 : 'y + 1'` back, indentation
+  and doubled quotes included; a longer body comes back under its own
+  header with the lines beneath it.
+
 - J's locales — named namespaces for the program's globals. `V_alpha_ =. 5`
   puts `V` in locale `alpha` and `V_alpha_` reads it back; `f_alpha_ =. 3 :
   'y + 100'` defines a verb there, and its body reads the names of ITS OWN
@@ -185,6 +203,20 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   name stands for itself — where it used to stop with a value error; text
   that is no name at all, such as `5!:1 <'i.'`, is now refused as an
   ill-formed name, which is what J calls it.
+- `x #: y` over whole numbers past 2⁵². `2 #: 4503599627370497` is 1 and
+  was 0, and `#: 4503599627370497` is 53 digits rather than a refusal: the
+  digits are taken in exact integers where every radix and every value is a
+  whole number, and the float path — which is where the tolerance lives —
+  keeps everything else.
+- `x ! y` for a large whole x with a negative whole or a fractional y.
+  `100000000 ! _2` is 100000001, `5000 ! 2.5` is `_1.19787e_13` and
+  `1e10 ! 2.5` is `_1.05786e_35`; each used to say the expression had no
+  value, because the gamma quotient behind it leaves the double range. The
+  quotient is now read in logarithms, and a negative whole y through the
+  upper negation, which stays exact.
+- An EMPTY of BOXES is acceptable numeric data, as an empty of characters
+  already was: `#. 0$<1` is 0, `i. 0$<1` is 0, `A. 0$<1` is 0 and
+  `$ #: 0$<1` is `0 0`.
 - `;` (raze) over boxes whose contents have unequal rank. An opened value
   whose items have fewer axes than the others is ONE item of the common
   shape, not several of a smaller one, so `; ('ab';(2 2$'wxyz'))` is three

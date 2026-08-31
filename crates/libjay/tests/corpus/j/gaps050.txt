@@ -115,3 +115,16 @@ h =: 1 : 0\nu y\n)\nh
 g =: 3 : 0\na =. y + 1\na * 2\n)\ng
 g =: 3 : 0\ny + 1\n)\ng 3
 g =: 3 : 0\ny+1\ny+2\n)\ng 3
+
+// A VERB named by an indirect locative: the locale is a value, so which
+// verb the name stands for is settled where it is applied. `z` is on
+// every locale's search path and answers where the named locale does not.
+v =: <'base'\nf =: 3 : 'y+1'\nf__v 3
+v =: <'base'\nf =: +/\nf__v 1 2 3
+v =: <'base'\nf =: 3 : 'y+1'\n(f__v) 3
+n =: <'cc'\ng_cc_ =: 3 : 'y * 3'\ng__n 4
+g_cc_ =: 3 : 'y * 3'\ng_dd_ =: 3 : 'y + 3'\nn =: <'dd'\ng__n 4
+g_cc_ =: 4 : 'x + y * 3'\nn =: <'cc'\n2 g__n 4
+f_z_ =: 3 : 'y - 1'\nn =: <'qq'\nf__n 10
+g_cc_ =: 3 : 'y * 3'\nn =: <'cc'\ng__n"0 ] 1 2 3
+g_cc_ =: 3 : 'y * 3'\nn =: <'cc'\n+/ g__n 1 2 3

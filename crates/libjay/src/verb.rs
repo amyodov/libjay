@@ -4583,7 +4583,7 @@ fn binomial_by_logs(x: f64, y: f64) -> f64 {
     // A whole y below zero has no Γ(y+1); the upper negation moves the
     // question onto `Γ(x−y) ÷ Γ(x+1)·Γ(−y)`, whose three arguments are all
     // above zero.
-    if y.fract() == 0.0 && y < 0.0 && x.fract() == 0.0 && x >= 0.0 && x < 1e17 {
+    if y.fract() == 0.0 && y < 0.0 && x.fract() == 0.0 && (0.0..1e17).contains(&x) {
         let sign = if (x as i64) % 2 == 0 { 1.0 } else { -1.0 };
         let ln = -log_gamma_ratio(x - y, y + 1.0) - log_gamma(-y).0;
         return sign * ln.exp();
@@ -8509,7 +8509,7 @@ fn complex_shaped(shape: Vec<usize>, values: Vec<Cx>) -> Array {
 /// value taken through a division by two cannot see.
 fn whole_i128_vec(a: &Array) -> Option<Vec<i128>> {
     let whole = |v: f64| -> Option<i128> {
-        (v.is_finite() && v.fract() == 0.0 && v.abs() < 1.7e38).then(|| v as i128)
+        (v.is_finite() && v.fract() == 0.0 && v.abs() < 1.7e38).then_some(v as i128)
     };
     match &a.data {
         Data::Bool(v) => Some(v.iter().map(|&x| x as i128).collect()),

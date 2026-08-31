@@ -61,9 +61,9 @@ feature — that is a promise, not a refusal.
 | `,.` | ravel items, exactly `,"_1`: each item ravelled, so a list becomes a column | stitch, exactly `,"_1` |
 | `,:` | itemize: a leading axis of 1 (`2 3` becomes `1 2 3`) | laminate: the two arguments as the items of a new leading axis (two atoms give shape `2 1`) |
 | `#` | tally; extended where the argument is | replicate: item i repeated x[i] times (a scalar x applies to every item, and a scalar y is repeated for every count, so `1 0 1 # 5` is `5 5`) |
-| `#.` | base-2 decode (rank 1) | mixed-radix decode; a scalar x is the radix of every digit, a radix of 0 contributes none |
-| `#:` | base-2 encode; the width fits the largest magnitude in the WHOLE argument, so the verb has infinite rank | mixed-radix encode; the digit axis is x's own shape, so `2 #: 5` is a scalar and `2 2 2 #: 5` a 3-list |
-| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity in J and a domain error in APL, which has no infinite value; a complex argument reaches gamma through the Lanczos approximation | binomial: x things chosen from y, defined through gamma on the reals and in the complex plane alike |
+| `#.` | base-2 decode (rank 1) | mixed-radix decode; a scalar x is the radix of every digit, a radix of 0 contributes none. A radix or a digit with an imaginary part runs the same Horner's rule in the complex arithmetic |
+| `#:` | base-2 encode; the width fits the largest magnitude in the WHOLE argument, so the verb has infinite rank | mixed-radix encode; the digit axis is x's own shape, so `2 #: 5` is a scalar and `2 2 2 #: 5` a 3-list. Whole numbers are written out in exact integers, so a value past 2⁵² keeps its last digit; each digit of a complex encode is a complex residue |
+| `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity in J and a domain error in APL, which has no infinite value; a complex argument reaches gamma through the Lanczos approximation | binomial: x things chosen from y, defined through gamma on the reals and in the complex plane alike. Past a whole x of 4096 the falling factorial gives way to the quotient, and where that quotient leaves the double range it is read in logarithms — a negative whole y through the upper negation, which stays exact |
 | `j.` | `0j1 * y` | `x + 0j1 * y` |
 | `r.` | `^ 0j1 * y`: the unit complex at angle y | `x * ^ 0j1 * y`: polar coordinates |
 | `":` | format: the characters that display the argument | format by specification: x is one complex `w j d` per column of y's last axis, or one for all of them — `w` the field width, `d` the digits after the point, and the rounding half-to-even. A width of 0 takes what the column needs, with one blank in front of every column but the first; a NEGATIVE width asks for the exponential form, written from the left behind one column of sign. A value too wide for its field is written as that many asterisks rather than refused, and a character or boxed argument is a domain error |
@@ -2531,9 +2531,13 @@ sections above is also collected here.
 - A bonded noun (`n&v`, `u&n`) and an amend's indices (`m}`) may be
   COMPUTED in J: `mp =. +/ . *` then `(m & mp) ^: 9 m`, or `j =. 2 * i. 5`
   then `0 j } b`, are read where the derived verb is applied, as a `^:`
-  count is. A noun fork's left tine still has to be a literal, and so does
-  APL's `∘` bind (`(⍳3)∘+`), whose operand is folded at the token level
-  before any expression exists to defer. A computed GERUND amend —
+  count is. A noun fork's left tine is read where the fork is WRITTEN
+  instead — `c =: 5` then `f =: c + ]` is `5 + ]`, and stays 5 when c is
+  given another value, which is what the reference keeps — and a tine the
+  program computes is read where the fork is applied. APL's `∘` bind
+  (`(⍳3)∘+`) still has to be a literal, its operand being folded at the
+  token level before any expression exists to defer. A computed GERUND
+  amend —
   `` u`v`w} `` where the gerund is a name — stays a gap on purpose: which
   three verbs the gerund holds decides how the amend PARSES, so it has to
   be known while the program compiles.
@@ -2560,9 +2564,11 @@ sections above is also collected here.
   locale that was in force, so a name whose part of speech only that switch
   would settle is refused by name. A literal locale name is followed at both
   times.
-- A VERB named by an indirect locative (`f__var y`): the locale is a value,
-  so what part of speech the name has is not known while the sentence is
-  read. Reading and writing a NOUN through one works.
+- A VERB named by an indirect locative (`f__var y`) works: the verbs its
+  head names in every locale travel with the name and the locale the
+  operand answers chooses among them where the verb is APPLIED, with `z`
+  on the search path as the fallback. A head no locale defines at all
+  leaves the name a noun, which is the gap that remains.
 - An explicit modifier whose body NAMES AN ARGUMENT and derives the
   modifier itself is refused: that body belongs to the derived verb, which
   the reference parses only where the verb is applied and libjay parses
@@ -2570,10 +2576,10 @@ sections above is also collected here.
   argument derives at parse time and does stop at its base case, bounded at
   16 deep. Recursion inside the derived verb's own body, by `$:` or by a
   verb's name, works as it does anywhere else.
-- Displaying a definition whose body is written on the LINES BELOW, and a
-  `{{ }}`: libjay keeps a definition's text only where it was written
-  inline, so `f =. 3 : 0` … `)` and then `f` is a named gap where the
-  reference gives the listing back. The inline forms display.
+- Displaying a `{{ }}` modifier: libjay keeps a modifier's text only where
+  it was written inline. A definition whose body is on the LINES BELOW is
+  given back by those lines — one of them inline as `3 : '…'`, more of them
+  under the header again — which is what the reference shows.
 - Named on their own, beyond what
   the tables above already mark "not supported yet": a sparse array of
   CHARACTERS or of BOXES, which J has a type code for and refuses to make

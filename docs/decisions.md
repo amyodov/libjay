@@ -4470,3 +4470,50 @@ the register.
   rationals are stored there as digit blocks whose header does not follow
   the same count-and-shape rule, and rather than guess at a layout that
   would silently write the wrong bytes, those two types are a named gap.
+- 2026-08-31 — A named noun in a fork's LEFT tine is CAPTURED, not deferred.
+  The bond's computed operand and the amend's computed indices are read
+  where the derived verb is applied, and the same shape was the obvious
+  reading here. The oracle says otherwise: `c =: 5`, `f =: c + ]`,
+  `c =: 100`, `f 3` is 8 there, and `f` displays as `5 + ]`. So the tine
+  takes the value the name holds where the fork is WRITTEN, which the
+  parse-time constant table already has; a tine the program computes has no
+  such value and keeps the deferred reading, which is also what makes a
+  bound parameter (`({n} + #) 1 2 3`) work.
+- 2026-08-31 — A VERB named by an indirect locative is a `Deferred` with a
+  TABLE rather than a builder. The locale is a value, so the verb cannot be
+  chosen while the sentence is read; but every verb the head names is
+  already in the parse-time table, so the whole set travels with the name
+  (keyed by locale) and the operand's value picks one where the verb is
+  applied. That reuses the deferred machinery — the recursion guard and the
+  operand evaluation come with it — and needs no new `Verb` variant. `z` is
+  the fallback, since it stands on every locale's search path. A head no
+  locale defines at all leaves the name a noun, which is the gap that
+  remains: nothing in the parse-time table would tell the sentence it is
+  looking at a verb.
+- 2026-08-31 — `x ! y` past the falling factorial's width is read in
+  LOGARITHMS, and the two large logarithms are taken as a RATIO rather than
+  subtracted. Below the diagonal `Γ(y−x+1)` is a reflection away from a Γ of
+  a large positive argument, and that one pairs with `Γ(x+1)`; above it
+  `Γ(y+1)` and `Γ(y−x+1)` are the pair. Subtracting them directly loses the
+  answer: at y of 10³⁰⁰ each logarithm is 10³⁰² and their difference — the
+  answer itself — rounds away entirely, which read `5000 ! 1e300` as 1
+  where it is `_`. Stirling's expansion of the difference has no such
+  cancellation and is taken above an argument of 16, below which its own
+  corrections are the larger error. A NEGATIVE whole y has no `Γ(y+1)` at
+  all and goes through the upper negation, `x ! _k` = `(_1^x) * (k−1) ! x+k−1`,
+  which is a product of k−1 factors and stays exact where the answer is:
+  `100000000 ! _2` is 100000001 and not 1.00000001e8.
+- 2026-08-31 — An EMPTY of BOXES is acceptable numeric data, and jconsole's
+  own answers do not make one rule. It answers `#. 0$<1` with 0, `i. 0$<1`
+  with 0, `A. 0$<1` with 0, `2 #: 0$<1` with the empty, and
+  `(0$0) #. 0$<1` and `(0$<1) #. 0$<1` with 0 — and refuses `2 #. 0$<1`
+  alone. Since an empty holds no element to be the wrong type, libjay reads
+  one the same way everywhere and pins that single refusal in
+  `corpus/j/divergences.txt` with both answers.
+- 2026-08-31 — `x #: y` over whole numbers is taken in exact integers
+  rather than through the tolerant residue. The float path divides its way
+  down one digit at a time, which past 2⁵² cannot see the last one:
+  `2 #: 4503599627370497` was 0 and is 1. The exact path runs in i128, so a
+  double that is exactly an integer keeps every digit it has — the width of
+  `#: 12345678901234567890` is 64 — and a fractional radix or value hands
+  the pass back to the float path, which is where the tolerance lives.

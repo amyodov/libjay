@@ -94,8 +94,8 @@ default tolerance (2⁻⁴⁴); `!.` sets it per verb.
 | `}.` | 🟢 behead | 🟢 drop |
 | `{:` | 🟢 tail | — |
 | `}:` | 🟢 curtail | — |
-| `#.` | 🟢 base 2 | 🟢 base; extended where an argument is; an ATOM of digits spreads over the radices (`1 2 3 #. 5` is 50), a one-item list does not |
-| `#:` | 🟢 antibase 2 | 🟢 antibase; extended where an argument is |
+| `#.` | 🟢 base 2 | 🟢 base; extended where an argument is, and complex where one is (`#. 3j4 1j_1` is `7j7`); an ATOM of digits spreads over the radices (`1 2 3 #. 5` is 50), a one-item list does not |
+| `#:` | 🟢 antibase 2; the digit count comes from the largest magnitude, complex ones included | 🟢 antibase; extended where an argument is, whole numbers in exact integers so a value past 2⁵² keeps its last digit, and complex where an argument is — each digit is a residue, and the complex residue rounds with the complex floor |
 
 ### Selection, search, sort
 
@@ -200,16 +200,16 @@ conjunctions above:
 | Hooks `(f g)` | 🟢 |
 | Longer trains (5-verb and up) | 🟢 |
 | Cap forks `([: g h)` | 🟢 |
-| Noun forks `(n g h)` | 🟡 literal noun only |
+| Noun forks `(n g h)` | 🟢 a literal, and a NAMED noun as the value the name holds where the fork is written, which is what the reference keeps when the name is given another one; a tine the program computes is read where the fork is applied |
 | Verb (tacit) assignment `mean =. +/ % #` | 🟢 |
-| Displaying a bare tacit-verb name (`mean` after `mean =. +/ % #`) | 🟡 the linear representation, bracketed where the spelling would otherwise read as something else; a cap fork is written `f@:g` and `u"b a b` as `u"a b`, which are the same functions under another spelling, and a definition whose body is on the lines below keeps no text to give back |
+| Displaying a bare tacit-verb name (`mean` after `mean =. +/ % #`) | 🟡 the linear representation, bracketed where the spelling would otherwise read as something else; a cap fork is written `f@:g` and `u"b a b` as `u"a b`, which are the same functions under another spelling |
 | Displaying a bare modifier name (`m` after `m =. /`) | 🟡 a primitive modifier and an explicit one written inline; one whose body is on the lines below, or a `{{ }}`, keeps no text to give back |
 | `explain` facility | 🟢 |
 | Adverb and conjunction assignment `m =. /` | 🟢 the name is that modifier from the next sentence on |
 | Multiple assignment `'a b' =. …` | 🟢 the value's items are shared out whatever its rank, a scalar goes to every name, one name takes the whole value |
 | `=.` vs `=:` scoping | 🟢 a definition has its own frame; `=:` names a global |
 | Explicit definitions `3 : '…'`, `4 : '…'`, `{{ }}` | 🟢 a body with no sentences at all has neither valence, and refuses |
-| Multi-line definition body `3 : 0` … `)` | 🟢 a lone `:` line separates the monad case from the dyad case |
+| Multi-line definition body `3 : 0` … `)` | 🟢 a lone `:` line separates the monad case from the dyad case; the definition is written back out by its own source lines, one of them inline as `3 : '…'` and more of them under the header again |
 | Explicit adverb `1 : '…'` and conjunction `2 : '…'` | 🟢 both phases; operands as `u`/`v` or `m`/`n` |
 | Multi-line modifier body `1 : 0` / `2 : 0` … `)` | 🟢 |
 | `{{ }}` modifier forms | 🟢 the part of speech is read off the operand names the body uses |
@@ -219,7 +219,7 @@ conjunctions above:
 | Tacit definition `13 : '…'` | 🟡 the translation and what it computes; a cap fork is displayed `f@:g` where the reference writes `[: f g`, and a body the abstraction cannot reach becomes the explicit definition, as the reference's own fallback does |
 | Control words `if. while. for. select. try.` | 🟢 `whilst.`, `for_i.`, `fcase.`, `elseif.` included |
 | Control words `throw. catcht. goto_x. label_x.` | 🟢 a branch lands on the body statement its label stands on, and the target is settled while the definition is built, so a missing label, a doubled one and one written inside a control structure are all refused there; `throw.` leaves the definition it stands in and only a `catcht.` in a CALLER's `try.` block takes it |
-| Locales | 🟢 named and numbered locales, the locative `name_locale_` and the indirect `name__var`, `cocurrent` and `coclass`, a definition's body reading its own home locale, and the search path with `z` on it. A `cocurrent` whose locale name is COMPUTED changes the locale at run time but not the one the sentences after it are read in, so a name whose part of speech only that switch would settle is a 🔴 named gap; so is a verb named by an indirect locative |
+| Locales | 🟢 named and numbered locales, the locative `name_locale_` and the indirect `name__var`, `cocurrent` and `coclass`, a definition's body reading its own home locale, and the search path with `z` on it. A `cocurrent` whose locale name is COMPUTED changes the locale at run time but not the one the sentences after it are read in, so a name whose part of speech only that switch would settle is a 🔴 named gap; a VERB named by an indirect locative is the one the locale holds where it is applied, chosen from the verbs its head names in every locale, with `z` on the path as the fallback; a head no locale defines at all leaves the name a noun and is a 🔴 named gap |
 | `18!:` locale foreigns | 🟢 `18!:0` (the locale class), `18!:1` (the names alive), `18!:2` (the search path, read and written), `18!:3` (make one), `18!:5` (the current locale) and `18!:55` (erase a numbered one) |
 | `3!:` conversions | 🟢 `3!:0` the type code; `3!:1` an array as the bytes that stand for it, `3!:2` back again and `3!:3` the same bytes in hexadecimal, over booleans, literals, integers, floats, complex numbers and boxes at any depth — the exact types are the one hole left, and named; `x 3!:4 y` and `x 3!:5 y` write whole numbers and floating-point numbers as bytes at the widths the reference gives, and read them back, `_4` being the unsigned four-byte reading |
 | `4!:` the name table | 🟢 `4!:0` the class a name has (0 noun, 1 adverb, 2 conjunction, 3 verb, `_1` no meaning, `_2` no name), `4!:1` the names of the classes asked for, sorted, and `4!:55` erase. A name has one class at a time: naming a verb takes away the value it held |
@@ -243,7 +243,7 @@ conjunctions above:
 | Base and constant literals `16b1f`, `1p1`, `1x1` | 🟢 the base is a number in its own right (`3r4b11`, `3j4b11`, `2e1b11`) and every letter after the `b` is a digit (`36bxyz`, `2b11p1`); a `.` among the digits starts the negative powers |
 | `'strings'`, `NB.` comments, multi-sentence programs | 🟢 a quoted literal is a BYTE vector, as J's literal type is: `# 'é'` is 2, and length, shape, indexing, `a.`, `e.`, `i.` and `":` all count the UTF-8 bytes the source spells. One item per character is the opt-in `j_unicode_strings` extension ([extensions.md](extensions.md)) |
 | `{name}` host-data interpolation | 🟢 |
-| An EMPTY where numeric data is wanted (`#. ''`, `i. ''`, `¯3⊥''`) | 🟡 an empty of characters or symbols is accepted, as both references accept it; an empty of BOXES is refused, which is what jconsole does with `2 #. 0$<1` and not what it does with `#. 0$<1` |
+| An EMPTY where numeric data is wanted (`#. ''`, `i. ''`, `¯3⊥''`) | 🟢 an empty holds no element of the wrong type whatever type it was written at, boxes included: `#. 0$<1` is 0, `i. 0$<1` is 0 and `A. 0$<1` is 0, as jconsole answers them. It refuses `2 #. 0$<1` alone and answers `(0$0) #. 0$<1` and `2 #: 0$<1`, so that one is pinned as a divergence |
 
 ## APL — functions
 
@@ -260,7 +260,7 @@ conjunctions above:
 | `⌈` | 🟢 ceiling | 🟢 maximum |
 | `⌊` | 🟢 floor | 🟢 minimum |
 | `\|` | 🟢 magnitude | 🟢 residue; the quotient is rounded with the tolerance |
-| `!` | 🟢 factorial — the gamma function by the Lanczos approximation, in the complex plane as well as on the reals; a value with no imaginary part is the real it displays as | 🟢 binomial; the same function |
+| `!` | 🟢 factorial — the gamma function by the Lanczos approximation, in the complex plane as well as on the reals; a value with no imaginary part is the real it displays as | 🟢 binomial; the same function, and past the width the falling factorial is taken at the quotient is read in logarithms, so `5000 ! 2.5` and `1e10 ! _2` have their values rather than none |
 | `○` | 🟢 pi times | 🟢 circle; `¯12` to `12`, real and complex |
 | `?` | 🟡 roll; libjay's own stream, not GNU APL's | 🟡 deal; same |
 | `⌹` | 🟢 matrix inverse (Householder QR, f64); an argument of rank 3 or more is a rank error, as it is in the reference — J's `%.` has rank 2 and runs over the 2-cells instead | 🟢 matrix divide; the same rank rule on both sides. The bracket form `⌹[K]` is not this function with an axis but a GROUP of unrelated ones — see the `⌹[K]` row in the syntax table |
