@@ -10265,9 +10265,16 @@ fn complex_parts(y: &Array, polar: bool, span: Span) -> Result<Array> {
         return Ok(Array::from_f64(vec![cx::abs(z), cx::arg(z)]));
     }
     // The parts of a WHOLE number are whole: `+. 9223372036854775806` is
-    // that number and a zero, which an f64 pair could not spell.
+    // that number and a zero, which an f64 pair could not spell. An EXACT
+    // number keeps its storage for the same reason: `+. 1r2` is `1r2 0`.
     if let Some(whole) = y.as_i64_slice().and_then(|v| v.first().copied()) {
         return Ok(Array::from_i64(vec![whole, 0]));
+    }
+    if let Some(e) = y.as_ext_slice().and_then(|v| v.first().cloned()) {
+        return Ok(Array::new(vec![2], Data::Ext(vec![e, Ext::from(0i64)].into())));
+    }
+    if let Some(r) = y.as_rat_slice().and_then(|v| v.first().cloned()) {
+        return Ok(Array::new(vec![2], Data::Rat(vec![r, Rat::from_int(Ext::from(0i64))].into())));
     }
     Ok(Array::from_f64(vec![z[0], z[1]]))
 }
@@ -15731,10 +15738,12 @@ fn at_level(
     span: Span,
 ) -> Result<Array> {
     // A level of `_` is the whole argument, however deeply it is boxed:
-    // there is nothing to descend into and nothing to collect, so both
-    // valences of both spellings are u applied to what they were given.
+    // there is nothing to descend into. `L:` hands that answer back as it
+    // is; `S:` still SPREADS, and one answer spreads into one item, so
+    // `$ *: S:_ (2 3 $ i. 6)` is `1 2 3`.
     if level == RANK_INF {
-        return u.monad(y, ctx, span);
+        let answer = u.monad(y, ctx, span)?;
+        return if spread { assemble(&[1], vec![answer], span) } else { Ok(answer) };
     }
     // A negative level counts down from the argument's own top.
     let n = if level < 0 { (boxing_level(y) + level).max(0) } else { level };
@@ -15774,7 +15783,8 @@ fn at_level_dyad(
     span: Span,
 ) -> Result<Array> {
     if left == RANK_INF && right == RANK_INF {
-        return u.dyad(x, y, ctx, span);
+        let answer = u.dyad(x, y, ctx, span)?;
+        return if spread { assemble(&[1], vec![answer], span) } else { Ok(answer) };
     }
     // A negative level counts down from each argument's own top, so the
     // two sides can stop at different depths.
