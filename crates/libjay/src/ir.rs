@@ -200,7 +200,9 @@ pub const NILADIC: &str = "(no argument)";
 /// as the text they display.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExplicitRep {
+    /// The number the header names: 1, 2, 3 or 4.
     pub valence: u8,
+    /// The body, one string a line, as the source wrote them.
     pub lines: Vec<String>,
     /// The source wrote it as a DIRECT definition (`{{ … }}`), which is
     /// what a session shows it as. The representation forms give the
