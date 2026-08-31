@@ -3333,6 +3333,7 @@ fn shape_refusal(e: &Error, agreeing: bool) -> bool {
     (agreeing && matches!(e.kind, ErrorKind::Length | ErrorKind::Shape)) || index_refusal(e)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn empty_frame(
     frame: &[usize],
     dtype: DType,
@@ -5123,7 +5124,7 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
             }
             // A complex sine turns by the argument's REAL part:
             // `2 o. 1e10j1` is a limit error and `1 o. 0j1e10` is not.
-            if matches!(a[0] as i64, 1 | 2 | 3) {
+            if matches!(a[0] as i64, 1..=3) {
                 turns(b[0], span)?;
             }
             cx::circle(a[0] as i64, b).ok_or_else(|| {
@@ -13370,6 +13371,7 @@ fn indices_inverse(y: &Array, near: NearInt, span: Span) -> Result<Array> {
 ///
 /// `offset` is what the language adds to that count: nothing in J, and
 /// `⎕IO - 1` in APL, which is what both references answer.
+#[allow(clippy::too_many_arguments)]
 fn interval_index(
     x: &Array,
     y: &Array,
@@ -13466,6 +13468,7 @@ fn bisect_bounds(n: usize, mut before: impl FnMut(usize) -> bool) -> usize {
 /// searches the cells of `y` shaped like one, and answers one number per
 /// cell in the frame that is left. The cells are compared by the dialect's
 /// total array ordering, which is what puts two rows in order.
+#[allow(clippy::too_many_arguments)]
 fn interval_index_cells(
     what: &str,
     x: &Array,
@@ -19721,7 +19724,7 @@ fn boxing_level(y: &Array) -> i64 {
         // An EMPTY of boxes holds no box, so there is nothing to descend
         // into and no level to count: `L. 0$<0` is 0 in jconsole, where
         // `L. a:` is 1.
-        Some(bs) if bs.is_empty() => 0,
+        Some([]) => 0,
         Some(bs) => 1 + bs.iter().map(boxing_level).max().unwrap_or(0),
     }
 }
