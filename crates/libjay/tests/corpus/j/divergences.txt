@@ -118,3 +118,12 @@ p. 1r2 _3r2 1
 ? the reference refuses this decode and answers (<1) #. (i. 0)
 (<1) #. (i. 0)
 ? the reference answers this decode and refuses (1;2;3) #. (i. 2 0 3)
+// A refusal about the cells' SHAPES survives an empty frame for a decode
+// whose radices are real and not for one whose radices are a fill, and the
+// two spellings say the same thing about the same verb:
+// `(0 $ 0.5) #. (i. 2 0 3)` is a length error there and
+// `(i. 0 0) #. (,5)` — 0 radices against 1 digit either way — is the empty.
+// libjay keeps the cell-agreement refusals of the verbs that PAIR their
+// cells and no others.
+(0 $ 0.5) #. (i. 2 0 3)
+? the reference keeps this length error and drops it for (i. 0 0) #. (,5)

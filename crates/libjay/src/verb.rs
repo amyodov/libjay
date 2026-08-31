@@ -2378,6 +2378,12 @@ impl Verb {
                             | ScalarDyad::Residue
                             | ScalarDyad::Gcd
                             | ScalarDyad::Lcm
+                            // Measured rather than reasoned: jconsole
+                            // takes a fit on `*` and ignores it — `2 *!.1e_13 3`
+                            // is 6 — and refuses one out of the tolerance
+                            // range, which is the same shape of answer the
+                            // comparisons give.
+                            | ScalarDyad::Mul
                     ) | DyadOp::Match
                         | DyadOp::GradeSelect { .. }
                         | DyadOp::Encode
@@ -2387,6 +2393,10 @@ impl Verb {
                         | DyadOp::MemberApl
                         | DyadOp::IndexOf { .. }
                         | DyadOp::IndexOfLast { .. }
+                        // `'ab' E.!.0 'abc'` is `1 0 0` in jconsole: the
+                        // search takes a tolerance like the comparisons it
+                        // is built out of.
+                        | DyadOp::FindSeq
                 )
             }
             Verb::Rank(v, _)
@@ -3031,7 +3041,10 @@ impl Verb {
             let right = fill_cell(y, fyl, self.is_pure());
             let cell = fill_cell(x, fxl, self.is_pure()).filter(|_| right.is_some());
             let conform = ctx.cfg.rules.lang == crate::Lang::J;
-            return empty_frame(&p.frame, y.dtype(), cell, conform, ctx, |left, numeric, c| {
+            // A scalar dyad pairs its cells, so their shapes must agree
+            // whether or not there is a cell to compute.
+            let agreeing = self.scalar_dyad_op().is_some();
+            return empty_frame(&p.frame, y.dtype(), cell, conform, agreeing, ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
                 let right = if numeric {
@@ -3290,16 +3303,26 @@ fn fill_cell(y: &Array, frame_rank: usize, pure: bool) -> Option<Array> {
 /// other one leaves the frame alone; where the answer's shape is merely
 /// being learnt — a scan, a cut, an infix with no piece — none of them
 /// stands.
-/// Whether a refusal is about SHAPES rather than about the values a fill
-/// cell happened to carry. Lengths and shapes say so in their kind; an
-/// index out of range is a shape fact too — it compares a number with an
-/// axis, not with any element — and libjay reports it as a domain error,
-/// so the message is what tells it from the rest of that kind.
-fn shape_refusal(e: &Error) -> bool {
-    matches!(e.kind, ErrorKind::Length | ErrorKind::Shape)
-        || (e.kind == ErrorKind::Domain
-            && e.msg.starts_with("index ")
-            && e.msg.contains("out of range"))
+/// An index out of range: a fact about the SHAPE — it compares a number
+/// with an axis, not with any element — that libjay reports as a domain
+/// error, so the message is what tells it from the rest of that kind.
+fn index_refusal(e: &Error) -> bool {
+    e.kind == ErrorKind::Domain
+        && e.msg.starts_with("index ")
+        && e.msg.contains("out of range")
+}
+
+/// Whether a refusal from a fill run is one the sentence keeps.
+///
+/// `agreeing` says the verb PAIRS its cells — a scalar dyad, whose two
+/// cells must agree — and there a length or shape refusal is a property of
+/// the arguments' own shapes rather than of the fill: `(1 2) +"1 (i. 0 3)`
+/// is a length error in jconsole with no cell to compute. A verb that does
+/// not pair keeps no such refusal, which is what makes `(i. 0 0) #. (,5)`
+/// and `(0 3 $ 0) # (i. 2 0 3)` empties there although a cell of each would
+/// be a length error. An index out of range stands either way.
+fn shape_refusal(e: &Error, agreeing: bool) -> bool {
+    (agreeing && matches!(e.kind, ErrorKind::Length | ErrorKind::Shape)) || index_refusal(e)
 }
 
 fn empty_frame(
@@ -3307,6 +3330,7 @@ fn empty_frame(
     dtype: DType,
     cell: Option<Array>,
     conform: bool,
+    agreeing: bool,
     ctx: &mut Ctx<'_>,
     mut run: impl FnMut(&Array, bool, &mut Ctx<'_>) -> Result<Array>,
 ) -> Result<Array> {
@@ -3317,7 +3341,7 @@ fn empty_frame(
                 shape.extend_from_slice(&answer.shape);
                 return Ok(Array::new(shape, Data::empty(answer.dtype())));
             }
-            Err(e) if conform && shape_refusal(&e) => return Err(e),
+            Err(e) if conform && shape_refusal(&e, agreeing) => return Err(e),
             // The verb has nothing to say about these values, but the
             // answer still has a shape: `$ 'a' ,"0 (i. 0)` is `0 2` in
             // jconsole although a character catenates with no number, and
@@ -3529,7 +3553,7 @@ fn prim_monad_frame(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, ctx, |cell, _numeric, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
         });
     }
@@ -3573,7 +3597,7 @@ fn rank_monad(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
     }
@@ -12302,7 +12326,7 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         }
         let cell = u.is_pure().then(|| base.clone());
         let framed =
-            empty_frame(&[0], base.dtype(), cell, false, ctx, |cell, _n, c| {
+            empty_frame(&[0], base.dtype(), cell, false, false, ctx, |cell, _n, c| {
                 u.monad(cell, c, span)
             })?;
         // That run gives the shape, and its type too — except a boolean,
@@ -14628,7 +14652,7 @@ fn cut(
     // pieces would have had.
     if ranges.is_empty() {
         let cell = u.is_pure().then(|| section(&items, 0, 0));
-        return empty_frame(&[0], items.dtype(), cell, false, ctx, |cell, _n, c| {
+        return empty_frame(&[0], items.dtype(), cell, false, false, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -14710,7 +14734,7 @@ fn per_axis_cut(
         let origin = vec![0i64; frame.len()];
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
-        return empty_frame(&frame, y.dtype(), cell, false, ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, false, false, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -15731,7 +15755,7 @@ fn level_fill_check(
     let right = if y.dtype() == DType::Box { &b } else { y };
     match u.dyad(left, right, ctx, span) {
         Ok(_) => Ok(()),
-        Err(e) if shape_refusal(&e) => Err(e),
+        Err(e) if shape_refusal(&e, true) => Err(e),
         Err(_) => Ok(()),
     }
 }
@@ -17630,7 +17654,7 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     // the cell whose shape the answer keeps.
     if starts.is_empty() {
         let cell = u.is_pure().then(|| select_items(&list, &[]));
-        return empty_frame(&[0], list.dtype(), cell, false, ctx, |cell, _n, c| {
+        return empty_frame(&[0], list.dtype(), cell, false, false, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }

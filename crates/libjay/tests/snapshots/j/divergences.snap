@@ -125,3 +125,7 @@
 ? the reference answers this decode and refuses (1;2;3) #. (i. 2 0 3)
 < <error>
 > j: 0
+= (0 $ 0.5) #. (i. 2 0 3)
+? the reference keeps this length error and drops it for (i. 0 0) #. (,5)
+<
+> j: <error>
