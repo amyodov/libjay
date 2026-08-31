@@ -593,6 +593,9 @@ fn format_atom(data: &Data, i: usize, opts: &FmtOpts) -> String {
         Data::Bool(v) => (if v[i] != 0 { "1" } else { "0" }).to_string(),
         Data::I64(v) => format_i64(v[i], opts),
         Data::Ext(v) => with_neg_sign(&v[i].to_string(), opts),
+        // An exact infinity is spelled the way the language spells one,
+        // which is the float path's business.
+        Data::Rat(v) if v[i].is_infinite() => format_f64(v[i].to_f64(), opts),
         Data::Rat(v) => with_neg_sign(&v[i].to_string(), opts),
         Data::F64(v) => format_f64(v[i], opts),
         Data::Complex(v) => format_complex(v[i], opts),

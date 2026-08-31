@@ -143,7 +143,7 @@ const J_DOMAIN: &[Case] = &[
     j("2 +: 3", ErrorKind::Domain, "2 +: 3", &["0 or 1"]),
     j("2 *: 3", ErrorKind::Domain, "2 *: 3", &["0 or 1"]),
     j("13 o. 1", ErrorKind::Domain, "13 o. 1", &["_12 to 12"]),
-    j("x: _", ErrorKind::Domain, "x: _", &["infinity"]),
+    j("x: _.", ErrorKind::Domain, "x: _.", &["NaN"]),
     j("u: _1", ErrorKind::Domain, "u: _1", &["codepoint"]),
     // Arithmetic on a box names the box and says how to open it.
     j("1 + < 1 2", ErrorKind::Type, "1 + < 1 2", &["boxed", "open them first"]),

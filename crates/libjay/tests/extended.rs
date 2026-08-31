@@ -217,9 +217,18 @@ fn rounding_and_sign_leave_the_rationals(#[case] src: &str, #[case] want: DType)
 #[case("^ 1x", DType::F64)]
 #[case("o. 1x", DType::F64)]
 #[case("! 1r2", DType::F64)]
-#[case("% 0x", DType::F64)]
-#[case("2x % 0", DType::F64)]
 fn what_falls_to_float(#[case] src: &str, #[case] want: DType) {
+    assert_eq!(dtype(src), want, "{src}");
+}
+
+/// A zero divisor answers an infinity, and it stays in the exact types:
+/// `% 0x` reports the rational type in the reference too.
+#[rstest]
+#[case("% 0x", DType::Rat)]
+#[case("2x % 0", DType::Rat)]
+#[case("x: _", DType::Rat)]
+#[case("(3 {. 123x) ^ _2", DType::Rat)]
+fn an_exact_infinity_stays_exact(#[case] src: &str, #[case] want: DType) {
     assert_eq!(dtype(src), want, "{src}");
 }
 
@@ -361,9 +370,9 @@ fn exact_conversion_refuses_what_it_cannot_read() {
     assert_eq!(e.kind, ErrorKind::Domain);
     assert!(e.msg.contains("character"), "{}", e.msg);
 
-    let e = err("x: _");
+    let e = err("x: _.");
     assert_eq!(e.kind, ErrorKind::Domain);
-    assert!(e.msg.contains("infinity"), "{}", e.msg);
+    assert!(e.msg.contains("NaN"), "{}", e.msg);
 
     let e = err("3 x: 1r3");
     assert_eq!(e.kind, ErrorKind::Domain);

@@ -6146,15 +6146,19 @@ fn lcm_gcd_data(
     // beside a zero; J's and Dyalog's do neither.
     let gnu = rules.lang == crate::Lang::Apl
         && rules.gcd_rule == crate::frontend::GcdRule::Tolerant;
-    let t = arith_type(x.dtype(), y.dtype(), span)?;
+    let mut t = arith_type(x.dtype(), y.dtype(), span)?;
     if t == DType::Complex {
         // The Gaussian-integer versions, which is what both references give.
         return complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
     }
-    if t.is_exact()
-        && let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)?
-    {
-        return Ok(d);
+    if t.is_exact() {
+        if let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)? {
+            return Ok(d);
+        }
+        // No exact answer — an infinity has no divisors — so the pass
+        // widens to floats, as every other exact pass does when it
+        // declines.
+        t = DType::F64;
     }
     let both_bool = x.dtype() == DType::Bool && y.dtype() == DType::Bool;
     let float = t == DType::F64;
@@ -6300,30 +6304,23 @@ fn exact_dyad_data(
     for i in 0..n {
         let a = &xs[i / xdiv];
         let b = &ys[i / ydiv];
+        // An operation with no exact answer at all — two opposite
+        // infinities meeting, a residue of an infinity — widens the whole
+        // pass to floats, where J's own NaN rules take over.
         let v = match op {
             Add => a.add(b),
             Sub => a.sub(b),
             Mul => a.mul(b),
-            // A zero divisor is an infinity, which no rational spells.
-            DivJ | DivApl => match a.div(b) {
-                Some(v) => v,
-                None => return Ok(None),
-            },
-            Min => a.min(b).clone(),
-            Max => a.max(b).clone(),
+            DivJ | DivApl => a.div(b),
+            Min => Some(a.min(b).clone()),
+            Max => Some(a.max(b).clone()),
             Residue => exact::rat_residue(a, b),
             Gcd => exact::rat_gcd(a, b),
             Lcm => exact::rat_lcm(a, b),
-            Pow => match exact_pow(a, b, span)? {
-                Some(v) => v,
-                None => return Ok(None),
-            },
+            Pow => exact_pow(a, b, span)?,
             Binomial => match (a.to_int(), b.to_int()) {
-                (Some(k), Some(m)) => match exact::ext_binomial(&k, &m) {
-                    Some(v) => Rat::from_int(v),
-                    None => return Ok(None),
-                },
-                _ => return Ok(None),
+                (Some(k), Some(m)) => exact::ext_binomial(&k, &m).map(Rat::from_int),
+                _ => None,
             },
             // An exact root exists only between whole numbers: the
             // reference answers `3 %: 8r27` with a float, not with `2r3`.
@@ -6334,15 +6331,13 @@ fn exact_dyad_data(
                 let Some(k) = exact::ext_to_i64(&k).and_then(|k| u32::try_from(k).ok()) else {
                     return Ok(None);
                 };
-                match exact::exact_root(k, &m) {
-                    Some(v) => Rat::from_int(v),
-                    None => return Ok(None),
-                }
+                exact::exact_root(k, &m).map(Rat::from_int)
             }
             Root | Log | Circle | MakeComplex | PolarBy => return Ok(None),
             // Comparisons never reach here; `compare_data` takes them.
             Eq | Ne | Lt | Le | Gt | Ge => return Ok(None),
         };
+        let Some(v) = v else { return Ok(None) };
         out.push(v);
     }
     Ok(Some(exact_data(t, out)))
@@ -6367,17 +6362,29 @@ fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
     let v = to_rat_vec(&y.data)?;
     let shape = y.shape.clone();
     // The three that answer with a whole number whatever they were given:
-    // `<. 7r2` is the extended 3, not the rational 3.
+    // `<. 7r2` is the extended 3, not the rational 3. An infinity is no
+    // whole number, so a pass that holds one stays in the rationals, where
+    // the extremum of an infinity is the infinity itself.
     if matches!(op, Floor | Ceil | Signum) {
-        let out: Vec<Ext> = v
+        if op == Signum || v.iter().all(|r| !r.is_infinite()) {
+            let out: Vec<Ext> = v
+                .iter()
+                .map(|r| match op {
+                    Floor => r.floor().expect("finite"),
+                    Ceil => r.ceil().expect("finite"),
+                    _ => r.signum(),
+                })
+                .collect();
+            return Some(Array::new(shape, Data::Ext(out.into())).with_layout(y.layout()));
+        }
+        let out: Vec<Rat> = v
             .iter()
-            .map(|r| match op {
-                Floor => r.floor(),
-                Ceil => r.ceil(),
-                _ => r.signum(),
+            .map(|r| match (op, r.floor(), r.ceil()) {
+                (Floor, Some(k), _) | (Ceil, _, Some(k)) => Rat::from_int(k),
+                _ => r.clone(),
             })
             .collect();
-        return Some(Array::new(shape, Data::Ext(out.into())).with_layout(y.layout()));
+        return Some(Array::new(shape, Data::Rat(out.into())).with_layout(y.layout()));
     }
     let two = Rat::from_int(Ext::from(2));
     let mut out = Vec::with_capacity(v.len());
@@ -6387,12 +6394,12 @@ fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
             Neg => r.neg(),
             Abs => r.abs(),
             Recip => r.recip()?,
-            Inc => r.add(&Rat::one()),
-            Dec => r.sub(&Rat::one()),
-            OneMinus => Rat::one().sub(r),
-            Double => r.add(r),
+            Inc => r.add(&Rat::one())?,
+            Dec => r.sub(&Rat::one())?,
+            OneMinus => Rat::one().sub(r)?,
+            Double => r.add(r)?,
             Halve => r.div(&two).expect("two is not zero"),
-            Square => r.mul(r),
+            Square => r.mul(r)?,
             Sqrt => r.sqrt()?,
             Factorial => Rat::from_int(r.to_int().as_ref().and_then(exact::ext_factorial)?),
             // No exact answer: the transcendentals, the two that make a
@@ -6418,7 +6425,7 @@ fn to_exact(y: &Array, span: Span) -> Result<Array> {
             let mut out = Vec::with_capacity(v.len());
             for &x in v.iter() {
                 out.push(exact::f64_to_rat(x).ok_or_else(|| {
-                    Error::domain("an infinity has no exact value", span)
+                    Error::domain("a NaN has no exact value", span)
                 })?);
             }
             exact_data(DType::Ext, out)
@@ -8917,7 +8924,7 @@ fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
     };
     let mut acc = Rat::from_int(Ext::from(0));
     for (d, b) in digits.iter().zip(&radix) {
-        acc = acc.mul(b).add(d);
+        acc = acc.mul(b)?.add(d)?;
     }
     let exact_in = |a: &Array| matches!(a.dtype(), DType::Ext | DType::Rat);
     if exact_in(y) || x.is_some_and(exact_in) {
@@ -9278,8 +9285,8 @@ fn encode_exact_rational(x: &Array, y: &Array) -> Option<Data> {
                 out[i * n + j] = rem;
                 rem = Rat::zero();
             } else {
-                let r = crate::exact::rat_residue(b, &rem);
-                rem = rem.sub(&r).div(b)?;
+                let r = crate::exact::rat_residue(b, &rem)?;
+                rem = rem.sub(&r)?.div(b)?;
                 out[i * n + j] = r;
             }
         }
@@ -9382,15 +9389,15 @@ fn encode_bits_exact(y: &Array) -> Option<Array> {
     let two = Rat::from_int(num_bigint::BigInt::from(2));
     let mut k = 1usize;
     for v in vals.iter() {
-        k = k.max(v.floor().bits().max(1) as usize);
+        k = k.max(v.floor()?.bits().max(1) as usize);
     }
     let mut out: Vec<Rat> = Vec::with_capacity(vals.len().checked_mul(k)?);
     for v in vals.iter() {
         let mut digits = vec![Rat::zero(); k];
         let mut rem = v.clone();
         for slot in digits.iter_mut().rev() {
-            let r = crate::exact::rat_residue(&two, &rem);
-            rem = rem.sub(&r).div(&two)?;
+            let r = crate::exact::rat_residue(&two, &rem)?;
+            rem = rem.sub(&r)?.div(&two)?;
             *slot = r;
         }
         out.extend(digits);
@@ -16701,7 +16708,7 @@ fn exact_poly_deriv(y: &Array) -> Option<Array> {
         .enumerate()
         .skip(1)
         .map(|(k, v)| v.mul(&Rat::from_int(num_bigint::BigInt::from(k as i64))))
-        .collect();
+        .collect::<Option<Vec<_>>>()?;
     Some(narrow_exact(Array::new(vec![out.len()], Data::Rat(out.into()))))
 }
 

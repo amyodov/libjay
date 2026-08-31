@@ -25,8 +25,15 @@ pub type Ext = BigInt;
 /// arithmetic refuses rather than exhausts the machine.
 pub const MAX_BITS: u64 = 1 << 26;
 
-/// A rational number in lowest terms; the denominator is always positive
-/// and never zero.
+/// A rational number in lowest terms; the denominator is positive, and zero
+/// only for the two infinities.
+///
+/// The exact types carry an infinity because the reference's do: `% 0x` is
+/// `_` and reports the rational type, and `(3 {. 123x) ^ _2` is
+/// `1r15129 _ _` in one rational array. A zero denominator over a zero
+/// numerator is not one of the two — it is no number at all — and every
+/// operation that would reach it answers None instead, which widens the
+/// pass to floats where J's own NaN rules take over.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rat {
     num: BigInt,
@@ -34,15 +41,29 @@ pub struct Rat {
 }
 
 impl Rat {
-    /// `num / den`, reduced. None when the denominator is zero: an infinite
-    /// rational is not a rational, and the caller answers in floats.
+    /// `num / den`, reduced. A zero denominator is an infinity unless the
+    /// numerator is zero too, which has no value at all.
     pub fn new(num: BigInt, den: BigInt) -> Option<Rat> {
         if den.is_zero() {
-            return None;
+            if num.is_zero() {
+                return None;
+            }
+            return Some(Rat::infinity(num.sign() == Sign::Minus));
         }
         let mut r = Rat { num, den };
         r.normalize();
         Some(r)
+    }
+
+    /// One of the two infinities.
+    pub fn infinity(negative: bool) -> Rat {
+        let one = BigInt::one();
+        Rat { num: if negative { -one } else { one }, den: BigInt::zero() }
+    }
+
+    /// Whether the value is one of the two infinities.
+    pub fn is_infinite(&self) -> bool {
+        self.den.is_zero()
     }
 
     fn normalize(&mut self) {
@@ -117,54 +138,90 @@ impl Rat {
         self.den.is_one() && other.den.is_one()
     }
 
-    pub fn add(&self, other: &Rat) -> Rat {
+    /// Addition. None where two opposite infinities meet, which has no
+    /// value: `(% 0x) - (% 0x)` is a NaN error there.
+    pub fn add(&self, other: &Rat) -> Option<Rat> {
+        if self.is_infinite() || other.is_infinite() {
+            return match (self.is_infinite(), other.is_infinite()) {
+                (true, true) => (self.num == other.num).then(|| self.clone()),
+                (true, false) => Some(self.clone()),
+                _ => Some(other.clone()),
+            };
+        }
         if self.both_whole(other) {
-            return Rat::from_int(&self.num + &other.num);
+            return Some(Rat::from_int(&self.num + &other.num));
         }
         let mut r = Rat {
             num: &self.num * &other.den + &other.num * &self.den,
             den: &self.den * &other.den,
         };
         r.normalize();
-        r
+        Some(r)
     }
 
-    pub fn sub(&self, other: &Rat) -> Rat {
+    pub fn sub(&self, other: &Rat) -> Option<Rat> {
         if self.both_whole(other) {
-            return Rat::from_int(&self.num - &other.num);
+            return Some(Rat::from_int(&self.num - &other.num));
         }
         self.add(&other.neg())
     }
 
-    pub fn mul(&self, other: &Rat) -> Rat {
+    /// Multiplication. An infinity times a zero is a zero, which is what
+    /// both references answer on the reals too.
+    pub fn mul(&self, other: &Rat) -> Option<Rat> {
+        if self.is_infinite() || other.is_infinite() {
+            if self.is_zero() || other.is_zero() {
+                return Some(Rat::zero());
+            }
+            let neg = (self.num.sign() == Sign::Minus) != (other.num.sign() == Sign::Minus);
+            return Some(Rat::infinity(neg));
+        }
         if self.both_whole(other) {
-            return Rat::from_int(&self.num * &other.num);
+            return Some(Rat::from_int(&self.num * &other.num));
         }
         let mut r = Rat { num: &self.num * &other.num, den: &self.den * &other.den };
         r.normalize();
-        r
+        Some(r)
     }
 
-    /// Division; None when the divisor is zero.
+    /// Division, with J's own zero rules: `0 % 0` is zero, anything else
+    /// over a zero is an infinity, and one infinity over another has no
+    /// value.
     pub fn div(&self, other: &Rat) -> Option<Rat> {
+        if self.is_infinite() {
+            if other.is_infinite() {
+                return None;
+            }
+            let neg = (self.num.sign() == Sign::Minus) != (other.num.sign() == Sign::Minus);
+            return Some(Rat::infinity(neg));
+        }
+        if other.is_zero() {
+            return Some(if self.is_zero() {
+                Rat::zero()
+            } else {
+                Rat::infinity(self.num.sign() == Sign::Minus)
+            });
+        }
         Rat::new(&self.num * &other.den, &self.den * &other.num)
     }
 
     pub fn recip(&self) -> Option<Rat> {
-        Rat::new(self.den.clone(), self.num.clone())
+        Rat::one().div(self)
     }
 
-    /// The greatest integer at or below the value.
-    pub fn floor(&self) -> BigInt {
-        self.num.div_floor(&self.den)
+    /// The greatest integer at or below the value; None for an infinity,
+    /// which is no integer.
+    pub fn floor(&self) -> Option<BigInt> {
+        (!self.is_infinite()).then(|| self.num.div_floor(&self.den))
     }
 
-    pub fn ceil(&self) -> BigInt {
-        -(-self.num.clone()).div_floor(&self.den)
+    pub fn ceil(&self) -> Option<BigInt> {
+        (!self.is_infinite()).then(|| -(-self.num.clone()).div_floor(&self.den))
     }
 
-    /// `self ^ n` for a whole exponent. None when the value is zero and the
-    /// exponent negative.
+    /// `self ^ n` for a whole exponent. A zero to a negative power is an
+    /// infinity, as `(0x) ^ _1` is there; None only where the result would
+    /// be too large to hold.
     pub fn pow(&self, n: i64) -> Option<Rat> {
         if n == 0 {
             return Some(Rat::one());
@@ -193,9 +250,21 @@ impl Rat {
 
 impl Ord for Rat {
     fn cmp(&self, other: &Rat) -> Ordering {
-        // Both denominators are positive, so cross-multiplying keeps the
-        // sense of the comparison.
-        (&self.num * &other.den).cmp(&(&other.num * &self.den))
+        // An infinity sits past every finite value on its own side, and
+        // cross-multiplying cannot see that: both products are zero when
+        // the two infinities have opposite signs.
+        match (self.is_infinite(), other.is_infinite()) {
+            (true, true) => self.num.cmp(&other.num),
+            (true, false) => {
+                if self.num.sign() == Sign::Minus { Ordering::Less } else { Ordering::Greater }
+            }
+            (false, true) => {
+                if other.num.sign() == Sign::Minus { Ordering::Greater } else { Ordering::Less }
+            }
+            // Both denominators are positive, so cross-multiplying keeps
+            // the sense of the comparison.
+            (false, false) => (&self.num * &other.den).cmp(&(&other.num * &self.den)),
+        }
     }
 }
 
@@ -216,6 +285,11 @@ impl std::hash::Hash for Rat {
 /// `3r4`, and a whole value as the integer alone.
 impl fmt::Display for Rat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_infinite() {
+            // The array formatter spells the infinities per language; here
+            // the value is written the way J writes one in text.
+            return write!(f, "{}", if self.num.sign() == Sign::Minus { "__" } else { "_" });
+        }
         if self.is_integer() {
             return write!(f, "{}", self.num);
         }
@@ -273,6 +347,9 @@ const CT_BITS: usize = 44;
 /// the first continued-fraction convergent that is close enough. An integral
 /// value is exact, so `x: 1e30` keeps every digit the double really holds.
 pub fn f64_to_rat(x: f64) -> Option<Rat> {
+    if x.is_infinite() {
+        return Some(Rat::infinity(x < 0.0));
+    }
     if !x.is_finite() {
         return None;
     }
@@ -285,18 +362,20 @@ pub fn f64_to_rat(x: f64) -> Option<Rat> {
     let (mut k0, mut k1) = (BigInt::one(), BigInt::zero());
     let mut a = target.clone();
     let tolerance = Rat::new(BigInt::one(), BigInt::one() << CT_BITS)?;
-    let limit = target.mul(&tolerance);
+    let limit = target.mul(&tolerance)?;
     loop {
-        let n = a.floor();
+        // Every value here is finite, so none of the exact operations
+        // declines: the infinities were answered above.
+        let n = a.floor()?;
         let (nh, nk) = (&n * &h1 + &h0, &n * &k1 + &k0);
         h0 = std::mem::replace(&mut h1, nh);
         k0 = std::mem::replace(&mut k1, nk);
         let cand = Rat::new(h1.clone(), k1.clone())?;
-        let err = cand.sub(&target).abs();
+        let err = cand.sub(&target)?.abs();
         if err <= limit {
             return Some(if x < 0.0 { cand.neg() } else { cand });
         }
-        let frac = a.sub(&Rat::from_int(n));
+        let frac = a.sub(&Rat::from_int(n))?;
         if frac.is_zero() {
             return Some(if x < 0.0 { cand.neg() } else { cand });
         }
@@ -526,22 +605,31 @@ pub fn ext_residue(x: &BigInt, y: &BigInt) -> BigInt {
     if x.sign() == Sign::Minus && !r.is_zero() { r - x.abs() } else { r }
 }
 
-/// `x | y` on rationals: `y - x * <. y % x`, as on the reals.
-pub fn rat_residue(x: &Rat, y: &Rat) -> Rat {
+/// `x | y` on rationals: `y - x * <. y % x`, as on the reals. None where
+/// the quotient is no number — an infinite y — which widens to floats.
+pub fn rat_residue(x: &Rat, y: &Rat) -> Option<Rat> {
     if x.is_zero() {
-        return y.clone();
+        return Some(y.clone());
     }
-    let q = y.div(x).expect("x is not zero");
-    y.sub(&x.mul(&Rat::from_int(q.floor())))
+    // An infinite modulus leaves y where it is — the quotient is zero and
+    // an infinity times a zero is a zero — and an infinite y has no
+    // residue at all, its quotient having no floor.
+    let q = y.div(x)?;
+    y.sub(&x.mul(&Rat::from_int(q.floor()?))?)
 }
 
 /// The greatest common divisor of two rationals: `gcd(numerators) over
 /// lcm(denominators)`, which is the largest rational dividing both a whole
 /// number of times.
-pub fn rat_gcd(a: &Rat, b: &Rat) -> Rat {
+/// None where either side is infinite: no rational divides an infinity a
+/// whole number of times, and the reference calls that a NaN error.
+pub fn rat_gcd(a: &Rat, b: &Rat) -> Option<Rat> {
+    if a.is_infinite() || b.is_infinite() {
+        return None;
+    }
     let num = a.num.gcd(&b.num);
     let den = a.den.lcm(&b.den);
-    Rat::new(num, den).expect("denominators are positive")
+    Rat::new(num, den)
 }
 
 /// The least common multiple of two rationals, `lcm(numerators)` over
@@ -553,16 +641,19 @@ pub fn rat_gcd(a: &Rat, b: &Rat) -> Rat {
 /// `_1r2 *. _1r3` is `1` in jconsole, `¯5∧2` is `¯10` in GNU APL — and it is
 /// the only place the exact path differed from the machine-integer one,
 /// which has always carried the sign through `a % g × b`.
-pub fn rat_lcm(a: &Rat, b: &Rat) -> Rat {
+pub fn rat_lcm(a: &Rat, b: &Rat) -> Option<Rat> {
+    if a.is_infinite() || b.is_infinite() {
+        return None;
+    }
     if a.is_zero() || b.is_zero() {
-        return Rat::zero();
+        return Some(Rat::zero());
     }
     let mut num = a.num.lcm(&b.num);
     if (a.num.sign() == Sign::Minus) != (b.num.sign() == Sign::Minus) {
         num = -num;
     }
     let den = a.den.gcd(&b.den);
-    Rat::new(num, den).expect("denominators are positive")
+    Rat::new(num, den)
 }
 
 #[cfg(test)]
@@ -579,16 +670,17 @@ mod tests {
         assert_eq!(r(1, -2), r(-1, 2));
         assert_eq!(r(6, 3).to_string(), "2");
         assert_eq!(r(-1, 2).to_string(), "-1r2");
-        assert!(Rat::new(BigInt::one(), BigInt::zero()).is_none());
+        assert_eq!(Rat::new(BigInt::one(), BigInt::zero()), Some(Rat::infinity(false)));
+        assert!(Rat::new(BigInt::zero(), BigInt::zero()).is_none());
     }
 
     #[test]
     fn rational_arithmetic_is_exact() {
-        assert_eq!(r(1, 2).add(&r(1, 3)), r(5, 6));
-        assert_eq!(r(1, 2).mul(&r(2, 3)), r(1, 3));
+        assert_eq!(r(1, 2).add(&r(1, 3)), Some(r(5, 6)));
+        assert_eq!(r(1, 2).mul(&r(2, 3)), Some(r(1, 3)));
         assert_eq!(r(1, 2).div(&r(1, 3)), Some(r(3, 2)));
         assert_eq!(r(1, 2).pow(-2), Some(r(4, 1)));
-        assert_eq!(r(1, 2).sub(&r(1, 2)), Rat::zero());
+        assert_eq!(r(1, 2).sub(&r(1, 2)), Some(Rat::zero()));
         assert_eq!(r(1, 4).sqrt(), Some(r(1, 2)));
         assert_eq!(r(1, 2).sqrt(), None);
     }
@@ -597,9 +689,9 @@ mod tests {
     fn rationals_order_by_value_however_they_are_spelled() {
         assert!(r(1, 3) < r(1, 2));
         assert!(r(2, 4) == r(1, 2));
-        assert_eq!(r(7, 2).floor(), BigInt::from(3));
-        assert_eq!(r(7, 2).ceil(), BigInt::from(4));
-        assert_eq!(r(-7, 2).floor(), BigInt::from(-4));
+        assert_eq!(r(7, 2).floor(), Some(BigInt::from(3)));
+        assert_eq!(r(7, 2).ceil(), Some(BigInt::from(4)));
+        assert_eq!(r(-7, 2).floor(), Some(BigInt::from(-4)));
     }
 
     #[test]
@@ -631,17 +723,17 @@ mod tests {
 
     #[test]
     fn gcd_and_lcm_of_rationals() {
-        assert_eq!(rat_gcd(&r(1, 2), &r(1, 3)), r(1, 6));
-        assert_eq!(rat_lcm(&r(1, 2), &r(1, 3)), r(1, 1));
-        assert_eq!(rat_gcd(&r(5, 1), &r(15, 1)), r(5, 1));
+        assert_eq!(rat_gcd(&r(1, 2), &r(1, 3)), Some(r(1, 6)));
+        assert_eq!(rat_lcm(&r(1, 2), &r(1, 3)), Some(r(1, 1)));
+        assert_eq!(rat_gcd(&r(5, 1), &r(15, 1)), Some(r(5, 1)));
         // A negative multiple keeps its sign, and two of them cancel; the
         // divisor stays positive.
-        assert_eq!(rat_lcm(&r(-5, 1), &r(2, 1)), r(-10, 1));
-        assert_eq!(rat_lcm(&r(5, 1), &r(-5, 1)), r(-5, 1));
-        assert_eq!(rat_lcm(&r(-5, 1), &r(-5, 1)), r(5, 1));
-        assert_eq!(rat_lcm(&r(-1, 2), &r(1, 3)), r(-1, 1));
-        assert_eq!(rat_gcd(&r(-5, 1), &r(5, 1)), r(5, 1));
-        assert_eq!(rat_lcm(&r(0, 1), &r(-5, 1)), r(0, 1));
+        assert_eq!(rat_lcm(&r(-5, 1), &r(2, 1)), Some(r(-10, 1)));
+        assert_eq!(rat_lcm(&r(5, 1), &r(-5, 1)), Some(r(-5, 1)));
+        assert_eq!(rat_lcm(&r(-5, 1), &r(-5, 1)), Some(r(5, 1)));
+        assert_eq!(rat_lcm(&r(-1, 2), &r(1, 3)), Some(r(-1, 1)));
+        assert_eq!(rat_gcd(&r(-5, 1), &r(5, 1)), Some(r(5, 1)));
+        assert_eq!(rat_lcm(&r(0, 1), &r(-5, 1)), Some(r(0, 1)));
     }
 
     #[test]

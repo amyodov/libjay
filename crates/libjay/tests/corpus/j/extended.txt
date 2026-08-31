@@ -193,3 +193,64 @@ _2 x: 2
 _1 x: 1r2
 1r2 ^ 100
 2 %: 1r9
+
+// The exact types carry the two infinities. `% 0x` is `_` and reports the
+// rational type, and `(3 {. 123x) ^ _2` is one rational array holding both
+// a fraction and an infinity. The arithmetic follows the same rules the
+// reals do: an infinity swallows a finite addend, an infinity times a zero
+// is a zero, a zero over a zero is a zero, and two infinities that cancel
+// have no value at all — where the pass widens to floats and J's own NaN
+// error takes over.
+(3 {. 123x) ^ _2
+(1 0x) ^ _1
+(1 0x) % 0
+1x % 0
+1r2 % 0
+(% 0x) + (% 0x)
+(% 0x) * (% 0x)
+(% 0x) % (% 0x)
+(% 0x) % 2x
+2x % (% 0x)
+(% 0x) | 2x
+2x | (% 0x)
+| (% 0x)
+- (% 0x)
+* (% 0x)
+>. (% 0x)
+<. (% 0x)
+% (% 0x)
+(% 0x) = (% 0x)
+(% 0x) < (% 0x)
+x: 1 % 0
+x: _
+x: _ 1 2
+(% 0x) ^ 0
+0 ^ (% 0x)
+(% 0x) ! 2x
+2x ! (% 0x)
+(% 0x) <. 2x
+(% 0x) >. 2x
+(% 0x) +. 2x
+(% 0x) *. 2x
+(% 0x) , 1r2
+1r2 , (% 0x)
+%: (% 0x)
+(% 0x) ^ _1
+(% 0x) ^ 2
+! (% 0x)
+(% 0x) - 2x
+2x - (% 0x)
+0x % 0x
+(% 0x) + 1
+(% 0x) = _
+(% 0x) e. (_ 1 2)
+< (% 0x)
+": (% 0x)
+5 {. (% 0x)
++/ ((% 0x) , 1r2)
+/: ((% 0x) , 1r2 , (- % 0x))
+2 #: (% 0x)
+(% 0x) p. 2
+2 x: (% 0x)
+p.. ((% 0x) , 1r2)
+(% 0x) * 0x
