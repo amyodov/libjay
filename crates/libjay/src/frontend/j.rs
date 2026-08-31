@@ -2078,11 +2078,15 @@ fn primitive(word: &str) -> Option<Prim> {
         "|:" => prim("|:", M::TransposeAxes, D::TransposeJ, [INF, 1, INF]),
         "i." => prim("i.", M::IotaJ, D::IndexOf { origin: 0, major_cells: false }, [1, INF, INF]),
         "i:" => prim("i:", M::Steps, D::IndexOfLast { origin: 0 }, [0, INF, INF]),
+        // The dyad reads its whole left argument, whose major cells are the
+        // bounds: `(2 2$1 2 3 4) I. 2 3` is 1 rather than the `1 2 / 0 0`
+        // a left rank of 1 would frame, and `I. b. 0` is `1 _ _`. The
+        // framed reading is still reachable as `I."1 _`.
         "I." => prim(
             "I.",
             M::Indices { origin: 0, boxed_coords: false },
             D::IntervalIndex { offset: 0, closed: false },
-            [1, 1, INF],
+            [1, INF, INF],
         ),
         // The dyad reads the whole argument: `2 x: y` gives every value a
         // numerator and a denominator, which becomes a trailing axis.

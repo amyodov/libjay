@@ -3030,10 +3030,11 @@ impl Verb {
         if p.n == 0 {
             let right = fill_cell(y, fyl, self.is_pure());
             let cell = fill_cell(x, fxl, self.is_pure()).filter(|_| right.is_some());
-            return Ok(empty_frame(&p.frame, y.dtype(), cell, ctx, |left, c| {
+            let conform = ctx.cfg.rules.lang == crate::Lang::J;
+            return empty_frame(&p.frame, y.dtype(), cell, conform, ctx, |left, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 self.dyad_cell(left, right, c, span)
-            }));
+            });
         }
         let work = x.count().max(y.count());
         let cells = each_cell(p.n, work, self.is_pure(), ctx, |i, c| {
@@ -3266,24 +3267,46 @@ fn fill_cell(y: &Array, frame_rank: usize, pure: bool) -> Option<Array> {
 /// would have had, so an empty of the frame's shape alone drops whatever
 /// axes the cells carried: `(,"1) i. 0 3` is a 0 by 3 table, not a list.
 /// The missing axes come from running the verb once on a cell of fills and
-/// keeping the shape of the answer, which is J's own rule. A verb that
-/// refuses the fill cell, or a cell there was no point building, leaves the
-/// frame standing on its own, holding the argument's type.
+/// keeping the shape of the answer, which is J's own rule. A cell there was
+/// no point building leaves the frame standing on its own, holding the
+/// argument's type.
+///
+/// `conform` says what a REFUSED fill cell means. A fill cell carries no
+/// data of the argument's own, so what it makes of a verb's VALUES is not
+/// the sentence's business: `'' { 1 2 3` and `'a' ,"0 (i. 0)` are empties
+/// in jconsole although a space is no index and a character catenates with
+/// no number. What the cells' SHAPES make of the verb is the sentence's
+/// business, because those shapes are the arguments' own —
+/// `(1 2) +"1 (i. 0 3)` pairs a two-element cell with a three-element one
+/// and is a length error there, with no cell to compute. So under J's rank
+/// framing a length or shape refusal from the fill run stands and every
+/// other one leaves the frame alone; where the answer's shape is merely
+/// being learnt — a scan, a cut, an infix with no piece — none of them
+/// stands.
 fn empty_frame(
     frame: &[usize],
     dtype: DType,
     cell: Option<Array>,
+    conform: bool,
     ctx: &mut Ctx<'_>,
     run: impl FnOnce(&Array, &mut Ctx<'_>) -> Result<Array>,
-) -> Array {
+) -> Result<Array> {
     let mut shape = frame.to_vec();
-    if let Some(cell) = cell
-        && let Ok(answer) = run(&cell, ctx)
-    {
-        shape.extend_from_slice(&answer.shape);
-        return Array::new(shape, Data::empty(answer.dtype()));
+    if let Some(cell) = cell {
+        match run(&cell, ctx) {
+            Ok(answer) => {
+                shape.extend_from_slice(&answer.shape);
+                return Ok(Array::new(shape, Data::empty(answer.dtype())));
+            }
+            Err(e)
+                if conform && matches!(e.kind, ErrorKind::Length | ErrorKind::Shape) =>
+            {
+                return Err(e);
+            }
+            Err(_) => {}
+        }
     }
-    Array::new(shape, Data::empty(dtype))
+    Ok(Array::new(shape, Data::empty(dtype)))
 }
 
 // ------------------------------------------------------------ agreement
@@ -3473,7 +3496,10 @@ fn prim_monad_frame(
     let n: usize = frame.iter().product();
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
-        return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| monad_op(p, cell, c, span)));
+        let conform = ctx.cfg.rules.lang == crate::Lang::J;
+        return empty_frame(&frame, y.dtype(), cell, conform, ctx, |cell, c| {
+            monad_op(p, cell, c, span)
+        });
     }
     let cells =
         each_cell(n, y.count(), pure, ctx, |i, c| monad_op(p, &y.cell_at(frame_rank, i), c, span))?;
@@ -3514,7 +3540,8 @@ fn rank_monad(
     let n: usize = frame.iter().product();
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
-        return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| v.monad(cell, c, span)));
+        let conform = ctx.cfg.rules.lang == crate::Lang::J;
+        return empty_frame(&frame, y.dtype(), cell, conform, ctx, |cell, c| v.monad(cell, c, span));
     }
     let cells = each_cell(n, y.count(), pure, ctx, |i, c| {
         cycled(v, i).monad(&y.cell_at(frame_rank, i), c, span)
@@ -10467,23 +10494,32 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             // The bounds are MAJOR CELLS in the Dyalog reading, so a matrix
             // searches rows and a scalar — having no cell — is refused; the
             // APL2 line reads a scalar as one bound and has no meaning for
-            // a table of them. J's `I.` reads neither rule.
-            if apl {
-                match cfg.rules.lookup_left {
-                    LookupLeft::MajorCells if x.rank() >= 2 => {
-                        return interval_index_cells(
-                            x,
-                            y,
-                            offset,
-                            closed,
-                            Grading::of(cfg.rules, tol),
-                            span,
-                        );
-                    }
-                    LookupLeft::MajorCells => {
-                        major_cell_rank("⍸", x, y, span)?;
-                    }
-                    LookupLeft::AnyRank => {}
+            // a table of them.
+            //
+            // J's `I.` reads the cells too, and differs from Dyalog only in
+            // allowing a SCALAR left argument, which is one bound:
+            // `(2 2$1 2 3 4) I. 2 3` is 1, `(2 2$1 2 3 4) I. 2` is a rank
+            // error, and `(2 3$i.6) I. 1 2` a length error. A left argument
+            // of rank 0 or 1 has cells of rank 0 either way, which is what
+            // the numeric path below already searches.
+            let what = if apl { "⍸" } else { "I." };
+            let by_cells = if apl { cfg.rules.lookup_left == LookupLeft::MajorCells } else { true };
+            if by_cells {
+                if x.rank() >= 2 {
+                    return interval_index_cells(
+                        what,
+                        x,
+                        y,
+                        offset,
+                        closed,
+                        Grading::of(cfg.rules, tol),
+                        span,
+                    );
+                }
+                // A scalar has no cell to search by, which Dyalog refuses
+                // and J reads as one bound.
+                if apl {
+                    major_cell_rank(what, x, y, span)?;
                 }
             }
             // J's `I.` compares EXACTLY, where APL's `⍸` consults ⎕CT:
@@ -12137,7 +12173,8 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
             return Ok(Array::new(base.shape.clone(), Data::empty(base.dtype())));
         }
         let cell = u.is_pure().then(|| base.clone());
-        let framed = empty_frame(&[0], base.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span));
+        let framed =
+            empty_frame(&[0], base.dtype(), cell, false, ctx, |cell, c| u.monad(cell, c, span))?;
         // That run gives the shape, and its type too — except a boolean,
         // which carries no type of its own here: an insert's identity is
         // boolean whatever it was folding, and then the argument's type
@@ -13171,11 +13208,12 @@ fn interval_index(
     Ok(Array::new(y.shape.clone(), Data::I64(out.into())))
 }
 
-/// `x ⍸ y` where the bounds are MAJOR CELLS: a table of them searches the
-/// cells of `y` shaped like one, and answers one number per cell in the
-/// frame that is left. The cells are compared by the dialect's total array
-/// ordering, which is what puts two rows in order.
+/// `x ⍸ y` and `x I. y` where the bounds are MAJOR CELLS: a table of them
+/// searches the cells of `y` shaped like one, and answers one number per
+/// cell in the frame that is left. The cells are compared by the dialect's
+/// total array ordering, which is what puts two rows in order.
 fn interval_index_cells(
+    what: &str,
     x: &Array,
     y: &Array,
     offset: i64,
@@ -13183,7 +13221,7 @@ fn interval_index_cells(
     ord: Grading,
     span: Span,
 ) -> Result<Array> {
-    let cell_rank = major_cell_rank("⍸", x, y, span)?;
+    let cell_rank = major_cell_rank(what, x, y, span)?;
     let frame_rank = y.rank() - cell_rank;
     let frame: Vec<usize> = y.shape[..frame_rank].to_vec();
     let nf: usize = frame.iter().product();
@@ -14338,7 +14376,7 @@ fn cut(
     // pieces would have had.
     if ranges.is_empty() {
         let cell = u.is_pure().then(|| section(&items, 0, 0));
-        return Ok(empty_frame(&[0], items.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
+        return empty_frame(&[0], items.dtype(), cell, false, ctx, |cell, c| u.monad(cell, c, span));
     }
     let mut cells = Vec::with_capacity(ranges.len());
     for (piece, (s, e)) in ranges.iter().enumerate() {
@@ -14418,7 +14456,7 @@ fn per_axis_cut(
         let origin = vec![0i64; frame.len()];
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
-        return Ok(empty_frame(&frame, y.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
+        return empty_frame(&frame, y.dtype(), cell, false, ctx, |cell, c| u.monad(cell, c, span));
     }
     let mut cells = Vec::with_capacity(total);
     let mut coord = vec![0usize; frame.len()];
@@ -17181,7 +17219,7 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     // the cell whose shape the answer keeps.
     if starts.is_empty() {
         let cell = u.is_pure().then(|| select_items(&list, &[]));
-        return Ok(empty_frame(&[0], list.dtype(), cell, ctx, |cell, c| u.monad(cell, c, span)));
+        return empty_frame(&[0], list.dtype(), cell, false, ctx, |cell, c| u.monad(cell, c, span));
     }
     let mut cells = Vec::with_capacity(starts.len());
     for (piece, start) in starts.into_iter().enumerate() {

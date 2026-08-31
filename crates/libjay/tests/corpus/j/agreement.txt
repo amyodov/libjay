@@ -1,0 +1,61 @@
+// The differential sweep against jconsole, driven to agreement. Every row
+// here is a sentence the fuzzer's minimiser cut a mismatch down to, kept so
+// the family it belongs to cannot come back.
+
+// `I.` reads the MAJOR CELLS of its left argument, and its dyad has an
+// infinite left rank (`I. b. 0` is `1 _ _`). A table of bounds searches
+// cells of `y` shaped like one row: `(2 2$1 2 3 4) I. 2 3` is 1, not the
+// `1 2 / 0 0` a left rank of 1 would frame — that reading is still
+// reachable as `I."1 _`. A right argument with no cell of that shape is a
+// rank error, and one whose cells are the wrong shape a length error, which
+// is what makes every rank-2 left argument over an empty right one a
+// refusal rather than an empty. A left argument of rank 0 or 1 has cells of
+// rank 0 either way, so the bounds are its atoms.
+(2 2$1 2 3 4) I. 2 3
+(2 2$1 2 3 4) I. (2 2$0 0 3 5)
+(2 2$1 2 3 4) I. (3 2$0 0 3 5 1 2)
+(2 2$'abcd') I. 'ac'
+(i. 2 2 2) I. (i. 2 2)
+(i. 2 2 2) I. (i. 2 2 2)
+(0 2$0) I. 1 2
+(2 2$1 2 3 4) I. 2
+(i. 2 3) I. 2
+(0 3$0) I. 2
+(i. 0 0 3) I. 2
+(2 0 3 $ 0) I. 2
+(2 3$i.6) I. 1 2
+(2 3$i.6) I. i.2 2
+(2 2$1 2 3 4) I."1 _ (2 3)
+I. b. 0
+2 I. 3
+2 I. i.2 3
+(1 2 3) I. i. 2 3
+(i.0) I. 2
+
+// Rank framing over an EMPTY frame still applies the verb once, to a cell
+// of fills, and that run is part of the sentence: it says what shape the
+// cells would have had, and its refusal is the sentence's refusal.
+// `(1 2) +"1 (i. 0 3)` is a length error and `2 {"1 (i. 0 2)` an index
+// error although neither has a cell to compute, while `(1 2 3) +"1 (i. 0 3)`
+// is the 0 by 3 table the fill run's shape gives it.
+$ (1 2 3) +"1 (i. 0 3)
+(1 2) +"1 (i. 0 3)
+2 {"1 (i. 0 2)
+5 {"1 (i. 0 2)
+(3&{)"0 (i. 0)
++/"1 (i. 0 3)
+(1r2 1r3) <"1 (i. 0 0)
+(2 0 3 $ 0) ~:"1 (0 $ 3j4)
+(i. 0 0) ~: "_ 1 1 ('hello')
+(1 {. 2) + "_ 1 1 (0 3 $ 2)
+(2 0 1 {. 2) +."1 (0 $ 2)
+(0 $ 0.5) #. (i. 2 0 3)
+
+// A scan, a cut and an infix with no piece at all learn the answer's shape
+// the same way, and there a refused run leaves the frame standing: these
+// are the empties jconsole answers.
+(3&{)\\ (i. 0 2)
+5 (3&{)\\ (i. 3)
+(3&{) ;._1 (0$0)
+(3&{)/\\ (i. 0 2)
++/\\ (0$'a')
