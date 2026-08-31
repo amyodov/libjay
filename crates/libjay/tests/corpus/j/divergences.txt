@@ -42,29 +42,6 @@ u: 233
 p. 1r2 _3r2 1
 ? jconsole factors this one over the rationals and libjay computes in f64
 
-// The dyadic outfix types its whole argument before any piece is cut, and
-// libjay does that for every fold J has special code for. Over BOXES the
-// reference does not follow its own rule: `5 +/\. (1;2)` is a domain error
-// there, while `5 <./\. (1;2)` and `5 */\. (2;5)` — the same shape, the
-// same argument, no piece left over — are the empty, and `0 >./\. (<'abc')`
-// answers a pair of boxes no maximum was ever taken of. Two of those three
-// cannot both be a rule. libjay asks the operand once, of the whole
-// argument, whichever fold it is, and refuses where that has no meaning.
-5 <./\\. (1;2)
-? the reference types this fold for + and not for <.
-5 */\\. (2;5)
-? the reference types this fold for + and not for *
-3 <./\\. (1;2;3)
-? the reference types this fold for + and not for <.
-0 >./\\. (<'abc')
-? the reference types this fold for + and not for >.
-// The same contradiction over CHARACTERS, where no piece is left either:
-// `6 +/\\. 'abc'` is a domain error there and `6 */\\. 'abc'` the empty.
-6 */\\. 'abc'
-? the reference types this fold for + and not for *
-5 <./\\. 'hello'
-? the reference types this fold for + and not for <.
-
 // Two whole numbers a double cannot tell apart. jconsole holds every
 // number in a double once the verb is not one of the integer special
 // cases, so `9007199254740992` and `9007199254740993` are the same value

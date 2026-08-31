@@ -6339,6 +6339,18 @@ fn exact_dyad_data(
     Ok(Some(exact_data(t, out)))
 }
 
+/// The exact square root of one pass of exact data, or None where any cell
+/// has none. It is what `^ 0.5` and `%:` both answer with over extended
+/// integers and rationals.
+fn exact_sqrt_data(x: &Data, xoff: usize, xdiv: usize, n: usize) -> Option<Data> {
+    let xs = rat_window(x, xoff, xdiv, n)?;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        out.push(xs[i / xdiv].sqrt()?);
+    }
+    Some(exact_data(x.dtype(), out))
+}
+
 /// Elementwise monadic application in the exact types. `Ok(None)` widens to
 /// float, as in the dyadic pass.
 fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
@@ -6563,6 +6575,21 @@ fn scalar_dyad_wide(
     }
     if matches!(op, Lcm | Gcd) {
         return lcm_gcd_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, rules, span);
+    }
+    // An exact base raised to the atom 0.5 is the exact square root:
+    // `4x ^ 0.5` is the extended 2 and `(1r4) ^ 0.5` is `1r2`. Only that
+    // one exponent, and only as an atom — `4x ^ 0.5 0.5` is a float there,
+    // and so is `4 ^ 0.5`, whose base is a machine integer — and only where
+    // every cell has a root, one failure widening the whole pass.
+    if op == Pow
+        && matches!(x.dtype(), DType::Ext | DType::Rat)
+        && let Data::F64(e) = y
+        && yoff == 0
+        && e.len() == 1
+        && e[0] == 0.5
+        && let Some(d) = exact_sqrt_data(x, xoff, xdiv, n)
+    {
+        return Ok(d);
     }
     let t = arith_type(x.dtype(), y.dtype(), span)?;
     if t.is_exact()
@@ -17894,27 +17921,26 @@ fn stencil(u: &Verb, w: &[i64], y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Res
     assemble(&frame, cells, span)
 }
 
-/// Whether an insert settles its domain from the whole argument before it
-/// cuts anything. J answers `2 %/\. 'abc'` with `ca` — a piece of one item
-/// applies nothing, so the characters are never divided — but refuses
-/// `2 +/\. 'abc'`, because a sum, a product, a running minimum or maximum
-/// and an or are the five folds its special code types up front. The set is
-/// the oracle's, exactly: `*./`, which looks like it belongs, answers.
-fn folds_eagerly(u: &Verb) -> bool {
-    let Verb::Reduce(inner) = u else { return false };
-    matches!(
-        **inner,
-        Verb::Prim(Prim {
-            dyad: DyadOp::Scalar(
-                ScalarDyad::Add
-                    | ScalarDyad::Mul
-                    | ScalarDyad::Min
-                    | ScalarDyad::Max
-                    | ScalarDyad::Gcd
-            ),
-            ..
-        })
-    )
+/// Whether an insert settles its domain from the whole argument before an
+/// outfix cuts anything, and on which of the two conditions. A sum, a
+/// product, a running minimum or maximum and an or are the five folds J has
+/// special code for; `*./`, which looks like it belongs, answers, and so
+/// does every fold outside the five (`2 %/\. 'abc'` is `ca`).
+///
+/// `Some(true)` is the sum, which types the argument wherever the outfix
+/// asks the fold for anything at all. `Some(false)` is the other four,
+/// which type it only where some piece really holds an item: `3 <./\. (1;2;3)`
+/// leaves one EMPTY piece and is `_` there, and `0 >./\. 'a'` is `aa`.
+fn folds_eagerly(u: &Verb) -> Option<bool> {
+    let Verb::Reduce(inner) = u else { return None };
+    let Verb::Prim(Prim { dyad: DyadOp::Scalar(op), .. }) = **inner else {
+        return None;
+    };
+    match op {
+        ScalarDyad::Add => Some(true),
+        ScalarDyad::Mul | ScalarDyad::Min | ScalarDyad::Max | ScalarDyad::Gcd => Some(false),
+        _ => None,
+    }
 }
 
 /// `x u\. y`: u applied to y with every run of x consecutive items removed.
@@ -17945,15 +17971,18 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     // although every piece it leaves behind holds one character, and so are
     // `_2 +/\. 'ab'` and `4 +/\. 'abc'`, which fold nothing at all. Every
     // other fold is asked piece by piece, so `2 %/\. 'abc'` is `ca`. The
-    // probe is spent on characters and boxes alone, since numeric data
-    // never fails it -- and on nothing at all when the operand is not pure,
-    // since a verb that writes must not write twice.
-    if !list.dtype().is_numeric()
-        && u.is_pure()
-        && folds_eagerly(u)
-        && n >= 1
-        && (n >= 2 || !starts.is_empty())
-    {
+    // sum types the argument wherever the outfix asks the fold for
+    // anything; the other four only where a piece really holds an item,
+    // which is a piece shorter than the argument. The probe is spent on
+    // characters and boxes alone, since numeric data never fails it -- and
+    // on nothing at all when the operand is not pure, since a verb that
+    // writes must not write twice.
+    let eager = match folds_eagerly(u) {
+        None => false,
+        Some(true) => n >= 1 && (n >= 2 || !starts.is_empty()),
+        Some(false) => n >= 2 && i128::from(n) > i128::from(k.unsigned_abs()),
+    };
+    if !list.dtype().is_numeric() && u.is_pure() && eager {
         // The question is whether the operand has a MEANING for this data,
         // and a fold of one item answers nothing: `+/ ,'a'` is that one
         // character, applying `+` to nothing. So an argument of one item is

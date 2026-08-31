@@ -399,3 +399,51 @@ _1r2 *. _1r3
 _5x +. 5x
 _5x +. 2x
 _1r2 +. 1r3
+
+// The dyadic outfix types its whole argument before any piece is cut, and
+// which folds do that is two rules rather than one. A SUM types it wherever
+// the outfix asks the fold for anything at all — one item with a piece to
+// leave out is enough. A product, a running minimum or maximum and an or
+// type it only where some piece really holds an item, so a width at or
+// above the argument's length leaves them nothing to object to. Every fold
+// outside those five is asked piece by piece.
+6 +/\\. 'abc'
+6 */\\. 'abc'
+6 <./\\. 'abc'
+6 >./\\. 'abc'
+2 +/\\. 'abc'
+2 */\\. 'abc'
+2 >./\\. 'abc'
+2 %/\\. 'abc'
+4 >./\\. 'abc'
+_4 >./\\. 'abc'
+_2 >./\\. 'abc'
+0 >./\\. 'a'
+0 >./\\. 'abc'
+0 >./\\. (<'abc')
+1 >./\\. (<'abc')
+1 +/\\. (<'abc')
+3 >./\\. (1;2;3)
+5 <./\\. (1;2)
+5 */\\. (2;5)
+3 <./\\. (1;2;3)
+5 <./\\. 'hello'
+_3 >./\\. 'abc'
+7 >./\\. 'abc'
+
+// An exact base raised to the atom 0.5 is the exact square root, and only
+// that exponent, that base and an atom do it.
+4x ^ 0.5
+(1r4) ^ 0.5
+1r9 ^ 0.5
+(4r9) ^ 0.5
+2x ^ 0.5
+4 ^ 0.5
+4x ^ 0.5 0.5
+(4x 9x) ^ 0.5
+(4x 2x) ^ 0.5
+(1r4) ^ 1r2
+(1r16) ^ 0.25
+(1r4) ^ _0.5
+(_4x) ^ 0.5
+0x ^ 0.5
