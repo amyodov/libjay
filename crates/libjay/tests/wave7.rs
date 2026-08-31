@@ -258,7 +258,7 @@ fn under_runs_a_function_and_undoes_the_preparation() {
     assert_eq!(apl("1↓⍢⌽1 2 3 4"), i64s(&[3], &[1, 2, 3]));
     // The obverse table is the same one J's `&.` uses, and a verb outside
     // it says so by name.
-    let e = err(Lang::Apl, "1+⍢!2");
+    let e = err(Lang::Apl, "1+⍢⌊2.5");
     assert_eq!(e.kind, ErrorKind::NotYet);
     assert!(e.msg.contains("obverse"), "{}", e.msg);
 }

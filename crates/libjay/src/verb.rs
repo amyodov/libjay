@@ -1485,6 +1485,12 @@ pub enum MonadOp {
     /// J `I.^:_1`: the obverse of indices — how many times each index from
     /// zero to the largest occurs in y.
     IndicesInverse,
+    /// J `!^:_1`: the obverse of the factorial — the SMALLEST argument at or
+    /// above zero whose factorial is y. `!` falls from 1 to its minimum
+    /// 0.885603 at 0.461632 and climbs from there, so a y between the two
+    /// is answered on the falling stretch (`!^:_1 0.9` is 0.284207, and
+    /// `!^:_1 1` is 0, not 1) and anything above 1 on the rising one.
+    FactorialInverse,
     /// GNU APL `⊤∧`, `⊤∨` and `⊤⍱` monadically: the bit-wise family's one
     /// argument form.
     Bitwise(BitMonad),
@@ -10187,6 +10193,15 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             Ok(carry_exact(Array::scalar_i64(primes_below(v, span)?), y))
         }
         MonadOp::IndicesInverse => indices_inverse(y, ctx.cfg.near(), span),
+        MonadOp::FactorialInverse => {
+            let v = digits_of(y, "the obverse of !", span)?;
+            let tol = ctx.cfg.tol;
+            let out: Vec<f64> = v.iter().map(|&x| factorial_inverse(x, tol)).collect();
+            if v.iter().zip(&out).any(|(&x, &r)| tol.made_nan(r, x, 0.0)) {
+                return Err(Error::nan("this factorial has no argument", span));
+            }
+            Ok(Array::new(y.shape.clone(), Data::F64(out.into())))
+        }
         MonadOp::Same => Ok(y.clone()),
         MonadOp::Format => Ok(format_chars(y, &ctx.cfg.fmt)),
         MonadOp::DecodeBits => decode(None, y, ctx.cfg.tol, span).map(|r| carry_exact(r, y)),
@@ -17870,6 +17885,51 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
     })
 }
 
+/// The argument whose factorial is `y`: the smallest one at or above zero,
+/// found by bisection on whichever stretch of `!` holds it.
+///
+/// `!` falls from `!0` = 1 to its minimum at [`FACTORIAL_MIN_AT`] and climbs
+/// from there without bound, so a y below that minimum has no argument at or
+/// above zero and no value here.
+const FACTORIAL_MIN_AT: f64 = 0.461_632_144_968_362_3;
+
+fn factorial_inverse(y: f64, tol: Tol) -> f64 {
+    if y.is_nan() {
+        return y;
+    }
+    // An infinite factorial is past every argument, and the reference's own
+    // search has no value for it either.
+    if y < factorial_as(FACTORIAL_MIN_AT, tol) || y == f64::INFINITY {
+        return f64::NAN;
+    }
+    // The falling stretch runs from 1 down to the minimum, the rising one
+    // from the minimum up; a y of exactly 1 sits at the top of the falling
+    // one, which is what makes `!^:_1 1` zero rather than one.
+    let falling = y <= 1.0;
+    let (mut lo, mut hi) = if falling {
+        (0.0, FACTORIAL_MIN_AT)
+    } else {
+        let mut hi = 1.0;
+        while hi < 1024.0 && factorial_as(hi, tol) < y {
+            hi *= 2.0;
+        }
+        (FACTORIAL_MIN_AT, hi)
+    };
+    for _ in 0..100 {
+        let mid = 0.5 * (lo + hi);
+        if mid <= lo || mid >= hi {
+            break;
+        }
+        let v = factorial_as(mid, tol);
+        if (v > y) == falling {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
 /// A J primitive by its spelling, for the obverses that are one.
 fn named(spelling: &'static str) -> Option<Verb> {
     crate::frontend::j::verb_named(spelling)
@@ -17983,6 +18043,8 @@ fn prim_obverse(v: &Verb, p: &Prim) -> Option<Verb> {
         MonadOp::Indices { origin: 0, boxed_coords: false } => {
             made("I.^:_1", MonadOp::IndicesInverse, [1, RANK_INF, RANK_INF])
         }
+        MonadOp::Scalar(SM::Factorial) => made("!^:_1", MonadOp::FactorialInverse, [0, 0, 0]),
+        MonadOp::FactorialInverse => named("!")?,
         // Formatting and evaluating undo one another in whichever language
         // spelled them: `":` with `".`, `⍕` with `⍎`.
         MonadOp::Format if p.name == "⍕" => Verb::Prim(Prim {

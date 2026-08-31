@@ -184,6 +184,17 @@ fn the_constants_and_the_circle_functions_invert_by_their_number() {
         &[("(2&^)^:_1 ] 8", &[3]), ("(^&2)^:_1 ] 9", &[3]), ("(%:&2)^:_1 ] 2", &[1])],
     );
     expect_near(Lang::J, &[("(2&%:)^:_1 ] 3", &[9.0]), ("(2&^.)^:_1 ] 3", &[8.0])]);
+    // The factorial's obverse is the SMALLEST argument at or above zero
+    // whose factorial is the value, so `!^:_1 ] 1` is 0 rather than 1.
+    expect_near(
+        Lang::J,
+        &[
+            ("! ^:_1 ] 6", &[3.0]),
+            ("! ^:_1 ] 1", &[0.0]),
+            ("! ^:_1 ] 0.9", &[0.284206909411597]),
+            ("! ^:_1 ] 120", &[5.0]),
+        ],
+    );
 }
 
 // --- the bonds -----------------------------------------------------------
@@ -395,7 +406,6 @@ fn what_the_table_does_not_reach_is_named() {
             "i. ^:_1 ] 1 2",
             "; ^:_1 ] 1 2",
             "A. ^:_1 ] 1 2",
-            "! ^:_1 ] 6",
             "(+/)^:_1 ] 6",
             "(<./\\)^:_1 ] 1 2",
             "(3&-~)^:_1 ] 1",
