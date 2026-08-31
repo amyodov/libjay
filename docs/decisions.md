@@ -4613,3 +4613,25 @@ the register.
   `5 <;.0 (1 2 3)` is the whole of it and `3 <;.0 (0$0)` the empty. Monadic
   `u;.3 y` is the same conjunction over a CUBE of the smallest axis, moved
   one step at a time along every axis.
+- 2026-08-31 — Only a verb that PAIRS its cells keeps a length or shape
+  refusal from the empty frame's fill run. A scalar dyad's two cells must
+  agree whatever the frame holds, which is what makes `(1 2) +"1 (i. 0 3)`
+  a length error with no cell to compute; a verb that does not pair keeps
+  no such refusal, which is what makes `(i. 0 0) #. (,5)` and
+  `(0 3 $ 0) # (i. 2 3)` empties although a cell of each would be a length
+  error. An index out of range stands either way, being a fact about an
+  axis rather than about an element. The reference itself does not draw
+  this line consistently — it keeps the length error for
+  `(0 $ 0.5) #. (i. 2 0 3)`, the same complaint about the same verb — and
+  both spellings are pinned in `corpus/j/divergences.txt`.
+- 2026-08-31 — An EMPTY of boxes has no boxing level: `L. 0$<0` is 0 in
+  jconsole where `L. a:` is 1. There is nothing to descend into, so the
+  count of levels is the count of descents that happened, which is none.
+- 2026-08-31 — `x ^!.n y` is the STOPE, not a tolerance: the product of `y`
+  terms starting at `x` and stepping by `n`, so `2 ^!.5 3` is
+  `2 × 7 × 12`. A step of 0 gives the ordinary power, a count of 0 gives 1,
+  and a count that is negative or fractional has no meaning. It is spelled
+  as a `Fit` over `^` rather than as a node of its own, which is what keeps
+  the representation `^!.n` without a new verb variant. `*` and `E.` take
+  an ordinary fit, which they ignore where the tolerance means nothing:
+  `2 (*!.1e_13) 3` is 6 and `'ab' (E.!.0) 'abc'` is `1 0 0`.

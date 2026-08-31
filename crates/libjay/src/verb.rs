@@ -3049,7 +3049,7 @@ impl Verb {
             // A scalar dyad pairs its cells, so their shapes must agree
             // whether or not there is a cell to compute.
             let agreeing = self.scalar_dyad_op().is_some();
-            return empty_frame(&p.frame, y.dtype(), cell, conform, agreeing, ctx, |left, numeric, c| {
+            return empty_frame(&p.frame, y.dtype(), cell, conform, agreeing, conform, ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
                 let right = if numeric {
@@ -3296,7 +3296,10 @@ fn fill_cell(y: &Array, frame_rank: usize, pure: bool) -> Option<Array> {
 /// no point building leaves the frame standing on its own, holding the
 /// argument's type.
 ///
-/// `conform` says what a REFUSED fill cell means. A fill cell carries no
+/// `probe` asks the verb again with NUMBERS of the same shapes where it
+/// refused the fills, and keeps only the SHAPE of that answer: the cells'
+/// shape is a property of the arguments and not of the types the fill
+/// happened to carry. `conform` says what a REFUSED fill cell means. A fill cell carries no
 /// data of the argument's own, so what it makes of a verb's VALUES is not
 /// the sentence's business: `'' { 1 2 3` and `'a' ,"0 (i. 0)` are empties
 /// in jconsole although a space is no index and a character catenates with
@@ -3336,6 +3339,7 @@ fn empty_frame(
     cell: Option<Array>,
     conform: bool,
     agreeing: bool,
+    probe: bool,
     ctx: &mut Ctx<'_>,
     mut run: impl FnMut(&Array, bool, &mut Ctx<'_>) -> Result<Array>,
 ) -> Result<Array> {
@@ -3354,7 +3358,7 @@ fn empty_frame(
             // of the same shapes is what learns the cells' shape without
             // asking the verb to mean anything by their types; only the
             // shape is kept, the argument's own type standing.
-            Err(_) if conform => {
+            Err(_) if probe => {
                 if let Ok(answer) = run(&numeric_like(&cell), true, ctx) {
                     shape.extend_from_slice(&answer.shape);
                 }
@@ -3558,7 +3562,7 @@ fn prim_monad_frame(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, ctx, |cell, _numeric, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, conform, ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
         });
     }
@@ -3602,7 +3606,7 @@ fn rank_monad(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, conform, ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
     }
@@ -12361,8 +12365,9 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
             return Ok(Array::new(base.shape.clone(), Data::empty(base.dtype())));
         }
         let cell = u.is_pure().then(|| base.clone());
+        let j = ctx.cfg.rules.lang == crate::Lang::J;
         let framed =
-            empty_frame(&[0], base.dtype(), cell, false, false, ctx, |cell, _n, c| {
+            empty_frame(&[0], base.dtype(), cell, false, false, j, ctx, |cell, _n, c| {
                 u.monad(cell, c, span)
             })?;
         // That run gives the shape, and its type too — except a boolean,
@@ -14688,7 +14693,8 @@ fn cut(
     // pieces would have had.
     if ranges.is_empty() {
         let cell = u.is_pure().then(|| section(&items, 0, 0));
-        return empty_frame(&[0], items.dtype(), cell, false, false, ctx, |cell, _n, c| {
+        let j = ctx.cfg.rules.lang == crate::Lang::J;
+        return empty_frame(&[0], items.dtype(), cell, false, false, j, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -14770,7 +14776,8 @@ fn per_axis_cut(
         let origin = vec![0i64; frame.len()];
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
-        return empty_frame(&frame, y.dtype(), cell, false, false, ctx, |cell, _n, c| {
+        let j = ctx.cfg.rules.lang == crate::Lang::J;
+        return empty_frame(&frame, y.dtype(), cell, false, false, j, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -17690,7 +17697,8 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     // the cell whose shape the answer keeps.
     if starts.is_empty() {
         let cell = u.is_pure().then(|| select_items(&list, &[]));
-        return empty_frame(&[0], list.dtype(), cell, false, false, ctx, |cell, _n, c| {
+        let j = ctx.cfg.rules.lang == crate::Lang::J;
+        return empty_frame(&[0], list.dtype(), cell, false, false, j, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }

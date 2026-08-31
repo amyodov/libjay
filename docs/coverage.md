@@ -2201,7 +2201,8 @@ oracle directly, one entry per line of
   `1 0.5` here, and `0 p.. 1 1 1x` is `0 1 1r2 1r3` there and
   `0 1 0.5 0.333333` here. The numbers are the same; their storage is not.
   The obverse of a base conversion reads the same way: `*: &.#. (1r2 1r3)`
-  is `16r9` there and `1.77778` here.
+  is `16r9` there and `1.77778` here, as do `(1r2 1r3) - &.:#. 2`,
+  `+"1 &.:#: (2 ,/ (1r2 1r3))` and the residue `2 #: 1r2`.
 - The dyadic outfix types its whole argument before any piece is cut, which
   is what makes `2 +/\. 'abc'` a domain error although every piece it
   leaves behind holds one character. Over BOXES the reference does not
@@ -2214,6 +2215,20 @@ oracle directly, one entry per line of
   and `5 <./\. 'hello'` are the empty. libjay asks the operand once, of the
   whole argument, whichever fold it is, and refuses where that has no
   meaning.
+- Where the frame is EMPTY — nothing to apply the verb to — the reference
+  keeps a refusal about an operand's TYPE for some verbs and drops it for
+  others, and the two cannot both be a rule. `(i. 0) ^. (<1)` is a domain
+  error there while `(i. 0) ^ (<1)`, `(i. 0) o. (<1)`, `(i. 0) ! (<1)` and
+  every other arithmetic verb answer the empty; `j.` and `r.` refuse with
+  `^.`. Decode reads the same way from the other end: `(1;2;3) #. (i. 2 0 3)`
+  and `(2 0 3 $ 0) #. 'hello'` are refused there while `(<1) #. (i. 0)` and
+  `(i. 0) #. 'ab'` are 0 and the empty. A refusal about the cells' SHAPES
+  splits the same way — `(0 $ 0.5) #. (i. 2 0 3)` keeps its length error and
+  `(i. 0 0) #. (,5)`, 0 radices against 1 digit either way, does not.
+  libjay keeps one rule: a refusal about a fill's type never survives an
+  empty frame, one about the cells' shapes survives for the verbs that PAIR
+  their cells (a scalar dyad, whose two cells must agree) and for an index
+  out of range, and no other does.
 - Two whole numbers a double cannot tell apart. Once the verb is not one of
   jconsole's integer special cases it holds every number in a double, so
   `9007199254740992` and `9007199254740993` are one value to its `*.` and
