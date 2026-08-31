@@ -3067,7 +3067,17 @@ impl Verb {
             // whether or not there is a cell to compute.
             let agreeing = self.scalar_dyad_op().is_some();
             let indexing = x.count() > 0;
-            return empty_frame(&p.frame, y.dtype(), cell, conform, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
+            // Three verbs settle their domain from the WHOLE argument, so
+            // a refusal about the arguments' types survives an empty frame
+            // where every other arithmetic verb answers the empty:
+            // `(i. 0) ^. (<1)` is a domain error in the reference while
+            // `(i. 0) ^ (<1)`, `(i. 0) o. (<1)` and `(i. 0) ! (<1)` are
+            // not. The set is the oracle's.
+            let eager = matches!(
+                self.scalar_dyad_op(),
+                Some(ScalarDyad::Log | ScalarDyad::MakeComplex | ScalarDyad::PolarBy)
+            ) && [x, y].into_iter().any(|a| !a.dtype().is_numeric() && a.count() > 0);
+            return empty_frame(&p.frame, y.dtype(), cell, conform, eager, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
                 let right = if numeric {
@@ -3370,6 +3380,7 @@ fn empty_frame(
     dtype: DType,
     cell: Option<Array>,
     conform: bool,
+    keep_any: bool,
     agreeing: bool,
     indexing: bool,
     probe: bool,
@@ -3384,7 +3395,9 @@ fn empty_frame(
                 shape.extend_from_slice(&answer.shape);
                 return Ok(Array::new(shape, Data::empty(answer.dtype())));
             }
-            Err(e) if conform && shape_refusal(&e, agreeing, indexing) => return Err(e),
+            Err(e) if conform && (keep_any || shape_refusal(&e, agreeing, indexing)) => {
+                return Err(e);
+            }
             // The verb has nothing to say about these values, but the
             // answer still has a shape: `$ 'a' ,"0 (i. 0)` is `0 2` in
             // jconsole although a character catenates with no number, and
@@ -3595,7 +3608,7 @@ fn prim_monad_frame(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, true, conform, &[], ctx, |cell, _numeric, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, conform, &[], ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
         });
     }
@@ -3639,7 +3652,7 @@ fn rank_monad(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, true, conform, &[], ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, conform, &[], ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
     }
@@ -4884,7 +4897,11 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
             if a < 0.0 || b < 0.0 {
                 return Err(Error::not_yet("complex numbers", span));
             }
-            let r = b.ln() / a.ln();
+            // The quotient follows J's own division, where a zero over a
+            // zero is a zero: `1 ^. 1` is 0 there and not the NaN the
+            // machine's quotient gives. APL reads that pair as 1, below.
+            let (num, den) = (b.ln(), a.ln());
+            let r = if tol.is_j() && num == 0.0 && den == 0.0 { 0.0 } else { num / den };
             // GNU APL has no infinite logarithm: `1⍟2`, `2⍟0` and `1⍟0` are
             // all DOMAIN ERROR. The two it does define where the ratio is a
             // NaN — `0⍟0` and `1⍟1` — are 1, each of them a base raised to
@@ -5334,6 +5351,17 @@ fn complex_dyad_data(
         }
         _ => pass!(borrow_cx(x, &mut tx), borrow_cx(y, &mut ty)),
     })
+}
+
+/// Whether one buffer holds a NaN anywhere, in either part of a complex
+/// value. A NaN the program wrote travels through the arithmetic unrefused,
+/// so what an operation MADE is what the answer is judged on.
+fn data_holds_nan(d: &Data) -> bool {
+    match d {
+        Data::F64(v) => v.iter().any(|x| x.is_nan()),
+        Data::Complex(v) => v.iter().any(|z| z[0].is_nan() || z[1].is_nan()),
+        _ => false,
+    }
 }
 
 /// `9 o.` to `12 o.` read a part of a number — real, magnitude, imaginary,
@@ -6637,6 +6665,22 @@ fn scalar_dyad_wide(
         {
             return Err(Error::domain("this logarithm has no value", span));
         }
+        // A complex quotient of an INFINITE part over a zero is no number
+        // at all in the reference — `(_j2) % 0` is a NaN error where
+        // `(2j3) % 0` is `_j_` — and a logarithm divides, so `1 ^. __` is
+        // one too. A NaN the program itself wrote still travels.
+        if matches!(op, Log | DivJ)
+            && rules.lang == crate::Lang::J
+            && let Data::Complex(v) = &data
+            && v.iter().any(|z| z[0].is_nan() || z[1].is_nan())
+            && !data_holds_nan(x)
+            && !data_holds_nan(y)
+        {
+            return Err(Error::nan(
+                format!("this {} has no value", crate::fuse::dyad_name(op)),
+                span,
+            ));
+        }
         if op == Circle && circle_reads_a_part(x, xoff, xdiv, n) && let Data::Complex(v) = &data {
             return Ok(Data::F64(v.iter().map(|z| z[0]).collect()));
         }
@@ -6795,6 +6839,23 @@ fn scalar_dyad(
     // error, because no pair of elements was ever formed. The agreement
     // above still holds — `1 2 3 + ''` is a length error either way.
     if p.n == 0 {
+        // Three verbs settle their domain from the WHOLE argument, so a
+        // refusal about the arguments' types survives an empty frame where
+        // every other arithmetic verb answers the empty: `(i. 0) ^. (<1)`
+        // is a domain error in the reference while `(i. 0) ^ (<1)`,
+        // `(i. 0) o. (<1)` and `(i. 0) ! (<1)` are not. The set is the
+        // oracle's, measured one verb at a time.
+        if cfg.rules.lang == crate::Lang::J
+            && matches!(
+                op,
+                ScalarDyad::Log | ScalarDyad::MakeComplex | ScalarDyad::PolarBy
+            )
+            && let Some(bad) = [x, y]
+                .into_iter()
+                .find(|a| !a.dtype().is_numeric() && a.count() > 0)
+        {
+            return Err(wrong_type(bad.dtype(), span));
+        }
         return Ok(Array::new(p.frame, Data::empty(empty_result_type(x, y))));
     }
     let data = scalar_dyad_data(
@@ -12554,7 +12615,7 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         // is `0`.
         let refused: &[usize] = if j && !back { &[0] } else { &[] };
         let framed =
-            empty_frame(&[0], base.dtype(), cell, false, false, true, j, refused, ctx, |cell, _n, c| {
+            empty_frame(&[0], base.dtype(), cell, false, false, false, true, j, refused, ctx, |cell, _n, c| {
                 u.monad(cell, c, span)
             })?;
         // That run gives the shape, and its type too — except a boolean,
@@ -14904,7 +14965,7 @@ fn cut(
         // A verb with nothing to say about that piece leaves a list of
         // empty lists, as the prefixes do.
         let refused: &[usize] = if j { &[0] } else { &[] };
-        return empty_frame(&[0], items.dtype(), cell, false, false, true, j, refused, ctx, |cell, _n, c| {
+        return empty_frame(&[0], items.dtype(), cell, false, false, false, true, j, refused, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -14987,7 +15048,7 @@ fn per_axis_cut(
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, false, false, true, j, &[], ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, false, false, false, true, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -15211,7 +15272,7 @@ fn tessellate(
         let block = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &block, span)).transpose()?;
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, false, false, true, j, &[], ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, false, false, false, true, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -18014,7 +18075,7 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     if starts.is_empty() {
         let cell = u.is_pure().then(|| select_items(&list, &[]));
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&[0], list.dtype(), cell, false, false, true, j, &[], ctx, |cell, _n, c| {
+        return empty_frame(&[0], list.dtype(), cell, false, false, false, true, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }

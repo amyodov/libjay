@@ -466,3 +466,62 @@ _3 >./\\. 'abc'
 (1e10) ! (1e10)
 1e5 ! 1e5 + 3
 100000000 ! 2
+
+// The three verbs that settle their domain from the whole argument, so a
+// type refusal survives an empty frame: the logarithm and the two that make
+// a complex number. Every other arithmetic verb answers the empty.
+(i. 0) ^. (<1)
+(i. 0) j. (<1)
+(i. 0) r. (<1)
+(i. 0) ^ (<1)
+(i. 0) o. (<1)
+(i. 0) ! (<1)
+(i. 0) ^. 'a'
+(0 $ 'a') ^. ('a')
+(0 0 $ '') ^. (<'abc')
+('a') ^. (0 $ 1 2 3)
+(0 $ 1) ^. (<'abc')
+
+// The logarithm divides, and the division is J's own: a zero over a zero is
+// a zero, so `1 ^. 1` is 0 rather than no number. A complex quotient with an
+// INFINITE part over a zero has no value, which is what makes `1 ^. __` a
+// NaN error where `1 ^. _2` is `_j_`; a real divisor leaves the infinite
+// part where it found it.
+1 ^. 1
+1 ^. 2
+1 ^. 0
+0 ^. 1
+1 ^. _
+_ ^. 1
+0 ^. 0
+_ ^. _
+0 ^. _
+_ ^. 0
+1 ^. 1 2 0
+1 ^. __
+1 ^. _1
+1 ^. _2
+1 ^. 0j_
+1 ^. _j0
+1 ^. (_j1)
+1 ^. _1j1
+2 ^. __
+(2j3) % 0
+(0j0) % 0
+(_j2) % 0
+(2j_) % 0
+(_j_) % 0
+(3 3 $ 1 0 0 0 1 0 0 0 1) ^. (_ __ 0)
+1 1 1 ^. (_ __ 0)
+
+// An infinite magnitude along an axis stays on it, the infinity times the
+// zero being a zero: `_ ^ 0.5` is `_` and not `_j_.`.
+(_ __ 0) ^ 0.5
+(_ __ 0) ^ 0.25
+(_ __ 0) ^ 2
+(_ __ 0) ^ _1
+('') ^. 2
+2 ^. ('')
+('') ^. ('')
+(i. 0) ^. (0 $ <1)
+(0 $ <1) ^. 2

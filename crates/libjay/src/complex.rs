@@ -63,18 +63,29 @@ pub fn mul(a: Cx, b: Cx) -> Cx {
 #[inline]
 pub fn div(a: Cx, b: Cx) -> Cx {
     if b[0] == 0.0 && b[1] == 0.0 {
+        // An INFINITE part over a zero has no value here, where a finite
+        // one is an infinity: `(2j3) % 0` is `_j_` there and `(_j2) % 0`
+        // is a NaN error. The reals divide the same infinity happily, so
+        // the rule belongs to the complex quotient alone.
+        if a[0].is_infinite() || a[1].is_infinite() {
+            return [f64::NAN, f64::NAN];
+        }
         let step = |x: f64| if x == 0.0 { 0.0 } else { f64::INFINITY.copysign(x) };
         return [step(a[0]), step(a[1])];
     }
-    // Smith's scaling keeps the denominator from overflowing.
+    // Smith's scaling keeps the denominator from overflowing. The cross
+    // terms multiply as J does — an infinity by a zero is a zero — so a
+    // real divisor leaves an infinite part where it found one:
+    // `(_j3.14159) % 0.693` is `_j4.53236` and not a NaN.
+    let cross = |x: f64, r: f64| if r == 0.0 { 0.0 } else { x * r };
     if b[0].abs() >= b[1].abs() {
         let r = b[1] / b[0];
         let d = b[0] + b[1] * r;
-        [(a[0] + a[1] * r) / d, (a[1] - a[0] * r) / d]
+        [(a[0] + cross(a[1], r)) / d, (a[1] - cross(a[0], r)) / d]
     } else {
         let r = b[0] / b[1];
         let d = b[0] * r + b[1];
-        [(a[0] * r + a[1]) / d, (a[1] * r - a[0]) / d]
+        [(cross(a[0], r) + a[1]) / d, (cross(a[1], r) - a[0]) / d]
     }
 }
 
@@ -114,7 +125,11 @@ fn principal(z: Cx) -> Cx {
 #[inline]
 pub fn exp(z: Cx) -> Cx {
     let m = z[0].exp();
-    [m * z[1].cos(), m * z[1].sin()]
+    // An infinite magnitude along an axis stays on it: J multiplies an
+    // infinity by a zero to a zero, which is what makes `_ ^ 0.5` the `_`
+    // it answers rather than `_j_.`.
+    let scale = |c: f64| if c == 0.0 { 0.0 } else { m * c };
+    [scale(z[1].cos()), scale(z[1].sin())]
 }
 
 /// The principal logarithm; `ln 0` is negative infinity, as on the reals.
