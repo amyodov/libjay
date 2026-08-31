@@ -642,8 +642,14 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             verb_lines(f, depth + 1, p, tr, out);
             verb_lines(g, depth + 1, p, tr, out);
         }
-        Verb::Atop(f, g) => {
-            head(out, "atop f (g y)");
+        Verb::Atop(f, g, form) => {
+            head(
+                out,
+                match form {
+                    crate::verb::AtopForm::At => "atop f (g y)",
+                    crate::verb::AtopForm::Cap => "capped fork f (g y)",
+                },
+            );
             verb_lines(f, depth + 1, p, tr, out);
             verb_lines(g, depth + 1, p, tr, out);
         }

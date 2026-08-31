@@ -662,7 +662,9 @@ fn same_verb(a: &Verb, b: &Verb) -> bool {
             m == n && same_verb(g, g2) && same_verb(h, h2)
         }
         (Verb::Hook(g, h), Verb::Hook(g2, h2))
-        | (Verb::Atop(g, h), Verb::Atop(g2, h2))
+        // The two spellings of one atop are the same function, so the
+        // spelling is not part of what makes two verbs the same.
+        | (Verb::Atop(g, h, _), Verb::Atop(g2, h2, _))
         | (Verb::Compose(g, h), Verb::Compose(g2, h2)) => same_verb(g, g2) && same_verb(h, h2),
         (Verb::BondLeft(m, u), Verb::BondLeft(n, v)) => m == n && same_verb(u, v),
         (Verb::BondRight(u, m), Verb::BondRight(v, n)) => m == n && same_verb(u, v),

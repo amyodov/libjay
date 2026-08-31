@@ -17,8 +17,8 @@ use crate::frontend::{
 };
 use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
 use crate::verb::{
-    AxisSpec, BitDyad, BitMonad, BoolDyad, DyadOp, Enclose, MonadOp, OpDef, Operand, Power, Prim,
-    ScalarDyad, ScalarMonad, Verb, WindowKind,
+    AtopForm, AxisSpec, BitDyad, BitMonad, BoolDyad, DyadOp, Enclose, MonadOp, OpDef,
+    Operand, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind,
     RANK_INF,
 };
 
@@ -2036,7 +2036,7 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                         )
                     })?;
                     let composed = Verb::Compose(Box::new(f), Box::new(g));
-                    Verb::Atop(Box::new(back), Box::new(composed))
+                    Verb::Atop(Box::new(back), Box::new(composed), AtopForm::At)
                 }
                 // `f.g` folds with f what g made of every row and column:
                 // `+.×` is the matrix product, `∧.=` asks which rows match.
@@ -2212,7 +2212,7 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                     Some(tok) if matches!(tok.kind, Tok::Func(_)) => {
                         let gtok = it.next().unwrap();
                         let Tok::Func(g) = gtok.kind else { unreachable!("checked above") };
-                        let v = Verb::Atop(Box::new(f), Box::new(g));
+                        let v = Verb::Atop(Box::new(f), Box::new(g), AtopForm::At);
                         out.push(Token {
                             kind: Tok::Func(v),
                             span: Span::merge(span, gtok.span),
@@ -2579,7 +2579,7 @@ fn train(tines: &[Token]) -> Result<Option<Verb>> {
         let (Tok::Func(g), Tok::Func(h)) = (&tines[0].kind, &tines[1].kind) else {
             return Ok(None);
         };
-        return Ok(Some(Verb::Atop(Box::new(g.clone()), Box::new(h.clone()))));
+        return Ok(Some(Verb::Atop(Box::new(g.clone()), Box::new(h.clone()), AtopForm::At)));
     }
     // An odd run forks its first two tines over the rest; an even one has
     // no tine to fork with, so the first is an atop over the rest.
@@ -2592,7 +2592,7 @@ fn train(tines: &[Token]) -> Result<Option<Verb>> {
             ));
         };
         let Some(rest) = train(&tines[1..])? else { return Ok(None) };
-        return Ok(Some(Verb::Atop(Box::new(f.clone()), Box::new(rest))));
+        return Ok(Some(Verb::Atop(Box::new(f.clone()), Box::new(rest), AtopForm::At)));
     }
     let Some(rest) = train(&tines[2..])? else { return Ok(None) };
     let Tok::Func(g) = &tines[1].kind else { unreachable!("the tail is all functions") };
@@ -3372,6 +3372,7 @@ fn strand_seed(d: Rules) -> Verb {
     Verb::Atop(
         Box::new(Verb::Prim(prim_for(',', d).expect("`,` is a primitive"))),
         Box::new(Verb::Prim(prim_for('⊂', d).expect("`⊂` is a primitive"))),
+        AtopForm::At,
     )
 }
 
@@ -3773,6 +3774,8 @@ fn build_dfn(body: &[Token], d: Rules, verbs: &HashMap<String, Verb>) -> Result<
             // A dfn is an expression, not a listing of lines.
             source: Vec::new(),
             spelling: None,
+            // APL has no explicit-definition representation to give.
+            rep: None,
         })))
     };
     if !(alpha_op || omega_op) {
@@ -4103,6 +4106,8 @@ fn build_tradfn(
         pure,
         source,
         spelling: None,
+        // APL has no explicit-definition representation to give.
+        rep: None,
     }));
     verbs.insert(name.clone(), verb.clone());
     Ok(Expr::VerbDef { name, verb, span })

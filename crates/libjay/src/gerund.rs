@@ -9,7 +9,7 @@
 //! computed and displayed like any other noun.
 
 use crate::array::{Array, Data};
-use crate::verb::{Enclose, Power, Verb, WindowKind, RANK_INF};
+use crate::verb::{AtopForm, Enclose, Power, Verb, WindowKind, RANK_INF};
 
 /// One atomic representation.
 #[derive(Clone, Debug, PartialEq)]
@@ -195,7 +195,14 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
             Some(Ar::Train(vec![Ar::Noun(n.clone()), verb_ar(g)?, verb_ar(h)?]))
         }
         Verb::Hook(f, g) => Some(Ar::Train(vec![verb_ar(f)?, verb_ar(g)?])),
-        Verb::Atop(f, g) => match under_ar(f, g, "&.:") {
+        // `[: f g` is the fork whose left tine is the cap, and that is how
+        // it is written back out: a three-part train with `[:` in front.
+        Verb::Atop(f, g, AtopForm::Cap) => Some(Ar::Train(vec![
+            Ar::Prim("[:".to_string()),
+            verb_ar(f)?,
+            verb_ar(g)?,
+        ])),
+        Verb::Atop(f, g, AtopForm::At) => match under_ar(f, g, "&.:") {
             Some(ar) => Some(ar),
             None => der("@:", vec![verb_ar(f)?, verb_ar(g)?]),
         },
@@ -238,8 +245,20 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
             )
         }
         Verb::SelfRef => Some(Ar::Prim("$:".to_string())),
+        // An explicit definition is the `:` conjunction over its valence
+        // and its body, whichever way the source spelled it.
+        Verb::Explicit(def) => def.rep.as_ref().map(explicit_ar),
         _ => None,
     }
+}
+
+/// The representation of an explicit definition: the valence and the body
+/// as the two noun operands of `:`.
+pub fn explicit_ar(rep: &crate::ir::ExplicitRep) -> Ar {
+    Ar::Derived(
+        ":".to_string(),
+        vec![Ar::Noun(Array::scalar_i64(rep.valence as i64)), Ar::Noun(rep.body())],
+    )
 }
 
 // --------------------------------------------- the linear representation
@@ -282,6 +301,9 @@ fn paren_spell(ar: &Ar) -> Option<(String, bool)> {
     if let Some(w) = constant_shortcut(ar) {
         return Some((w, true));
     }
+    if let Some(text) = definition_text(ar) {
+        return Some((text, false));
+    }
     match ar {
         Ar::Prim(s) => Some((word(s), true)),
         Ar::Noun(a) => Some((noun_text(a)?, true)),
@@ -310,6 +332,38 @@ fn bracketed(ar: &Ar) -> Option<String> {
     Some(if one_word { text } else { format!("({text})") })
 }
 
+/// The header spelling of an EXPLICIT DEFINITION: `:` over a valence of 1
+/// to 4 and a character body. One line is written inline, `3 : 'y + 1'`;
+/// several take the `3 : 0` header with the lines below it and a closing
+/// `)`, which is the only spelling that holds them.
+fn definition_text(ar: &Ar) -> Option<String> {
+    let Ar::Derived(sp, ops) = ar else { return None };
+    if sp != ":" {
+        return None;
+    }
+    let [Ar::Noun(n), Ar::Noun(body)] = ops.as_slice() else { return None };
+    if n.rank() != 0 || body.rank() > 2 {
+        return None;
+    }
+    let v = *n.to_f64_vec()?.first()?;
+    if v.fract() != 0.0 || !(1.0..=4.0).contains(&v) {
+        return None;
+    }
+    let Data::Char(cs) = body.row_major_data() else { return None };
+    let width = *body.shape.last().unwrap_or(&body.count());
+    let cs: Vec<char> = cs.as_slice().to_vec();
+    // A body of rank 2 is one row per line, padded to the widest; the
+    // padding is not part of what was written.
+    let lines: Vec<String> = if body.rank() == 2 {
+        cs.chunks(width.max(1))
+            .map(|row| row.iter().collect::<String>().trim_end().to_string())
+            .collect()
+    } else {
+        vec![cs.iter().collect()]
+    };
+    Some(crate::ir::ExplicitRep { valence: v as u8, lines, direct: false }.header_form())
+}
+
 /// `n [ ]` written as `n:` where the noun is one of the atoms that has such
 /// a word. The representation itself keeps the three parts; only the
 /// spelling takes the shortcut.
@@ -329,6 +383,12 @@ fn spell(ar: &Ar) -> Option<(String, Shape)> {
     // has to keep the three parts, which is what a gerund reads back.
     if let Some(w) = constant_shortcut(ar) {
         return Some((w, Shape::Word));
+    }
+    // `n : '…'` is the one phrase whose spelling is not the operands with
+    // the conjunction between them: the body is written as source text,
+    // and a body of several lines takes the header form instead.
+    if let Some(text) = definition_text(ar) {
+        return Some((text, Shape::Modified));
     }
     match ar {
         Ar::Prim(s) => Some((word(s), Shape::Word)),
@@ -444,7 +504,7 @@ fn rank_ar(inner: &Verb, r: &[i64; 3]) -> Option<Ar> {
     let der = |s: &str, ops: Vec<Ar>| Some(Ar::Derived(s.to_string(), ops));
     // `u&.v` sets v's MONADIC rank around the same tree `&.:` builds, which
     // is what separates it from `u@v` — that one sets all three of g's.
-    if let Verb::Atop(f, g) = inner
+    if let Verb::Atop(f, g, AtopForm::At) = inner
         && matches!(&**g, Verb::Compose(_, u) if *r == [u.ranks()[0]; 3])
         && let Some(ar) = under_ar(f, g, "&.")
     {
@@ -453,7 +513,11 @@ fn rank_ar(inner: &Verb, r: &[i64; 3]) -> Option<Ar> {
     match inner {
         // `m"n`: the constant verb, whose left operand is the noun itself.
         Verb::Constant(m) => der("\"", vec![Ar::Noun(m.clone()), Ar::Noun(rank_noun(r))]),
-        Verb::Atop(f, g) if *r == g.ranks() => der("@", vec![verb_ar(f)?, verb_ar(g)?]),
+        // `u@v` is `u@:v` at v's own ranks. A CAPPED fork carries the rank
+        // it was written with instead, so it keeps the `"` spelling.
+        Verb::Atop(f, g, AtopForm::At) if *r == g.ranks() => {
+            der("@", vec![verb_ar(f)?, verb_ar(g)?])
+        }
         Verb::Compose(f, g) if *r == [g.ranks()[0]; 3] => {
             der("&", vec![verb_ar(f)?, verb_ar(g)?])
         }

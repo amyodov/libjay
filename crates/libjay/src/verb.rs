@@ -1986,6 +1986,19 @@ impl std::fmt::Display for AxisSpec {
     }
 }
 
+/// Which of the two spellings of one atop was written. J's `[: f g` and
+/// `f@:g` are the same function — they apply the same way, take the same
+/// obverse and fuse the same — so nothing but the representation ever reads
+/// this.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtopForm {
+    /// `f@:g`, and every atop a frontend builds for a meaning of its own.
+    At,
+    /// `[: f g`: the capped fork, whose left tine produces nothing to fork
+    /// over.
+    Cap,
+}
+
 /// A verb: primitive or derived. Language-agnostic; frontends decide which
 /// combinations their syntax produces (e.g. APL `+/` becomes
 /// `Rank(Reduce(+), [1,1,1])` — reduce the last axis).
@@ -2019,8 +2032,11 @@ pub enum Verb {
     NounFork(Array, Box<Verb>, Box<Verb>),
     /// (f g) y = y f (g y);  x (f g) y = x f (g y).  (J hook)
     Hook(Box<Verb>, Box<Verb>),
-    /// f@:g / [: f g:  monad f (g y);  dyad f (x g y).
-    Atop(Box<Verb>, Box<Verb>),
+    /// f@:g / [: f g:  monad f (g y);  dyad f (x g y). The third field is
+    /// the SPELLING, which is all that separates the two: they are one
+    /// function, and the representation gives back the one that was
+    /// written.
+    Atop(Box<Verb>, Box<Verb>, AtopForm),
     /// f&:g:  monad f (g y);  dyad (g x) f (g y). J's `&` is this wrapped in
     /// [`Verb::Rank`] at g's monadic rank; `&:` is this on its own.
     Compose(Box<Verb>, Box<Verb>),
@@ -2247,7 +2263,8 @@ impl Verb {
             Verb::Fork(f, g, h) => format!("({} {} {})", f.name(), g.name(), h.name()),
             Verb::NounFork(_, g, h) => format!("(n {} {})", g.name(), h.name()),
             Verb::Hook(f, g) => format!("({} {})", f.name(), g.name()),
-            Verb::Atop(f, g) => format!("({}@:{})", f.name(), g.name()),
+            Verb::Atop(f, g, AtopForm::At) => format!("({}@:{})", f.name(), g.name()),
+            Verb::Atop(f, g, AtopForm::Cap) => format!("([: {} {})", f.name(), g.name()),
             Verb::Compose(f, g) => format!("({}&:{})", f.name(), g.name()),
             Verb::BondLeft(_, v) => format!("(n&{})", v.name()),
             Verb::BondRight(v, _) => format!("({}&n)", v.name()),
@@ -2416,7 +2433,7 @@ impl Verb {
             }
             Verb::NounFork(_, g, h)
             | Verb::Hook(g, h)
-            | Verb::Atop(g, h)
+            | Verb::Atop(g, h, _)
             | Verb::Compose(g, h) => g.uses_tolerance() || h.uses_tolerance(),
         }
     }
@@ -2471,7 +2488,7 @@ impl Verb {
             Verb::Fork(f, g, h) => f.is_pure() && g.is_pure() && h.is_pure(),
             Verb::NounFork(_, g, h)
             | Verb::Hook(g, h)
-            | Verb::Atop(g, h)
+            | Verb::Atop(g, h, _)
             | Verb::Compose(g, h) => g.is_pure() && h.is_pure(),
             Verb::BondLeft(_, v)
             | Verb::BondRight(v, _)
@@ -2630,7 +2647,9 @@ impl Verb {
                 let r = g.monad(y, ctx, span)?;
                 f.dyad(y, &r, ctx, span)
             }
-            Verb::Atop(f, g) | Verb::Compose(f, g) => {
+            // The two spellings of the atop are one function: the cap says
+            // nothing about how it applies.
+            Verb::Atop(f, g, _) | Verb::Compose(f, g) => {
                 let r = g.monad(y, ctx, span)?;
                 f.monad(&r, ctx, span)
             }
@@ -2876,7 +2895,7 @@ impl Verb {
                 let r = g.monad(y, ctx, span)?;
                 f.dyad(x, &r, ctx, span)
             }
-            Verb::Atop(f, g) => {
+            Verb::Atop(f, g, _) => {
                 let r = g.dyad(x, y, ctx, span)?;
                 f.monad(&r, ctx, span)
             }
@@ -17161,11 +17180,13 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
         // An explicit obverse (`u :. v`) is the whole answer.
         Verb::WithObverse(_, w) => (**w).clone(),
         // A composition inverts by inverting its parts, in the other order.
-        Verb::Atop(f, g) => {
-            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?))
+        // Whichever way round the atop was WRITTEN, what comes back is a
+        // verb nobody wrote, so it takes the plain spelling.
+        Verb::Atop(f, g, _) => {
+            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?), AtopForm::At)
         }
         Verb::Compose(f, g) | Verb::Beside(f, g) => {
-            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?))
+            Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?), AtopForm::At)
         }
         Verb::Rank(f, r) => Verb::Rank(Box::new(obverse(f)?), *r),
         Verb::Fit(f, n) => Verb::Fit(Box::new(obverse(f)?), *n),
@@ -17209,7 +17230,7 @@ fn is_dyad(v: &Verb, op: DyadOp) -> bool {
 }
 
 fn atop(f: Verb, g: Verb) -> Verb {
-    Verb::Atop(Box::new(f), Box::new(g))
+    Verb::Atop(Box::new(f), Box::new(g), AtopForm::At)
 }
 
 /// The obverse of a primitive.
@@ -17530,6 +17551,7 @@ fn structural_bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
             let size = Verb::Atop(
                 Box::new(Verb::BondLeft(Array::scalar_f64(k.abs()), Box::new(named("+")?))),
                 Box::new(named("#")?),
+                AtopForm::At,
             );
             let width = if k >= 0.0 { atop(named("-")?, size) } else { size };
             Some(Verb::Hook(
@@ -19593,19 +19615,6 @@ fn representation(op: MonadOp, y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<A
     };
     let text = |s: String| Ok(Array::from_chars(s.chars().collect()));
     if let Some(v) = ctx.env.verb(&name) {
-        // An explicit definition is written back as the source it was
-        // given, which is the spelling a session shows for it.
-        if let Verb::Explicit(def) = v
-            && let Some(spelling) = &def.spelling
-        {
-            return match op {
-                MonadOp::BoxedRep => Err(Error::not_yet(
-                    "the boxed representation of an explicit definition",
-                    span,
-                )),
-                _ => text(spelling.clone()),
-            };
-        }
         let ar = crate::gerund::verb_ar(v).ok_or_else(|| {
             Error::not_yet(format!("the representation of {}", v.name()), span)
         })?;
@@ -19962,7 +19971,8 @@ mod tests {
             "(n + -)"
         );
         assert_eq!(Verb::Hook(b(plus()), b(minus())).name(), "(+ -)");
-        assert_eq!(Verb::Atop(b(plus()), b(minus())).name(), "(+@:-)");
+        assert_eq!(Verb::Atop(b(plus()), b(minus()), AtopForm::At).name(), "(+@:-)");
+        assert_eq!(Verb::Atop(b(plus()), b(minus()), AtopForm::Cap).name(), "([: + -)");
         assert_eq!(Verb::Compose(b(plus()), b(minus())).name(), "(+&:-)");
         assert_eq!(Verb::BondLeft(Array::scalar_i64(1), b(plus())).name(), "(n&+)");
         assert_eq!(Verb::BondRight(b(plus()), Array::scalar_i64(1)).name(), "(+&n)");
@@ -20724,7 +20734,7 @@ mod tests {
     #[test]
     fn atop_composes() {
         ctx!(c);
-        let v = Verb::Atop(b(minus()), b(plus()));
+        let v = Verb::Atop(b(minus()), b(plus()), AtopForm::At);
         let r = v.monad(&Array::from_i64(vec![1, 2]), &mut c, sp()).unwrap();
         assert_eq!(ints(&r), vec![-1, -2]);
         let r = v
@@ -20872,7 +20882,7 @@ mod tests {
         assert!(plus().is_pure());
         assert!(Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1]).is_pure());
         assert!(!echo_v().is_pure());
-        assert!(!Verb::Rank(b(Verb::Atop(b(echo_v()), b(plus()))), [1, 1, 1]).is_pure());
+        assert!(!Verb::Rank(b(Verb::Atop(b(echo_v()), b(plus()), AtopForm::At)), [1, 1, 1]).is_pure());
     }
 
     #[test]
@@ -20880,7 +20890,7 @@ mod tests {
         // Enough elements to pass the threshold; the cells must still be
         // written one after another, in index order.
         let y = Array::new(vec![16, 8192], Data::I64((0..16 * 8192).collect::<Vec<i64>>().into()));
-        let v = Verb::Rank(b(Verb::Atop(b(echo_v()), b(head_v()))), [1, 1, 1]);
+        let v = Verb::Rank(b(Verb::Atop(b(echo_v()), b(head_v()), AtopForm::At)), [1, 1, 1]);
         let mut seen: Vec<i64> = Vec::new();
         let mut sink = |s: &str| {
             if let Some(first) = s.split_whitespace().next() && let Ok(n) = first.parse::<i64>() {

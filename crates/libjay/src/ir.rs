@@ -183,6 +183,62 @@ pub struct Branch {
 /// definition wearing it is called by naming it rather than applying it.
 pub const NILADIC: &str = "(no argument)";
 
+/// How J writes an explicit definition back out: the valence its header
+/// names — 1 an adverb, 2 a conjunction, 3 a monad, 4 a dyad — and the
+/// lines of its body. The `:` conjunction over the two IS the
+/// representation `5!:1` gives, whichever way the definition was spelled,
+/// so a `{{ … }}` and a body on the lines below carry one of these as well
+/// as the text they display.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExplicitRep {
+    pub valence: u8,
+    pub lines: Vec<String>,
+    /// The source wrote it as a DIRECT definition (`{{ … }}`), which is
+    /// what a session shows it as. The representation forms give the
+    /// header spelling either way.
+    pub direct: bool,
+}
+
+impl ExplicitRep {
+    /// The header spelling: `n : '…'` for a body of one line, and the
+    /// header, the lines and a closing `)` for a body of several. This is
+    /// what `5!:5` and `5!:6` answer.
+    pub fn header_form(&self) -> String {
+        let n = self.valence;
+        match self.lines.as_slice() {
+            [only] => format!("{n} : '{}'", only.replace('\'', "''")),
+            lines => format!("{n} : 0\n{}\n)", lines.join("\n")),
+        }
+    }
+
+    /// How a session DISPLAYS the definition: a direct definition shows
+    /// the words between its braces, everything else its header spelling.
+    pub fn display(&self) -> String {
+        if self.direct {
+            return format!("{{{{ {}}}}}", self.lines.join("\n"));
+        }
+        self.header_form()
+    }
+
+    /// The BODY as the representation holds it: a character vector for one
+    /// line, and a character matrix — the lines padded to the longest —
+    /// for more.
+    pub fn body(&self) -> crate::array::Array {
+        use crate::array::{Array, Data};
+        let rows: Vec<Vec<char>> = self.lines.iter().map(|l| l.chars().collect()).collect();
+        if let [only] = rows.as_slice() {
+            return Array::from_chars(only.clone());
+        }
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let mut flat = Vec::with_capacity(rows.len() * width);
+        for row in &rows {
+            flat.extend_from_slice(row);
+            flat.extend(std::iter::repeat_n(' ', width - row.len()));
+        }
+        Array::new(vec![rows.len(), width], Data::Char(flat.into()))
+    }
+}
+
 /// An explicit definition: J's `3 : '…'`, `4 : '…'` and `{{ … }}`, APL's
 /// `{…}` and `∇`-defined functions.
 #[derive(Debug)]
@@ -243,10 +299,15 @@ pub struct ExplicitDef {
     /// back. Empty for a definition that has no such lines — a J one, or a
     /// `{…}`, which is an expression rather than a listing.
     pub source: Vec<String>,
-    /// How a session writes the definition back out on ONE line, where the
-    /// source spells it in a way that can be given back: J's `3 : '…'` and
-    /// its relatives. None for a definition whose text is not kept.
+    /// How a session DISPLAYS the definition: the source's own spelling,
+    /// which is `{{ … }}` for a direct definition and the header and body
+    /// for every other J form. None for a definition whose text is not
+    /// kept — every APL one.
     pub spelling: Option<String>,
+    /// What `5!:1`, `5!:2` and `5!:5` write the definition out as, which is
+    /// the `n : '…'` form whatever the source spelled. None for a
+    /// definition J has no such representation for.
+    pub rep: Option<ExplicitRep>,
     /// J's locale for this definition: the namespace its body's bare global
     /// names are read and written in, whatever locale the CALLER is in.
     /// None for a definition that belongs to no locale in particular —

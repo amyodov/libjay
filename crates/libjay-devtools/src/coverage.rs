@@ -39,7 +39,7 @@ use std::fmt::Write as _;
 
 use jay::array::{Array, Data};
 use jay::ir::{Control, Expr, Program};
-use jay::verb::{Power, Verb, RANK_INF};
+use jay::verb::{AtopForm, Power, Verb, RANK_INF};
 use jay::{compile, Dialect};
 use libjay_testkit::{corpus, Lang};
 
@@ -850,7 +850,7 @@ fn receivers(v: &Verb, valence: Valence, depth: u32) -> Vec<Attr> {
         Verb::Fork(f, _, h) => down(f).into_iter().chain(down(h)).collect(),
         Verb::NounFork(_, _, h) => down(h),
         // `f@:g`: g is applied to the arguments, in the site's valence.
-        Verb::Atop(_, g) => down(g),
+        Verb::Atop(_, g, _) => down(g),
         // A declaration, a cache, a tolerance and a fallback all apply the
         // verb they wrap to the arguments they were given.
         Verb::Fit(u, _)
@@ -982,7 +982,8 @@ fn modifier(v: &Verb, lang: Lang) -> Option<(Mod, Vec<String>)> {
             (m("fork (n g h)", &[]), ops)
         }
         Verb::Hook(f, g) => (m("hook (f g)", &[]), verbs(&[f, g])),
-        Verb::Atop(f, g) => (m("atop", &["@", "@:", "[:"]), verbs(&[f, g])),
+        Verb::Atop(f, g, AtopForm::At) => (m("atop", &["@", "@:"]), verbs(&[f, g])),
+        Verb::Atop(f, g, AtopForm::Cap) => (m("capped fork", &["[:"]), verbs(&[f, g])),
         Verb::Compose(f, g) => (m("compose", &["&", "&:", "⍥"]), verbs(&[f, g])),
         Verb::Beside(f, g) => (m("beside", &["∘"]), verbs(&[f, g])),
         Verb::Before(f, g) => (m("before", &["⍛"]), verbs(&[f, g])),
@@ -1074,7 +1075,7 @@ fn operand_verbs(v: &Verb) -> Vec<&Verb> {
         Verb::Fork(f, g, h) => vec![f, g, h],
         Verb::NounFork(_, g, h) => vec![g, h],
         Verb::Hook(f, g)
-        | Verb::Atop(f, g)
+        | Verb::Atop(f, g, _)
         | Verb::Compose(f, g)
         | Verb::Beside(f, g)
         | Verb::Before(f, g)

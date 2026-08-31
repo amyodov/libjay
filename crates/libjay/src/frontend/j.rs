@@ -12,9 +12,10 @@ use std::sync::Arc;
 use crate::array::{Array, Data};
 use crate::error::{Error, ErrorKind, Result, Span};
 use crate::frontend::{Segment, SourceParts};
-use crate::ir::{Branch, Control, ExplicitDef, Expr, Scope};
+use crate::ir::{Branch, Control, ExplicitDef, ExplicitRep, Expr, Scope};
 use crate::verb::{
-    BoolDyad, DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad, Verb, WindowKind,
+    AtopForm, BoolDyad, DyadOp, Enclose, MonadOp, Power, Prim, ScalarDyad, ScalarMonad,
+    Verb, WindowKind,
     RANK_INF,
 };
 
@@ -71,7 +72,7 @@ impl Modifier {
     fn display_text(&self) -> Option<String> {
         match self {
             Modifier::Prim(g) => Some((*g).to_string()),
-            Modifier::Explicit(src) => src.spelling.clone(),
+            Modifier::Explicit(src) => src.rep.as_ref().map(ExplicitRep::display),
         }
     }
 }
@@ -543,12 +544,10 @@ fn take_colon_definition(
         13.0 => (false, None),
         v => return Err(Error::domain(format!("{v} is not an explicit definition"), span)),
     };
-    // How a session writes the definition back out: the header and the
-    // body, as the source spells it. A body written on ONE line is given
-    // back inline whichever way it was typed, and a longer one keeps the
-    // `0` header and the lines below it.
-    let mut body_text = None;
-    let mut block_text = None;
+    // The lines the definition is written back out from. A body written on
+    // ONE line is given back inline whichever way it was typed, and a
+    // longer one keeps the `0` header and the lines below it.
+    let rep_lines: Option<Vec<String>>;
     let body = match &body_arr.data {
         // `3 : 0`: the body is written on the lines below, ending with `)`.
         Data::I64(_)
@@ -565,11 +564,7 @@ fn take_colon_definition(
             // `3 : 0` over `y + 1` displays as `3 : 'y + 1'`. Two or more
             // keep the header and the lines, because there is no inline
             // spelling that holds them.
-            match texts.len() {
-                0 => body_text = Some(String::new()),
-                1 => body_text = Some(texts.into_iter().next().expect("one line")),
-                _ => block_text = Some(texts.join("\n")),
-            }
+            rep_lines = Some(if texts.is_empty() { vec![String::new()] } else { texts });
             body
         }
         Data::Char(chars) => {
@@ -584,7 +579,7 @@ fn take_colon_definition(
             // The body sits one character past the opening quote; a doubled
             // quote inside it shifts what follows by one column.
             lex_line(&text, body_span.start + 1, scope.char_bytes, &mut frags)?;
-            body_text = Some(text);
+            rep_lines = Some(text.split('\n').map(str::to_string).collect());
             vec![frags]
         }
         Data::Symbol(_) | Data::Box(_) => {
@@ -592,19 +587,15 @@ fn take_colon_definition(
         }
     };
     if valence == 13.0 {
-        let verb = tacit_definition(body, body_text.as_deref(), scope, span)?;
+        let verb = tacit_definition(body, rep_lines.as_deref(), scope, span)?;
         sentence.splice(at - 1..at + 2, [Frag::Verb(VerbFrag::V(verb), span)]);
         return Ok(());
     }
-    let spelling = match (&body_text, &block_text) {
-        (Some(t), _) => Some(definition_spelling(valence as i64, t)),
-        (None, Some(b)) => Some(format!("{} : 0\n{b}\n)", valence as i64)),
-        (None, None) => None,
-    };
+    let rep = rep_lines.map(|lines| ExplicitRep { valence: valence as u8, lines, direct: false });
     if let Some(conjunction) = modifier {
         let name = if conjunction { "2 : '...'" } else { "1 : '...'" };
         let mut src = mod_source(name, conjunction, body, self_name);
-        src.spelling = spelling;
+        src.rep = rep;
         let frag = if conjunction {
             Frag::Conj(Modifier::Explicit(Arc::new(src)), span)
         } else {
@@ -614,16 +605,9 @@ fn take_colon_definition(
         return Ok(());
     }
     let name = if dyadic { "4 : '...'" } else { "3 : '...'" };
-    let verb = build_definition(body, dyadic, name, spelling, scope, self_name)?;
+    let verb = build_definition(body, dyadic, name, rep, scope, self_name)?;
     sentence.splice(at - 1..at + 2, [Frag::Verb(VerbFrag::V(verb), span)]);
     Ok(())
-}
-
-
-/// How a definition written inline is given back: the header and the body,
-/// with a quote inside the body doubled as the source had to write it.
-fn definition_spelling(valence: i64, text: &str) -> String {
-    format!("{valence} : '{}'", text.replace('\'', "''"))
 }
 
 // ------------------------------------------------------- tacit definitions
@@ -639,7 +623,7 @@ fn definition_spelling(valence: i64, text: &str) -> String {
 /// definition instead, which is what the reference falls back to as well.
 fn tacit_definition(
     body: Vec<Vec<Frag>>,
-    text: Option<&str>,
+    text: Option<&[String]>,
     scope: &Names,
     span: Span,
 ) -> Result<Verb> {
@@ -651,7 +635,13 @@ fn tacit_definition(
     }
     let dyadic = mentions(&body, "x");
     let name = if dyadic { "4 : '...'" } else { "3 : '...'" };
-    let spelling = text.map(|t| definition_spelling(if dyadic { 4 } else { 3 }, t));
+    // The fallback definition takes the valence the BODY asks for, which is
+    // the one the reference's own fallback writes.
+    let rep = text.map(|lines| ExplicitRep {
+        valence: if dyadic { 4 } else { 3 },
+        lines: lines.to_vec(),
+        direct: false,
+    });
     let mut inner = scope.clone();
     for arg in ["x", "y"] {
         inner.nouns.insert(arg.to_string());
@@ -685,7 +675,7 @@ fn tacit_definition(
     match translated {
         Some(Tacit::Verb(v)) => Ok(v),
         Some(Tacit::Const(a)) => Ok(constant_of(a)),
-        None => build_definition(body, dyadic, name, spelling, scope, None),
+        None => build_definition(body, dyadic, name, rep, scope, None),
     }
 }
 
@@ -741,7 +731,9 @@ fn translate_tacit(e: &Expr, dyadic: bool) -> Option<Tacit> {
             let out = if !dyadic && is_prim(&v, "]") {
                 verb.clone()
             } else {
-                Verb::Atop(Box::new(verb.clone()), Box::new(v))
+                // The reference writes this composition as a capped fork,
+                // which is the spelling the translation gives back.
+                Verb::Atop(Box::new(verb.clone()), Box::new(v), AtopForm::Cap)
             };
             Some(Tacit::Verb(out))
         }
@@ -864,6 +856,23 @@ fn source_line(source: &str, line: &[Frag]) -> Option<String> {
     Some(source[start..end].to_string())
 }
 
+/// The BODY LINES of a direct definition, as the representation keeps them:
+/// the source between the braces, with the blanks that hold the body off
+/// the opening `{{` dropped — the spaces on the same line, or the newline
+/// that starts the body on the next one — and the newline before the
+/// closing `}}` dropped too. What is left is written back out as a
+/// definition's body, indentation and trailing spaces included.
+fn direct_body_text(source: &str, open: Span, close: Span) -> Option<Vec<String>> {
+    if close.start > source.len() || open.end > close.start {
+        return None;
+    }
+    let text = &source[open.end..close.start];
+    let text = text.trim_start_matches([' ', '\t']);
+    let text = text.strip_prefix('\n').unwrap_or(text);
+    let text = text.strip_suffix('\n').unwrap_or(text);
+    Some(text.split('\n').map(str::to_string).collect())
+}
+
 /// `{{ … }}` — the body is the words between the braces, on this line or on
 /// the lines below.
 fn take_direct_definition(
@@ -942,9 +951,15 @@ fn take_direct_definition(
             ))
         }
     };
+    let text = direct_body_text(&scope.source, open_span, close_span);
     let frag = match part {
         Some(conjunction) => {
-            let src = mod_source("{{ ... }}", conjunction, body, self_name);
+            let mut src = mod_source("{{ ... }}", conjunction, body, self_name);
+            src.rep = text.map(|lines| ExplicitRep {
+                valence: if conjunction { 2 } else { 1 },
+                lines,
+                direct: true,
+            });
             let m = Modifier::Explicit(Arc::new(src));
             if conjunction { Frag::Conj(m, span) } else { Frag::Adverb(m, span) }
         }
@@ -956,7 +971,12 @@ fn take_direct_definition(
                 Some('m') => false,
                 _ => mentions(&body, "x"),
             };
-            let verb = build_definition(body, dyadic, "{{ ... }}", None, scope, self_name)?;
+            let rep = text.map(|lines| ExplicitRep {
+                valence: if dyadic { 4 } else { 3 },
+                lines,
+                direct: true,
+            });
+            let verb = build_definition(body, dyadic, "{{ ... }}", rep, scope, self_name)?;
             Frag::Verb(VerbFrag::V(verb), span)
         }
     };
@@ -1031,7 +1051,7 @@ fn build_definition(
     body: Vec<Vec<Frag>>,
     dyadic: bool,
     name: &str,
-    spelling: Option<String>,
+    rep: Option<ExplicitRep>,
     scope: &Names,
     self_name: Option<&str>,
 ) -> Result<Verb> {
@@ -1120,7 +1140,8 @@ fn build_definition(
         pure,
         // J has no `⎕CR`, and nothing else asks a definition for its text.
         source: Vec::new(),
-        spelling,
+        spelling: rep.as_ref().map(ExplicitRep::display),
+        rep,
         home: Some(home),
     })))
 }
@@ -1242,9 +1263,10 @@ struct ModSource {
     /// The name this definition is being given, so that its body can
     /// mention it.
     self_name: Option<String>,
-    /// How a session writes the modifier back out, where the source spells
-    /// it in a way that can be given back.
-    spelling: Option<String>,
+    /// What the source wrote, where it wrote it in a way that can be given
+    /// back: how a session displays the modifier, and what the
+    /// representation forms answer for it.
+    rep: Option<ExplicitRep>,
 }
 
 fn mod_source(
@@ -1260,7 +1282,7 @@ fn mod_source(
         deferred: dyadic || mentions(&body, "y"),
         dyadic,
         self_name: self_name.map(str::to_string),
-        spelling: None,
+        rep: None,
         body,
     }
 }
@@ -3466,7 +3488,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         "@:" => {
             let f = verb_operand(u, span)?;
             let g = verb_operand(v, span)?;
-            Ok(Frag::Verb(VerbFrag::V(Verb::Atop(Box::new(f), Box::new(g))), span))
+            Ok(Frag::Verb(VerbFrag::V(Verb::Atop(Box::new(f), Box::new(g), AtopForm::At)), span))
         }
         // `u@v` is `u@:v` applied at v's own ranks: one v-cell at a time,
         // with u run on each result. That difference in rank is all that
@@ -3475,7 +3497,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             let f = verb_operand(u, span)?;
             let g = verb_operand(v, span)?;
             let ranks = g.ranks();
-            let atop = Verb::Atop(Box::new(f), Box::new(g));
+            let atop = Verb::Atop(Box::new(f), Box::new(g), AtopForm::At);
             Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(atop), ranks)), span))
         }
         "&" => compose(u, v, false, span),
@@ -3502,7 +3524,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             let g = verb_operand(v, span)?;
             let back = obverse_of(&g, span)?;
             let composed = Verb::Compose(Box::new(f), Box::new(g.clone()));
-            let under = Verb::Atop(Box::new(back), Box::new(composed));
+            let under = Verb::Atop(Box::new(back), Box::new(composed), AtopForm::At);
             if glyph == "&.:" {
                 return Ok(Frag::Verb(VerbFrag::V(under), span));
             }
@@ -4371,10 +4393,13 @@ fn apply_fork(f: Frag, g: Frag, h: Frag, scope: &Names) -> Result<Frag> {
     let (gv, _) = as_verb(g)?;
     let (hv, _) = as_verb(h)?;
     match f {
-        // `[: g h` is g atop h: the left tine produces nothing to fork over.
-        Frag::Verb(VerbFrag::Cap, _) => {
-            Ok(Frag::Verb(VerbFrag::V(Verb::Atop(Box::new(gv), Box::new(hv))), span))
-        }
+        // `[: g h` is g atop h: the left tine produces nothing to fork
+        // over. The spelling is kept so that the verb writes itself back
+        // out as the fork it was written as.
+        Frag::Verb(VerbFrag::Cap, _) => Ok(Frag::Verb(
+            VerbFrag::V(Verb::Atop(Box::new(gv), Box::new(hv), AtopForm::Cap)),
+            span,
+        )),
         Frag::Verb(VerbFrag::V(fv), _) => Ok(Frag::Verb(
             VerbFrag::V(Verb::Fork(Box::new(fv), Box::new(gv), Box::new(hv))),
             span,
@@ -4984,7 +5009,7 @@ mod tests {
     fn atop_conjunction() {
         let (v, _) = monad_of(&one("+/ @: , y"));
         match &v {
-            Verb::Atop(f, g) => {
+            Verb::Atop(f, g, AtopForm::At) => {
                 assert!(matches!(**f, Verb::Reduce(_)), "got {f:?}");
                 assert_eq!(prim_of(g).name, ",");
             }
@@ -5169,7 +5194,7 @@ mod tests {
     fn cap_makes_a_fork_an_atop() {
         let (v, _) = monad_of(&one("([: +/ ,) 1 2 3"));
         match &v {
-            Verb::Atop(f, g) => {
+            Verb::Atop(f, g, AtopForm::Cap) => {
                 assert!(matches!(**f, Verb::Reduce(_)), "got {f:?}");
                 assert_eq!(prim_of(g).name, ",");
             }
