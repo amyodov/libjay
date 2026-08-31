@@ -97,7 +97,16 @@ pub enum Expr {
     /// modifier is applied when the sentence holding it is parsed, so this
     /// node carries only what the name stands for; like
     /// [`Expr::VerbDef`] it runs nothing and yields nothing.
-    ModDef { name: String, spelling: String, conjunction: bool, span: Span },
+    ModDef {
+        name: String,
+        spelling: String,
+        conjunction: bool,
+        /// What the modifier writes itself out as: the glyph a primitive is
+        /// spelled with, or the `:` phrase an explicit one was written as.
+        /// None where libjay keeps no spelling for it.
+        rep: Option<crate::gerund::Ar>,
+        span: Span,
+    },
 }
 
 /// A control-flow sentence. Every body is a block: a list of sentences whose
@@ -1594,9 +1603,9 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
         // The parser has already applied a named modifier everywhere it is
         // used; the run records only the CLASS, which is what `4!:0` and
         // `4!:1` ask a name for. The sentence is silent either way.
-        Expr::ModDef { name, conjunction, .. } => {
+        Expr::ModDef { name, conjunction, rep, .. } => {
             ctx.env.erase_name(name);
-            ctx.env.define_mod(name.clone(), *conjunction);
+            ctx.env.define_mod(name.clone(), *conjunction, rep.clone());
             Ok(Array::scalar_i64(0))
         }
         // A record of what the program was: a silent sentence whose value

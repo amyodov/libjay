@@ -306,7 +306,7 @@ impl FillAtom {
     }
 
     /// The fill as a rank-0 array.
-    fn array(self) -> Array {
+    pub(crate) fn array(self) -> Array {
         let data = match self {
             FillAtom::Bool(b) => Data::Bool(vec![b].into()),
             FillAtom::I64(n) => Data::I64(vec![n].into()),
@@ -472,8 +472,12 @@ pub struct Env {
     verbs: HashMap<String, Verb>,
     /// The names given an adverb or a conjunction, and which of the two.
     /// A modifier is applied while a sentence is parsed, so the run keeps
-    /// only the CLASS — which is all `4!:0` and `4!:1` ask for.
+    /// only the CLASS — which is all `4!:0` and `4!:1` ask for — and, for
+    /// the representation forms, the spelling the name was given.
     mods: HashMap<String, bool>,
+    /// What a name of modifier class writes itself out as, for the names
+    /// whose spelling libjay keeps.
+    mod_reps: HashMap<String, crate::gerund::Ar>,
     args: Vec<Array>,
     /// The definition depth a `throw.` now travelling was raised at, which
     /// is what a `catcht.` reads to tell a throw from something it CALLED —
@@ -602,6 +606,7 @@ impl Env {
             running: Vec::new(),
             verbs: HashMap::new(),
             mods: HashMap::new(),
+            mod_reps: HashMap::new(),
             args,
             thrown: None,
         }
@@ -823,8 +828,27 @@ impl Env {
     /// is resolved while a sentence is PARSED, so nothing at run time needs
     /// the modifier itself; what the run does need is that `4!:0` and
     /// `4!:1` can say a name has that class.
-    pub fn define_mod(&mut self, name: String, conjunction: bool) {
+    pub fn define_mod(
+        &mut self,
+        name: String,
+        conjunction: bool,
+        rep: Option<crate::gerund::Ar>,
+    ) {
+        match rep {
+            Some(ar) => {
+                self.mod_reps.insert(name.clone(), ar);
+            }
+            None => {
+                self.mod_reps.remove(&name);
+            }
+        }
         self.mods.insert(name, conjunction);
+    }
+
+    /// The representation a name of modifier class stands for, where its
+    /// spelling was kept.
+    pub fn mod_rep(&self, name: &str) -> Option<&crate::gerund::Ar> {
+        self.mod_reps.get(name)
     }
 
     /// The class `4!:0` gives a name: 0 a noun, 1 an adverb, 2 a
@@ -889,6 +913,7 @@ impl Env {
         self.unset_global(name);
         self.verbs.remove(name);
         self.mods.remove(name);
+        self.mod_reps.remove(name);
         if let Some(frame) = self.frames.last_mut() {
             frame.remove(name);
         }
@@ -7617,6 +7642,11 @@ fn atomic_rep(y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<Array> {
                 span,
             )
         })?;
+        return Ok(Array::boxed(ar.to_array()));
+    }
+    // A name of MODIFIER class stands for the modifier it was given, which
+    // an explicit one writes out as the `:` phrase its body was written as.
+    if let Some(ar) = ctx.env.mod_rep(&name) {
         return Ok(Array::boxed(ar.to_array()));
     }
     // A name that stands for nothing yet represents ITSELF, which is what
@@ -19636,10 +19666,14 @@ fn representation(op: MonadOp, y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<A
             },
         };
     }
-    // A name that stands for nothing yet represents ITSELF.
+    // A name that stands for nothing yet represents ITSELF; one of
+    // MODIFIER class stands for the modifier it was given.
     let ar = match ctx.env.get(&name) {
         Some(a) => crate::gerund::Ar::Noun(a),
-        None => crate::gerund::Ar::Prim(ill_formed(name, span)?),
+        None => match ctx.env.mod_rep(&name) {
+            Some(ar) => ar.clone(),
+            None => crate::gerund::Ar::Prim(ill_formed(name, span)?),
+        },
     };
     match op {
         MonadOp::BoxedRep => Ok(crate::gerund::boxed_rep(&ar)),

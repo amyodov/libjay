@@ -67,12 +67,21 @@ impl Modifier {
     }
 
     /// How a session writes the modifier back out. None where the source
-    /// spells it in a way libjay does not keep — a body written on the
-    /// lines below, or a `{{ }}`.
+    /// spells it in a way libjay does not keep.
     fn display_text(&self) -> Option<String> {
         match self {
             Modifier::Prim(g) => Some((*g).to_string()),
             Modifier::Explicit(src) => src.rep.as_ref().map(ExplicitRep::display),
+        }
+    }
+
+    /// What the modifier writes itself out as in the representation forms:
+    /// a primitive is its own spelling, and an explicit one the `:` phrase
+    /// its header and body make.
+    fn rep(&self) -> Option<crate::gerund::Ar> {
+        match self {
+            Modifier::Prim(g) => Some(crate::gerund::Ar::Prim((*g).to_string())),
+            Modifier::Explicit(src) => src.rep.as_ref().map(crate::gerund::explicit_ar),
         }
     }
 }
@@ -268,9 +277,10 @@ impl Names {
         // node the sentence lowers to carries only its spelling.
         if let Some(Frag::ModDef(name, conj, m, span)) = frag {
             let spelling = m.spelling();
+            let rep = m.rep();
             self.forget(&name);
             self.mods.insert(self.key(&name), (conj, m));
-            return Ok(Expr::ModDef { name, spelling, conjunction: conj, span });
+            return Ok(Expr::ModDef { name, spelling, conjunction: conj, rep, span });
         }
         let stmt = lower_sentence(frag, whole, self.char_bytes)?;
         self.record(&stmt);
@@ -2991,7 +3001,8 @@ fn lower_sentence(frag: Option<Frag>, whole: Span, char_bytes: bool) -> Result<E
         Some(f @ (Frag::Noun(_) | Frag::Name(..))) => as_noun(f),
         Some(Frag::VerbDef(name, verb, span)) => Ok(Expr::VerbDef { name, verb, span }),
         Some(Frag::ModDef(name, conjunction, m, span)) => {
-            Ok(Expr::ModDef { name, spelling: m.spelling(), conjunction, span })
+            let rep = m.rep();
+            Ok(Expr::ModDef { name, spelling: m.spelling(), conjunction, rep, span })
         }
         // A sentence that IS a verb or a modifier displays the entity, and
         // what a session shows for it is its linear representation: the

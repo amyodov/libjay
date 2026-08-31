@@ -161,6 +161,20 @@ fn constant_word(n: &Array) -> Option<String> {
     Some(if k < 0 { format!("_{}:", -k) } else { format!("{k}:") })
 }
 
+/// A parameter list as the noun it was written as: real where every one of
+/// them is, and one atom where the list holds one.
+fn cx_noun(zs: &[crate::complex::Cx]) -> Array {
+    if zs.iter().all(|z| z[1] == 0.0) {
+        let reals: Vec<f64> = zs.iter().map(|z| z[0]).collect();
+        return match reals.as_slice() {
+            [only] => Array::scalar_f64(*only),
+            _ => Array::from_f64(reals),
+        };
+    }
+    let shape = if zs.len() == 1 { Vec::new() } else { vec![zs.len()] };
+    Array::new(shape, Data::Complex(zs.to_vec().into()))
+}
+
 fn power_noun(p: &Power) -> Option<Array> {
     Some(match p {
         Power::Times(n) => Array::scalar_i64(*n as i64),
@@ -248,6 +262,35 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         // An explicit definition is the `:` conjunction over its valence
         // and its body, whichever way the source spelled it.
         Verb::Explicit(def) => def.rep.as_ref().map(explicit_ar),
+        // `u : v` — one verb out of two, which is the same conjunction
+        // over two VERB operands.
+        Verb::Ambivalent(u, w) => der(":", vec![verb_ar(u)?, verb_ar(w)?]),
+        // `u&.,` is written with the ravel it is an under of.
+        Verb::UnderRavel(u) => {
+            der("&.", vec![verb_ar(u)?, Ar::Prim(",".to_string())])
+        }
+        // `u!.f` where the fit is a FILL: the fill stands as its own noun.
+        Verb::Fill(u, f) => der("!.", vec![verb_ar(u)?, Ar::Noun(f.array())]),
+        // `|.!.f` is the rotate with a fill, and the rotate is what it is
+        // written from.
+        Verb::ShiftFill(f) => {
+            der("!.", vec![Ar::Prim("|.".to_string()), Ar::Noun(f.clone())])
+        }
+        // `` u`v`w} `` — the gerund is the adverb's one noun operand.
+        Verb::AmendGerund(vs) => {
+            let items: Option<Vec<Ar>> = vs.iter().map(verb_ar).collect();
+            der("}", vec![Ar::Noun(gerund_array(&items?))])
+        }
+        // `m H. n`: the two parameter lists, as they were written.
+        Verb::Hypergeometric { num, den } => der(
+            "H.",
+            vec![Ar::Noun(cx_noun(num)), Ar::Noun(cx_noun(den))],
+        ),
+        // `u . v` — J's inner product. APL's `f.g` is the same node under
+        // a spelling J does not have.
+        Verb::InnerProduct { u, v, apl: false } => {
+            der(".", vec![verb_ar(u)?, verb_ar(v)?])
+        }
         _ => None,
     }
 }
