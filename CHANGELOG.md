@@ -244,6 +244,53 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- J's exact types carry the two INFINITIES. `% 0x` is `_` and reports the
+  rational type, `(3 {. 123x) ^ _2` is one rational array holding a
+  fraction beside two infinities, and `x: _` is `_` rather than a refusal.
+  An infinity swallows a finite addend, two opposite ones cancel to
+  nothing, an infinity times a zero is a zero, and a zero over a zero is a
+  zero; anything with no value at all widens the pass to floats, where J's
+  NaN rules take over. That closes the last row of the exact-storage
+  family.
+- An exact base raised to the ATOM 0.5 is the exact square root: `4x ^ 0.5`
+  is the extended 2 and `(1r4) ^ 0.5` is `1r2`. `^ 0.5` reads as `%:`
+  throughout, which is why a BOOLEAN base keeps its type under both.
+- The dyadic outfix's eager folds are two rules: a sum types its whole
+  argument wherever the fold is asked for anything, the other four only
+  where some piece really holds an item. `3 <./\. (1;2;3)` is the identity
+  rather than a domain error, and six divergence rows close with it.
+- `x ! y` takes the SHORT side of its symmetry where the two arguments are
+  close: `4503599627370496 ! 4503599627370497` is y itself, not the 6.2e27
+  a gamma quotient of two huge factorials cancels to.
+- `x C. y` refuses a left argument that is no permutation of y's items —
+  the Dictionary does not define one, and the reference's answers for one
+  follow no rule — with a diagnostic naming the value that spoils it.
+- Which type refusals survive an EMPTY frame is now the reference's own
+  table: `^.`, `j.` and `r.` settle their domain from the whole argument,
+  `%:` keeps a character's refusal on either side and a box's only on the
+  left, and every other arithmetic verb answers the empty. Three
+  divergence rows close with it.
+- J's logarithm divides the way J's `%` does, so `1 ^. 1` is 0; a complex
+  quotient of an infinite part over a zero has no value, which makes
+  `1 ^. __` a NaN error where `2 ^. __` keeps its `_j4.53236`; and an
+  infinite magnitude along an axis stays on it, so `_ ^ 0.5` is `_`.
+- A NEGATIVE zero divisor turns the infinity over, in the fused kernel and
+  the shader as well as the plain path, so `% ^:_2 (_ __ 0)` is `_ __ 0`.
+- A polynomial's boxed root form is a boxed scalar or a two-box list, and a
+  two-column TABLE where the roots go spells the polynomial sparsely, one
+  term per row as `coefficient, exponent`; a sparse form written in the
+  exact types stays exact through the derivative and the integral. A
+  polynomial value the arithmetic could not make is no value.
+- A tessellation of complete blocks moves one place at a time even where
+  the block holds no items: `$ 0 <;._3 (i. 5)` is 5.
+- `u&.>` boxes every answer it makes, so an argument with no atom to open
+  still leaves boxed data; `x A. y` over an atom y answers y itself where x
+  names no permutation at all.
+- A boxed array's row heights span the whole array as its column widths do,
+  which lines up the rules of a rank-3 answer plane by plane.
+- `I.` searches a COMPLEX bound or value by the same total order the grades
+  use, and refuses a numeric bound against a boxed value whatever their
+  ranks.
 - J's `L:` and `S:` read their level operand like a RANK — 1 atom for every
   valence, 2 atoms `left right` with the monadic level taken from the
   right, 3 atoms in full — and read it when the derived verb is APPLIED, so

@@ -77,11 +77,11 @@ feature — that is a promise, not a refusal.
 | `\|:` | transpose (reverse axes) | dyadic transpose: the axes x names move to the END in that order and the rest keep their order in front; a BOXED x groups axes, and the axes of one group are run together, which is the diagonal. An axis named twice is an index error, as it is in the reference |
 | `i.` | integers (negative axis = reversed) | index of (absent gives the item count) |
 | `i:` | steps: `-y` to `y` one apart, `1 + <. 2 * \| y` of them; a negative y counts down | index of the LAST occurrence (absent gives the item count) |
-| `I.` | indices: index `i` repeated `y[i]` times (rank 1, so a table frames the rows) | interval index: how many items of the ascending x are strictly below each cell. Characters and symbols have an order of their own and are searched by it; the two sides must be the same kind |
+| `I.` | indices: index `i` repeated `y[i]` times (rank 1, so a table frames the rows) | interval index: how many items of the ascending x are strictly below each cell. Characters, symbols, boxes and complex numbers have an order of their own and are searched by it — the same total order `/:` grades with, which reads a complex number's real part first and its imaginary part after it; the two sides must be the same kind, a numeric bound against a boxed value being refused |
 | `e.` | raze-in: for every element of y, which items of `; y` it holds — the answer is shaped `($y), #items of the raze` | member: cells of x shaped like items of y |
 | `E.` | — | find: 1 at each position of y where a copy of x begins, shaped like y's items; a pattern longer than y matches nowhere |
 | `A.` | anagram index: where the permutation y's items RANK as stands among the permutations of that length, lexicographically | the x-th permutation of y's items; a negative x counts back from the last. Characters have no anagram index monadically, as in J |
-| `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation. A list shorter than the permutation it names stands for one over `1 + >./ y` items | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation of y's items, ABBREVIATED where it is shorter — the items it never names come first, in ascending order, so `0 1 C. 'abcde'` is `cdeab`, `3 4 2 C. 'abcde'` is `abdec` and an atom is such a list of one. An element of a cycle is an index INTO y and counts back from the end where it is negative, so `(<_1 0) C. 1 2 3` is `3 2 1`; an index y has no item for is refused before the permutation is built |
+| `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation. A list shorter than the permutation it names stands for one over `1 + >./ y` items | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation of y's items, ABBREVIATED where it is shorter — the items it never names come first, in ascending order, so `0 1 C. 'abcde'` is `cdeab`, `3 4 2 C. 'abcde'` is `abdec` and an atom is such a list of one. An element of a cycle is an index INTO y and counts back from the end where it is negative, so `(<_1 0) C. 1 2 3` is `3 2 1`; an index y has no item for is refused before the permutation is built, and so is a left argument that is no permutation of the items at all — the Dictionary does not define that, and the diagnostic names the value that spoils it |
 | `u:` | codepoints become characters; characters are answered with themselves | form 3 gives codepoints, 10 the characters they name, 1 a codepoint modulo 256, 2 the same characters widened, 8 the UTF-8 bytes of a codepoint and 9 the codepoints a run of UTF-8 bytes spells |
 | `;:` | words: J's own tokeniser over a string, one box per word. A run of numeric literals separated by blanks is ONE word (`;: '1 2 3'` has one), `NB.` swallows the rest of the line, and an unclosed quote is a parse error | the sequential machine — see below |
 | `s:` | symbols: the argument's text, interned. A character LIST carries its own delimiter in its first position, so ``s: '`a`b'`` is the two symbols `` `a `` and `` `b `` while `s: 'a b'` is the one name `" b"`, and the empty list has no delimiter and no names. A character TABLE gives one name per row with trailing blanks trimmed, the leading axes becoming the result's shape. A BOXED argument gives one name per box, the characters taken exactly as they stand — trailing blank and all. Anything else is a domain error; a box holding a rank-2 array is a rank error | the name forms: `4 s:` lays the names out as a character table, blank-padded to the longest (the shape gains that width as a trailing axis), and `5 s:` boxes them one apiece, keeping the shape. `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report on an interpreter's own symbol table — how many slots it holds, which are in use, how it hashes them — and are named gaps rather than guesses |
@@ -2165,26 +2165,15 @@ the decimal point, and that is typography, not semantics.
 
 These are sentences jconsole answers and libjay refuses by name, or answers
 differently, that a 150 000-expression sweep at depth 3 still reaches. No
-family is above three cases in fifty thousand; most are singletons.
+family is above three cases in fifty thousand; most are singletons. Round 3
+of the agreement loop closed the exact infinity, the exact root, the
+binomial's symmetry, the outfix's eager folds, the logarithm's domain and
+division, the polynomial's boxed and sparse forms, the tessellation's empty
+block, the empty frame's type table, the signed zero, the boolean root, the
+boxed empty an under-open leaves, the interval index over complex values
+and the box display's row heights; what is listed here is what a sweep
+still reaches after them.
 
-- **An infinite value inside an EXACT array.** `(3 {. 123x) ^ _2` is
-  `1r15129 _ _` there, a rational array holding an infinity, and
-  `6.60982e_5 _ _` here: libjay's `Rat` has no zero denominator by
-  construction, so an infinity among exact values drops the whole array to
-  f64. `(+. (1 2 3x)) ^ _2` and `((_5x) %"_ 1 1 (3 3 $ 1 0 0 0 1 0 0 0 1))
-  ^ _1` read the same way. Relaxing it is a change to the exact-number
-  model, not to a verb.
-- **An exact ROOT.** `(1r4) ^ 0.5` is `1r2` there and `0.5` here: a
-  rational raised to a rational power comes back exact where the root is.
-- `x ! y` where `y - x` is tiny beside `y`:
-  `4503599627370496 ! 4503599627370497` is `4.5036e15` there and
-  `6.23515e27` here, and `1e10 ! (1e10 + 1e_4)` is 1.00234 against 1.00238.
-  The Stirling ratio loses the answer when the two large arguments are
-  nearly equal.
-- **`C.` with a left argument that is no permutation of the items.**
-  `(_2 0 2) C. 'hello'` is `eolhl` there and a domain error here, and
-  `(_3) C. (1;2;3)` rotates. The reading is neither the direct form nor the
-  flat cycle form the monad writes, and twenty probes did not settle it.
 - **The obverse of `!` off the principal branch.** `!^:_1` here is the
   smallest argument at or above zero whose factorial is the value, which is
   what the reference answers everywhere the sweep reaches. The reference
@@ -2195,9 +2184,15 @@ family is above three cases in fifty thousand; most are singletons.
 - **`".` of a bare undefined name.** `". 'hello'` is the empty there — the
   sentence has no result, rather than failing — and a value error here,
   which is what libjay's compiler makes of an unbound name. `". 'hello+1'`
-  is an error on both sides.
-- **`p.` and `p..` over a BOXED root form at a level or under each.**
-  `p..&.> ((<i. 2 2);5)` is `0 0 6` there and `_6 22 _18 4` here.
+  is an error on both sides. Letting the sentence through wants an
+  unbound-name node in the IR.
+- **A polynomial whose roots are all RATIONAL, or all Gaussian.** jconsole
+  factors over the coefficients' own exact type: `p. (1r2 1r3)` is
+  `1r3 ; _3r2` there and a pair of floats here, `p. (4 0 1x)` is
+  `1 ; 0j2 0j_2`, and the roots come back descending. libjay's
+  Durand–Kerner works in f64 throughout, so the two name the same numbers
+  and write them differently. One divergence row (`p. 1r2 _3r2 1`) and two
+  sweep spellings.
 - **A dyadic `L:` whose two sides reach their level with different shapes.**
   `(2 2 $ 1;2;3;4) *. L:0 (2;4)` pairs a 2 by 2 of boxes against 2 there
   and is a length error here.
@@ -2206,7 +2201,24 @@ family is above three cases in fifty thousand; most are singletons.
   type error here; `2 {.!.'z' (1 2)` is an error on both sides, so the
   check is not simply lazy.
 - **`<.` and `>.` over a tolerantly real complex number.** The comparisons
-  read one as the real number it is; the two extrema still refuse it.
+  read one as the real number it is; the two extrema still refuse it, since
+  `cx_op` has no tolerance in scope.
+- **A tessellation's or a cut's boxed FILL.** `3 ,.;.3 (2 2 $ <i. 2 2)` and
+  `_1 2 }:;.3 (2 2 $ <i. 2 2)` pad their short blocks with a differently
+  shaped empty box than the reference does.
+- **A large whole number a double cannot hold, under a verb that leaves the
+  integers.** `*. &.:#. (_9223372036854775806)` and
+  `(5) *. "0 0 1 (_9223372036854775806)` part the two the way
+  `(9007199254740992) *. (9007199254740993)` already does: the reference
+  holds both in one double and libjay keeps them exact.
+- **A circle function of a very large angle.** `*.^:_1 (i. 2 3 4)` reaches
+  an argument above the limit libjay puts on an angle (2^53 divided by
+  2π, past which a period is no longer resolvable) and jconsole answers it
+  anyway.
+- Around twenty further singletons the round-3 sweep still names, each its
+  own investigation: `{::` and `&.,` over an atom, `S:` at a level of `_`
+  over a scan, the linear representation of a two-atom `S:` level, a
+  boxed-empty `,/`, the value `(p. [)^:3` iterates to.
 
 ## Known divergences (deliberate, revisit later)
 
@@ -2240,39 +2252,63 @@ oracle directly, one entry per line of
   writes as `λ` here and as `Î»` there.
   One entry per line of `crates/libjay/tests/corpus/j/divergences.txt`.
 - jconsole computes a polynomial's ROOTS exactly where it can factor it
-  over the coefficients' own exact type — degree 2 or more, whole roots for
-  whole coefficients and rational ones for rational coefficients — and
-  stores the answer as rationals. libjay's Durand–Kerner works in f64
-  throughout, so `p. 1r2 _3r2 1` is `1 1r2` there and `1 0.5` here: the
-  numbers are the same and their storage is not. The polynomial derivative
+  over the coefficients' own exact type — a polynomial whose every root is
+  rational, or Gaussian, comes back exact, roots descending — and stores
+  the answer as rationals. libjay's Durand–Kerner works in f64 throughout,
+  so `p. 1r2 _3r2 1` is `1 1r2` there and `1 0.5` here: the numbers are the
+  same and their storage is not. It is listed as a named gap above too,
+  since the rule is measurable and only the work is missing. The polynomial derivative
   and integral, the base conversions and their obverses no longer diverge —
   they run in the exact arithmetic where either side is exact.
-- The dyadic outfix types its whole argument before any piece is cut, which
-  is what makes `2 +/\. 'abc'` a domain error although every piece it
-  leaves behind holds one character. Over BOXES the reference does not
-  follow that rule of its own: `5 +/\. (1;2)` is a domain error there while
-  `5 <./\. (1;2)` and `5 */\. (2;5)` — the same shape, the same argument,
-  no piece left over — are the empty, and `0 >./\. (<'abc')` answers a pair
-  of boxes no maximum was ever taken of. Two of those cannot both be a
-  rule. The same contradiction stands over CHARACTERS, where no piece is
-  left either: `6 +/\. 'abc'` is a domain error there and `6 */\. 'abc'`
-  and `5 <./\. 'hello'` are the empty. libjay asks the operand once, of the
-  whole argument, whichever fold it is, and refuses where that has no
-  meaning.
 - Where the frame is EMPTY — nothing to apply the verb to — the reference
   keeps a refusal about an operand's TYPE for some verbs and drops it for
-  others, and the two cannot both be a rule. `(i. 0) ^. (<1)` is a domain
-  error there while `(i. 0) ^ (<1)`, `(i. 0) o. (<1)`, `(i. 0) ! (<1)` and
-  every other arithmetic verb answer the empty; `j.` and `r.` refuse with
-  `^.`. Decode reads the same way from the other end: `(1;2;3) #. (i. 2 0 3)`
+  others. Which verbs those are is measurable, and libjay follows it:
+  `^.`, `j.` and `r.` settle their domain from the whole argument, `%:`
+  keeps a character's refusal on either side and a box's only on the left,
+  and every other arithmetic verb answers the empty. DECODE is what still
+  parts the two: `(1;2;3) #. (i. 2 0 3)`
   and `(2 0 3 $ 0) #. 'hello'` are refused there while `(<1) #. (i. 0)` and
-  `(i. 0) #. 'ab'` are 0 and the empty. A refusal about the cells' SHAPES
+  `(i. 0) #. 'ab'` are 0 and the empty, and no rule tells the four apart. A
+  refusal about the cells' SHAPES
   splits the same way — `(0 $ 0.5) #. (i. 2 0 3)` keeps its length error and
   `(i. 0 0) #. (,5)`, 0 radices against 1 digit either way, does not.
   libjay keeps one rule: a refusal about a fill's type never survives an
   empty frame, one about the cells' shapes survives for the verbs that PAIR
   their cells (a scalar dyad, whose two cells must agree) and for an index
   out of range, and no other does.
+- `x ! y` over two large arguments a double cannot tell apart.
+  `1e10 ! (1e10 + 1e_4)` is 1.00234 there; the value is 1.0023631, which
+  the digamma series gives independently, and the reference's difference of
+  two log-gammas cancels catastrophically at that size. libjay's own
+  quotient lands on 1.00238, no closer, and matching the reference would
+  mean matching its arithmetic rather than the mathematics. Where the
+  difference of the two arguments is a small WHOLE number both sides are
+  exact and agree — that is the symmetry `x ! y` is `(y-x) ! y`, and it is
+  the ordinary case.
+- `x C. y` over a left argument that is no permutation of y's items. The
+  Dictionary defines the dyad for a permutation — a direct one or a boxed
+  list of cycles — and says nothing about anything else, which makes any
+  other left argument undefined behaviour. Thirty probes found no rule in
+  what the reference does with one: `(_2 0 2) C. 'hello'` is `eolhl` there,
+  `(_1 _2) C. i.4` is `0 1 3 2` and `(_2 _1) C. i.4` is `0 1 2 3`, which is
+  neither the direct reading nor the flat cycle form `C. y` writes, and
+  `(_1) C. i.4` and `(_3) C. (1;2;3)` disagree with both again. libjay
+  would rather say plainly that this is undefined than fabricate an answer
+  to match behaviour nobody has specified: it refuses, and the diagnostic
+  names the value that makes the argument no permutation.
+- `x I. y` over BOXES. libjay searches every element type that has an order
+  by the same total order `/:` grades with, and for characters and symbols
+  the reference agrees. For boxes it does not: its comparison there tells
+  apart only equal from unequal, so `(<2) I. (1;2;3)` is `1 0 1` — a 1 on
+  both sides of the 0 — which no order can produce, and `(<5) I. (1;2;3)`
+  is `1 1 1` although `/: ((<5);1;2;3)` puts the 5 last in both. The
+  Dictionary defines the interval index for a sorted numeric list, so this
+  too is undefined behaviour; libjay answers by the order it grades with.
+- `x ^. y` over a boxed y and a NEGATIVE x, which sends the logarithm into
+  the complex domain. jconsole answers it with NOTHING AT ALL — no value,
+  no error, no output line — while `2 ^. (<1)`, the same sentence with a
+  positive left argument, is a domain error. libjay refuses both alike
+  rather than following the silence.
 - Two whole numbers a double cannot tell apart. Once the verb is not one of
   jconsole's integer special cases it holds every number in a double, so
   `9007199254740992` and `9007199254740993` are one value to its `*.` and

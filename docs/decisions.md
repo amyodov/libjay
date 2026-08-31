@@ -4710,3 +4710,96 @@ the register.
   not the 0 a difference against a shifted-in fill made. The guard is said
   in the language itself — the undoing is run `0 < #@$` times — rather than
   as a new verb variant.
+- 2026-08-31 — The exact types carry the two INFINITIES. `% 0x` is `_` and
+  reports the rational type in the reference, and `(3 {. 123x) ^ _2` is one
+  rational array holding a fraction beside two infinities, so a `Rat` may
+  now have a zero denominator, which is the infinity of the numerator's
+  sign. A zero over a zero is no number at all and answers None, which
+  widens the pass to floats where J's own NaN rules take over. The
+  arithmetic follows the rules the reals already do: an infinity swallows a
+  finite addend, two opposite ones cancel to nothing, an infinity times a
+  zero is a zero, a zero over a zero is a zero, and an extremum or a
+  residue of an infinity is the infinity itself. `x: _` is `_` rather than
+  a refusal; only a NaN has no exact value now. This closes the last row of
+  the exact-storage family the 0.5.0 certification pinned.
+- 2026-08-31 — An exact base raised to the ATOM 0.5 is the exact square
+  root: `4x ^ 0.5` is the extended 2 and `(1r4) ^ 0.5` is `1r2`. Only that
+  one exponent and only as an atom — `4x ^ 0.5 0.5` is a float there, and
+  so is `4 ^ 0.5`, whose base is a machine integer — and only where every
+  cell has a root, one failure widening the whole pass. `^ 0.5` reads as
+  `%:` throughout, which is also why a BOOLEAN base keeps its type under
+  both: zero and one are their own square roots.
+- 2026-08-31 — The dyadic outfix's eager folds are TWO rules, not one. A
+  sum types its whole argument wherever the outfix asks the fold for
+  anything at all; a product, a running extremum and an or type it only
+  where some piece really holds an item, so a width at or above the
+  argument's length leaves them nothing to object to. That is what makes
+  `3 <./\. (1;2;3)` the identity rather than a domain error, and it closed
+  the six outfix rows the divergence list carried as a self-contradiction.
+  The lesson is worth keeping: an apparent contradiction in the reference
+  is often two rules that have not been told apart yet.
+- 2026-08-31 — `x ! y` is `(y-x) ! y`, and where the two arguments are
+  close the SHORT side of that symmetry is the accurate one: the gamma
+  quotient of two huge factorials cancels to nothing, so
+  `4503599627370496 ! 4503599627370497` read as 6.2e27 where the answer is
+  y itself. The product form is spent where the difference is a small whole
+  number. The one pair that stays apart is two large arguments a double
+  cannot tell apart, where the reference's own answer is not the value
+  either (owner's call): that is pinned with both answers.
+- 2026-08-31 — `x C. y` over a left argument that is no permutation of y's
+  items is undefined behaviour — the Dictionary defines the dyad for a
+  permutation and says nothing about anything else — and thirty probes
+  found no rule in what the reference does with one. libjay REFUSES, and
+  the diagnostic names the value that makes the argument no permutation
+  (owner's call). Saying plainly that something is undefined is worth more
+  than an answer fabricated to match behaviour nobody has specified. `x I. y`
+  over BOXES is pinned the same way: the reference's comparison there tells
+  apart only equal from unequal, which no order can produce, and libjay
+  answers by the total order `/:` grades with.
+- 2026-08-31 — Which type refusals survive an EMPTY frame is a TABLE, verb
+  by verb and side by side, and not a rule: `^.`, `j.` and `r.` settle
+  their domain from the whole argument, `%:` keeps a character's refusal on
+  either side and a box's only on the left, and every other arithmetic verb
+  answers the empty. The offending operand must hold an item — `('') ^. 2`
+  is the empty on both sides. Three divergence rows closed with it. Decode
+  is the one that still parts the two sides.
+- 2026-08-31 — The logarithm DIVIDES, and the division is J's own: a zero
+  over a zero is a zero, so `1 ^. 1` is 0 rather than no number. A complex
+  quotient of an INFINITE part over a zero has no value — `(_j2) % 0` is a
+  NaN error where `(2j3) % 0` is `_j_` — which is what makes `1 ^. __` one
+  too; a real divisor leaves the infinite part where it found it. An
+  infinite magnitude along an axis stays on it, the infinity times the zero
+  being a zero, which makes `_ ^ 0.5` the `_` the reference answers.
+- 2026-08-31 — A NEGATIVE zero divisor turns the infinity over, which makes
+  the reciprocal its own inverse to the ends of the line (`% ^:_2 (_ __ 0)`
+  is `_ __ 0`). The rule is mirrored in the fused kernel and in the GPU
+  shader; a fused sum or product now hands an INFINITY back to the plain
+  fold, whose order is the language's, since whether `_ + __` has a value
+  depends on the order the fold reaches the pair in.
+- 2026-08-31 — A polynomial's boxed root form is a boxed SCALAR or a
+  two-box list, and a TABLE where the roots go is not roots at all: two
+  columns spell the polynomial SPARSELY, one term per row as
+  `coefficient, exponent`, a later row replacing an earlier one at the same
+  exponent. The exponent is a whole number at or above zero; any other
+  column count is a length error and the two-box form takes no table. A
+  sparse form written in the exact types stays exact, through the
+  derivative and the integral too. A polynomial value the arithmetic could
+  not make is no value, as its roots already were.
+- 2026-08-31 — A tessellation of complete blocks moves one place at a time
+  even where the block holds NO items: `$ 0 <;._3 (i. 5)` is 5, exactly as
+  a block of one is, and not the six a run of length zero would leave room
+  for.
+- 2026-08-31 — `u&.>` boxes every answer it makes, so an argument with no
+  atom to open still leaves BOXED data: `3!:0 (+: &.> (i. 0))` is the boxed
+  type, where `+: &> (i. 0)` keeps the integer one. `x A. y` over an ATOM y
+  answers y itself where x names no permutation at all; a list y keeps the
+  empty frame.
+- 2026-08-31 — A boxed array's ROW HEIGHTS span the whole array as the
+  column widths already did: row 1 of every plane is as tall as the tallest
+  cell any plane's row 1 holds, which is what keeps the rules of a rank-3
+  answer lined up. A cell with no lines leaves the row with none.
+- 2026-08-31 — A COMPLEX bound or value in `I.` is searched by the same
+  total order the grades use — the real part first, the imaginary part
+  after it — which fits every probe where neither a tolerance nor a
+  magnitude does. Bounds and values must be comparable, so a numeric bound
+  against a boxed value is refused whatever their ranks.
