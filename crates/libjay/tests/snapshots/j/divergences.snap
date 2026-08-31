@@ -93,3 +93,35 @@
 ? jconsole refuses this one dyadic decode and answers every other empty
 < 0
 > j: <error>
+= (i. 0) ^. (<1)
+? the reference refuses this empty frame and answers the same shape for ^ and o.
+<
+> j: <error>
+= (i. 0) j. (<1)
+? the reference refuses this empty frame and answers the same shape for ^ and o.
+<
+> j: <error>
+= (i. 0) r. (<1)
+? the reference refuses this empty frame and answers the same shape for ^ and o.
+<
+> j: <error>
+= (<i. 0) %: (0 $ 123x)
+? the reference refuses a boxed left here and answers (i. 0) %: (<1)
+<
+> j: <error>
+= (1;2;3) #. (i. 2 0 3)
+? the reference refuses this decode and answers (<1) #. (i. 0)
+<
+> j: <error>
+= (2 0 3 $ 0) #. ('hello')
+? the reference refuses this decode and answers (i. 0) #. 'ab'
+<
+> j: <error>
+= (<'abc') #. (2 0 3 $ 0)
+? the reference refuses this decode and answers (<1) #. (i. 0)
+<
+> j: <error>
+= (<1) #. (i. 0)
+? the reference answers this decode and refuses (1;2;3) #. (i. 2 0 3)
+< <error>
+> j: 0

@@ -91,3 +91,30 @@ p. 1r2 _3r2 1
 // everywhere.
 2 #. 0$<1
 ? jconsole refuses this one dyadic decode and answers every other empty
+
+// A refusal about an operand's TYPE where the frame is empty — nothing to
+// apply the verb to — survives in the reference for some verbs and not for
+// others, and the two cannot both be a rule. `(i. 0) ^. (<1)` is a domain
+// error there while `(i. 0) ^ (<1)`, `(i. 0) o. (<1)`, `(i. 0) ! (<1)` and
+// every other arithmetic verb answer the empty; `j.` and `r.` refuse with
+// `^.`. Decode reads the same way from the other end: `(1;2;3) #. (i. 2 0 3)`
+// and `(2 0 3 $ 0) #. 'hello'` are refused there while `(<1) #. (i. 0)` and
+// `(i. 0) #. 'ab'` are 0 and the empty. libjay keeps one rule: a refusal
+// about a fill's type never survives an empty frame, and one about the
+// cells' SHAPES always does.
+(i. 0) ^. (<1)
+? the reference refuses this empty frame and answers the same shape for ^ and o.
+(i. 0) j. (<1)
+? the reference refuses this empty frame and answers the same shape for ^ and o.
+(i. 0) r. (<1)
+? the reference refuses this empty frame and answers the same shape for ^ and o.
+(<i. 0) %: (0 $ 123x)
+? the reference refuses a boxed left here and answers (i. 0) %: (<1)
+(1;2;3) #. (i. 2 0 3)
+? the reference refuses this decode and answers (<1) #. (i. 0)
+(2 0 3 $ 0) #. ('hello')
+? the reference refuses this decode and answers (i. 0) #. 'ab'
+(<'abc') #. (2 0 3 $ 0)
+? the reference refuses this decode and answers (<1) #. (i. 0)
+(<1) #. (i. 0)
+? the reference answers this decode and refuses (1;2;3) #. (i. 2 0 3)

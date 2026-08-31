@@ -9050,6 +9050,13 @@ fn encode_one(radix: &[f64], v: f64, out: &mut [f64], tol: Tol) {
 /// shape `(#x), $y`. J applies this per atom of y (right rank 0) and APL to
 /// the whole of it (right rank infinite); the operation itself is the same.
 fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
+    // No radix is no digit, so nothing of the value is ever read and its
+    // type never comes up: `(i. 0) #: 'ab'` is the empty in jconsole.
+    if x.count() == 0 {
+        let mut shape = if x.rank() == 0 { Vec::new() } else { vec![0] };
+        shape.extend_from_slice(&y.shape);
+        return Ok(Array::new(shape, Data::empty(DType::I64)));
+    }
     if has_imaginary(x) || has_imaginary(y) {
         return encode_complex(x, y, span);
     }

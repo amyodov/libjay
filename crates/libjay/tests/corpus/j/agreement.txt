@@ -248,3 +248,28 @@ _1000000 ];.0 i. 3 4
 p.^:2 (1 2 3x)
 p.^:2 (1 2 3)
 p.^:2 (2 7 1 8)
+
+// The other half of the empty-frame type contradiction: every one of these
+// answers on both sides, which is what makes the refusals in
+// divergences.txt a contradiction rather than a rule.
+(i. 0) ^ (<1)
+(i. 0) o. (<1)
+(i. 0) ! (<1)
+(i. 0) - (<1)
+(i. 0) % (<1)
+(i. 0) <. (<1)
+(i. 0) | (<1)
+(i. 0) *. (<1)
+(i. 0) +. (<1)
+(i. 0) = (<1)
+(i. 0) %: (<1)
+(i. 0) ^. 'ab'
+'ab' ^. (i. 0)
+(i. 0) #. ('ab')
+('') ^. 2
+2 #. ('')
+('') #. 2
+
+// No radix is no digit, so nothing of the value is ever read.
+(i. 0) #: ('ab')
+(i. 0) #: 5
