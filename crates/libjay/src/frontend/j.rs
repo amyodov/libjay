@@ -2134,7 +2134,7 @@ fn primitive(word: &str) -> Option<Prim> {
             ";:",
             M::Words,
             D::SequentialMachine,
-            [INF, INF, INF],
+            [1, INF, INF],
         ),
         "L." => prim("L.", M::LevelOf, D::None, [INF, INF, INF]),
         "\"." => prim(

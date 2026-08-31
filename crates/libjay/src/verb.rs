@@ -3049,7 +3049,7 @@ impl Verb {
             // A scalar dyad pairs its cells, so their shapes must agree
             // whether or not there is a cell to compute.
             let agreeing = self.scalar_dyad_op().is_some();
-            return empty_frame(&p.frame, y.dtype(), cell, conform, agreeing, conform, ctx, |left, numeric, c| {
+            return empty_frame(&p.frame, y.dtype(), cell, conform, agreeing, conform, &[], ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
                 let right = if numeric {
@@ -3348,6 +3348,7 @@ fn empty_frame(
     conform: bool,
     agreeing: bool,
     probe: bool,
+    refused: &[usize],
     ctx: &mut Ctx<'_>,
     mut run: impl FnMut(&Array, bool, &mut Ctx<'_>) -> Result<Array>,
 ) -> Result<Array> {
@@ -3366,12 +3367,11 @@ fn empty_frame(
             // of the same shapes is what learns the cells' shape without
             // asking the verb to mean anything by their types; only the
             // shape is kept, the argument's own type standing.
-            Err(_) if probe => {
-                if let Ok(answer) = run(&numeric_like(&cell), true, ctx) {
-                    shape.extend_from_slice(&answer.shape);
-                }
-            }
-            Err(_) => {}
+            Err(_) if probe => match run(&numeric_like(&cell), true, ctx) {
+                Ok(answer) => shape.extend_from_slice(&answer.shape),
+                Err(_) => shape.extend_from_slice(refused),
+            },
+            Err(_) => shape.extend_from_slice(refused),
         }
     }
     Ok(Array::new(shape, Data::empty(dtype)))
@@ -3570,7 +3570,7 @@ fn prim_monad_frame(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, conform, ctx, |cell, _numeric, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, conform, &[], ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
         });
     }
@@ -3614,7 +3614,7 @@ fn rank_monad(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, conform, ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, conform, &[], ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
     }
@@ -12374,8 +12374,13 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         }
         let cell = u.is_pure().then(|| base.clone());
         let j = ctx.cfg.rules.lang == crate::Lang::J;
+        // Where the verb has nothing to say about that run at all, the
+        // prefixes leave a list of empty lists and the suffixes an empty
+        // list: `$ (4&{)\\ (0 3 $ 0)` is `0 0` and `$ (4&{)\\. (0 3 $ 0)`
+        // is `0`.
+        let refused: &[usize] = if j && !back { &[0] } else { &[] };
         let framed =
-            empty_frame(&[0], base.dtype(), cell, false, false, j, ctx, |cell, _n, c| {
+            empty_frame(&[0], base.dtype(), cell, false, false, j, refused, ctx, |cell, _n, c| {
                 u.monad(cell, c, span)
             })?;
         // That run gives the shape, and its type too — except a boolean,
@@ -12432,7 +12437,14 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
 /// still has the shape of one: J learns that shape by running the verb on a
 /// window of fills, and so does this. A verb that fails on fills, or a
 /// window too large to build, leaves the result a plain empty vector.
-fn empty_windows(u: &Verb, y: &Array, w: usize, ctx: &mut Ctx<'_>, span: Span) -> Array {
+fn empty_windows(
+    u: &Verb,
+    y: &Array,
+    w: usize,
+    refused_axis: bool,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Array {
     let m = y.item_size();
     if u.is_pure() && let Some(cells) = w.checked_mul(m).filter(|&s| s <= 1 << 20) {
         let mut shape = y.shape.clone();
@@ -12444,7 +12456,10 @@ fn empty_windows(u: &Verb, y: &Array, w: usize, ctx: &mut Ctx<'_>, span: Span) -
             return Array::new(shape, Data::empty(cell.dtype()));
         }
     }
-    Array::new(vec![0], Data::empty(DType::I64))
+    // A verb that has nothing to say about a run of fills leaves J with a
+    // list of empty lists rather than a bare empty: `$ 3 +/\\ ''` is `0 0`.
+    let shape = if refused_axis { vec![0, 0] } else { vec![0] };
+    Array::new(shape, Data::empty(DType::I64))
 }
 
 /// The window size: one integer atom.
@@ -12475,9 +12490,17 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     let base = promoted.as_ref().unwrap_or(y);
     let n = base.items();
     let m = base.item_size();
+    let j = ctx.cfg.rules.lang == crate::Lang::J;
     if k < 0 {
         let w = k.unsigned_abs() as usize;
         let count = n.div_ceil(w);
+        // No chunk at all: the chunk an empty argument would have offered
+        // is the EMPTY one, not a run of |x| fills, and the verb run on it
+        // says what shape the answer keeps — `$ _4 +/\\ (0 3 $ 'a')` is
+        // `0 3`, where a run of four character fills is no sum at all.
+        if count == 0 {
+            return Ok(empty_windows(u, base, 0, j, ctx, span));
+        }
         let cells = each_cell(count, n * m, u.is_pure(), ctx, |i, c| {
             cycled(u, i).monad(&section(base, i * w, ((i + 1) * w).min(n)), c, span)
         })?;
@@ -12485,7 +12508,7 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     }
     let w = k as usize;
     if n < w {
-        return Ok(empty_windows(u, base, w, ctx, span));
+        return Ok(empty_windows(u, base, w, j, ctx, span));
     }
     let count = n - w + 1;
     if w > 0 && base.dtype().is_numeric()
@@ -12547,7 +12570,7 @@ fn nwise(f: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     let count = n + 1 - w;
     let fold = Verb::Reduce(Box::new(f.clone()));
     if count == 0 {
-        return Ok(empty_windows(&fold, base, w, ctx, span));
+        return Ok(empty_windows(&fold, base, w, false, ctx, span));
     }
     // The blockwise fold the infix already has. It runs over whole items at
     // full rank, which is what folding the elements along the axis comes to
@@ -14704,7 +14727,10 @@ fn cut(
     if ranges.is_empty() {
         let cell = u.is_pure().then(|| section(&items, 0, 0));
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&[0], items.dtype(), cell, false, false, j, ctx, |cell, _n, c| {
+        // A verb with nothing to say about that piece leaves a list of
+        // empty lists, as the prefixes do.
+        let refused: &[usize] = if j { &[0] } else { &[] };
+        return empty_frame(&[0], items.dtype(), cell, false, false, j, refused, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -14787,7 +14813,7 @@ fn per_axis_cut(
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, false, false, j, ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, false, false, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -15003,6 +15029,18 @@ fn tessellate(
         frame.push(count as usize);
     }
     let total: usize = frame.iter().product();
+    // No block fits on some axis, so there is no block at all: the verb run
+    // on an EMPTY block says what shape the blocks would have had, the axes
+    // no size named staying whole. `$ 2 2 ];.3 (i. 0 0 5)` is `0 0 0 0 5`.
+    if total == 0 {
+        let origin = vec![0i64; frame.len()];
+        let block = vec![0i64; frame.len()];
+        let cell = u.is_pure().then(|| subarray(y, &origin, &block, span)).transpose()?;
+        let j = ctx.cfg.rules.lang == crate::Lang::J;
+        return empty_frame(&frame, y.dtype(), cell, false, false, j, &[], ctx, |cell, _n, c| {
+            u.monad(cell, c, span)
+        });
+    }
     let mut cells = Vec::with_capacity(total);
     let mut coord = vec![0usize; frame.len()];
     for _ in 0..total {
@@ -17717,7 +17755,7 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     if starts.is_empty() {
         let cell = u.is_pure().then(|| select_items(&list, &[]));
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&[0], list.dtype(), cell, false, false, j, ctx, |cell, _n, c| {
+        return empty_frame(&[0], list.dtype(), cell, false, false, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
