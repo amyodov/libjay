@@ -5807,7 +5807,7 @@ fn compare_data(
         // magnitude IS the real number it tolerantly equals, and orders as
         // one: `2 <: _j3.14159` is 1 and `2 <: 1j1e_14` is 0, where
         // `2 <: 1e10j1` and `2 <: 0j1e_20` carry no order at all.
-        if !equality && !total && !(tolerantly_real(x, tol) && tolerantly_real(y, tol)) {
+        if !(equality || total || tolerantly_real(x, tol) && tolerantly_real(y, tol)) {
             return Err(no_complex_order(span));
         }
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
@@ -15877,6 +15877,7 @@ fn map_level(u: &Verb, n: i64, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
 /// until each has reached level n, and u is applied to the pair. A side
 /// that has already reached its level is held while the other descends, so
 /// an unboxed left argument reaches every leaf of the right one.
+#[allow(clippy::too_many_arguments)]
 fn at_level_dyad(
     u: &Verb,
     left: i64,
