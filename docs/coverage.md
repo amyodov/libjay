@@ -2161,6 +2161,25 @@ accepted within 1e-5 relative / 1e-9 absolute. Column padding is not
 compared: libjay right-aligns a mixed numeric column where GNU APL aligns on
 the decimal point, and that is typography, not semantics.
 
+## Named gaps the differential sweep still finds (J)
+
+These are sentences jconsole answers and libjay refuses by name, or answers
+differently, that a 100 000-expression sweep at depth 3 still reaches. None
+is above ten cases in fifty thousand.
+
+- `S:` and `L:` check their level while the sentence is READ, where the
+  reference checks it when the derived verb is applied: `>./\"_2 S:0 2` is
+  a VERB there, the level being `0 2`, and a parse error here.
+- A NOUN operand to a conjunction is not the constant verb here:
+  `,@_1&* 2` is `_1` there and a named refusal here.
+- The obverse of `!` is named: no inverse is known.
+- `x ! y` where `y - x` is tiny beside `y`:
+  `4503599627370496 ! 4503599627370497` is `4.5036e15` there and
+  `6.23515e27` here. The Stirling ratio loses the answer when the two large
+  arguments are nearly equal.
+- The shape a scan, a cut or an infix leaves when it has NO piece at all:
+  `$ 7 <./\ (1;2;3)` is `0 0` there and `0` here.
+
 ## Known divergences (deliberate, revisit later)
 
 Every entry below is a place libjay's answer differs from a reference

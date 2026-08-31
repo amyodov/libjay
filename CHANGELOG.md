@@ -263,6 +263,23 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - Monadic tessellation, `u;.3 y` and `u;._3 y`, which was a named gap: the
   window is a cube of the smallest axis, moved one step at a time along
   every axis.
+- `x ^!.n y`, the STOPE, which was refused as a fit `^` does not take: the
+  product of `y` terms starting at `x` and stepping by `n`, so `2 ^!.5 3`
+  is 168 and `2 ^!.0 3` the ordinary power.
+- A descent with no pair to apply its operand to asks it once, of the fills
+  the pieces would have been, and keeps a refusal about their shapes:
+  `(1 2 3) *. L:0 (0 $ a:)` is a length error, three items against none.
+- An empty frame keeps the cells' SHAPE even where the verb has nothing to
+  say about the fill's type, so `$ 'a' ,"0 (i. 0)` is `0 2`.
+- Euclid's remainder is a rounding artefact only where a subtraction left
+  one: `(1 - 1.00000000000001) +. 2` is that difference and was 2.
+- `+.` of a whole number answers whole parts, which keeps
+  `+. 9223372036854775806` exact.
+- `(i. 0) #: 'ab'` is the empty: no radix is no digit, so nothing of the
+  value is read and its type never comes up.
+- `L. 0$<0` is 0 — an empty of boxes has no level to count — where it was 1.
+- `*` and `E.` take a fit, which they ignore where the tolerance means
+  nothing: `2 (*!.1e_13) 3` is 6 and `'ab' (E.!.0) 'abc'` is `1 0 0`.
 - `j./` and `r./` of an empty are 0, the identity jconsole folds to, where
   they were refused for having none.
 - `x ! y` below its diagonal for a large left argument. The answer is zero
