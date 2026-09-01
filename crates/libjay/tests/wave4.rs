@@ -307,7 +307,9 @@ fn execute_runs_the_string_over_the_names_around_it() {
 
 #[test]
 fn execute_reports_the_inner_diagnostic_at_the_outer_sentence() {
-    let e = err(Lang::J, "\". 'zz'");
+    // A bare unbound name is the empty in J, so the name has to be doing
+    // something for the value error to reach the executing sentence.
+    let e = err(Lang::J, "\". 'zz 3'");
     assert_eq!(e.kind, ErrorKind::Value);
     assert!(e.msg.contains("in the executed string"), "{}", e.msg);
     // The inner diagnostic still reads in full, as a note: its own spans

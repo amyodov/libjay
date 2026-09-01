@@ -314,11 +314,11 @@ fn an_empty_is_acceptable_numeric_data(
 
 /// An empty of BOXES holds no element to be the wrong type either, so it
 /// is numeric data wherever an empty of characters is. jconsole reads one
-/// the same way — `#. 0$<1` is 0 and `A. 0$<1` is 0 — and refuses only the
-/// one dyadic decode, which `corpus/j/divergences.txt` pins.
+/// the same way — `#. 0$<1` is 0 and `A. 0$<1` is 0. The one exception is
+/// the DYADIC decode, whose radices have to be of a kind that reads boxes:
+/// `2 #. 0$<1` is a domain error there and `(<1) #. 0$<1` is 0.
 #[rstest]
 #[case("#. 0$<1", "0")]
-#[case("2 #. 0$<1", "0")]
 #[case("i. 0$<1", "0")]
 #[case("A. 0$<1", "0")]
 #[case("$ #: 0$<1", "0 0")]
