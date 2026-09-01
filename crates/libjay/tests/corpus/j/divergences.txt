@@ -142,3 +142,18 @@ C. (_2 0 2)
 ? the reference's box comparison here tells apart only equal from unequal
 (<2) I. (1;2;3)
 ? the reference's box comparison here tells apart only equal from unequal
+
+// A polynomial of the THIRD degree or higher with an infinite coefficient
+// aborts jconsole's own root finder — `p. (_ 1 2 3)` and `p. (1 2 3 __)`
+// are both stack errors there, which is an interpreter limit and not an
+// answer the Dictionary describes. The same polynomials at the SECOND
+// degree answer with roots that have no value, and libjay carries that
+// reading up to any degree: an infinite leading coefficient over a
+// non-zero constant term leaves no root, and the roots come back as
+// `_.j_.`.
+p. (_ 1 2 3)
+? jconsole's root finder aborts on this one with a stack error
+p. (1 2 3 __)
+? jconsole's root finder aborts on this one with a stack error
+p. (0 1 1 _)
+? jconsole's root finder aborts on this one with a stack error

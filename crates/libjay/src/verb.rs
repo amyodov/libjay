@@ -16865,11 +16865,15 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
     let quotient = |k: Cx| -> Cx {
         if k[1] == 0.0 && lead[1] == 0.0 { [k[0] / lead[0], 0.0] } else { cx::div(k, lead) }
     };
-    let monic: Vec<Cx> = c.iter().map(|&k| quotient(k)).collect();
+    let mut monic: Vec<Cx> = c.iter().map(|&k| quotient(k)).collect();
+    // A monic polynomial's leading coefficient is one by definition, and
+    // dividing an INFINITY by itself would make a NaN of it instead:
+    // `p. 0 0 _` is `_ ; 0 0` in the reference.
+    *monic.last_mut().expect("a polynomial has a leading coefficient") = cx::ONE;
     // A polynomial of the first degree has its root outright, which is what
     // keeps an infinite coefficient exact: `p. _ 1` is `1 ; __` and
     // `p. 1 _` is `_ ; 0`, where an iteration would find neither.
-    let roots = if monic.len() == 2 {
+    let mut roots = if monic.len() == 2 {
         // Negated part by part, so that a zero stays the zero J writes and
         // does not become the negative one the sign bit would print.
         let away = |v: f64| if v == 0.0 { 0.0 } else { -v };
@@ -16877,13 +16881,30 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
     } else {
         durand_kerner(&monic)
     };
-    // A root the arithmetic could not find is no root: jconsole answers a
-    // NaN error for `p. _ __ 0` and `p. _. 1 2` rather than a list of NaNs.
-    if lead[0].is_nan()
-        || lead[1].is_nan()
-        || roots.iter().any(|r| r[0].is_nan() || r[1].is_nan())
-    {
+    // A NaN among the COEFFICIENTS is a NaN error, and so is a root of the
+    // FIRST degree that has no value: `p. _. 1 2` and `p. _ __ 0` are both
+    // refusals there. A root of the second degree or higher that has no
+    // value is ANSWERED instead, as `_.j_.` — `p. 0 __ __` is
+    // `__ ; _.j_. _.j_.` — and one root without a value costs them all.
+    if c.iter().any(|k| k[0].is_nan() || k[1].is_nan()) {
         return Err(Error::nan("this polynomial's roots have no value", span));
+    }
+    // An INFINITE leading coefficient leaves no root either, unless the
+    // constant term is zero and the roots are the zeros that divides out:
+    // `p. 0 0 _` is `_ ; 0 0` where `p. 2 1 _` has no root at all.
+    let unbounded = !lead[0].is_finite() || !lead[1].is_finite();
+    if roots.iter().any(|r| r[0].is_nan() || r[1].is_nan())
+        || (unbounded && c[0] != cx::ZERO && roots.len() > 1)
+    {
+        if roots.len() < 2 {
+            return Err(Error::nan("this polynomial's roots have no value", span));
+        }
+        // A quadratic's two roots part along the imaginary axis where the
+        // coefficient of x is zero, so their real half survives as the
+        // zero it was: `p. 1 0 _` is `_ ; 0j_. 0j_.` where `p. 2 1 _` is
+        // `_ ; _.j_. _.j_.`.
+        let value = if c[1] == cx::ZERO { [0.0, f64::NAN] } else { [f64::NAN, f64::NAN] };
+        roots = vec![value; roots.len()];
     }
     // The multiplier keeps the COEFFICIENTS' own type whether or not the
     // roots beside it come out exact: `3!:0 > 0 { p. 2 _2 _1 1x` is the
