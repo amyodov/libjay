@@ -656,6 +656,20 @@ pub fn rat_lcm(a: &Rat, b: &Rat) -> Option<Rat> {
     Rat::new(num, den)
 }
 
+/// The least common multiple of a list of denominators: the smallest whole
+/// number every value in the list is a whole multiple of a `1/D` step of.
+/// None where any value is infinite.
+pub fn common_denominator(v: &[Rat]) -> Option<BigInt> {
+    let mut d = BigInt::one();
+    for k in v {
+        if k.is_infinite() {
+            return None;
+        }
+        d = d.lcm(&k.den);
+    }
+    Some(d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

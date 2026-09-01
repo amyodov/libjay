@@ -16684,6 +16684,9 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
         if let Some(exact) = exact_sparse_poly(y, span)? {
             return Ok(exact);
         }
+        if let Some(exact) = exact_root_form(y) {
+            return Ok(exact);
+        }
         return Ok(complex_or_real(root_form_coeffs(y, span)?));
     }
     let mut c = poly_coeffs_relaxed(y, span)?;
@@ -16692,9 +16695,13 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
     }
     // The ZERO polynomial has no leading coefficient to divide by and every
     // number for a root: J answers `0 ; ''`, a zero multiplier and no roots
-    // at all. Only a non-zero constant has no root form.
+    // at all, in the BOOLEAN type whatever the coefficients were written
+    // as. Only a non-zero constant has no root form.
     if c.iter().all(|&k| k == cx::ZERO) {
-        let pair = vec![Array::scalar_i64(0), Array::new(vec![0], Data::empty(DType::I64))];
+        let pair = vec![
+            Array::new(vec![], Data::Bool(vec![0].into())),
+            Array::new(vec![0], Data::empty(DType::Bool)),
+        ];
         return Ok(Array::new(vec![2], Data::Box(pair.into())));
     }
     if c.len() < 2 {
@@ -16727,8 +16734,162 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
     {
         return Err(Error::nan("this polynomial's roots have no value", span));
     }
-    let pair = vec![scalar_complex_or_real(lead), complex_or_real(roots)];
+    // The multiplier keeps the COEFFICIENTS' own type whether or not the
+    // roots beside it come out exact: `3!:0 > 0 { p. 2 _2 _1 1x` is the
+    // extended type there and the roots beside it are floats.
+    let multiplier =
+        coefficient_atom(y, c.len() - 1).unwrap_or_else(|| scalar_complex_or_real(lead));
+    let roots = match exact_roots(y, &c, &roots) {
+        Some(exact) => exact,
+        None => complex_or_real(roots),
+    };
+    let pair = vec![multiplier, roots];
     Ok(Array::new(vec![2], Data::Box(pair.into())))
+}
+
+/// One coefficient as an atom of the argument's own type.
+fn coefficient_atom(y: &Array, i: usize) -> Option<Array> {
+    let data = match &y.data {
+        Data::Bool(v) => Data::Bool(vec![*v.get(i)?].into()),
+        Data::I64(v) => Data::I64(vec![*v.get(i)?].into()),
+        Data::Ext(v) => Data::Ext(vec![v.get(i)?.clone()].into()),
+        Data::Rat(v) => Data::Rat(vec![v.get(i)?.clone()].into()),
+        Data::F64(v) => Data::F64(vec![*v.get(i)?].into()),
+        Data::Complex(v) => return Some(scalar_complex_or_real(*v.get(i)?)),
+        _ => return None,
+    };
+    Some(Array::new(vec![], data))
+}
+
+/// The exact rational coefficients a polynomial argument spells, the first
+/// `len` of them. A float is read through `x:` — the simplest rational
+/// within the comparison tolerance — which is how `p. 0.1 _0.7 1` reaches
+/// `1r2 1r5` rather than the dyadic fraction the double really holds.
+fn poly_exact_coeffs(y: &Array, len: usize) -> Option<Vec<Rat>> {
+    let int = |v: i64| Rat::from_int(Ext::from(v));
+    let out: Vec<Rat> = match &y.data {
+        Data::Bool(v) => v.iter().take(len).map(|&x| int(i64::from(x))).collect(),
+        Data::I64(v) => v.iter().take(len).map(|&x| int(x)).collect(),
+        Data::Ext(v) => v.iter().take(len).map(|x| Rat::from_int(x.clone())).collect(),
+        Data::Rat(v) => v.iter().take(len).cloned().collect(),
+        Data::F64(v) => {
+            v.iter().take(len).map(|&x| exact::f64_to_rat(x)).collect::<Option<Vec<_>>>()?
+        }
+        _ => return None,
+    };
+    if out.len() != len || out.iter().any(Rat::is_infinite) {
+        return None;
+    }
+    Some(out)
+}
+
+/// How wide the exact factoring lets the arithmetic grow before it gives
+/// the polynomial up as a float one: the common denominator's bits, times
+/// the number of coefficients.
+const EXACT_ROOT_BITS: u64 = 100_000;
+
+/// The roots of an exact polynomial, exactly — where the reference finds
+/// them exactly too.
+///
+/// jconsole factors over the coefficients read as rationals, and the answer
+/// is exact only where EVERY root is one it can name. A root is one of
+/// those when it is a whole multiple of `1/D`, where D is the least common
+/// denominator of the coefficients: `p. 1r2 _3r2 1` is `1 ; 1 1r2` where
+/// the same polynomial written `p. 1 _3 2` is a pair of floats, and
+/// `p. 1r3 _1 2r3` — the same polynomial again, over thirds — is floats
+/// too, because a half is no multiple of a third. The float roots say
+/// which multiple, so a root a double cannot tell from its neighbour is not
+/// found at all: `p. 1000000016000000063 _1000000017000000064 1x` is `1e18`
+/// and a 1 in the reference as it is here.
+///
+/// A polynomial of the FIRST degree divides instead of searching, which is
+/// why `p. 3 6x` is `3 ; _1r2` where `p. 3 6` is a float; only the exact
+/// storages take that path, and the quotient keeps the extended type where
+/// it is whole.
+#[inline(never)]
+fn exact_roots(y: &Array, c: &[Cx], floats: &[Cx]) -> Option<Array> {
+    let degree = c.len() - 1;
+    let exact = poly_exact_coeffs(y, c.len())?;
+    if degree == 1 {
+        if !is_exact_storage(y) {
+            return None;
+        }
+        let root = exact[0].neg().div(&exact[1])?;
+        return Some(narrow_exact(Array::new(vec![1], Data::Rat(vec![root].into()))));
+    }
+    let d = exact::common_denominator(&exact)?;
+    if d.bits().saturating_mul(c.len() as u64) > EXACT_ROOT_BITS {
+        return None;
+    }
+    let scale = exact::ext_to_f64(&d);
+    if !scale.is_finite() {
+        return None;
+    }
+    let mut roots = Vec::with_capacity(degree);
+    for z in floats {
+        if z[1] != 0.0 {
+            return None;
+        }
+        let near = exact::f64_to_ext((z[0] * scale).round())?;
+        roots.push(Rat::new(near, d.clone())?);
+    }
+    // The candidates are only the answer if the polynomial they build is
+    // the polynomial that was asked about, coefficient for coefficient:
+    // that is what rejects a rounded near-miss, and what makes a repeated
+    // root count once for each time it appears.
+    let mut built = vec![exact[degree].clone()];
+    for r in &roots {
+        let mut next = vec![Rat::zero(); built.len() + 1];
+        for (k, v) in built.iter().enumerate() {
+            next[k + 1] = next[k + 1].add(v)?;
+            next[k] = next[k].sub(&v.mul(r)?)?;
+        }
+        built = next;
+    }
+    if built != exact {
+        return None;
+    }
+    // The order is the float path's: the largest magnitude first, then the
+    // largest value — taken on the exact numbers, which the rounding could
+    // otherwise have shuffled among equal magnitudes.
+    roots.sort_by(|a, b| b.abs().cmp(&a.abs()).then_with(|| b.cmp(a)));
+    Some(Array::new(vec![degree], Data::Rat(roots.into())))
+}
+
+/// The coefficients an EXACT root form spells, exactly: `p. (< 1 2 3x)` is
+/// `_6 11 _6 1` in the extended type, and a rational anywhere in the form
+/// keeps the whole answer rational — `p. (2 ; 1r2 2)` is `2 _5 2` and
+/// reports the rational type although every coefficient is whole.
+fn exact_root_form(y: &Array) -> Option<Array> {
+    let parts = y.as_boxes()?;
+    let (multiplier, roots) = match (y.rank(), parts) {
+        (0, [roots]) => (None, roots),
+        (1, [multiplier, roots]) => (Some(multiplier), roots),
+        _ => return None,
+    };
+    if roots.rank() > 1 {
+        return None;
+    }
+    let mut rational = roots.dtype() == DType::Rat;
+    let head = match multiplier {
+        None => Rat::one(),
+        Some(m) if m.rank() == 0 => {
+            rational |= m.dtype() == DType::Rat;
+            exact_coeffs(m)?.pop()?
+        }
+        Some(_) => return None,
+    };
+    let mut coeffs = vec![head];
+    for r in exact_coeffs(roots)? {
+        let mut next = vec![Rat::zero(); coeffs.len() + 1];
+        for (k, v) in coeffs.iter().enumerate() {
+            next[k + 1] = next[k + 1].add(v)?;
+            next[k] = next[k].sub(&v.mul(&r)?)?;
+        }
+        coeffs = next;
+    }
+    let out = Array::new(vec![coeffs.len()], Data::Rat(coeffs.into()));
+    Some(if rational { out } else { narrow_exact(out) })
 }
 
 /// The roots of a monic polynomial, by the Durand–Kerner iteration: every
