@@ -326,8 +326,10 @@ fn roots_come_out_in_js_order() {
 fn the_derivative_and_the_integral_are_coefficient_vectors() {
     assert_eq!(val(Lang::J, "p.. 1 2 3"), i64s(&[2], &[2, 6]));
     assert_eq!(val(Lang::J, "p.. 5"), i64s(&[1], &[0]));
-    // The left argument of the integral is the constant term.
-    assert_eq!(val(Lang::J, "_1 p.. 1 2 3"), i64s(&[4], &[-1, 1, 1, 1]));
+    // The left argument of the integral is the constant term. A float
+    // integral stays a float, whole coefficients and all — jconsole reports
+    // 8 for `3!:0 (1 p.. 1 2 3)` where the derivative's is 4.
+    close(&floats(&val(Lang::J, "_1 p.. 1 2 3")), &[-1.0, 1.0, 1.0, 1.0], "integral");
     close(&floats(&val(Lang::J, "0 p.. 0 1")), &[0.0, 0.0, 0.5], "integral");
     // Differentiating the integral gives the coefficients back.
     assert_eq!(val(Lang::J, "p.. 0 p.. 1 2 3"), i64s(&[3], &[1, 2, 3]));

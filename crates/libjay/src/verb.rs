@@ -3408,6 +3408,7 @@ fn empty_frame(
     mut run: impl FnMut(&Array, bool, &mut Ctx<'_>) -> Result<Array>,
 ) -> Result<Array> {
     let mut shape = frame.to_vec();
+    let mut learnt = true;
     if let Some(cell) = cell {
         match run(&cell, false, ctx) {
             Ok(answer) => {
@@ -3424,14 +3425,39 @@ fn empty_frame(
             // of the same shapes is what learns the cells' shape without
             // asking the verb to mean anything by their types; only the
             // shape is kept, the argument's own type standing.
-            Err(_) if probe => match run(&numeric_like(&cell), true, ctx) {
-                Ok(answer) => shape.extend_from_slice(&answer.shape),
-                Err(_) => shape.extend_from_slice(refused),
-            },
-            Err(_) => shape.extend_from_slice(refused),
+            // A STRUCTURAL refusal — a rank, a length, a shape — is about
+            // the cell itself and not about the types the fill happened to
+            // carry, so asking again with numbers of the same shape would
+            // be asking a different question: `$ p. (0 2 $ <0)` is `0` in
+            // jconsole, where a cell of two numbers would have made
+            // coefficients to measure. Only a refusal about TYPES is asked
+            // again, which is what the probe was for.
+            Err(e)
+                if probe
+                    && !matches!(
+                        e.kind,
+                        ErrorKind::Rank | ErrorKind::Length | ErrorKind::Shape
+                    ) =>
+            {
+                match run(&numeric_like(&cell), true, ctx) {
+                    Ok(answer) => shape.extend_from_slice(&answer.shape),
+                    Err(_) => {
+                        shape.extend_from_slice(refused);
+                        learnt = !refused.is_empty();
+                    }
+                }
+            }
+            Err(_) => {
+                shape.extend_from_slice(refused);
+                learnt = !refused.is_empty();
+            }
         }
     }
-    Ok(Array::new(shape, Data::empty(dtype)))
+    // A frame whose cells' shape could not be learnt at all is the empty
+    // the frame alone spells, in the BOOLEAN type rather than in the
+    // argument's: `3!:0 p. (0 2 $ <0)` is 1 there where the argument is
+    // boxed.
+    Ok(Array::new(shape, Data::empty(if learnt { dtype } else { DType::Bool })))
 }
 
 /// The same shape, holding zeros: a stand-in whose type no verb objects to.
