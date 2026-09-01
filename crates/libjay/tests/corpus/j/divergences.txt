@@ -121,3 +121,16 @@ p. (1 2 3 __)
 ? jconsole's root finder aborts on this one with a stack error
 p. (0 1 1 _)
 ? jconsole's root finder aborts on this one with a stack error
+// An LCM of a whole number a double cannot hold. The reference contradicts
+// ITSELF here rather than merely rounding: `9223372036854775806 +. 5` is 1
+// there, so `x *. y` — `(x % (x +. y)) * y` by the Dictionary's own
+// definition — is five times x, and the reference answers x instead. It
+// holds 9223372036854775806 as 9223372036854775808, whose residue by 5 its
+// own float arithmetic loses. libjay keeps the value exact and answers the
+// LCM the reference's own GCD asks for.
+(9223372036854775806) *. (,5)
+? the reference's own GCD of 1 contradicts the LCM it answers
+(_9223372036854775806) *. "1 _ 0 (i. 5)
+? the same boundary, one radix per cell
+(_9223372036854775806) *."_2 (i. 3 4)
+? the same boundary over a table

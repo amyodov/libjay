@@ -683,3 +683,18 @@ $ ((_ 2) }. (i. 3 4))
 3!:0 (_2 <./\\ (''))
 3!:0 (_1 <./\\ (0 $ 0))
 $ (_4 ,/\\ (i. 0 3))
+
+// A SCALAR on either side of a dyadic level goes to every box on the
+// other, as a scalar dyad's does.
+(2;4) * L:0 (<a:)
+(1;2;3) + L:0 (<10)
+(1;2) + L:0 (3;4)
+(1;2;3) + L:0 (1;2)
+(2 2 $ 1;2;3;4) + L:0 (<10)
+
+// An array of BOXES with no box in it has no content to bring to one
+// shape, so opening it is no change at all.
+$ (> (0 $ <0))
+3!:0 (> (0 $ <0))
+$ (> (0 2 $ <0))
+|/ (> (0 $ <0))

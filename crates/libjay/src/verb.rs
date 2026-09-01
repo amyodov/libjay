@@ -2673,6 +2673,17 @@ impl Verb {
                 if p.monad == MonadOp::Open && is_mixed_simple(y) {
                     return Ok(y.clone());
                 }
+                // An array of boxes with no box in it has no content to
+                // bring to one shape, so it is its own answer, BOXES and
+                // all: `3!:0 (> (0 $ <0))` is the boxed type in the
+                // reference and `$ (> (0 2 $ <0))` is `0 2`.
+                if p.monad == MonadOp::Open
+                    && y.dtype() == DType::Box
+                    && y.count() == 0
+                    && ctx.cfg.rules.lang == crate::Lang::J
+                {
+                    return Ok(y.clone());
+                }
                 let frame_rank = y.rank() - effective_rank(p.ranks[0], y.rank());
                 if frame_rank == 0 {
                     return monad_op(p, y, ctx, span);
@@ -9201,6 +9212,7 @@ fn decode_reads(radix: DType, digits: DType) -> bool {
 /// are 0 there, `('a') #. (i. 0)` and `2 #. (0 $ <1)` domain errors,
 /// the kinds having to stand in the reference's own table. A radix list
 /// with no atom of its own asks nothing at all.
+#[inline(never)]
 fn decode_nothing(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
     if let Some(x) = x {
         if x.count() > 0 && !decode_reads(x.dtype(), y.dtype()) {
@@ -10864,6 +10876,7 @@ fn count_rank(verb: &str, counts: usize, rank: usize, span: Span) -> Error {
 /// for the whole axis: `_ {. y` is y, `_ }. y` the empty, and both ends
 /// read the same way. An infinity travels as the largest or smallest i64,
 /// which no axis can be as long as, and every use clamps to the axis.
+#[inline(never)]
 fn axis_counts_reaching(
     x: &Array,
     what: &str,
@@ -12966,6 +12979,7 @@ fn empty_windows(
 
 /// The answer a window of `w` fills would have shaped, where the operand
 /// has anything to say about one.
+#[inline(never)]
 fn probe_windows(
     u: &Verb,
     y: &Array,
@@ -16400,6 +16414,20 @@ fn level_pairs(
             })
         }
         (Some(bx), Some(by)) => {
+            // A SCALAR on either side goes to every box on the other, as a
+            // scalar dyad's does: `(2;4) * L:0 (<a:)` is two boxes there.
+            if x.rank() == 0 || y.rank() == 0 {
+                let (n, shape) = if x.rank() == 0 {
+                    (by.len(), y.shape.clone())
+                } else {
+                    (bx.len(), x.shape.clone())
+                };
+                let left =
+                    if x.rank() == 0 { vec![bx[0].clone(); n] } else { bx.to_vec() };
+                let right =
+                    if y.rank() == 0 { vec![by[0].clone(); n] } else { by.to_vec() };
+                return Ok(Some(LevelPairs { left, right, shape }));
+            }
             if x.shape != y.shape {
                 return Err(Error::new(
                     ErrorKind::Length,
