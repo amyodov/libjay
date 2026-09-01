@@ -3096,6 +3096,16 @@ impl Verb {
                         && types_before_the_frame(op, left, a.dtype() == DType::Box)
                 })
             });
+            // The polynomial dyad settles its LEFT argument before the
+            // frame: a root form that is no root form is a refusal there
+            // whether or not there is a cell to compute — `(3 $ a:) p.
+            // (0 0 $ 0)` is a length error and `((2;3);4) p. (0 $ 1r2)` a
+            // rank one — where a refusal about the RIGHT argument's type
+            // leaves the frame alone, `(1 2 3) p. (0 0 $ 'a')` being the
+            // empty.
+            if conform && matches!(self, Verb::Prim(Prim { dyad: DyadOp::PolyEval, .. })) {
+                poly_eval(x, &Array::scalar_i64(0), span)?;
+            }
             return empty_frame(&p.frame, y.dtype(), cell, conform, eager, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
