@@ -1,0 +1,257 @@
+// The polynomial family, exactly: which polynomials jconsole factors over
+// the rationals, which types the two halves of the root form carry, and
+// what the dyad does that the monad does not.
+
+// A polynomial factors exactly when every root is a whole multiple of
+// 1/D, where D is the least common denominator of its coefficients. The
+// roots come back as rationals whatever the coefficients were written as,
+// and the multiplier keeps the coefficients' own type.
+p. 2 _3 1x
+p. 1r2 1r3
+p. 1r2 _3r2 1
+p. 1r6 _5r6 1x
+p. 1r12 _7r12 1x
+p. _1r4 0 1x
+p. _1r9 0 1x
+p. _1r6 _1r6 1x
+p. 1r4 _3r4 1r2
+p. _1r2 3r2 _1x
+p. 1r3 1r2 1r6
+p. 1 _5r6 1r6
+p. _1 0 1r4
+p. _6 11 _6 1x
+p. _4 6 _2x
+p. 4 _6 2x
+p. 6 _11 6 _1x
+p. 0 0 6 _11 6 _1x
+p. 1 3 3 1x
+p. 1 _2 1
+p. 12 _7 1
+p. 0 1 1
+p. 2 _3 1 0x
+p. 0 1r2 _3r2 1
+p. 1r10 _7r10 1x
+p. 1r14 _9r14 1x
+p. 1r15 _8r15 1x
+p. 1r2 _9r4 1
+p. 3r2 _5r2 1
+p. 5r4 _9r4 1
+p. 1r8 _5r8 1r2
+p. 1r2 _1r2 _1r2 1r2
+p. 1r3 _4r3 1x
+p. 1r3 _5r6 1r2
+p. 6r5 _7r5 1r5
+p. 1r7 _8r7 1x
+p. 999999999999 _1000000000000 1x
+p. (6 _5 1) * 32416190071x
+p. 720 _1764 1624 _735 175 _21 1x
+p. _120 274 _225 85 _15 1x
+
+// A root whose denominator does not divide D is no root the factoring can
+// name, so the same polynomial over other denominators is a pair of
+// floats: `1r2 _3r2 1` factors and `1 _3 2` and `1r3 _1 2r3` do not.
+p. 1 _3 2x
+p. 2 _5 2x
+p. _1 0 4x
+p. _6 29 _21 4x
+p. 1r3 _1 2r3
+p. 2r3 _2 4r3
+p. 2r5 _1 3r5
+p. 1r2 _5r2 2
+p. 1 _9r2 2
+p. 3 _11r2 2
+p. 1r2 _13r6 2
+p. 1r2 _11r6 4r3
+p. 1r3 _5r3 2
+p. 1r2 _7r2 3
+p. 3 _5 2x
+p. 2 _2 _1 1x
+p. 2 0 0 1x
+p. 4 0 1x
+p. 5 0 1x
+p. 1r4 0 1x
+p. _1r8 0 0 1x
+p. 1r2 0 0 0 1r2
+p. _1r16 0 0 0 1x
+p. 3r4 _13r4 1r2
+p. _2 _1 1r2
+p. 2 _3 1r2
+p. 1r6 _1 1x
+p. 1r2 1r3 1r4
+
+// The float roots say which multiple of 1/D a root is, so a root two
+// doubles apart cannot be told from its neighbour and is not found at all.
+p. 1000000016000000063 _1000000017000000064 1x
+
+// Float coefficients are read through `x:` first — the simplest rational
+// within the comparison tolerance — which is how a tenth reaches the
+// factoring as a tenth.
+p. 0.5 _1.5 1
+p. 0.1 _0.7 1
+p. 0.2 _0.9 1
+p. 0.25 _0.75 0.5
+p. 0.1 _0.3 0.2
+p. 1.1 _2.1 1
+p. 0.11 _1.11 1
+p. 0.01 _0.2 1
+p. 0.123 _1.123 1
+p. 0.3 _1.1 1
+p. 0.333333333333333 _1.33333333333333 1
+p. (1 _3 2) * 1r3
+
+// A polynomial of the FIRST degree divides instead of searching, and only
+// the exact storages take that path.
+p. 3 6x
+p. 7 3x
+p. _2 1x
+p. 0 5x
+p. 1r5 _1x
+p. 2r3 _1x
+p. 1r3 _1x
+p. 1r2 _1x
+p. _2 1
+p. 3 6
+p. _2 1.0
+
+// The zero polynomial answers a boolean zero and no roots at all.
+p. 0x
+p. 0
+p. 0 0 0.0
+p. 1 1 0 0
+
+// The types, side by side.
+3!:0 > 0 { p. 2 _3 1x
+3!:0 > 1 { p. 2 _3 1x
+3!:0 > 0 { p. 2 _3 1
+3!:0 > 1 { p. 2 _3 1
+3!:0 > 0 { p. 2 _3 1r1
+3!:0 > 1 { p. 2 _3 1r1
+3!:0 > 0 { p. 2 _2 _1 1x
+3!:0 > 1 { p. 2 _2 _1 1x
+3!:0 > 0 { p. 4 0 1x
+3!:0 > 1 { p. 4 0 1x
+3!:0 > 0 { p. 0x
+3!:0 > 1 { p. 0x
+3!:0 > 0 { p. 1 1 0 0
+3!:0 > 1 { p. 0.5 _1.5 1
+3!:0 > 0 { p. 0.1 _0.3 0.2
+3!:0 > 0 { p. 2 _3 1.0
+3!:0 > 1 { p. 2 _3 1.0
+3!:0 > 1 { p. _2 1x
+3!:0 > 1 { p. _2r1 1r1
+3!:0 > 1 { p. 3 6x
+3!:0 > 1 { p. _6 11 _6 1x
+
+// The root form multiplied back out is exact too, and a rational anywhere
+// in it keeps the whole answer rational — whole coefficients and all.
+p. < 1 2 3x
+p. < 1 2 3
+3!:0 p. < 1 2 3
+p. < 1r2 2
+3!:0 p. < 1r2 2
+p. 2 ; 1r2 2
+3!:0 p. 2 ; 1r2 2
+p. 2x ; 1 2 3x
+3!:0 p. 2 ; 1 2 3
+p. < i. 0
+3!:0 p. < i. 0
+p. 1r2 ; 1 2
+3!:0 p. 1r2 ; 1 2
+p. < 1 0
+3!:0 p. < 1 0
+p. 0 ; 1 2
+p. < 1 2.5
+3!:0 p. < 1 2.5
+3!:0 p. < 0j1 1
+p. < 1r3
+3!:0 p. < 1r3
+
+// The dyad evaluates exactly where ONE of the two sides is written in an
+// exact type: `(1 2 3) p. 2` is a float and `(1 2 3) p. 2x` is not.
+(1 2 3x) p. 2
+3!:0 (1 2 3x) p. 2
+(1 2 3) p. 2x
+3!:0 (1 2 3) p. 2x
+3!:0 (1 2 3) p. 2
+(1r2 1) p. 2
+3!:0 (1r2 1) p. 2
+(2r1 4r1) p. 3
+3!:0 (2r1 4r1) p. 3
+(1 2 3) p. 2r3
+3!:0 (1 2 3) p. 2r3
+(2 ; 1 2) p. 3x
+3!:0 (2 ; 1 2) p. 3x
+(2 ; 1r2 2) p. 3
+3!:0 (2 ; 1r2 2) p. 3
+(0$0x) p. 3
+3!:0 (0$0x) p. 3
+3!:0 (0$0) p. 3
+(1 2 3x) p. 2.5
+3!:0 (1 2 3x) p. 2.5
+(1 2 3x) p. 0j1
+(1 2 3x) p. 2 3 4
+3!:0 (1 2 3x) p. 2 3 4
+(1 2 3x) p. 1r2
+3!:0 (1 2 3x) p. 1r2
+(< 1 2x) p. 3
+3!:0 (< 1 2x) p. 3
+(< i. 0) p. 3x
+3!:0 (< i. 0) p. 3x
+3!:0 (< i. 0) p. 3
+
+// The sparse form: the dyad ADDS two terms at the same exponent where the
+// monad lets the later replace the earlier, and it takes an exponent the
+// monad refuses.
+p. (< 2 2 $ 1 1)
+(< 2 2 $ 1 1) p. 2
+(< 2 2 $ 1 1x) p. 2
+(< 3 2 $ 1 1 1 1 1 1) p. 2
+(< 2 2 $ 3 2 4 2) p. 2
+(< 2 2 $ 3 2 4 2x) p. 2
+3!:0 (< 2 2 $ 3 2 4 2x) p. 2
+(< 2 2 $ 1 0 1 0) p. 2
+p. (< 2 2 $ 1 0 1 0)
+(< 1 2 $ 3 2) p. 2
+(< 1 2 $ 1 _1) p. 2
+(< 1 2 $ 1 _1) p. 2x
+(< 1 2 $ 1 _2) p. 2x
+3!:0 (< 1 2 $ 1 _1) p. 2x
+(< 1 2 $ 1 0.5) p. 2
+(< 1 2 $ 1 1r2) p. 4x
+3!:0 (< 1 2 $ 1 1r2) p. 4x
+(< 2 2 $ 1 _1 1 1) p. 2x
+(< 1 2 $ 1 100) p. 2x
+3!:0 (< 1 2 $ 1 100) p. 2x
+(< 1 2 $ 1 0) p. 2x
+3!:0 (< 1 2 $ 1 0) p. 2x
+(< 0 2 $ 0) p. 2x
+3!:0 (< 0 2 $ 0) p. 2x
+p. (< 1 2 $ 2r1 2)
+3!:0 p. (< 1 2 $ 2r1 2)
+(< 2 2 $ 1r2 1 1r3 1) p. 2
+3!:0 (< 2 2 $ 1r2 1 1r3 1) p. 2
+
+// The derivative narrows a whole answer to the integer type; the dyadic
+// integral does not, and it turns on the COEFFICIENTS' type alone.
+3!:0 p.. 1 2 3
+3!:0 p.. 1 2 3x
+p.. 1r2 2r1
+3!:0 p.. 1r2 2r1
+3!:0 (1 p.. 1 2 3)
+3!:0 (1x p.. 1 2 3)
+3!:0 (1 p.. 1 2 3x)
+3!:0 (1r2 p.. 1 2 3x)
+1r2 p.. 1 2 3x
+2 p.. 2r1 4r1
+3!:0 (2 p.. 2r1 4r1)
+3!:0 (1.5 p.. 1 2 3x)
+1x p.. 1r2 1r3
+3!:0 (1x p.. 1r2 1r3)
+1 p.. (<1 2 3)
+3!:0 (1 p.. (<1 2 3))
+p.. (<1r2 2)
+3!:0 p.. (<1r2 2)
+p.. (<1 2 3)
+3!:0 p.. (<1 2 3)
+p.. (<i.0)
+3!:0 p.. (<i.0)

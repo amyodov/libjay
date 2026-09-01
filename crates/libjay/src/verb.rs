@@ -17227,10 +17227,10 @@ fn coefficient_error(monic: &[Cx], roots: &[Cx]) -> f64 {
 /// `p.. y`: the derivative of the polynomial y's ascending coefficients
 /// describe, again as coefficients.
 fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
-    // A sparse form stored exactly is the exact coefficients it spells,
-    // and the exact path below takes it from there.
+    // A sparse or a root form stored exactly is the exact coefficients it
+    // spells, and the exact path below takes it from there.
     let spelled;
-    let y = match exact_sparse_poly(y, span)? {
+    let y = match exact_sparse_poly(y, span)?.or_else(|| exact_root_form(y)) {
         Some(c) => {
             spelled = c;
             &spelled
@@ -17260,7 +17260,7 @@ fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
 /// `x p.. y`: the integral of y's coefficients, with x as the constant term.
 fn poly_integral(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let spelled;
-    let y = match exact_sparse_poly(y, span)? {
+    let y = match exact_sparse_poly(y, span)?.or_else(|| exact_root_form(y)) {
         Some(c) => {
             spelled = c;
             &spelled

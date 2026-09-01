@@ -171,12 +171,12 @@ fn a_per_element_check_vanishes_with_no_elements() {
 /// go unsaid. An empty list of roots is no root, not a type to refuse.
 #[test]
 fn a_boxed_polynomial_is_its_roots() {
-    // The coefficients come out of complex arithmetic, so they are compared
-    // with a float list rather than an integer one.
-    assert_eq!(j("p. (<1 2)"), j("2.0 _3.0 1.0"));
-    assert_eq!(j("p. (1;2 3)"), j("6.0 _5.0 1.0"));
-    assert_eq!(j("p.. (<1 2 3)"), j("11 _12 3"));
-    assert_eq!(j("p. (<i.0)"), j(",1.0"));
+    // Exact roots multiply out exactly, in the extended type: J reports 64
+    // for all four of these.
+    assert_eq!(j("p. (<1 2)"), j("2 _3 1x"));
+    assert_eq!(j("p. (1;2 3)"), j("6 _5 1x"));
+    assert_eq!(j("p.. (<1 2 3)"), j("11 _12 3x"));
+    assert_eq!(j("p. (<i.0)"), j(",1x"));
     // An integer list, not the boolean one `,0` spells.
     assert_eq!(j("p.. (<i.0)"), j(",0 + 0"));
     assert_eq!(j("p.. (0$'a')"), j(",0 + 0"));
