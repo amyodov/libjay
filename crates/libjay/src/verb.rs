@@ -16357,6 +16357,40 @@ fn sparse_poly(terms: &Array, span: Span) -> Result<Vec<Cx>> {
     Ok(coeffs)
 }
 
+/// The value a SPARSE polynomial takes at `at`: its terms, added up.
+///
+/// The dyad ADDS two terms that name the same exponent where the monad lets
+/// the later one replace the earlier — `(< 2 2 $ 1 1) p. 2` is 4 where
+/// `p. (< 2 2 $ 1 1)` is `0 1` — and it takes an exponent the monad
+/// refuses, since it never has to lay the terms out along an axis:
+/// `(< 1 2 $ 1 _1) p. 2` is a half and `(< 1 2 $ 1 0.5) p. 2` is a square
+/// root.
+fn sparse_value(terms: &Array, at: Cx, span: Span) -> Result<Cx> {
+    if terms.rank() != 2 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("a sparse polynomial is a table of terms, and this has rank {}", terms.rank()),
+            Some(span),
+        ));
+    }
+    if terms.shape[1] != 2 {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "a sparse polynomial's rows are `coefficient, exponent`, and these have {} columns",
+                terms.shape[1]
+            ),
+            Some(span),
+        ));
+    }
+    let flat = poly_coeffs_relaxed(terms, span)?;
+    let mut acc = cx::ZERO;
+    for row in 0..terms.shape[0] {
+        acc = cx::add(acc, cx::mul(flat[2 * row], cx::pow(at, flat[2 * row + 1])));
+    }
+    Ok(acc)
+}
+
 /// The ascending coefficients a boxed root form stands for: `m × (x-r0) ×
 /// (x-r1) × …`, multiplied out.
 fn root_form_coeffs(y: &Array, span: Span) -> Result<Vec<Cx>> {
@@ -16627,18 +16661,26 @@ fn complex_or_real(values: Vec<Cx>) -> Array {
 /// `x p. y`: the polynomial with ascending coefficients x, at y — Horner's
 /// rule, or the product over the roots when x is the boxed root form.
 fn poly_eval(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    if let Some(exact) = exact_poly_eval(x, y) {
+        return Ok(exact);
+    }
     let at = poly_coeffs(y, span)?;
     let at = at.first().copied().unwrap_or(cx::ZERO);
     let value = match x.as_boxes() {
         Some(_) => {
             let (mut v, roots) = root_form(x, span)?;
             if roots.rank() >= 2 {
-                let c = root_form_coeffs(x, span)?;
-                let mut acc = cx::ZERO;
-                for &k in c.iter().rev() {
-                    acc = cx::add(cx::mul(acc, at), k);
+                if x.rank() == 1 {
+                    return Err(Error::new(
+                        ErrorKind::Rank,
+                        format!(
+                            "a polynomial's roots are a list, and these have rank {}",
+                            roots.rank()
+                        ),
+                        Some(span),
+                    ));
                 }
-                acc
+                sparse_value(roots, at, span)?
             } else {
                 for r in root_list(roots, span)? {
                     v = cx::mul(v, cx::sub(at, r));
@@ -16665,6 +16707,89 @@ fn poly_eval(x: &Array, y: &Array, span: Span) -> Result<Array> {
         return Err(Error::nan("this polynomial has no value here", span));
     }
     Ok(scalar_complex_or_real(value))
+}
+
+/// `x p. y` over exact arguments, kept exact.
+///
+/// The path runs where ONE of the two sides is written in an exact type and
+/// neither carries a float: `(1 2 3) p. 2` is a float in the reference,
+/// `(1 2 3) p. 2x` and `(1 2 3x) p. 2` are extended, and a rational
+/// anywhere makes the answer rational whether or not it comes out whole —
+/// `(2 ; 1r2 2) p. 3` is 5 and reports the rational type.
+#[inline(never)]
+fn exact_poly_eval(x: &Array, y: &Array) -> Option<Array> {
+    let mut rational = y.dtype() == DType::Rat;
+    let mut exact = is_exact_storage(y);
+    let at = exact_coeffs(y)?.first().cloned().unwrap_or_else(Rat::zero);
+    let value = match x.as_boxes() {
+        Some(parts) => {
+            let (multiplier, roots) = match (x.rank(), parts) {
+                (0, [roots]) => (None, roots),
+                (1, [multiplier, roots]) => (Some(multiplier), roots),
+                _ => return None,
+            };
+            // A table in the one-box form is the polynomial written
+            // sparsely, and its terms are added up.
+            if roots.rank() == 2 && multiplier.is_none() {
+                rational |= roots.dtype() == DType::Rat;
+                exact |= is_exact_storage(roots);
+                if !exact || roots.shape[1] != 2 {
+                    return None;
+                }
+                if roots.shape[0] == 0 {
+                    return Some(Array::scalar_i64(0));
+                }
+                let flat = exact_values(roots)?;
+                let mut acc = Rat::zero();
+                for row in 0..roots.shape[0] {
+                    let e = flat[2 * row + 1].to_int().as_ref().and_then(exact::ext_to_i64)?;
+                    acc = acc.add(&flat[2 * row].mul(&at.pow(e)?)?)?;
+                }
+                let out = Array::new(vec![], Data::Rat(vec![acc].into()));
+                return Some(if rational { out } else { narrow_exact(out) });
+            }
+            if roots.rank() > 1 {
+                return None;
+            }
+            rational |= roots.dtype() == DType::Rat;
+            exact |= is_exact_storage(roots);
+            let mut v = match multiplier {
+                None => Rat::one(),
+                Some(m) if m.rank() == 0 => {
+                    rational |= m.dtype() == DType::Rat;
+                    exact |= is_exact_storage(m);
+                    exact_coeffs(m)?.pop()?
+                }
+                Some(_) => return None,
+            };
+            for r in exact_coeffs(roots)? {
+                v = v.mul(&at.sub(&r)?)?;
+            }
+            v
+        }
+        None => {
+            rational |= x.dtype() == DType::Rat;
+            exact |= is_exact_storage(x);
+            let c = exact_coeffs(x)?;
+            // A polynomial with no coefficients at all is the zero one, and
+            // the reference answers it in the MACHINE integer type rather
+            // than in either exact one: `(0$0x) p. 3` is 0 and reports the
+            // integer type, where `(0$0) p. 3` is a float.
+            if c.is_empty() {
+                return if exact { Some(Array::scalar_i64(0)) } else { None };
+            }
+            let mut v = Rat::zero();
+            for k in c.iter().rev() {
+                v = v.mul(&at)?.add(k)?;
+            }
+            v
+        }
+    };
+    if !exact {
+        return None;
+    }
+    let out = Array::new(vec![], Data::Rat(vec![value].into()));
+    Some(if rational { out } else { narrow_exact(out) })
 }
 
 fn scalar_complex_or_real(z: Cx) -> Array {
@@ -16815,7 +16940,7 @@ fn exact_roots(y: &Array, c: &[Cx], floats: &[Cx]) -> Option<Array> {
             return None;
         }
         let root = exact[0].neg().div(&exact[1])?;
-        return Some(narrow_exact(Array::new(vec![1], Data::Rat(vec![root].into()))));
+        return Some(exact_typed(y.dtype() == DType::Rat, vec![1], vec![root]));
     }
     let d = exact::common_denominator(&exact)?;
     if d.bits().saturating_mul(c.len() as u64) > EXACT_ROOT_BITS {
@@ -17158,7 +17283,10 @@ fn poly_integral(x: &Array, y: &Array, span: Span) -> Result<Array> {
     for (i, &v) in c.iter().enumerate() {
         out.push(cx::div(v, cx::from_real((i + 1) as f64)));
     }
-    Ok(narrow_numbers(complex_or_real(out)))
+    // A float integral stays a float, whole coefficients and all:
+    // `3!:0 (1 p.. 1 2 3)` is the float type there where the derivative's
+    // `3!:0 p.. 1 2 3` is the integer one.
+    Ok(complex_or_real(out))
 }
 
 /// The derivative of an EXACT coefficient list, kept exact. None where the
@@ -17201,7 +17329,7 @@ fn exact_sparse_poly(y: &Array, span: Span) -> Result<Option<Array>> {
     for (row, &k) in powers.iter().enumerate() {
         coeffs[k] = flat[2 * row].clone();
     }
-    Ok(Some(narrow_exact(Array::new(vec![len], Data::Rat(coeffs.into())))))
+    Ok(Some(exact_typed(terms.dtype() == DType::Rat, vec![len], coeffs)))
 }
 
 fn exact_poly_deriv(y: &Array) -> Option<Array> {
@@ -17222,7 +17350,15 @@ fn exact_poly_deriv(y: &Array) -> Option<Array> {
         .skip(1)
         .map(|(k, v)| v.mul(&Rat::from_int(num_bigint::BigInt::from(k as i64))))
         .collect::<Option<Vec<_>>>()?;
-    Some(narrow_exact(Array::new(vec![out.len()], Data::Rat(out.into()))))
+    Some(exact_typed(y.dtype() == DType::Rat, vec![out.len()], out))
+}
+
+/// An exact answer in the type the reference gives it: the RATIONAL type
+/// wherever a rational went in, whole values and all — `p.. 1r2 2r1` is 2
+/// and reports the rational type — and the extended one otherwise.
+fn exact_typed(rational: bool, shape: Vec<usize>, v: Vec<Rat>) -> Array {
+    let a = Array::new(shape, Data::Rat(v.into()));
+    if rational { a } else { narrow_exact(a) }
 }
 
 /// A rational array whose values are all whole, as the exact integers J
@@ -17241,6 +17377,12 @@ fn exact_coeffs(a: &Array) -> Option<Vec<Rat>> {
     if a.rank() > 1 {
         return None;
     }
+    exact_values(a)
+}
+
+/// The exact values an array holds, whatever its rank, in ravel order. None
+/// where its storage is not one of the exact ones.
+fn exact_values(a: &Array) -> Option<Vec<Rat>> {
     let int = |v: i64| Rat::from_int(num_bigint::BigInt::from(v));
     match &a.data {
         Data::Rat(v) => Some(v.to_vec()),
@@ -17260,7 +17402,9 @@ fn is_exact_storage(a: &Array) -> bool {
 /// `x p.. y` over exact coefficients, kept exact: every step divides by a
 /// whole number, so `1 p.. (1r2 1r3)` is `1 1r2 1r6`.
 fn exact_poly_integral(x: &Array, y: &Array) -> Option<Array> {
-    if !is_exact_storage(x) && !is_exact_storage(y) {
+    // The COEFFICIENTS decide: `1x p.. 1 2 3` is a float in the reference
+    // where `1 p.. 1 2 3x` is extended.
+    if !is_exact_storage(y) {
         return None;
     }
     let c = exact_coeffs(y)?;
@@ -17269,7 +17413,8 @@ fn exact_poly_integral(x: &Array, y: &Array) -> Option<Array> {
     for (i, v) in c.iter().enumerate() {
         out.push(v.div(&Rat::from_int(num_bigint::BigInt::from(i as i64 + 1)))?);
     }
-    Some(narrow_exact(Array::new(vec![out.len()], Data::Rat(out.into()))))
+    let rational = x.dtype() == DType::Rat || y.dtype() == DType::Rat;
+    Some(exact_typed(rational, vec![out.len()], out))
 }
 
 /// A float array whose values are all whole, as integers. Polynomial
