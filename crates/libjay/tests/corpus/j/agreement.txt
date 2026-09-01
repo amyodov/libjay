@@ -572,3 +572,64 @@ p.. (0.5 1.5)
 '' { (i. 0 0)
 (0 $ 1 2 3) { (i. 0 3)
 2 {"1 (i. 0 2)
+
+// DECODE with nothing to weigh. Where the digits hold no atom the radices
+// are never read, so their KIND is not a domain question in itself — but
+// the kinds still have to stand in the reference's own table: characters
+// read only characters, numbers read characters and numbers, and boxes
+// read characters, whole numbers and boxes.
+('a') #. ('')
+('a') #. (i. 0)
+('a') #. (0 $ <1)
+(<1) #. (i. 0)
+(<1) #. ('')
+(<1) #. (0 $ <1)
+(<1) #. (0 $ 0.5)
+(<1) #. (0 $ 3j4)
+(<1) #. (0 $ 1x)
+2 #. ('')
+2 #. (0 $ <1)
+(0 $ 0) #. (0 $ <1)
+(0 $ '') #. (i. 0)
+// Only an ATOM radix spreads over the digits: a one-item LIST is a length
+// error against any other count.
+(,2) #. (1 0 1)
+(,2) #. (,1)
+(,2) #. 5
+(,2) #. (i. 0)
+1 2 3 #. (,5)
+1 2 3 #. 5
+// Decode settles both its domain and its cell lengths from the cells
+// wherever the LEFT argument is one cell of its own rank, even where the
+// RIGHT's frame is empty; digits of a kind it cannot read settle it from
+// the whole argument besides, wherever the radices have an atom.
+(2 3) #. (i. 0 0)
+(0 $ 0) #. (0 3 $ 0)
+('ab') #. (i. 0 0)
+(1;2) #. (i. 0 0)
+(2 0 $ 0) #. (2 0 3 $ 0)
+(i. 0 0) #. (,5)
+(0 3 $ 0) #. (i. 0)
+(0 3 $ 0) #. (1;2;3)
+(0 0 $ 0) #. (1;2;3)
+(0 0 $ 0) #. ('ab')
+
+// A shift's FILL is never placed where the argument holds no atom, so its
+// kind is not consulted and the argument's own type stands. That is what
+// makes the inverse of a suffix scan over an empty an empty rather than a
+// refusal, the scan's own fill being a number.
+1 |.!.1 (0 $ '')
+1 |.!.'z' (0 $ 0)
+$ (1 |.!.1 (0 2 $ ''))
+3!:0 (1 |.!.1 (0 $ ''))
+*/\\. ^:_1 (0 $ '')
+-/\\. ^:_1 (0 $ '')
+%/\\. ^:_1 (0 $ '')
+
+// A J sentence that is nothing but an UNBOUND NAME leaves no value rather
+// than refusing, which is what `".` answers the empty for. The name has to
+// be the whole sentence: applied to something it is a value error again.
+". 'a'
+". 'abc'
+$ (". 'zzz')
+3!:0 (". 'zzz')

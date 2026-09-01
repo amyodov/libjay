@@ -43,42 +43,6 @@ u: 233
 (9007199254740992) *. (9007199254740993)
 ? jconsole holds both in one double and libjay keeps them exact
 
-// An empty of BOXES is acceptable numeric data on both sides — `#. 0$<1`
-// is 0 there and here — but jconsole refuses the one dyadic decode whose
-// left argument is not empty itself. It answers `(0$0) #. 0$<1` and
-// `(0$<1) #. 0$<1` with the same 0, and `2 #: 0$<1` with the empty, so the
-// refusal is not a rule about boxes; libjay reads an empty the one way
-// everywhere.
-2 #. 0$<1
-? jconsole refuses this one dyadic decode and answers every other empty
-
-// A refusal about an operand's TYPE where the frame is empty — nothing to
-// apply the verb to — survives in the reference for some verbs and not for
-// others. Which verbs those are is measurable and libjay follows it now
-// (`^.`, `j.` and `r.` settle their domain from the whole argument), but
-// DECODE reads the same way from the other end and does not: `(1;2;3) #. (i. 2 0 3)`
-// and `(2 0 3 $ 0) #. 'hello'` are refused there while `(<1) #. (i. 0)` and
-// `(i. 0) #. 'ab'` are 0 and the empty. libjay keeps one rule: a refusal
-// about a fill's type never survives an empty frame, and one about the
-// cells' SHAPES always does.
-(1;2;3) #. (i. 2 0 3)
-? the reference refuses this decode and answers (<1) #. (i. 0)
-(2 0 3 $ 0) #. ('hello')
-? the reference refuses this decode and answers (i. 0) #. 'ab'
-(<'abc') #. (2 0 3 $ 0)
-? the reference refuses this decode and answers (<1) #. (i. 0)
-(<1) #. (i. 0)
-? the reference answers this decode and refuses (1;2;3) #. (i. 2 0 3)
-// A refusal about the cells' SHAPES survives an empty frame for a decode
-// whose radices are real and not for one whose radices are a fill, and the
-// two spellings say the same thing about the same verb:
-// `(0 $ 0.5) #. (i. 2 0 3)` is a length error there and
-// `(i. 0 0) #. (,5)` — 0 radices against 1 digit either way — is the empty.
-// libjay keeps the cell-agreement refusals of the verbs that PAIR their
-// cells and no others.
-(0 $ 0.5) #. (i. 2 0 3)
-? the reference keeps this length error and drops it for (i. 0 0) #. (,5)
-
 // Two large arguments to `!` a double cannot tell apart. jconsole answers
 // `1e10 ! (1e10 + 1e_4)` with 1.00234; the value is 1.0023631, which the
 // digamma series gives independently, and the reference's difference of two

@@ -3124,7 +3124,27 @@ impl Verb {
                     .map_or(plain.dtype(), |a| a.dtype());
                 return Ok(Array::new(p.frame.clone(), Data::empty(t)));
             }
-            return empty_frame(&p.frame, y.dtype(), cell, conform, eager, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
+            // DECODE settles both its domain and its cell lengths from the
+            // cells wherever the LEFT argument has a cell to bring them,
+            // even where the RIGHT's frame is empty: `(2 3) #. (i. 0 0)`
+            // and `(0 $ 0) #. (0 3 $ 0)` are length errors in the
+            // reference and `'ab' #. (i. 0 0)` a domain error, while a
+            // frame empty on the LEFT hides both — `(i. 0 0) #. (,5)`,
+            // `(0 3 $ 0) #. (i. 0)` and `(2 0 $ 0) #. (2 0 3 $ 0)` are
+            // empties there. One cell is what the left has to bring, so
+            // the rule is about a left of the verb's own rank. Digits of a
+            // kind decode cannot read settle it from the WHOLE argument
+            // besides, wherever the radices have an atom to read them
+            // with: `(0 3 $ 0) #. (1;2;3)` is a domain error there and
+            // `(0 0 $ 0) #. (1;2;3)` — no radix at all — the empty.
+            let decode_eager = fxl == 0
+                || (!y.dtype().is_numeric()
+                    && y.count() > 0
+                    && x.shape[fxl..].iter().product::<usize>() > 0);
+            let keep_any = eager
+                || (decode_eager
+                    && matches!(self, Verb::Prim(Prim { dyad: DyadOp::Decode, .. })));
+            return empty_frame(&p.frame, y.dtype(), cell, conform, keep_any, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
                 let right = if numeric {
@@ -9113,7 +9133,7 @@ fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
                 digits = vec![digits[0].clone(); r.len()];
             }
             match r.len() {
-                1 => vec![r[0].clone(); digits.len()],
+                1 if x.rank() == 0 => vec![r[0].clone(); digits.len()],
                 n if n == digits.len() => r,
                 _ => return None,
             }
@@ -9133,11 +9153,49 @@ fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
     Some(Array::scalar_i64(exact::ext_to_i64(&whole)?))
 }
 
+/// Whether radices of one kind can read digits of another where there is
+/// no digit to weigh. The reference's own table: characters read only
+/// characters, numbers read characters and numbers, and boxes read
+/// characters, WHOLE numbers and boxes — `(<1) #. (i. 0)` is 0 there and
+/// `(<1) #. (0 $ 0.5)` a domain error.
+fn decode_reads(radix: DType, digits: DType) -> bool {
+    match radix {
+        DType::Char => digits == DType::Char,
+        d if d.is_numeric() => digits == DType::Char || digits.is_numeric(),
+        _ => matches!(digits, DType::Char | DType::Bool | DType::I64) || !digits.is_numeric(),
+    }
+}
+
+/// `x #. y` where there is no digit to weigh. The radices are never read,
+/// so their own kind is no domain question — but the kinds still have to
+/// stand in the reference's order: `('a') #. ('')` and `(<1) #. (i. 0)`
+/// are 0 there, `('a') #. (i. 0)` and `2 #. (0 $ <1)` domain errors,
+/// the kinds having to stand in the reference's own table. A radix list
+/// with no atom of its own asks nothing at all.
+fn decode_nothing(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
+    if let Some(x) = x {
+        if x.count() > 0 && !decode_reads(x.dtype(), y.dtype()) {
+            return Err(Error::domain("decode reads digits of a kind the radices cannot", span));
+        }
+        if x.rank() > 0 && x.count() > 0 {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!("{} radices for 0 digits", x.count()),
+                Some(span),
+            ));
+        }
+    }
+    Ok(Array::scalar_i64(0))
+}
+
 /// `x #. y` / `x ⊥ y`: the digits y read in the radices x. A scalar x is the
 /// radix of every position; otherwise the two have the same length.
 fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     if let Some(exact) = decode_exact(x, y) {
         return Ok(exact);
+    }
+    if y.count() == 0 && (!y.dtype().is_numeric() || x.is_some_and(|x| !x.dtype().is_numeric())) {
+        return decode_nothing(x, y, span);
     }
     if has_imaginary(y) || x.is_some_and(has_imaginary) {
         return decode_complex(x, y, span);
@@ -9152,8 +9210,10 @@ fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
             if y.rank() == 0 && r.len() != 1 {
                 digits = vec![digits[0]; r.len()];
             }
+            // Only an ATOM radix spreads: `(,2) #. (1 0 1)` is a length
+            // error in the reference where `2 #. (1 0 1)` is 5.
             match r.len() {
-                1 => vec![r[0]; digits.len()],
+                1 if x.rank() == 0 => vec![r[0]; digits.len()],
                 n if n == digits.len() => r,
                 n => {
                     return Err(Error::new(
@@ -16026,6 +16086,15 @@ fn shift_fill(
     let mismatch = || {
         Error::new(ErrorKind::Type, "the fill and the argument differ in kind", Some(span))
     };
+    // An argument with no atoms never has a place to put the fill, so the
+    // fill's kind is not consulted at all and the argument's own type
+    // stands: `1 |.!.1 (0 $ '')` is the empty of CHARACTERS in jconsole,
+    // and `1 |.!.'z' (0 $ 0)` the empty of numbers. That is what makes the
+    // inverse of a suffix scan over an empty an empty rather than a
+    // refusal, the scan's own fill being a number.
+    if y.count() == 0 {
+        return Ok(Array::new(y.shape.clone(), Data::empty(y.dtype())));
+    }
     let t = DType::promote(y.dtype(), fill.dtype()).ok_or_else(mismatch)?;
     let (Some(base), Some(f)) = (y.data.cast(t), fill.data.cast(t)) else {
         return Err(mismatch());
@@ -21181,8 +21250,20 @@ pub(crate) fn execute_source(
         ));
     }
     let mut rec = None;
-    let (value, _) = crate::ir::run_block(&nested.stmts, None, ctx, &mut rec)
-        .map_err(|e| nested_error(e, src, span))?;
+    let ran = crate::ir::run_block(&nested.stmts, None, ctx, &mut rec);
+    // A J sentence that is nothing but an UNBOUND NAME leaves no value
+    // rather than refusing: `". 'a'` and `". 'abc'` are the empty in
+    // jconsole, where `". 'a 3'` — the same name with something to apply
+    // it to — is a value error. The name has to be the whole sentence for
+    // the reference to let it stand.
+    if let Err(e) = &ran
+        && !apl
+        && e.kind == ErrorKind::Value
+        && e.msg.strip_prefix("undefined name: ").is_some_and(|n| n == src.trim())
+    {
+        return Ok(Array::new(vec![0], Data::empty(DType::Bool)));
+    }
+    let (value, _) = ran.map_err(|e| nested_error(e, src, span))?;
     // A nested program whose last sentence produced nothing — the empty
     // program among them — leaves the sentence that executed it with no
     // value to hand on. GNU APL reports that as a VALUE ERROR wherever the

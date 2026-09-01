@@ -250,7 +250,9 @@ const J_EXECUTE: &[Case] = &[
         "\". '1 2 + 1 2 3'",
         &["in the executed string", "left shape 2", "right shape 3"],
     ),
-    j("\". 'nope'", ErrorKind::Value, "\". 'nope'", &["in the executed string", "nope"]),
+    // A bare unbound name is the empty in J, so the name has to be doing
+    // something for the value error to reach the executing sentence.
+    j("\". 'nope 3'", ErrorKind::Value, "\". 'nope 3'", &["in the executed string", "nope"]),
     j("\". '(1'", ErrorKind::Parse, "\". '(1'", &["in the executed string"]),
 ];
 
