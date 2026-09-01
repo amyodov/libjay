@@ -633,3 +633,53 @@ $ (1 |.!.1 (0 2 $ ''))
 ". 'abc'
 $ (". 'zzz')
 3!:0 (". 'zzz')
+
+// COMPLEX data has no order, so a running extremum refuses it as a
+// character refuses a sum, and the same probe over an outfix settles it.
+1 >./\\. (3j4 1j_1)
+_1 <./\\. (3j4 1j_1)
+1 <./\\ (3j4 1j_1)
+2 <./\\ (3j4 1j_1)
+
+// The digits of `#:` are as many as the WHOLE part of the magnitude needs.
+#: _4r3
+#: _2x
+#: _5r2
+- &.#. (1r2 1r3)
+
+// An ATOM takes the rank the amounts of a rotate name, every axis one
+// long; one amount or none leaves it alone, and a y that has an axis is
+// never extended.
+$ ((_2 0 2) |. 2)
+$ (1 2 |. 2)
+$ ((,2) |. 2)
+$ ((i. 3 4) |. 2)
+$ ((0 $ 0) |. 2)
+
+// A boxed y is linked open, but only where it HAS a box.
+$ (2 ; (0 $ <0))
+$ (2 ; (1;2))
+2 ; (0 $ <0)
+
+// Take and drop read the two INFINITIES as the whole axis.
+$ (_ }. (i. 5))
+$ (__ }. (i. 5))
+$ (_ {. (i. 5))
+$ ((_ __ 0) }. 2)
+$ ((_ __ 0) {. 2)
+$ ((_ 2) }. (i. 3 4))
+
+// A take, a drop or a reshape settles the FILL's kind against the whole
+// argument, before any frame is cut; an argument with no atom has no type
+// to keep and the fill's stands.
+2 {. !.'z' (1 2 3)
+5 {. !.'z' (0 $ 0)
+(1 0 1 $ 5) {. !.'z' 2
+2 }. !.'z' (1 2 3)
+
+// A non-overlapping chunk of ONE item is that item, so the argument's own
+// type stands there and nowhere wider.
+3!:0 (_1 <./\\ (''))
+3!:0 (_2 <./\\ (''))
+3!:0 (_1 <./\\ (0 $ 0))
+$ (_4 ,/\\ (i. 0 3))

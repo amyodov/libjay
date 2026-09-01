@@ -3801,6 +3801,22 @@ fn dyad_filled(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
+    // A take, a drop or a reshape settles the FILL's kind against the whole
+    // argument, before any frame is cut: `2 {. !.'z' (1 2 3)` is a domain
+    // error in the reference although the take needs no fill at all, and so
+    // is `(1 0 1 $ 5) {. !.'z' 2`, whose frame holds no cell. An argument
+    // with no atom has no type to keep and the fill's stands.
+    if y.count() > 0
+        && matches!(
+            v,
+            Verb::Prim(Prim {
+                dyad: DyadOp::Take | DyadOp::Drop | DyadOp::Reshape,
+                ..
+            })
+        )
+    {
+        fitted_fill(y, *f, span)?;
+    }
     ctx.with_fill(*f, |c| v.dyad(x, y, c, span))
 }
 
@@ -4194,7 +4210,12 @@ fn raze(y: &Array, filled: Option<FillAtom>, span: Span) -> Result<Array> {
 /// boxed and boxed when it is not.
 fn link(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let head = Array::boxed(x.clone());
-    let tail = if y.dtype() == DType::Box { y.clone() } else { Array::boxed(y.clone()) };
+    // A boxed y is linked open, so its own boxes become items of the
+    // answer — but only where it HAS one: an empty of boxes is boxed like
+    // any other value, which is what makes `$ 2 ; (0 $ <0)` 2 rather than
+    // the 1 an open link would leave.
+    let open = y.dtype() == DType::Box && y.count() > 0;
+    let tail = if open { y.clone() } else { Array::boxed(y.clone()) };
     catenate(&head, &tail, true, false, span)
 }
 
@@ -7491,7 +7512,15 @@ fn reverse(y: &Array) -> Array {
 fn rotate(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let counts = axis_counts(x, "rotate", near, span)?;
     if y.rank() == 0 {
-        return Ok(y.clone());
+        // An ATOM takes the rank the amounts name, every axis one long, so
+        // that the answer says how many axes were turned: `$ (_2 0 2) |. 2`
+        // is `1 1 1` in the reference. One amount or none leaves the atom
+        // alone — `$ (,2) |. 2` is the scalar — and a y that HAS an axis
+        // is never extended: `1 2 |. (i. 4)` is a length error.
+        if counts.len() < 2 {
+            return Ok(y.clone());
+        }
+        return Ok(Array::new(vec![1; counts.len()], y.data.clone()));
     }
     if counts.len() > y.rank() {
         return Err(Error::new(
@@ -9644,9 +9673,12 @@ fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
 fn encode_bits_exact(y: &Array) -> Option<Array> {
     let Data::Rat(vals) = &y.data else { return None };
     let two = Rat::from_int(num_bigint::BigInt::from(2));
+    // The digits are as many as the WHOLE part of the magnitude needs:
+    // `#: _4r3` is one digit in jconsole, `2r3`, where `#: _2` is two.
+    // Flooring a negative first would count the ceiling's bits instead.
     let mut k = 1usize;
     for v in vals.iter() {
-        k = k.max(v.floor()?.bits().max(1) as usize);
+        k = k.max(v.abs().floor()?.bits().max(1) as usize);
     }
     let mut out: Vec<Rat> = Vec::with_capacity(vals.len().checked_mul(k)?);
     for v in vals.iter() {
@@ -10828,6 +10860,38 @@ fn count_rank(verb: &str, counts: usize, rank: usize, span: Span) -> Error {
     )
 }
 
+/// The axis amounts a take or a drop reads, where the two INFINITIES stand
+/// for the whole axis: `_ {. y` is y, `_ }. y` the empty, and both ends
+/// read the same way. An infinity travels as the largest or smallest i64,
+/// which no axis can be as long as, and every use clamps to the axis.
+fn axis_counts_reaching(
+    x: &Array,
+    what: &str,
+    near: NearInt,
+    span: Span,
+) -> Result<Vec<i64>> {
+    match axis_counts(x, what, near, span) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            let Some(v) = x.to_f64_vec() else { return Err(e) };
+            if x.rank() > 1 || !v.iter().any(|f| f.is_infinite()) {
+                return Err(e);
+            }
+            let mut out = Vec::with_capacity(v.len());
+            for f in v {
+                out.push(match f {
+                    f if f == f64::INFINITY => i64::MAX,
+                    f if f == f64::NEG_INFINITY => i64::MIN,
+                    f => near.round(f).ok_or_else(|| {
+                        Error::domain(format!("{what} needs integer lengths"), span)
+                    })?,
+                });
+            }
+            Ok(out)
+        }
+    }
+}
+
 fn take(
     x: &Array,
     y: &Array,
@@ -10837,7 +10901,7 @@ fn take(
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
-    let counts = axis_counts(x, "take", near, span)?;
+    let counts = axis_counts_reaching(x, "take", near, span)?;
     // APL overtakes a nested array with the PROTOTYPE of its first item —
     // that item's shape, with a zero for every number and a blank for every
     // character. J fills with the empty box instead, or with the element
@@ -10870,6 +10934,21 @@ fn take(
     if wrong {
         return Err(count_rank("take", counts.len(), base.rank(), span));
     }
+    // An INFINITE amount reaches the whole axis rather than overtaking it:
+    // `_ {. (i. 5)` is the five items and `__ {. (i. 5)` the same five from
+    // the other end.
+    let counts: Vec<i64> = counts
+        .iter()
+        .enumerate()
+        .map(|(a, &k)| {
+            let len = base.shape.get(a).copied().unwrap_or(0) as i64;
+            match k {
+                i64::MAX => len,
+                i64::MIN => -len,
+                k => k,
+            }
+        })
+        .collect();
     if let Some(run) = leading_run(base, &counts, false) {
         return Ok(keep_proto(run, base, gap.prototype()));
     }
@@ -10967,7 +11046,7 @@ fn drop_(
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
-    let counts = axis_counts(x, "drop", near, span)?;
+    let counts = axis_counts_reaching(x, "drop", near, span)?;
     let promoted;
     let base = if y.rank() == 0 {
         promoted = Array::new(vec![1; counts.len()], y.data.clone());
@@ -12876,21 +12955,36 @@ fn empty_windows(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Array {
-    let m = y.item_size();
-    if u.is_pure() && let Some(cells) = w.checked_mul(m).filter(|&s| s <= 1 << 20) {
-        let mut shape = y.shape.clone();
-        shape[0] = w;
-        let probe = Array::new(shape, fill_data(y.dtype(), cells));
-        if let Ok(cell) = u.monad(&probe, ctx, span) {
-            let mut shape = vec![0usize];
-            shape.extend_from_slice(&cell.shape);
-            return Array::new(shape, Data::empty(cell.dtype()));
-        }
+    if let Some(a) = probe_windows(u, y, w, ctx, span) {
+        return a;
     }
     // A verb that has nothing to say about a run of fills leaves J with a
     // list of empty lists rather than a bare empty: `$ 3 +/\\ ''` is `0 0`.
     let shape = if refused_axis { vec![0, 0] } else { vec![0] };
     Array::new(shape, Data::empty(DType::I64))
+}
+
+/// The answer a window of `w` fills would have shaped, where the operand
+/// has anything to say about one.
+fn probe_windows(
+    u: &Verb,
+    y: &Array,
+    w: usize,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Option<Array> {
+    let m = y.item_size();
+    if !u.is_pure() {
+        return None;
+    }
+    let cells = w.checked_mul(m).filter(|&s| s <= 1 << 20)?;
+    let mut shape = y.shape.clone();
+    shape[0] = w;
+    let probe = Array::new(shape, fill_data(y.dtype(), cells));
+    let cell = u.monad(&probe, ctx, span).ok()?;
+    let mut shape = vec![0usize];
+    shape.extend_from_slice(&cell.shape);
+    Some(Array::new(shape, Data::empty(cell.dtype())))
 }
 
 /// The window size: one integer atom.
@@ -12930,7 +13024,17 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
         // says what shape the answer keeps — `$ _4 +/\\ (0 3 $ 'a')` is
         // `0 3`, where a run of four character fills is no sum at all.
         if count == 0 {
-            return Ok(empty_windows(u, base, 0, j, ctx, span));
+            // A chunk of ONE item is that item, so the argument's own type
+            // stands where the chunks are that narrow: `3!:0 (_1 <./\ '')`
+            // is the CHARACTER type in the reference. Any wider chunk is
+            // asked of the EMPTY one instead, which is what makes
+            // `$ _4 ,/\ (i. 0 3)` `0 0` rather than the `0 12` four rows
+            // of fills would ravel to.
+            let answer = (w == 1)
+                .then(|| probe_windows(u, base, 1, ctx, span))
+                .flatten()
+                .unwrap_or_else(|| empty_windows(u, base, 0, j, ctx, span));
+            return Ok(answer);
         }
         let cells = each_cell(count, n * m, u.is_pure(), ctx, |i, c| {
             cycled(u, i).monad(&section(base, i * w, ((i + 1) * w).min(n)), c, span)
@@ -18831,7 +18935,16 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
         Some(true) => n >= 1 && (n >= 2 || !starts.is_empty()),
         Some(false) => n >= 2 && i128::from(n) > i128::from(k.unsigned_abs()),
     };
-    if !list.dtype().is_numeric() && u.is_pure() && eager {
+    // COMPLEX data has no order, so a running extremum refuses it as a
+    // character refuses a sum, and the same probe settles it:
+    // `1 >./\. (3j4 1j_1)` is a domain error in the reference although
+    // every piece it leaves behind holds one value.
+    let unordered = list.dtype() == DType::Complex
+        && matches!(u, Verb::Reduce(inner)
+            if matches!(**inner, Verb::Prim(Prim {
+                dyad: DyadOp::Scalar(ScalarDyad::Min | ScalarDyad::Max), ..
+            })));
+    if (!list.dtype().is_numeric() || unordered) && u.is_pure() && eager {
         // The question is whether the operand has a MEANING for this data,
         // and a fold of one item answers nothing: `+/ ,'a'` is that one
         // character, applying `+` to nothing. So an argument of one item is
