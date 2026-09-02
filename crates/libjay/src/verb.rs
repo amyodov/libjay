@@ -2803,6 +2803,18 @@ impl Verb {
             Verb::UnderRavel(u) => {
                 let flat = Array::new(vec![y.count()], y.data.clone());
                 let r = u.monad(&flat, ctx, span)?;
+                // The shape goes back over the answer's ATOMS, cycling
+                // where there are too few — `}: &., (1 2 3)` is `1 2 1`.
+                // Over NO atom at all there is nothing to cycle, and that
+                // is the length error `3 $ (i. 0)` is: `}: &., 2` and
+                // `> &., (a:)` are refusals in the reference.
+                if r.count() == 0 && y.count() > 0 {
+                    return Err(Error::new(
+                        ErrorKind::Length,
+                        "u&., has no atom to put back under the shape",
+                        Some(span),
+                    ));
+                }
                 let shape = Array::from_i64(y.shape.iter().map(|&n| n as i64).collect());
                 reshape(&shape, &r, false, false, None, ctx.cfg.near(), span)
             }
@@ -5120,6 +5132,11 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
                         span,
                     ));
                 }
+            } else if a == f64::NEG_INFINITY && b < 0.0 {
+                // The reference answers a POSITIVE zero here whatever the
+                // exponent's parity — `*. (__ ^ _1)` is `0 0` there, not
+                // the half-turn a negative zero's angle would be.
+                0.0
             } else {
                 a.powf(b)
             }
@@ -8892,7 +8909,7 @@ fn catenate_at(
     // `1 2 3`. The retyping happens here, before any fill is worked out, so
     // that the fill an unequal axis needs is the RESULT's — the empty
     // planes of `(2 0 3$0) , 'hello'` come out as spaces, not as zeros.
-    let (xa, ya) = match empty_type(&xa, &ya)
+    let (xa, ya) = match empty_type(x, y)
         .filter(|_| fill && DType::promote(xa.dtype(), ya.dtype()).is_none())
     {
         None => (xa, ya),
@@ -10878,6 +10895,60 @@ fn axis_counts(x: &Array, what: &str, near: NearInt, span: Span) -> Result<Vec<i
         .ok_or_else(|| Error::domain(format!("{what} needs integer lengths"), span))
 }
 
+/// A reshape length written `_` asks for AS MANY AS MAKE THE TOTAL COME
+/// OUT EXACTLY: `_ $ (i. 2 3)` keeps both items, `_ 2 $ (i. 2 3)` is one
+/// frame of two, and `_ 3 $ (i. 2 3)` is a domain error because three does
+/// not divide two. One infinity at most, and it must be the positive one:
+/// two of them name no number between them.
+///
+/// `None` where no length is infinite, which is every ordinary reshape.
+#[inline(never)]
+fn infinite_length(x: &Array, y: &Array, by_items: bool, span: Span) -> Result<Option<Array>> {
+    let Some(vals) = x.to_f64_vec() else {
+        return Ok(None);
+    };
+    let mut open = None;
+    for (i, v) in vals.iter().enumerate() {
+        if !v.is_infinite() {
+            continue;
+        }
+        if open.is_some() || *v < 0.0 {
+            return Err(Error::domain(
+                "a reshape takes one infinite length, and only the positive one",
+                span,
+            ));
+        }
+        open = Some(i);
+    }
+    let Some(k) = open else {
+        return Ok(None);
+    };
+    let src = if by_items {
+        y.items().max(usize::from(y.rank() == 0))
+    } else {
+        y.count()
+    };
+    let mut rest: usize = 1;
+    for (i, v) in vals.iter().enumerate() {
+        if i == k {
+            continue;
+        }
+        if *v < 0.0 || v.fract() != 0.0 {
+            return Err(Error::domain("reshape needs integer lengths", span));
+        }
+        rest = rest.saturating_mul(*v as usize);
+    }
+    if rest == 0 || src % rest != 0 {
+        return Err(Error::domain(
+            format!("an infinite reshape length needs the other {rest} to divide {src}"),
+            span,
+        ));
+    }
+    let mut counts: Vec<i64> = vals.iter().map(|v| *v as i64).collect();
+    counts[k] = (src / rest) as i64;
+    Ok(Some(Array::from_i64(counts)))
+}
+
 /// `x $ y` and `x ⍴ y` are not the same verb.
 ///
 /// J lays out ITEMS: the result's shape is x followed by the shape of an
@@ -10897,6 +10968,14 @@ fn reshape(
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
+    let spread;
+    let x = match infinite_length(x, y, by_items, span)? {
+        Some(counts) => {
+            spread = counts;
+            &spread
+        }
+        None => x,
+    };
     let dims = axis_counts(x, "reshape", near, span)?;
     if dims.iter().any(|&d| d < 0) {
         return Err(Error::domain("reshape lengths must be nonnegative", span));

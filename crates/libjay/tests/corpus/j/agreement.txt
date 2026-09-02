@@ -810,3 +810,39 @@ $ >"1 (2 2 $ <0)
 (_j_) ^ 2
 (3j4 % 0) ^ _2
 ((3j4 1j_1) %/ (2 3 $ i. 6)) ^ _2
+
+// A reshape from NOTHING AT ALL is a length error, and `u&.,` puts its
+// answer's atoms back under the shape the same way: `}: &., (1 2 3)` cycles
+// to `1 2 1` and `}: &., 2` has no atom to cycle.
+}: &., (1 2 3)
+}: &., (i. 2 3)
+#. &., (1 0 1)
+|. &., (i. 2 3)
+
+// A reshape length written `_` asks for AS MANY AS MAKE THE TOTAL COME OUT
+// EXACTLY, and a length the source does not divide by is a domain error.
+// One infinity at most, and only the positive one.
+_ $ 0
+_ $ 1 2 3
+$ (_ $ (i. 2 3))
+$ (_ 2 $ (i. 2 3))
+$ (2 _ $ (i. 2 3))
+$ (_ 1 $ (i. 2 3))
+_ 3 $ (i. 2 3)
+_ _ $ (i. 2 3)
+_ $ 'abc'
+
+// An EMPTY takes the other side's type from the arguments AS GIVEN, before
+// a scalar is spread into an empty of its own.
+3!:0 ((0 0 $ '') , ('' $ 0))
+3!:0 ((0 $ 'a') , 5)
+3!:0 (5 , (0 $ 'a'))
+3!:0 ((0 $ 0) , (0 $ 'a'))
+3!:0 ((0 $ 'a') , (0 $ <0))
+3!:0 ((2 0 3$0) , 'hello')
+
+// A NEGATIVE INFINITY raised to a negative power is a POSITIVE zero,
+// whatever the exponent's parity.
+*. (__ ^ _1)
+*. (__ ^ _3)
+*. ((_ __ 0) ^ _1)
