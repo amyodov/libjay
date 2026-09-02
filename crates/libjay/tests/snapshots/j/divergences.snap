@@ -283,3 +283,23 @@
 ? the reference searches into the complex plane; libjay has no real answer
 < <error>
 > j: __j_6.02345e41 _9.22337e18 _
+= 4 +/\\. (0 3 $ (3 $ a:))
+? the same function spelled `[: +/ ]` answers the empty there
+<
+> j: <error>
+= 2 +/\\. (0 3 $ (3 $ a:))
+? the same, with the smallest left argument that refuses
+<
+> j: <error>
+= 2 +/\\. (0 3 $ 'a')
+? the same over characters
+<
+> j: <error>
+= 2 +/\\. (0 3 $ s: 'a')
+? the same over symbols
+<
+> j: <error>
+= 2 +/\\. (0 2 3 $ (6 $ a:))
+? the same where the cells are of higher rank
+<
+> j: <error>

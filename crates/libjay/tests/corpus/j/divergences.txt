@@ -291,3 +291,24 @@ _1r2 ^. _1r2
 ? the reference searches into the complex plane; libjay has no real answer
 ! ^:(_1 0 1) (_9223372036854775806)
 ? the reference searches into the complex plane; libjay has no real answer
+// The DYADIC OUTFIX `x u\.` over an empty frame of BOXED, CHARACTER or
+// SYMBOL cells, where u is exactly `+/` and x is 2 or more. jconsole
+// answers a LENGTH ERROR; libjay answers the empty frame the definition
+// gives — `1 + 0 - x` outfixes is none of them, so there is nothing to
+// apply u to. Every neighbour in the grid answers: `*/`, `-/`, `<./`,
+// `>./`, `,/` and `<` in u's place; `0 3 $ 0` and every other numeric type
+// in the argument's; `0 $ a:` where the item is itself empty; and 1, 0 or
+// a negative left argument. Decisively, `4 ([: +/ ])\.` and `4 (+/@:])\.`
+// — the SAME function spelled around `+/` — answer the empty where bare
+// `+/` refuses, so the refusal is the reference's own special code for
+// `+/\.` disagreeing with the reference's ordinary path.
+4 +/\\. (0 3 $ (3 $ a:))
+? the same function spelled `[: +/ ]` answers the empty there
+2 +/\\. (0 3 $ (3 $ a:))
+? the same, with the smallest left argument that refuses
+2 +/\\. (0 3 $ 'a')
+? the same over characters
+2 +/\\. (0 3 $ s: 'a')
+? the same over symbols
+2 +/\\. (0 2 3 $ (6 $ a:))
+? the same where the cells are of higher rank
