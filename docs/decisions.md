@@ -4818,3 +4818,69 @@ the register.
   the constant term alone in the type it was written in, and the obverse of
   `n&p..` is the derivative, whatever n was — differentiating drops exactly
   the constant the integral put on the front.
+- 2026-09-02 — A RANK AND A LEVEL SPELL THEMSELVES BACK as they were
+  written, not in the fewest atoms that mean the same: `u"2 _ 2` and
+  `u"_ 2` are one verb — one atom stands for all three ranks and two atoms
+  `m n` for `n m n` — and the reference writes each of them out the way it
+  came. The three ranks now carry the count of atoms that wrote them; the
+  count is no part of what the verb does and of what makes two rank
+  specifications equal, and nothing reads it but the linear representation
+  and the atomic one.
+- 2026-09-02 — A FILL IS EXAMINED ONLY WHERE AN ATOM OF IT IS PLACED. `!.`
+  is what makes a RESHAPE fill at all, in place of the cycling a plain
+  `4 $ 1 2 3` does, and only a shape that outruns the argument reaches it:
+  `2 $ !.'z' (1 2 3)` is `1 2` where `4 $ !.'z' (1 2 3)` is a domain error.
+  A CATENATION is the same — a side already at the wanted lengths, or one
+  with nothing in it, is widened without the fill being consulted. A take
+  and a drop are the exception, and keep the eager check measured in round
+  3: those settle the fill's kind against the whole argument before any
+  frame is cut.
+- 2026-09-02 — What an EMPTY FRAME hides of a domain, verb by verb and side
+  by side. The two verbs that MAKE A COMPLEX NUMBER settle their domain
+  from the RIGHT argument alone: `(<1) j. (i. 0)` is the empty and
+  `(i. 0) j. (<1)` a domain error, where the logarithm refuses from either
+  side and `%:` refuses a character from either and a box only on the left.
+  INTERVAL INDEX compares nothing where it has no bound to compare against,
+  so the two kinds are no question there — `(0 0$0) I. ('')` is 0 — while
+  the shapes are still read.
+- 2026-09-02 — A NaN THE PROGRAM HANDED IN travels through a GCD and an LCM
+  unrefused (`1 +. _.` is `_.`), where an INFINITY on either side is
+  refused. Over the complex numbers an infinite part is refused in the
+  divisor, the multiple and the RESIDUE alike, even where the same infinity
+  over the reals answers (`_ | 5` is 5, `_ | 1j2` a refusal); a NaN part
+  leaves the divisor at zero and the multiple at whichever argument carries
+  it.
+- 2026-09-02 — OPENING AN ARRAY WITH NO BOX IN IT is no change at all, so
+  it is no change at any RANK either: the frame would otherwise run the
+  verb on a cell of fills and answer that cell's shape and type in place of
+  the argument's. `a:` holds a BOOLEAN empty — `3!:0 (> a:)` is 1 — and so
+  does the fill of a boxed array. An infinite magnitude raised to a
+  negative real power is zero however the infinity is spelled.
+- 2026-09-02 — A RESHAPE LENGTH WRITTEN `_` asks for as many as make the
+  total come out exactly; a length the source does not divide by is a
+  domain error, and two infinities name no number between them. An EMPTY
+  takes the other side's type from the arguments AS GIVEN, before a scalar
+  is spread into an empty of its own. `u&.,` puts its answer's ATOMS back
+  under the shape, cycling where there are too few and refusing where there
+  are none, as the reshape it is would.
+- 2026-09-02 — ONE NUMERIC WORD IS READ AT ONE PRECISION: an `x` suffix
+  anywhere in it forbids an atom spelled other than as a whole number or a
+  rational — a decimal point, an exponent, a base, a complex or a polar
+  part — while the two infinities go with either. A trailing `x` is a
+  suffix only where it is not a digit, every letter after a base's `b`
+  being one. A radix held in a WIDE numeric type reads BOXES where a
+  boolean or an integer one does not, and format by specification spells an
+  infinity the way the plain format does.
+- 2026-09-02 — The recursion guard drops from 64 levels to 48. The number
+  is set by the machine stack and not by the languages: one level of an
+  explicit definition costs about 34 kB in an unoptimised build, and at 64
+  the process died on a 2 MiB thread stack before the guard was reached.
+- 2026-09-02 — A REFERENCE THAT CRASHES IS NOT A MISMATCH. jconsole aborts
+  on a handful of sentences — the obverse of `[` or `]` composed on the
+  left is one family, `__ $ 0` another — and announces it on stderr, which
+  the recorder had been reading as a refusal, counting libjay's answer as a
+  difference from a reference that had no opinion. A crash now has its own
+  reply, its own verdict and its own line in a sweep's report, and the
+  recorder calls such a line unrecordable: a corpus row would kill the
+  recorder on the sentence it records, so these live in the bug register
+  rather than in the accepted list.

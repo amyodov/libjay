@@ -2165,14 +2165,25 @@ the decimal point, and that is typography, not semantics.
 
 These are sentences jconsole answers and libjay refuses by name, or answers
 differently, that a 150 000-expression sweep at depth 3 still reaches. No
-family is above three cases in fifty thousand; most are singletons. Round 3
-of the agreement loop closed the exact infinity, the exact root, the
-binomial's symmetry, the outfix's eager folds, the logarithm's domain and
-division, the polynomial's boxed and sparse forms, the tessellation's empty
-block, the empty frame's type table, the signed zero, the boolean root, the
-boxed empty an under-open leaves, the interval index over complex values
-and the box display's row heights; what is listed here is what a sweep
-still reaches after them.
+family is above three cases in fifty thousand; most are singletons. Round 4
+of the agreement loop closed the linear representation of a rank and a
+level, the fill that is never placed, the empty frame's domain table for
+the complex-making verbs and for interval index, the NaN and the infinity
+in a divisor, a multiple and a residue, the open at rank over an array with
+no box, the ace's own empty, the infinite reshape length, an empty's type
+in a catenation, the ravel put back under its shape, the numeric word read
+at one precision, the wide radix that reads boxes, and the infinity a
+format by specification writes; what is listed here is what a sweep still
+reaches after them.
+
+A sentence the REFERENCE CRASHES ON is none of these: it is neither an
+answer nor a refusal, so `fuzz --compare` counts it as an oracle abort and
+leaves it out of the agreement figure entirely. Such a sentence can never
+go into a corpus file — the recorder would die on the row it is recording —
+so the register in `bug-register.nogit.md` is where they live. The known
+families are the obverse of `[` or `]` composed on the LEFT
+(`[@:>:^:_1 (2)`, `]&:*:^:_1 (4)` and their like), `__ $ 0`, and
+`3!:0 (0 $ <0) p. (0 $ 0)`.
 
 - **The obverse of `!` off the principal branch.** `!^:_1` here is the
   smallest argument at or above zero whose factorial is the value, which is
@@ -2181,18 +2192,9 @@ still reaches after them.
   a NEGATIVE argument (`!^:_1 ] 1.0000001` is `_1.73245e_7` there and
   `1.00000024` here) and for a value below the minimum 0.885603 it finds a
   negative root where libjay has none (`!^:_1 ] 0.8` is `_4.17518` there).
-- **`".` of a bare undefined name.** `". 'hello'` is the empty there — the
-  sentence has no result, rather than failing — and a value error here,
-  which is what libjay's compiler makes of an unbound name. `". 'hello+1'`
-  is an error on both sides. Letting the sentence through wants an
-  unbound-name node in the IR.
 - **A dyadic `L:` whose two sides reach their level with different shapes.**
   `(2 2 $ 1;2;3;4) *. L:0 (2;4)` pairs a 2 by 2 of boxes against 2 there
   and is a length error here.
-- **A fill whose type a non-empty argument does not take, where the join
-  never needs it.** `(0 0 $ 0) , !.0 (2;5)` is the two boxes there and a
-  type error here; `2 {.!.'z' (1 2)` is an error on both sides, so the
-  check is not simply lazy.
 - **`<.` and `>.` over a tolerantly real complex number.** The comparisons
   read one as the real number it is; the two extrema still refuse it, since
   `cx_op` has no tolerance in scope.
@@ -2208,10 +2210,27 @@ still reaches after them.
   an argument above the limit libjay puts on an angle (2^53 divided by
   2π, past which a period is no longer resolvable) and jconsole answers it
   anyway.
-- Around twenty further singletons the round-3 sweep still names, each its
-  own investigation: `{::` and `&.,` over an atom, `S:` at a level of `_`
-  over a scan, the linear representation of a two-atom `S:` level, a
-  boxed-empty `,/`, the value `(p. [)^:3` iterates to.
+- **A cut's or a frame's EMPTY takes the type the verb would have made**,
+  not the argument's: `3!:0 (0 *.;.2 (1;2 3))` is the float type there and
+  the boxed one here, and `3!:0 (0 *:;.1 (a:))` is boolean there.
+  `3!:0 (-: (0 $ a:))` is the float type there and the integer one here.
+- **`{::` applied to what `{::` made.** `{::^:2 (<i. 0)` nests one level
+  deeper here than there; the map of a map is its own question.
+- **The obverse of `u@|:`.** Pinned as a divergence: the reference does not
+  undo its own transpose, and its round trip does not return its argument.
+- **An interval index against a single EXACT bound.** Pinned: `(1x) I. 2`
+  is 0 there and `(1x 2x) I. 2` is 1, which no monotone rule allows.
+- **Index of last over cells with no atom.** Pinned: `(0 0$0) i: (0$0)` is
+  `_1` there, neither an index into the left argument nor its length.
+- **A logarithm with a negative left and a non-numeric right.** Pinned: the
+  reference neither answers nor refuses — no output, exit 0, no value.
+- **The extrema of a NaN, one pair at a time.** Pinned: the reference
+  answers `1 <. _.` with `_.` and `1 1 <. (_. _.)` with `1 1`.
+- Around fifteen further singletons the round-4 sweep still names, each its
+  own investigation: `S:` at a level of `_` over a scan, a boxed-empty
+  `,/`, an empty box's width in a link's display, `!^:3` of an extended
+  that overflows, `#:` of a value too large to encode, `x ^. x` over two
+  equal negative exact numbers, the value `(p. [)^:3` iterates to.
 
 ## Known divergences (deliberate, revisit later)
 
@@ -2229,8 +2248,6 @@ language and reference each entry compares against is named inline;
 oracle directly, one entry per line of
 `crates/libjay/tests/corpus/apl/divergences.txt`.
 
-- `u"b a b` is displayed `u"a b`: two spellings of one rank and one node in
-  the tree, so the shorter one comes back whichever was written.
 - J's `u:` widens a literal to a wider character type, which libjay does
   not have: the widened value has the same items and the same codes here
   (`# u: 'é'` is 2 and `3 u: u: 'é'` is `195 169` in both), and only the

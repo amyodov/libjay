@@ -253,6 +253,27 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Round 4 of the agreement sweep, everything but the polynomial verbs.**
+  A rank and a level SPELL THEMSELVES BACK as they were written: `u"2 _ 2`
+  and `u"_ 2` are one verb, and the reference writes each out the way it
+  came. A FILL is examined only where an atom of it is placed, so `!.` on a
+  reshape or a catenation that never fills is no complaint about its kind,
+  while a take and a drop keep their eager check. The two verbs that make a
+  complex number settle their domain from the right argument alone, and
+  interval index compares nothing where it has no bound. A NaN the program
+  handed in travels through a GCD and an LCM where an infinity is refused,
+  and over the complex numbers an infinite part is refused in the divisor,
+  the multiple and the residue alike. Opening an array with no box in it is
+  no change AT ANY RANK, `a:` holds a BOOLEAN empty, and an infinite
+  magnitude to a negative real power is zero. A reshape length written `_`
+  asks for as many as make the total come out exactly. An empty takes the
+  other side's type from the arguments as given. One numeric word is read
+  at ONE PRECISION, so an `x` suffix forbids a float spelling beside it. A
+  radix held in a wide numeric type reads boxes. Format by specification
+  spells the infinities the way the plain format does.
+- The recursion guard stops explicit definitions at 48 levels rather than
+  64: one level costs about 34 kB of stack in an unoptimised build, and the
+  old number reached the end of a 2 MiB thread stack before the guard fired.
 - J's exact types carry the two INFINITIES. `% 0x` is `_` and reports the
   rational type, `(3 {. 123x) ^ _2` is one rational array holding a
   fraction beside two infinities, and `x: _` is `_` rather than a refusal.
