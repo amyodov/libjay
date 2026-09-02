@@ -995,7 +995,7 @@ pub fn could_part(verdict: Verdict, ours: Option<&libjay_testkit::eval::Answer>)
             Answer::Refused(e) => !matches!(e.kind, ErrorKind::NotYet | ErrorKind::Language),
             Answer::Value(_) => false,
         },
-        Verdict::Agree | Verdict::Unfinished => false,
+        Verdict::Agree | Verdict::Unfinished | Verdict::OracleAbort => false,
     }
 }
 
@@ -1091,6 +1091,11 @@ pub enum Verdict {
     TheyRefuse,
     /// The oracle never finished, so there is nothing to compare against.
     Unfinished,
+    /// The oracle died on the sentence. Nothing to compare against either,
+    /// and the fault is the reference's: a crash is not an answer, so it is
+    /// neither a mismatch nor an agreement, and it is counted on its own so
+    /// that a sweep's unexplained tally never hides one.
+    OracleAbort,
     /// libjay panicked. Always a bug: a refusal is a diagnostic, a panic is
     /// a crash.
     Panicked,
@@ -1105,18 +1110,19 @@ impl Verdict {
             Verdict::WeRefuse => "we-refuse",
             Verdict::TheyRefuse => "they-refuse",
             Verdict::Unfinished => "unfinished",
+            Verdict::OracleAbort => "oracle-abort",
             Verdict::Panicked => "panic",
         }
     }
 
     /// A verdict worth a human's attention.
     pub fn is_mismatch(self) -> bool {
-        !matches!(self, Verdict::Agree | Verdict::Unfinished)
+        !matches!(self, Verdict::Agree | Verdict::Unfinished | Verdict::OracleAbort)
     }
 
     /// Whether the two answers were compared at all.
     pub fn is_compared(self) -> bool {
-        !matches!(self, Verdict::Unfinished)
+        !matches!(self, Verdict::Unfinished | Verdict::OracleAbort)
     }
 }
 

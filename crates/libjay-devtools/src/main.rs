@@ -556,6 +556,8 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
             }
         }
     }
+    let aborts: Vec<&Finding> =
+        findings.iter().filter(|f| f.drawn == fuzz::Verdict::OracleAbort).collect();
     let mismatches: usize = findings.iter().filter(|f| f.drawn.is_mismatch()).count();
     // An expression the oracle never finished was not compared, so it is
     // not in the denominator either.
@@ -572,7 +574,26 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         ratio(total - unexplained, total)
     );
     for (label, n) in counts {
-        println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));
+        // A class that was never compared is not a share of the compared
+        // total, so it is reported as a plain count.
+        if label == "oracle-abort" || label == "unfinished" {
+            println!("  {label:<12} {n:>5}");
+        } else {
+            println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));
+        }
+    }
+    if !aborts.is_empty() {
+        // The reference died on these, so neither side was measured. They
+        // belong in the bug register, not in the divergence list: a corpus
+        // row would kill the recorder on the sentence it records.
+        println!("\n{} sentences the oracle crashed on (not compared):", aborts.len());
+        let mut shown = std::collections::BTreeSet::<&str>::new();
+        for finding in &aborts {
+            if shown.insert(finding.expr.as_str()) {
+                println!("  {}", finding.expr);
+                println!("    libjay: {}", one_line(&finding.seen.ours_text));
+            }
+        }
     }
     if !matched_rows.is_empty() {
         // Which pinned row each accepted mismatch was excused by, so the
@@ -733,11 +754,17 @@ fn compare(
     // printing more than one run may hold — was not compared, and neither
     // side is at fault for it.
     let unanswered = !theirs.is_comparable();
+    let crashed = theirs.crashed();
     let theirs = theirs.answer();
-    let verdict = match (&ours, unanswered) {
-        (None, _) => fuzz::Verdict::Panicked,
-        (_, true) => fuzz::Verdict::Unfinished,
-        (Some(ours), false) => fuzz::triage(lang, ours, theirs.as_deref()),
+    // A sentence the oracle DIED on is the reference's own bug, and libjay's
+    // answer to it stands unmeasured: reporting it as a difference would
+    // count the crash against libjay. A panic of ours is still ours, so it
+    // is named first.
+    let verdict = match (&ours, crashed, unanswered) {
+        (None, _, _) => fuzz::Verdict::Panicked,
+        (_, true, _) => fuzz::Verdict::OracleAbort,
+        (_, _, true) => fuzz::Verdict::Unfinished,
+        (Some(ours), _, false) => fuzz::triage(lang, ours, theirs.as_deref()),
     };
     let ours_text = match &ours {
         None => "<panic>".to_string(),
@@ -745,8 +772,13 @@ fn compare(
         Some(libjay_testkit::eval::Answer::NoValue) => "<no value>".to_string(),
         Some(libjay_testkit::eval::Answer::Refused(e)) => format!("<error> {e}"),
     };
-    let theirs_text = theirs
-        .unwrap_or_else(|| if unanswered { "<unfinished>".to_string() } else { "<error>".to_string() });
+    let theirs_text = theirs.unwrap_or_else(|| {
+        match (crashed, unanswered) {
+            (true, _) => "<oracle crashed>".to_string(),
+            (_, true) => "<unfinished>".to_string(),
+            _ => "<error>".to_string(),
+        }
+    });
     Outcome { verdict, ours_text, theirs_text }
 }
 

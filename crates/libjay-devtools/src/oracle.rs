@@ -57,6 +57,12 @@ pub enum Reply {
     /// nor a refusal either: what came back is the front of an answer, and
     /// an abbreviation recorded as an answer is a wrong answer.
     Overflowed,
+    /// The interpreter died on the sentence — an abort or a fatal signal,
+    /// not a diagnostic. It is not a refusal: a refusal is an answer of a
+    /// kind ("this is not in the domain"), while a crash is the reference
+    /// declining to have an opinion, and comparing against it would count a
+    /// bug in the reference as a difference in libjay.
+    Crashed,
 }
 
 impl Reply {
@@ -72,8 +78,13 @@ impl Reply {
     pub fn answer(self) -> Option<String> {
         match self {
             Reply::Answer(text) => Some(text),
-            Reply::Refused | Reply::TimedOut | Reply::Overflowed => None,
+            Reply::Refused | Reply::TimedOut | Reply::Overflowed | Reply::Crashed => None,
         }
+    }
+
+    /// Whether the interpreter died on the sentence.
+    pub fn crashed(&self) -> bool {
+        matches!(self, Reply::Crashed)
     }
 
     /// Whether what came back is comparable at all: an answer or a
@@ -88,6 +99,7 @@ impl Reply {
         match self {
             Reply::TimedOut => Some("did not finish (LIBJAY_ORACLE_TIMEOUT)"),
             Reply::Overflowed => Some("printed past the capture cap (LIBJAY_ORACLE_CAPTURE)"),
+            Reply::Crashed => Some("crashed on the sentence"),
             Reply::Answer(_) | Reply::Refused => None,
         }
     }
@@ -183,6 +195,14 @@ fn own_group(command: &mut Command) -> &mut Command {
     command
 }
 
+/// What a finished child printed, and whether it died abnormally — an
+/// abort or a fatal signal rather than an exit of its own.
+struct Finished {
+    out: String,
+    err: String,
+    died: bool,
+}
+
 /// Wait for a child that has already been written to, draining both pipes
 /// in threads of their own so neither can fill and block, and killing it if
 /// it outstays the limit or prints past the cap. `Err` names why what came
@@ -191,15 +211,20 @@ fn own_group(command: &mut Command) -> &mut Command {
 /// Both drain threads are joined on EVERY path. A thread left running after
 /// a kill still holds its buffer, and a recording of thousands of sentences
 /// leaks one such buffer per sentence it cut short.
-fn wait_within(mut child: Child) -> Result<(String, String), Reply> {
+fn wait_within(mut child: Child) -> Result<Finished, Reply> {
     let cap = capture_cap();
     let out = drain(child.stdout.take().expect("piped stdout"), cap);
     let err = drain(child.stderr.take().expect("piped stderr"), cap);
     let deadline = limit().map(|d| std::time::Instant::now() + d);
     let mut cut_short = None;
+    let mut died = false;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) | Err(_) => break,
+            Ok(Some(status)) => {
+                died = abnormal(&status);
+                break;
+            }
+            Err(_) => break,
             Ok(None) => {}
         }
         let over_cap =
@@ -226,7 +251,22 @@ fn wait_within(mut child: Child) -> Result<(String, String), Reply> {
     if out_over.load(Ordering::Relaxed) || err_over.load(Ordering::Relaxed) {
         return Err(Reply::Overflowed);
     }
-    Ok((text_out, text_err))
+    Ok(Finished { out: text_out, err: text_err, died })
+}
+
+/// Whether a finished child died rather than exited: a fatal signal, or the
+/// 128+n exit a wrapper shell reports one as. An interpreter that refuses a
+/// sentence exits normally and says so on its streams; one that aborts has
+/// no opinion to record.
+fn abnormal(status: &std::process::ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if status.signal().is_some() {
+            return true;
+        }
+    }
+    status.code().is_some_and(|code| code >= 128)
 }
 
 /// Where the interpreter is, which implementation it is, and where its
@@ -333,10 +373,16 @@ fn eval_j(jconsole: &Path, expr: &str) -> Reply {
         .unwrap()
         .write_all(format!("{J_PREAMBLE}\n{expr}\n").as_bytes())
         .expect("write to jconsole");
-    let (text, complaint) = match wait_within(child) {
+    let Finished { out: text, err: complaint, died } = match wait_within(child) {
         Ok(streams) => streams,
         Err(reply) => return reply,
     };
+    // A crash is not a refusal. jconsole announces one on stderr and aborts,
+    // so the exit says as much as the message does; either alone is enough,
+    // since a build with no abort handler dies silently on the signal.
+    if died || complaint.contains("JE has crashed") {
+        return Reply::Crashed;
+    }
     if (text.contains("error") && text.contains('|')) || !complaint.trim().is_empty() {
         return Reply::Refused;
     }
@@ -371,10 +417,13 @@ fn eval_apl(apl: &Path, cwd: &Path, expr: &str, index_origin: u8) -> Reply {
             .write_all(format!("{line}\n)OFF\n").as_bytes())
             .expect("write to GNU APL");
     }
-    let (stdout, stderr) = match wait_within(child) {
+    let Finished { out: stdout, err: stderr, died } = match wait_within(child) {
         Ok(streams) => streams,
         Err(reply) => return reply,
     };
+    if died {
+        return Reply::Crashed;
+    }
     // GNU APL always exits 0; a failed sentence is reported on stderr as a
     // named error plus a caret line under the offending glyphs.
     if !stderr.trim().is_empty() || has_error_marker(&stdout) {
