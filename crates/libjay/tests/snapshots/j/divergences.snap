@@ -303,3 +303,35 @@
 ? the same where the cells are of higher rank
 <
 > j: <error>
+= (<1 2) I. (<2)
+? the reference's own answers over boxes are not monotone
+< 0
+> j: 1
+= (a:) I. (<1)
+? the same, with the empty box as the bound
+< 0
+> j: 1
+= (<'a') I. (<1)
+? the same, comparing a character box with a numeric one
+< 0
+> j: 1
+= $ 2 +/\\. (<1 2)
+? the same argument under `<\.` and `,/\.` agrees
+< 0
+> j: 0 0
+= $ 2 +/\\. (<<1 2)
+? the same, one box deeper
+< 0
+> j: 0 0
+= $ 2 +/\\. (,<1 2)
+? the same, written as a one-item list
+< 0
+> j: 0 0
+= (i. 0 0) i: (0 $ 0)
+? the reference's own `i.` answers 0 for the same arguments
+< 0
+> j: _1
+= (i. 0 0) i: (0 $ 3j4)
+? the same, with a complex empty
+< 0
+> j: _1

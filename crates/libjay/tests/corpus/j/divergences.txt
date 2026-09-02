@@ -312,3 +312,38 @@ _1r2 ^. _1r2
 ? the same over symbols
 2 +/\\. (0 2 3 $ (6 $ a:))
 ? the same where the cells are of higher rank
+
+// INTERVAL INDEX over BOXES. `x I. y` counts the bounds of a sorted x that
+// lie below y, and boxes have no such order: the reference's own answers
+// contradict each other. `((<1);(<2);(<3)) I. (<0)` is 3 and `I. (<9)` is 2
+// — a SMALLER value cannot have MORE bounds below it — while `I. (<2)` is 3
+// and `I. (<'a')` is 2. libjay counts the boxes that sort below the value
+// in its own total order, which for these is none. Neither answer is the
+// Dictionary's, which asks for a left argument in ascending order and says
+// nothing about what ordering boxes have.
+(<1 2) I. (<2)
+? the reference's own answers over boxes are not monotone
+(a:) I. (<1)
+? the same, with the empty box as the bound
+(<'a') I. (<1)
+? the same, comparing a character box with a numeric one
+
+// The dyadic OUTFIX over an ATOM, with u exactly `+/`. `2 +/\. (<1 2)` has
+// shape `0 0` in jconsole and `0` here: an atom is one item, `1 + 1 - 2` is
+// no outfix at all, and the answer is the empty frame with the cell shape
+// the fold would have made. The same argument under `<\.` or `,/\.` agrees,
+// as does every numeric type under `+/\.`, so this is the reference's own
+// special code for `+/\.` again — the family the boxed empty frame above
+// belongs to.
+$ 2 +/\\. (<1 2)
+? the same argument under `<\.` and `,/\.` agrees
+$ 2 +/\\. (<<1 2)
+? the same, one box deeper
+$ 2 +/\\. (,<1 2)
+? the same, written as a one-item list
+
+// The same INDEX OF LAST divergence pinned above, written with `i.`.
+(i. 0 0) i: (0 $ 0)
+? the reference's own `i.` answers 0 for the same arguments
+(i. 0 0) i: (0 $ 3j4)
+? the same, with a complex empty
