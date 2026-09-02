@@ -23,7 +23,7 @@ Counts below cover the primitive tables (verbs, adverbs, conjunctions,
 nouns), one count per valence the language defines; the syntax/feature
 tables are listed separately and not counted.
 
-**J: 159 green / 16 partial / 2 absent by design, of 177 valences in the
+**J: 161 green / 14 partial / 2 absent by design, of 177 valences in the
 inventory. No row in J's primitive tables is red.**
 
 **APL: 107 green / 18 partial / 3 absent by design, of 128 valences in the
@@ -58,8 +58,8 @@ inventory. Nothing in APL's primitive tables is red.**
 | `%.` | 🟢 matrix inverse (Householder QR, f64) | 🟢 matrix divide. Its left rank is infinite, so a right-hand side of rank 3 or more is solved whole — one column per element of an item — and the answer keeps every axis but the leading one. APL's `⌹` refuses that shape, which is its own reference's rule |
 | `j.` | 🟢 imaginary | 🟢 complex |
 | `r.` | 🟢 angle | 🟢 polar |
-| `p.` | 🟡 roots, by Durand–Kerner in f64, with a repeated one refined through its m-1st derivative. The numbers agree with jconsole; their STORAGE need not. jconsole factors a polynomial of degree 2 or more over the coefficients' own exact type and answers rationals where it succeeds — whole roots for whole coefficients (`p. 6 _5 1` is `3 2`), rational ones for rational coefficients (`p. 1r2 _3r2 1` is `1 1r2`) — and falls back to floats for a linear polynomial, or where one root is not of that type (`p. 1 _3 2` is `1 0.5` there too). libjay computes in f64 throughout; the two cases that part are pinned in `corpus/j/divergences.txt`. A boxed argument is the root form and answers the coefficients; the multiplier may go unsaid, so `p. (<1 2)` is `2 _3 1` | 🟢 polynomial; a boxed `multiplier ; roots` left argument too, the multiplier optional |
-| `p..` | 🟢 poly. derivative; a boxed argument is the root form | 🟡 poly. integral, x the constant term; a boxed argument is the root form. The integral divides by the power, and jconsole keeps that division exact for an EXTENDED or rational argument (`0 p.. 1 1 1x` is `0 1 1r2 1r3`) where libjay answers floats — pinned in `corpus/j/divergences.txt` |
+| `p.` | 🟢 roots. jconsole factors a polynomial exactly when EVERY root is a whole multiple of `1 % D`, D the least common denominator of the coefficients read as rationals, and answers rationals where it succeeds — `p. 6 _5 1` is `3 2` and `p. 1r2 _3r2 1` is `1 1r2` — falling back to Durand–Kerner in f64 where no such factoring exists (`p. 1 _3 2` is `1 0.5` on both sides), a repeated root refined through its m-1st derivative. libjay follows that rule, storage and all. A boxed argument is the root form and answers the coefficients; the multiplier may go unsaid, so `p. (<1 2)` is `2 _3 1`. An empty frame whose fill cell the verb refuses stands alone in the boolean type | 🟢 polynomial; a boxed `multiplier ; roots` left argument too, the multiplier optional. A complex argument keeps the complex type; the left argument, and a symbol on the right, are refused before an empty frame, and what is left holds the type a value would have had |
+| `p..` | 🟢 poly. derivative; a boxed argument is the root form | 🟢 poly. integral, x the constant term; a boxed argument is the root form. The division by the power stays exact for an extended or rational argument, so `0 p.. 1 1 1x` is `0 1 1r2 1r3`. An EMPTY polynomial integrates to its constant term alone, in that term's own type, and the obverse of `n&p..` is the derivative |
 | `p:` | 🟢 the y-th prime; extended where y is | 🟢 the prime queries: `_1` `0` `1` `2` `3` `4` `_4` |
 | `q:` | 🟢 prime factors, exact however many digits the number has — trial division, then Miller–Rabin and Pollard's rho. The whole argument is read at once: one row per item, padded with 1s | 🟢 prime exponents: the first `x` primes' exponents, and for a negative `x` the last `\|x\|` columns of the factor table, all of them for `__` |
 | `?` | 🟡 roll; libjay's own stream, not J's | 🟡 deal; same |
