@@ -169,6 +169,16 @@ impl Tol {
         self.is_j() && y.abs() < self.ct
     }
 
+    /// Whether the tolerance reads this complex magnitude as zero.
+    ///
+    /// The same threshold the real rule uses, on the magnitude: J answers
+    /// `* 0j5.6e_14` with 0 and `* 0j5.7e_14` with 0j1, and `*!.0` of
+    /// either with 0j1.
+    #[inline(always)]
+    pub fn is_zero_cx(self, z: crate::complex::Cx) -> bool {
+        self.is_j() && crate::complex::abs(z) < self.ct
+    }
+
     /// Tolerant `<`: less, and not tolerantly equal.
     #[inline(always)]
     pub fn lt(self, a: f64, b: f64) -> bool {
@@ -5063,12 +5073,16 @@ fn i64_op(op: ScalarDyad, a: i64, b: i64) -> Option<i64> {
                 r
             }
         }
-        Pow => {
-            if b < 0 {
-                return None;
-            }
-            a.checked_pow(u32::try_from(b).ok()?)?
-        }
+        // A POWER LEAVES THE INTEGERS AS SOON AS IT IS A REAL POWER: the
+        // reference answers `3!:0 (3^3)` with the float type, and keeps
+        // integers only where the exponent is 0 or 1 and the answer is one
+        // of the arguments back (`3!:0 (2 ^ 0 1)` is 4). Two booleans keep
+        // the boolean type through the same two exponents.
+        Pow => match b {
+            0 => 1,
+            1 => a,
+            _ => return None,
+        },
         Binomial => binomial_i64(a, b)?,
         _ => return None,
     })
@@ -7186,15 +7200,19 @@ fn scalar_dyad(
     Ok(Array::new(p.frame, data))
 }
 
-/// The element type of an empty answer. A numeric operand names it; with
-/// none, the numbers an arithmetic result would have held.
+/// The element type of an empty answer. TWO NUMERIC OPERANDS SETTLE IT
+/// BETWEEN THEM, exactly as a pair with something in it would: `3!:0
+/// ((123x) *. (0 $ 3j4))` is the complex type and `((123x) + (0 $ 1.5))`
+/// the float one, where taking the first numeric side alone would have kept
+/// the extended one. A character side names nothing, so the numeric side
+/// stands alone; with neither, the integers an arithmetic result holds.
 fn empty_result_type(x: &Array, y: &Array) -> DType {
-    for a in [x, y] {
-        if a.dtype().is_numeric() {
-            return a.dtype();
-        }
+    let pick = |a: &Array| a.dtype().is_numeric().then(|| a.dtype());
+    match (pick(x), pick(y)) {
+        (Some(a), Some(b)) => DType::promote(a, b).unwrap_or(a),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => DType::I64,
     }
-    DType::I64
 }
 
 /// Is `v` exactly representable as an i64?
@@ -7220,7 +7238,7 @@ fn monad_leaves_reals(op: ScalarMonad, d: &Data) -> bool {
 }
 
 /// Elementwise monadic application in the complex domain.
-fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
+fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     use ScalarMonad::*;
     let mut tmp = Vec::new();
     let v = borrow_cx(&y.data, &mut tmp);
@@ -7247,12 +7265,19 @@ fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
         // Magnitude is the one that leaves the complex domain again.
         Abs => Data::F64(par::map(v, |&z| cx::abs(z)).into()),
         Not => return Err(Error::domain("logical negation needs values of 0 or 1", span)),
+        // A COMPLEX MAGNITUDE BELOW THE TOLERANCE IS ZERO, and its signum
+        // is zero with it: `* 0j5.6e_14` is 0 while `* 0j5.7e_14` is 0j1,
+        // the threshold being the tolerance itself, as it is for a real
+        // argument. The tolerance the comparisons use does not move it
+        // (`9!:19 ] 0` leaves the same answer), so it is the fixed default.
+        Signum => Data::Complex(
+            par::map(v, |&z| if tol.is_zero_cx(z) { cx::ZERO } else { cx::signum(z) }).into(),
+        ),
         _ => {
             let step: fn(Cx) -> Cx = match op {
                 Factorial => cx::factorial,
                 Conj => cx::conj,
                 Neg => cx::neg,
-                Signum => cx::signum,
                 Recip => cx::recip,
                 Sqrt => cx::sqrt,
                 Exp => cx::exp,
@@ -7268,7 +7293,7 @@ fn complex_monad(op: ScalarMonad, y: &Array, span: Span) -> Result<Array> {
                 Pi => |z| [std::f64::consts::PI * z[0], std::f64::consts::PI * z[1]],
                 Imaginary => |z| cx::mul(cx::I, z),
                 Polar => |z| cx::exp(cx::mul(cx::I, z)),
-                Abs | Not => unreachable!("handled above"),
+                Abs | Not | Signum => unreachable!("handled above"),
             };
             Data::Complex(par::map(v, |&z| step(z)).into())
         }
@@ -7298,7 +7323,25 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
         return scalar_monad(op, &r, cfg, span);
     }
     if d.dtype() == DType::Complex || monad_leaves_reals(op, d) {
-        return complex_monad(op, y, span);
+        return complex_monad(op, y, tol, span);
+    }
+    // AN EXACT FACTORIAL THAT OVERFLOWS THE MACHINE IS REFUSED, not
+    // widened: `!^:3 (123x)` is an out-of-memory error in jconsole, where
+    // dropping to floats would answer `_`.
+    if op == Factorial && d.dtype().is_exact() {
+        let over = match d {
+            Data::Ext(v) => v.iter().any(exact::ext_factorial_overflows),
+            Data::Rat(v) => v
+                .iter()
+                .any(|r| r.to_int().is_some_and(|k| exact::ext_factorial_overflows(&k))),
+            _ => false,
+        };
+        if over {
+            return Err(Error::domain(
+                "the factorial of a whole number this large will not fit in memory",
+                span,
+            ));
+        }
     }
     if d.dtype().is_exact() && let Some(a) = exact_monad(op, y) {
         return Ok(a);
@@ -9815,13 +9858,19 @@ fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
         {
             let mut shape = y.shape.clone();
             shape.push(k);
-            return Ok(Array::new(shape, Data::I64(digits.into())));
+            return Ok(Array::new(shape, bit_digits(digits, bit_digit_dtype(y))));
         }
     }
     // EXACT values keep their storage, the fraction landing in the last
     // digit: `#: 5r2` is `1 1r2`.
     if let Some(exact) = encode_bits_exact(y) {
         return Ok(exact);
+    }
+    // A WHOLE NUMBER PAST THE MACHINE WORD still has every bit: a double
+    // holds `1e300` exactly, and jconsole writes out all 997 of its
+    // digits. The bits come off an exact integer, so nothing is guessed.
+    if let Some(digits) = encode_bits_big(y) {
+        return Ok(digits);
     }
     let values = digits_of(y, "encode", span)?;
     let k = bit_width(&values, span)?;
@@ -9833,6 +9882,80 @@ fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let mut shape = y.shape.clone();
     shape.push(k);
     Ok(Array::new(shape, narrow(out, is_integral(y))))
+}
+
+/// THE TYPE `#: y` WRITES ITS BITS IN, which is the argument's own with one
+/// step of narrowing: an integer argument leaves BOOLEAN digits (`3!:0 #:
+/// 100` is 1), a float leaves integers while its magnitude stays under 9e15
+/// and floats past it (`3!:0 #: 1e19` is 8, measured to the boundary at
+/// exactly 9e15), and an extended argument keeps the extended type.
+fn bit_digit_dtype(y: &Array) -> DType {
+    // An empty argument has no digit to narrow, and keeps its own type
+    // whatever it is: `3!:0 #: (i. 0)` is 4, `#: (0 $ 'a')` the character
+    // type, `#: (0 $ 0.5)` the float one.
+    if y.count() == 0 {
+        return y.dtype();
+    }
+    match &y.data {
+        Data::Bool(_) | Data::I64(_) => DType::Bool,
+        Data::F64(v) => {
+            if v.iter().all(|&x| x.fract() == 0.0 && x.abs() < 9e15) {
+                DType::I64
+            } else {
+                DType::F64
+            }
+        }
+        Data::Ext(_) => DType::Ext,
+        Data::Complex(v) if v.iter().all(|z| z[1] == 0.0) => {
+            if v.iter().all(|z| z[0].fract() == 0.0 && z[0].abs() < 9e15) {
+                DType::I64
+            } else {
+                DType::F64
+            }
+        }
+        _ => DType::I64,
+    }
+}
+
+/// A finished run of binary digits in the type [`bit_digit_dtype`] chose.
+fn bit_digits(digits: Vec<i64>, t: DType) -> Data {
+    match t {
+        DType::Bool => Data::Bool(digits.iter().map(|&d| u8::from(d != 0)).collect()),
+        DType::F64 => Data::F64(digits.iter().map(|&d| d as f64).collect::<Vec<_>>().into()),
+        DType::Ext => Data::Ext(digits.iter().map(|&d| Ext::from(d)).collect()),
+        _ => Data::I64(digits.into()),
+    }
+}
+
+/// `#: y` over whole numbers too wide for a machine word — a large double
+/// or an extended integer past `i64` — as exact big integers. None where
+/// any value is not whole, which leaves the float path to refuse or round.
+fn encode_bits_big(y: &Array) -> Option<Array> {
+    let values: Vec<Ext> = match &y.data {
+        Data::F64(v) => v.iter().map(|&x| exact::f64_to_ext(x)).collect::<Option<Vec<_>>>()?,
+        Data::Ext(v) => v.to_vec(),
+        Data::Rat(v) => v.iter().map(|r| r.to_int()).collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    let mut k = 1usize;
+    for v in &values {
+        k = k.max(v.bits().max(1) as usize);
+    }
+    let two = Ext::from(2);
+    let mut out: Vec<i64> = Vec::with_capacity(values.len().checked_mul(k)?);
+    for v in &values {
+        let mut digits = vec![0i64; k];
+        let mut rem = v.clone();
+        for slot in digits.iter_mut().rev() {
+            let r = exact::ext_residue(&two, &rem);
+            rem = (&rem - &r) / &two;
+            *slot = if r.sign() == num_bigint::Sign::NoSign { 0 } else { 1 };
+        }
+        out.extend(digits);
+    }
+    let mut shape = y.shape.clone();
+    shape.push(k);
+    Some(Array::new(shape, bit_digits(out, bit_digit_dtype(y))))
 }
 
 /// `#: y` over exact fractions, kept exact. The digits are the bits of the
@@ -22509,11 +22632,18 @@ mod tests {
     #[test]
     fn power_stays_integral_when_it_can() {
         ctx!(c);
+        // Only the two exponents that hand an argument back stay integral:
+        // the reference reports the float type for every real power.
+        let r = pow_v()
+            .dyad(&Array::from_i64(vec![2, 0, 5]), &Array::from_i64(vec![1, 0, 1]), &mut c, sp())
+            .unwrap();
+        assert_eq!(r.dtype(), DType::I64);
+        assert_eq!(ints(&r), vec![2, 1, 5]);
         let r = pow_v()
             .dyad(&Array::from_i64(vec![2, 0, 5]), &Array::from_i64(vec![10, 0, 1]), &mut c, sp())
             .unwrap();
-        assert_eq!(r.dtype(), DType::I64);
-        assert_eq!(ints(&r), vec![1024, 1, 5]);
+        assert_eq!(r.dtype(), DType::F64);
+        assert!(close(floats(&r)[0], 1024.0));
         // A negative exponent forces the float path for the whole result.
         let r = pow_v()
             .dyad(&Array::from_i64(vec![2, 4]), &Array::from_i64(vec![-1, 2]), &mut c, sp())

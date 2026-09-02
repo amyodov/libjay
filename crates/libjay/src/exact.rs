@@ -563,10 +563,24 @@ fn pollard_rho(n: &BigInt) -> BigInt {
     }
 }
 
+/// The largest argument whose exact factorial is worked out rather than
+/// refused. jconsole answers to a memory bound of its own — `! 1000000x`
+/// is a number of five and a half million digits there — and runs out of
+/// memory past it; libjay names its own bound instead of quietly widening
+/// to a float infinity.
+pub const EXT_FACTORIAL_MAX: u64 = 200_000;
+
+/// Whether `! v` would exhaust the machine: a whole argument past
+/// [`EXT_FACTORIAL_MAX`]. A negative one is the gamma function's pole and
+/// belongs to the float path, not here.
+pub fn ext_factorial_overflows(v: &BigInt) -> bool {
+    v.sign() != Sign::Minus && v.to_u64().is_none_or(|n| n > EXT_FACTORIAL_MAX)
+}
+
 /// `! y` on a whole number: the exact factorial. None for a negative
 /// argument (a pole) or one large enough to exhaust the machine.
 pub fn ext_factorial(v: &BigInt) -> Option<BigInt> {
-    let n = v.to_u64().filter(|&n| n <= 200_000)?;
+    let n = v.to_u64().filter(|&n| n <= EXT_FACTORIAL_MAX)?;
     let mut acc = BigInt::one();
     for k in 2..=n {
         acc *= k;
