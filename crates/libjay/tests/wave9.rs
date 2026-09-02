@@ -168,7 +168,12 @@ fn the_determinant_bottoms_out_at_the_identity_elements() {
         j("< . > 'ab'"),
         Array::new(Vec::new(), Data::Box(vec![chars(&[2], "ab")].into()))
     );
-    assert_eq!(j("*: . > 2 2 $ 1 2 3 4"), i64s(&[2, 1], &[0, 0]));
+    // The square of a boolean is boolean, which is the type the reference
+    // reports here too.
+    assert_eq!(
+        j("*: . > 2 2 $ 1 2 3 4"),
+        Array::new(vec![2, 1], Data::Bool(vec![0, 0].into()))
+    );
 }
 
 /// The verb's monadic rank is 2, so an argument of higher rank gives one

@@ -215,3 +215,43 @@
 ? the same over characters and boxes
 < 0
 > j: _1
+= _3 ^. _3
+? the reference answers a rounding away from 1, differently per spelling
+< 1
+> j: 1j_2.09983e_18
+= _3x ^. _3x
+? the reference answers a rounding away from 1, differently per spelling
+< 1
+> j: 1j9.81297e_18
+= _3 ^. _3x
+? the reference answers a rounding away from 1, differently per spelling
+< 1
+> j: 1j5.34113e_17
+= _2 ^. _2
+? the reference answers a rounding away from 1, differently per spelling
+< 1
+> j: 1j3.88619e_17
+= _1r2 ^. _1r2
+? the reference answers a rounding away from 1, differently per spelling
+< 1
+> j: 1j_3.88619e_17
+= (o. 1) *. 1
+? the two float Euclids cut the same residue chain at different steps
+< 1.04033e13
+> j: 5.14116e12
+= 1e12 * ((o. 1) +. 1)
+? the two float Euclids cut the same residue chain at different steps
+< 0.301981
+> j: 0.611067
+= !^:_1 ] 1.1
+? two arguments have this factorial and the two engines pick different ones
+< 1.19699
+> j: _0.136587
+= !^:_1 ] 1.0000001
+? two arguments have this factorial and the two engines pick different ones
+< 1
+> j: _1.73245e_7
+= !^:_1 ] 0.8
+? no argument at or above zero has this factorial; the reference goes below
+< <error>
+> j: _4.17518

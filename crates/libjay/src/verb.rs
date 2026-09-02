@@ -3816,6 +3816,18 @@ fn prim_monad_frame(
     let frame = y.shape[..frame_rank].to_vec();
     let n: usize = frame.iter().product();
     if n == 0 {
+        // THE TWO READINGS OF A COMPLEX NUMBER NAME THEIR OWN EMPTY TYPE,
+        // where probing the fill would have carried the argument's: `3!:0
+        // (+. (0 $ 0.5))` is the boolean type there whatever the argument
+        // was, unless it was complex, and `*.` is the float type always.
+        if let MonadOp::ComplexParts { polar } = p.monad
+            && ctx.cfg.rules.lang == crate::Lang::J
+        {
+            let t = if polar || y.dtype() == DType::Complex { DType::F64 } else { DType::Bool };
+            let mut shape = frame;
+            shape.push(2);
+            return Ok(Array::new(shape, Data::empty(t)));
+        }
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
         let probe = conform && !matches!(p.monad, MonadOp::PolyRoots | MonadOp::PolyDeriv);
@@ -6709,6 +6721,17 @@ fn exact_sqrt_data(x: &Data, xoff: usize, xdiv: usize, n: usize) -> Option<Data>
 /// float, as in the dyadic pass.
 fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
     use ScalarMonad::*;
+    // The ones with no exact answer decline before the pass, so that an
+    // EMPTY argument declines too: `3!:0 (^ (0 $ 1r2))` is the float type
+    // there, not the rational one the empty would have carried through.
+    // The two logarithmic ones keep an EXTENDED empty (`3!:0 (^ (0 $ 1x))`
+    // is 64) where multiplying by pi does not; the pair is measured.
+    if matches!(op, Imaginary | Polar | Not)
+        || (matches!(op, Exp | Ln) && y.dtype() == DType::Rat)
+        || (op == Pi && matches!(y.dtype(), DType::Ext | DType::Rat))
+    {
+        return None;
+    }
     let v = to_rat_vec(&y.data)?;
     let shape = y.shape.clone();
     // The three that answer with a whole number whatever they were given:
@@ -7310,14 +7333,24 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
     let tol = cfg.tol;
     let d = &y.data;
     // An empty argument has no element for the verb to run on, so its type
-    // never comes up: `%: ''` is an empty, not a type error.
+    // never comes up: `%: ''` is an empty, not a type error. WHAT IT
+    // ANSWERS IS WHAT A BOOLEAN EMPTY WOULD HAVE: `3!:0 (o. (0 $ 'a'))` is
+    // the float type there, `(j. (0 $ 'a'))` the complex one, `(* (0 $
+    // 'a'))` the boolean one — each of them the type that verb gives a
+    // boolean argument. Logical negation is the one that does not follow,
+    // answering with integers where a boolean argument keeps its type.
     if y.count() == 0 && !d.dtype().is_numeric() {
+        if cfg.rules.lang == crate::Lang::J && !matches!(op, Not | OneMinus) {
+            let bits = Array::new(y.shape.clone(), Data::empty(DType::Bool));
+            return scalar_monad(op, &bits, cfg, span);
+        }
         return Ok(Array::new(y.shape.clone(), Data::empty(DType::I64)));
     }
     // The gamma function has no complex reading here, but a complex value
     // with no imaginary part is the real it displays as: `!2j0` is 2.
     if op == Factorial
         && d.dtype() == DType::Complex
+        && y.count() > 0
         && let Some(r) = as_real(y)
     {
         return scalar_monad(op, &r, cfg, span);
@@ -7370,7 +7403,23 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
             Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
             Data::I64(v) => Data::I64(par::map(v, |&x| x.signum()).into()),
             // NaN has no sign here; it yields 0, and so does anything the
-            // dialect's tolerance reads as zero.
+            // dialect's tolerance reads as zero. THE ANSWER LEAVES THE
+            // FLOATS: `3!:0 (* 0.5)` is the integer type there, three
+            // values being all a sign can take.
+            Data::F64(v) if tol.is_j() => Data::I64(
+                par::map(v, |&x| {
+                    if tol.is_zero(x) || x.is_nan() {
+                        0i64
+                    } else if x > 0.0 {
+                        1
+                    } else if x < 0.0 {
+                        -1
+                    } else {
+                        0
+                    }
+                })
+                .into(),
+            ),
             Data::F64(v) => Data::F64(
                 par::map(v, |&x| {
                     if tol.is_zero(x) {
@@ -7559,6 +7608,31 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
                 _ => return Err(bad()),
             }
         }
+    };
+    // A BOOLEAN ARGUMENT STAYS BOOLEAN under every monad whose answer
+    // cannot leave {0, 1} — `* <. >. | %: -. *: !` and the real/imaginary
+    // pair — which is the type the reference reports for each of them
+    // (`3!:0 (* (1 0))` is 1). The dyadic pass has the same rule for two
+    // boolean arguments. GNU APL has no type report, so nothing in APL
+    // asks the question.
+    let data = if cfg.rules.lang == crate::Lang::J
+        && d.dtype() == DType::Bool
+        && matches!(op, Signum | Floor | Ceil | Abs | Sqrt | Not | Square | Factorial | Conj)
+        && let Some(bits) = match &data {
+            Data::I64(v) => v
+                .iter()
+                .map(|&k| (k == 0 || k == 1).then_some(k as u8))
+                .collect::<Option<Vec<_>>>(),
+            Data::F64(v) => v
+                .iter()
+                .map(|&k| (k == 0.0 || k == 1.0).then_some(k as u8))
+                .collect::<Option<Vec<_>>>(),
+            _ => None,
+        }
+    {
+        Data::Bool(bits.into())
+    } else {
+        data
     };
     Ok(Array::new(y.shape.clone(), data).with_layout(y.layout()))
 }
@@ -9919,6 +9993,11 @@ fn bit_digit_dtype(y: &Array) -> DType {
 
 /// A finished run of binary digits in the type [`bit_digit_dtype`] chose.
 fn bit_digits(digits: Vec<i64>, t: DType) -> Data {
+    // Nothing to encode keeps the argument's type as it stands, character
+    // and complex included: `3!:0 (#: (0 $ 'a'))` is 2 there.
+    if digits.is_empty() {
+        return Data::empty(t);
+    }
     match t {
         DType::Bool => Data::Bool(digits.iter().map(|&d| u8::from(d != 0)).collect()),
         DType::F64 => Data::F64(digits.iter().map(|&d| d as f64).collect::<Vec<_>>().into()),
@@ -10996,6 +11075,13 @@ fn complex_parts(y: &Array, polar: bool, span: Span) -> Result<Array> {
     // The parts of a WHOLE number are whole: `+. 9223372036854775806` is
     // that number and a zero, which an f64 pair could not spell. An EXACT
     // number keeps its storage for the same reason: `+. 1r2` is `1r2 0`.
+    // A BOOLEAN keeps its type through the pair, both parts being in
+    // {0, 1}: `3!:0 (+. (1 0))` is 1 there.
+    if let Data::Bool(b) = &y.data
+        && let Some(&bit) = b.first()
+    {
+        return Ok(Array::new(vec![2], Data::Bool(vec![bit, 0].into())));
+    }
     if let Some(whole) = y.as_i64_slice().and_then(|v| v.first().copied()) {
         return Ok(Array::from_i64(vec![whole, 0]));
     }
@@ -22719,8 +22805,11 @@ mod tests {
         ctx!(c);
         let r = times().monad(&Array::from_i64(vec![-3, 0, 9]), &mut c, sp()).unwrap();
         assert_eq!(ints(&r), vec![-1, 0, 1]);
+        // A sign has three values and none of them needs a float: the
+        // reference reports the integer type for `* 0.5` too.
         let r = times().monad(&Array::from_f64(vec![-3.0, 0.0, 9.0]), &mut c, sp()).unwrap();
-        assert_eq!(floats(&r), vec![-1.0, 0.0, 1.0]);
+        assert_eq!(r.dtype(), DType::I64);
+        assert_eq!(ints(&r), vec![-1, 0, 1]);
         let r = residue_v().monad(&Array::from_i64(vec![-3, 3]), &mut c, sp()).unwrap();
         assert_eq!(ints(&r), vec![3, 3]);
         let bits = Array::new(vec![2], Data::Bool(vec![0, 1].into()));

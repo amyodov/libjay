@@ -203,3 +203,57 @@ _ <. (_.)
 ? the reference's own `i.` answers 0 for the same arguments
 (0 0 $ '') i: (0 $ a:)
 ? the same over characters and boxes
+
+// A LOGARITHM TO ITS OWN NEGATIVE BASE. `x ^. x` is 1 for every x, and
+// libjay answers 1. jconsole answers a complex number a rounding away from
+// it, and a DIFFERENT one for every spelling of the same value: `_3 ^. _3`
+// is `1j_2.09983e_18`, `_3x ^. _3x` is `1j9.81297e_18`, `_3 ^. _3x` is
+// `1j5.34113e_17` and `_3x ^. _3` is `1j_4.56982e_17`, the last three with
+// a real part of 0.99999999999999989 rather than 1. Four answers to one
+// question is the reference contradicting itself, so there is nothing to
+// follow; libjay gives the value the algebra gives.
+_3 ^. _3
+? the reference answers a rounding away from 1, differently per spelling
+_3x ^. _3x
+? the reference answers a rounding away from 1, differently per spelling
+_3 ^. _3x
+? the reference answers a rounding away from 1, differently per spelling
+_2 ^. _2
+? the reference answers a rounding away from 1, differently per spelling
+_1r2 ^. _1r2
+? the reference answers a rounding away from 1, differently per spelling
+
+// A GCD OR LCM OF TWO VALUES WITH NO COMMON MEASURE. Neither engine can
+// answer `(o. 1) +. 1` — pi and 1 have no common divisor — and both run a
+// float Euclid until the residues reach the noise. The residue chains
+// AGREE step for step (jconsole's own `|` was measured against libjay's
+// over thirty pairs and matched exactly); the two part only in where the
+// chain is cut, and the reference's cut leaves an answer that is not a
+// common divisor of anything: `g | 1` is 2.27e_13 and `g | (o. 1)` is
+// 2.52e_13, neither of them zero, and its `(o. 1) +. 3` is not a multiple
+// of its `(o. 1) +. 1` although a common divisor of pi and 1 must divide
+// a common divisor of pi and 3. libjay cuts the chain where the residue
+// falls below the comparison tolerance times the larger argument, which is
+// a rule that can be stated; the reference's could not be recovered from
+// forty-four measured pairs.
+(o. 1) *. 1
+? the two float Euclids cut the same residue chain at different steps
+1e12 * ((o. 1) +. 1)
+? the two float Euclids cut the same residue chain at different steps
+
+// THE OBVERSE OF THE FACTORIAL, WHERE THE EQUATION HAS MORE THAN ONE
+// ANSWER. `! x = y` has two solutions between every pair of the gamma
+// function's poles, so which one `!^:_1` means is a choice. libjay takes
+// the smallest argument at or above zero and says so; jconsole searches
+// from a seed of its own and lands elsewhere — `!^:_1 ] 1.1` is
+// `_0.136587` there and 1.19699 here, both of them arguments whose
+// factorial is 1.1. Its search does not always finish: `!^:_1 ] 1.5` is a
+// NaN error although two arguments answer it, and `!^:_1` of the gamma
+// minimum 0.885603194410888 never returns at all. There is no consistent
+// rule to follow, so libjay keeps its own.
+!^:_1 ] 1.1
+? two arguments have this factorial and the two engines pick different ones
+!^:_1 ] 1.0000001
+? two arguments have this factorial and the two engines pick different ones
+!^:_1 ] 0.8
+? no argument at or above zero has this factorial; the reference goes below

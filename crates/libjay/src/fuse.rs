@@ -1275,12 +1275,28 @@ fn monad_type(op: ScalarMonad, a: DType) -> Option<DType> {
         Recip | Halve | Exp => F64,
         // Identity and magnitude keep a boolean boolean.
         Conj | Abs | OneMinus => a,
-        Neg | Signum | Inc | Dec | Double | Square => match a {
+        Neg | Inc | Dec | Double => match a {
             Bool | I64 => I64,
             other => other,
         },
+        // A SIGN HAS THREE VALUES AND NEEDS NO FLOAT, and a boolean one
+        // needs no integer either — the unfused monad narrows both, and a
+        // fused chain has to land on the same type.
+        Signum => match a {
+            Bool => Bool,
+            I64 | F64 => I64,
+            _ => return None,
+        },
+        // The same narrowing for the three whose answers cannot leave
+        // {0, 1} where their argument could not.
+        Square => match a {
+            Bool => Bool,
+            I64 => I64,
+            other => other,
+        },
         Floor | Ceil => match a {
-            Bool | I64 => I64,
+            Bool => Bool,
+            I64 => I64,
             _ => return None,
         },
         _ => return None,
@@ -2638,6 +2654,9 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
 fn float_result(out: Vec<f64>, root: DType) -> Data {
     match root {
         DType::Bool => Data::Bool(par::map(&out, |&v| (v != 0.0) as u8).into()),
+        // A float pass whose answer is whole — the signum of floats is the
+        // one that gets here — lands in the integers, as unfused.
+        DType::I64 => Data::I64(par::map(&out, |&v| v as i64).into()),
         _ => Data::F64(out.into()),
     }
 }

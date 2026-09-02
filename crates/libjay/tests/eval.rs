@@ -55,7 +55,8 @@ fn j_arithmetic() {
     assert_eq!(run(Lang::J, "1 2 3 * 10"), Some(i64s(&[3], &[10, 20, 30])));
     assert_eq!(run(Lang::J, "10 % 4"), Some(Array::scalar_f64(2.5)));
     assert_eq!(run(Lang::J, "- 3"), Some(Array::scalar_i64(-3)));
-    assert_eq!(run(Lang::J, "2 ^ 10"), Some(Array::scalar_i64(1024)));
+    // A real power leaves the integers, as the reference's type report says.
+    assert_eq!(run(Lang::J, "2 ^ 10"), Some(Array::scalar_f64(1024.0)));
 }
 
 #[test]

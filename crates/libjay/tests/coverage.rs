@@ -500,15 +500,17 @@ fn compose_applies_the_right_verb_to_both_arguments() {
 fn a_noun_operand_bonds_it_into_the_dyad() {
     assert_eq!(val(Lang::J, "(1 & +) 5"), Array::scalar_i64(6));
     assert_eq!(val(Lang::J, "(1 & +) i. 2 3"), i64s(&[2, 3], &[1, 2, 3, 4, 5, 6]));
-    assert_eq!(val(Lang::J, "(^ & 2) 1 2 3"), i64s(&[3], &[1, 4, 9]));
-    assert_eq!(val(Lang::J, "(2 & ^) 1 2 3"), i64s(&[3], &[2, 4, 8]));
+    // A real power leaves the integers, which is the type the reference
+    // reports for `3!:0 (3^3)` too.
+    assert_eq!(val(Lang::J, "(^ & 2) 1 2 3"), f64s(&[3], &[1.0, 4.0, 9.0]));
+    assert_eq!(val(Lang::J, "(2 & ^) 1 2 3"), f64s(&[3], &[2.0, 4.0, 8.0]));
     assert_eq!(val(Lang::J, "(10 & *) 1 2 3"), i64s(&[3], &[10, 20, 30]));
     // Which side the noun sits on is the difference between the two.
     assert_eq!(val(Lang::J, "(- & 1) 5"), Array::scalar_i64(4));
     assert_eq!(val(Lang::J, "(1 & -) 5"), Array::scalar_i64(-4));
     // Bonds inside larger trains.
     assert_eq!(val(Lang::J, "(1&+ @ *:) 1 2 3"), i64s(&[3], &[2, 5, 10]));
-    assert_eq!(val(Lang::J, "(^&2 @ (1&+)) 1 2 3"), i64s(&[3], &[4, 9, 16]));
+    assert_eq!(val(Lang::J, "(^&2 @ (1&+)) 1 2 3"), f64s(&[3], &[4.0, 9.0, 16.0]));
     assert_eq!(val(Lang::J, "(10&* + 1&+) 1 2 3"), i64s(&[3], &[12, 23, 34]));
     // The bond takes the rank of the side its argument arrives on: `,` is
     // infinite both ways, `,"1` reads rows.
@@ -629,12 +631,13 @@ fn decode_reads_digits_in_a_radix() {
 fn encode_writes_a_number_in_a_radix() {
     // The monad picks a width wide enough for the largest value anywhere in
     // the argument, which is why it is not a rank-0 verb.
-    assert_eq!(val(Lang::J, "#: 5"), i64s(&[3], &[1, 0, 1]));
-    assert_eq!(val(Lang::J, "#: 0"), i64s(&[1], &[0]));
-    assert_eq!(val(Lang::J, "#: 2 5"), i64s(&[2, 3], &[0, 1, 0, 1, 0, 1]));
-    assert_eq!(val(Lang::J, "#: 8"), i64s(&[4], &[1, 0, 0, 0]));
+    // An integer argument leaves BOOLEAN digits: `3!:0 #: 5` is 1 there.
+    assert_eq!(val(Lang::J, "#: 5"), bits(&[3], &[1, 0, 1]));
+    assert_eq!(val(Lang::J, "#: 0"), bits(&[1], &[0]));
+    assert_eq!(val(Lang::J, "#: 2 5"), bits(&[2, 3], &[0, 1, 0, 1, 0, 1]));
+    assert_eq!(val(Lang::J, "#: 8"), bits(&[4], &[1, 0, 0, 0]));
     // A negative value wraps within that width.
-    assert_eq!(val(Lang::J, "#: _5"), i64s(&[3], &[0, 1, 1]));
+    assert_eq!(val(Lang::J, "#: _5"), bits(&[3], &[0, 1, 1]));
     // Dyadically the digit axis is the radix's own shape: a scalar radix
     // adds no axis, so `2 #: 5` is a scalar.
     assert_eq!(val(Lang::J, "2 2 2 #: 5"), i64s(&[3], &[1, 0, 1]));
