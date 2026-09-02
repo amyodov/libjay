@@ -287,3 +287,7 @@ _1r2 ^. _1r2
 // its own `3 *. (9223372036854775806)` is the integer.
 (3 1 4 1 5) *. (9223372036854775806)
 ? jconsole holds the left and the right in one double and libjay keeps them exact
+!^:_1 (-. ^:(<2) 2)
+? the reference searches into the complex plane; libjay has no real answer
+! ^:(_1 0 1) (_9223372036854775806)
+? the reference searches into the complex plane; libjay has no real answer

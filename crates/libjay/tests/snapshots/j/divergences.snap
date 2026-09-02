@@ -275,3 +275,11 @@
 ? jconsole holds the left and the right in one double and libjay keeps them exact
 < 9.22337e18 9.22337e18 1.84467e19 9.22337e18 4.61169e19
 > j: 9.22337e18 9.22337e18 9.22337e18 9.22337e18 9.22337e18
+= !^:_1 (-. ^:(<2) 2)
+? the reference searches into the complex plane; libjay has no real answer
+< <error>
+> j: 2 8.91115j18.2226
+= ! ^:(_1 0 1) (_9223372036854775806)
+? the reference searches into the complex plane; libjay has no real answer
+< <error>
+> j: __j_6.02345e41 _9.22337e18 _
