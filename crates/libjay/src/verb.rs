@@ -9188,18 +9188,35 @@ fn cat_promote(
 ///
 /// J lets an empty operand join anything: `(0$'a') , 1 2 3` is `1 2 3`, and
 /// an empty box vanishes beside characters the same way, because no element
-/// of the empty side ever becomes an element of the result. Where both
-/// sides are empty the wider container wins — a box over a character, a
-/// character over a number.
+/// of the empty side ever becomes an element of the result.
+///
+/// Where BOTH sides are empty the reference settles the type by an order of
+/// its own, measured pair by pair over the nine types: a boolean loses to
+/// everything, then a character, a whole number, a box, an extended
+/// number, a rational, a float, a complex number, and a symbol last. It is
+/// not the promotion two numbers with something in them would take —
+/// `(0 $ 1x) , (0 $ 1.5)` is a FLOAT empty there, where `1x + 1.5` is
+/// extended.
 fn empty_type(x: &Array, y: &Array) -> Option<DType> {
+    use DType::*;
+    let order = |t: DType| match t {
+        Bool => 0,
+        Char => 1,
+        I64 => 2,
+        Box => 3,
+        Ext => 4,
+        Rat => 5,
+        F64 => 6,
+        Complex => 7,
+        Symbol => 8,
+    };
     match (x.count() == 0, y.count() == 0) {
         (true, false) => Some(y.dtype()),
         (false, true) => Some(x.dtype()),
-        (true, true) => Some(match (x.dtype(), y.dtype()) {
-            (DType::Box, _) | (_, DType::Box) => DType::Box,
-            (DType::Char, _) | (_, DType::Char) => DType::Char,
-            (a, b) => DType::promote(a, b)?,
-        }),
+        (true, true) => {
+            let (a, b) = (x.dtype(), y.dtype());
+            Some(if order(a) >= order(b) { a } else { b })
+        }
         (false, false) => None,
     }
 }

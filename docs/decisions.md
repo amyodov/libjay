@@ -4967,3 +4967,9 @@ the register.
   number; two boxed sides of `u L: n` pair by ordinary leading-prefix
   agreement; and a boxed empty above rank 2 draws its plane separators as
   lines of its own.
+- 2026-09-02 — TWO EMPTIES CATENATED take the type an order of the
+  reference's own gives them, measured pair by pair over the nine types: a
+  boolean loses to everything, then a character, a whole number, a box, an
+  extended number, a rational, a float, a complex number, and a symbol
+  last. It is not the promotion two numbers with something in them would
+  take, and it is not the "wider container" rule libjay had been following.

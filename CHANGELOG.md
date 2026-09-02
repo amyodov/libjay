@@ -291,6 +291,11 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   table; the obverse of a running or an outfix fold asks a scalar to be a
   number; two boxed sides of `u L: n` pair by leading-prefix agreement; a
   boxed empty above rank 2 draws its plane separators as lines of its own.
+- Two EMPTIES catenated take the type the reference's own order gives them:
+  a boolean loses to everything, then a character, a whole number, a box,
+  an extended number, a rational, a float, a complex number, and a symbol
+  last. It is not the promotion two numbers with something in them take —
+  `(0 $ 1x) , (0 $ 1.5)` is a float empty.
 
 - **Round 4 of the agreement sweep, everything but the polynomial verbs.**
   A rank and a level SPELL THEMSELVES BACK as they were written: `u"2 _ 2`
