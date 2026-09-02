@@ -707,7 +707,10 @@ class TestRecursionGuard:
         assert {"j": j, "apl": apl}[lang](source) == expected
 
     def test_the_guard_does_not_leak_between_calls(self):
-        source = "f =. 3 : 'if. y = 0 do. 0 else. $: y - 1 end.'\nf 60"
+        # Well inside the guard, which stands at 48 levels: the point is
+        # that the count starts again on the second call, not how deep the
+        # first one went.
+        source = "f =. 3 : 'if. y = 0 do. 0 else. $: y - 1 end.'\nf 40"
         kernel = jay.j.compile(source)
         assert kernel() == 0
         assert kernel() == 0
