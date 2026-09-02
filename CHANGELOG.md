@@ -7,6 +7,15 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The polynomial family's EMPTY FRAME and its types. `p.` and `p..` used
+  monadically leave a frame whose fill cell they refuse standing alone in
+  the boolean type; the dyad refuses its left argument, and a symbol on the
+  right, before the frame, and holds the type a value would have had —
+  `(1 2 3x) p. (0 $ 'a')` extended, `(1 2 3) p. (0 $ 0j1)` complex,
+  `(0 $ 1r2) p. (0 $ 0)` an integer. A polynomial written with a complex
+  number keeps the complex type, an empty polynomial integrates to its
+  constant term alone in that term's own type, and `n p.. ^:_1` is the
+  derivative.
 - The J foreigns that only compute. `3!:1` writes an array as the bytes
   that stand for it and `3!:2` reads them back — booleans, literals,
   integers, floats, complex numbers and boxes nested to any depth — with

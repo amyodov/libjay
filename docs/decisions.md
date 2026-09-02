@@ -4803,3 +4803,18 @@ the register.
   after it — which fits every probe where neither a tolerance nor a
   magnitude does. Bounds and values must be comparable, so a numeric bound
   against a boxed value is refused whatever their ranks.
+- 2026-09-02 — The polynomial verbs settle their domain from the cell as a
+  whole, and their EMPTY FRAME follows from that. The monads never ask the
+  fill cell twice: a refusal of any kind leaves the frame alone in the
+  boolean type, so `$ p. (0 2 $ 'a')` is `0` and not `0 2`. The dyad
+  refuses its left argument before the frame, and a SYMBOL on the right is
+  refused with it where a character and a box are not; what is left holds
+  the type a VALUE would have had — the fill cell where the right argument
+  is numbers, a plain zero where it is not — which makes
+  `(1 2 3x) p. (0 $ 'a')` extended, `(1 2 3) p. (0 $ 0j1)` complex and the
+  zero polynomial `(0 $ 1r2) p. (0 $ 0)` an integer. A polynomial written
+  with a complex number keeps the complex type however real its value comes
+  out. An empty polynomial has nothing to integrate, so `x p.. (i. 0)` is
+  the constant term alone in the type it was written in, and the obverse of
+  `n&p..` is the derivative, whatever n was — differentiating drops exactly
+  the constant the integral put on the front.

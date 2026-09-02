@@ -88,8 +88,8 @@ feature — that is a promise, not a refusal.
 | `L.` | the boxing level: 0 for anything unboxed, one more than the deepest content otherwise. APL's `≡` counts the array itself as well, so the two differ by one on a simple array | — |
 | `".` | do: the characters are compiled as a J program and run HERE, over the names the sentence itself can see — `". 'a =. 3'` assigns in the surrounding scope. A `{name}` hole inside the string has nothing to bind to and is refused | the numbers a line of text spells: the line is split at blanks and every word read as a J numeric literal, with the atom x standing in for a word that is not one. One word gives a scalar, as reading that line as a noun would, and several give a vector of that many. The right rank is 1, so a character matrix is read a row at a time and the rows framed with fills |
 | `%.` | matrix inverse — the least-squares pseudo-inverse of a taller matrix; a wider one is refused, a singular one is a domain error | matrix divide: the least-squares solution of `y a = x` |
-| `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`, largest magnitude first, then largest real part, then largest imaginary part; roots that sit on top of one another are refined through the m-1st derivative, so a repeated one is exact; a boxed argument of that form converts back to coefficients, and the multiplier may go unsaid — one box is the roots alone, so `p. (<1 2)` is `2 _3 1` | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial, the multiplier optional |
-| `p..` | the derivative of the polynomial y's ascending coefficients describe, as coefficients; a boxed y is the root form and is differentiated through the coefficients it stands for | the integral, with x as the constant term; a boxed y is the root form here too, though its coefficients come out in floats where jconsole keeps exact rationals |
+| `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`, largest magnitude first, then largest real part, then largest imaginary part; roots that sit on top of one another are refined through the m-1st derivative, so a repeated one is exact; a boxed argument of that form converts back to coefficients, and the multiplier may go unsaid — one box is the roots alone, so `p. (<1 2)` is `2 _3 1` | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial, the multiplier optional. A complex argument keeps the complex type however real the value comes out. The left argument settles before an empty frame — a root form that is no root form is refused whatever the frame holds, and so is a symbol on the right — and what is left holds the type a value would have had |
+| `p..` | the derivative of the polynomial y's ascending coefficients describe, as coefficients; a boxed y is the root form and is differentiated through the coefficients it stands for | the integral, with x as the constant term; a boxed y is the root form here too, and exact coefficients integrate exactly. An EMPTY polynomial has nothing to integrate, so the answer is the constant term alone, in the type it was written in. The obverse of `n&p..` is the derivative, whatever n was |
 | `p:` | the y-th prime, counting from zero | the prime queries: `_1` counts the primes below y, `0` and `1` ask whether it is composite or prime, `2` gives the factorisation as a 2-row table and `3` its top row, `4` and `_4` step to the next and previous prime |
 | `q:` | prime factors, ascending, with multiplicity (`q: 1` is empty), exact however many digits the number has. The whole argument is read at once — one row per item, padded with 1s | the exponents of the first x primes; a NEGATIVE x gives the last `\|x\|` primes that divide y over their exponents, as a 2-row table, and `__` gives all of them |
 | `?` | roll: a random value below each element (`? 0` is a uniform double) | deal: x distinct values from `i. y` |
@@ -2186,13 +2186,6 @@ still reaches after them.
   which is what libjay's compiler makes of an unbound name. `". 'hello+1'`
   is an error on both sides. Letting the sentence through wants an
   unbound-name node in the IR.
-- **A polynomial whose roots are all RATIONAL, or all Gaussian.** jconsole
-  factors over the coefficients' own exact type: `p. (1r2 1r3)` is
-  `1r3 ; _3r2` there and a pair of floats here, `p. (4 0 1x)` is
-  `1 ; 0j2 0j_2`, and the roots come back descending. libjay's
-  Durand–Kerner works in f64 throughout, so the two name the same numbers
-  and write them differently. One divergence row (`p. 1r2 _3r2 1`) and two
-  sweep spellings.
 - **A dyadic `L:` whose two sides reach their level with different shapes.**
   `(2 2 $ 1;2;3;4) *. L:0 (2;4)` pairs a 2 by 2 of boxes against 2 there
   and is a length error here.
@@ -2251,14 +2244,12 @@ oracle directly, one entry per line of
   bytes into characters in J — is the identity here, so `2 u: 8 u: u: 955`
   writes as `λ` here and as `Î»` there.
   One entry per line of `crates/libjay/tests/corpus/j/divergences.txt`.
-- jconsole computes a polynomial's ROOTS exactly where it can factor it
-  over the coefficients' own exact type — a polynomial whose every root is
-  rational, or Gaussian, comes back exact, roots descending — and stores
-  the answer as rationals. libjay's Durand–Kerner works in f64 throughout,
-  so `p. 1r2 _3r2 1` is `1 1r2` there and `1 0.5` here: the numbers are the
-  same and their storage is not. It is listed as a named gap above too,
-  since the rule is measurable and only the work is missing. The polynomial derivative
-  and integral, the base conversions and their obverses no longer diverge —
+- A polynomial's ROOTS come back exact wherever jconsole factors it, which
+  it does when every root is a whole multiple of `1 % D`, D the least
+  common denominator of the coefficients read as rationals. libjay follows
+  that rule, so `p. 1r2 _3r2 1` is `1 ; 1 1r2` on both sides and
+  `p. 1 _3 2x` is a pair of floats on both. The polynomial derivative and
+  integral, the base conversions and their obverses no longer diverge —
   they run in the exact arithmetic where either side is exact.
 - Where the frame is EMPTY — nothing to apply the verb to — the reference
   keeps a refusal about an operand's TYPE for some verbs and drops it for
@@ -2276,6 +2267,17 @@ oracle directly, one entry per line of
   empty frame, one about the cells' shapes survives for the verbs that PAIR
   their cells (a scalar dyad, whose two cells must agree) and for an index
   out of range, and no other does.
+- The POLYNOMIAL verbs settle their domain from the cell as a whole, and
+  the empty frame follows from that. `p.` and `p..` used monadically never
+  ask the fill cell twice: a refusal of any kind leaves the frame alone in
+  the BOOLEAN type, so `$ p. (0 2 $ 'a')` is `0` and not `0 2`. The DYAD
+  refuses its left argument before the frame — `(3 $ a:) p. (0 0 $ 0)` is a
+  length error — and a SYMBOL on the right is refused with it, where a
+  character and a box are not. What is left holds the type a value would
+  have had: the fill cell where the right argument is numbers, a plain zero
+  where it is not, so `(1 2 3) p. (0 $ 0)` is a float empty,
+  `(1 2 3x) p. (0 $ 'a')` an extended one, `(1 2 3) p. (0 $ 0j1)` a complex
+  one and `(0 $ 1r2) p. (0 $ 0)` — the zero polynomial — an integer one.
 - `x ! y` over two large arguments a double cannot tell apart.
   `1e10 ! (1e10 + 1e_4)` is 1.00234 there; the value is 1.0023631, which
   the digamma series gives independently, and the reference's difference of
