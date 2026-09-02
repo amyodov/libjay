@@ -464,13 +464,28 @@ fn format_boxed(a: &Array, opts: &FmtOpts) -> String {
 /// every axis but the last counts a row, and the last one is how wide the
 /// cell draws. So `<''` is one empty line inside a zero-wide cell, `<0 3$0`
 /// is a cell three wide with no lines in it, and `<2 0$0` is two empty
-/// lines. The width has to travel beside the lines because a cell with no
-/// lines still has one.
+/// lines. Above rank 2 the PLANE SEPARATORS are lines of its own, exactly
+/// as they are for an array with something in it: `<3 1 0$0` is five lines,
+/// three rows and the two blanks between the planes. The width has to
+/// travel beside the lines because a cell with no lines still has one.
 fn block(a: &Array, opts: &FmtOpts) -> (Vec<String>, usize) {
     if a.count() == 0 && a.rank() > 0 {
         let rank = a.rank();
-        let rows: usize = a.shape[..rank - 1].iter().product();
         let w = a.shape[rank - 1];
+        let rows = if rank < 3 {
+            a.shape[..rank - 1].iter().product::<usize>()
+        } else {
+            let nrows = a.shape[rank - 2];
+            let frame = &a.shape[..rank - 2];
+            let planes: usize = frame.iter().product();
+            // A plane with no ROW in it draws nothing, and there is nothing
+            // for a separator to stand between: `<2 0 3$0` is no lines.
+            if nrows == 0 {
+                0
+            } else {
+                (0..planes).map(|p| nrows + if p > 0 { plane_gap(frame, p) } else { 0 }).sum()
+            }
+        };
         return (vec![" ".repeat(w); rows], w);
     }
     let text = format_raw(a, opts);

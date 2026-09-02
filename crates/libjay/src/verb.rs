@@ -3628,14 +3628,6 @@ fn empty_frame(
     Ok(Array::new(shape, Data::empty(if learnt { dtype } else { DType::Bool })))
 }
 
-/// True for the polynomial monads, which settle their domain from the cell
-/// as a whole. An empty frame whose fill cell they refuse says nothing
-/// about the cells' shape, so the numeric probe would be asking a different
-/// question: `$ p. (0 2 $ 'a')` is `0` in the reference, not `0 2`.
-fn is_poly_monad(v: &Verb) -> bool {
-    matches!(v, Verb::Prim(p) if matches!(p.monad, MonadOp::PolyRoots | MonadOp::PolyDeriv))
-}
-
 /// The same shape, holding zeros: a stand-in whose type no verb objects to.
 fn numeric_like(a: &Array) -> Array {
     Array::new(a.shape.clone(), Data::I64(vec![0i64; a.count()].into()))
@@ -3887,8 +3879,15 @@ fn rank_monad(
     if matches!(v, Verb::Prim(p) if opens_to_itself(p, y, ctx)) {
         return Ok(y.clone());
     }
-    let frame_rank = y.rank() - effective_rank(rank, y.rank());
-    if frame_rank == 0 {
+    let eff = effective_rank(rank, y.rank());
+    let frame_rank = y.rank() - eff;
+    // A rank AT OR ABOVE the verb's own frames nothing the verb would not
+    // frame itself, so the verb takes the whole argument. That is only
+    // visible where the frame is EMPTY: `$ +."0 (0 $ 'a')` is `0 2` in the
+    // reference, what `+.` alone answers, and not the `0` a frame with a
+    // refused fill cell would leave; `#:"0` — whose own rank is infinite —
+    // does frame, and answers `0`.
+    if frame_rank == 0 || eff as i64 >= v.ranks()[0] {
         // The inner verb applies its own rank machinery to the whole
         // argument; that is what `"` means.
         return v.monad(y, ctx, span);
@@ -3910,21 +3909,14 @@ fn rank_monad(
         // `$ (~: @ *:)"0 (0 $ 'a')` is `0` in the reference where
         // `$ (~: @ *:)"0 (0 $ 0)` is `0 1`, and `u&.v` — which is a rank
         // over a composition — parts the same way.
-        let probe = conform && matches!(v, Verb::Prim(_)) && !is_poly_monad(v);
-        let out = empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _n, c| {
+        // A frame the RANK made is never asked again with numbers. Where
+        // the fill run refuses, nothing about the cells' shape was learnt
+        // and the frame stands alone in the boolean type: `$ #:"0 (0 $ <0)`
+        // is `0` in the reference where `$ #: (0 $ <0)` — the same verb
+        // with no frame around it — is `0 0`.
+        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, false, &[], ctx, |cell, _n, c| {
             v.monad(cell, c, span)
-        })?;
-        // As in `prim_monad_frame`: the frame learnt a SHAPE from a cell of
-        // fills, and the reference DECLARES the type.
-        if conform
-            && let Verb::Prim(p) = v
-            && let Some(t) = empty_monad_type(&p.monad, y.dtype())
-            && out.dtype() != t
-            && let Some(data) = empty_of_type(t, out.count())
-        {
-            return Ok(Array::new(out.shape, data));
-        }
-        return Ok(out);
+        });
     }
     let cells = each_cell(n, y.count(), pure, ctx, |i, c| {
         cycled(v, i).monad(&y.cell_at(frame_rank, i), c, span)
@@ -7293,6 +7285,33 @@ fn scalar_dyad(
         {
             return Err(wrong_type(bad.0.dtype(), span));
         }
+        // What TYPE the empty carries is what the verb would have made of
+        // one pair — of the types AS WRITTEN, a non-numeric one read as the
+        // boolean it stands in for. So `3!:0 ((0 $ 0) + (0 $ 1.5))` is the
+        // float type and `3!:0 ((0 $ 5) * (0 $ 5))` the integer one, as the
+        // reference has them, rather than whichever side happened to be
+        // numeric first.
+        if cfg.rules.lang == crate::Lang::J {
+            // A non-numeric side takes BOTH sides down to the boolean
+            // reading: neither empty held a value, so neither names a type
+            // for the answer. `3!:0 ((0 $ 1.5) + (0 $ 'a'))` is the integer
+            // type there, what two boolean empties make.
+            let plain = x.dtype().is_numeric() && y.dtype().is_numeric();
+            let read = |t: DType| if plain { t } else { DType::Bool };
+            let (xt, yt) = (read(x.dtype()), read(y.dtype()));
+            if let Some(t) = empty_dyad_type(op, xt, yt, x.dtype(), y.dtype()) {
+                return Ok(Array::new(p.frame, Data::empty(t)));
+            }
+            // A ROOT types its empty exactly as the division it is written
+            // from does.
+            let probe = if op == ScalarDyad::Root { ScalarDyad::DivJ } else { op };
+            if let (Some(a), Some(b)) = (empty_of_type(xt, 1), empty_of_type(yt, 1))
+                && let Ok(one) =
+                    scalar_dyad_data(probe, &a, 0, 1, &b, 0, 1, 1, cfg.tol, cfg.rules, span)
+            {
+                return Ok(Array::new(p.frame, Data::empty(one.dtype())));
+            }
+        }
         return Ok(Array::new(p.frame, Data::empty(empty_result_type(x, y))));
     }
     let data = scalar_dyad_data(
@@ -7309,6 +7328,72 @@ fn scalar_dyad(
         span,
     )?;
     Ok(Array::new(p.frame, data))
+}
+
+/// The type an empty answer carries where the pair of zeros the ordinary
+/// path would run does not predict it. `None` leaves that path to settle it.
+///
+/// The one verb here is the BINOMIAL, whose answer over an empty is the
+/// float type wherever either side is not exact, the extended type wherever
+/// either side is one of the two exact ones, and boolean only where both
+/// sides are.
+fn empty_dyad_type(
+    op: ScalarDyad,
+    x: DType,
+    y: DType,
+    xw: DType,
+    yw: DType,
+) -> Option<DType> {
+    // A LOGARITHM of nothing is a float, and a complex one wherever either
+    // side was WRITTEN complex, whatever the other side holds.
+    if op == ScalarDyad::Log {
+        return Some(if xw == DType::Complex || yw == DType::Complex {
+            DType::Complex
+        } else {
+            DType::F64
+        });
+    }
+    // `j.` and `r.` settle their domain from the RIGHT argument alone, so a
+    // non-numeric LEFT leaves them no complex value to make: the one
+    // answers in whole numbers, the other in booleans. A non-numeric RIGHT
+    // changes nothing — both stay complex.
+    if !xw.is_numeric() {
+        if op == ScalarDyad::MakeComplex {
+            return Some(DType::I64);
+        }
+        if op == ScalarDyad::PolarBy {
+            return Some(DType::Bool);
+        }
+    }
+    // A BOOLEAN raised to an INTEGER power: the reference reads the
+    // exponent as one that need not leave a whole number behind, and
+    // `3!:0 ((0 $ 0) ^ (0 $ 5))` is the float type where the same pair the
+    // other way round is the integer one.
+    if op == ScalarDyad::Pow {
+        // A whole base raised to an INTEGER power: the reference reads the
+        // exponent as one that need not leave a whole number behind, and
+        // `3!:0 ((0 $ 5) ^ (0 $ 5))` is the float type where the same pair
+        // with a boolean exponent is the integer one.
+        let whole = matches!(x, DType::Bool | DType::I64);
+        return (whole && y == DType::I64).then_some(DType::F64);
+    }
+    // A RESIDUE by an integer stays whole however the multiple is written:
+    // `3!:0 ((0 $ 5) | (0 $ 1.5))` is the integer type.
+    if op == ScalarDyad::Residue {
+        return (x == DType::I64 && y == DType::F64).then_some(DType::I64);
+    }
+    if op != ScalarDyad::Binomial {
+        return None;
+    }
+    Some(match (x, y) {
+        _ if x == DType::Complex || y == DType::Complex => DType::Complex,
+        _ if x == DType::F64 || y == DType::F64 => DType::F64,
+        _ if matches!(x, DType::Ext | DType::Rat) || matches!(y, DType::Ext | DType::Rat) => {
+            DType::Ext
+        }
+        (DType::Bool, DType::Bool) => DType::Bool,
+        _ => DType::F64,
+    })
 }
 
 /// The element type of an empty answer. TWO NUMERIC OPERANDS SETTLE IT
@@ -9646,6 +9731,12 @@ fn decode_nothing(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
 /// `x #. y` / `x ⊥ y`: the digits y read in the radices x. A scalar x is the
 /// radix of every position; otherwise the two have the same length.
 fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
+    // A weighted sum of NO digits is the whole number 0, whatever types the
+    // radices and the digits were written in: `3!:0 ((0 $ 1r2) #. (0 $ 1x))`
+    // is the integer type there.
+    if y.count() == 0 && x.is_none_or(|x| x.count() == 0) && y.dtype().is_numeric() {
+        return Ok(Array::scalar_i64(0));
+    }
     if let Some(exact) = decode_exact(x, y) {
         return Ok(exact);
     }
@@ -11858,7 +11949,11 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             let radix = encode_radix(x, y, n, cfg.near(), span)?;
             encode_apl(&radix, y, cfg.tol, span).map(|r| carry_exact2(r, x, y))
         }
-        DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
+        DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| {
+            // A sum of NO digits is the whole number 0, and no exact type
+            // travels out of arguments that held no value.
+            if x.count() == 0 && y.count() == 0 { r } else { carry_exact2(r, x, y) }
+        }),
         DyadOp::Encode => encode(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, cfg.fill, span),
         DyadOp::Link => link(x, y, span),
