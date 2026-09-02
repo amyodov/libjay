@@ -34,9 +34,9 @@ feature — that is a promise, not a refusal.
 |---|---|---|
 | `+` | conjugate (identity on reals) | plus |
 | `-` | negate | minus |
-| `*` | signum | times |
+| `*` | signum: three values, so the answer is an integer where the argument was a float and a boolean where it was one; a complex magnitude below the tolerance has no direction and answers 0 | times |
 | `%` | reciprocal | divide (float; `0%0` is `0`, `n%0` is `_`) |
-| `^` | exponential | power |
+| `^` | exponential | power. A real power leaves the integers: `3!:0 (3^3)` is the float type, and only the exponents 0 and 1, which hand an argument straight back, keep an integer base integral |
 | `^.` | natural logarithm (`^. 0` is `__`); a negative argument gives a complex answer | logarithm to base x; the same |
 | `%:` | square root; a negative argument gives a complex answer | x-th root (`x %: y` is `y^(1%x)`); the same |
 | `\|` | magnitude | residue |
@@ -62,7 +62,7 @@ feature — that is a promise, not a refusal.
 | `,:` | itemize: a leading axis of 1 (`2 3` becomes `1 2 3`) | laminate: the two arguments as the items of a new leading axis (two atoms give shape `2 1`) |
 | `#` | tally; extended where the argument is | replicate: item i repeated x[i] times (a scalar x applies to every item, and a scalar y is repeated for every count, so `1 0 1 # 5` is `5 5`) |
 | `#.` | base-2 decode (rank 1) | mixed-radix decode; a scalar x is the radix of every digit, a radix of 0 contributes none. A radix or a digit with an imaginary part runs the same Horner's rule in the complex arithmetic |
-| `#:` | base-2 encode; the width fits the largest magnitude in the WHOLE argument, so the verb has infinite rank | mixed-radix encode; the digit axis is x's own shape, so `2 #: 5` is a scalar and `2 2 2 #: 5` a 3-list. Whole numbers are written out in exact integers, so a value past 2⁵² keeps its last digit; each digit of a complex encode is a complex residue |
+| `#:` | base-2 encode; the width fits the largest magnitude in the WHOLE argument, so the verb has infinite rank. A whole number past the machine word keeps every bit (`#: 1e300` is 997 digits), and the digits take the argument's type narrowed one step: boolean under an integer, integers under a float below 9e15 and floats past it, extended under an extended argument | mixed-radix encode; the digit axis is x's own shape, so `2 #: 5` is a scalar and `2 2 2 #: 5` a 3-list. Whole numbers are written out in exact integers, so a value past 2⁵² keeps its last digit; each digit of a complex encode is a complex residue |
 | `!` | factorial — gamma(y+1), always float; a negative integer is a signed infinity in J and a domain error in APL, which has no infinite value; a complex argument reaches gamma through the Lanczos approximation | binomial: x things chosen from y, defined through gamma on the reals and in the complex plane alike. Past a whole x of 4096 the falling factorial gives way to the quotient, and where that quotient leaves the double range it is read in logarithms — a negative whole y through the upper negation, which stays exact |
 | `j.` | `0j1 * y` | `x + 0j1 * y` |
 | `r.` | `^ 0j1 * y`: the unit complex at angle y | `x * ^ 0j1 * y`: polar coordinates |
@@ -2209,7 +2209,8 @@ families are the obverse of `[` or `]` composed on the LEFT
 - **A circle function of a very large angle.** `*.^:_1 (i. 2 3 4)` reaches
   an argument above the limit libjay puts on an angle (2^53 divided by
   2π, past which a period is no longer resolvable) and jconsole answers it
-  anyway.
+  anyway. (Round 5 re-measured this one: every circle function of a large
+  angle the sweeps reach now agrees, `1 o. 1e300` included.)
 - **A cut's or a frame's EMPTY takes the type the verb would have made**,
   not the argument's: `3!:0 (0 *.;.2 (1;2 3))` is the float type there and
   the boxed one here, and `3!:0 (0 *:;.1 (a:))` is boolean there.
@@ -2226,11 +2227,23 @@ families are the obverse of `[` or `]` composed on the LEFT
   reference neither answers nor refuses — no output, exit 0, no value.
 - **The extrema of a NaN, one pair at a time.** Pinned: the reference
   answers `1 <. _.` with `_.` and `1 1 <. (_. _.)` with `1 1`.
-- Around fifteen further singletons the round-4 sweep still names, each its
+- **A MONADIC EMPTY'S TYPE, verb by verb.** A character empty answers as a
+  boolean one would, which libjay follows, but the numeric empties do not
+  all follow from the argument's type: `3!:0 (+. (0 $ 0.5))` is boolean
+  there whatever the argument was, although `3!:0 (+. 0.5)` is the float
+  type. libjay follows the measured table for the scalar monads, `#:`,
+  `*.` and `+.`; `? (0 $ 'a')` and `x: (0 $ 'a')` are still open.
+- **A rank conjunction whose ranks are the verb's own is not written out.**
+  `#."1 1 y` spells itself back as `#.` there, where `u"2 _ 2` keeps every
+  atom it was written with.
+- **The obverse of `-.@#:`.** The reference answers `-.@#: ^:_1 (1 2 3)`
+  with `0 _1 _2` — `-.^:_1` alone — although its own `#:^:_1 (0 _1 _2)` is
+  `_4`, which is what the composition's obverse should reach.
+- Around a dozen further singletons the round-5 sweep still names, each its
   own investigation: `S:` at a level of `_` over a scan, a boxed-empty
-  `,/`, an empty box's width in a link's display, `!^:3` of an extended
-  that overflows, `#:` of a value too large to encode, `x ^. x` over two
-  equal negative exact numbers, the value `(p. [)^:3` iterates to.
+  `,/`, an empty box's width in a link's display, the value `(p. [)^:3`
+  iterates to, `(<i. 0) I. (2;5)`, and `_j_ ^ 0j1` (a NaN error there,
+  `_.j_.` here, where `%: _j_` answers `_.j_.` on both sides).
 
 ## Known divergences (deliberate, revisit later)
 
@@ -2338,6 +2351,40 @@ oracle directly, one entry per line of
   consulted. The same boundary runs the other way for `2 #:`, where the
   reference is the exact one and libjay is not; that one is a gap and is
   listed above rather than here.
+- A LOGARITHM TO ITS OWN NEGATIVE BASE. `x ^. x` is 1 for every x; the
+  reference answers a rounding away from it and a different one for each
+  spelling of the same value — `_3 ^. _3` is `1j_2.09983e_18`, `_3x ^. _3x`
+  is `1j9.81297e_18`, `_3 ^. _3x` is `1j5.34113e_17`, the last two with a
+  real part of 0.99999999999999989. Four answers to one question is the
+  reference contradicting itself, so libjay keeps the algebra's.
+- A GCD OR LCM OF TWO VALUES WITH NO COMMON MEASURE. Pi and 1 have no
+  common divisor and both engines run a float Euclid until the residues
+  reach the noise. The residue chains agree step for step — jconsole's own
+  `|` was measured against libjay's over thirty pairs and matched exactly —
+  and the two part only in where the chain is cut. The reference's cut is
+  not a common divisor of anything: its `g` leaves `g | 1` at 2.27e_13 and
+  `g | (o. 1)` at 2.52e_13, and its `(o. 1) +. 3` is not a multiple of its
+  `(o. 1) +. 1` although a common divisor of pi and 1 must divide one of
+  pi and 3. libjay cuts where the residue falls below the comparison
+  tolerance times the larger argument; the reference's rule could not be
+  recovered from forty-four measured pairs, and no threshold on the
+  residue relative to either argument, to the current pair or to the step
+  count reproduces it. It is the largest single family left in a sweep.
+- THE OBVERSE OF THE FACTORIAL, WHERE THE EQUATION HAS MORE THAN ONE
+  ANSWER. `! x = y` has two solutions between every pair of the gamma
+  function's poles. libjay takes the smallest argument at or above zero
+  and says so; the reference searches from a seed of its own — `!^:_1 ]
+  1.1` is `_0.136587` there and 1.19699 here, both of them arguments whose
+  factorial is 1.1 — searches into the complex plane below zero (`!^:_1
+  (_5)` is `4.55654j_5.33834`), calls `!^:_1 ] 1.5` a NaN error although
+  two arguments answer it, and never returns at all for the gamma minimum
+  0.885603194410888.
+- A REDUCTION INSIDE A CUT WHOSE ANSWER IS WHOLE. `%/ 7 1 8` is 56 and
+  `<;._1 (2 7 1 8)` is the one piece `7 1 8`, but `%/;._1 (2 7 1 8)` is
+  2.76677e_322 there — 56 times the smallest denormal, which is the
+  integer 56's bit pattern read as a double. `+/;._1` and `*/;._1` of the
+  same argument are right. The cut copies an integer cell into a float
+  frame without converting it.
 - APL dyadic `⌽` and `⊖` reduce a large rotate amount whole; GNU APL
   truncates it to a signed 32-bit integer first, so `9223372036854775806⌽1 2 3`
   is `1 2 3` here and `2 3 1` there.

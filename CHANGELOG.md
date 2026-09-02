@@ -253,6 +253,21 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Round 5B of the agreement sweep, the numeric residue.** The types
+  arithmetic answers in: A REAL POWER LEAVES THE INTEGERS (`3!:0 (3^3)` is
+  the float type, only the exponents 0 and 1 keeping an integer base
+  integral); A SIGN NEEDS NO FLOAT and a boolean argument stays boolean
+  under every monad whose answer cannot leave {0, 1}; AN EMPTY ARITHMETIC
+  ANSWER TAKES BOTH SIDES' TYPES rather than the first numeric one; a
+  non-numeric empty answers as a boolean empty would, verb by verb. `#:`
+  keeps every bit of a whole number past the machine word — `#: 1e300` is
+  997 digits — and writes them in the argument's type narrowed one step,
+  the boundary between an integer and a float digit being exactly 9e15. A
+  COMPLEX MAGNITUDE BELOW THE TOLERANCE IS ZERO and its signum with it; an
+  EXTREMUM reads real-valued complex data as the reals it holds wherever it
+  arrives from; TWO INFINITE PARTS NAME NO DIRECTION, so `%: _j_` and `_j_
+  ^ 0.5` are `_.j_.`. An exact factorial that would exhaust the machine is
+  refused rather than widened to a float infinity.
 - **Round 4 of the agreement sweep, everything but the polynomial verbs.**
   A rank and a level SPELL THEMSELVES BACK as they were written: `u"2 _ 2`
   and `u"_ 2` are one verb, and the reference writes each out the way it

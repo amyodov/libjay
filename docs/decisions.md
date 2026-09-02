@@ -4884,3 +4884,48 @@ the register.
   recorder calls such a line unrecordable: a corpus row would kill the
   recorder on the sentence it records, so these live in the bug register
   rather than in the accepted list.
+- 2026-09-02 — THE TYPE ARITHMETIC ANSWERS IN, measured verb by verb. A
+  REAL POWER LEAVES THE INTEGERS: `3!:0 (3^3)` is the float type, and only
+  the exponents 0 and 1 — which hand an argument straight back — keep an
+  integer base integral. A SIGN HAS THREE VALUES AND NEEDS NO FLOAT, so
+  `* 0.5` is an integer, `* _.` is 0, and a boolean argument stays boolean
+  under every monad whose answer cannot leave {0, 1} (`* <. >. | %: -. *:
+  !` and the real/imaginary pair), which is the rule the dyadic pass
+  already had for two boolean arguments. An EMPTY ARITHMETIC ANSWER settles
+  its type from BOTH sides rather than from the first numeric one, and a
+  NON-NUMERIC empty answers as a boolean empty would — `o.` the float type,
+  `j.` the complex one, `*` the boolean one — logical negation being the
+  one verb that does not follow.
+- 2026-09-02 — `#:` KEEPS EVERY BIT OF A WHOLE NUMBER past the machine
+  word: the bits come off an exact integer, so `#: 1e300` writes out all
+  997 digits rather than refusing. The digits take the argument's own type
+  narrowed one step — boolean under an integer, integers under a float
+  whose magnitude stays below 9e15 and floats past it (the boundary is
+  exactly 9e15, bracketed by measurement), the extended type under an
+  extended argument, and the argument's type unchanged where there is
+  nothing to encode.
+- 2026-09-02 — A COMPLEX MAGNITUDE BELOW THE COMPARISON TOLERANCE IS ZERO,
+  and its signum is zero with it, which is the rule the real signum already
+  followed. An EXTREMUM reads real-valued complex data as the reals it
+  holds wherever it arrives from, so a reduction agrees with the array
+  path. TWO INFINITE PARTS NAME NO DIRECTION: `%: _j_` is `_.j_.`, and so
+  is `_j_ ^ 0.5`, the half power being the root — `_j_ ^ 1.5` is still
+  `_j_`.
+- 2026-09-02 — AN EXACT FACTORIAL THAT WOULD EXHAUST THE MACHINE IS
+  REFUSED, not widened to a float infinity. jconsole answers to a memory
+  bound of its own (`! 1000000x` is five and a half million digits there)
+  and runs out of memory past it; libjay names its own bound instead of
+  answering `_`.
+- 2026-09-02 — Four numeric families are PINNED rather than followed, each
+  with both answers recorded. `x ^. x` over a negative base: the answer is
+  1 and the reference gives a rounding away from it, a different one for
+  each of the four spellings of the same pair. A GCD or LCM of two values
+  with no common measure: the residue chains agree step for step and the
+  two engines cut them at different steps, and the reference's cut is not a
+  common divisor of its own arguments — its rule could not be recovered
+  from forty-four measured pairs. `!^:_1` where the equation has more than
+  one answer: libjay takes the smallest argument at or above zero and the
+  reference searches from a seed of its own, into the complex plane below
+  zero, without finishing at the gamma minimum. And a reduction inside a
+  cut whose answer is whole: `%/;._1 (2 7 1 8)` is 2.76677e_322 there,
+  which is the integer 56's bit pattern read as a double.
