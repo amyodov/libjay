@@ -345,6 +345,10 @@ $ 2 +/\\. (<<1 2)
 ? the same, one box deeper
 $ 2 +/\\. (,<1 2)
 ? the same, written as a one-item list
+$ 2 +/\\. ('a')
+? the same over a character, so the family is not about boxes
+$ 2 +/\\. (0 $ <0)
+? the same where the argument has no item at all
 
 // The same INDEX OF LAST divergence pinned above, written with `i.`.
 (i. 0 0) i: (0 $ 0)

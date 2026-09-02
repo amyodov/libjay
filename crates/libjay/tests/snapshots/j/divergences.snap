@@ -341,6 +341,14 @@
 ? the same, written as a one-item list
 < 0
 > j: 0 0
+= $ 2 +/\\. ('a')
+? the same over a character, so the family is not about boxes
+< 0
+> j: 0 0
+= $ 2 +/\\. (0 $ <0)
+? the same where the argument has no item at all
+< 0
+> j: 0 0
 = (i. 0 0) i: (0 $ 0)
 ? the reference's own `i.` answers 0 for the same arguments
 < 0

@@ -3911,9 +3911,20 @@ fn rank_monad(
         // `$ (~: @ *:)"0 (0 $ 0)` is `0 1`, and `u&.v` — which is a rank
         // over a composition — parts the same way.
         let probe = conform && matches!(v, Verb::Prim(_)) && !is_poly_monad(v);
-        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _n, c| {
+        let out = empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _n, c| {
             v.monad(cell, c, span)
-        });
+        })?;
+        // As in `prim_monad_frame`: the frame learnt a SHAPE from a cell of
+        // fills, and the reference DECLARES the type.
+        if conform
+            && let Verb::Prim(p) = v
+            && let Some(t) = empty_monad_type(&p.monad, y.dtype())
+            && out.dtype() != t
+            && let Some(data) = empty_of_type(t, out.count())
+        {
+            return Ok(Array::new(out.shape, data));
+        }
+        return Ok(out);
     }
     let cells = each_cell(n, y.count(), pure, ctx, |i, c| {
         cycled(v, i).monad(&y.cell_at(frame_rank, i), c, span)
@@ -10912,6 +10923,13 @@ fn empty_of_type(t: DType, n: usize) -> Option<Data> {
 /// the ordinary computation settled on standing.
 fn empty_monad_type(op: &MonadOp, seen: DType) -> Option<DType> {
     use DType::*;
+    // An elementwise verb over an empty FRAME settles its type the way it
+    // does over an empty argument, and a non-numeric type is read as the
+    // boolean one there too: `3!:0 (*"_2 (0 $ <0))` is the boolean type.
+    if let MonadOp::Scalar(op) = op {
+        let seen = if seen.is_numeric() { seen } else { Bool };
+        return empty_scalar_type(*op, seen);
+    }
     Some(match op {
         // Base-2 digits of nothing keep the type the numbers were written
         // in: `3!:0 #: (0 $ 'a')` is the character type.
