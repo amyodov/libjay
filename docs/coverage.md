@@ -17,7 +17,22 @@ feature — that is a promise, not a refusal.
   numeric list; two empty arrays of the same shape match whatever their
   element types are, as both references have it.
 - Verb rank machinery with frames, J framing fill (shorter cells extended by
-  leading 1-axes, padded with 0 / space).
+  leading 1-axes, padded with 0 / space). A rank AT OR ABOVE the verb's own
+  frames nothing the verb would not frame itself, so the verb takes the
+  whole argument; that shows only where the frame is empty. A frame the
+  RANK made is never asked again with numbers, so a fill cell the verb
+  refuses leaves the frame alone in the boolean type.
+- THE TYPE AN EMPTY ANSWER CARRIES is a property of the verb and of the
+  types the arguments were WRITTEN in — nothing ran, so nothing else could
+  settle it. A non-numeric empty is read as a boolean one; a dyad whose
+  either side is non-numeric reads BOTH that way. Beyond that each verb
+  declares its own: `#:` keeps the argument's type, `#.` is integer, `;`
+  and `q:` boolean, `p:` float (extended over the exact types), `x:`
+  extended for the whole types and rational otherwise, `+.` boolean unless
+  the argument was complex, `*.` always float, a root as the division it is
+  written from. The tables are the oracle's, measured cell by cell; `u:`
+  answers in J's two-byte character type, which libjay does not have, and
+  that one cell is a known gap.
 - Dyadic agreement is per-language: J leading-prefix agreement (a 2×3 matrix
   pairs with a 2-vector row-wise), APL exact-shape-or-scalar.
 - A sequence's value is its last sentence's; a sentence that is an
@@ -94,7 +109,7 @@ feature — that is a promise, not a refusal.
 | `q:` | prime factors, ascending, with multiplicity (`q: 1` is empty), exact however many digits the number has. The whole argument is read at once — one row per item, padded with 1s | the exponents of the first x primes; a NEGATIVE x gives the last `\|x\|` primes that divide y over their exponents, as a 2-row table, and `__` gives all of them |
 | `?` | roll: a random value below each element (`? 0` is a uniform double) | deal: x distinct values from `i. y` |
 | `?.` | roll from a fixed seed, restarted on every invocation | deal from that fixed seed |
-| `{::` | the map: y's box structure with every leaf replaced by the path that fetches it — a boxed list of one index per level descended, empty where the level is a boxed scalar | fetch: follow the path x into y, opening one level a step |
+| `{::` | the map: y's box structure with every leaf replaced by the path that fetches it — a boxed list of one index per level descended, empty where the level is a boxed scalar. The two empties it holds are spelled in types of their own: the coordinate of a boxed SCALAR is a BOXED empty, which is what makes the map its own fixed point (`{:: {:: y` is `{:: y`), and an argument with no box in it is one leaf whose path is a BOOLEAN empty | fetch: follow the path x into y, opening one level a step |
 | `/:` | grade up (stable permutation). A BOXED argument orders by J's total array ordering: the type class (numeric, then symbol, then character, then boxed — and an empty array takes the lowest class whatever its type), then the rank, then the shape read with the LAST axis most significant, then the atoms in row-major order, a boxed atom recursively | x's items in the ascending order of y's |
 | `\:` | grade down (stable permutation), the same ordering read backwards | x's items in the descending order of y's |
 | `]` `[` | same | right / left |
@@ -234,7 +249,11 @@ need of it); `` ` `` (tie) and `@.` (agenda).
 
 `u L: n` and `u S: n` apply u at a boxing level: u runs on every subarray
 whose `L.` is n or below, and `L:` puts each answer back in the box its
-operand came from while `S:` spreads them into the items of one array. A
+operand came from while `S:` spreads them into the items of one array. Two
+boxed arguments pair the way any two frames do — the shorter shape is a
+PREFIX of the longer, and each of its boxes goes to the whole block of the
+other's it stands over, so `(2 2 $ 1;2;3;4) + L:0 (2;4)` adds 2 along the
+first row and 4 along the second. A
 negative n counts down from the argument's own level, and the two
 infinities are the two ends of that descent: `_` is the whole argument,
 however deeply it is boxed, so `# L:_ (1;2;<3 4)` is 3 where `# L:0` is

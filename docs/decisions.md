@@ -4935,3 +4935,35 @@ the register.
   not contradict the round-4 rule that a rank spells itself back as
   written: the atoms are kept wherever the rank changes anything, and only
   a rank that changes nothing disappears.
+- 2026-09-02 — THE TYPE AN EMPTY ANSWER CARRIES is declared, not computed.
+  Nothing ran, so the answer's type can only be a property of the verb and
+  of the types the arguments were WRITTEN in. A non-numeric empty is read
+  as a boolean one, and a dyad with a non-numeric side reads BOTH that way;
+  past that each verb has its own cell in a table measured against the
+  oracle one entry at a time (`empty_scalar_type`, `empty_monad_type`,
+  `empty_dyad_type`). The same probing turned up types at FULL size that
+  were wrong: a square, a factorial, a floor, a ceiling and a sign keep a
+  boolean boolean, a sign over floats answers in integers, base-2 digits
+  are boolean, and a roll over a boolean argument is float.
+- 2026-09-02 — A RANK AT OR ABOVE THE VERB'S OWN frames nothing the verb
+  would not frame itself, so `u"n` hands it the whole argument. That is
+  invisible except where the frame is EMPTY, and there it is the difference
+  between `$ +."0 (0 $ 'a')` being `0 2` and being `0`. A frame the rank
+  itself made is never asked again with NUMBERS where the fill cell was
+  refused: nothing about the cells' shape was learnt, and the frame stands
+  alone in the boolean type. Only a primitive applied at its own rank keeps
+  the numeric retry.
+- 2026-09-02 — The MAP `{::` is its own fixed point. The coordinate of a
+  boxed scalar is an empty in the BOXED type, so a second map finds an
+  empty boxed array with no leaf to name and answers what it was given; an
+  argument with no box in it is one leaf whose path is a BOOLEAN empty.
+- 2026-09-02 — Round 5A's smaller rules: an empty cycle specification moves
+  nothing and leaves an atom an atom; a root reads its EXPONENT's type
+  before an empty frame, refusing a boxed right where the exponent is not
+  whole and a character where it is not boolean; the polynomial DYAD reads
+  a one-box root form as the roots with a multiplier of 1 while the MONAD
+  reads one only where the box holds the sparse table; the obverse of a
+  running or an outfix fold leaves a scalar alone but still asks it to be a
+  number; two boxed sides of `u L: n` pair by ordinary leading-prefix
+  agreement; and a boxed empty above rank 2 draws its plane separators as
+  lines of its own.

@@ -7,6 +7,11 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The TYPE an empty answer carries, monadic and dyadic, measured against
+  the oracle cell by cell: nothing ran, so the verb and the types the
+  arguments were written in are all there is to settle it. A non-numeric
+  empty reads as a boolean one, and a dyad with a non-numeric side reads
+  both sides that way.
 - The polynomial family's EMPTY FRAME and its types. `p.` and `p..` used
   monadically leave a frame whose fill cell they refuse standing alone in
   the boolean type; the dyad refuses its left argument, and a symbol on the
@@ -270,6 +275,23 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   refused rather than widened to a float infinity. A RANK CONJUNCTION WHOSE
   RANKS ARE THE VERB'S OWN is not written out: `#."1 1` spells itself back
   as `#.`.
+- The MAP `{::` is its own fixed point: the coordinate of a boxed scalar is
+  a BOXED empty and an argument with no box in it is one leaf whose path is
+  a BOOLEAN empty, so `{:: {:: y` is `{:: y`.
+- A rank AT OR ABOVE the verb's own frames nothing the verb would not frame
+  itself, and a frame the rank made is never asked again with numbers where
+  its fill cell was refused.
+- Types at full size that the empty probes turned up: a square, a
+  factorial, a floor, a ceiling and a sign keep a BOOLEAN boolean; a sign
+  over floats answers in INTEGERS; base-2 digits are BOOLEAN; a roll over a
+  boolean argument is FLOAT.
+- An empty cycle specification moves nothing and leaves an atom an atom; a
+  root reads its exponent's type before an empty frame; the polynomial dyad
+  reads a one-box root form as the roots, the monad only as the sparse
+  table; the obverse of a running or an outfix fold asks a scalar to be a
+  number; two boxed sides of `u L: n` pair by leading-prefix agreement; a
+  boxed empty above rank 2 draws its plane separators as lines of its own.
+
 - **Round 4 of the agreement sweep, everything but the polynomial verbs.**
   A rank and a level SPELL THEMSELVES BACK as they were written: `u"2 _ 2`
   and `u"_ 2` are one verb, and the reference writes each out the way it
