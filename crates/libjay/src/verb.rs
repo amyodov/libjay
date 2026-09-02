@@ -3103,8 +3103,28 @@ impl Verb {
             // rank one — where a refusal about the RIGHT argument's type
             // leaves the frame alone, `(1 2 3) p. (0 0 $ 'a')` being the
             // empty.
+            // What is left is the frame alone, holding the type a VALUE
+            // would have had: the fill cell where the right argument is
+            // numbers, and a plain zero where it is not, since a character
+            // or a box says nothing about the type and leaves the
+            // polynomial's own — `(1 2 3) p. (0 $ 0)` is a float empty,
+            // `(1 2 3x) p. (0 $ 'a')` an extended one, `(1 2 3) p. (0 $ 0j1)`
+            // a complex one and `(0 $ 1r2) p. (0 $ 0)` an integer one.
             if conform && matches!(self, Verb::Prim(Prim { dyad: DyadOp::PolyEval, .. })) {
-                poly_eval(x, &Array::scalar_i64(0), span)?;
+                let plain = poly_eval(x, &Array::scalar_i64(0), span)?;
+                // A SYMBOL on the right is refused whatever the frame,
+                // where a character and a box are not: `(1 2 3) p. (0 $ s:
+                // ,'a')` is a domain error there.
+                if y.dtype() == DType::Symbol {
+                    if let Some(r) = right.as_ref() {
+                        poly_eval(x, r, span)?;
+                    }
+                }
+                let t = right
+                    .as_ref()
+                    .and_then(|r| poly_eval(x, r, span).ok())
+                    .map_or(plain.dtype(), |a| a.dtype());
+                return Ok(Array::new(p.frame.clone(), Data::empty(t)));
             }
             return empty_frame(&p.frame, y.dtype(), cell, conform, eager, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
@@ -3470,6 +3490,14 @@ fn empty_frame(
     Ok(Array::new(shape, Data::empty(if learnt { dtype } else { DType::Bool })))
 }
 
+/// True for the polynomial monads, which settle their domain from the cell
+/// as a whole. An empty frame whose fill cell they refuse says nothing
+/// about the cells' shape, so the numeric probe would be asking a different
+/// question: `$ p. (0 2 $ 'a')` is `0` in the reference, not `0 2`.
+fn is_poly_monad(v: &Verb) -> bool {
+    matches!(v, Verb::Prim(p) if matches!(p.monad, MonadOp::PolyRoots | MonadOp::PolyDeriv))
+}
+
 /// The same shape, holding zeros: a stand-in whose type no verb objects to.
 fn numeric_like(a: &Array) -> Array {
     Array::new(a.shape.clone(), Data::I64(vec![0i64; a.count()].into()))
@@ -3663,7 +3691,8 @@ fn prim_monad_frame(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, conform, &[], ctx, |cell, _numeric, c| {
+        let probe = conform && !matches!(p.monad, MonadOp::PolyRoots | MonadOp::PolyDeriv);
+        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
         });
     }
@@ -3707,7 +3736,8 @@ fn rank_monad(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, conform, &[], ctx, |cell, _n, c| {
+        let probe = conform && !is_poly_monad(v);
+        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
     }
@@ -16742,7 +16772,21 @@ fn poly_eval(x: &Array, y: &Array, span: Span) -> Result<Array> {
     {
         return Err(Error::nan("this polynomial has no value here", span));
     }
+    // A polynomial written with a complex number keeps the complex type
+    // however real its value comes out: `3!:0 (1 2 3) p. 0j0` is the
+    // complex type there, and so is `3!:0 (1j1;2 3) p. 1`.
+    if holds_complex(x) || holds_complex(y) {
+        return Ok(Array::new(vec![], Data::Complex(vec![value].into())));
+    }
     Ok(scalar_complex_or_real(value))
+}
+
+/// True where a polynomial's argument is written complex, boxes and all.
+fn holds_complex(a: &Array) -> bool {
+    match a.as_boxes() {
+        Some(parts) => parts.iter().any(holds_complex),
+        None => a.dtype() == DType::Complex,
+    }
 }
 
 /// `x p. y` over exact arguments, kept exact.
@@ -17333,6 +17377,13 @@ fn poly_integral(x: &Array, y: &Array, span: Span) -> Result<Array> {
         poly_coeffs(y, span)?
     };
     let k = poly_coeffs(x, span)?;
+    // An EMPTY polynomial has nothing to integrate, so the constant term
+    // stands alone — and it stands in the type it was written in, where
+    // every other integral is a float: `3!:0 (1x p.. (i. 0))` is the
+    // extended type and `1r2 p.. (0 $ 0)` is `1r2`.
+    if c.is_empty() && x.rank() == 0 && x.dtype().is_numeric() {
+        return Ok(Array::new(vec![1], x.data.clone()));
+    }
     if let Some(exact) = exact_poly_integral(x, y) {
         return Ok(exact);
     }
@@ -19084,6 +19135,14 @@ fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
         return Some(v);
     }
     let Verb::Prim(p) = f else { return None };
+    // `n p.. y` is the integral whose constant term is n, and the
+    // DERIVATIVE takes it back: differentiating drops exactly the constant
+    // the integral put on the front, so the noun plays no part in the
+    // obverse — `2 p.. ^:_1 (1 2 3)` is `p.. 1 2 3` whatever n was. Bonded
+    // on the right the verb is `y p.. n`, which has no inverse here.
+    if p.dyad == DyadOp::PolyIntegral && left {
+        return named("p..");
+    }
     let bond = |name: &'static str, arg: &Array| -> Option<Verb> {
         let g = named(name)?;
         Some(if left {
