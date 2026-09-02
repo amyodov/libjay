@@ -437,7 +437,7 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
         }
         Verb::Constant(m) => head(out, &format!("the constant verb answering {}", brief(m))),
         Verb::Rank(u, r) => {
-            head(out, &format!("rank \"{}", ranks(*r)));
+            head(out, &format!("rank \"{}", ranks(r.triple())));
             verb_lines(u, depth + 1, p, tr, out);
         }
         Verb::Reduce(u) => {

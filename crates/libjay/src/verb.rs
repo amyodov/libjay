@@ -23,6 +23,77 @@ use crate::simd::multiversioned;
 /// Infinite rank (applies to the argument as a whole).
 pub const RANK_INF: i64 = i64::MAX;
 
+/// The three ranks a `"` was written with — monadic, left, right — and how
+/// many atoms wrote them.
+///
+/// The ranks alone decide what the verb DOES: one atom stands for all
+/// three, and two atoms `m n` for `n m n`, so `"2 _ 2` and `"_ 2` are the
+/// same verb. Only the SPELLING keeps them apart, and the reference spells
+/// a verb back the way it was written rather than in the shortest words
+/// that mean the same. The count is carried for that alone: it is not part
+/// of equality, and nothing reads it but the linear representation.
+#[derive(Clone, Copy, Debug)]
+pub struct Ranks {
+    r: [i64; 3],
+    atoms: u8,
+}
+
+impl Ranks {
+    /// The ranks as written, with the atom count as written (1, 2 or 3).
+    pub fn spelled(r: [i64; 3], atoms: u8) -> Ranks {
+        Ranks { r, atoms: atoms.clamp(1, 3) }
+    }
+
+    /// The three ranks.
+    pub fn triple(&self) -> [i64; 3] {
+        self.r
+    }
+
+    /// How many atoms the noun operand held.
+    pub fn atoms(&self) -> u8 {
+        self.atoms
+    }
+}
+
+impl From<[i64; 3]> for Ranks {
+    /// Ranks with no spelling of their own: they are written in the fewest
+    /// atoms that say the same thing, which is what a verb libjay itself
+    /// built has to spell as.
+    fn from(r: [i64; 3]) -> Ranks {
+        let atoms = if r[0] == r[1] && r[1] == r[2] {
+            1
+        } else if r[0] == r[2] {
+            2
+        } else {
+            3
+        };
+        Ranks { r, atoms }
+    }
+}
+
+impl std::ops::Index<usize> for Ranks {
+    type Output = i64;
+    fn index(&self, i: usize) -> &i64 {
+        &self.r[i]
+    }
+}
+
+impl PartialEq for Ranks {
+    /// Two rank specifications are the same where they say the same thing,
+    /// however they were written.
+    fn eq(&self, other: &Ranks) -> bool {
+        self.r == other.r
+    }
+}
+
+impl Eq for Ranks {}
+
+impl PartialEq<[i64; 3]> for Ranks {
+    fn eq(&self, other: &[i64; 3]) -> bool {
+        self.r == *other
+    }
+}
+
 /// How dyadic frames must agree. A property of the source language,
 /// fixed per compiled program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2053,7 +2124,7 @@ pub enum Verb {
     /// frontend wraps this in.
     Constant(Array),
     /// Apply the verb to cells of the given ranks (J `"`, APL `⍤`).
-    Rank(Box<Verb>, [i64; 3]),
+    Rank(Box<Verb>, Ranks),
     /// Insert the verb between items, folding right to left (J `/`, APL `⌿`).
     Reduce(Box<Verb>),
     /// APL `f/` and `f⌿`: the same insert monadically, and the N-WISE
@@ -2124,7 +2195,7 @@ pub enum Verb {
     /// J `u L: n` and `u S: n`: apply u to every subarray at boxing level
     /// n or below. `L:` puts each result back where its operand was; `S:`
     /// spreads them into the items of one array.
-    Level { u: Box<Verb>, levels: [i64; 3], spread: bool },
+    Level { u: Box<Verb>, levels: Ranks, spread: bool },
     /// J `u b.`: answers questions about u rather than applying it. `0` asks
     /// for its three ranks.
     Characteristics(Box<Verb>),
@@ -2232,7 +2303,7 @@ impl Verb {
     pub fn ranks(&self) -> [i64; 3] {
         match self {
             Verb::Prim(p) => p.ranks,
-            Verb::Rank(_, r) => *r,
+            Verb::Rank(_, r) => r.triple(),
             // `x u\ y` and `x u\. y` take one width per application, so the
             // left cell is an atom: a list of widths frames the result, as
             // in J, and an empty list of them frames nothing.
@@ -3299,13 +3370,13 @@ fn one_rank(r: i64) -> String {
 /// The rank or level list as `"`, `L:` and `S:` write it. Two atoms are
 /// `left right` with the monadic one taken from the right, so a triple
 /// whose ends agree is written as the pair it came from.
-fn rank_str(r: [i64; 3]) -> String {
-    if r[0] == r[1] && r[1] == r[2] {
-        one_rank(r[0])
-    } else if r[0] == r[2] {
-        format!("{} {}", one_rank(r[1]), one_rank(r[2]))
-    } else {
-        format!("{} {} {}", one_rank(r[0]), one_rank(r[1]), one_rank(r[2]))
+fn rank_str(r: Ranks) -> String {
+    // As many atoms as were written, not as few as would do: `u"2 _ 2` and
+    // `u"_ 2` are one verb, and the reference spells each back as it came.
+    match r.atoms() {
+        1 => one_rank(r[0]),
+        2 => format!("{} {}", one_rank(r[1]), one_rank(r[2])),
+        _ => format!("{} {} {}", one_rank(r[0]), one_rank(r[1]), one_rank(r[2])),
     }
 }
 
@@ -19165,7 +19236,7 @@ fn prim_obverse(v: &Verb, p: &Prim) -> Option<Verb> {
         // pair folds back together under the verb that made it.
         MonadOp::ComplexParts { polar } => Verb::Rank(
             Box::new(Verb::Reduce(Box::new(named(if polar { "r." } else { "j." })?))),
-            [1, RANK_INF, RANK_INF],
+            [1, RANK_INF, RANK_INF].into(),
         ),
         // Grading down is grading up over the reversed argument.
         MonadOp::GradeDown { origin } => atop(
@@ -19180,7 +19251,7 @@ fn prim_obverse(v: &Verb, p: &Prim) -> Option<Verb> {
         // A list of prime factors multiplies back into its number, one row
         // at a time.
         MonadOp::PrimeFactors => {
-            Verb::Rank(Box::new(Verb::Reduce(Box::new(named("*")?))), [1, RANK_INF, RANK_INF])
+            Verb::Rank(Box::new(Verb::Reduce(Box::new(named("*")?))), [1, RANK_INF, RANK_INF].into())
         }
         // `;: y` cuts a character list into words; putting a blank after
         // each word and razing them joins it back, less the trailing blank.
@@ -21884,11 +21955,11 @@ mod tests {
     #[test]
     fn names_of_primitives_and_derived_verbs() {
         assert_eq!(plus().name(), "+");
-        assert_eq!(Verb::Rank(b(plus()), [1, 1, 1]).name(), "+\"1");
-        assert_eq!(Verb::Rank(b(plus()), [0, 1, RANK_INF]).name(), "+\"0 1 _");
-        assert_eq!(Verb::Rank(b(plus()), [RANK_INF; 3]).name(), "+\"_");
+        assert_eq!(Verb::Rank(b(plus()), [1, 1, 1].into()).name(), "+\"1");
+        assert_eq!(Verb::Rank(b(plus()), [0, 1, RANK_INF].into()).name(), "+\"0 1 _");
+        assert_eq!(Verb::Rank(b(plus()), [RANK_INF; 3].into()).name(), "+\"_");
         assert_eq!(Verb::Reduce(b(plus())).name(), "+/");
-        assert_eq!(Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1]).name(), "+/\"1");
+        assert_eq!(Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1].into()).name(), "+/\"1");
         assert_eq!(Verb::Fork(b(plus()), b(minus()), b(times())).name(), "(+ - *)");
         assert_eq!(
             Verb::NounFork(Array::scalar_i64(1), b(plus()), b(minus())).name(),
@@ -21999,7 +22070,7 @@ mod tests {
     fn dyadic_rank_pairs_rows_with_the_whole_right_argument() {
         ctx!(c);
         // Left cells are rows, the right argument is one cell for all of them.
-        let v = Verb::Rank(b(plus()), [0, 1, 1]);
+        let v = Verb::Rank(b(plus()), [0, 1, 1].into());
         let r = v
             .dyad(&mat(2, 3, vec![1, 2, 3, 4, 5, 6]), &Array::from_i64(vec![10, 20, 30]), &mut c, sp())
             .unwrap();
@@ -22012,7 +22083,7 @@ mod tests {
         ctx!(c);
         // Left cells are scalars (frame 2 2), right cells are rows (frame 2):
         // each right row serves the two left cells sharing its index.
-        let v = Verb::Rank(b(head_v()), [0, 0, 1]);
+        let v = Verb::Rank(b(head_v()), [0, 0, 1].into());
         let x = mat(2, 2, vec![1, 1, 2, 2]);
         let y = mat(2, 3, vec![1, 2, 3, 4, 5, 6]);
         let r = v.dyad(&x, &y, &mut c, sp()).unwrap();
@@ -22024,7 +22095,7 @@ mod tests {
     fn an_empty_frame_pairs_its_single_cell_with_every_other_cell() {
         ctx!(c, Agreement::ExactOrScalar);
         // Right cell rank 1 leaves an empty right frame; the left frame is 2.
-        let v = Verb::Rank(b(head_v()), [0, 0, 1]);
+        let v = Verb::Rank(b(head_v()), [0, 0, 1].into());
         let x = Array::from_i64(vec![1, 2]);
         let y = Array::from_i64(vec![7, 8, 9]);
         let r = v.dyad(&x, &y, &mut c, sp()).unwrap();
@@ -22036,7 +22107,7 @@ mod tests {
     fn negative_rank_leaves_frame_axes() {
         ctx!(c);
         // Rank _1 on a matrix leaves one frame axis: shape of each row.
-        let v = Verb::Rank(b(dollar()), [-1, -1, -1]);
+        let v = Verb::Rank(b(dollar()), [-1, -1, -1].into());
         let r = v.monad(&mat(2, 3, vec![1, 2, 3, 4, 5, 6]), &mut c, sp()).unwrap();
         assert_eq!(r.shape, vec![2, 1]);
         assert_eq!(ints(&r), vec![3, 3]);
@@ -22089,7 +22160,7 @@ mod tests {
     #[test]
     fn rank_wrapped_reduction_sums_the_last_axis() {
         ctx!(c);
-        let v = Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1]);
+        let v = Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1].into());
         let r = v.monad(&mat(2, 3, vec![1, 2, 3, 4, 5, 6]), &mut c, sp()).unwrap();
         assert_eq!(r.shape, vec![2]);
         assert_eq!(ints(&r), vec![6, 15]);
@@ -22579,7 +22650,7 @@ mod tests {
     fn cells_of_unequal_shapes_are_padded_with_fills() {
         ctx!(c);
         // i."0 ] 1 2 3: cells of length 1, 2 and 3 frame into a 3 by 3 table.
-        let v = Verb::Rank(b(iota()), [0, 0, 0]);
+        let v = Verb::Rank(b(iota()), [0, 0, 0].into());
         let r = v.monad(&Array::from_i64(vec![1, 2, 3]), &mut c, sp()).unwrap();
         assert_eq!(r.shape, vec![3, 3]);
         assert_eq!(ints(&r), vec![0, 0, 0, 0, 1, 0, 0, 1, 2]);
@@ -22778,7 +22849,7 @@ mod tests {
         // 400 cells of 512 elements: over the threshold, and every cell
         // yields a different value, so a misplaced cell would show.
         let y = f64_mat(400, 512);
-        let v = Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1]);
+        let v = Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1].into());
         let (one, many) = seq_par(|| {
             ctx!(c);
             v.monad(&y, &mut c, sp()).unwrap()
@@ -22792,7 +22863,7 @@ mod tests {
         let x = f64_mat(400, 512);
         let y = f64_mat(400, 512);
         // Rank 1: the frame is the rows, and each row pair is one cell.
-        let v = Verb::Rank(b(plus()), [1, 1, 1]);
+        let v = Verb::Rank(b(plus()), [1, 1, 1].into());
         let (one, many) = seq_par(|| {
             ctx!(c);
             v.dyad(&x, &y, &mut c, sp()).unwrap()
@@ -22804,9 +22875,9 @@ mod tests {
     #[test]
     fn a_verb_that_writes_output_is_not_pure() {
         assert!(plus().is_pure());
-        assert!(Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1]).is_pure());
+        assert!(Verb::Rank(b(Verb::Reduce(b(plus()))), [1, 1, 1].into()).is_pure());
         assert!(!echo_v().is_pure());
-        assert!(!Verb::Rank(b(Verb::Atop(b(echo_v()), b(plus()), AtopForm::At)), [1, 1, 1]).is_pure());
+        assert!(!Verb::Rank(b(Verb::Atop(b(echo_v()), b(plus()), AtopForm::At)), [1, 1, 1].into()).is_pure());
     }
 
     #[test]
@@ -22814,7 +22885,7 @@ mod tests {
         // Enough elements to pass the threshold; the cells must still be
         // written one after another, in index order.
         let y = Array::new(vec![16, 8192], Data::I64((0..16 * 8192).collect::<Vec<i64>>().into()));
-        let v = Verb::Rank(b(Verb::Atop(b(echo_v()), b(head_v()), AtopForm::At)), [1, 1, 1]);
+        let v = Verb::Rank(b(Verb::Atop(b(echo_v()), b(head_v()), AtopForm::At)), [1, 1, 1].into());
         let mut seen: Vec<i64> = Vec::new();
         let mut sink = |s: &str| {
             if let Some(first) = s.split_whitespace().next() && let Ok(n) = first.parse::<i64>() {

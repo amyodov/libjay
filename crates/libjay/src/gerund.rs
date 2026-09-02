@@ -130,7 +130,7 @@ pub fn gerund_array(items: &[Ar]) -> Array {
 }
 
 /// A rank specification as the noun `u"n` was given.
-fn rank_noun(r: &[i64; 3]) -> Array {
+fn rank_noun(r: crate::verb::Ranks) -> Array {
     let one = |v: i64| {
         if v == RANK_INF {
             f64::INFINITY
@@ -140,16 +140,15 @@ fn rank_noun(r: &[i64; 3]) -> Array {
             v as f64
         }
     };
-    if r[0] == r[1] && r[1] == r[2] {
-        return Array::new(vec![], Data::F64(vec![one(r[0])].into()));
+    // As many atoms as were written. One stands for all three, and two are
+    // the left rank and the right one with the monadic rank taken from the
+    // right; a spelling that says the same thing in more atoms is still the
+    // spelling the entity was built with.
+    match r.atoms() {
+        1 => Array::new(vec![], Data::F64(vec![one(r[0])].into())),
+        2 => Array::from_f64(vec![one(r[1]), one(r[2])]),
+        _ => Array::from_f64(vec![one(r[0]), one(r[1]), one(r[2])]),
     }
-    // Two atoms are the left rank and the right one, and the monadic rank
-    // is the right one again: the shorter spelling wherever it says the
-    // same thing.
-    if r[0] == r[2] {
-        return Array::from_f64(vec![one(r[1]), one(r[2])]);
-    }
-    Array::from_f64(vec![one(r[0]), one(r[1]), one(r[2])])
 }
 
 /// The word a constant verb is spelled as: `_9:` through `9:` for the
@@ -207,7 +206,7 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         // A noun operand to `@` is the constant verb, and writes itself
         // back out as the noun it was: `*:@_1 2`, not `*:@(_1 2"_)`.
         Verb::Constant(m) => Some(Ar::Noun(m.clone())),
-        Verb::Rank(inner, r) => rank_ar(inner, r),
+        Verb::Rank(inner, r) => rank_ar(inner, *r),
         Verb::Reduce(u) => der("/", vec![verb_ar(u)?]),
         Verb::Windowed(u, WindowKind::Prefix) => der("\\", vec![verb_ar(u)?]),
         Verb::Windowed(u, WindowKind::Suffix) => der("\\.", vec![verb_ar(u)?]),
@@ -244,7 +243,7 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         Verb::Memo(u, _) => der("M.", vec![verb_ar(u)?]),
         Verb::Level { u, levels, spread } => der(
             if *spread { "S:" } else { "L:" },
-            vec![verb_ar(u)?, Ar::Noun(rank_noun(levels))],
+            vec![verb_ar(u)?, Ar::Noun(rank_noun(*levels))],
         ),
         Verb::Characteristics(u) => der("b.", vec![verb_ar(u)?]),
         Verb::Key(u) => der("/.", vec![verb_ar(u)?]),
@@ -572,12 +571,12 @@ fn noun_text(a: &Array) -> Option<String> {
 /// `u"n`, and the three conjunctions J spells by applying at an operand's
 /// own rank: `u@v`, `u&v` and `u&.v` are each a rank around what `@:`,
 /// `&:` and `&.:` derive, so the rank they set is what tells them apart.
-fn rank_ar(inner: &Verb, r: &[i64; 3]) -> Option<Ar> {
+fn rank_ar(inner: &Verb, r: crate::verb::Ranks) -> Option<Ar> {
     let der = |s: &str, ops: Vec<Ar>| Some(Ar::Derived(s.to_string(), ops));
     // `u&.v` sets v's MONADIC rank around the same tree `&.:` builds, which
     // is what separates it from `u@v` — that one sets all three of g's.
     if let Verb::Atop(f, g, AtopForm::At) = inner
-        && matches!(&**g, Verb::Compose(_, u) if *r == [u.ranks()[0]; 3])
+        && matches!(&**g, Verb::Compose(_, u) if r == [u.ranks()[0]; 3])
         && let Some(ar) = under_ar(f, g, "&.")
     {
         return Some(ar);
@@ -587,16 +586,16 @@ fn rank_ar(inner: &Verb, r: &[i64; 3]) -> Option<Ar> {
         Verb::Constant(m) => der("\"", vec![Ar::Noun(m.clone()), Ar::Noun(rank_noun(r))]),
         // `u@v` is `u@:v` at v's own ranks. A CAPPED fork carries the rank
         // it was written with instead, so it keeps the `"` spelling.
-        Verb::Atop(f, g, AtopForm::At) if *r == g.ranks() => {
+        Verb::Atop(f, g, AtopForm::At) if r == g.ranks() => {
             der("@", vec![verb_ar(f)?, verb_ar(g)?])
         }
-        Verb::Compose(f, g) if *r == [g.ranks()[0]; 3] => {
+        Verb::Compose(f, g) if r == [g.ranks()[0]; 3] => {
             der("&", vec![verb_ar(f)?, verb_ar(g)?])
         }
-        Verb::BondLeft(m, g) if *r == [g.ranks()[2]; 3] => {
+        Verb::BondLeft(m, g) if r == [g.ranks()[2]; 3] => {
             der("&", vec![Ar::Noun(m.clone()), verb_ar(g)?])
         }
-        Verb::BondRight(g, n) if *r == [g.ranks()[1]; 3] => {
+        Verb::BondRight(g, n) if r == [g.ranks()[1]; 3] => {
             der("&", vec![verb_ar(g)?, Ar::Noun(n.clone())])
         }
         _ => der("\"", vec![verb_ar(inner)?, Ar::Noun(rank_noun(r))]),

@@ -698,3 +698,14 @@ $ (> (0 $ <0))
 3!:0 (> (0 $ <0))
 $ (> (0 2 $ <0))
 |/ (> (0 $ <0))
+
+// A rank or a level SPELLS ITSELF BACK with as many atoms as it was written
+// with, not as few as would say the same thing. `u"2 _ 2` and `u"_ 2` are
+// one verb — one atom stands for all three ranks, two atoms `m n` for
+// `n m n` — and the reference writes each of them out the way it came.
+-:"_1"2 _ 2
++"0 1 2
++"2 _
++"_ 2
+!@:,. L:2 2
+< L:1 1

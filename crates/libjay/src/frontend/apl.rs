@@ -978,7 +978,7 @@ fn verb_for(ch: char, d: Rules) -> Option<Verb> {
     // Monadic `⌽` is `⊖` on rows, which the rank operator supplies. The
     // dyad picks its own axis, so it keeps its whole arguments.
     if ch == '⌽' {
-        return Some(Verb::Rank(Box::new(Verb::Prim(p)), [1, RANK_INF, RANK_INF]));
+        return Some(Verb::Rank(Box::new(Verb::Prim(p)), [1, RANK_INF, RANK_INF].into()));
     }
     Some(Verb::Prim(p))
 }
@@ -2123,14 +2123,14 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
             // the n-wise reduction, whose left argument is one number
             // however it is shaped, so the wrapper frames the right
             // argument alone.
-            OpGlyph::Slash => Verb::Rank(Box::new(Verb::NWise(Box::new(f))), [1, RANK_INF, 1]),
+            OpGlyph::Slash => Verb::Rank(Box::new(Verb::NWise(Box::new(f))), [1, RANK_INF, 1].into()),
             OpGlyph::SlashBar => Verb::NWise(Box::new(f)),
             // The scan follows the reduce: `\` along the last axis, `⍀`
             // along the leading one. The k-th element is the reduce of the
             // first k, which is the verb applied to the k-th prefix.
             OpGlyph::Backslash => Verb::Rank(
                 Box::new(Verb::Windowed(Box::new(Verb::Reduce(Box::new(f))), WindowKind::Scan)),
-                [1, 1, 1],
+                [1, 1, 1].into(),
             ),
             OpGlyph::BackslashBar => {
                 Verb::Windowed(Box::new(Verb::Reduce(Box::new(f))), WindowKind::Scan)
@@ -2229,7 +2229,7 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                 };
                 let arr = literal(&spec.kind).expect("checked above");
                 let ranks = rank_spec(arr, spec.span)?;
-                let f = Verb::Rank(Box::new(f), ranks);
+                let f = Verb::Rank(Box::new(f), ranks.into());
                 out.push(Token { kind: Tok::Func(f), span: Span::merge(span, spec.span) });
                 continue;
             }
@@ -3076,7 +3076,7 @@ fn reads_axis(v: &Verb) -> bool {
 fn leading_axis_form(v: &Verb) -> Option<Verb> {
     match v {
         // `⌽` is `⊖` applied to rows; with an axis given the two agree.
-        Verb::Rank(inner, [1, RANK_INF, RANK_INF]) => leading_axis_form(inner),
+        Verb::Rank(inner, r) if *r == [1, RANK_INF, RANK_INF] => leading_axis_form(inner),
         // `AlongAxis` brings the named axis to the front, so the form under
         // it always rotates the LEADING one, whichever glyph was written.
         Verb::Prim(p) if matches!(p.monad, MonadOp::Reverse) => {
@@ -5183,7 +5183,7 @@ mod tests {
         match &e {
             Expr::Monad { verb: Verb::Rank(inner, ranks), .. } => {
                 assert_eq!(*ranks, [1, 1, 1]);
-                assert!(matches!(inner.as_ref(), Verb::Rank(_, [1, RANK_INF, 1])));
+                assert!(matches!(inner.as_ref(), Verb::Rank(_, r) if *r == [1, RANK_INF, 1]));
             }
             other => panic!("expected Rank(Rank(NWise(+))), got {other:?}"),
         }
@@ -5281,7 +5281,7 @@ mod tests {
         let sp = SourceParts::from_parts(&["+/", ""], &["m"]);
         let stmts = parse(&sp, rules(1)).unwrap();
         match &stmts[0] {
-            Expr::Monad { verb: Verb::Rank(_, [1, RANK_INF, 1]), y, .. } => {
+            Expr::Monad { verb: Verb::Rank(_, r), y, .. } if *r == [1, RANK_INF, 1] => {
                 assert!(matches!(y.as_ref(), Expr::Param(0, _)));
             }
             other => panic!("expected a reduction over a parameter, got {other:?}"),

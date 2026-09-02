@@ -955,7 +955,7 @@ fn modifier(v: &Verb, lang: Lang) -> Option<(Mod, Vec<String>)> {
     let with = |v: &Verb, extra: String| vec![verb_class(v), extra];
     Some(match v {
         Verb::Rank(u, r) => {
-            (m("rank", &["\"", "⍤"]), with(u, format!("rank {}", ranks_label(*r))))
+            (m("rank", &["\"", "⍤"]), with(u, format!("rank {}", ranks_label(r.triple()))))
         }
         // APL's outer product is an insertion too, and the IR keeps one
         // node for both: `f/` and `∘.f` differ by the valence of the site.

@@ -706,7 +706,7 @@ fn constant_of(a: Array) -> Verb {
     {
         return constant_verb(a);
     }
-    Verb::Rank(Box::new(Verb::Constant(a)), [crate::verb::RANK_INF; 3])
+    Verb::Rank(Box::new(Verb::Constant(a)), [crate::verb::RANK_INF; 3].into())
 }
 
 /// Whether an expression reads either argument.
@@ -3472,7 +3472,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             // `u"(v b. 0)`, which is what makes `<"(+/)` box the whole
             // argument and `<"(<"1)` box each of its rows.
             let ranks = if v.is_verb() {
-                verb_operand(v.clone(), span)?.ranks()
+                verb_operand(v.clone(), span)?.ranks().into()
             } else {
                 rank_spec(&v, span)?
             };
@@ -3527,7 +3527,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             };
             let ranks = g.ranks();
             let atop = Verb::Atop(Box::new(f), Box::new(g), AtopForm::At);
-            Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(atop), ranks)), span))
+            Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(atop), ranks.into())), span))
         }
         "&" => compose(u, v, false, span),
         "&:" => compose(u, v, true, span),
@@ -3558,7 +3558,7 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                 return Ok(Frag::Verb(VerbFrag::V(under), span));
             }
             let rank = g.ranks()[0];
-            Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(under), [rank; 3])), span))
+            Ok(Frag::Verb(VerbFrag::V(Verb::Rank(Box::new(under), [rank; 3].into())), span))
         }
         "^:" => {
             let f = verb_operand(u, span)?;
@@ -3825,7 +3825,7 @@ fn compose(u: Frag, v: Frag, infinite: bool, span: Span) -> Result<Frag> {
         if infinite {
             return verb(composed);
         }
-        return verb(Verb::Rank(Box::new(composed), [monadic_rank; 3]));
+        return verb(Verb::Rank(Box::new(composed), [monadic_rank; 3].into()));
     }
     if u.is_noun() && v.is_noun() {
         return Err(Error::not_yet("noun-operand conjunctions", span));
@@ -4122,7 +4122,7 @@ fn verb_operand(f: Frag, span: Span) -> Result<Verb> {
 /// itself. The two infinities are the two ends of the descent: `_` is the
 /// whole argument, boxed however deeply, and `__` its leaves, which is level
 /// 0 written the other way round.
-fn level_spec(f: &Frag, span: Span) -> Result<[i64; 3]> {
+fn level_spec(f: &Frag, span: Span) -> Result<crate::verb::Ranks> {
     let Some(arr) = as_const(f) else {
         return Err(Error::not_yet("a computed level specification", span));
     };
@@ -4155,16 +4155,20 @@ fn level_spec(f: &Frag, span: Span) -> Result<[i64; 3]> {
             r.push(x as i64);
         }
     }
-    Ok(match r.len() {
+    // One atom stands for every level, two atoms `m n` for `n m n`. The
+    // count is kept beside them: it says nothing about what the verb does,
+    // and everything about how it spells itself back.
+    let triple = match r.len() {
         1 => [r[0], r[0], r[0]],
         2 => [r[1], r[0], r[1]],
         _ => [r[0], r[1], r[2]],
-    })
+    };
+    Ok(crate::verb::Ranks::spelled(triple, r.len() as u8))
 }
 
 /// `u"n`: 1 atom applies to every valence, 2 atoms are `left right` with the
 /// monadic rank taken from the right, 3 atoms are given in full.
-fn rank_spec(f: &Frag, span: Span) -> Result<[i64; 3]> {
+fn rank_spec(f: &Frag, span: Span) -> Result<crate::verb::Ranks> {
     let Some(arr) = as_const(f) else {
         return Err(Error::not_yet("computed rank specifications", span));
     };
@@ -4186,11 +4190,12 @@ fn rank_spec(f: &Frag, span: Span) -> Result<[i64; 3]> {
             r.push(x as i64);
         }
     }
-    Ok(match r.len() {
+    let triple = match r.len() {
         1 => [r[0], r[0], r[0]],
         2 => [r[1], r[0], r[1]],
         _ => [r[0], r[1], r[2]],
-    })
+    };
+    Ok(crate::verb::Ranks::spelled(triple, r.len() as u8))
 }
 
 /// `u^:n`: one nonnegative integer atom, or `_` for "iterate until the
