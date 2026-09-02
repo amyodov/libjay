@@ -6790,6 +6790,11 @@ fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
 /// dialect's comparison tolerance of it, so `x: 0.1` is `1r10` rather than
 /// the binary fraction a double really holds.
 fn to_exact(y: &Array, span: Span) -> Result<Array> {
+    // Nothing to convert is no complaint about the kind, and the reference
+    // leaves the RATIONAL type there: `3!:0 (x: (0 $ 'a'))` is 128.
+    if y.count() == 0 && !y.dtype().is_numeric() {
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Rat)));
+    }
     let data = match &y.data {
         Data::Ext(_) | Data::Rat(_) => return Ok(y.clone()),
         Data::Bool(v) => Data::Ext(v.iter().map(|&b| Ext::from(b)).collect()),
@@ -14723,6 +14728,11 @@ fn roll(
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
+    // Nothing to roll is no complaint about the kind, and the reference
+    // leaves the BOOLEAN type there: `3!:0 (? (0 $ 'a'))` is 1.
+    if y.count() == 0 && !y.dtype().is_numeric() {
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Bool)));
+    }
     let bounds = y
         .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("roll needs whole numbers", span))?;

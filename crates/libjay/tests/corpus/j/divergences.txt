@@ -279,3 +279,11 @@ _1r2 ^. _1r2
 ? the reference searches into the complex plane; libjay has no real answer
 ! ^:(_1 0 1) (_5x)
 ? the reference searches into the complex plane; libjay has no real answer
+
+// The same two whole numbers a double cannot tell apart, reached through a
+// VECTOR left argument, where the whole pass goes to floats at once:
+// jconsole answers every cell with 9.2233720368547758e18 although
+// `4 *. (9223372036854775806)` is twice that and `5 *.` five times it, and
+// its own `3 *. (9223372036854775806)` is the integer.
+(3 1 4 1 5) *. (9223372036854775806)
+? jconsole holds the left and the right in one double and libjay keeps them exact
