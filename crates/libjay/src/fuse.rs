@@ -1273,7 +1273,8 @@ fn monad_type(op: ScalarMonad, a: DType) -> Option<DType> {
     }
     Some(match op {
         Recip | Halve | Exp => F64,
-        // Identity and magnitude keep a boolean boolean.
+        // Identity and magnitude keep a boolean boolean, and so does a
+        // square: zero and one are their own.
         Conj | Abs | OneMinus => a,
         Neg | Inc | Dec | Double => match a {
             Bool | I64 => I64,

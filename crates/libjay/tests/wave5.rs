@@ -82,14 +82,18 @@ fn the_map_replaces_every_leaf_by_its_path() {
                 .collect()
         )
     );
-    // An unboxed argument is one leaf, itself, and its path is empty.
-    assert_eq!(val(Lang::J, "{:: 1 2 3"), Array::empty(DType::I64));
+    // An unboxed argument is one leaf, itself, and its path is empty — in
+    // the boolean type, as the reference has it.
+    assert_eq!(val(Lang::J, "{:: 1 2 3"), Array::empty(DType::Bool));
     // A boxed scalar contributes an empty index: nothing chooses among the
-    // one thing it holds.
+    // one thing it holds. That empty is BOXED, which is what makes the map
+    // its own fixed point.
     assert_eq!(
         val(Lang::J, "{:: <1 2 3"),
-        boxes(&[], vec![boxes(&[1], vec![Array::empty(DType::I64)])])
+        boxes(&[], vec![boxes(&[1], vec![Array::empty(DType::Box)])])
     );
+    // So a map of a map is the map: `{:: {:: y` is `{:: y`.
+    assert_eq!(val(Lang::J, "{::^:2 (<1 2)"), val(Lang::J, "{:: (<1 2)"));
     // The index within a rank-2 array is the whole coordinate vector.
     let paths = val(Lang::J, "{:: 2 2$1;2;3;4");
     assert_eq!(paths.shape, vec![2, 2]);

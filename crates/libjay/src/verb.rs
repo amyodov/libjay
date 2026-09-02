@@ -3837,9 +3837,19 @@ fn prim_monad_frame(
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
         let probe = conform && !matches!(p.monad, MonadOp::PolyRoots | MonadOp::PolyDeriv);
-        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _numeric, c| {
+        let out = empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
-        });
+        })?;
+        // The frame learnt a SHAPE from a cell of fills; what the answer's
+        // TYPE is, where the verb ran on no cell at all, the reference
+        // declares. See [`empty_monad_type`].
+        if conform
+            && let Some(t) = empty_monad_type(&p.monad, y.dtype())
+            && out.dtype() != t
+        {
+            return Ok(Array::new(out.shape, Data::empty(t)));
+        }
+        return Ok(out);
     }
     let cells =
         each_cell(n, y.count(), pure, ctx, |i, c| monad_op(p, &y.cell_at(frame_rank, i), c, span))?;
@@ -3888,7 +3898,14 @@ fn rank_monad(
     if n == 0 {
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
-        let probe = conform && !is_poly_monad(v);
+        // Only a PRIMITIVE is asked again with numbers. A primitive knows
+        // its own answer for an empty and the reference's own code
+        // computes one; a DERIVED verb has to be run, and where the run
+        // refuses nothing about the cells' shape was learnt at all:
+        // `$ (~: @ *:)"0 (0 $ 'a')` is `0` in the reference where
+        // `$ (~: @ *:)"0 (0 $ 0)` is `0 1`, and `u&.v` — which is a rank
+        // over a composition — parts the same way.
+        let probe = conform && matches!(v, Verb::Prim(_)) && !is_poly_monad(v);
         return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
@@ -7359,6 +7376,46 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
     Ok(Array::new(y.shape.clone(), data).with_layout(y.layout()))
 }
 
+/// The type an empty answer carries, where the reference DECLARES one
+/// rather than computing it.
+///
+/// An empty argument has no element to run the verb on, so the answer's
+/// type is a property of the verb and of the type the argument was written
+/// in — nothing else. The table is the oracle's, measured one cell at a
+/// time; `None` leaves the ordinary computation to settle the type, which
+/// over no elements comes to the same thing for every op not named here.
+/// A NON-NUMERIC argument is read as a boolean one before the lookup: a
+/// fill the verb never sees says nothing about the answer.
+fn empty_scalar_type(op: ScalarMonad, seen: DType) -> Option<DType> {
+    use DType::*;
+    use ScalarMonad::*;
+    // bool, integer, float, complex, extended, rational — in that order.
+    let row: [DType; 6] = match op {
+        Halve => [F64, F64, F64, Complex, Ext, Rat],
+        Double | Inc | Dec | Neg | OneMinus => [I64, I64, F64, Complex, Ext, Rat],
+        Square => [Bool, I64, F64, Complex, Ext, Rat],
+        Sqrt | Factorial => [Bool, F64, F64, Complex, Ext, Rat],
+        Conj | Abs if seen == Complex => return Some(if op == Abs { F64 } else { Complex }),
+        Conj | Abs => [Bool, I64, F64, Complex, Ext, Rat],
+        Signum => [Bool, I64, I64, Complex, Ext, Ext],
+        Exp | Ln => [F64, F64, F64, Complex, Ext, F64],
+        Recip => [F64, F64, F64, Complex, Ext, Rat],
+        Pi => [F64, F64, F64, Complex, F64, F64],
+        Imaginary | Polar => return Some(Complex),
+        Not | Floor | Ceil => return None,
+    };
+    let i = match seen {
+        Bool => 0,
+        I64 => 1,
+        F64 => 2,
+        Complex => 3,
+        Ext => 4,
+        Rat => 5,
+        _ => return None,
+    };
+    Some(row[i])
+}
+
 /// Elementwise monadic application to a whole array.
 fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     use ScalarMonad::*;
@@ -7368,18 +7425,20 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
     let tol = cfg.tol;
     let d = &y.data;
     // An empty argument has no element for the verb to run on, so its type
-    // never comes up: `%: ''` is an empty, not a type error. WHAT IT
-    // ANSWERS IS WHAT A BOOLEAN EMPTY WOULD HAVE: `3!:0 (o. (0 $ 'a'))` is
-    // the float type there, `(j. (0 $ 'a'))` the complex one, `(* (0 $
-    // 'a'))` the boolean one — each of them the type that verb gives a
-    // boolean argument. Logical negation is the one that does not follow,
-    // answering with integers where a boolean argument keeps its type.
-    if y.count() == 0 && !d.dtype().is_numeric() {
-        if cfg.rules.lang == crate::Lang::J && !matches!(op, Not | OneMinus) {
-            let bits = Array::new(y.shape.clone(), Data::empty(DType::Bool));
-            return scalar_monad(op, &bits, cfg, span);
+    // never comes up: `%: ''` is an empty, not a type error. What the
+    // answer's type IS comes from reading that empty as a BOOLEAN one and
+    // letting the verb's own type rule stand: `3!:0 *: ('')` is the boolean
+    // type there, `3!:0 -: (0 $ a:)` the float that halving a boolean
+    // makes, `3!:0 j. (0 $ a:)` the complex one.
+    if y.count() == 0 && cfg.rules.lang == crate::Lang::J {
+        let seen = if d.dtype().is_numeric() { d.dtype() } else { DType::Bool };
+        if let Some(t) = empty_scalar_type(op, seen) {
+            return Ok(Array::new(y.shape.clone(), Data::empty(t)));
         }
-        return Ok(Array::new(y.shape.clone(), Data::empty(DType::I64)));
+    }
+    if y.count() == 0 && !d.dtype().is_numeric() {
+        let zeros = Array::new(y.shape.clone(), Data::empty(DType::Bool));
+        return scalar_monad(op, &zeros, cfg, span);
     }
     // The gamma function has no complex reading here, but a complex value
     // with no imaginary part is the real it displays as: `!2j0` is 2.
@@ -7434,8 +7493,11 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
             Data::F64(v) => Data::F64(par::map(v, |&x| -x).into()),
             _ => return Err(wrong_type(d.dtype(), span)),
         },
+        // A sign is one of three whole numbers, so it is never wider than
+        // the numbers that hold them: a BOOLEAN argument keeps its type,
+        // and a float one answers in INTEGERS (`3!:0 * 1.5 2` is 4).
         Signum => match d {
-            Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
+            Data::Bool(_) => d.clone(),
             Data::I64(v) => Data::I64(par::map(v, |&x| x.signum()).into()),
             // NaN has no sign here; it yields 0, and so does anything the
             // dialect's tolerance reads as zero. THE ANSWER LEAVES THE
@@ -7518,8 +7580,9 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
             Data::F64(v) => Data::F64(par::map(v, |&x| x.abs()).into()),
             _ => return Err(wrong_type(d.dtype(), span)),
         },
+        // Zero and one are whole, so rounding leaves a BOOLEAN alone.
         Floor | Ceil => match d {
-            Data::Bool(v) => Data::I64(par::map(v, |&b| b as i64).into()),
+            Data::Bool(_) => d.clone(),
             Data::I64(_) => d.clone(),
             Data::F64(v) => {
                 let round = |x: f64| if op == Floor { tol.floor(x) } else { tol.ceil(x) };
@@ -7546,10 +7609,11 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
                 _ => return Err(wrong_type(d.dtype(), span)),
             }
         }
+        // A square of zero or one is itself, so `*:` keeps the BOOLEAN
+        // type where `+:` cannot.
         Double | Square => match d {
-            Data::Bool(v) => {
-                Data::I64(par::map(v, |&b| if op == Double { 2 * b as i64 } else { b as i64 }).into())
-            }
+            Data::Bool(v) if op == Square => Data::Bool(v.clone()),
+            Data::Bool(v) => Data::I64(par::map(v, |&b| 2 * b as i64).into()),
             Data::I64(v) => {
                 let f = |x: i64| if op == Double { x.checked_mul(2) } else { x.checked_mul(x) };
                 match par::try_map(v, f) {
@@ -7575,6 +7639,11 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
         Pi => {
             let v = as_f64(d, &mut tmp, span)?;
             Data::F64(par::map(v, |&x| std::f64::consts::PI * x).into())
+        }
+        // `! 0` and `! 1` are both 1, so a BOOLEAN argument answers in
+        // booleans rather than in the floats the gamma function makes.
+        Factorial if matches!(d, Data::Bool(_)) => {
+            Data::Bool(vec![1u8; y.count()].into())
         }
         Factorial => {
             let v = as_f64(d, &mut tmp, span)?;
@@ -10767,7 +10836,74 @@ fn determinant_lu(mut a: Vec<f64>, n: usize) -> f64 {
 fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     let apl = ctx.cfg.rules.lang == crate::Lang::Apl;
     let out = monad_op_inner(p, y, ctx, span);
-    if apl { out.map(tightened_mixed) } else { out }
+    if apl {
+        return out.map(tightened_mixed);
+    }
+    // A verb that ran on NO elements settled no type by running; the
+    // reference declares one instead. See [`empty_monad_type`].
+    if y.count() == 0
+        && let Ok(a) = &out
+        && let Some(t) = empty_monad_type(&p.monad, y.dtype())
+        && a.dtype() != t
+    {
+        return Ok(Array::new(a.shape.clone(), Data::empty(t)));
+    }
+    // An empty argument holds no value outside the exact domain, so `x:`
+    // answers where the same type at full would be refused: `3!:0 x: (0 $
+    // a:)` is the rational type there.
+    if y.count() == 0
+        && out.is_err()
+        && p.monad == MonadOp::ToExact
+        && let Some(t) = empty_monad_type(&p.monad, y.dtype())
+    {
+        return Ok(Array::new(y.shape.clone(), Data::empty(t)));
+    }
+    out
+}
+
+/// The type an empty answer carries where the verb is not one that works
+/// element by element — [`empty_scalar_type`] is that case.
+///
+/// Measured against the oracle one cell at a time. `None` leaves whatever
+/// the ordinary computation settled on standing.
+fn empty_monad_type(op: &MonadOp, seen: DType) -> Option<DType> {
+    use DType::*;
+    Some(match op {
+        // Base-2 digits of nothing keep the type the numbers were written
+        // in: `3!:0 #: (0 $ 'a')` is the character type.
+        MonadOp::EncodeBits => seen,
+        // A weighted sum of nothing is the whole number 0.
+        MonadOp::DecodeBits => I64,
+        MonadOp::Raze | MonadOp::PrimeFactors => Bool,
+        MonadOp::NthPrime => {
+            if matches!(seen, Ext | Rat) {
+                Ext
+            } else {
+                F64
+            }
+        }
+        MonadOp::ToExact => {
+            if matches!(seen, Bool | I64 | Ext) {
+                Ext
+            } else {
+                Rat
+            }
+        }
+        // The real and imaginary parts of nothing are BOOLEAN unless the
+        // argument was itself complex; a length and an angle are floats
+        // whatever the argument was.
+        MonadOp::ComplexParts { polar: false } => {
+            if seen == Complex {
+                F64
+            } else {
+                Bool
+            }
+        }
+        MonadOp::ComplexParts { polar: true } => F64,
+        // A run of no integers written in an exact type stays exact.
+        MonadOp::IotaJ if matches!(seen, Rat) => Ext,
+        _ => return None,
+    })
 }
 
 /// Every APL result passes through [`tightened_mixed`] on the way out, so
@@ -14748,8 +14884,15 @@ fn roll(
     if !float_at_zero && bounds.contains(&0) {
         return Err(Error::domain("? 0 has no value: the range is empty", span));
     }
-    // A zero anywhere makes the whole answer float, as J's does.
-    let any_zero = bounds.contains(&0);
+    // A roll from no range at all is the empty, and the reference spells
+    // that one BOOLEAN.
+    if bounds.is_empty() && float_at_zero {
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Bool)));
+    }
+    // A zero anywhere makes the whole answer float, as J's does — and so
+    // does a BOOLEAN argument, whose every roll but `? 0` is the single
+    // value 0: `3!:0 ? 1 1` is the float type there.
+    let any_zero = bounds.contains(&0) || (float_at_zero && y.dtype() == DType::Bool);
     crate::rng::with(fixed, |g| {
         if any_zero {
             let out: Vec<f64> = bounds
@@ -16621,8 +16764,17 @@ fn amend_spec(spec: &Spec, x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// A path is a boxed list holding one index per level descended — the
 /// coordinate vector within that level's array, empty where the level is a
 /// boxed scalar. An unboxed y is one leaf, itself, and its path is empty.
+///
+/// The two empties a map holds are spelled in types of their own. A boxed
+/// SCALAR names no coordinate, and that empty is BOXED, which is what makes
+/// the map its own fixed point: `{:: {:: (<1 2)` is `{:: (<1 2)`, because a
+/// path of no boxes has no leaf to name a second time. An argument with no
+/// box in it is one leaf whose path is empty, and THAT empty is BOOLEAN.
 fn map_paths(y: &Array) -> Array {
     fn coord_of(shape: &[usize], mut i: usize) -> Array {
+        if shape.is_empty() {
+            return Array::new(vec![0], Data::empty(DType::Box));
+        }
         let mut out = vec![0i64; shape.len()];
         for k in (0..shape.len()).rev() {
             out[k] = (i % shape[k]) as i64;
@@ -16633,7 +16785,7 @@ fn map_paths(y: &Array) -> Array {
     fn go(y: &Array, prefix: &[Array]) -> Array {
         let Some(boxes) = y.as_boxes() else {
             if prefix.is_empty() {
-                return Array::new(vec![0], Data::I64(Vec::new().into()));
+                return Array::new(vec![0], Data::empty(DType::Bool));
             }
             return Array::new(vec![prefix.len()], Data::Box(prefix.to_vec().into()));
         };
@@ -21291,6 +21443,10 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
     let chars = chars_of(y);
     match (form, chars) {
         (3, Some(_)) => Ok(chars_to_codes(y)),
+        // Nothing to read is no error: an empty carries no character the
+        // form could object to, and the reference answers the whole-number
+        // empty whatever type the argument was written in.
+        (3, None) if y.count() == 0 => Ok(Array::new(y.shape.clone(), Data::empty(DType::I64))),
         (3, None) => Err(Error::domain("form 3 converts characters to codepoints", span)),
         // One byte per character, the codepoint taken modulo 256 — which is
         // what J's narrowing to a byte string keeps.
