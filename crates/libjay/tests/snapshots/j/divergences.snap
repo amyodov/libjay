@@ -141,6 +141,14 @@
 > j:           0 _9.22337e18 _9.22337e18 _9.22337e18
 > j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
 > j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
+= (2 7 1 8) *. (_9223372036854775806)
+? the same boundary, the huge number on the right
+< _9.22337e18 _6.45636e19 _9.22337e18 _3.68935e19
+> j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
+= (_9223372036854775806) +. (2.0 4.0 6.0)
+? the same boundary in the GCD the LCM is built on
+< 2 4 2
+> j: 2 4 6
 = (1.5 2.5 _0.5) ^. (a:)
 ? the reference neither answers nor refuses; the sign of an unrelated atom decides
 < <error>
@@ -151,6 +159,14 @@
 > j:
 = (_0.5) ^. 'a'
 ? the same silence over characters
+< <error>
+> j:
+= (1.5 2.5 _0.5) ^. ('hello')
+? the same silence over a longer character list
+< <error>
+> j:
+= (_ __ 0) ^. (1;2 3)
+? the same silence with the infinities for the negative atom
 < <error>
 > j:
 = 1 <. (_.)

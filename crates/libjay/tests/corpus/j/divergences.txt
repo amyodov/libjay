@@ -134,6 +134,10 @@ p. (0 1 1 _)
 ? the same boundary, one radix per cell
 (_9223372036854775806) *."_2 (i. 3 4)
 ? the same boundary over a table
+(2 7 1 8) *. (_9223372036854775806)
+? the same boundary, the huge number on the right
+(_9223372036854775806) +. (2.0 4.0 6.0)
+? the same boundary in the GCD the LCM is built on
 
 // A LOGARITHM whose left argument holds a NEGATIVE number and whose right
 // is not numeric. The reference neither answers it nor refuses it: the
@@ -149,6 +153,10 @@ p. (0 1 1 _)
 ? the same silence over a plain box
 (_0.5) ^. 'a'
 ? the same silence over characters
+(1.5 2.5 _0.5) ^. ('hello')
+? the same silence over a longer character list
+(_ __ 0) ^. (1;2 3)
+? the same silence with the infinities for the negative atom
 
 // The EXTREMA of a NaN, one pair at a time. The reference answers `1 <. _.`
 // with `_.` and `1 1 <. (_. _.)` with `1 1` — the same operation on the
