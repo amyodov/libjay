@@ -257,3 +257,25 @@ _1r2 ^. _1r2
 ? two arguments have this factorial and the two engines pick different ones
 !^:_1 ] 0.8
 ? no argument at or above zero has this factorial; the reference goes below
+
+// A REDUCTION INSIDE A CUT WHOSE ANSWER IS WHOLE. `%/ 7 1 8` is 56 and
+// `<;._1 (2 7 1 8)` is the one piece `7 1 8`, but `%/;._1 (2 7 1 8)` is
+// 2.76677e_322 in jconsole — 56 times the smallest denormal, which is the
+// integer 56's bit pattern read as a double. `%/;._1 (2 7 1 4)` is
+// 1.38338e_322 the same way, 28 bits deep, while `+/;._1` and `*/;._1` of
+// the same argument are 16 and 56 as they should be. The cut copies an
+// integer cell into a float frame without converting it; libjay answers
+// the value.
+%/;._1 (2 7 1 8)
+? the reference copies the integer answer's bits into a float cell
+%/;._1 (2 7 1 4)
+? the reference copies the integer answer's bits into a float cell
+
+// The obverse of the factorial BELOW ZERO. `!^:_1 (_5)` is
+// `4.55654j_5.33834` there — a complex argument for a real y, and one
+// whose factorial jconsole itself does not return `_5` for. libjay has no
+// argument at or above zero whose factorial is negative and says so.
+!^:_1 (_5)
+? the reference searches into the complex plane; libjay has no real answer
+! ^:(_1 0 1) (_5x)
+? the reference searches into the complex plane; libjay has no real answer

@@ -148,6 +148,12 @@ pub fn sqrt(z: Cx) -> Cx {
     if z[0] == 0.0 && z[1] == 0.0 {
         return ZERO;
     }
+    // TWO INFINITE PARTS NAME NO DIRECTION, so the root of them is no
+    // number: `%: _j_` and `_j__ ^ 0.5` are both `_.j_.` in the reference,
+    // where one infinite part alone still has a root.
+    if z[0].is_infinite() && z[1].is_infinite() {
+        return [f64::NAN, f64::NAN];
+    }
     let t = ((abs(z) + z[0].abs()) / 2.0).sqrt();
     if z[0] >= 0.0 {
         [t, z[1] / (2.0 * t)]
@@ -165,6 +171,12 @@ pub fn pow(a: Cx, b: Cx) -> Cx {
     // their own works out to a NaN.
     if (a[0].is_infinite() || a[1].is_infinite()) && b[1] == 0.0 && b[0] < 0.0 {
         return ZERO;
+    }
+    // THE HALF POWER IS THE SQUARE ROOT and takes its answer: `_j_ ^ 0.5`
+    // is `_.j_.` in the reference where `_j_ ^ 1.5` is `_j_`, so it is the
+    // root's rule about two infinite parts and not a rule about powers.
+    if b[1] == 0.0 && b[0] == 0.5 && a[0].is_infinite() && a[1].is_infinite() {
+        return [f64::NAN, f64::NAN];
     }
     if b[1] == 0.0 && b[0].fract() == 0.0 && b[0].abs() <= 1024.0 {
         let n = b[0] as i64;

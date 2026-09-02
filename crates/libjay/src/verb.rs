@@ -7001,6 +7001,17 @@ fn scalar_dyad_wide(
         }
         // Integer overflow (or a fractional result): J widens to float.
     }
+    // AN EXTREMUM READS REAL-VALUED COMPLEX DATA AS THE REALS IT HOLDS,
+    // wherever it arrives from: `<./ (2j0 5j0)` is 2 there, as `1 <. (2j0
+    // 5j0)` already was on the array path. A genuinely complex value still
+    // carries no order.
+    if matches!(op, Min | Max)
+        && t == DType::Complex
+        && let Some(xf) = real_of(x)
+        && let Some(yf) = real_of(y)
+    {
+        return scalar_dyad_data(op, &xf, xoff, xdiv, &yf, yoff, ydiv, n, tol, rules, span);
+    }
     if t == DType::Complex
         || matches!(op, MakeComplex | PolarBy)
         || pass_leaves_reals(op, x, xoff, xdiv, y, yoff, ydiv, n)
@@ -7153,6 +7164,19 @@ fn pervade_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result
 /// The same array with its complex values read as the reals they are, or
 /// `None` when one of them really is complex. A value that is not complex
 /// at all needs no reading and answers for itself.
+/// One buffer's values as reals, where every complex one has no imaginary
+/// part. None where any of them has.
+fn real_of(d: &Data) -> Option<Data> {
+    match d {
+        Data::Complex(v) => {
+            let out: Option<Vec<f64>> =
+                v.iter().map(|z| (z[1] == 0.0).then_some(z[0])).collect();
+            Some(Data::F64(out?.into()))
+        }
+        _ => Some(d.clone()),
+    }
+}
+
 fn as_real(a: &Array) -> Option<Array> {
     if a.dtype() != DType::Complex {
         return Some(a.clone());
