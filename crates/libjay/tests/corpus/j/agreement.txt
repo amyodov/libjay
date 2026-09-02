@@ -846,3 +846,43 @@ _ $ 'abc'
 *. (__ ^ _1)
 *. (__ ^ _3)
 *. ((_ __ 0) ^ _1)
+
+// ONE NUMERIC WORD IS READ AT ONE PRECISION, so an `x` suffix anywhere in
+// it forbids an atom spelled other than as a whole number or a rational —
+// a decimal point, an exponent, a base, a complex or a polar part. The two
+// infinities are spellings of their own and go with either. A trailing `x`
+// is a suffix only where it is not a DIGIT: every letter after a base's
+// `b` is one.
+1e20 _1x
+1x 1.5
+1j2 1x
+2b11 1x
+1x 1e2
+1 2 3.5x
+1r2 1x
+1x 2r3
+_ 1x
+1x __
+1 1x
+1e20 1r2
+36bx
+16b1f
+1e20 + 1x
+
+// A radix held in a WIDE numeric type reads BOXES where a boolean or an
+// integer one does not.
+2x #. (0 $ <0)
+2.5 #. (0 $ <0)
+2r1 #. (0 $ <0)
+2j1 #. (0 $ <0)
+2 #. (0 $ <0)
+1 #. (0 $ <0)
+'a' #. (0 $ <0)
+
+// An INFINITY and an indeterminate are spelled by FORMAT BY SPECIFICATION
+// as the plain format spells them, whatever width or digit count it was
+// given.
+0 ": __
+6 ": __
+0 ": (_ __ 1)
+8 2 ": _

@@ -185,3 +185,13 @@ _ <. (_.)
 ? the same, with a negative bound
 (1r2) I. 2
 ? the same, with a rational bound
+
+// INDEX OF LAST over cells with NO ATOM. `x i: y` answers an index into x
+// where the cell is found and `#x` where it is not, and the reference
+// answers `_1` — neither — as soon as x has no item and the cell is empty:
+// `(0 0$0) i: (0$0)` is `_1` there while its own `i.` on the same
+// arguments is 0, and `(0$0) i: 5` is 0. libjay answers `#x`, which is 0.
+(0 0 $ 0) i: (0 $ 0)
+? the reference's own `i.` answers 0 for the same arguments
+(0 0 $ '') i: (0 $ a:)
+? the same over characters and boxes

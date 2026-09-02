@@ -646,6 +646,13 @@ fn with_neg_sign(s: &str, opts: &FmtOpts) -> String {
     }
 }
 
+/// The text an infinity or an indeterminate is spelled with, or `None`
+/// for an ordinary number. Format by specification writes them the same
+/// way, whatever width or precision it was given.
+pub fn special_f64(x: f64, opts: &FmtOpts) -> Option<String> {
+    (!x.is_finite()).then(|| format_f64(x, opts))
+}
+
 fn format_f64(x: f64, opts: &FmtOpts) -> String {
     if x.is_nan() {
         return format!("{}.", opts.neg);

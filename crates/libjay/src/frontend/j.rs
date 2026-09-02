@@ -2463,13 +2463,22 @@ fn lex_line(text: &str, base: usize, char_bytes: bool, out: &mut Vec<Frag>) -> R
             // Numeric words separated only by blanks form one vector.
             let start = i;
             let mut nums: Vec<Num> = Vec::new();
+            let mut exact_suffix = false;
+            let mut inexact_spelling = false;
             let mut end;
             loop {
                 let ws = i;
                 while at(i).is_some_and(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
                     i += 1;
                 }
-                nums.push(parse_number(&text[off(ws)..off(i)], span(ws, i))?);
+                let word = &text[off(ws)..off(i)];
+                // A trailing `x` is the extended suffix only where it is
+                // not a DIGIT: every letter after a base's `b` is one, so
+                // `36bx` is 33 and carries no suffix at all.
+                exact_suffix |=
+                    word.ends_with('x') && word.len() > 1 && !word.contains('b');
+                inexact_spelling |= spelled_inexact(word);
+                nums.push(parse_number(word, span(ws, i))?);
                 end = i;
                 let mut k = i;
                 while at(k).is_some_and(char::is_whitespace) {
@@ -2485,6 +2494,17 @@ fn lex_line(text: &str, base: usize, char_bytes: bool, out: &mut Vec<Frag>) -> R
                 } else {
                     break;
                 }
+            }
+            // One numeric word is read at ONE precision, so an `x` suffix
+            // anywhere in it forbids an atom spelled as a float — a decimal
+            // point, an exponent, a complex or a polar part. `1x 1.5` and
+            // `1e20 _1x` are ill-formed in the reference, while `1r2 1x`
+            // and `_ 1x` — both exactly spelled — are not.
+            if exact_suffix && inexact_spelling {
+                return Err(Error::parse(
+                    "ill-formed number: an `x` suffix and a float spelling in one numeric word",
+                    span(start, end),
+                ));
             }
             out.push(Frag::Noun(Expr::Const(num_array(&nums), span(start, end))));
             continue;
@@ -2644,6 +2664,24 @@ fn starts_number(cs: &[(usize, char)], i: usize) -> bool {
         // J name never begins with `_`, so nothing else claims the word.
         Some(d) => d.is_ascii_digit() || d == '.' || d == 'j' || !d.is_alphanumeric(),
     }
+}
+
+/// Whether a numeric word is spelled OTHER THAN as a plain whole number or
+/// a rational: a decimal point, an exponent, a base, a complex or a polar
+/// part. The spelling is what counts, not the value — `1e2` is a hundred
+/// and counts all the same, and so does `2b11`. The two INFINITIES are
+/// spellings of their own and count as neither.
+fn spelled_inexact(word: &str) -> bool {
+    if matches!(word, "_" | "__") {
+        return false;
+    }
+    word.contains('.')
+        || word.contains('e')
+        || word.contains('j')
+        || word.contains('p')
+        || word.contains('b')
+        || word.contains("ad")
+        || word.contains("ar")
 }
 
 fn parse_number(word: &str, span: Span) -> Result<Num> {

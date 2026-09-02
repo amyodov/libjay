@@ -9351,7 +9351,14 @@ fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
 fn decode_reads(radix: DType, digits: DType) -> bool {
     match radix {
         DType::Char => digits == DType::Char,
-        d if d.is_numeric() => digits == DType::Char || digits.is_numeric(),
+        // A radix held in a WIDE numeric type reads BOXES where a boolean
+        // or an integer one does not: `2x #. (0 $ <0)` and
+        // `2.5 #. (0 $ <0)` are 0 in the reference, `2 #. (0 $ <0)` a
+        // domain error.
+        DType::Bool | DType::I64 => digits == DType::Char || digits.is_numeric(),
+        d if d.is_numeric() => {
+            digits == DType::Char || digits.is_numeric() || digits == DType::Box
+        }
         _ => matches!(digits, DType::Char | DType::Bool | DType::I64) || !digits.is_numeric(),
     }
 }
@@ -18348,6 +18355,12 @@ fn format_spec(
         match (&y.data, &numbers) {
             (Data::Char(v), _) => (v[i].to_string(), 0),
             (_, Some(v)) => {
+                // An INFINITY and an indeterminate are spelled as the plain
+                // format spells them: `0 ": __` is `__`, not a field of
+                // digits it has none of.
+                if let Some(word) = crate::fmt::special_f64(v[i], fmt) {
+                    return (word, 0);
+                }
                 let sign = if v[i] < 0.0 { fmt.neg.to_string() } else { String::new() };
                 if p >= 0 {
                     let digits = fixed_digits(v[i].abs(), p as usize, padded);
@@ -18657,6 +18670,15 @@ fn parse_numbers(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// the field is and how many digits follow the point, and a NEGATIVE width
 /// asks for the exponential form instead of the fixed one.
 fn format_field(value: f64, precision: usize, exponential: bool, neg: char) -> String {
+    // An INFINITY and an indeterminate are spelled as the plain format
+    // spells them, whatever width or digit count was asked for: `0 ": __`
+    // is `__`, not a field of digits it has none of.
+    if !value.is_finite() {
+        let opts = FmtOpts { neg, ..FmtOpts::J };
+        if let Some(word) = crate::fmt::special_f64(value, &opts) {
+            return word;
+        }
+    }
     let sign = |s: String| match s.strip_prefix('-') {
         // A value that rounds to nothing keeps no sign, as the reference
         // has it: `5j2 ": _0.001` is ` 0.00`.
