@@ -17099,18 +17099,15 @@ fn level_pairs(
                     if y.rank() == 0 { vec![by[0].clone(); n] } else { by.to_vec() };
                 return Ok(Some(LevelPairs { left, right, shape }));
             }
-            if x.shape != y.shape {
-                return Err(Error::new(
-                    ErrorKind::Length,
-                    format!(
-                        "the levels do not agree: left shape {}, right shape {}",
-                        show_shape(&x.shape),
-                        show_shape(&y.shape)
-                    ),
-                    Some(span),
-                ));
-            }
-            Some(LevelPairs { left: bx.to_vec(), right: by.to_vec(), shape: x.shape.clone() })
+            // Two boxed sides pair the way any two frames do — the shorter
+            // shape is a PREFIX of the longer, and each of its boxes goes
+            // to the whole block of the other's it stands over:
+            // `(2 2 $ 1;2;3;4) + L:0 (2;4)` adds 2 along the first row and
+            // 4 along the second.
+            let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, Agreement::LeadingPrefix, span)?;
+            let left: Vec<Array> = (0..p.n).map(|i| bx[i / p.x_div].clone()).collect();
+            let right: Vec<Array> = (0..p.n).map(|i| by[i / p.y_div].clone()).collect();
+            Some(LevelPairs { left, right, shape: p.frame })
         }
     })
 }

@@ -181,6 +181,10 @@ _ <. (_.)
 ? the reference's own round trip through this obverse does not return its argument
 <@|: ^:_1 (i. 2 3)
 ? the same composition with a box
++:@|: ^:_1 (2 3 $ 2)
+? the same, where every element is alike so only the shape shows it
+<@|: ^:_1 (2 3 $ 2)
+? the same again, with a box
 
 // INTERVAL INDEX against a SINGLE EXACT bound. The reference answers
 // `(1x) I. 2` with 0 and `(1x 2x) I. 2` with 1: adding a bound that is NOT
