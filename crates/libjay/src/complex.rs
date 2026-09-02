@@ -159,6 +159,13 @@ pub fn sqrt(z: Cx) -> Cx {
 /// `x ^ y`. An integer exponent is repeated multiplication, which keeps
 /// `0j1 ^ 2` exactly `_1` rather than a rounded neighbour of it.
 pub fn pow(a: Cx, b: Cx) -> Cx {
+    // An INFINITE magnitude raised to a NEGATIVE real power is zero,
+    // however the infinity is spelled: `(_j_) ^ _2` is 0 in the reference
+    // as `_ ^ _2` is, where the reciprocal of the two infinite parts on
+    // their own works out to a NaN.
+    if (a[0].is_infinite() || a[1].is_infinite()) && b[1] == 0.0 && b[0] < 0.0 {
+        return ZERO;
+    }
     if b[1] == 0.0 && b[0].fract() == 0.0 && b[0].abs() <= 1024.0 {
         let n = b[0] as i64;
         if n == 0 {

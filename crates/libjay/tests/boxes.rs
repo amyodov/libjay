@@ -343,15 +343,16 @@ fn apl_structure_works_on_nested() {
 
 #[test]
 fn overtaking_a_boxed_array_fills_with_the_empty_box() {
-    // J's `a:` is a box holding an empty numeric list.
-    let ace = scalar_box(Array::empty(jay::DType::I64));
+    // J's `a:` is a box holding an empty numeric list, and the list is
+    // BOOLEAN: `3!:0 (> a:)` is 1 in the reference.
+    let ace = scalar_box(Array::empty(jay::DType::Bool));
     assert_eq!(
         val(Lang::J, "4 {. 1;2 3"),
         boxes(&[4], vec![
             bits(&[], &[1]),
             i64s(&[2], &[2, 3]),
-            Array::empty(jay::DType::I64),
-            Array::empty(jay::DType::I64),
+            Array::empty(jay::DType::Bool),
+            Array::empty(jay::DType::Bool),
         ])
     );
     assert_eq!(val(Lang::J, "1 {. 3 {. 2 1 $ <'x'"), val(Lang::J, "1 1 $ <'x'"));

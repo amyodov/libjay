@@ -787,3 +787,26 @@ $ ((0 2 $ 'a') , !.1e_3 'abc')
 _ | 1j2
 1j2 | (_j_)
 _j3.14159 | 1
+
+// OPENING AN ARRAY WITH NO BOX IN IT is no change at all, so it is no
+// change at any RANK either: the frame would otherwise run the verb on a
+// cell of fills and answer that cell's shape and type in place of the
+// argument's. The fill of a boxed array is `a:`, whose empty list is
+// BOOLEAN.
+$ >"1 (0 2 $ <0)
+3!:0 >"1 (0 2 $ <0)
+$ >"0 (0 2 $ <0)
+$ >"2 (0 2 $ <0)
+$ >"1 (2 0 $ <0)
+$ >"1 (2 2 $ <0)
+3!:0 (> a:)
+3!:0 (> (2 $ a:))
+3!:0 > {. (0 2 $ <0)
+
+// An INFINITE magnitude raised to a negative real power is zero, however
+// the infinity is spelled.
+(_j_) ^ _2
+(_j_) ^ _1
+(_j_) ^ 2
+(3j4 % 0) ^ _2
+((3j4 1j_1) %/ (2 3 $ i. 6)) ^ _2

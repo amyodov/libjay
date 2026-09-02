@@ -2166,7 +2166,7 @@ fn noun_word(word: &str) -> Option<Array> {
         "a." => Some(Array::from_chars(
             (0u32..256).map(|c| char::from_u32(c).expect("a Latin-1 codepoint")).collect(),
         )),
-        "a:" => Some(Array::boxed(Array::empty(crate::dtype::DType::I64))),
+        "a:" => Some(Array::boxed(Array::empty(crate::dtype::DType::Bool))),
         "_." => Some(Array::scalar_f64(f64::NAN)),
         _ => None,
     }

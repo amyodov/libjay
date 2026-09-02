@@ -990,9 +990,11 @@ impl Array {
     }
 
     /// The element that fills a boxed array: J's `a:`, a box holding an
-    /// empty numeric list.
+    /// empty numeric list. The list is BOOLEAN, which is the type the
+    /// reference gives `> a:` and every empty it makes with no type of its
+    /// own.
     pub fn box_fill() -> Array {
-        Array::empty(DType::I64)
+        Array::empty(DType::Bool)
     }
 
     pub fn dtype(&self) -> DType {

@@ -523,10 +523,11 @@ impl EvalCfg {
 /// rather than letting the process die on a stack overflow.
 ///
 /// The number is set by the machine stack, not by the languages: one level
-/// of a definition costs about 24 kB of stack in an unoptimised build, so
-/// the guard has to fire well inside the 2 MiB a small thread gets. It can
-/// rise when the evaluator's frames shrink.
-pub const RECURSION_LIMIT: usize = 64;
+/// of a definition costs about 34 kB of stack in an unoptimised build, so
+/// the guard has to fire well inside the 2 MiB a small thread gets — at 64
+/// levels the process dies before the guard is reached. It moves with the
+/// evaluator's frames, up as they shrink and down as they grow.
+pub const RECURSION_LIMIT: usize = 48;
 
 
 /// The names a running program can reach: the values it has assigned, the
@@ -2744,15 +2745,7 @@ impl Verb {
                 if p.monad == MonadOp::Open && is_mixed_simple(y) {
                     return Ok(y.clone());
                 }
-                // An array of boxes with no box in it has no content to
-                // bring to one shape, so it is its own answer, BOXES and
-                // all: `3!:0 (> (0 $ <0))` is the boxed type in the
-                // reference and `$ (> (0 2 $ <0))` is `0 2`.
-                if p.monad == MonadOp::Open
-                    && y.dtype() == DType::Box
-                    && y.count() == 0
-                    && ctx.cfg.rules.lang == crate::Lang::J
-                {
+                if opens_to_itself(p, y, ctx) {
                     return Ok(y.clone());
                 }
                 let frame_rank = y.rank() - effective_rank(p.ranks[0], y.rank());
@@ -3380,6 +3373,18 @@ fn rank_str(r: Ranks) -> String {
     }
 }
 
+/// Whether `>` gives this argument back unchanged: an array of BOXES with
+/// no box in it has no content to bring to one shape, so opening it is no
+/// change at all, boxes and all. `3!:0 (> (0 $ <0))` is the boxed type in
+/// the reference and `$ (> (0 2 $ <0))` is `0 2`.
+#[inline(never)]
+fn opens_to_itself(p: &Prim, y: &Array, ctx: &Ctx<'_>) -> bool {
+    p.monad == MonadOp::Open
+        && y.dtype() == DType::Box
+        && y.count() == 0
+        && ctx.cfg.rules.lang == crate::Lang::J
+}
+
 /// A shape as it appears in diagnostics.
 fn show_shape(shape: &[usize]) -> String {
     if shape.is_empty() {
@@ -3820,6 +3825,13 @@ fn rank_monad(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
+    // Opening an array with no box in it is no change at all, so it is no
+    // change at any RANK either: the frame would otherwise run the verb on
+    // a cell of fills and answer that cell's shape and type in place of the
+    // argument's.
+    if matches!(v, Verb::Prim(p) if opens_to_itself(p, y, ctx)) {
+        return Ok(y.clone());
+    }
     let frame_rank = y.rank() - effective_rank(rank, y.rank());
     if frame_rank == 0 {
         // The inner verb applies its own rank machinery to the whole
