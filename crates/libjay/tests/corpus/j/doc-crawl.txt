@@ -567,8 +567,10 @@ $ |: i. 2 3 4 5
 1 ^. _
 _ ^. _
 
-// $ with infinity in the shape
-__ $ 1
+// $ with infinity in the shape. `__ $ 1` and `__ $ 1 2 3` are NOT here:
+// the reference crashes on a negative infinite length, and a corpus row
+// would kill the recorder on the row it is recording. Both are in
+// bug-register.nogit.md instead; libjay refuses them.
 2.5 $ 1
 'a' $ 1
 (< 2) $ 1
@@ -690,7 +692,6 @@ _ 0 $ i. 6
 0 _ $ i. 6
 _ 3 $ i. 7
 _ 3 $ i. 5
-__ $ 1 2 3
 _ 3 $ (< 1) , (< 2) , (< 3) , < 4
 $ _ 3 $ i. 7
 $ 3 _ $ i. 7
