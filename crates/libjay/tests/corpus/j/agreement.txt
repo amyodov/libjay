@@ -709,3 +709,28 @@ $ (> (0 2 $ <0))
 +"_ 2
 !@:,. L:2 2
 < L:1 1
+
+// A FILL IS EXAMINED ONLY WHERE AN ATOM OF IT IS PLACED. `!.` is what makes
+// a reshape fill at all, in place of the cycling `4 $ 1 2 3` does, and only
+// a shape that outruns the argument reaches it: `2 $ !.'z' (1 2 3)` is
+// `1 2` and `4 $ !.'z' (1 2 3)` a domain error. A catenation is the same:
+// a side already at the wanted lengths, or one with nothing in it, is
+// widened without the fill being consulted. A TAKE and a DROP are the
+// exception — those settle the fill's kind against the whole argument
+// before any frame is cut.
+2 $ !.'z' (1 2 3)
+0 $ !.'z' (1 2 3)
+3 $ !.'z' (1 2 3)
+4 $ !.'z' (1 2 3)
+2 2 $ !.'z' (1 2 3)
+4 $ !.9 (1 2 3)
+2 3 $ !.9 (1 2 3)
+(0 2 $ 'a') , !.1e_3 'abc'
+$ ((0 2 $ 'a') , !.1e_3 'abc')
+3!:0 ((0 2 $ 'a') , !.1e_3 'abc')
+(0 2 $ 0) , !.'z' (0.1 0.2)
+(0 2 $ 0) , !.'z' (0.1 0.2 0.3)
+(0 3 $ 0) , !.'z' (0.1 0.2)
+(0 0 $ 0) , !.0 (2;5)
+2 {. !.'z' (1 2 3)
+2 }. !.'z' (1 2 3)

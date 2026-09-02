@@ -3883,16 +3883,21 @@ fn dyad_filled(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
-    // A take, a drop or a reshape settles the FILL's kind against the whole
-    // argument, before any frame is cut: `2 {. !.'z' (1 2 3)` is a domain
-    // error in the reference although the take needs no fill at all, and so
-    // is `(1 0 1 $ 5) {. !.'z' 2`, whose frame holds no cell. An argument
-    // with no atom has no type to keep and the fill's stands.
+    // A take or a drop settles the FILL's kind against the whole argument,
+    // before any frame is cut: `2 {. !.'z' (1 2 3)` is a domain error in
+    // the reference although the take needs no fill at all, and so is
+    // `(1 0 1 $ 5) {. !.'z' 2`, whose frame holds no cell. An argument with
+    // no atom has no type to keep and the fill's stands.
+    //
+    // A RESHAPE does not: `2 $ !.'z' (1 2 3)` is `1 2`, and only a shape
+    // that outruns the argument — `4 $ !.'z' (1 2 3)` — reaches the fill
+    // and refuses it. `!.` is what makes a reshape fill at all, in place of
+    // the cycling `4 $ 1 2 3` does.
     if y.count() > 0
         && matches!(
             v,
             Verb::Prim(Prim {
-                dyad: DyadOp::Take | DyadOp::Drop | DyadOp::Reshape,
+                dyad: DyadOp::Take | DyadOp::Drop,
                 ..
             })
         )
@@ -8878,9 +8883,17 @@ fn catenate_at(
         let fit = |a: &Array| -> Result<Array> {
             let mut to = want.clone();
             to[axis] = a.shape[axis] as i64;
+            // A side that is widened without an atom being PLACED — one
+            // already at the wanted lengths, or one with nothing in it —
+            // never consults the fill, so its kind is no complaint there:
+            // `(0 2$'a') , !.1e_3 'abc'` is `abc`, where the same fill over
+            // a character side that does fill is a domain error.
+            let places = to.iter().all(|&t| t > 0)
+                && to.iter().zip(&a.shape).any(|(&t, &s)| t as usize > s);
+            let gap = Gap::of(false, filled.filter(|_| places));
             // The lengths are ours, not the program's: no float
             // reaches the near-integer admission on this path.
-            take(&Array::from_i64(to), a, Gap::of(false, filled), false, true, NearInt::J, span)
+            take(&Array::from_i64(to), a, gap, false, true, NearInt::J, span)
         };
         (fit(&xa)?, fit(&ya)?)
     } else {
@@ -10835,17 +10848,6 @@ fn reshape(
     near: NearInt,
     span: Span,
 ) -> Result<Array> {
-    // A fill of a wider type widens the result, and once one is named the
-    // ravel is not repeated: what runs out is filled.
-    let widened;
-    let (y, filled) = match filled {
-        Some(f) => {
-            let (a, atom) = fitted_fill(y, f, span)?;
-            widened = a;
-            (&widened, Some(atom))
-        }
-        None => (y, None),
-    };
     let dims = axis_counts(x, "reshape", near, span)?;
     if dims.iter().any(|&d| d < 0) {
         return Err(Error::domain("reshape lengths must be nonnegative", span));
@@ -10860,6 +10862,20 @@ fn reshape(
         (1, y.count())
     };
     let n = crate::limits::elements(&shape, span)?;
+    // A fill of a wider type widens the result, and once one is named the
+    // ravel is not repeated: what runs out is filled. It is REACHED only
+    // where the result outruns the argument, and a fill that is never
+    // placed is never examined either: `2 $ !.'z' (1 2 3)` is `1 2`, where
+    // `4 $ !.'z' (1 2 3)` is a domain error.
+    let widened;
+    let (y, filled) = match filled.filter(|_| n > 0 && n > unit.saturating_mul(src)) {
+        Some(f) => {
+            let (a, atom) = fitted_fill(y, f, span)?;
+            widened = a;
+            (&widened, Some(atom))
+        }
+        None => (y, None),
+    };
     let mut data = Data::empty(y.dtype());
     if n > 0 && src == 0 {
         if by_items && filled.is_none() {
