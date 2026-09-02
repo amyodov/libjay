@@ -3115,10 +3115,8 @@ impl Verb {
                 // A SYMBOL on the right is refused whatever the frame,
                 // where a character and a box are not: `(1 2 3) p. (0 $ s:
                 // ,'a')` is a domain error there.
-                if y.dtype() == DType::Symbol {
-                    if let Some(r) = right.as_ref() {
-                        poly_eval(x, r, span)?;
-                    }
+                if y.dtype() == DType::Symbol && let Some(r) = right.as_ref() {
+                    poly_eval(x, r, span)?;
                 }
                 let t = right
                     .as_ref()
