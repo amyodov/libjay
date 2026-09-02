@@ -4929,3 +4929,9 @@ the register.
   zero, without finishing at the gamma minimum. And a reduction inside a
   cut whose answer is whole: `%/;._1 (2 7 1 8)` is 2.76677e_322 there,
   which is the integer 56's bit pattern read as a double.
+- 2026-09-02 — A RANK CONJUNCTION WHOSE RANKS ARE THE VERB'S OWN IS NOT
+  WRITTEN OUT: `#."1 1` writes itself back as `#.`, `+"0` as `+` and `,"_`
+  as `,`, while `#:"_` keeps its rank because `#:` is `_ 1 0`. This does
+  not contradict the round-4 rule that a rank spells itself back as
+  written: the atoms are kept wherever the rank changes anything, and only
+  a rank that changes nothing disappears.

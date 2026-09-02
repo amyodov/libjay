@@ -2233,9 +2233,6 @@ families are the obverse of `[` or `]` composed on the LEFT
   there whatever the argument was, although `3!:0 (+. 0.5)` is the float
   type. libjay follows the measured table for the scalar monads, `#:`,
   `*.` and `+.`; `? (0 $ 'a')` and `x: (0 $ 'a')` are still open.
-- **A rank conjunction whose ranks are the verb's own is not written out.**
-  `#."1 1 y` spells itself back as `#.` there, where `u"2 _ 2` keeps every
-  atom it was written with.
 - **The obverse of `-.@#:`.** The reference answers `-.@#: ^:_1 (1 2 3)`
   with `0 _1 _2` — `-.^:_1` alone — although its own `#:^:_1 (0 _1 _2)` is
   `_4`, which is what the composition's obverse should reach.

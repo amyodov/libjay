@@ -267,7 +267,9 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   EXTREMUM reads real-valued complex data as the reals it holds wherever it
   arrives from; TWO INFINITE PARTS NAME NO DIRECTION, so `%: _j_` and `_j_
   ^ 0.5` are `_.j_.`. An exact factorial that would exhaust the machine is
-  refused rather than widened to a float infinity.
+  refused rather than widened to a float infinity. A RANK CONJUNCTION WHOSE
+  RANKS ARE THE VERB'S OWN is not written out: `#."1 1` spells itself back
+  as `#.`.
 - **Round 4 of the agreement sweep, everything but the polynomial verbs.**
   A rank and a level SPELL THEMSELVES BACK as they were written: `u"2 _ 2`
   and `u"_ 2` are one verb, and the reference writes each out the way it

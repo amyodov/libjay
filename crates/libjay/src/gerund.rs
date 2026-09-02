@@ -598,6 +598,11 @@ fn rank_ar(inner: &Verb, r: crate::verb::Ranks) -> Option<Ar> {
         Verb::BondRight(g, n) if r == [g.ranks()[1]; 3] => {
             der("&", vec![verb_ar(g)?, Ar::Noun(n.clone())])
         }
+        // A RANK CONJUNCTION WHOSE RANKS ARE THE VERB'S OWN IS NOT WRITTEN
+        // OUT: `#."1 1` writes itself back as `#.`, `+"0` as `+` and `,"_`
+        // as `,`, where a rank that changes anything keeps every atom it
+        // was written with (`u"2 _ 2` and `u"_ 2` write differently).
+        _ if r.triple() == inner.ranks() => verb_ar(inner),
         _ => der("\"", vec![verb_ar(inner)?, Ar::Noun(rank_noun(r))]),
     }
 }

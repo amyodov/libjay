@@ -2374,6 +2374,12 @@ impl Verb {
             Verb::Cycle(vs) => {
                 vs.iter().map(Verb::name).collect::<Vec<_>>().join("`")
             }
+            // A RANK CONJUNCTION WHOSE RANKS ARE THE VERB'S OWN IS NOT
+            // WRITTEN OUT: `#."1 1` spells itself back as `#.` and `+"0`
+            // as `+`, where a rank that changes anything keeps every atom
+            // it was written with (`u"2 _ 2` and `u"_ 2` are one verb and
+            // write differently).
+            Verb::Rank(v, r) if r.triple() == v.ranks() => v.name(),
             Verb::Rank(v, r) => format!("{}\"{}", v.name(), rank_str(*r)),
             Verb::Reduce(v) | Verb::NWise(v) => format!("{}/", v.name()),
             Verb::Windowed(v, WindowKind::Suffix) => format!("{}\\.", v.name()),

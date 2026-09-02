@@ -110,3 +110,18 @@ f =. 3 : '>:^:y ] 0'\nf 0
 f =. 3 : '+:^:y ] 1'\nf 5
 f =. 4 : '+:^:x ] y'\n3 f 1
 n =. <3\n>:^:n ] 0
+
+// Round 5: A RANK CONJUNCTION WHOSE RANKS ARE THE VERB'S OWN IS NOT
+// WRITTEN OUT, where one that changes anything keeps every atom.
+": +"0
+": +"0 0 0
+": #."1 1
+": #."1
+": <."0
+": ,"_
+": %:"0 0 0
+": #:"_
+": +/"1 1
+": +"1
+": +"2 _ 2
+": +"_ 2
