@@ -134,3 +134,18 @@ p. (0 1 1 _)
 ? the same boundary, one radix per cell
 (_9223372036854775806) *."_2 (i. 3 4)
 ? the same boundary over a table
+
+// A LOGARITHM whose left argument holds a NEGATIVE number and whose right
+// is not numeric. The reference neither answers it nor refuses it: the
+// sentence leaves no value, prints nothing on either stream, exits 0, and
+// the session carries on — `z =: (1.5 2.5 _0.5) ^. a:` leaves `z`
+// undefined. The same box in the same place IS a domain error where no
+// atom of the left is negative (`(1.5 2.5) ^. a:`), so an unrelated atom's
+// SIGN decides whether a box is in the domain. libjay refuses on the type,
+// which is what it answers everywhere else on this path.
+(1.5 2.5 _0.5) ^. (a:)
+? the reference neither answers nor refuses; the sign of an unrelated atom decides
+(1.5 _0.5) ^. (<1 2)
+? the same silence over a plain box
+(_0.5) ^. 'a'
+? the same silence over characters

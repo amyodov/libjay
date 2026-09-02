@@ -734,3 +734,29 @@ $ ((0 2 $ 'a') , !.1e_3 'abc')
 (0 0 $ 0) , !.0 (2;5)
 2 {. !.'z' (1 2 3)
 2 }. !.'z' (1 2 3)
+
+// The two verbs that MAKE A COMPLEX NUMBER settle their domain from the
+// RIGHT argument alone, where the logarithm settles it from either side:
+// `(<1) j. (i. 0)` is the empty and `(i. 0) j. (<1)` a domain error, while
+// both sides of `^.` refuse. `%:` is the mirror image of neither — a
+// character refuses it on either side and a box only on the left.
+(<1) j. (i. 0)
+(i. 0) j. (<1)
+'a' r. (i. 0)
+(i. 0) r. 'a'
+(<1) ^. (i. 0)
+(i. 0) ^. (<1)
+(i. 0) %: (<1)
+(<1) %: (i. 0)
+
+// INTERVAL INDEX compares nothing where there is no bound to compare
+// against, so the two kinds are no question there: `(0 0$0) I. ('')` is 0,
+// the answer every value gets among no bounds at all. The shapes are still
+// read.
+(0 0 $ 0) I. ('')
+(0 0 $ 0) I. (0 $ 'a')
+(0 0 $ '') I. (i. 0)
+(0 0 $ 0) I. (2 0 $ 'a')
+(0 3 $ 0) I. ('')
+(0 0 $ 0) I. (<1)
+(0 0 $ 0) I. (0 $ <1)

@@ -5582,14 +5582,17 @@ fn complex_dyad_data(
 /// Which type refusals a scalar dyad keeps over an EMPTY frame, and on
 /// which side. Nearly every arithmetic verb answers the empty whatever it
 /// was handed — `(i. 0) ^ (<1)`, `(i. 0) o. (<1)` and `(i. 0) ! (<1)` all
-/// do — while the logarithm and the two that make a complex number settle
-/// their domain from the whole argument. `%:` sits between the two: a
-/// CHARACTER refuses it on either side, and a BOX only on the left, so
-/// `(<1) %: (i. 0)` is a domain error and `(i. 0) %: (<1)` is the empty.
-/// The table is the oracle's, measured verb by verb and side by side.
+/// do — while the LOGARITHM settles its domain from the whole argument on
+/// either side. The two that make a complex number settle it from the RIGHT
+/// argument alone: `(i. 0) j. (<1)` is a domain error and `(<1) j. (i. 0)`
+/// the empty. `%:` is the mirror image of neither: a CHARACTER refuses it
+/// on either side, and a BOX only on the left, so `(<1) %: (i. 0)` is a
+/// domain error and `(i. 0) %: (<1)` the empty. The table is the oracle's,
+/// measured verb by verb and side by side.
 fn types_before_the_frame(op: ScalarDyad, left: bool, boxed: bool) -> bool {
     match op {
-        ScalarDyad::Log | ScalarDyad::MakeComplex | ScalarDyad::PolarBy => true,
+        ScalarDyad::Log => true,
+        ScalarDyad::MakeComplex | ScalarDyad::PolarBy => !left,
         ScalarDyad::Root => left || !boxed,
         _ => false,
     }
@@ -14158,7 +14161,11 @@ fn interval_index_cells(
     // Bounds and values are compared, so they must be comparable: the
     // reference refuses `(3 3 $ 0) I. (1;'ab';2)`, where a numeric bound
     // meets a boxed value, exactly as it refuses the same pair as lists.
-    if x.dtype().is_numeric() != y.dtype().is_numeric() {
+    // Where there is NO BOUND to compare against, nothing is compared and
+    // the two kinds are no question: `(0 0$0) I. ('')` is 0, the answer
+    // every value gets among no bounds at all. The shapes are still read —
+    // `(0 3$0) I. ('')` is a length error and `(0 0$0) I. (<1)` a rank one.
+    if x.count() > 0 && x.dtype().is_numeric() != y.dtype().is_numeric() {
         return Err(Error::domain(
             format!(
                 "interval index compares {} bounds with {} values",

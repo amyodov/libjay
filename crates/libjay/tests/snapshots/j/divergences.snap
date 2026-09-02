@@ -141,3 +141,15 @@
 > j:           0 _9.22337e18 _9.22337e18 _9.22337e18
 > j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
 > j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
+= (1.5 2.5 _0.5) ^. (a:)
+? the reference neither answers nor refuses; the sign of an unrelated atom decides
+< <error>
+> j:
+= (1.5 _0.5) ^. (<1 2)
+? the same silence over a plain box
+< <error>
+> j:
+= (_0.5) ^. 'a'
+? the same silence over characters
+< <error>
+> j:
