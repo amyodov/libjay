@@ -3196,7 +3196,12 @@ impl Verb {
                 [(x, true), (y, false)].into_iter().any(|(a, left)| {
                     !a.dtype().is_numeric()
                         && a.count() > 0
-                        && types_before_the_frame(op, left, a.dtype() == DType::Box)
+                        && types_before_the_frame(
+                            op,
+                            left,
+                            a.dtype() == DType::Box,
+                            if left { y.dtype() } else { x.dtype() },
+                        )
                 })
             });
             // The polynomial dyad settles its LEFT argument before the
@@ -5693,11 +5698,26 @@ fn complex_dyad_data(
 /// on either side, and a BOX only on the left, so `(<1) %: (i. 0)` is a
 /// domain error and `(i. 0) %: (<1)` the empty. The table is the oracle's,
 /// measured verb by verb and side by side.
-fn types_before_the_frame(op: ScalarDyad, left: bool, boxed: bool) -> bool {
+fn types_before_the_frame(op: ScalarDyad, left: bool, boxed: bool, other: DType) -> bool {
     match op {
         ScalarDyad::Log => true,
         ScalarDyad::MakeComplex | ScalarDyad::PolarBy => !left,
-        ScalarDyad::Root => left || !boxed,
+        // A root reads the EXPONENT's type before the frame. A boxed right
+        // argument is refused wherever the exponent is not a whole number
+        // (`(0 $ 1.5) %: (<1 2)` is a domain error, `(0 $ 5) %: (<1 2)` the
+        // empty); a character or a symbol is refused wherever it is not
+        // BOOLEAN (`(0 $ 5) %: ('a')` refuses where `(0 $ 0) %: ('a')`
+        // answers). An exponent that is itself an empty of some other type
+        // counts as the boolean one, as every empty does.
+        ScalarDyad::Root => {
+            let other = if other.is_numeric() { other } else { DType::Bool };
+            left
+                || if boxed {
+                    !matches!(other, DType::Bool | DType::I64)
+                } else {
+                    other != DType::Bool
+                }
+        }
         _ => false,
     }
 }
@@ -7252,7 +7272,12 @@ fn scalar_dyad(
             && let Some(bad) = [(x, true), (y, false)].into_iter().find(|&(a, left)| {
                 !a.dtype().is_numeric()
                     && a.count() > 0
-                    && types_before_the_frame(op, left, a.dtype() == DType::Box)
+                    && types_before_the_frame(
+                        op,
+                        left,
+                        a.dtype() == DType::Box,
+                        if left { y.dtype() } else { x.dtype() },
+                    )
             })
         {
             return Err(wrong_type(bad.0.dtype(), span));
@@ -10845,8 +10870,9 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         && let Ok(a) = &out
         && let Some(t) = empty_monad_type(&p.monad, y.dtype())
         && a.dtype() != t
+        && let Some(data) = empty_of_type(t, a.count())
     {
-        return Ok(Array::new(a.shape.clone(), Data::empty(t)));
+        return Ok(Array::new(a.shape.clone(), data));
     }
     // An empty argument holds no value outside the exact domain, so `x:`
     // answers where the same type at full would be refused: `3!:0 x: (0 $
@@ -10859,6 +10885,24 @@ fn monad_op(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
         return Ok(Array::new(y.shape.clone(), Data::empty(t)));
     }
     out
+}
+
+/// A buffer of `n` zeros in `t`, for retyping an answer a verb reached with
+/// no element to read. `n` is 0 for every such answer but the weighted sum,
+/// whose empty sum is the single number 0.
+fn empty_of_type(t: DType, n: usize) -> Option<Data> {
+    if n == 0 {
+        return Some(Data::empty(t));
+    }
+    Some(match t {
+        DType::Bool => Data::Bool(vec![0u8; n].into()),
+        DType::I64 => Data::I64(vec![0i64; n].into()),
+        DType::F64 => Data::F64(vec![0.0f64; n].into()),
+        DType::Ext => Data::Ext(vec![Ext::from(0i64); n].into()),
+        DType::Rat => Data::Rat(vec![Rat::zero(); n].into()),
+        DType::Complex => Data::Complex(vec![cx::ZERO; n].into()),
+        _ => return None,
+    })
 }
 
 /// The type an empty answer carries where the verb is not one that works
@@ -17286,12 +17330,17 @@ fn sparse_value(terms: &Array, at: Cx, span: Span) -> Result<Cx> {
 /// The ascending coefficients a boxed root form stands for: `m × (x-r0) ×
 /// (x-r1) × …`, multiplied out.
 fn root_form_coeffs(y: &Array, span: Span) -> Result<Vec<Cx>> {
-    let (multiplier, roots) = root_form(y, span)?;
+    // The MONAD reads a one-box LIST only where the box holds a TABLE, the
+    // sparse form: `p. (,<(2 2 $ 0 1 2 3))` is `0 0 0 2` there where
+    // `p. (,<4)` is a length error.
+    let sparse = y.rank() == 1
+        && y.as_boxes().is_some_and(|parts| parts.len() == 1 && parts[0].rank() == 2);
+    let (multiplier, roots) = root_form(y, sparse, span)?;
     // A TABLE where the roots go is not roots at all: the one-box form
     // reads it as the polynomial written sparsely. The two-box form does
     // not take one — `p. (2 ; (1 2 $ 1 2))` is a rank error there.
     if roots.rank() >= 2 {
-        if y.rank() == 1 {
+        if y.rank() == 1 && !sparse {
             return Err(Error::new(
                 ErrorKind::Rank,
                 format!(
@@ -17328,10 +17377,13 @@ fn root_form_coeffs(y: &Array, span: Span) -> Result<Vec<Cx>> {
 /// The multiplier and the roots a boxed polynomial argument holds. J writes
 /// the form as `multiplier ; roots` and lets the multiplier go unsaid: one
 /// box is the roots alone, with a multiplier of 1.
-fn root_form(y: &Array, span: Span) -> Result<(Cx, &Array)> {
+///
+/// `lone_list` says the caller reads a one-box LIST as the roots too. The
+/// DYAD does — `(,<4) p. 2` is `_2` there — and the monad does not:
+/// `p. (,<4)` is a length error where `p. (<4)` answers.
+fn root_form(y: &Array, lone_list: bool, span: Span) -> Result<(Cx, &Array)> {
     let parts = y.as_boxes().expect("a root form is boxed");
     // The form is a boxed SCALAR or a two-box LIST, and nothing else:
-    // `p. (,<4)` is a length error there where `p. (<4)` answers, and
     // `p. (2 2 $ <i. 2 2)` is a rank error.
     if y.rank() > 1 {
         return Err(Error::new(
@@ -17340,7 +17392,7 @@ fn root_form(y: &Array, span: Span) -> Result<(Cx, &Array)> {
             Some(span),
         ));
     }
-    if y.rank() == 1 && parts.len() != 2 {
+    if y.rank() == 1 && parts.len() != 2 && !(lone_list && parts.len() == 1) {
         return Err(Error::new(
             ErrorKind::Length,
             format!(
@@ -17560,7 +17612,7 @@ fn poly_eval(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let at = at.first().copied().unwrap_or(cx::ZERO);
     let value = match x.as_boxes() {
         Some(_) => {
-            let (mut v, roots) = root_form(x, span)?;
+            let (mut v, roots) = root_form(x, true, span)?;
             if roots.rank() >= 2 {
                 if x.rank() == 1 {
                     return Err(Error::new(
@@ -19959,12 +20011,16 @@ fn scan_obverse(f: &Verb, kind: WindowKind) -> Option<Verb> {
         differences
     };
     // A SCALAR has no axis to scan, so the scan leaves it as it is and the
-    // obverse has to leave it alone too: `+/\ ^:_1 ] 5` is 5, not the 0 a
-    // difference against a shifted-in fill would make. Running the undoing
-    // `0 < #@$` times is that guard, said in the language itself.
+    // obverse has to leave it alone too. But it still has to be a NUMBER:
+    // `*/\. ^:_1 (<1 2)` is a domain error in the reference where the
+    // guard alone would hand a box straight back. Adding zero first is what
+    // asks, and it is the identity on every number.
     let ranked = atop(
-        Verb::BondLeft(Array::scalar_i64(0), Box::new(named("<")?)),
-        atop(named("#")?, named("$")?),
+        atop(
+            Verb::BondLeft(Array::scalar_i64(0), Box::new(named("<")?)),
+            atop(named("#")?, named("$")?),
+        ),
+        Verb::BondLeft(Array::scalar_i64(0), Box::new(named("+")?)),
     );
     Some(Verb::PowerV(Box::new(undo), Box::new(ranked)))
 }
@@ -21362,6 +21418,12 @@ fn cycles_to_direct(
 /// atom is such a list of one, so `2 C. i.5` and `3 4 2 C. i.5` are the
 /// same permutation.
 fn permute(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    // A specification naming no place moves nothing, so the argument comes
+    // back as it stands — an ATOM stays an atom: `$ ('') C. (0)` is empty
+    // there, where making a list of it first would answer 1.
+    if x.count() == 0 {
+        return Ok(y.clone());
+    }
     let ys = as_list(y);
     let n = ys.items();
     if x.dtype() != DType::Box {
