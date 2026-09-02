@@ -760,3 +760,30 @@ $ ((0 2 $ 'a') , !.1e_3 'abc')
 (0 3 $ 0) I. ('')
 (0 0 $ 0) I. (<1)
 (0 0 $ 0) I. (0 $ <1)
+
+// A NAN THE PROGRAM HANDED IN travels through a GCD and an LCM: `1 +. _.`
+// and `1 *. _.` are both `_.`, where an INFINITY on either side is refused.
+// Over the COMPLEX numbers an infinite part is refused the same way — and
+// so is an infinite RESIDUE, even where the same infinity over the reals
+// answers (`_ | 5` is 5, `_ | 1j2` a refusal). A NaN part leaves the
+// divisor at zero and the multiple at whichever argument carries it.
+1 +. (_.)
+1 *. (_.)
+1 +. (0 1 _.)
+1 *. (0 1 _.)
+1 +. _
+1 *. __
+1 +. (_j0)
+1 +. (0j_)
+1 *. (0j_)
+1 +. (_.j0)
+1 +. (0j_.)
+3j4 +. (_.j_.)
+(_.j_.) +. (_.j_.)
+1 *. (0j_.)
+2 *. (_.j0)
+3j4 *. (_.j_.)
+1j2 | _
+_ | 1j2
+1j2 | (_j_)
+_j3.14159 | 1

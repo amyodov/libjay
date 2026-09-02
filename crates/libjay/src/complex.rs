@@ -254,6 +254,12 @@ pub fn residue(x: Cx, y: Cx) -> Cx {
 /// The Gaussian-integer greatest common divisor, by Euclid with the nearest
 /// Gaussian integer as the quotient. `gcd(0, 0)` is 0.
 pub fn gcd(a: Cx, b: Cx) -> Cx {
+    // A NAN in either part leaves no divisor: the reference answers zero,
+    // which divides nothing. `3j4 +. (_.j0)` is 0 there, and so is
+    // `(_.j_.) +. (_.j_.)`.
+    if [a[0], a[1], b[0], b[1]].iter().any(|v| v.is_nan()) {
+        return ZERO;
+    }
     let (mut a, mut b) = (a, b);
     // Bounded because each step strictly shrinks |b|; the cap is there so
     // that arguments that are not Gaussian integers stop rather than spin.
@@ -293,6 +299,15 @@ fn first_quadrant(z: Cx) -> Cx {
 /// `x *. y`: the least common multiple, `(x * y) % gcd`.
 #[inline]
 pub fn lcm(a: Cx, b: Cx) -> Cx {
+    // A NAN in either part leaves the multiple the argument that carries
+    // it: `1 *. 0j_.` is `0j_.` and `2 *. _.j0` is `_.` once the zero
+    // imaginary part narrows away.
+    if a[0].is_nan() || a[1].is_nan() {
+        return a;
+    }
+    if b[0].is_nan() || b[1].is_nan() {
+        return b;
+    }
     let g = gcd(a, b);
     if g[0] == 0.0 && g[1] == 0.0 { ZERO } else { div(mul(a, b), g) }
 }

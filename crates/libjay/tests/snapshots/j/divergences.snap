@@ -153,3 +153,15 @@
 ? the same silence over characters
 < <error>
 > j:
+= 1 <. (_.)
+? the reference's own two-pair answer is `1 1`, which contradicts this one
+< 1
+> j: _.
+= 1 >. (_.)
+? the reference's own two-pair answer is `1 1`, which contradicts this one
+< 1
+> j: _.
+= _ <. (_.)
+? the same, with an infinity for the other value
+< _
+> j: _.

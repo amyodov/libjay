@@ -149,3 +149,16 @@ p. (0 1 1 _)
 ? the same silence over a plain box
 (_0.5) ^. 'a'
 ? the same silence over characters
+
+// The EXTREMA of a NaN, one pair at a time. The reference answers `1 <. _.`
+// with `_.` and `1 1 <. (_. _.)` with `1 1` — the same operation on the
+// same values, differing only in how many pairs it was handed, which is a
+// vectorised path parting from a scalar one rather than a rule. libjay
+// answers both the way the reference answers the pairs: a NaN loses the
+// comparison and the other value stands.
+1 <. (_.)
+? the reference's own two-pair answer is `1 1`, which contradicts this one
+1 >. (_.)
+? the reference's own two-pair answer is `1 1`, which contradicts this one
+_ <. (_.)
+? the same, with an infinity for the other value

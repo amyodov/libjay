@@ -5392,9 +5392,35 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
         Pow => cx::pow(a, b),
         Log => cx::log(a, b),
         Root => cx::root(a, b),
-        Residue => cx::residue(a, b),
-        Lcm => cx::lcm(a, b),
-        Gcd => cx::gcd(a, b),
+        Residue => {
+            // An INFINITE part leaves no residue to name, and the reference
+            // refuses rather than answering a NaN — on either side, even
+            // where the same infinity over the reals answers (`_ | 5` is 5
+            // there, `_ | 1j2` a refusal).
+            if [a[0], a[1], b[0], b[1]].iter().any(|v| v.is_infinite()) {
+                return Err(Error::new(
+                    ErrorKind::Nan,
+                    "a residue of an infinity has no value",
+                    Some(span),
+                ));
+            }
+            cx::residue(a, b)
+        }
+        Lcm | Gcd => {
+            // An INFINITE part leaves no Gaussian integer to divide by, and
+            // the reference refuses rather than answering a NaN — as it
+            // refuses `1 +. _` on the reals. A NaN part is not refused: it
+            // leaves the divisor at zero and the multiple at whichever
+            // argument carries it.
+            if [a[0], a[1], b[0], b[1]].iter().any(|v| v.is_infinite()) {
+                return Err(Error::new(
+                    ErrorKind::Nan,
+                    "a greatest common divisor of an infinity has no value",
+                    Some(span),
+                ));
+            }
+            if op == Lcm { cx::lcm(a, b) } else { cx::gcd(a, b) }
+        }
         MakeComplex => cx::add(a, cx::mul(cx::I, b)),
         PolarBy => {
             // `a r. b` turns by the angle `b`, which is the exponent's
@@ -6379,6 +6405,14 @@ fn real_lcm_gcd(
     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, 0, &mut out, |a, b, slot| {
         let (a, b) = (whole(a), whole(b));
         let (a, b) = (if vanishes(a, b) { 0.0 } else { a }, if vanishes(b, a) { 0.0 } else { b });
+        // A NAN THE PROGRAM HANDED IN travels through: `1 +. _.` and
+        // `1 *. _.` are both `_.` in the reference, where an INFINITY on
+        // either side is refused. What the arithmetic itself makes is what
+        // it is judged on.
+        if a.is_nan() || b.is_nan() {
+            *slot = f64::NAN;
+            return true;
+        }
         let Some(g) = gcd_decimal(a, b).or_else(|| gcd_f64(a, b, tol)) else {
             ok = false;
             return false;
