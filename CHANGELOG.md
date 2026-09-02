@@ -296,6 +296,9 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   an extended number, a rational, a float, a complex number, and a symbol
   last. It is not the promotion two numbers with something in them take —
   `(0 $ 1x) , (0 $ 1.5)` is a float empty.
+- The identity of a CATENATION keeps the cell's remaining axes, so
+  `$ ,/ (0 3 4 $ 0)` is `0 4` and every scan and cut built on `,/` over an
+  argument with no item follows.
 
 - **Round 4 of the agreement sweep, everything but the polynomial verbs.**
   A rank and a level SPELL THEMSELVES BACK as they were written: `u"2 _ 2`

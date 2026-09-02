@@ -3886,8 +3886,10 @@ fn rank_monad(
     // visible where the frame is EMPTY: `$ +."0 (0 $ 'a')` is `0 2` in the
     // reference, what `+.` alone answers, and not the `0` a frame with a
     // refused fill cell would leave; `#:"0` — whose own rank is infinite —
-    // does frame, and answers `0`.
-    if frame_rank == 0 || eff as i64 >= v.ranks()[0] {
+    // does frame, and answers `0`. A NEGATIVE rank names no fixed one, so
+    // the two cannot be compared and the frame stands: `$ ="_1"0 (2 2 $
+    // 'ab')` is `2 2 1 1` where `="_1` on the whole argument is `2 2 2`.
+    if frame_rank == 0 || (v.ranks()[0] >= 0 && eff as i64 >= v.ranks()[0]) {
         // The inner verb applies its own rank machinery to the whole
         // argument; that is what `"` means.
         return v.monad(y, ctx, span);
@@ -12964,11 +12966,15 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     let cell_shape = y.shape[1..].to_vec();
     let m: usize = cell_shape.iter().product();
     if n == 0 {
-        // Catenation's identity is the empty LIST, whatever shape the cells
-        // that were not there would have had: `,/ i. 0 3` is `i. 0`.
+        // Catenation's identity is the empty array a cell catenates with
+        // unchanged: no item, and then the cell's own shape less the axis
+        // the catenation joins along. `,/ i. 0 3` is `i. 0`, and
+        // `$ ,/ (0 3 4 $ 0)` is `0 4`.
         if matches!(v, Verb::Prim(p) if matches!(p.dyad, DyadOp::AppendLeading | DyadOp::AppendLast))
         {
-            return Ok(Array::new(vec![0], Data::empty(y.dtype())));
+            let mut shape = vec![0usize];
+            shape.extend_from_slice(cell_shape.get(1..).unwrap_or(&[]));
+            return Ok(Array::new(shape, Data::empty(y.dtype())));
         }
         return match reduce_identity(v, m, ctx.cfg.rules.lang) {
             Some(d) => Ok(Array::new(cell_shape, d)),

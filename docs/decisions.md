@@ -4973,3 +4973,9 @@ the register.
   extended number, a rational, a float, a complex number, and a symbol
   last. It is not the promotion two numbers with something in them would
   take, and it is not the "wider container" rule libjay had been following.
+- 2026-09-02 — A NEGATIVE rank names no fixed one, so `u"n` cannot be
+  compared with the verb's own and the frame stands: `$ ="_1"0 (2 2 $ 'ab')`
+  is `2 2 1 1` where `="_1` on the whole argument is `2 2 2`. The identity
+  of a CATENATION is the empty array a cell catenates with unchanged — no
+  item, then the cell's own shape less the axis the catenation joins along
+  — so `$ ,/ (0 3 4 $ 0)` is `0 4`, not `0`.
