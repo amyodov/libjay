@@ -243,7 +243,11 @@ fn the_hypergeometric_series_sums_its_parameters() {
     assert!(e.msg.contains("did not converge"), "{}", e.msg);
     // The dyad stops the same sum after x terms: 1 + 3 + 9/2 = 8.5.
     assert_eq!(j("3 (1 H. 1) 3"), Array::scalar_f64(8.5));
-    assert_eq!(j("0 (1 H. 1) 5"), Array::scalar_f64(0.0));
+    // No term is summed at all, so no argument is read: the answer is a
+    // whole zero per element, whatever type the argument was written at,
+    // which is what `3!:0 (0 (1 H. 1) 5)` says on the reference.
+    assert_eq!(j("0 (1 H. 1) 5"), Array::scalar_i64(0));
+    assert_eq!(j("0 (2 H. 2) 'a'"), Array::scalar_i64(0));
     assert_eq!(j("1 (1 H. 1) 5"), Array::scalar_f64(1.0));
     // The count pairs with the argument element by element.
     assert_eq!(j("1 2 3 (1 H. 1) 1"), Array::from_f64(vec![1.0, 2.0, 2.5]));
