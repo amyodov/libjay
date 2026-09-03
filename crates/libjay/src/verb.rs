@@ -4998,13 +4998,25 @@ fn binomial_at_infinity(x: f64, y: f64) -> Option<f64> {
         // whole negative right argument is a pole.
         return (!(y < 0.0 && y.fract() == 0.0)).then_some(0.0);
     }
-    if x > 0.0 {
-        Some(f64::INFINITY)
-    } else if x == 0.0 {
-        Some(1.0)
-    } else {
-        Some(0.0)
+    // A WHOLE left argument makes `x ! y` a polynomial in y of that degree,
+    // so its value at either infinity is the leading term's: `2 ! __` is
+    // `_` where `1 ! __` and `3 ! __` are `__`, and a negative whole x
+    // makes the empty polynomial 0. A FRACTIONAL one makes a ratio of
+    // gammas instead, whose limit is a number in neither direction, so it
+    // is refused rather than guessed.
+    if x.fract() != 0.0 {
+        return None;
     }
+    if x == 0.0 {
+        return Some(1.0);
+    }
+    if x < 0.0 {
+        return Some(0.0);
+    }
+    if y > 0.0 {
+        return Some(f64::INFINITY);
+    }
+    Some(if (x as i64) % 2 == 0 { f64::INFINITY } else { f64::NEG_INFINITY })
 }
 
 /// `x ! y` on the reals.
@@ -5056,6 +5068,19 @@ fn binomial(x: f64, y: f64) -> f64 {
                 return sign * binomial_product(k as i64, x - y - 1.0);
             }
         }
+    }
+    // A NEGATIVE WHOLE y under a FRACTIONAL x. Γ(y+1) sits on a pole and
+    // nothing below it does — y−x+1 is fractional wherever y is whole and x
+    // is not — so the quotient is infinite. Its sign is the pole's own,
+    // which alternates with the pole's index (Γ's residue at −n carries
+    // `(_1)^n`), times the sign of the finite half: `0.5 ! _5` is `__`,
+    // `1.5 ! _5` is `_`, and `0.5 ! _6` is `__` again. Working the gammas
+    // out numerically instead reads the pole as a large finite number,
+    // which is what libjay used to answer.
+    if y.fract() == 0.0 && y < 0.0 && x.fract() != 0.0 {
+        let residue = if (-y - 1.0) % 2.0 == 0.0 { 1.0 } else { -1.0 };
+        let sign = residue * log_gamma(x + 1.0).1 * log_gamma(y - x + 1.0).1;
+        return sign * f64::INFINITY;
     }
     let direct = gamma(y + 1.0) / (gamma(x + 1.0) * gamma(y - x + 1.0));
     // Past a few thousand the gammas themselves leave the double range and

@@ -433,6 +433,7 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     let mut given: Option<String> = None;
     let mut journal: Option<String> = None;
     let mut journal_run: Option<String> = None;
+    let mut probe_list: Option<String> = None;
     let mut supervise = true;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -463,6 +464,9 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
             "--journal-run" => {
                 journal_run = Some(it.next().ok_or("--journal-run needs a file")?.clone());
             }
+            "--probe-list" => {
+                probe_list = Some(it.next().ok_or("--probe-list needs a file")?.clone());
+            }
             "--no-supervise" => supervise = false,
             other if other.starts_with("--") => return Err(format!("unknown option {other:?}")),
             _ => positional.push(arg),
@@ -476,12 +480,16 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     // `@ io=0` directive says under which origin its lines mean what they
     // are recorded to mean, and comparing them under any other origin
     // compares something nobody wrote.
-    let probes: Vec<fuzz::Probe> = match &given {
-        Some(path) => corpus::read(std::path::Path::new(path))
+    let probes: Vec<fuzz::Probe> = match (&probe_list, &given) {
+        // A supervisor's own list, in the format of `journal.rs` rather than
+        // the corpus one: a drawn sentence is arbitrary text, and the corpus
+        // format reserves the starts of lines.
+        (Some(path), _) => journal::read_probes(std::path::Path::new(path))?,
+        (None, Some(path)) => corpus::read(std::path::Path::new(path))
             .into_iter()
             .map(|e| fuzz::Probe { expr: e.expr, io: e.io })
             .collect(),
-        None => fuzz::fuzz(lang, count, seed, depth),
+        (None, None) => fuzz::fuzz(lang, count, seed, depth),
     };
     if !compare_them {
         let mut io = 1u8;

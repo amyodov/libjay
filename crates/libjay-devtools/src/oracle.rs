@@ -191,7 +191,7 @@ fn drain<R: Read + Send + 'static>(reader: R, cap: Option<usize>) -> Drain {
 /// group of its own (see `own_group`), and the signal goes to the group:
 /// killing the child alone would leave a grandchild holding the pipes open,
 /// and the drain threads waiting on them.
-fn kill_group(child: &mut Child) {
+pub fn kill_group(child: &mut Child) {
     #[cfg(unix)]
     {
         // Negative pid is the group, by `kill(2)`. The child is its own
@@ -205,7 +205,7 @@ fn kill_group(child: &mut Child) {
 /// Start a child in a process group of its own, so that `kill_group` can
 /// reach whatever it starts. jconsole and GNU APL are one process each
 /// today, but an oracle reached through a wrapper script is not.
-fn own_group(command: &mut Command) -> &mut Command {
+pub fn own_group(command: &mut Command) -> &mut Command {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

@@ -36,6 +36,27 @@ use crate::{Finding, Outcome, measure_one};
 /// so a sweep of an hour says what it is doing.
 const PROGRESS: &str = "  ";
 
+/// How long a worker may go without writing anything down before the
+/// supervisor takes it for stuck and kills it, in seconds.
+/// `LIBJAY_SWEEP_STALL` overrides it; 0 waits for ever.
+///
+/// The sentences a generator draws include ones that ask libjay for an
+/// array of two thousand million items, which is not a crash and not an
+/// infinite loop: it is a request the machine cannot fill, and the process
+/// grinds until the kernel kills it. Nothing INSIDE the process can stop
+/// that — a thread cannot be interrupted — so the limit is kept outside it.
+/// It is generous because a cut-down search legitimately spends many
+/// interpreter runs on one mismatch, and a false kill costs a measurement.
+const STALL: u64 = 600;
+
+fn stall() -> Option<std::time::Duration> {
+    let secs: u64 = std::env::var("LIBJAY_SWEEP_STALL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(STALL);
+    (secs > 0).then(|| std::time::Duration::from_secs(secs))
+}
+
 /// Measure `probes` under a worker process, restarting it past any sentence
 /// that kills it, and give back one finding per probe in the probes' own
 /// order.
@@ -90,18 +111,18 @@ pub fn supervise(
         let before = results.len();
         let mut command = std::process::Command::new(&exe);
         command.args(["fuzz", libjay_testkit::lang_dir(lang), "--compare"]);
-        command.arg("--exprs").arg(&exprs);
+        command.arg("--probe-list").arg(&exprs);
         command.arg("--journal-run").arg(&path);
         if signatures {
             command.arg("--signature");
         }
-        let status = command.status().map_err(|e| format!("starting the sweep worker: {e}"))?;
+        let ended = run_worker(&mut command, &path)?;
         let (after, in_flight) = read(&path);
         // A worker that neither finished nor left anything behind cannot be
         // stepped past: there is nothing to blame and nothing to skip.
-        if !status.success() && after.len() == before && in_flight.is_empty() {
+        if !ended && after.len() == before && in_flight.is_empty() {
             return Err(format!(
-                "the sweep worker exited {status} at {before} of {} sentences, having announced none",
+                "the sweep worker stopped at {before} of {} sentences, having announced none",
                 wanted.len()
             ));
         }
@@ -131,6 +152,41 @@ pub fn supervise(
         println!("{PROGRESS}the journal is {}", path.display());
     }
     Ok(findings)
+}
+
+/// Run one worker to its end, killing it if it goes quiet for longer than
+/// [`stall`] allows. `true` where it finished of its own accord.
+///
+/// The worker leads a process group, so the kill reaches the interpreter it
+/// had running as well: killing the worker alone would leave a jconsole
+/// holding a core.
+fn run_worker(command: &mut std::process::Command, path: &std::path::Path) -> Result<bool, String> {
+    let mut child =
+        oracle::own_group(command).spawn().map_err(|e| format!("starting the sweep worker: {e}"))?;
+    let limit = stall();
+    let mut last = (written(path), std::time::Instant::now());
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status.success()),
+            Err(e) => return Err(format!("waiting for the sweep worker: {e}")),
+            Ok(None) => {}
+        }
+        let now = written(path);
+        if now != last.0 {
+            last = (now, std::time::Instant::now());
+        } else if limit.is_some_and(|d| last.1.elapsed() >= d) {
+            println!("{PROGRESS}the worker wrote nothing for {:?}; killing it", limit.unwrap());
+            oracle::kill_group(&mut child);
+            let _ = child.wait();
+            return Ok(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// How much the journal holds, as the measure of a worker's progress.
+fn written(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
 /// The worker half: measure every probe the journal does not hold yet,
@@ -253,16 +309,28 @@ fn read(path: &std::path::Path) -> (std::collections::HashMap<Key, Finding>, Vec
     (results, attempted)
 }
 
+/// The probes a supervisor hands its worker: `io<TAB>sentence`, escaped, one
+/// per line. It is NOT the corpus format, because a drawn sentence is
+/// arbitrary text — `? 5` is a roll — and the corpus format reads a line
+/// beginning `? ` as a note about the line above it. A sweep must not lose
+/// a sentence to the file it was written down in.
 fn write_probes(path: &std::path::Path, probes: &[fuzz::Probe]) -> Result<(), String> {
     let mut text = String::new();
-    let mut io = 1u8;
     for probe in probes {
-        if probe.io != io {
-            text.push_str(&format!("@ io={}\n", probe.io));
-            io = probe.io;
-        }
-        text.push_str(&corpus::escape(&probe.expr));
-        text.push('\n');
+        text.push_str(&format!("{}\t{}\n", probe.io, corpus::escape(&probe.expr)));
     }
     std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Read back what [`write_probes`] wrote.
+pub fn read_probes(path: &std::path::Path) -> Result<Vec<fuzz::Probe>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut out = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let (io, expr) = line.split_once('\t').ok_or_else(|| format!("line {}", i + 1))?;
+        let io = io.parse().map_err(|_| format!("line {}: index origin {io:?}", i + 1))?;
+        let expr = corpus::try_unescape(expr).map_err(|e| format!("line {}: {e}", i + 1))?;
+        out.push(fuzz::Probe { expr, io });
+    }
+    Ok(out)
 }
