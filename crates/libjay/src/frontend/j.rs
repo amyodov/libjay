@@ -1551,11 +1551,15 @@ fn part_of_speech(f: &Frag) -> &'static str {
 /// left alone, so a body that reaches for it reports an undefined name, as
 /// the reference does.
 fn bind_operand(body: &mut [Vec<Frag>], verb_name: &str, noun_name: &str, operand: &Frag) {
-    let wanted = if operand.is_real_verb() { verb_name } else { noun_name };
+    // A NOUN operand answers to both of its spellings — `m` and `u` are one
+    // operand written two ways, and the noun is what either of them stands
+    // for. A VERB operand answers only to the verb spelling: `m` beside a
+    // verb operand is a name with nothing under it.
+    let noun = !operand.is_real_verb();
     for line in body.iter_mut() {
         for i in 0..line.len() {
             let Frag::Name(n, span) = &line[i] else { continue };
-            if n != wanted {
+            if n != verb_name && !(noun && n == noun_name) {
                 continue;
             }
             let span = *span;

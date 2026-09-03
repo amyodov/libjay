@@ -12449,7 +12449,9 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             )
         }
         DyadOp::IndexOfLast { origin } => Ok(index_of_last(x, y, origin, tol)),
-        DyadOp::MatrixDivide => matrix_divide(x, y, cfg.rules.lang == crate::Lang::J, span),
+        DyadOp::MatrixDivide => {
+            matrix_divide(x, y, cfg.rules.lang == crate::Lang::J, cfg, span)
+        }
         DyadOp::PartitionEnclose => partition_enclose(x, y, cfg.near(), span),
         DyadOp::PartitionCounts => partition_counts(x, y, cfg.near(), span),
         DyadOp::Squad { origin, leading } => {
@@ -15948,7 +15950,32 @@ fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
 ///
 /// `planes` is J's reading of a right-hand side of rank 3 or more, which
 /// APL's `⌹` refuses instead.
-fn matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array> {
+fn matrix_divide(
+    x: &Array,
+    y: &Array,
+    planes: bool,
+    cfg: EvalCfg,
+    span: Span,
+) -> Result<Array> {
+    // An ATOM on the right is no matrix: the system it names has one
+    // unknown and one equation per item of x, and the reference answers
+    // the items' SUM over that atom — `(1 2) %. 4` is 0.75, and `2 %. 0`
+    // the infinity the plain division gives.
+    if y.rank() == 0 && y.count() == 1 {
+        // No item sums to zero, of the shape one item would have had.
+        let mut total = if x.rank() == 0 {
+            x.clone()
+        } else if x.items() == 0 {
+            let cell: usize = x.shape[1..].iter().product();
+            Array::new(x.shape[1..].to_vec(), Data::I64(vec![0i64; cell].into()))
+        } else {
+            x.item(0)
+        };
+        for i in 1..x.items() {
+            total = scalar_dyad(ScalarDyad::Add, &total, &x.item(i), cfg, span)?;
+        }
+        return scalar_dyad(ScalarDyad::DivJ, &total, y, cfg, span);
+    }
     if (x.dtype() == DType::Complex || y.dtype() == DType::Complex) && y.count() != 0 {
         return complex_matrix_divide(x, y, planes, span);
     }
@@ -20136,11 +20163,31 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
     if spec.iter().any(|[w, d]| w.fract() != 0.0 || d.fract() != 0.0) {
         return Err(Error::domain("a format specification is whole numbers", span));
     }
+    // BOXED data has no field to lay out: the reference writes its
+    // ordinary display and reads the specification only far enough to
+    // refuse one it does not know, which is anything past a pair of the
+    // three smallest whole numbers.
     if y.dtype() == DType::Box {
-        return Err(Error::domain("format by specification takes numbers", span));
+        if spec.len() > 2 {
+            return Err(Error::new(
+                ErrorKind::Length,
+                format!("{} specification value(s) for boxed data", spec.len()),
+                Some(span),
+            ));
+        }
+        if spec.iter().any(|[w, d]| !(0.0..=2.0).contains(w) || *d != 0.0) {
+            return Err(Error::domain(
+                "boxed data is written as it stands, and takes 0, 1 or 2 as its specification",
+                span,
+            ));
+        }
+        return Ok(format_chars(y, fmt));
     }
-    let Some(values) = y.to_f64_vec() else {
-        return Err(Error::domain("format by specification takes numbers", span));
+    // A COMPLEX value is laid out by its REAL part, which is what a field
+    // of a width and a digit count can hold.
+    let values = match y.to_complex_vec() {
+        Some(v) => v.iter().map(|[re, _]| *re).collect::<Vec<f64>>(),
+        None => return Err(Error::domain("format by specification takes numbers", span)),
     };
     let cols = if y.rank() == 0 { 1 } else { y.shape[y.rank() - 1] };
     let rows = if cols == 0 { 0 } else { y.count() / cols };
