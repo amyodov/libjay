@@ -5309,10 +5309,15 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
             r
         }
         Root => {
-            // The ZEROTH root of a negative has no value at all — the
-            // reference refuses `0 %: _3` where `0 %: 3` is `_` — and the
-            // complex path is not asked about it.
+            // The ZEROTH root is the limit `y ^ _`: zero where the
+            // magnitude is under one, whatever the sign, and no value at
+            // all where a negative magnitude is one or more, since the
+            // powers of such a y alternate without settling. `0 %: _0.5`
+            // is 0 there and `0 %: _1` a domain error.
             if a == 0.0 && b < 0.0 {
+                if b > -1.0 {
+                    return Ok(0.0);
+                }
                 return Err(Error::domain("a zeroth root of a negative value has no value", span));
             }
             if b < 0.0 {
@@ -5564,7 +5569,23 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
         }
         Pow => cx::pow(a, b),
         Log => cx::log(a, b),
-        Root => cx::root(a, b),
+        Root => {
+            // The ZEROTH root of a NEGATIVE real is the limit the real
+            // path takes — zero under a magnitude of one, no value at or
+            // above it — and the complex path is reached whenever any
+            // other cell of the same pass needs it, so the rule stands
+            // here too.
+            if a == cx::ZERO && b[1] == 0.0 && b[0] < 0.0 {
+                if b[0] > -1.0 {
+                    return Ok(cx::ZERO);
+                }
+                return Err(Error::domain(
+                    "a zeroth root of a negative value has no value",
+                    span,
+                ));
+            }
+            cx::root(a, b)
+        }
         Residue => {
             // An INFINITE part leaves no residue to name, and the reference
             // refuses rather than answering a NaN — on either side, even
@@ -7159,8 +7180,8 @@ fn scalar_dyad_wide(
     // carries no order.
     if matches!(op, Min | Max)
         && t == DType::Complex
-        && let Some(xf) = real_of(x)
-        && let Some(yf) = real_of(y)
+        && let Some(xf) = real_of(x, tol)
+        && let Some(yf) = real_of(y, tol)
     {
         return scalar_dyad_data(op, &xf, xoff, xdiv, &yf, yoff, ydiv, n, tol, rules, span);
     }
@@ -7318,11 +7339,20 @@ fn pervade_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result
 /// at all needs no reading and answers for itself.
 /// One buffer's values as reals, where every complex one has no imaginary
 /// part. None where any of them has.
-fn real_of(d: &Data) -> Option<Data> {
+fn real_of(d: &Data, tol: Tol) -> Option<Data> {
     match d {
         Data::Complex(v) => {
-            let out: Option<Vec<f64>> =
-                v.iter().map(|z| (z[1] == 0.0).then_some(z[0])).collect();
+            // "Real-valued" is TOLERANT, as every other reading of a
+            // complex number as a real is: `2 >. 1j1e_15` is 2 there and
+            // `2 >. 1j1e_13` carries no order at all, the boundary being
+            // the imaginary part beside the value's own magnitude.
+            let real = |z: &Cx| {
+                if z[0].is_infinite() && z[1].is_finite() {
+                    return Some(z[0]);
+                }
+                tol.eq_cx(*z, [z[0], 0.0]).then_some(z[0])
+            };
+            let out: Option<Vec<f64>> = v.iter().map(real).collect();
             Some(Data::F64(out?.into()))
         }
         _ => Some(d.clone()),

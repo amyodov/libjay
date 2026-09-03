@@ -861,3 +861,44 @@ __ | _.
 %: __
 %: (%: __)
 *: ^:_3 (_ __ 0)
+
+// THE ZEROTH ROOT is the limit `y ^ _`: zero under a magnitude of one,
+// one at 1, an infinity above it, and no value at all where a NEGATIVE
+// magnitude reaches one. A real-valued complex operand orders as the real
+// it tolerantly equals, which is what an extremum reads.
+0 %: 5
+0 %: _5
+0 %: 0
+0 %: 0.5
+0 %: 1
+0 %: 2
+0 %: _0.5
+0 %: _1
+0 %: __
+0 %: _
+1 %: 5
+2 %: 5
+(1 0) %: 5
+(3 3 $ 1 0 0 0 1 0 0 0 1) %: (_9223372036854775806)
+(3 3 $ 1 0 0 0 1 0 0 0 1) %: (_ __ 0)
+(i. 3 4) %: (_9223372036854775806)
+_1 %: _5
+0.5 %: _5
+2 >./ (r.^:1 (1e_15))
+2 >./ (1j1e_15)
+2 >./ (1j1e_13)
+2 >./ (1j1e_10)
+2 >./ (1j5e_14)
+2 >./ (1j6e_14)
+2 >./ (100j1e_12)
+1 <. (2j0 5j0)
+<./ (2j0 5j0)
+2 >. (^. __)
+2 <. (^. __)
+1 <. 1j2
+1 >. 0j1e_20
+0 %: _0.9
+0 %: _0.5
+0 %: _1
+0 %: _1.5
+0 %: (_0.5 _1.5)
