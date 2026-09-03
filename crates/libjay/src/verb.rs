@@ -2923,7 +2923,8 @@ impl Verb {
                 other => other,
             },
             Verb::Fold { u, v, multiple, reverse } => {
-                fold_family(u, v, *multiple, *reverse, None, y, ctx, span)
+                let kind = FoldKind { multiple: *multiple, reverse: *reverse };
+                fold_family(u, v, kind, None, y, ctx, span)
             }
             Verb::Beside(f, g) => {
                 let r = g.monad(y, ctx, span)?;
@@ -3148,7 +3149,8 @@ impl Verb {
                 other => other,
             },
             Verb::Fold { u, v, multiple, reverse } => {
-                fold_family(u, v, *multiple, *reverse, Some(x), y, ctx, span)
+                let kind = FoldKind { multiple: *multiple, reverse: *reverse };
+                fold_family(u, v, kind, Some(x), y, ctx, span)
             }
             Verb::Beside(f, g) => {
                 let r = g.monad(y, ctx, span)?;
@@ -14300,17 +14302,23 @@ fn nwise(f: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
 /// what an insert of v over the empty answers, which is v's identity
 /// element, so the SINGLE forms have an answer where the multiple ones have
 /// no step to report.
+#[derive(Clone, Copy)]
+struct FoldKind {
+    multiple: bool,
+    reverse: bool,
+}
+
 #[inline(never)]
 fn fold_family(
     u: &Verb,
     v: &Verb,
-    multiple: bool,
-    reverse: bool,
+    kind: FoldKind,
     x: Option<&Array>,
     y: &Array,
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
+    let FoldKind { multiple, reverse } = kind;
     let mut items = if y.rank() == 0 { vec![y.clone()] } else { y.cells(1) };
     if reverse {
         items.reverse();
