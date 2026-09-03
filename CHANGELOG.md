@@ -67,6 +67,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   both, one nested magnitude block an item and two for a rational.
 - `__:`, the constant verb of the infinity below, which the lexer had read
   as a number and a definition's colon.
+- The type and the shape a RANKED scalar dyad answers with when its frame
+  has no cell. A fill the verb refused stands in as a BOOLEAN zero, the
+  narrowest numeric type there is, so it names no type of its own in the
+  answer — `3!:0 ((2 3 $ 1) *"1 _ 0 (0 $ 'a'))` is boolean where integer
+  zeros had widened it. A LOGARITHM and a ROOT are not asked again with
+  numbers at all: their frame stands alone in the boolean type and no
+  cell shape is learnt, so `$ ((2 3 $ 2) ^."1 _ 0 (0 $ 'a'))` is `0`
+  where every other scalar dyad answers `0 2 3`.
 - The whole of the boolean-function conjunction `m b.`: its ONE-ARGUMENT
   form, which is the same table read with a left argument of zero, so
   `(4 b.) y` is y itself and `(8 b.) y` its negation; the three numbers

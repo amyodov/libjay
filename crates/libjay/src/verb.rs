@@ -3347,7 +3347,16 @@ impl Verb {
             // objected to, and the left's own type is what the answer keeps
             // — `3!:0 ((2x) <."1 (0 2 $ <0))` is extended in the reference.
             let numeric_left = cell.as_ref().filter(|c| c.dtype().is_numeric()).cloned();
-            let framed = empty_frame(&p.frame, joining.unwrap_or_else(|| y.dtype()), cell, conform, keep_any, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
+            // A LOGARITHM and a ROOT are not asked again with numbers. Where
+            // their fill run refuses about a type, the frame stands on its
+            // own and no cell shape is learnt at all: `$ ((2 3 $ 2) ^."1 _ 0
+            // (0 $ 'a'))` is `0` in the reference, not the `0 2 3` every
+            // other scalar dyad answers, and its type is the boolean one.
+            let retries = !matches!(
+                self.scalar_dyad_op(),
+                Some(ScalarDyad::Log | ScalarDyad::Root)
+            );
+            let framed = empty_frame(&p.frame, joining.unwrap_or_else(|| y.dtype()), cell, conform, keep_any, agreeing, indexing, conform && retries, &[], ctx, |left, numeric, c| {
                 let left = match &numeric_left {
                     Some(l) if numeric => l,
                     _ => left,
@@ -3745,8 +3754,14 @@ fn empty_frame(
 }
 
 /// The same shape, holding zeros: a stand-in whose type no verb objects to.
+///
+/// The zeros are BOOLEAN ones, which is the narrowest numeric type there
+/// is, so a side that stands in for a fill the verb refused names no type
+/// of its own in the answer: `3!:0 ((2 3 $ 1) *"1 _ 0 (0 $ 'a'))` is the
+/// boolean type in the reference, where integer zeros would have widened
+/// it.
 fn numeric_like(a: &Array) -> Array {
-    Array::new(a.shape.clone(), Data::I64(vec![0i64; a.count()].into()))
+    Array::new(a.shape.clone(), Data::Bool(vec![0u8; a.count()].into()))
 }
 
 // ------------------------------------------------------------ agreement
