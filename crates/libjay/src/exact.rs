@@ -455,6 +455,22 @@ pub fn ext_pow(base: &BigInt, exp: u64) -> Option<BigInt> {
 /// split by Pollard's rho, which is what makes a large factor reachable.
 const TRIAL_LIMIT: u64 = 1 << 20;
 
+/// The smallest prime strictly greater than n, in the extended integers.
+/// The machine-word search hands over to this one where the next prime
+/// would not fit a word: the reference answers
+/// `4 p: 9223372036854775806` with 9223372036854775837, which is 2^63 + 29.
+pub fn ext_next_prime(n: &BigInt) -> BigInt {
+    let one = BigInt::one();
+    let mut k = n + &one;
+    if k < BigInt::from(2) {
+        return BigInt::from(2);
+    }
+    while !is_probable_prime(&k) {
+        k += &one;
+    }
+    k
+}
+
 /// The prime factors of a whole number, ascending, with multiplicity.
 /// `None` for anything that is not a positive integer; the factors of 1 are
 /// none at all.

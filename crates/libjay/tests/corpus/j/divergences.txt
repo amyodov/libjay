@@ -72,6 +72,32 @@ _1 + ((100000000) ! (100000000.00000001))
 _1 + ((1e8) ! (1e8 + 1e_4))
 ? both sides lose this one; the reference's answer is not the value either
 
+// A NaN OR AN INFINITY AMONG THE PRIMES, WHERE THE REFERENCE CONTRADICTS
+// ITSELF BETWEEN ONE ITEM AND SEVERAL. Every one of these is settled by the
+// reference's own answer to the same cell asked on its own:
+//
+//   `1 p: _.` is 0 there — a NaN is not prime — but `1 p: (_. 1 2)` is a
+//   domain error, the same question of the same value with two neighbours.
+//   `4 p: _.` is a domain error there, but `4 p: (_. 1 2)` is `2 2 3`, so
+//   the NaN that had no next prime alone has one in company.
+//   `4 p: (_ 1 2)` is `2 2 2`, although the reference's own `4 p: 2` is 3:
+//   an infinity ANYWHERE makes every cell answer with the smallest prime,
+//   including the cells that hold ordinary numbers.
+//
+// libjay keeps ONE rule, applied cell by cell, and it is the rule the
+// reference itself follows whenever the cell is asked on its own: a NaN is
+// no prime but has no place in the order, an infinity has no place either
+// except that the next prime after one is the smallest there is, and no
+// cell changes what a neighbouring cell answers.
+1 p: (_. 1 2)
+? the reference calls a lone NaN not prime and refuses the same NaN in a list
+4 p: (_. 1 2)
+? the reference refuses a lone NaN's next prime and answers one in a list
+4 p: (_. 1)
+? the reference refuses a lone NaN's next prime and answers one in a list
+4 p: (_ 1 2)
+? an infinity makes the reference answer 2 for cells whose own answer is 3
+
 // THE NEAR-EQUAL BINOMIAL REACHING A REFUSAL rather than a value, which is
 // to the rule above what the GCD's refusal row is to the GCD's. `1 ! y` IS
 // y, so `(1) ! (0.9999999999999999)` is 0.99999999999999989 here and the

@@ -71,6 +71,22 @@
 ? both sides lose this one; the reference's answer is not the value either
 < 0.00190154
 > j: 0.00190162
+= 1 p: (_. 1 2)
+? the reference calls a lone NaN not prime and refuses the same NaN in a list
+< 0 0 1
+> j: <error>
+= 4 p: (_. 1 2)
+? the reference refuses a lone NaN's next prime and answers one in a list
+< <error>
+> j: 2 2 3
+= 4 p: (_. 1)
+? the reference refuses a lone NaN's next prime and answers one in a list
+< <error>
+> j: 2 2
+= 4 p: (_ 1 2)
+? an infinity makes the reference answer 2 for cells whose own answer is 3
+< 2 2 3
+> j: 2 2 2
 = ((1) ! (0.9999999999999999)) ": 5
 ? the near-equal binomial parts by one bit and the format downstream refuses
 < <error>

@@ -7074,7 +7074,42 @@ fn from_exact(y: &Array) -> Array {
 }
 
 /// `x x: y`: the exact form named by x.
-fn exact_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+/// `_2 x: y`: `%/"1 y`, the alternating quotient over the LAST axis, which
+/// is what puts back together what form 2 split apart. The division itself
+/// is the ordinary one, so every type answers as it does anywhere else —
+/// two extended values make a rational, a complex pair divides as complex,
+/// and `1 % 0` is an infinity.
+///
+/// An axis with NOTHING along it folds to the identity of `%`, which is the
+/// boolean 1, and an axis of ONE item is that item, never divided — which
+/// is why a lone character or box comes back untouched where a table of
+/// them is refused.
+#[inline(never)]
+fn alternating_quotient(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    if y.rank() == 0 {
+        return Ok(y.clone());
+    }
+    let y = y.to_row_major();
+    let last = *y.shape.last().expect("rank at least 1");
+    let mut shape = y.shape.clone();
+    shape.pop();
+    let outer: usize = shape.iter().product();
+    if last == 0 {
+        return Ok(Array::new(shape, Data::Bool(vec![1u8; outer].into())));
+    }
+    let mut cells = Vec::with_capacity(outer);
+    for i in 0..outer {
+        let row = y.cell_at(y.rank() - 1, i);
+        let mut acc = row.item(last - 1);
+        for j in (0..last - 1).rev() {
+            acc = scalar_dyad(ScalarDyad::DivJ, &row.item(j), &acc, cfg, span)?;
+        }
+        cells.push(acc);
+    }
+    assemble(&shape, cells, span)
+}
+
+fn exact_form(x: &Array, y: &Array, cfg: EvalCfg, near: NearInt, span: Span) -> Result<Array> {
     match one_whole(x, "the form x: converts to", near, span)? {
         1 => {
             let e = to_exact(y, span)?;
@@ -7093,16 +7128,12 @@ fn exact_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
             Ok(Array::new(shape, Data::Ext(out.into())))
         }
         -1 => Ok(from_exact(y)),
-        // The one that leaves an inexact argument alone.
-        -2 => {
-            if !y.dtype().is_numeric() {
-                return Err(Error::domain(
-                    format!("x: needs real numbers, not {} data", y.dtype().name()),
-                    span,
-                ));
-            }
-            Ok(y.clone())
-        }
+        // The OBVERSE of form 2. Form 2 splits every value into a numerator
+        // and a denominator along a new last axis; this puts one back
+        // together, and over a longer axis it keeps going — it is `%/"1`,
+        // the alternating quotient, so `_2 x: (1 2 3)` is `1 % (2 % 3)`,
+        // which is 1.5, and `_2 x: (1 2 3x)` is the exact `3r2`.
+        -2 => alternating_quotient(y, cfg, span),
         n => Err(Error::domain(
             format!("x: converts to form 1, 2, _1 or _2, not {n}"),
             span,
@@ -12436,7 +12467,7 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::CharRep => char_rep_dyad(x, y, cfg.near(), span),
         DyadOp::PolyMultiply => poly_multiply(x, y, span),
         DyadOp::PolyDivide => poly_divide(x, y, span),
-        DyadOp::ExactForm => exact_form(x, y, cfg.near(), span),
+        DyadOp::ExactForm => exact_form(x, y, cfg, cfg.near(), span),
         DyadOp::Boolean(op) => bool_dyad(op, x, y, cfg, span),
         DyadOp::Bitwise(op) => bit_dyad(op, x, y, cfg, span),
         DyadOp::MatrixProduct => apl_matrix_product(x, y, cfg, span),
@@ -22862,7 +22893,7 @@ fn prime_meta_at(form: i64, n: f64, span: Span) -> Result<Array> {
             if n.is_nan() {
                 return Err(unordered("a NaN"));
             }
-            Ok(Array::scalar_i64(next_prime(n.floor() as i64, span)?))
+            Ok(next_prime(n.floor() as i64))
         }
         -4 => {
             if !n.is_finite() {
@@ -23058,12 +23089,27 @@ fn primes_below(n: i64, span: Span) -> Result<i64> {
     Ok(large[1])
 }
 
-fn next_prime(n: i64, span: Span) -> Result<i64> {
-    let mut k = n.checked_add(1).ok_or_else(|| Error::domain("no next prime", span))?;
-    while !is_prime(k) {
-        k = k.checked_add(1).ok_or_else(|| Error::domain("no next prime", span))?;
+/// The smallest prime strictly greater than n. There is always one, and
+/// past the machine word it is answered in the EXTENDED integers rather
+/// than refused: the reference's `4 p: 9223372036854775806` is
+/// 9223372036854775837, which no word holds.
+#[inline(never)]
+fn next_prime(n: i64) -> Array {
+    let mut k = n;
+    loop {
+        match k.checked_add(1) {
+            Some(next) => {
+                k = next;
+                if is_prime(k) {
+                    return Array::scalar_i64(k);
+                }
+            }
+            None => {
+                let from = Ext::from(k);
+                return Array::new(vec![], Data::Ext(vec![crate::exact::ext_next_prime(&from)].into()));
+            }
+        }
     }
-    Ok(k)
 }
 
 fn previous_prime(n: i64, span: Span) -> Result<i64> {
