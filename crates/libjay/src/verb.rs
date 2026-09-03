@@ -9503,12 +9503,24 @@ fn complex_counts(x: &Array, near: NearInt, span: Span) -> Result<Vec<(i64, i64)
     parts.iter().map(|c| Ok((whole(c[0])?, whole(c[1])?))).collect()
 }
 
-fn copy_items(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Result<Array> {
+fn copy_items(
+    x: &Array,
+    y: &Array,
+    apl: bool,
+    filled: Option<FillAtom>,
+    near: NearInt,
+    span: Span,
+) -> Result<Array> {
     // Each count is a number of copies and a number of fills to follow
     // them. J spells the pair as one COMPLEX count — `1j2 # 'a'` is an `a`
     // and two spaces — and APL spells a run of fills as a negative count.
+    // A COMPLEX count is asked to be whole and nonnegative only where an
+    // ITEM reads it: `(0j_3) # (i. 0)` is the empty in the reference, where
+    // `(0j_3) # (i. 3 0)` — three items, and the count read for each — is a
+    // domain error. A LIST of counts is still counted against the items.
+    let unread = !apl && x.rank() == 0 && y.rank() > 0 && y.items() == 0;
     let counts: Vec<(i64, i64)> = if !apl && x.dtype() == DType::Complex {
-        complex_counts(x, near, span)?
+        if unread { Vec::new() } else { complex_counts(x, near, span)? }
     } else {
         let plain = x
             .to_i64_vec_near(near)
@@ -9525,7 +9537,11 @@ fn copy_items(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Res
     let scalar_y = y.rank() == 0 || one_item;
     let m = y.item_size();
     let n = if x.rank() == 0 || !scalar_y { y.items() } else { counts.len() };
-    let per = if x.rank() == 0 { vec![counts[0]; n] } else { counts };
+    let per = match (x.rank() == 0, counts.first()) {
+        (true, Some(&c)) => vec![c; n],
+        (true, None) => Vec::new(),
+        (false, _) => counts,
+    };
     if per.len() != n {
         return Err(Error::new(
             ErrorKind::Length,
@@ -9538,8 +9554,20 @@ fn copy_items(x: &Array, y: &Array, apl: bool, near: NearInt, span: Span) -> Res
     let items: u128 = per.iter().map(|&(c, f)| c as u128 + f as u128).sum();
     let total = crate::limits::count(items * m.max(1) as u128, span)? / m.max(1);
     // APL's fill is the argument's prototype; J's is the type's own fill,
-    // so a boxed argument gets `a:` rather than a zeroed copy of an item.
-    let fill = if apl { prototype_of(y) } else { None };
+    // so a boxed argument gets `a:` rather than a zeroed copy of an item —
+    // unless `!.f` named one, which `(1j2) # !.9 (1 2)` puts in place of
+    // the zeros, answering `1 9 9 2 9 9`.
+    let (widened, fill) = match filled.filter(|_| !apl && per.iter().any(|&(_, f)| f > 0)) {
+        Some(f) => {
+            let (w, atom) = fitted_fill(y, f, span)?;
+            (Some(w), Some(atom))
+        }
+        None if apl => (None, prototype_of(y)),
+        None => (None, None),
+    };
+    // A fill of a wider type takes the ARGUMENT with it, as it does under a
+    // take: `(2j1) # !.1.5 (1 2)` is `1 1 1.5 2 2 1.5` in floats there.
+    let y = widened.as_ref().unwrap_or(y);
     let mut data = Data::empty(y.dtype());
     for (i, &(copies, fills)) in per.iter().enumerate() {
         // A scalar y stands in for every count.
@@ -12096,9 +12124,14 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             Ok(Array::scalar_bool(!arrays_match_rule(x, y, tol, NanRule::Same)))
         }
         DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules, cfg.tol, span),
-        DyadOp::Copy => {
-            copy_items(x, y, cfg.agreement == Agreement::ExactOrScalar, cfg.near(), span)
-        }
+        DyadOp::Copy => copy_items(
+            x,
+            y,
+            cfg.agreement == Agreement::ExactOrScalar,
+            cfg.fill,
+            cfg.near(),
+            span,
+        ),
         DyadOp::CollateGrade { down, origin } => collate_grade(x, y, down, origin, span),
         DyadOp::TransposeJ => transpose_j(x, y, cfg.near(), span),
         DyadOp::TransposeApl => transpose_apl(x, y, cfg.rules.origin, cfg.near(), span),

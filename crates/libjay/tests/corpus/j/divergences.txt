@@ -342,6 +342,12 @@ $ 2 +/\\. ('a')
 ? the same over a character, so the family is not about boxes
 $ 2 +/\\. (0 $ <0)
 ? the same where the argument has no item at all
+$ 2 +/\\. (0 $ a:)
+? the same with the empty box for the item
+$ 8 +/\\. (0 $ a:)
+? the same, with a wider left argument
+$ 2 +/\\. (0 $ s: 'a')
+? the same over symbols
 
 // The same INDEX OF LAST divergence pinned above, written with `i.`.
 (i. 0 0) i: (0 $ 0)

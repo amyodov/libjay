@@ -337,6 +337,18 @@
 ? the same where the argument has no item at all
 < 0
 > j: 0 0
+= $ 2 +/\\. (0 $ a:)
+? the same with the empty box for the item
+< 0
+> j: 0 0
+= $ 8 +/\\. (0 $ a:)
+? the same, with a wider left argument
+< 0
+> j: 0 0
+= $ 2 +/\\. (0 $ s: 'a')
+? the same over symbols
+< 0
+> j: 0 0
 = (i. 0 0) i: (0 $ 0)
 ? the reference's own `i.` answers 0 for the same arguments
 < 0
