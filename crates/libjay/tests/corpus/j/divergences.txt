@@ -145,7 +145,7 @@ p. (0 1 1 _)
 ? the same boundary over a table
 (2 7 1 8) *. (_9223372036854775806)
 ? the same boundary, the huge number on the right
-~ cause=differ:val:vector/num,differ:val:table/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
+~ cause=differ:val:vector/num|differ:val:table/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
 (_9223372036854775806) +. (2.0 4.0 6.0)
 ? the same boundary in the GCD the LCM is built on
 
@@ -257,7 +257,7 @@ _1r2 ^. _1r2
 // anything else is not this family and stays unexplained.
 (o. 1) *. 3
 ? the two float Euclids cut the same residue chain at different steps
-~ cause=differ:val:atom/num,differ:val:vector/num,differ:val:table/num verb=+.,*. also=o.,%,%:,^.,^,*,+,-,<.,>.,|,j.,!.,&.,&.: answers=inexact
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=+.,*. also=o.,%,%:,^.,^,*,+,-,<.,>.,|,j.,!.,&.,&.: answers=inexact
 
 // The same family REACHING A REFUSAL rather than a value. Where the two
 // GCDs part by one bit — `1 +. 1.0000000000000002` is exactly 1 there and
@@ -282,7 +282,7 @@ _1r2 ^. _1r2
 // rule to follow, so libjay keeps its own.
 !^:_1 ] 1.1
 ? two arguments have this factorial and the two engines pick different ones
-~ cause=differ:val:atom/num,differ:val:vector/num verb=! with=^: also=%,%:,-,+,*,&.,&.: answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num verb=! with=^: also=%,%:,-,+,*,&.,&.: answers=numeric
 !^:_1 ] 1.0000001
 ? two arguments have this factorial and the two engines pick different ones
 !^:_1 ] 0.8

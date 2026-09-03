@@ -1027,7 +1027,8 @@ pub fn cause_class(signature: &str) -> &str {
 ///
 /// - `cause=` (required) is the cause classes the mismatch may have — how
 ///   the two sides parted, and what libjay made of the sentence — one of
-///   which it must be.
+///   which it must be. Several are separated by `|`, since a cause class
+///   can hold a comma but never a bar.
 /// - `verb=` (required, non-empty) is the primitives the family is about.
 ///   The cut-down sentence must name at least ONE of them.
 /// - `with=` is the primitives it must name as well, ALL of them: a family
@@ -1176,7 +1177,13 @@ impl Family {
                 .split_once('=')
                 .ok_or_else(|| format!("clause {clause:?} is not key=value"))?;
             match key {
-                "cause" => family.cause = list(value),
+                // A cause class can hold a comma — a refusal's own words
+                // are part of it — so its alternatives are separated by
+                // the one character a cause class never holds, which is
+                // what a signature already uses to end it.
+                "cause" => {
+                    family.cause = value.split('|').filter(|s| !s.is_empty()).map(str::to_string).collect();
+                }
                 "verb" => family.verb = list(value),
                 "with" => family.with = list(value),
                 "also" => family.also = list(value),
@@ -1481,7 +1488,7 @@ mod tests {
     #[test]
     fn a_family_rule_covers_what_its_reason_covers() {
         let rule = Family::parse(
-            "cause=differ:val:atom/num verb=+.,*. also=o.,% answers=inexact",
+            "cause=differ:val:atom/num|differ:val:vector/num verb=+.,*. also=o.,% answers=inexact",
         )
         .expect("a well-formed rule");
         let covers = |expr: &str, ours: &str, theirs: &str| {
@@ -1498,7 +1505,10 @@ mod tests {
         assert!(!covers("(o. 1) *. 3", "12", "15"));
         // Nor is another way of parting, nor another kind of answer.
         assert!(!rule.covers(Lang::J, Verdict::WeRefuse, "(o. 1) *. 3", "<error> x", "1.5"));
-        assert!(!covers("(o. 1) *. 3", "3.19 4.5", "1.34 2.5"));
+        // A class the rule does name, spelled with the bar that separates
+        // them, is covered; one it does not is not.
+        assert!(covers("(o. 1) *. 3", "3.19 4.5", "1.34 2.5"));
+        assert!(!rule.covers(Lang::J, Verdict::Differ, "(o. 1) *. 3", "a b\nc d", "e f\ng h"));
         // `with=` asks for every one of its primitives, which is how a
         // family about an obverse is about `^:` as well as the verb.
         let obverse = Family::parse("cause=differ:val:atom/num verb=! with=^:").expect("rule");
