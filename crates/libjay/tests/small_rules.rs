@@ -161,14 +161,17 @@ fn j_decode_spreads_an_atom_of_digits(#[case] src: &str, #[case] want: i64) {
 }
 
 /// No radix at all weighs nothing, and the zero it answers with is the
-/// running total's own — a FLOAT where the digits are ordinary numbers, the
-/// INTEGER where they are boolean and the boolean where either side is
-/// exact. `3!:0 ((i. 0) #. 5)` is 8 in the reference, `3!:0 ((i. 0) #. 1)`
-/// 4 and `3!:0 ((i. 0) #. 5x)` 1.
+/// running total's own — a FLOAT for ordinary numbers, the INTEGER where
+/// BOTH sides are boolean, the boolean where either side is exact and the
+/// complex where either is complex. `3!:0 ((i. 0) #. 5)` is 8 in the
+/// reference, `3!:0 ((0 $ 0) #. 1)` 4, `3!:0 ((i. 0) #. 1)` 8 again — the
+/// radices being integers — and `3!:0 ((i. 0) #. 5x)` 1.
 #[rstest]
 #[case("(i. 0) #. 5", "0", "8")]
-#[case("(i. 0) #. 1", "0", "4")]
+#[case("(0 $ 0) #. 1", "0", "4")]
+#[case("(i. 0) #. 1", "0", "8")]
 #[case("(i. 0) #. 5x", "0", "1")]
+#[case("(i. 0) #. 5j1", "0", "16")]
 #[case("('') #. 5", "0", "8")]
 fn j_decode_with_no_radix_answers_the_running_total(
     #[case] src: &str,

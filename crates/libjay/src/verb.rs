@@ -3275,25 +3275,48 @@ impl Verb {
             )
             .then(|| empty_type(x, y))
             .flatten();
+            // What the NUMBERS made of the fill cells, where the verb had
+            // nothing to say about their types. A left argument that holds
+            // a value names the answer's type there, the empty on the right
+            // naming none of its own: `3!:0 (2 <."1 (0 2 $ <0))` is the
+            // integer type in the reference, not the boxed one.
+            let mut by_numbers = None;
+            // A LEFT side that is already numeric stands as it is when the
+            // numbers are asked again: it is the right side's type the verb
+            // objected to, and the left's own type is what the answer keeps
+            // — `3!:0 ((2x) <."1 (0 2 $ <0))` is extended in the reference.
+            let numeric_left = cell.as_ref().filter(|c| c.dtype().is_numeric()).cloned();
             let framed = empty_frame(&p.frame, joining.unwrap_or_else(|| y.dtype()), cell, conform, keep_any, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
+                let left = match &numeric_left {
+                    Some(l) if numeric => l,
+                    _ => left,
+                };
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
+                // Only the side whose TYPE the verb objected to stands in:
+                // a numeric side names the answer's type, and swapping it
+                // for plain integers would lose that.
                 let stand_in;
-                let right = if numeric {
+                let right = if numeric && !right.dtype().is_numeric() {
                     stand_in = numeric_like(right);
                     &stand_in
                 } else {
                     right
                 };
-                self.dyad_cell(left, right, c, span)
+                let answer = self.dyad_cell(left, right, c, span);
+                if numeric && let Ok(a) = &answer {
+                    by_numbers = Some(a.dtype());
+                }
+                answer
             })?;
             // The SHAPE of a catenation with no cell is what the fill cells
             // join to; the TYPE is the order's, whatever type that join
             // happened to take. `3!:0 ((0 $ 0) ,"0 1 (0 $ 'a'))` is the
             // character type there, where a boolean atom joined to an empty
             // character list is boolean.
-            return Ok(match joining {
-                Some(dt) => Array::new(framed.shape, Data::empty(dt)),
-                None => framed,
+            return Ok(match (joining, by_numbers) {
+                (Some(dt), _) => Array::new(framed.shape, Data::empty(dt)),
+                (None, Some(dt)) => Array::new(framed.shape, Data::empty(dt)),
+                (None, None) => framed,
             });
         }
         let work = x.count().max(y.count());
@@ -9819,15 +9842,12 @@ fn decode_nothing(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
 fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     // A weighted sum of NO digits is the whole number 0, whatever types the
     // radices and the digits were written in: `3!:0 ((0 $ 1r2) #. (0 $ 1x))`
-    // is the integer type there.
-    if y.count() == 0 && x.is_none_or(|x| x.count() == 0) && y.dtype().is_numeric() {
-        return Ok(Array::scalar_i64(0));
+    // and `3!:0 (2 #. (0 $ 1x))` are both the integer type there.
+    if y.count() == 0 {
+        return decode_nothing(x, y, span);
     }
     if let Some(exact) = decode_exact(x, y) {
         return Ok(exact);
-    }
-    if y.count() == 0 && (!y.dtype().is_numeric() || x.is_some_and(|x| !x.dtype().is_numeric())) {
-        return decode_nothing(x, y, span);
     }
     if has_imaginary(y) || x.is_some_and(has_imaginary) {
         return decode_complex(x, y, span);
@@ -9869,14 +9889,20 @@ fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     // and the answer is the zero of whichever arithmetic would have run it,
     // not the whole number the digits would have made. An EXACT side makes
     // it the boolean zero (`3!:0 (('') #. 2x)` is 1), boolean digits the
-    // integer one (`3!:0 ((0 $ 0) #. 0)` is 4), and anything else the
-    // running total's own float (`3!:0 (('') #. 2)` is 8).
+    // integer one where the RADICES are boolean too (`3!:0 ((0 $ 0) #. 0)`
+    // is 4 where `3!:0 ((i. 0) #. 0)` is 8), and anything else the running
+    // total's own float (`3!:0 (('') #. 2)` is 8). A COMPLEX side outranks
+    // them all and a FLOAT one outranks the exact.
     let no_radix = x.is_some_and(|x| x.count() == 0);
     if no_radix {
-        let exact = |t: DType| matches!(t, DType::Ext | DType::Rat);
-        let zero = if exact(y.dtype()) || x.is_some_and(|x| exact(x.dtype())) {
+        let has = |p: fn(DType) -> bool| p(y.dtype()) || x.is_some_and(|x| p(x.dtype()));
+        let zero = if has(|t| t == DType::Complex) {
+            Data::Complex(vec![cx::ZERO].into())
+        } else if has(|t| t == DType::F64) {
+            Data::F64(vec![0.0f64].into())
+        } else if has(|t| matches!(t, DType::Ext | DType::Rat)) {
             Data::Bool(vec![0u8].into())
-        } else if y.dtype() == DType::Bool {
+        } else if y.dtype() == DType::Bool && x.is_some_and(|x| x.dtype() == DType::Bool) {
             Data::I64(vec![0i64].into())
         } else {
             Data::F64(vec![0.0f64].into())
@@ -12093,9 +12119,11 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| {
             // A sum of NO digits is the whole number 0, and no exact type
             // travels out of arguments that held no value. Neither does one
-            // travel out of a radix list with nothing in it, whatever the
-            // digits were written as: `3!:0 (('') #. 2x)` is boolean there.
-            if x.count() == 0 { r } else { carry_exact2(r, x, y) }
+            // travel out of a radix list with nothing in it, nor out of a
+            // digit list with nothing in it, whatever the other side was
+            // written as: `3!:0 (('') #. 2x)` is boolean there and
+            // `3!:0 (2 #. (0 $ 1x))` the integer type.
+            if x.count() == 0 || y.count() == 0 { r } else { carry_exact2(r, x, y) }
         }),
         DyadOp::Encode => encode(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, cfg.fill, span),
@@ -12265,13 +12293,6 @@ const APL_EXTREME: f64 = 1.7976e308;
 /// reads the language.
 fn reduce_identity(v: &Verb, n: usize, lang: crate::Lang) -> Option<Data> {
     let Verb::Prim(p) = v else { return None };
-    // Indexing and permuting leave their right argument alone when the left
-    // one names every item in order, so `i.` of the cell's own shape is the
-    // identity of both: `({)/ (i. 0 3)` and `(C.)/ (i. 0 3)` are `0 1 2` in
-    // the reference, and `({)/ (0 $ 0)` is the atom 0.
-    if lang == crate::Lang::J && matches!(p.dyad, DyadOp::From | DyadOp::Permute) {
-        return Some(Data::I64((0..n as i64).collect::<Vec<i64>>().into()));
-    }
     let DyadOp::Scalar(op) = p.dyad else { return None };
     // Every numeric identity here is 0 or 1, and both references report a
     // boolean for each of them.
@@ -13125,6 +13146,18 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
             let mut shape = vec![0usize];
             shape.extend_from_slice(cell_shape.get(1..).unwrap_or(&[]));
             return Ok(Array::new(shape, Data::empty(y.dtype())));
+        }
+        // Indexing and permuting leave their right argument alone when the
+        // left one names every ITEM of it in order, so `i. #` of the cell
+        // is the identity of both — and the answer is that list, not the
+        // cell's own shape: `({)/ (i. 0 3)` is `0 1 2`, `({)/ (i. 0 2 3)`
+        // is `0 1` and `({)/ (0 $ 0)` the one-item list `0`.
+        if ctx.cfg.rules.lang == crate::Lang::J
+            && let Verb::Prim(p) = v
+            && matches!(p.dyad, DyadOp::From | DyadOp::Permute)
+        {
+            let k = cell_shape.first().copied().unwrap_or(1) as i64;
+            return Ok(Array::new(vec![k as usize], Data::I64((0..k).collect::<Vec<i64>>().into())));
         }
         return match reduce_identity(v, m, ctx.cfg.rules.lang) {
             Some(d) => Ok(Array::new(cell_shape, d)),
@@ -15808,15 +15841,45 @@ fn fetch(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
         None => vec![x.clone()],
     };
     let mut cur = y.clone();
+    // Whether the step just taken opened a BOX, which is the only thing a
+    // further step descends into. A value that no box held takes another
+    // step only while it is an atom: `((<0),(<0)) {:: ((1 2);(3 4))` is 1
+    // in the reference, where `((<''),(<0)) {:: (1 2 3)` — the same rank-1
+    // value, reached without opening anything — is a rank error, and so is
+    // `(2 $ a:) {:: (1 2 3)`.
+    let mut opened = true;
     for step in steps {
+        if !opened && cur.rank() != 0 {
+            return Err(Error::new(
+                ErrorKind::Rank,
+                format!("a path step into a rank-{} value that no box holds", cur.rank()),
+                Some(span),
+            ));
+        }
         // An empty step selects the level whole, which is how a path
         // reaches into a boxed scalar; `a:` spells it and holds characters.
-        let idx = if step.count() == 0 {
-            Vec::new()
+        // It opens a boxed SCALAR and nothing else — `(a:) {:: (1;2)` is
+        // the boxed list itself in the reference, and `(a:) {:: 5` the
+        // atom 5 rather than a one-item list.
+        if step.count() == 0 {
+            opened = cur.rank() == 0 && cur.dtype() == DType::Box;
+            if opened {
+                cur = open_cell(&cur);
+            }
+            continue;
+        }
+        // A step that is itself a boxed SCALAR holds the indices one box
+        // deeper: `(<<0) {:: (1 2 3)` is 1 in the reference, and so is the
+        // first step of `((<0);(<1)) {:: ((1 2);(3 4))`, which links its
+        // two paths one level down.
+        let step = if step.rank() == 0 && step.dtype() == DType::Box && cur.rank() > 0 {
+            open_cell(&step)
         } else {
-            step.to_i64_vec_near(near)
-                .ok_or_else(|| Error::domain("a fetch path holds integers", span))?
+            step
         };
+        let idx = step
+            .to_i64_vec_near(near)
+            .ok_or_else(|| Error::domain("a fetch path holds integers", span))?;
         // A scalar has one item, which is how `{` reads one too.
         let base =
             if cur.rank() == 0 { Array::new(vec![1], cur.data.clone()) } else { cur.clone() };
@@ -15832,7 +15895,9 @@ fn fetch(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
             ));
         }
         let at = cell_index(&base, &idx, span)?;
-        cur = open_cell(&base.cell_at(idx.len(), at));
+        let cell = base.cell_at(idx.len(), at);
+        opened = cell.rank() == 0 && cell.dtype() == DType::Box;
+        cur = open_cell(&cell);
     }
     Ok(cur)
 }
