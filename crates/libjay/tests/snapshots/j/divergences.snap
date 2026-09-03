@@ -71,6 +71,10 @@
 ? both sides lose this one; the reference's answer is not the value either
 < 0.00190154
 > j: 0.00190162
+= ((1) ! (0.9999999999999999)) ": 5
+? the near-equal binomial parts by one bit and the format downstream refuses
+< <error>
+> j: 5
 = (_2 0 2) C. 'hello'
 ? the reference's answer for a non-permutation is undefined; libjay refuses
 < <error>
@@ -285,6 +289,10 @@
 ? the reference searches into the complex plane; libjay has no real answer
 < <error>
 > j: 4.55654j_5.33834 _5 _
+= ! ^:_1 (3j4 1j_1)
+? the reference searches the complex plane; libjay's obverse reads reals
+< <error>
+> j: 2.91824j0.747611 1.80245j_0.907562
 = (3 1 4 1 5) *. (9223372036854775806)
 ? jconsole holds the left and the right in one double and libjay keeps them exact
 < 9.22337e18 9.22337e18 1.84467e19 9.22337e18 4.61169e19

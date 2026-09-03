@@ -105,7 +105,7 @@ feature — that is a promise, not a refusal.
 | `%.` | matrix inverse — the least-squares pseudo-inverse of a taller matrix; a wider one is refused, a singular one is a domain error | matrix divide: the least-squares solution of `y a = x` |
 | `p.` | the roots of the polynomial whose ascending coefficients y holds, as the boxed pair `multiplier ; roots`, largest magnitude first, then largest real part, then largest imaginary part; roots that sit on top of one another are refined through the m-1st derivative, so a repeated one is exact; a boxed argument of that form converts back to coefficients, and the multiplier may go unsaid — one box is the roots alone, so `p. (<1 2)` is `2 _3 1` | the polynomial with ascending coefficients x, at y (Horner); a boxed x is the `multiplier ; roots` form of the same polynomial, the multiplier optional. A complex argument keeps the complex type however real the value comes out. The left argument settles before an empty frame — a root form that is no root form is refused whatever the frame holds, and so is a symbol on the right — and what is left holds the type a value would have had |
 | `p..` | the derivative of the polynomial y's ascending coefficients describe, as coefficients; a boxed y is the root form and is differentiated through the coefficients it stands for | the integral, with x as the constant term; a boxed y is the root form here too, and exact coefficients integrate exactly. An EMPTY polynomial has nothing to integrate, so the answer is the constant term alone, in the type it was written in. The obverse of `n&p..` is the derivative, whatever n was |
-| `p:` | the y-th prime, counting from zero | the prime queries: `_1` counts the primes below y, `0` and `1` ask whether it is composite or prime, `2` gives the factorisation as a 2-row table and `3` its top row, `4` and `_4` step to the next and previous prime |
+| `p:` | the y-th prime, counting from zero | the prime queries: `_1` counts the primes below y, `0` and `1` ask whether it is composite or prime, `2` gives the factorisation as a 2-row table and `3` its top row, `4` and `_4` step to the next and previous prime. Only the two that FACTORISE need a whole y; the rest ask where y sits among the primes and read any real, so nothing fractional is prime, the count below y is the count below its ceiling, and the neighbours are the primes strictly either side. An infinity has no place in that order and is refused, except by `4`, which answers the smallest prime there is. `_1` stops at 2^31, as the reference does |
 | `q:` | prime factors, ascending, with multiplicity (`q: 1` is empty), exact however many digits the number has. The whole argument is read at once — one row per item, padded with 1s | the exponents of the first x primes; a NEGATIVE x gives the last `\|x\|` primes that divide y over their exponents, as a 2-row table, and `__` gives all of them |
 | `?` | roll: a random value below each element (`? 0` is a uniform double) | deal: x distinct values from `i. y` |
 | `?.` | roll from a fixed seed, restarted on every invocation | deal from that fixed seed |
@@ -2225,11 +2225,6 @@ families are the obverse of `[` or `]` composed on the LEFT
   makes; libjay settles what a name stands for while the sentence is
   parsed, so the assignment is a sentence of its own here and there is
   nothing to hand the train. Named, not a syntax error.
-- **`x p: y` for a y that is not a whole number.** The reference answers
-  some forms (`0 p: 2.5` is 1, `4 p: 1.5` is 2) and refuses others
-  (`2 p: 1.5`), by no rule black-box probing could settle; libjay refuses
-  all of them. The generator does not draw the form, and the register
-  carries the probe grid.
 - **The binary representation of the exact types.** `3!:1` and `3!:3` of
   extended or rational data are the one hole left in the `3!:` family, and
   docs/status.md carries them as red.

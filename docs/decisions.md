@@ -5102,3 +5102,39 @@ the register.
   reference additionally reads `1e_15` as `1r1000000000000000` where libjay
   gives `1r999999999999999`, one convergent earlier and equally inside the
   tolerance.
+- 2026-09-03 — `x p: y` over a y that is NOT WHOLE has a rule after all, and
+  round 5C's "no derivable rule" was five points rather than a grid. Only
+  the two forms that FACTORISE (`2 p:` and `3 p:`) need a whole number.
+  Every other form asks where y SITS among the primes, which is an ordinary
+  question about any real: nothing fractional is prime, the count below y
+  is the count below its ceiling, and the neighbours are the primes
+  strictly either side, so `4 p: 4.0` is 5 rather than 4. An infinity has
+  no place in that order and is refused — except by `4 p:`, which answers
+  the smallest prime there is for either infinity. That last is a wart, and
+  it is followed because the oracle wins and it is deterministic. A NaN
+  parts from the infinities: it is no prime (`1 p: _.` is 0) rather than no
+  answer, but it is still refused wherever a place in the order is asked
+  for.
+- 2026-09-03 — the PRIME COUNT is computed sublinearly, not by listing.
+  `p:^:_1 y` is `_1 p: y`, the count of primes strictly below y, and the
+  reference answers it to exactly 2^31. Counting one candidate at a time
+  cannot reach that — there are 105097564 primes below the bound — so
+  libjay carries how many values survive each prefix of the sieve for the
+  roughly `2*sqrt(n)` distinct values of `n/i`, which costs about `n^(3/4)`
+  steps and `sqrt(n)` words and never lists a prime. `is_prime` went the
+  same way, from trial division to the strong probable-prime test over the
+  first twelve prime bases — a proof below 3.3e24 and so for every value a
+  machine word holds. Both are published algorithms and neither has
+  anything to do with any Iverson-family source.
+- 2026-09-03 — the umbrella float-GCD family rule now admits `#.`, `#:` and
+  `^:` in its `also=` clause, and the cost of the third is written above
+  the rule rather than left implicit. `#.` is a polynomial in the base and
+  so is arithmetic the rule already allowed under other names, which was
+  MEASURED (both engines answer `#. (1 1.0000000000001)` alike, and the
+  `*.` after it is what parts them). `^:` is admitted because a GCD reached
+  through a structural obverse is still that GCD — but `^:` with a negative
+  left argument is an obverse, a family of its own, so this rule would now
+  excuse a future divergence in the obverse OF `+.` or OF `*.`. Those two
+  were measured across the exact and float types this round and agree
+  throughout; the note beside the rule says to re-measure them before
+  trusting it if it is ever the only thing matching a mismatch.

@@ -1,0 +1,163 @@
+// Round 7B: the numeric rules measured against jconsole — the prime
+// queries over a y that is not whole, the prime count and its bound, the
+// binomial at its own argument, and the logarithm of an exact 1.
+//
+// NOT HERE, DELIBERATELY: `q:` of a complex number and `3 p: _.`. The
+// reference answers each with nothing at all — no value, no shape, no type
+// — which is the signature of the silent `q: _.` death the quarantine list
+// carries. Neither may be recorded.
+
+// THE PRIME COUNT. `p:^:_1 y` is `_1 p: y`: how many primes stand strictly
+// below y, which for a prime y is that prime's own index.
+p:^:_1 ] 0
+p:^:_1 ] 1
+p:^:_1 ] 2
+p:^:_1 ] 3
+p:^:_1 ] 4
+p:^:_1 ] 10
+p:^:_1 ] 100
+p:^:_1 ] 1000
+p:^:_1 ] 1000000
+p:^:_1 (i. 10)
+p:^:_1 (2 3 $ i. 6)
+3!:0 (p:^:_1 (i. 10))
+p: ^:_2 ] 10
+_1 p: 100
+_1 p: 1000000
+
+// Its argument need not be whole: the count below y is the count below its
+// ceiling. A negative y has nothing below it.
+p:^:_1 ] 2.5
+p:^:_1 ] 1.5
+p:^:_1 ] 3.9
+p:^:_1 ] 4.1
+p:^:_1 ] _1
+p:^:_1 ] _5.5
+p:^:_1 ] 100r3
+p:^:_1 ] 3j0
+_1 p: 2.5
+_1 p: _5
+_1 p: 1p1
+
+// The exact types carry through, and the empty answers the integer empty.
+p:^:_1 ] 100x
+3!:0 (p:^:_1 ] 100x)
+3!:0 (_1 p: 100x)
+p:^:_1 (0 $ 0)
+3!:0 (p:^:_1 (0 $ 0))
+$ p:^:_1 (0 $ 0)
+
+// The bound is exactly 2^31, and it is measured against the argument
+// rather than its floor.
+p:^:_1 ] 2147483648
+p:^:_1 ] 2147483647.5
+p:^:_1 ] 4294967296
+_1 p: 2147483648
+
+// WHETHER y IS PRIME. Nothing fractional is; a whole float is tested as
+// itself; a value with an imaginary part is not one either.
+1 p: 2.5
+0 p: 2.5
+1 p: 1.5
+0 p: 1.5
+1 p: 3.0
+1 p: 4.0
+1 p: 1r2
+1 p: (1r2 1r3)
+0 p: (1.5 2.5 _0.5)
+1 p: 2j0
+1 p: 3j4
+1 p: _2.5
+
+// THE NEIGHBOURING PRIMES, strictly either side, so a prime y steps past
+// itself. `_4 p:` refuses where there is no prime below.
+4 p: 1.5
+4 p: 2.5
+4 p: 7.5
+4 p: 0.5
+4 p: 4.0
+4 p: 1p1
+4 p: 1r2
+4 p: _2.5
+4 p: (1r2 1r3)
+_4 p: 2.5
+_4 p: 3.5
+_4 p: 7.5
+_4 p: 4.0
+_4 p: 1.5
+
+// An INFINITY has no place in that order and is refused — except by the
+// next prime, which answers the smallest there is for either infinity. A
+// NaN is no prime rather than no answer, and is still refused where a
+// place in the order is asked for.
+4 p: _
+4 p: __
+4 p: (_ __ 0)
+0 p: _
+1 p: _
+_1 p: _
+_4 p: _
+1 p: (_.)
+0 p: (_.)
+4 p: (_.)
+_1 p: (_.)
+
+// The two forms that FACTORISE still need a whole number.
+2 p: 1.5
+3 p: 1.5
+2 p: 2.5
+
+// THE BINOMIAL AT ITS OWN ARGUMENT is 1 at every magnitude, whole or not.
+0 ! 0
+5 ! 5
+0.5 ! 0.5
+_2.5 ! _2.5
+1e17 ! 1e17
+1e300 ! 1e300
+_1e17 ! _1e17
+1e17 ! 1
+1e17 ! _1
+_1e17 ! 0
+_1e17 ! _1
+_1e17 ! _2
+_1e17 ! 2
+
+// TWO NEGATIVE WHOLE ARGUMENTS: the upper-negation identity, whose sign
+// alternates with the parity of `y - x` READ OFF THE DOUBLE. Past 2^53 a
+// double cannot tell an odd whole number from an even one, so
+// `_1e17 ! _1` is 1 although 99999999999999999 is odd, and
+// `_99999999999999999 ! _1` is 1 for the same reason.
+_5 ! _1
+_5 ! _2
+_5 ! _3
+_5 ! _4
+_5 ! _5
+_4 ! _1
+_4 ! _2
+_4 ! _3
+_4 ! _4
+_3 ! _1
+_3 ! _2
+_2 ! _1
+_1 ! _1
+_6 ! _1
+_6 ! _2
+_7 ! _1
+_1e17 ! _3
+_99999999999999999 ! _1
+
+// THE LOGARITHM OF AN EXACT 1 is an exact 0, and 1 is the only argument
+// whose natural logarithm keeps the extended type. The rational type
+// declines with the rest of the transcendentals.
+^. 1x
+3!:0 (^. 1x)
+^. (1x 1x 1x)
+3!:0 (^. (1x 1x 1x))
+3!:0 (^. (2 2 $ 1x))
+3!:0 (^. (1x 2x))
+3!:0 (^. 1r1)
+3!:0 (^. 2x)
+3!:0 (^ 0x)
+^ ^:_1 ] 1x
+3!:0 (^ ^:_1 ] 1x)
+3!:0 (^ ^:_1 (1x 1x))

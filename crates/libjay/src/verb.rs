@@ -5063,16 +5063,43 @@ fn binomial(x: f64, y: f64) -> f64 {
     if x.is_infinite() || y.is_infinite() {
         return binomial_at_infinity(x, y).unwrap_or(f64::NAN);
     }
-    if x.fract() == 0.0 && x.abs() < 1e17 {
+    // `x ! x` IS 1 wherever it is finite, at any magnitude and whole or
+    // not: the falling factorial and the factorial under it have the same
+    // factors. The gamma quotient reaches that only while both gammas stay
+    // inside the double, so past their range — `297467900836831170 !
+    // 297467900836831170` — it reads as no value where the answer is the
+    // plainest there is.
+    if x == y {
+        return 1.0;
+    }
+    // A WHOLE x answers structurally wherever it fits a machine word. The
+    // bound used to be 1e17, which left every larger one to the gamma
+    // quotient and so to a NaN: `_1e17 ! 0` is 0 and `_1e17 ! _1` is 1, and
+    // neither needs any gamma at all.
+    if x.fract() == 0.0 && x.abs() <= 9e18 {
         let xi = x as i64;
         if xi < 0 {
-            if y.fract() == 0.0 && y < 0.0 && y >= x {
-                let sign = if (y as i64 - xi) % 2 == 0 { 1.0 } else { -1.0 };
+            // C(y, x) is 0 for a negative x unless y is negative too and no
+            // greater, where the upper-negation identity turns it into a
+            // product of `_y-1` factors. That product is worth walking only
+            // while there are few of them; past that the gamma quotient at
+            // the end of this function stands in, which is what falling out
+            // of the whole whole-x block reaches.
+            if !(y.fract() == 0.0 && y < 0.0 && y >= x) {
+                return 0.0;
+            }
+            if -y - 1.0 <= BINOMIAL_PRODUCT_LIMIT as f64 {
+                // The alternating sign is the parity of `y - x`, READ OFF
+                // THE DOUBLE rather than off two machine words. Past 2^53 a
+                // double cannot tell an odd whole number from an even one,
+                // and the reference reads the parity it has: its
+                // `_1e17 ! _1` is 1 where the exact difference
+                // 99999999999999999 is odd, because `1e17 - 1` is `1e17`
+                // there. Below 2^53 the two readings are the same.
+                let sign = if (y - x) % 2.0 == 0.0 { 1.0 } else { -1.0 };
                 return sign * binomial_product(-y as i64 - 1, -x - 1.0);
             }
-            return 0.0;
-        }
-        if xi <= BINOMIAL_PRODUCT_LIMIT {
+        } else if xi <= BINOMIAL_PRODUCT_LIMIT {
             return binomial_product(xi, y);
         }
         // Past the product limit the gamma quotient stands in, and it reads
@@ -6928,6 +6955,21 @@ fn exact_monad(op: ScalarMonad, y: &Array) -> Option<Array> {
         || (op == Pi && matches!(y.dtype(), DType::Ext | DType::Rat))
     {
         return None;
+    }
+    // THE LOGARITHM OF AN EXACT 1 IS AN EXACT 0, and 1 is the only argument
+    // whose natural logarithm is exact at all. `3!:0 (^. 1x)` is the
+    // extended type there where `^. 2x` is a float, and a pass keeps the
+    // type only where EVERY item is 1 — `^. (1x 2x)` is a float pair, and
+    // `^. (1x 1x 1x)` extended. The RATIONAL type declines above with the
+    // rest of the transcendentals, so `^. 1r1` is a float although `1r1`
+    // and `1x` are the same number.
+    if op == Ln
+        && let Data::Ext(v) = &y.data
+        && !v.is_empty()
+        && v.iter().all(|e| *e == Ext::from(1))
+    {
+        let out: Vec<Ext> = vec![Ext::from(0); v.len()];
+        return Some(Array::new(y.shape.clone(), Data::Ext(out.into())).with_layout(y.layout()));
     }
     let v = to_rat_vec(&y.data)?;
     let shape = y.shape.clone();
@@ -11639,11 +11681,19 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         MonadOp::Sparse => crate::sparse::sparsify(y, span),
         MonadOp::Dense => Ok(y.densified()),
         MonadOp::PrimeCount => {
-            let n = y
-                .to_i64_vec_near(ctx.cfg.near())
-                .ok_or_else(|| Error::domain("the prime count needs an integer", span))?;
-            let v = n.first().copied().unwrap_or(0);
-            Ok(carry_exact(Array::scalar_i64(primes_below(v, span)?), y))
+            // `p:^:_1 y` IS `_1 p: y` — the count of primes strictly below
+            // y, which for a prime y is that prime's own index and so makes
+            // the obverse of `p:`. It reads any real, fractional or not.
+            let zs = complex_digits_of(y, "the prime count", span)?;
+            let z = zs.first().copied().unwrap_or([0.0, 0.0]);
+            if z[1] != 0.0 {
+                return Err(Error::domain(
+                    "the prime count has no answer for a complex number",
+                    span,
+                ));
+            }
+            let v = prime_meta_at(-1, z[0], span)?;
+            Ok(carry_exact(v, y))
         }
         MonadOp::IndicesInverse => indices_inverse(y, ctx.cfg.near(), span),
         MonadOp::FactorialInverse => {
@@ -22722,41 +22772,117 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
     // the answers are assembled into it here — the right rank has to be
     // infinite for form 3's sake, which takes the framing off the rank
     // machinery and puts it here.
-    if y.rank() != 0 {
-        let ns = y
-            .to_i64_vec_near(near)
-            .ok_or_else(|| Error::domain("a prime query needs an integer", span))?;
-        let mut cells = Vec::with_capacity(ns.len());
-        for n in ns {
-            cells.push(prime_meta_at(form, n, span)?);
+    //
+    // Form 2 FACTORISES and so needs a whole number. Every other form asks
+    // where y sits among the primes, which is an ordinary question about
+    // any real: nothing fractional is prime, the count below it is the
+    // count below its ceiling, and its neighbours are the primes strictly
+    // either side of it.
+    if form == 2 {
+        if y.rank() != 0 {
+            let ns = y
+                .to_i64_vec_near(near)
+                .ok_or_else(|| Error::domain("a prime query needs an integer", span))?;
+            let mut cells = Vec::with_capacity(ns.len());
+            for n in ns {
+                cells.push(factor_table_at(n, span)?);
+            }
+            return assemble(&y.shape, cells, span);
         }
-        return assemble(&y.shape, cells, span);
+        let n = one_int(y, "a prime query", near, span)?;
+        return factor_table_at(n, span);
     }
-    let n = one_int(y, "a prime query", near, span)?;
-    prime_meta_at(form, n, span)
+    let zs = complex_digits_of(y, "a prime query", span)?;
+    let mut cells = Vec::with_capacity(zs.len());
+    for z in zs {
+        cells.push(prime_query_at(form, z, span)?);
+    }
+    if y.rank() == 0 {
+        return cells.pop().ok_or_else(|| Error::domain("a prime query needs a number", span));
+    }
+    assemble(&y.shape, cells, span)
 }
 
-/// One `x p: y`, for a single whole y and a form that is not 3.
-fn prime_meta_at(form: i64, n: i64, span: Span) -> Result<Array> {
+/// One `x p: y` for a single value and a form that neither factorises nor
+/// is 3. A value with an IMAGINARY PART is not a prime and has no place in
+/// the order of the primes either, so the two forms that ask whether it is
+/// one answer no and the three that ask where it sits refuse.
+#[inline(never)]
+fn prime_query_at(form: i64, z: Cx, span: Span) -> Result<Array> {
+    if z[1] != 0.0 {
+        return match form {
+            0 => Ok(Array::scalar_bool(true)),
+            1 => Ok(Array::scalar_bool(false)),
+            other => Err(Error::domain(
+                format!("{other} p: has no answer for a complex number"),
+                span,
+            )),
+        };
+    }
+    prime_meta_at(form, z[0], span)
+}
+
+/// One `x p: y`, for a single real y and a form that is neither 2 nor 3.
+#[inline(never)]
+fn prime_meta_at(form: i64, n: f64, span: Span) -> Result<Array> {
+    // An INFINITY has no place in the order of the primes — the reference
+    // refuses the count and both neighbours at one, and refuses to call it
+    // prime — with the single exception of the NEXT prime, which it answers
+    // with the smallest there is whichever infinity it was handed. A NaN
+    // parts from that: it is no prime rather than no answer (`1 p: _.` is 0
+    // and `0 p: _.` is 1), and it is refused wherever a PLACE in the order
+    // is asked for, the next prime included.
+    let unordered = |what: &str| Error::domain(format!("{what} has no place among the primes"), span);
     match form {
-        // How many primes are below y.
-        -1 => Ok(Array::scalar_i64(primes_below(n, span)?)),
-        // Whether y is prime, and its negation.
-        0 => Ok(Array::scalar_bool(!is_prime(n))),
-        1 => Ok(Array::scalar_bool(is_prime(n))),
-        // The factorisation as a table, and its top row on its own.
-        2 => {
-            let (ps, es) = factor_table(&Ext::from(n), span)?;
-            let k = ps.len();
-            let mut all: Vec<i64> = ps.iter().filter_map(crate::exact::ext_to_i64).collect();
-            all.extend(es);
-            Ok(Array::new(vec![2, k], Data::I64(all.into())))
+        // How many primes are below y: those at or below `ceil(y) - 1`,
+        // which for a whole y is everything under it and for a fractional
+        // one everything under its ceiling.
+        -1 => {
+            if !n.is_finite() {
+                return Err(unordered("the value counted below"));
+            }
+            Ok(Array::scalar_i64(primes_below(n.ceil() as i64, span)?))
         }
-        // The neighbouring primes.
-        4 => Ok(Array::scalar_i64(next_prime(n, span)?)),
-        -4 => Ok(Array::scalar_i64(previous_prime(n, span)?)),
+        // Whether y is prime, and its negation. Nothing fractional is, and
+        // a NaN is fractional enough for that — only an infinity is refused.
+        0 | 1 => {
+            if n.is_infinite() {
+                return Err(unordered("an infinity"));
+            }
+            let p = n.fract() == 0.0 && n.abs() < 9e18 && is_prime(n as i64);
+            Ok(Array::scalar_bool(if form == 0 { !p } else { p }))
+        }
+        // The neighbouring primes, strictly either side of y. EITHER
+        // infinity answers the smallest prime there is, which is what the
+        // reference does; a NaN answers nothing.
+        4 => {
+            if n.is_infinite() {
+                return Ok(Array::scalar_i64(2));
+            }
+            if n.is_nan() {
+                return Err(unordered("a NaN"));
+            }
+            Ok(Array::scalar_i64(next_prime(n.floor() as i64, span)?))
+        }
+        -4 => {
+            if !n.is_finite() {
+                return Err(unordered("the value looked below"));
+            }
+            Ok(Array::scalar_i64(previous_prime(n.ceil() as i64, span)?))
+        }
         other => Err(Error::domain(format!("{other} is not a prime query"), span)),
     }
+}
+
+/// `2 p: y`: y's distinct prime factors over the number of times each
+/// divides it, as a two-row table.
+#[inline(never)]
+fn factor_table_at(n: i64, span: Span) -> Result<Array> {
+    let (ps, es) = factor_table(&Ext::from(n), span)?;
+    let k = ps.len();
+    let mut all: Vec<i64> = ps.iter().filter_map(crate::exact::ext_to_i64).collect();
+    all.extend(es);
+    Ok(Array::new(vec![2, k], Data::I64(all.into())))
 }
 
 /// `x q: y`: the exponents of the primes in y — of the first x of them, or,
@@ -22804,25 +22930,132 @@ fn factor_table(n: &Ext, span: Span) -> Result<(Vec<Ext>, Vec<i64>)> {
     Ok((ps, es))
 }
 
+/// `a * b` and `b ^ e`, both modulo m, in the width above a machine word so
+/// that no product overflows on the way.
+fn mod_mul(a: u64, b: u64, m: u64) -> u64 {
+    ((a as u128 * b as u128) % m as u128) as u64
+}
+
+fn mod_pow(mut base: u64, mut exp: u64, m: u64) -> u64 {
+    let mut acc = 1u64;
+    base %= m;
+    while exp > 0 {
+        if exp & 1 == 1 {
+            acc = mod_mul(acc, base, m);
+        }
+        base = mod_mul(base, base, m);
+        exp >>= 1;
+    }
+    acc
+}
+
+/// Whether n is prime, by the strong probable-prime test over the first
+/// twelve prime bases. That test is a PROOF below 3.3e24 and so for every
+/// value a machine word holds, and it costs logarithms where a trial
+/// division costs a square root: `1 p: 9223372036854775783` is an answer
+/// rather than an afternoon, and neither `4 p:` nor `_4 p:` can be handed
+/// an argument that stalls a sweep.
+#[inline(never)]
 fn is_prime(n: i64) -> bool {
     if n < 2 {
         return false;
     }
-    let mut d = 2i64;
-    while d.saturating_mul(d) <= n {
-        if n % d == 0 {
+    let n = n as u64;
+    const BASES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
+    for p in BASES {
+        if n == p {
+            return true;
+        }
+        if n % p == 0 {
             return false;
         }
-        d += 1;
+    }
+    let mut d = n - 1;
+    let mut s = 0u32;
+    while d % 2 == 0 {
+        d /= 2;
+        s += 1;
+    }
+    'base: for a in BASES {
+        let mut x = mod_pow(a, d, n);
+        if x == 1 || x == n - 1 {
+            continue;
+        }
+        for _ in 1..s {
+            x = mod_mul(x, x, n);
+            if x == n - 1 {
+                continue 'base;
+            }
+        }
+        return false;
     }
     true
 }
 
+/// The largest argument the prime count answers for. The reference stops at
+/// exactly 2^31, refusing `2147483648` and answering `2147483647`, and a
+/// fractional argument is measured against the same bound rather than its
+/// floor: its `p:^:_1 ] 2147483647.5` is a limit error too.
+const PRIME_COUNT_LIMIT: f64 = 2147483647.0;
+
+/// How many primes are strictly below `n`.
+///
+/// Counting them one at a time cannot reach the bound the reference sets:
+/// there are 105097564 primes below 2^31 and testing each candidate costs
+/// its own square root. This is the sublinear count instead, which carries
+/// the number of survivors of each prefix of the sieve for the roughly
+/// `2*sqrt(n)` distinct values of `n/i` and never lists a prime at all. It
+/// runs in about `n^(3/4)` steps and `sqrt(n)` words, which is a few
+/// million of each at the bound.
+#[inline(never)]
 fn primes_below(n: i64, span: Span) -> Result<i64> {
-    if n < 0 {
-        return Err(Error::domain("counting the primes below a negative number", span));
+    if (n as f64) > PRIME_COUNT_LIMIT {
+        return Err(Error::new(
+            ErrorKind::Limit,
+            format!("counting the primes below {n} is past the limit of {PRIME_COUNT_LIMIT:.0}"),
+            Some(span),
+        ));
     }
-    Ok((2..n).filter(|&k| is_prime(k)).count() as i64)
+    // A count of what is BELOW n is a count of what is at or below n-1, and
+    // nothing at all is below 2.
+    let m = n - 1;
+    if m < 2 {
+        return Ok(0);
+    }
+    let mut r = (m as f64).sqrt() as i64;
+    while r * r > m {
+        r -= 1;
+    }
+    while (r + 1) * (r + 1) <= m {
+        r += 1;
+    }
+    // `small[i]` counts what survives at or below i; `large[i]` does the
+    // same for `m/i`. Before any prime is struck out every value but 1
+    // survives.
+    let mut small: Vec<i64> = (0..=r).map(|i| i - 1).collect();
+    let mut large: Vec<i64> = (0..=r).map(|i| if i == 0 { 0 } else { m / i - 1 }).collect();
+    for p in 2..=r {
+        if small[p as usize] == small[(p - 1) as usize] {
+            // p survived nothing new, so it is composite and its multiples
+            // are gone already.
+            continue;
+        }
+        let sp = small[(p - 1) as usize];
+        let p2 = p * p;
+        let lim = (m / p2).min(r);
+        for i in 1..=lim {
+            let d = i * p;
+            let inner =
+                if d <= r { large[d as usize] } else { small[(m / d) as usize] };
+            large[i as usize] -= inner - sp;
+        }
+        let mut i = r;
+        while i >= p2 {
+            small[i as usize] -= small[(i / p) as usize] - sp;
+            i -= 1;
+        }
+    }
+    Ok(large[1])
 }
 
 fn next_prime(n: i64, span: Span) -> Result<i64> {

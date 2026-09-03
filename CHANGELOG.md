@@ -7,6 +7,20 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Round 7B's numeric rules, measured against jconsole. `x p: y` over a y
+  that is NOT WHOLE, which only the two forms that factorise refuse: every
+  other form asks where y sits among the primes and reads any real, so
+  nothing fractional is prime, the count below y is the count below its
+  ceiling, and `4 p:` and `_4 p:` step to the primes strictly either side
+  (`4 p: 4.0` is 5). An infinity is refused there, except by `4 p:`, which
+  answers the smallest prime; a NaN is no prime rather than no answer.
+  `x ! x` is 1 at every magnitude, where the whole-number rules used to
+  stop at 1e17 and leave the rest to a gamma quotient that overflowed into
+  no value at all. The alternating sign of the upper-negation identity is
+  the parity of `y - x` read off the DOUBLE, which is what the reference
+  has past 2^53. And the logarithm of an EXACT 1 is an exact 0 — the one
+  argument whose natural logarithm keeps the extended type.
+
 - Round 6B's structural rules, measured grid by grid against jconsole. The
   identity of an INDEXING fold — `({)/` and `(C.)/` answer `i. #` of the
   cell, which they had no identity for before. The type a BOOLEAN fold
@@ -252,6 +266,17 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   per window too, which they did not before.
 
 ### Changed
+
+- **The prime count is computed sublinearly**, not by testing every
+  candidate, which is what lets `p:^:_1` and `_1 p:` reach the reference's
+  bound of 2^31 at all — there are 105097564 primes below it. libjay
+  carries how many values survive each prefix of the sieve for the roughly
+  `2*sqrt(n)` distinct values of `n/i`: about `n^(3/4)` steps and
+  `sqrt(n)` words, and no prime is ever listed. Past that bound it is a
+  limit error, as the reference has. Primality itself is now the strong
+  probable-prime test over the first twelve prime bases — a proof for every
+  value a machine word holds — so `1 p:`, `4 p:` and `_4 p:` cost
+  logarithms where they used to cost a square root.
 
 - **A sweep survives the sentence that kills the runner.** `fuzz --compare`
   measures in a WORKER process and reports from a journal the worker

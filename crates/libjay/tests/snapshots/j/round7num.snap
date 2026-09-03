@@ -1,0 +1,260 @@
+# libjay reference snapshot: J — corpus/j/round7num.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= p:^:_1 ] 0
+> j: 0
+= p:^:_1 ] 1
+> j: 0
+= p:^:_1 ] 2
+> j: 0
+= p:^:_1 ] 3
+> j: 1
+= p:^:_1 ] 4
+> j: 2
+= p:^:_1 ] 10
+> j: 4
+= p:^:_1 ] 100
+> j: 25
+= p:^:_1 ] 1000
+> j: 168
+= p:^:_1 ] 1000000
+> j: 78498
+= p:^:_1 (i. 10)
+> j: 0 0 0 1 2 2 3 3 4 4
+= p:^:_1 (2 3 $ i. 6)
+> j: 0 0 0
+> j: 1 2 2
+= 3!:0 (p:^:_1 (i. 10))
+> j: 4
+= p: ^:_2 ] 10
+> j: 2
+= _1 p: 100
+> j: 25
+= _1 p: 1000000
+> j: 78498
+= p:^:_1 ] 2.5
+> j: 1
+= p:^:_1 ] 1.5
+> j: 0
+= p:^:_1 ] 3.9
+> j: 2
+= p:^:_1 ] 4.1
+> j: 2
+= p:^:_1 ] _1
+> j: 0
+= p:^:_1 ] _5.5
+> j: 0
+= p:^:_1 ] 100r3
+> j: 11
+= p:^:_1 ] 3j0
+> j: 1
+= _1 p: 2.5
+> j: 1
+= _1 p: _5
+> j: 0
+= _1 p: 1p1
+> j: 2
+= p:^:_1 ] 100x
+> j: 25
+= 3!:0 (p:^:_1 ] 100x)
+> j: 64
+= 3!:0 (_1 p: 100x)
+> j: 64
+= p:^:_1 (0 $ 0)
+> j:
+= 3!:0 (p:^:_1 (0 $ 0))
+> j: 4
+= $ p:^:_1 (0 $ 0)
+> j: 0
+= p:^:_1 ] 2147483648
+> j: <error>
+= p:^:_1 ] 2147483647.5
+> j: <error>
+= p:^:_1 ] 4294967296
+> j: <error>
+= _1 p: 2147483648
+> j: <error>
+= 1 p: 2.5
+> j: 0
+= 0 p: 2.5
+> j: 1
+= 1 p: 1.5
+> j: 0
+= 0 p: 1.5
+> j: 1
+= 1 p: 3.0
+> j: 1
+= 1 p: 4.0
+> j: 0
+= 1 p: 1r2
+> j: 0
+= 1 p: (1r2 1r3)
+> j: 0 0
+= 0 p: (1.5 2.5 _0.5)
+> j: 1 1 1
+= 1 p: 2j0
+> j: 1
+= 1 p: 3j4
+> j: 0
+= 1 p: _2.5
+> j: 0
+= 4 p: 1.5
+> j: 2
+= 4 p: 2.5
+> j: 3
+= 4 p: 7.5
+> j: 11
+= 4 p: 0.5
+> j: 2
+= 4 p: 4.0
+> j: 5
+= 4 p: 1p1
+> j: 5
+= 4 p: 1r2
+> j: 2
+= 4 p: _2.5
+> j: 2
+= 4 p: (1r2 1r3)
+> j: 2 2
+= _4 p: 2.5
+> j: 2
+= _4 p: 3.5
+> j: 3
+= _4 p: 7.5
+> j: 7
+= _4 p: 4.0
+> j: 3
+= _4 p: 1.5
+> j: <error>
+= 4 p: _
+> j: 2
+= 4 p: __
+> j: 2
+= 4 p: (_ __ 0)
+> j: 2 2 2
+= 0 p: _
+> j: <error>
+= 1 p: _
+> j: <error>
+= _1 p: _
+> j: <error>
+= _4 p: _
+> j: <error>
+= 1 p: (_.)
+> j: 0
+= 0 p: (_.)
+> j: 1
+= 4 p: (_.)
+> j: <error>
+= _1 p: (_.)
+> j: <error>
+= 2 p: 1.5
+> j: <error>
+= 3 p: 1.5
+> j: <error>
+= 2 p: 2.5
+> j: <error>
+= 0 ! 0
+> j: 1
+= 5 ! 5
+> j: 1
+= 0.5 ! 0.5
+> j: 1
+= _2.5 ! _2.5
+> j: 1
+= 1e17 ! 1e17
+> j: 1
+= 1e300 ! 1e300
+> j: 1
+= _1e17 ! _1e17
+> j: 1
+= 1e17 ! 1
+> j: 0
+= 1e17 ! _1
+> j: 1
+= _1e17 ! 0
+> j: 0
+= _1e17 ! _1
+> j: 1
+= _1e17 ! _2
+> j: 1e17
+= _1e17 ! 2
+> j: 0
+= _5 ! _1
+> j: 1
+= _5 ! _2
+> j: _4
+= _5 ! _3
+> j: 6
+= _5 ! _4
+> j: _4
+= _5 ! _5
+> j: 1
+= _4 ! _1
+> j: _1
+= _4 ! _2
+> j: 3
+= _4 ! _3
+> j: _3
+= _4 ! _4
+> j: 1
+= _3 ! _1
+> j: 1
+= _3 ! _2
+> j: _2
+= _2 ! _1
+> j: _1
+= _1 ! _1
+> j: 1
+= _6 ! _1
+> j: _1
+= _6 ! _2
+> j: 5
+= _7 ! _1
+> j: 1
+= _1e17 ! _3
+> j: 5e33
+= _99999999999999999 ! _1
+> j: 1
+= ^. 1x
+> j: 0
+= 3!:0 (^. 1x)
+> j: 64
+= ^. (1x 1x 1x)
+> j: 0 0 0
+= 3!:0 (^. (1x 1x 1x))
+> j: 64
+= 3!:0 (^. (2 2 $ 1x))
+> j: 64
+= 3!:0 (^. (1x 2x))
+> j: 8
+= 3!:0 (^. 1r1)
+> j: 8
+= 3!:0 (^. 2x)
+> j: 8
+= 3!:0 (^ 0x)
+> j: 8
+= ^ ^:_1 ] 1x
+> j: 0
+= 3!:0 (^ ^:_1 ] 1x)
+> j: 64
+= 3!:0 (^ ^:_1 (1x 1x))
+> j: 64

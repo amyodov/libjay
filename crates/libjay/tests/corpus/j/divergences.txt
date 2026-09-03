@@ -72,6 +72,19 @@ _1 + ((100000000) ! (100000000.00000001))
 _1 + ((1e8) ! (1e8 + 1e_4))
 ? both sides lose this one; the reference's answer is not the value either
 
+// THE NEAR-EQUAL BINOMIAL REACHING A REFUSAL rather than a value, which is
+// to the rule above what the GCD's refusal row is to the GCD's. `1 ! y` IS
+// y, so `(1) ! (0.9999999999999999)` is 0.99999999999999989 here and the
+// reference reads it tolerantly as exactly 1. A verb downstream that wants
+// a WHOLE number then refuses on one side and not the other: a format
+// specification is whole numbers, so libjay refuses where the reference
+// formats. The answers cannot be classified as numbers — one of them is a
+// refusal and the other is text — so this needs a rule of its own rather
+// than the `answers=` clause above.
+((1) ! (0.9999999999999999)) ": 5
+? the near-equal binomial parts by one bit and the format downstream refuses
+~ cause=we-refuse:err:domain_error:_a_format_specification_is_whole_numbers|we-refuse:err:domain_error:_format_by_specification_takes_numbers verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,":,&.,&.:
+
 // `x C. y` over a left argument that is no permutation of y's items. The
 // Dictionary defines the dyad for a permutation — a direct one or a boxed
 // list of cycles — and says nothing about anything else. Thirty probes did
@@ -265,9 +278,32 @@ _1r2 ^. _1r2
 // ceiling, a residue, the two readings of a complex number, a tolerance —
 // and structure, which computes nothing of its own. A sentence naming
 // anything else is not this family and stays unexplained.
+//
+// TWO ADDITIONS TO THAT LIST, ROUND 7, EACH WITH ITS REASON.
+//
+// `#.` AND `#:`. A base decode is a polynomial in the base — `+/ y * b ^ i`
+// — which is a power and the four operations, all of them already on the
+// list, and the encode only writes the same value back out in digits.
+// Neither can part the two engines on its own, and it was measured: both
+// answer `#. (1 1.0000000000001)` with the same 3.0000000000001, and it is
+// the `*.` after it that parts them. Without this,
+// `2 *. &.:#. (1 1.0000000000001)` — a plain LCM of a near-equal pair,
+// wrapped — stays unexplained for the wrapper's sake alone.
+//
+// `^:`. A GCD reached through a power conjunction is still that GCD:
+// `(*. o.) L:2 (|:^:_1 (i. 2 3 4))` parts on the LCM of two multiples of
+// pi, and its `|:^:_1` — the obverse of a transpose — is pure
+// rearrangement that both engines agree about, as measuring it alone
+// shows. THE COST OF THIS ONE IS REAL AND IS WRITTEN DOWN HERE: `^:` with
+// a negative left argument is an obverse, which is a family of its own,
+// so a future divergence in the obverse OF `+.` or OF `*.` would be
+// excused by this rule rather than reported. Those two obverses were
+// measured across the exact and float types in round 7 and agree
+// throughout; if this rule is ever the only thing matching a mismatch,
+// re-measure them before trusting it.
 (o. 1) *. 3
 ? the two float Euclids cut the same residue chain at different steps
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=+.,*. also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,<:,>:,=,~:,|,j.,r.,!.,&.,&.: answers=inexact
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=+.,*. also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,<:,>:,=,~:,|,j.,r.,!.,&.,&.:,#.,#:,^: answers=inexact
 
 // The same family REACHING A REFUSAL rather than a value. Where the two
 // GCDs part by one bit — `1 +. 1.0000000000000002` is exactly 1 there and
@@ -319,7 +355,9 @@ _1r2 ^. _1r2
 ? the reference searches into the complex plane; libjay has no real answer
 ! ^:(_1 0 1) (_5x)
 ? the reference searches into the complex plane; libjay has no real answer
-~ cause=we-refuse:err:NaN_error:_this_factorial_has_no_argument verb=! with=^: also=%,%:,-,+,*,&.,&.:
+! ^:_1 (3j4 1j_1)
+? the reference searches the complex plane; libjay's obverse reads reals
+~ cause=we-refuse:err:NaN_error:_this_factorial_has_no_argument|we-refuse:err:domain_error:_the_obverse_of_!_needs_numeric_data verb=! with=^: also=%,%:,-,+,*,j.,&.,&.:
 
 // The same two whole numbers a double cannot tell apart, reached through a
 // VECTOR left argument, where the whole pass goes to floats at once:
