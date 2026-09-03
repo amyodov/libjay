@@ -2236,8 +2236,24 @@ families are the obverse of `[` or `]` composed on the LEFT
   `3!:0 (-: (0 $ a:))` is the float type there and the integer one here.
 - **`{::` applied to what `{::` made.** `{::^:2 (<i. 0)` nests one level
   deeper here than there; the map of a map is its own question.
-- **The obverse of `u@|:`.** Pinned as a divergence: the reference does not
-  undo its own transpose, and its round trip does not return its argument.
+- **The obverse of `u@|:`.** RETIRED in round 6B: the obverse of a
+  composition takes the rank of the obverse it composes, and at the
+  double's rank 0 the transpose falls away on both sides. The two agree.
+- **A cut whose piece is EMPTY under an EXTREMUM insert.** Pinned:
+  `<./;._2 (,5)` refuses there where `([: <./ ])`, `(<./ @ ,)` and
+  `(<./ "1)` — the same function spelled around the insert — answer `_`,
+  and an EXTENDED piece answers 1 for the minimum and _1 for the maximum,
+  which is no identity of either.
+- **`%/\` against `%/`.** Pinned: the last item of `%/\ (1 0 0)` is 0
+  there and `%/ (1 0 0)` is `_` — the scan reads the insert as the
+  alternating product and the fold does not.
+- **The ROOTS of a degree-3-or-more polynomial with an INFINITE
+  coefficient.** Pinned: `p. (_ _ _ _)` refuses there where degree 1 and 2
+  answer with exactly the NaN roots libjay gives, and so does
+  `p. (0 0 1 1 _)` at degree 4 with the same infinity.
+- **DECODE where the left argument's frame has no cell.** Pinned:
+  `(0 2 $ 'a') #. (2 0 $ 0)` is `0 0` there, shaped by the RIGHT frame
+  alone, where the same two shapes with a NUMERIC left are a length error.
 - **An interval index against a single EXACT bound.** Pinned: `(1x) I. 2`
   is 0 there and `(1x 2x) I. 2` is 1, which no monotone rule allows.
 - **Index of last over cells with no atom.** Pinned: `(0 0$0) i: (0$0)` is

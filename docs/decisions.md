@@ -4979,3 +4979,33 @@ the register.
   of a CATENATION is the empty array a cell catenates with unchanged — no
   item, then the cell's own shape less the axis the catenation joins along
   — so `$ ,/ (0 3 4 $ 0)` is `0 4`, not `0`.
+- 2026-09-03 — Round 6B, the structural residue. Four rules the reference
+  keeps that libjay did not: `{` and `C.` have the identity `i. #` of the
+  cell, so their fold over an empty answers rather than refusing; a fold of
+  BOOLEANS by an operation that cannot leave `0 1` keeps the boolean type;
+  `#.` refuses a radix of a kind its own path READS (a character radix
+  refuses booleans, a boxed one booleans and integers, a symbol one every
+  digit) and answers the running total's own zero where the radices hold
+  nothing; and a JOIN between two sides that share no type settles it by
+  catenation's order whatever spelling made it, an empty side naming no
+  type even where the two would have promoted.
+- 2026-09-03 — A FETCH path descends only through BOXES. `x {:: y` with
+  more than one box takes a step at a time, and a value that no box held
+  takes another step only while it is an atom; an empty step selects the
+  level whole and opens a boxed SCALAR alone. That is what makes
+  `(2 $ a:) {:: (1 2 3)` a rank error and `(a:) {:: (1;2)` the boxed list
+  itself.
+- 2026-09-03 — The obverse of a COMPOSITION takes the rank of the obverse
+  it composes. `u@v` composes at v's own rank; `(u@v)^:_1` is `v^:_1 @
+  u^:_1`, whose rank is that of `u^:_1` — the rank the new spelling would
+  have been given, not the one the old one carried. This retired the
+  round-4 accepted divergence for the obverse of `u@|:`: the transpose
+  falls away at the double's rank in the reference exactly as it now does
+  here, and the two sides agree. A fill (`!.`) only travels back through a
+  primitive.
+- 2026-09-03 — `u:` and its two- and four-byte character types stay a
+  PINNED divergence rather than a new dtype. `3!:0 (u: y)` is 131072 in the
+  reference for every y, empty or not, widened or not, and `10 u:` reports
+  262144; libjay has one character type and everything but the reported
+  type agrees. A wide dtype would touch every verb's type table to change
+  one foreign's answer, so the accepted list carries the family instead.

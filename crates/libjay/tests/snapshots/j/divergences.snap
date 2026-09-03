@@ -35,6 +35,22 @@
 ? libjay has one character type, so widening does not change it
 < 2
 > j: 131072
+= 3!:0 (u: (0 $ 0))
+? the widened type is what `u:` ALWAYS reports there, empty or not
+< 2
+> j: 131072
+= 3!:0 (u: 'abc')
+? the same over a literal that needed no widening at all
+< 2
+> j: 131072
+= 3!:0 (u: 97)
+? the same over a code point below 128
+< 2
+> j: 131072
+= 3!:0 (10 u: (0 $ 0))
+? `10 u:` reports the FOUR-byte type there, which libjay has no more than the two
+< 2
+> j: 262144
 = 2 u: 8 u: u: 955
 ? widening bytes to characters changes only how they are written out
 < λ

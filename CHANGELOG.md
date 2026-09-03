@@ -7,6 +7,22 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Round 6B's structural rules, measured grid by grid against jconsole. The
+  identity of an INDEXING fold — `({)/` and `(C.)/` answer `i. #` of the
+  cell, which they had no identity for before. The type a BOOLEAN fold
+  keeps: `*/`, `<./` and `>./` over booleans stay boolean where a sum or a
+  difference widens. Which radix kinds DECODE will read, and the type of
+  the zero a radix list with nothing in it answers with. The order two
+  empty sides settle a JOIN's type by, now followed by `,:`, `,.` and a
+  ranked `,"n` as it already was by `,`, with an empty side naming no type
+  even where the two would have promoted. The depth rule of a FETCH path:
+  `{::` descends only through boxes, so a value no box held takes another
+  step only while it is an atom. The type of an empty frame under a RANKED
+  dyad, which is what the NUMBERS made of the fill cells, a side that holds
+  a value keeping its own type. And the rank of the obverse of a
+  COMPOSITION, which is the rank of the obverse it composes, not the one
+  the original carried — `(|.@%:)^:_1 (1 2 3)` is `9 4 1`.
+
 - The TYPE an empty answer carries, monadic and dyadic, measured against
   the oracle cell by cell: nothing ran, so the verb and the types the
   arguments were written in are all there is to settle it. A non-numeric
