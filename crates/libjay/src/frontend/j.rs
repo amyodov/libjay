@@ -2197,12 +2197,13 @@ fn constant_verb(n: Array) -> Verb {
     )
 }
 
-/// The spelling of a constant verb: `_9:` … `9:`, and `_:` for infinity.
-/// The word must be complete — `3::` is the adverse conjunction after a
-/// number, not a constant verb.
+/// The spelling of a constant verb: `_9:` … `9:`, `_:` for infinity and
+/// `__:` for the infinity below. The word must be complete — `3::` is the
+/// adverse conjunction after a number, not a constant verb.
 fn constant_verb_word(cs: &[(usize, char)], i: usize) -> Option<(usize, Array)> {
     let at = |k: usize| cs.get(k).map(|&(_, c)| c);
     let (digits, value) = match (at(i), at(i + 1), at(i + 2)) {
+        (Some('_'), Some('_'), Some(':')) => (3, f64::NEG_INFINITY),
         (Some('_'), Some(':'), _) => (2, f64::INFINITY),
         (Some('_'), Some(d), Some(':')) if d.is_ascii_digit() => {
             (3, -((d as u8 - b'0') as f64))

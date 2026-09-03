@@ -161,6 +161,9 @@ fn constant_word(n: &Array) -> Option<String> {
     if v == f64::INFINITY {
         return Some("_:".to_string());
     }
+    if v == f64::NEG_INFINITY {
+        return Some("__:".to_string());
+    }
     if v.fract() != 0.0 || !(-9.0..=9.0).contains(&v) {
         return None;
     }
@@ -472,7 +475,12 @@ fn tines(ar: &Ar) -> Vec<&Ar> {
     let Ar::Train(ops) = ar else { return vec![ar] };
     let (last, head) = ops.split_last().expect("a train has parts");
     let mut out: Vec<&Ar> = head.iter().collect();
-    if matches!(last, Ar::Train(_)) {
+    // A HOOK's right tine is always written bracketed: two tines and then
+    // an odd train reparse as a hook over a fork, which is the same tree,
+    // but the reference writes the tree it was given. Only a train that
+    // already counts out odd absorbs an odd one in its last place. A
+    // constant verb is spelled by its own word and is never taken apart.
+    if ops.len() % 2 == 1 && matches!(last, Ar::Train(_)) && constant_shortcut(last).is_none() {
         let inner = tines(last);
         if inner.len() % 2 == 1 {
             out.extend(inner);
@@ -496,8 +504,11 @@ fn left(ar: &Ar) -> Option<String> {
 fn right(ar: &Ar) -> Option<String> {
     let (text, shape) = spell(ar)?;
     // `{` carries a space of its own, and the reference brackets it here
-    // rather than letting the space end the phrase.
-    let bare = shape == Shape::Word && !text.ends_with(' ');
+    // rather than letting the space end the phrase. `{::` and a constant
+    // verb of a NEGATIVE atom are bracketed too — the reference will not
+    // let either stand against the conjunction that took it.
+    let held_off = text == "{::" || (text.starts_with('_') && text.ends_with(':') && text != "_:");
+    let bare = shape == Shape::Word && !text.ends_with(' ') && !held_off;
     Some(if bare { text } else { format!("({text})") })
 }
 
