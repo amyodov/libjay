@@ -77,9 +77,6 @@ pub fn supervise(
         Some(given) => std::path::PathBuf::from(given),
         None => scratch.join("journal.tsv"),
     };
-    // A journal from an earlier run of another sweep would be read as this
-    // one's measurements, so a named journal is started fresh.
-    let _ = std::fs::remove_file(&path);
 
     // A generator draws the same sentence twice readily, and the journal
     // holds one record per sentence, so what the sweep is waiting for is
@@ -87,9 +84,16 @@ pub fn supervise(
     let wanted: std::collections::HashSet<Key> =
         probes.iter().map(|p| (p.expr.clone(), p.io)).collect();
     let exe = std::env::current_exe().map_err(|e| format!("finding this binary: {e}"))?;
+    // A journal from another sweep holds records for sentences this one
+    // never drew, so what is counted is how many of THIS run's probes it
+    // answers. That is also what makes a kept journal a RESUME: an
+    // interrupted sweep re-run over the same journal measures what is left.
+    let held = |results: &std::collections::HashMap<Key, Finding>| {
+        wanted.iter().filter(|key| results.contains_key(*key)).count()
+    };
     loop {
         let (results, in_flight) = read(&path);
-        if results.len() >= wanted.len() {
+        if held(&results) >= wanted.len() {
             break;
         }
         if !in_flight.is_empty() {
@@ -108,7 +112,7 @@ pub fn supervise(
             }
             continue;
         }
-        let before = results.len();
+        let before = held(&results);
         let mut command = std::process::Command::new(&exe);
         command.args(["fuzz", libjay_testkit::lang_dir(lang), "--compare"]);
         command.arg("--probe-list").arg(&exprs);
@@ -120,7 +124,7 @@ pub fn supervise(
         let (after, in_flight) = read(&path);
         // A worker that neither finished nor left anything behind cannot be
         // stepped past: there is nothing to blame and nothing to skip.
-        if !ended && after.len() == before && in_flight.is_empty() {
+        if !ended && held(&after) == before && in_flight.is_empty() {
             return Err(format!(
                 "the sweep worker stopped at {before} of {} sentences, having announced none",
                 wanted.len()
