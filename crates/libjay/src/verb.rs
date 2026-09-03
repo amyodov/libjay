@@ -20932,14 +20932,22 @@ fn find_seq(x: &Array, y: &Array, tol: Tol, apl: bool, span: Span) -> Result<Arr
 /// already be booleans, which is the only domain either reference gives
 /// them.
 fn bool_dyad(op: BoolDyad, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    // A value TOLERANTLY equal to 0 or 1 IS that value: `(1.00000000000005)
+    // *: 1` is 0 there and `(1 + 1e_13) *: 1` a domain error, the boundary
+    // being the comparison tolerance. Against ZERO the tolerance is
+    // relative and so no tolerance at all, which is why `(1e_20) +: 0` is
+    // refused on both sides.
     let bit = |a: &Array| -> Result<u8> {
-        match a.to_i64_vec().as_deref() {
-            Some([0]) => Ok(0),
-            Some([1]) => Ok(1),
-            _ => Err(Error::domain("this verb reads values of 0 or 1", span)),
+        if let Some([one]) = a.to_f64_vec().as_deref() {
+            if cfg.tol.eq(*one, 0.0) {
+                return Ok(0);
+            }
+            if cfg.tol.eq(*one, 1.0) {
+                return Ok(1);
+            }
         }
+        Err(Error::domain("this verb reads values of 0 or 1", span))
     };
-    let _ = cfg;
     let (a, b) = (bit(x)?, bit(y)?);
     let v = match op {
         BoolDyad::Nor => u8::from(a == 0 && b == 0),

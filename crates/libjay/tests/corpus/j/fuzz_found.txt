@@ -902,3 +902,29 @@ _1 %: _5
 0 %: _1
 0 %: _1.5
 0 %: (_0.5 _1.5)
+
+// A LOGICAL VERB READS A VALUE TOLERANTLY EQUAL TO 0 OR 1 AS THAT VALUE:
+// `(1.00000000000005) *: 1` is 0 and `(1 + 1e_13) *: 1` a domain error,
+// the boundary being the comparison tolerance. Against ZERO the tolerance
+// is relative and so no tolerance at all.
+(*: >.)"2 ((1) +. (1.0000000000000002))
+1.0 *: 1.0
+0.0 *: 1.0
+1.0 *: 0.0
+(1.0000000000000002) *: 1
+0.5 *: 1
+(1 + 1e_15) *: 1
+1.0 +: 1.0
+1.0 *. 1.0
+(,: < j.) &.^. ((1) +. (1.0000000000000002))
+(1e_20) *: 1
+(1 + 1e_13) *: 1
+(1.00000000000005) *: 1
+(0.99999999999999) *: 1
+(0.5) *: 1
+(1 2) *: 1
+(2) *: 1
+(1e_20) +: 0
+(_1) *: 1
+0 *: 0
+1 +: 1
