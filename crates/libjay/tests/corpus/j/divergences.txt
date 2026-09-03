@@ -171,21 +171,6 @@ p. (0 1 1 _)
 _ <. (_.)
 ? the same, with an infinity for the other value
 
-// The obverse of `u@|:`. The reference does not undo the transpose:
-// `+:@|: (i. 2 3)` is `0 6 / 2 8 / 4 10` there, and putting that back
-// through the reference's own `+:@|:^:_1` answers `0 3 / 1 4 / 2 5` rather
-// than the `i. 2 3` it started from — an obverse that does not invert its
-// own verb. libjay composes the obverses as the Dictionary defines them,
-// `|:^:_1 @ +:^:_1`, and the round trip comes back.
-+:@|: ^:_1 (i. 2 3)
-? the reference's own round trip through this obverse does not return its argument
-<@|: ^:_1 (i. 2 3)
-? the same composition with a box
-+:@|: ^:_1 (2 3 $ 2)
-? the same, where every element is alike so only the shape shows it
-<@|: ^:_1 (2 3 $ 2)
-? the same again, with a box
-
 // INTERVAL INDEX against a SINGLE EXACT bound. The reference answers
 // `(1x) I. 2` with 0 and `(1x 2x) I. 2` with 1: adding a bound that is NOT
 // below the value cannot raise the count from none to one, and the same

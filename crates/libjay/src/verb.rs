@@ -20069,8 +20069,37 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
         Verb::Compose(f, g) | Verb::Beside(f, g) => {
             Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?), AtopForm::At)
         }
-        Verb::Rank(f, r) => Verb::Rank(Box::new(obverse(f)?), *r),
-        Verb::Fit(f, n) => Verb::Fit(Box::new(obverse(f)?), *n),
+        // `u@v` and `u&v` are the composition wrapped in V's own rank. The
+        // obverse composes the other way round, `v^:_1 @ u^:_1`, and takes
+        // the rank of `u^:_1` with it — the rank the frontend would have
+        // given the new spelling, not the one the old one carried:
+        // `(|.@%:)^:_1 (1 2 3)` is `9 4 1` in the reference, where keeping
+        // the square root's rank 0 answers `1 4 9`. A rank somebody WROTE
+        // stands, which is what the two rank tests tell apart.
+        Verb::Rank(f, r) => {
+            let inner = obverse(f)?;
+            let built = match &**f {
+                Verb::Atop(_, g, AtopForm::At) => r.triple() == g.ranks(),
+                Verb::Compose(_, g) | Verb::Beside(_, g) => {
+                    r.triple() == [g.ranks()[0]; 3]
+                }
+                _ => false,
+            };
+            match &inner {
+                Verb::Atop(_, b, AtopForm::At) if built => {
+                    let ranks = b.ranks();
+                    Verb::Rank(Box::new(inner), ranks.into())
+                }
+                _ => Verb::Rank(Box::new(inner), *r),
+            }
+        }
+        // A fill only travels back through a PRIMITIVE: the reference has no
+        // obverse for a fit over anything it built itself, refusing
+        // `(\:@|.!.0)^:_1` where `(|.!.1)^:_1` answers.
+        Verb::Fit(f, n) if matches!(&**f, Verb::Prim(_)) => {
+            Verb::Fit(Box::new(obverse(f)?), *n)
+        }
+        Verb::Fit(..) => return None,
         Verb::Fill(f, a) => Verb::Fill(Box::new(obverse(f)?), *a),
         // `u&.>` and `u¨` undo box by box: the boxing is its own inverse,
         // so only the verb inside one has to be turned round.
