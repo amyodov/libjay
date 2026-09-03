@@ -7294,13 +7294,19 @@ fn scalar_dyad(
         // reference has them, rather than whichever side happened to be
         // numeric first.
         if cfg.rules.lang == crate::Lang::J {
-            // A non-numeric side takes BOTH sides down to the boolean
-            // reading: neither empty held a value, so neither names a type
-            // for the answer. `3!:0 ((0 $ 1.5) + (0 $ 'a'))` is the integer
-            // type there, what two boolean empties make.
+            // A non-numeric side reads as a boolean, and takes an EMPTY
+            // numeric side down with it: neither empty held a value, so
+            // neither names a type for the answer, and `3!:0 ((0 $ 1.5) +
+            // (0 $ 'a'))` is the integer type there, what two boolean
+            // empties make. A numeric side WITH A VALUE keeps its own type
+            // against the boolean: `3!:0 ((123x) *. (0 $ 'a'))` is the
+            // extended type, `(5) + (0 $ 'a')` the integer one and `(1.5) *
+            // (0 $ 'a')` the float one, measured over nine verbs.
             let plain = x.dtype().is_numeric() && y.dtype().is_numeric();
-            let read = |t: DType| if plain { t } else { DType::Bool };
-            let (xt, yt) = (read(x.dtype()), read(y.dtype()));
+            let read = |a: &Array| {
+                if a.dtype().is_numeric() && (plain || a.count() > 0) { a.dtype() } else { DType::Bool }
+            };
+            let (xt, yt) = (read(x), read(y));
             if let Some(t) = empty_dyad_type(op, xt, yt, x.dtype(), y.dtype()) {
                 return Ok(Array::new(p.frame, Data::empty(t)));
             }
