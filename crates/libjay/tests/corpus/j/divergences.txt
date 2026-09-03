@@ -532,3 +532,30 @@ _10 10 #: 1234
 ? every cell of this answers on its own there and the list of them does not
 (1.5 _0.5) ^. 0
 ? every cell of this answers on its own there and the list of them does not
+// `x:` OF A FLOAT THAT HAS NO SHORT EXACT RATIONAL. Both sides answer a
+// rational within the default comparison tolerance and the Dictionary names
+// neither: libjay answers the simplest one inside that tolerance — the
+// continued fraction's first convergent to reach it — and the reference
+// answers another, which is not a convergent of the double at all and which
+// no rule black-box probing could reconstruct. The exact cases (`x: 0.1`,
+// `x: 1r3 + 0.0`, `x: 123.456`) agree on both sides.
+x: 2 ^ 0.5
+? libjay answers the simplest rational within the comparison tolerance
+2 x: 2 ^ 0.5
+? the same conversion, written as a numerator and a denominator
+x: 1e_15
+? one convergent earlier than the reference's, and equally inside the tolerance
+x: 3.14159265358979
+? the same, on a value with no short exact rational either
+
+// INTERVAL INDEX OVER SYMBOLS. The reference's own `<` and `/:` order
+// symbols by their NAME — `(s: <'a') < (s: <'b')` is 1 and
+// `/: (s: <'b'), (s: <'a')` is `1 0` — but its `I.` does not use that
+// order: it answers 1 where the value EQUALS the bound and 0 otherwise,
+// which is the opposite of what its own `<` says about the same pair.
+// libjay reads the bounds by the total array ordering, as it does for
+// every other type.
+(s: <'a') I. (s: <'b')
+? the reference's own `<` puts these the other way round
+(s: <'a') I. (s: <'a')
+? the same pair, equal

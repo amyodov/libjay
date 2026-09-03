@@ -491,3 +491,27 @@
 ? every cell of this answers on its own there and the list of them does not
 < __ _j_
 > j: <error>
+= x: 2 ^ 0.5
+? libjay answers the simplest rational within the comparison tolerance
+< 3880899r2744210
+> j: 431273813145r304956637823
+= 2 x: 2 ^ 0.5
+? the same conversion, written as a numerator and a denominator
+< 3880899 2744210
+> j: 431273813145 304956637823
+= x: 1e_15
+? one convergent earlier than the reference's, and equally inside the tolerance
+< 1r999999999999999
+> j: 1r1000000000000000
+= x: 3.14159265358979
+? the same, on a value with no short exact rational either
+< 5419351r1725033
+> j: 6686425096436r2128355211423
+= (s: <'a') I. (s: <'b')
+? the reference's own `<` puts these the other way round
+< 1
+> j: 0
+= (s: <'a') I. (s: <'a')
+? the same pair, equal
+< 0
+> j: 1

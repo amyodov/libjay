@@ -5076,3 +5076,29 @@ the register.
   `_0.5 ^. 0` is `_j_` — and a list of bases against a list of arguments
   answers too, but the list of bases against the one 0 is a NaN error
   there. libjay answers the cells.
+- 2026-09-03 — A GENERATOR'S REACH IS PART OF THE GATE. "All known J
+  behaviours" is only as good as what the sweep can draw, and generation 2
+  of the J fuzz grammar drew no `~`, no explicit definition, no gerund, no
+  `@.`, no `::`, no `:.`, no `M.`, no `f.`, no `b.`, no `H.`, no inner
+  product, no name, no fold, no conversion verb and no foreign — a
+  99.9%-agreeing sweep over a third of the vocabulary. Generation 3 widened
+  the tree rather than reweighting it (arms 30 to 45 of the expression
+  draw, 14 to 21 of the verb draw), so the coverage the recorded findings
+  came from is intact, and the first 5000 drawn against it found eleven
+  families where the previous grammar had been finding one spelling a week.
+  What a generator deliberately does NOT draw is a decision too: `$.`
+  (a sparse array does not survive a step here by decision), `q:` and the
+  `p:` monad (each turns a value into a search), `F.` and `F:` (unbounded,
+  and the reference hangs on them), the `s:` symbol-table forms and
+  `b. 1`/`b. _1` (an interpreter's own table and its own spellings).
+- 2026-09-03 — `x:` of a float that has no short exact rational is a
+  DIVERGENCE, not a bug. Both sides answer a rational within the default
+  comparison tolerance and the Dictionary names neither: libjay answers the
+  simplest rational within that tolerance (`x: 2^0.5` is `3880899r2744210`,
+  the continued fraction's first convergent inside it), the reference
+  answers another (`431273813145r304956637823`) that is not a convergent of
+  the double at all and that no rule black-box probing could reconstruct.
+  The exact cases — `x: 0.1`, `x: 1r3+0.0`, `x: 123.456` — agree; the
+  reference additionally reads `1e_15` as `1r1000000000000000` where libjay
+  gives `1r999999999999999`, one convergent earlier and equally inside the
+  tolerance.

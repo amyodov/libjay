@@ -80,3 +80,15 @@ q: 1 2 3x
 // assignment inside a larger one would be, which libjay names as a gap
 2 [ n =. 3
 2 [ n =: 3
+
+// --- symbols ORDER by the name behind the index, in the total array
+// ordering as well as in a comparison
+/: (s: <'b'), (s: <'a')
+\\: (s: <'b'), (s: <'a')
+(s: <'a') < (s: <'b')
+(s: <'b') < (s: <'a')
+/: (< s: <'b'), (< s: <'a')
+~. (s: <'b'), (s: <'a'), (s: <'b')
+(s: <'a') = (s: <'a')
+4 s: s: <'ab'
+5 s: s: <'ab'

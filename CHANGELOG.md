@@ -28,6 +28,17 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   arguments were written in are all there is to settle it. A non-numeric
   empty reads as a boolean one, and a dyad with a non-numeric side reads
   both sides that way.
+- J's FOLD family, `u F.. v`, `u F.: v`, `u F:. v` and `u F:: v`: v folds
+  the items of y into a running value, the item on its left, and u is
+  applied to each running value. The first inflection says whether the
+  answer is the last result or every one framed, the second which end the
+  items are taken from, and a left argument is where the running value
+  starts. `F.` and `F:`, whose step count a test decides, stay named: each
+  is unbounded.
+- `%.` over COMPLEX data, solved as the real system of twice the size, and
+  over an argument with no elements, which answers the empty its inverse
+  would have had.
+
 - The polynomial family's EMPTY FRAME and its types. `p.` and `p..` used
   monadically leave a frame whose fill cell they refuse standing alone in
   the boolean type; the dyad refuses its left argument, and a symbol on the
@@ -369,6 +380,25 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `$ ,/ (0 3 4 $ 0)` is `0 4` and every scan and cut built on `,/` over an
   argument with no item follows.
 
+- **Round 5C of the agreement sweep: what the generator could not reach.**
+  The J fuzz grammar is generation 3, and reaches the whole conjunction
+  layer for the first time — the reflex and passive `~`, explicit
+  definitions in every spelling and the control words in them, gerunds and
+  the modifiers that hand them out, `@.` `:.` `::` `M.` `f.` `b.` `H.`, the
+  inner product, a verb's ranks and a verb's power count, names, the fold
+  family, the conversion verbs, the sandbox-safe foreigns and the literals
+  the pools had no spelling for. What it found: `u@.n` reads its index the
+  way `{` reads one, so a negative counts back from the end of the gerund
+  and a LIST of indices is the train the verbs it picks spell; `u^:v` means
+  by its computed count what the same count written as a literal means;
+  a `4!:` or `5!:` foreign asked about no name answers an empty rather than
+  reading the empty argument's type; `}. y` of an ATOM is the empty list of
+  the atom's own type; `x (m H. n) y` reads every element of y rather than
+  its first, and a term count of zero reads none of it; `":` reads a
+  complex specification as J's `wjd` and refuses a fractional one; `3 p: y`
+  is `q: y` written the other way and pads each row with 1s rather than
+  framing per element with a zero. A verb assignment used as a VALUE inside
+  a larger sentence is now a named gap where it was a syntax error.
 - **Round 4 of the agreement sweep, everything but the polynomial verbs.**
   A rank and a level SPELL THEMSELVES BACK as they were written: `u"2 _ 2`
   and `u"_ 2` are one verb, and the reference writes each out the way it

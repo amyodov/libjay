@@ -596,6 +596,34 @@ summary): two runs' find rates are comparable only when it matches. Anything
 whose count is unbounded is deliberately absent from the pools — `u^:_`,
 `u^:a:` and `f⍣≡` all converge, and a generator that can hang has no oracle.
 
+`--depth D` is the tree's depth, 3 by default and free to be larger; nothing
+caps it, and a sweep worth comparing is usually run at 3 and again at 4.
+
+Generation 3 (2026-09-03) widened the J tree to the forms the earlier
+grammars could not draw AT ALL: the reflex and passive `~`, explicit
+definitions in every spelling (`{{ }}`, `n : '…'`, `n : (<'…')`) and the
+control words inside them, explicit modifiers and the tacit translation
+`13 :`, gerunds and the four modifiers that hand them out (`@.`, `` `: ``,
+an adverb, a cut, a rank, the amend), the obverse `:.` and the adverse `::`,
+`M.`, `f.`, `b.`, the dyadic `H.`, the inner product `u . v`, a verb's ranks
+(`u"v`) and the constant verb (`m"n`), a verb power count (`u^:v`), names
+and sequencing, the fold family, the conversion verbs (`x:` `u:` `s:` `p:`
+`%.` `".`), the sandbox-safe foreigns, and the literals the leaf pools had
+no spelling for (`_.`, `1p1`, `1x1`, `1ad45`, `16b1f`).
+
+What it deliberately does NOT draw is part of the design:
+
+- `$.` — a sparse array does not survive a step in libjay by decision, so
+  every composition of it is a difference the corpus already carries.
+- `q:` and the `p:` MONAD — each turns a value into a search, and the y-th
+  prime of a leaf near 2⁶³ is a computation rather than an expression.
+- `F.` and `F:` — the two fold spellings whose step count a test decides.
+  Both are unbounded, and jconsole itself runs without end on them.
+- `$~`, `#~`, `{.~` and `i.~` in the reflex pool — each would hand a leaf to
+  itself as an AMOUNT, which is an allocation rather than an expression.
+- the `s:` symbol-table forms and `b. 1`/`b. _1` — an interpreter's own
+  table and its own spellings, which docs/status.md names.
+
 ## The rest of the suite
 
 `tests/eval.rs`, `coverage.rs`, `boxes.rs`, `definitions.rs`, `fuse.rs`,

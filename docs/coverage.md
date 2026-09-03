@@ -2184,7 +2184,23 @@ the decimal point, and that is typography, not semantics.
 
 These are sentences jconsole answers and libjay refuses by name, or answers
 differently, that a 150 000-expression sweep at depth 3 still reaches. No
-family is above three cases in fifty thousand; most are singletons. Round 4
+family is above three cases in fifty thousand; most are singletons.
+
+Round 5C widened the GENERATOR rather than the implementation, on the
+reading that "all known J behaviours" is only as good as what a sweep can
+draw. Generation 2 of the J fuzz grammar drew no `~`, no explicit
+definition, no gerund, no `@.`, no `::`, no `:.`, no `M.`, no `f.`, no
+`b.`, no `H.`, no inner product, no name, no fold, no conversion verb and
+no foreign; generation 3 draws all of them, and the first five thousand
+sentences it drew found eleven families where the older grammar had been
+finding one spelling a week. What it closed: the fold conjunctions `F..`
+`F.:` `F:.` `F::` (a family the inventory had no row for at all), the
+agenda index read as `{` reads one, a computed power count that is negative
+or a list, a `4!:`/`5!:` foreign asked about no name, the behead of an
+atom, the complex and the empty matrix inverse, the hypergeometric partial
+sum over every element of its argument, a complex `":` specification, the
+`3 p:` factor table's padding, and the total ordering of symbols — which
+used to panic rather than answer. Round 4
 of the agreement loop closed the linear representation of a rank and a
 level, the fill that is never placed, the empty frame's domain table for
 the complex-making verbs and for interval index, the NaN and the infinity
@@ -2204,6 +2220,19 @@ families are the obverse of `[` or `]` composed on the LEFT
 (`[@:>:^:_1 (2)`, `]&:*:^:_1 (4)` and their like), `__ $ 0`, and
 `3!:0 (0 $ <0) p. (0 $ 0)`.
 
+- **A verb or modifier assignment used as a VALUE inside a sentence.** The
+  reference reads `2 [ f =. #` as the noun fork the assignment's value
+  makes; libjay settles what a name stands for while the sentence is
+  parsed, so the assignment is a sentence of its own here and there is
+  nothing to hand the train. Named, not a syntax error.
+- **`x p: y` for a y that is not a whole number.** The reference answers
+  some forms (`0 p: 2.5` is 1, `4 p: 1.5` is 2) and refuses others
+  (`2 p: 1.5`), by no rule black-box probing could settle; libjay refuses
+  all of them. The generator does not draw the form, and the register
+  carries the probe grid.
+- **The binary representation of the exact types.** `3!:1` and `3!:3` of
+  extended or rational data are the one hole left in the `3!:` family, and
+  docs/status.md carries them as red.
 - **The obverse of `!` off the principal branch.** `!^:_1` here is the
   smallest argument at or above zero whose factorial is the value, which is
   what the reference answers everywhere the sweep reaches. The reference

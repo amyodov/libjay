@@ -8702,6 +8702,12 @@ fn cmp_atoms_n(x: &Array, y: &Array, n: usize, ord: Grading) -> std::cmp::Orderi
     }
     match (dx, dy) {
         (Data::Char(a), Data::Char(b)) => a[..n].cmp(&b[..n]),
+        // Symbols order by the NAME behind the index, not by the order the
+        // two were interned in.
+        (Data::Symbol(a), Data::Symbol(b)) => (0..n)
+            .map(|k| crate::symbol::cmp(a[k], b[k]))
+            .find(|o| *o != Equal)
+            .unwrap_or(Equal),
         _ => cmp_numbers(dx, dy, n, ord.tol),
     }
 }
@@ -8734,6 +8740,11 @@ fn cmp_numbers(dx: &Data, dy: &Data, n: usize, tol: Tol) -> std::cmp::Ordering {
         Some(_) => {
             let (mut ta, mut tb) = (Vec::new(), Vec::new());
             let (a, b) = (borrow_i64(dx, &mut ta), borrow_i64(dy, &mut tb));
+            // A type neither side can be borrowed as an integer has no
+            // order here; the callers that DO order it answer above.
+            if a.len() < n || b.len() < n {
+                return Equal;
+            }
             seek(&|k| a[k].cmp(&b[k]))
         }
     }
