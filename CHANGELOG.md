@@ -67,6 +67,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   both, one nested magnitude block an item and two for a rational.
 - `__:`, the constant verb of the infinity below, which the lexer had read
   as a number and a definition's colon.
+- The whole of the boolean-function conjunction `m b.`: its ONE-ARGUMENT
+  form, which is the same table read with a left argument of zero, so
+  `(4 b.) y` is y itself and `(8 b.) y` its negation; the three numbers
+  that move bits rather than pair them — 32 rotates y left by x places,
+  33 shifts it logically and 34 arithmetically, a negative x moving the
+  other way; and the numbers that name no function, which the reference
+  tells apart — `_1 b.` down to `_16 b.` refuses where a value is read,
+  so an empty argument leaves the empty, and anything outside `_16` to
+  `34` is out of range where the verb is made. The domain refusal of a
+  table below 16 — its two arguments must be bits — now survives an
+  empty frame, so `2 (0 b.) (i. 0)` refuses where `1 (0 b.) (i. 0)` is
+  the empty.
 - Round 6B's structural rules, measured grid by grid against jconsole. The
   identity of an INDEXING fold — `({)/` and `(C.)/` answer `i. #` of the
   cell, which they had no identity for before. The type a BOOLEAN fold

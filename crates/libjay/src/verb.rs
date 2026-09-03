@@ -1581,6 +1581,10 @@ pub enum MonadOp {
     /// GNU APL `⊤∧`, `⊤∨` and `⊤⍱` monadically: the bit-wise family's one
     /// argument form.
     Bitwise(BitMonad),
+    /// J `m b. y`: the boolean function of one argument, which is the same
+    /// table read with a left argument of zero — `(4 b.) y` is y itself and
+    /// `(8 b.) y` its negation.
+    TruthTable(i8),
     /// GNU APL `⎕CC n`: the characters of the numbered class, as a vector.
     /// Several numbers give one class per item, nested.
     CharClass,
@@ -1725,8 +1729,13 @@ pub enum DyadOp {
     SequentialMachine,
     /// J `x m b. y`: the boolean function whose truth table `m` numbers,
     /// on two bits for `m` below 16 and on every bit of two integers for
-    /// `m` from 16 to 31.
-    TruthTable(u8),
+    /// `m` from 16 to 31. Three more numbers move bits rather than combine
+    /// them: 32 rotates y left by x places, 33 shifts it logically and 34
+    /// arithmetically, a negative x moving the other way. A NEGATIVE
+    /// number names no function, and says so where a value is read rather
+    /// than where the verb is made: `2 (_5 b.) 5` is a domain error and
+    /// `(i. 0) (_5 b.) (i. 0)` the empty.
+    TruthTable(i8),
     /// J `x x: y`: which exact form. 1 is the rational one, 2 the pair of
     /// numerator and denominator, `_1` the conversion back to a machine
     /// number, `_2` the argument unchanged.
@@ -3290,7 +3299,25 @@ impl Verb {
                     && y.count() > 0
                     && x.shape[fxl..].iter().product::<usize>() > 0)
                 || (decode_refuses(x.dtype(), y.dtype()) && y.count() > 0);
+            // `m b.` below 16 reads two BITS, and a value that is no bit is
+            // refused whatever the frame holds: `2 (0 b.) (i. 0)` is a
+            // domain error in the reference where `1 (0 b.) (i. 0)` is the
+            // empty. From 16 up the table reads whole integers and nothing
+            // about a value is out of range, so the frame stands there.
+            let bits_eager = {
+                let mut v = self;
+                while let Verb::Rank(inner, _) = v {
+                    v = inner;
+                }
+                matches!(v, Verb::Prim(Prim { dyad: DyadOp::TruthTable(m), .. }) if *m < 16)
+                    && [x, y].into_iter().any(|a| {
+                        a.count() > 0
+                            && a.to_i64_vec()
+                                .is_none_or(|v| v.iter().any(|&n| !(0..=1).contains(&n)))
+                    })
+            };
             let keep_any = eager
+                || bits_eager
                 || (decode_eager
                     && matches!(self, Verb::Prim(Prim { dyad: DyadOp::Decode, .. })));
             // CATENATION settles the type of an answer with no cell the way
@@ -11802,6 +11829,7 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         MonadOp::Split => Ok(split_items(y)),
         MonadOp::Execute { apl } => execute(y, apl, ctx, span),
         MonadOp::Bitwise(op) => bit_monad(op, y, ctx.cfg, span),
+        MonadOp::TruthTable(m) => truth_table(m, &Array::scalar_i64(0), y, span),
         MonadOp::CharClass => char_class(y, ctx.cfg.near(), span),
         MonadOp::NameClass => name_class(y, ctx.env, span),
         MonadOp::CharRep => char_rep(y, ctx.env, span),
@@ -20319,8 +20347,11 @@ fn carry_exact2(result: Array, x: &Array, y: &Array) -> Array {
 
 /// `m b.`: one of the sixteen boolean functions of two bits, and — sixteen
 /// higher — the same function applied to every bit of a pair of integers.
-fn truth_table(m: u8, x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let table = m & 15;
+fn truth_table(m: i8, x: &Array, y: &Array, span: Span) -> Result<Array> {
+    if m < 0 {
+        return Err(Error::domain("m b. takes a number from 0 to 34", span));
+    }
+    let table = (m as u8) & 15;
     let bit = |a: i64, b: i64| ((table >> (3 - (2 * a + b))) & 1) as i64;
     let xs = x
         .to_i64_vec()
@@ -20329,6 +20360,24 @@ fn truth_table(m: u8, x: &Array, y: &Array, span: Span) -> Result<Array> {
         .to_i64_vec()
         .ok_or_else(|| Error::domain("a boolean function takes integers", span))?;
     let (a, b) = (xs.first().copied().unwrap_or(0), ys.first().copied().unwrap_or(0));
+    // The three numbers above the tables move y's bits instead of pairing
+    // them with x's. A rotation reads the count around the word, so every
+    // count names a place; a shift past the width leaves nothing, and an
+    // arithmetic one past it leaves the sign bit alone.
+    if m >= 32 {
+        let bits = u64::BITS as i64;
+        let word = b as u64;
+        let out = match m {
+            32 => word.rotate_left(a.rem_euclid(bits) as u32) as i64,
+            33 if a >= bits || a <= -bits => 0,
+            33 if a >= 0 => (word << a) as i64,
+            33 => (word >> -a) as i64,
+            _ if a >= bits => 0,
+            _ if a >= 0 => (word << a) as i64,
+            _ => b >> (-a).min(bits - 1),
+        };
+        return Ok(Array::scalar_i64(out));
+    }
     if m < 16 {
         if !(0..=1).contains(&a) || !(0..=1).contains(&b) {
             return Err(Error::domain(

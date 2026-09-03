@@ -3467,18 +3467,28 @@ fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
     // `b.` takes either operand too: a noun names one of the thirty-two
     // boolean functions, a verb asks after the verb's own characteristics.
     if glyph == "b." && !u.is_real_verb() {
+        // The operand is ONE whole number: a list, a fraction, a character
+        // or a box names no function at all.
         let m = as_const(&u)
+            .filter(|a| a.count() == 1)
             .and_then(Array::to_i64_vec)
             .and_then(|v| v.first().copied())
-            .filter(|&m| (0..32).contains(&m))
-            .ok_or_else(|| {
-                Error::not_yet("a boolean function outside `0 b.` … `31 b.`", span)
-            })?;
+            .ok_or_else(|| Error::domain("m b. takes one whole number", span))?;
+        // Thirty-five functions are numbered, and the reference tells the
+        // numbers below them from the ones past either end: `_1 b.` is a
+        // domain error down to `_16 b.`, and anything outside `_16` to `34`
+        // is out of range.
+        if !(-16..=34).contains(&m) {
+            return Err(Error::domain(
+                "m b. numbers the functions 0 to 34; that index is out of range",
+                span,
+            ));
+        }
         let p = crate::verb::Prim {
             name: "b.",
-            monad: MonadOp::None,
-            dyad: DyadOp::TruthTable(m as u8),
-            ranks: [crate::verb::RANK_INF, 0, 0],
+            monad: MonadOp::TruthTable(m as i8),
+            dyad: DyadOp::TruthTable(m as i8),
+            ranks: [0, 0, 0],
         };
         return Ok(Frag::Verb(VerbFrag::V(Verb::Prim(p)), span));
     }
