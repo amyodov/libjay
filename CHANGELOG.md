@@ -67,6 +67,16 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   both, one nested magnitude block an item and two for a rational.
 - `__:`, the constant verb of the infinity below, which the lexer had read
   as a number and a definition's colon.
+- The numbered symbol forms over an argument with NO ITEMS, which are
+  answered whatever its type, since no value of one is read: `5 s: (i. 0)`
+  is the boxed empty where `5 s: 5` is a domain error. `2 s:` (the names
+  razed into one list) and `3 s:` are implemented besides; `0 s:` and
+  `1 s:` dump an interpreter's own table and `6 s:` … `_2 s:` number a
+  symbol within it, so those stay named gaps over symbols, and a number
+  outside `_2` to `7` is now a domain error rather than a gap.
+- The TESSELATING cut takes no gerund. `` (+`,);.3 `` and `` (+`,);._3 ``
+  are refused as the reference refuses them, where every other cut form
+  cuts with one verb per piece.
 - The type and the shape a RANKED scalar dyad answers with when its frame
   has no cell. A fill the verb refused stands in as a BOOLEAN zero, the
   narrowest numeric type there is, so it names no type of its own in the

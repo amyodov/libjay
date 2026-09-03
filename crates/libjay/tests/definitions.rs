@@ -155,7 +155,7 @@ fn a_catcht_with_no_try_has_no_opening_word() {
 /// not an error the program can handle, so it goes straight through.
 #[test]
 fn try_does_not_swallow_a_not_yet() {
-    let e = fails(Lang::J, "f =. 3 : 0\ntry.\n2 s: y\ncatch.\n0\nend.\n)\nf 'a b'");
+    let e = fails(Lang::J, "f =. 3 : 0\ntry.\n6 s: s: ;: y\ncatch.\n0\nend.\n)\nf 'a b'");
     assert_eq!(e.kind, ErrorKind::NotYet);
 }
 

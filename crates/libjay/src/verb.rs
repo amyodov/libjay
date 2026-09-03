@@ -22860,11 +22860,16 @@ fn to_symbols(y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(vec![ids.len()], Data::Symbol(ids.into())))
 }
 
-/// `x s: y`: the numbered symbol forms. 4 lays the names out as a character
-/// table, blank-padded to the longest, and 5 boxes them one apiece. The
-/// remaining numbers J defines report on its own symbol table — how many
-/// slots it holds, which are in use, how it hashes them — and describe an
-/// interpreter's internals rather than the language.
+/// `x s: y`: the numbered symbol forms. 2 razes the names into one list, 3
+/// and 4 lay them out as a character table blank-padded to the longest, and
+/// 5 boxes them one apiece. The remaining numbers J defines report on its
+/// own symbol table — its index for each symbol, how many slots it holds,
+/// which are in use — and describe an interpreter's internals rather than
+/// the language, so libjay answers only where there is nothing to report.
+///
+/// An argument with NO ITEMS is answered whatever its type, since no value
+/// of it is read: `5 s: (i. 0)` is the boxed empty in the reference where
+/// `5 s: 5` is a domain error.
 fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
     let form = x
         .to_i64_vec()
@@ -22872,7 +22877,12 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
         .first()
         .copied()
         .unwrap_or(0);
-    if !matches!(form, 4 | 5) {
+    if !(-2..=7).contains(&form) {
+        return Err(Error::domain(format!("{form} s: names no symbol form"), span));
+    }
+    // 0 and 1 DUMP the interpreter's own table, which libjay has no answer
+    // for at any size.
+    if matches!(form, 0 | 1) {
         return Err(Error::not_yet(format!("the symbol-table form ({form} s:)"), span));
     }
     // Nothing to read is no error: an argument with no elements holds no
@@ -22888,17 +22898,43 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
         return Ok(Array::new(shape, Data::empty(DType::Char)));
     }
     let row_major = y.to_row_major();
-    let Data::Symbol(ids) = &row_major.data else {
-        return Err(Error::domain(
-            format!("{form} s: reads symbols, not {} data", y.dtype().name()),
-            span,
-        ));
+    let empty: [crate::symbol::Id; 0] = [];
+    let ids: &[crate::symbol::Id] = match &row_major.data {
+        Data::Symbol(ids) => ids.as_slice(),
+        _ if y.count() == 0 => &empty,
+        _ => {
+            return Err(Error::domain(
+                format!("{form} s: reads symbols, not {} data", y.dtype().name()),
+                span,
+            ))
+        }
     };
-    let names = crate::symbol::names(ids.as_slice());
+    // The three forms that report an interpreter's own table: its index for
+    // a symbol is a fact about the table and not about the language, so
+    // only a request with nothing to number is answered.
+    if matches!(form, -2 | -1 | 6 | 7) {
+        if !ids.is_empty() {
+            return Err(Error::not_yet(
+                format!("the symbol-table form ({form} s:) over symbols"),
+                span,
+            ));
+        }
+        return Ok(match form {
+            -2 | -1 => Array::new(vec![0], Data::Symbol(Vec::new().into())),
+            6 => Array::new(y.shape.clone(), Data::I64(Vec::new().into())),
+            _ => Array::new(vec![0], Data::I64(Vec::new().into())),
+        });
+    }
+    let names = crate::symbol::names(ids);
     if form == 5 {
         let boxes: Vec<Array> =
             names.iter().map(|n| Array::from_chars(n.chars().collect())).collect();
         return Ok(Array::new(y.shape.clone(), Data::Box(boxes.into())));
+    }
+    // The RAZE: every name run together, whatever the argument's shape.
+    if form == 2 {
+        let out: Vec<char> = names.iter().flat_map(|n| n.chars()).collect();
+        return Ok(Array::new(vec![out.len()], Data::Char(out.into())));
     }
     let width = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
     let mut out: Vec<char> = Vec::with_capacity(names.len() * width);

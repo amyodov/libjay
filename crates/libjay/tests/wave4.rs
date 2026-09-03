@@ -296,7 +296,7 @@ fn the_adverse_answers_a_refusal_with_the_other_verb() {
     assert_eq!(val(Lang::J, "(+/ :: 0) 'abc'"), bits(&[], &[0]));
     assert_eq!(val(Lang::J, "(+/ :: 0) 1 2 3"), Array::scalar_i64(6));
     // A gap in libjay is a promise, not an error the program may handle.
-    let e = err(Lang::J, "(2&s: :: 0) 'a b'");
+    let e = err(Lang::J, "(6&s: :: 0) s: ;: 'a b'");
     assert_eq!(e.kind, ErrorKind::NotYet);
 }
 

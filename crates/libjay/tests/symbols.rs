@@ -143,11 +143,15 @@ fn ordering_a_symbol_against_a_non_symbol_is_refused() {
 
 #[test]
 fn the_symbol_table_forms_are_a_named_gap_not_a_syntax_error() {
-    for form in ["0", "1", "2", "3", "6", "7", "_1"] {
+    // The forms that report an interpreter's OWN table: its numbering of a
+    // symbol is a fact about the table, not about the language.
+    for form in ["0", "1", "6", "7", "_1"] {
         let e = err(&format!("{form} s: s: <'a'"));
         assert_eq!(e.kind, ErrorKind::NotYet, "{form} s:");
         assert!(e.msg.contains("symbol-table form"), "{}", e.msg);
     }
+    // A form that names nothing at all is a domain error, not a gap.
+    assert_eq!(err("8 s: s: <'a'").kind, ErrorKind::Domain);
 }
 
 #[test]

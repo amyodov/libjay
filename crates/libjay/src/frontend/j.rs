@@ -3673,7 +3673,8 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         ";." => {
             // A gerund cuts with one verb per piece, as the cycling
             // adverbs do; anything else is the one verb every piece gets.
-            let f = if gerund_operand(&u, scope) {
+            let is_gerund = gerund_operand(&u, scope);
+            let f = if is_gerund {
                 Verb::Cycle(gerund_verbs(&u, scope, span)?)
             } else {
                 verb_operand(u, span)?
@@ -3681,6 +3682,12 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             let n = one_atom(&v, "cut", span)?;
             if n.fract() != 0.0 || !matches!(n as i64, -3..=3) {
                 return Err(Error::not_yet(format!("cut (u;.{n})"), span));
+            }
+            // The TESSELATING cut alone takes no gerund: the reference cuts
+            // with one verb per piece under every other number and refuses
+            // `` (+`,);.3 `` and `` (+`,);._3 `` however they are applied.
+            if is_gerund && matches!(n as i64, 3 | -3) {
+                return Err(Error::domain("the tesselating cut takes no gerund", span));
             }
             Ok(Frag::Verb(VerbFrag::V(Verb::Cut(Box::new(f), n as i64)), span))
         }
