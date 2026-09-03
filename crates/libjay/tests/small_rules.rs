@@ -154,11 +154,29 @@ fn an_outfix_leaves_an_operand_that_does_have_one_alone(
 #[rstest]
 #[case("1 2 3 #. 5", 50)]
 #[case("2 3 4 #. 1", 17)]
-#[case("(i. 0) #. 5", 0)]
 #[case("(,2) #. 5", 5)]
 #[case("5 #. 1 2 3", 38)]
 fn j_decode_spreads_an_atom_of_digits(#[case] src: &str, #[case] want: i64) {
     assert_eq!(j(src), Array::scalar_i64(want));
+}
+
+/// No radix at all weighs nothing, and the zero it answers with is the
+/// running total's own — a FLOAT where the digits are ordinary numbers, the
+/// INTEGER where they are boolean and the boolean where either side is
+/// exact. `3!:0 ((i. 0) #. 5)` is 8 in the reference, `3!:0 ((i. 0) #. 1)`
+/// 4 and `3!:0 ((i. 0) #. 5x)` 1.
+#[rstest]
+#[case("(i. 0) #. 5", "0", "8")]
+#[case("(i. 0) #. 1", "0", "4")]
+#[case("(i. 0) #. 5x", "0", "1")]
+#[case("('') #. 5", "0", "8")]
+fn j_decode_with_no_radix_answers_the_running_total(
+    #[case] src: &str,
+    #[case] value: &str,
+    #[case] kind: &str,
+) {
+    assert_eq!(shown(Lang::J, src), value);
+    assert_eq!(shown(Lang::J, &format!("3!:0 ({src})")), kind);
 }
 
 #[test]

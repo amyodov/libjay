@@ -3245,14 +3245,37 @@ impl Verb {
             // besides, wherever the radices have an atom to read them
             // with: `(0 3 $ 0) #. (1;2;3)` is a domain error there and
             // `(0 0 $ 0) #. (1;2;3)` — no radix at all — the empty.
+            // A radix of a kind that weighs nothing refuses wherever a
+            // digit is READ, whatever the frames hold: `(0 2 $ 'a') #. 0`
+            // and `(0 0 $ 'a') #. (,0)` are domain errors there. It is one
+            // digit that reads the radices — a whole cell of them stands
+            // beside a frame with no cell to weigh, and `(0 2 $ 'a') #.
+            // (1 2 3)` is the empty there.
             let decode_eager = fxl == 0
                 || (!y.dtype().is_numeric()
                     && y.count() > 0
-                    && x.shape[fxl..].iter().product::<usize>() > 0);
+                    && x.shape[fxl..].iter().product::<usize>() > 0)
+                || (decode_refuses(x.dtype(), y.dtype()) && y.count() > 0);
             let keep_any = eager
                 || (decode_eager
                     && matches!(self, Verb::Prim(Prim { dyad: DyadOp::Decode, .. })));
-            return empty_frame(&p.frame, y.dtype(), cell, conform, keep_any, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
+            // CATENATION settles the type of an answer with no cell the way
+            // it settles the type of an empty join: by the reference's own
+            // order over the nine types, not by whichever side stands on
+            // the right. `3!:0 ((0 $ 5) ,. (0 $ 'a'))` is the integer type
+            // there, `3!:0 ((0 $ 'a') ,. (0 $ 0))` the character one and
+            // `3!:0 ((0 $ <0) ,. (0 $ 5))` the boxed one.
+            let mut inner = self;
+            while let Verb::Rank(v, _) = inner {
+                inner = v;
+            }
+            let joining = matches!(
+                inner,
+                Verb::Prim(Prim { dyad: DyadOp::AppendLeading | DyadOp::AppendLast, .. })
+            )
+            .then(|| empty_type(x, y))
+            .flatten();
+            let framed = empty_frame(&p.frame, joining.unwrap_or_else(|| y.dtype()), cell, conform, keep_any, agreeing, indexing, conform, &[], ctx, |left, numeric, c| {
                 let right = right.as_ref().expect("a left fill cell comes with a right one");
                 let stand_in;
                 let right = if numeric {
@@ -3262,6 +3285,15 @@ impl Verb {
                     right
                 };
                 self.dyad_cell(left, right, c, span)
+            })?;
+            // The SHAPE of a catenation with no cell is what the fill cells
+            // join to; the TYPE is the order's, whatever type that join
+            // happened to take. `3!:0 ((0 $ 0) ,"0 1 (0 $ 'a'))` is the
+            // character type there, where a boolean atom joined to an empty
+            // character list is boolean.
+            return Ok(match joining {
+                Some(dt) => Array::new(framed.shape, Data::empty(dt)),
+                None => framed,
             });
         }
         let work = x.count().max(y.count());
@@ -9276,9 +9308,10 @@ fn catenate_at(
     // `1 2 3`. The retyping happens here, before any fill is worked out, so
     // that the fill an unequal axis needs is the RESULT's — the empty
     // planes of `(2 0 3$0) , 'hello'` come out as spaces, not as zeros.
-    let (xa, ya) = match empty_type(x, y)
-        .filter(|_| fill && DType::promote(xa.dtype(), ya.dtype()).is_none())
-    {
+    // A side with nothing in it names no type at all, not even where the
+    // two types would have promoted: `3!:0 ((0) , (0 $ 1x))` is the boolean
+    // type in the reference and `3!:0 ((0 $ 5) , (0))` the same.
+    let (xa, ya) = match empty_type(x, y).filter(|_| fill) {
         None => (xa, ya),
         Some(dt) => {
             let retype = |a: Array| {
@@ -9696,6 +9729,12 @@ fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
             }
         }
     };
+    // No radix at all beside digits that do exist weighs nothing, and the
+    // zero it answers with is typed by the float path's own rule rather
+    // than by the exact arithmetic here.
+    if radix.is_empty() && y.count() > 0 {
+        return None;
+    }
     let mut acc = Rat::from_int(Ext::from(0));
     for (d, b) in digits.iter().zip(&radix) {
         acc = acc.mul(b)?.add(d)?;
@@ -9717,7 +9756,10 @@ fn decode_exact(x: Option<&Array>, y: &Array) -> Option<Array> {
 /// `(<1) #. (0 $ 0.5)` a domain error.
 fn decode_reads(radix: DType, digits: DType) -> bool {
     match radix {
-        DType::Char => digits == DType::Char,
+        // A boolean empty is what a character radix reads beside a
+        // character one: `'a' #. (0 $ 0)` is 0 there where `'a' #. (i. 0)`
+        // — the same empty in the integer type — is a domain error.
+        DType::Char => matches!(digits, DType::Char | DType::Bool),
         // A radix held in a WIDE numeric type reads BOXES where a boolean
         // or an integer one does not: `2x #. (0 $ <0)` and
         // `2.5 #. (0 $ <0)` are 0 in the reference, `2 #. (0 $ <0)` a
@@ -9727,6 +9769,25 @@ fn decode_reads(radix: DType, digits: DType) -> bool {
             digits == DType::Char || digits.is_numeric() || digits == DType::Box
         }
         _ => matches!(digits, DType::Char | DType::Bool | DType::I64) || !digits.is_numeric(),
+    }
+}
+
+/// Whether a radix of a kind that weighs nothing refuses the digits it is
+/// given, where there IS a digit to weigh.
+///
+/// The reference weighs WHOLE numbers through paths of their own, which ask
+/// the radix's kind, and everything else through a running total that never
+/// reads a radix list with nothing in it. Measured kind by kind: a CHARACTER
+/// radix refuses booleans, a BOXED one refuses booleans and integers, a
+/// SYMBOL one refuses every digit, and none of them refuses a float, an
+/// exact number or a complex one — `('') #. 2` is 0 and `('') #. 0` a
+/// domain error, `(0 $ <0) #. 2` a domain error and `(0 $ <0) #. 1.5` a 0.
+fn decode_refuses(radix: DType, digits: DType) -> bool {
+    match radix {
+        DType::Char => digits == DType::Bool || !digits.is_numeric(),
+        DType::Box => matches!(digits, DType::Bool | DType::I64) || !digits.is_numeric(),
+        DType::Symbol => true,
+        _ => false,
     }
 }
 
@@ -9796,6 +9857,32 @@ fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
             }
         }
     };
+    // A radix of a kind that weighs nothing is refused wherever there IS a
+    // digit to weigh, even where the radices hold none of their own:
+    // `(0 $ 'a') #. 0` is a domain error in the reference, as `'a' #. 0`
+    // is, and so are the boxed and the symbol radix. The LENGTHS are asked
+    // first, which is why `(0 $ 'a') #. (,1.5)` is a length error instead.
+    if x.is_some_and(|x| decode_refuses(x.dtype(), y.dtype())) {
+        return Err(Error::domain("decode reads digits of a kind the radices cannot", span));
+    }
+    // No radix at all beside digits that do exist: the weighing never runs,
+    // and the answer is the zero of whichever arithmetic would have run it,
+    // not the whole number the digits would have made. An EXACT side makes
+    // it the boolean zero (`3!:0 (('') #. 2x)` is 1), boolean digits the
+    // integer one (`3!:0 ((0 $ 0) #. 0)` is 4), and anything else the
+    // running total's own float (`3!:0 (('') #. 2)` is 8).
+    let no_radix = x.is_some_and(|x| x.count() == 0);
+    if no_radix {
+        let exact = |t: DType| matches!(t, DType::Ext | DType::Rat);
+        let zero = if exact(y.dtype()) || x.is_some_and(|x| exact(x.dtype())) {
+            Data::Bool(vec![0u8].into())
+        } else if y.dtype() == DType::Bool {
+            Data::I64(vec![0i64].into())
+        } else {
+            Data::F64(vec![0.0f64].into())
+        };
+        return Ok(Array::new(vec![], zero));
+    }
     let mut acc = 0.0f64;
     for (d, b) in digits.iter().zip(&radix) {
         // The dialect's product, so that an infinite radix meets the same
@@ -9808,7 +9895,7 @@ fn decode(x: Option<&Array>, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     if acc.is_nan() && !digits.iter().chain(&radix).any(|v| v.is_nan()) {
         return Err(Error::nan("this weighted sum has no value", span));
     }
-    let integral = is_integral(y) && x.is_none_or(is_integral);
+    let integral = is_integral(y) && x.is_none_or(is_integral) && !no_radix;
     Ok(Array::new(vec![], narrow(vec![acc], integral)))
 }
 
@@ -9840,6 +9927,15 @@ fn decode_complex(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
             }
         }
     };
+    if x.is_some_and(|x| decode_refuses(x.dtype(), y.dtype())) {
+        return Err(Error::domain("decode reads digits of a kind the radices cannot", span));
+    }
+    // No radix at all beside digits that do exist: the answer keeps the
+    // COMPLEX type the digits were written in, `3!:0 ((0 $ 0) #. 3j4)`
+    // being complex in the reference.
+    if x.is_some_and(|x| x.count() == 0) && y.count() > 0 {
+        return Ok(Array::new(Vec::new(), Data::Complex(vec![cx::ZERO].into())));
+    }
     let mut acc = cx::ZERO;
     for (d, b) in digits.iter().zip(&radix) {
         acc = cx::add(cx::mul(acc, *b), *d);
@@ -10341,6 +10437,26 @@ fn laminate(x: &Array, y: &Array, filled: Option<FillAtom>, span: Span) -> Resul
         Array::new(shape, data)
     };
     let cells = vec![spread(x, y), spread(y, x)];
+    // Two sides that share no type settle it the way CATENATION does — the
+    // reference's own order over the nine types, where a side with nothing
+    // in it never names the answer's type on its own: `3!:0 ((0 $ 'a') ,:
+    // (0 $ 1x))` is the extended type there and `3!:0 ((0 $ 0) ,: (0 $
+    // 'a'))` the character one, both of them what `,` already answers.
+    let cells = match empty_type(&cells[0], &cells[1])
+        .filter(|_| DType::promote(cells[0].dtype(), cells[1].dtype()).is_none())
+    {
+        None => cells,
+        Some(dt) => cells
+            .into_iter()
+            .map(|a| {
+                if a.count() == 0 && a.dtype() != dt {
+                    Array::new(a.shape.clone(), Data::empty(dt))
+                } else {
+                    a
+                }
+            })
+            .collect(),
+    };
     let cells = match filled {
         Some(f) => padded_with(cells, f, span)?,
         None => cells,
@@ -11976,8 +12092,10 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         }
         DyadOp::Decode => decode(Some(x), y, cfg.tol, span).map(|r| {
             // A sum of NO digits is the whole number 0, and no exact type
-            // travels out of arguments that held no value.
-            if x.count() == 0 && y.count() == 0 { r } else { carry_exact2(r, x, y) }
+            // travels out of arguments that held no value. Neither does one
+            // travel out of a radix list with nothing in it, whatever the
+            // digits were written as: `3!:0 (('') #. 2x)` is boolean there.
+            if x.count() == 0 { r } else { carry_exact2(r, x, y) }
         }),
         DyadOp::Encode => encode(x, y, cfg.tol, span).map(|r| carry_exact2(r, x, y)),
         DyadOp::Laminate => laminate(x, y, cfg.fill, span),
@@ -12147,6 +12265,13 @@ const APL_EXTREME: f64 = 1.7976e308;
 /// reads the language.
 fn reduce_identity(v: &Verb, n: usize, lang: crate::Lang) -> Option<Data> {
     let Verb::Prim(p) = v else { return None };
+    // Indexing and permuting leave their right argument alone when the left
+    // one names every item in order, so `i.` of the cell's own shape is the
+    // identity of both: `({)/ (i. 0 3)` and `(C.)/ (i. 0 3)` are `0 1 2` in
+    // the reference, and `({)/ (0 $ 0)` is the atom 0.
+    if lang == crate::Lang::J && matches!(p.dyad, DyadOp::From | DyadOp::Permute) {
+        return Some(Data::I64((0..n as i64).collect::<Vec<i64>>().into()));
+    }
     let DyadOp::Scalar(op) = p.dyad else { return None };
     // Every numeric identity here is 0 or 1, and both references report a
     // boolean for each of them.
@@ -12510,6 +12635,20 @@ fn fold_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize) -> Option<Vec<f64>> {
 /// Reduce a numeric buffer with one of the arithmetic operations, without
 /// an intermediate array per step. None means this path does not apply and
 /// the general fold must run.
+/// A fold of BOOLEANS whose operation cannot leave `0 1` keeps the BOOLEAN
+/// type. `3!:0 (*/ 1 0 1)`, `3!:0 (<./ 1 0 1)` and `3!:0 (>./ 1 0 1)` are
+/// all the boolean type in the reference, where a sum or a difference has
+/// to widen. The typed folds all reduce a boolean buffer through the
+/// integer path, so each of them narrows its answer back here.
+fn bool_fold(op: ScalarDyad, v: Vec<i64>) -> Data {
+    use ScalarDyad::{Max, Min, Mul};
+    if matches!(op, Mul | Min | Max) {
+        Data::Bool(v.into_iter().map(|k| k as u8).collect::<Vec<u8>>().into())
+    } else {
+        Data::I64(v.into())
+    }
+}
+
 fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
     use ScalarDyad::*;
     // The rest — comparisons, LCM/GCD, the float-only divisions — decide
@@ -12522,9 +12661,11 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
         Data::Complex(v) => Some(Data::Complex(fold_cx(op, v, n, m)?.into())),
         Data::I64(v) => Some(Data::I64(fold_i64(op, v, n, m)?.into())),
         // Booleans reduce as integers, which is what promotion says the
-        // general path would produce. The promotion happens where the fold
-        // reads the element, so the boolean buffer is folded where it lies.
-        Data::Bool(v) => Some(Data::I64(fold_i64(op, v.as_slice(), n, m)?.into())),
+        // general path would produce for a sum or a difference. The
+        // promotion happens where the fold reads the element, so the
+        // boolean buffer is folded where it lies, and a product or an
+        // extremum narrows back to the type it never left.
+        Data::Bool(v) => Some(bool_fold(op, fold_i64(op, v.as_slice(), n, m)?)),
         // A bignum has no blockwise form: the exact types fold, scan and
         // window through the general path, one step at a time.
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
@@ -12614,8 +12755,9 @@ fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> 
             }?
             .into(),
         )),
-        // Booleans reduce as integers, and are promoted where they are read.
-        Data::Bool(v) => Some(Data::I64(fold_runs_i64(op, v.as_slice(), n, m)?.into())),
+        // Booleans reduce as integers, and are promoted where they are
+        // read; a product or an extremum narrows back to boolean.
+        Data::Bool(v) => Some(bool_fold(op, fold_runs_i64(op, v.as_slice(), n, m)?)),
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
 }
@@ -12755,8 +12897,10 @@ fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Optio
         }
         // Booleans reduce as integers, which is what promotion says the
         // general path would produce; the promotion happens where the fold
-        // reads the element, so the columns are folded where they lie.
-        Data::Bool(v) => Some(Data::I64(
+        // reads the element, so the columns are folded where they lie, and
+        // a product or an extremum narrows back to boolean.
+        Data::Bool(v) => Some(bool_fold(
+            op,
             by!(
                 v,
                 i64::overflowing_add,
@@ -12764,8 +12908,7 @@ fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Optio
                 i64::overflowing_mul,
                 |a: i64, b: i64| (a.min(b), false),
                 |a: i64, b: i64| (a.max(b), false)
-            )
-            .into(),
+            ),
         )),
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
@@ -12881,8 +13024,10 @@ fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Optio
                 .into(),
             ))
         }
-        // Read as integers where each element is read, as everywhere else.
-        Data::Bool(v) => Some(Data::I64(
+        // Read as integers where each element is read, as everywhere else;
+        // a product or an extremum narrows back to boolean.
+        Data::Bool(v) => Some(bool_fold(
+            op,
             by!(
                 v,
                 i64::overflowing_add,
@@ -12890,8 +13035,7 @@ fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Optio
                 i64::overflowing_mul,
                 |a: i64, b: i64| (a.min(b), false),
                 |a: i64, b: i64| (a.max(b), false)
-            )
-            .into(),
+            ),
         )),
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
