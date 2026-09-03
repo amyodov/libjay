@@ -355,3 +355,70 @@ $ 2 +/\\. (0 $ <0)
 ? the reference's own `i.` answers 0 for the same arguments
 (i. 0 0) i: (0 $ 3j4)
 ? the same, with a complex empty
+
+// A CUT whose piece is EMPTY, folded by an EXTREMUM. `<./;._2 (,5)` is a
+// domain error in jconsole; libjay answers the identity `_` the same fold
+// gives outside a cut, `<./ (0 $ 0)` being `_` there too. The reference
+// contradicts itself three ways over: `([: <./ ])`, `(<./ @ ,)` and
+// `(<./ "1)` — the SAME function spelled around the insert — all answer
+// `_` where the bare `<./` refuses; `+/`, `*/`, `+./`, `*./`, `=/`, `,/`,
+// `-/`, `%/` and `<` all answer; and a FLOAT, character, boxed, rational
+// or boolean piece answers where an integer or a complex one refuses. The
+// EXTENDED piece answers 1 for the minimum and _1 for the maximum, which
+// is no identity of either — the reference's own special code for `u/;.n`,
+// not a rule.
+<./ ;._2 (,5)
+? the same fold spelled `[: <./ ]` answers `_` there
+>./ ;._2 (,5)
+? the same, the maximum's identity
+<./ ;._1 (,5)
+? the same under the other end's cut
+<./ ;._2 (5 3 5)
+? the same where only ONE of the two pieces is empty
+<./ ;._2 (,1j2)
+? the same over a complex piece, where a float one answers
+<./ ;._2 (,1x)
+? an extended piece answers 1, which is no minimum of anything
+>./ ;._2 (,1x)
+? the same, answering _1 for the maximum
+
+// The PREFIX SCAN of a DIVISION insert against the insert itself. The last
+// item of `%/\ (1 0 0)` is `%/ (1 0 0)` by the scan's own definition, and
+// jconsole answers 0 for the one and `_` for the other: it reads `%/` as
+// the alternating product `(*/ odd) % (*/ even)`, which is `0 % 0` here,
+// where the fold `1 % (0 % 0)` is `1 % 0`. libjay scans by folding each
+// prefix, so its answer is the reference's own `%/`.
+%/\\ (1 0 0)
+? the reference's own `%/` on the same prefix answers `_`
+%/\\ (1 0 0 0)
+? the same, one item longer
+
+// The ROOTS of a polynomial of degree 3 or more with an INFINITE
+// coefficient. jconsole refuses `p. (_ _ _ _)`; libjay answers the NaN
+// roots the arithmetic gives. The refusal follows no rule the reference
+// keeps: degree 1 and 2 answer with exactly those NaN roots
+// (`p. (_ _)` and `p. (_ _ _)`), and so does `p. (0 0 1 1 _)` at degree 4
+// with the same infinity — it is the reference's own root finder giving
+// up on the numbers in front of it, not a statement about the domain.
+p. (_ _ _ _)
+? degree 2 with the same infinities answers the same NaN roots there
+p. (1 1 1 _)
+? one infinity is enough, wherever it stands
+p. (_ _ _ _ _)
+? the same at degree 4, where `p. (0 0 1 1 _)` answers
+
+// DECODE where the LEFT argument's frame has no cell. `(0 2 $ 'a') #.
+// (2 0 $ 0)` is `0 0` in jconsole, shaped by the RIGHT frame alone, where
+// `(0 2 $ 0) #. (2 0 $ 0)` — the same two shapes with a NUMERIC left — is
+// a length error: a character left cannot be more permissive about shape
+// than a numeric one. `$ (2 0 3 $ 'a') #. (0 $ 0)` is `2` there, which no
+// frame of a rank-1 verb gives. libjay agrees the frames the ordinary way
+// and answers, or refuses, as those frames say.
+(0 2 $ 'a') #. (0 $ 0)
+? the reference drops the left frame and answers the atom 0
+(0 2 $ 'a') #. (2 0 $ 0)
+? the same two shapes with a numeric left are a length error there
+(0 2 $ <0) #. (i. 3 0)
+? the same, with a boxed left
+$ (2 0 3 $ 'a') #. (0 $ 0)
+? the reference's shape here is `2`, which no rank rule gives

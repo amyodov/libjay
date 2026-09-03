@@ -357,3 +357,73 @@
 ? the same, with a complex empty
 < 0
 > j: _1
+= <./ ;._2 (,5)
+? the same fold spelled `[: <./ ]` answers `_` there
+< _
+> j: <error>
+= >./ ;._2 (,5)
+? the same, the maximum's identity
+< __
+> j: <error>
+= <./ ;._1 (,5)
+? the same under the other end's cut
+< _
+> j: <error>
+= <./ ;._2 (5 3 5)
+? the same where only ONE of the two pieces is empty
+< _ 3
+> j: <error>
+= <./ ;._2 (,1j2)
+? the same over a complex piece, where a float one answers
+< _
+> j: <error>
+= <./ ;._2 (,1x)
+? an extended piece answers 1, which is no minimum of anything
+< _
+> j: 1
+= >./ ;._2 (,1x)
+? the same, answering _1 for the maximum
+< __
+> j: _1
+= %/\\ (1 0 0)
+? the reference's own `%/` on the same prefix answers `_`
+< 1 _ _
+> j: 1 _ 0
+= %/\\ (1 0 0 0)
+? the same, one item longer
+< 1 _ _ _
+> j: 1 _ 0 0
+= p. (_ _ _ _)
+? degree 2 with the same infinities answers the same NaN roots there
+< +-+-----------------+
+< |_|_.j_. _.j_. _.j_.|
+< +-+-----------------+
+> j: <error>
+= p. (1 1 1 _)
+? one infinity is enough, wherever it stands
+< +-+-----------------+
+< |_|_.j_. _.j_. _.j_.|
+< +-+-----------------+
+> j: <error>
+= p. (_ _ _ _ _)
+? the same at degree 4, where `p. (0 0 1 1 _)` answers
+< +-+-----------------------+
+< |_|_.j_. _.j_. _.j_. _.j_.|
+< +-+-----------------------+
+> j: <error>
+= (0 2 $ 'a') #. (0 $ 0)
+? the reference drops the left frame and answers the atom 0
+<
+> j: 0
+= (0 2 $ 'a') #. (2 0 $ 0)
+? the same two shapes with a numeric left are a length error there
+< <error>
+> j: 0 0
+= (0 2 $ <0) #. (i. 3 0)
+? the same, with a boxed left
+< <error>
+> j: 0 0 0
+= $ (2 0 3 $ 'a') #. (0 $ 0)
+? the reference's shape here is `2`, which no rank rule gives
+< 2 0
+> j: 2
