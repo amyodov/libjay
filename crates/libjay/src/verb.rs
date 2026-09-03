@@ -11655,8 +11655,11 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             for n in &names {
                 ctx.env.erase_name(n);
             }
-            let ones = vec![1i64; names.len()];
-            Ok(Array::new(y.shape.clone(), Data::I64(ones.into())))
+            // 1 where the box held a NAME, whether or not anything stood
+            // under it to erase, and 0 where it held something that is not
+            // a name at all.
+            let erased: Vec<i64> = names.iter().map(|n| i64::from(is_name(n))).collect();
+            Ok(Array::new(y.shape.clone(), Data::I64(erased.into())))
         }
         MonadOp::BoxedRep | MonadOp::LinearRep | MonadOp::ParenRep => {
             representation(p.monad, y, ctx, span)
@@ -23543,6 +23546,19 @@ fn boxed_name_arg(y: &Array, what: &str, span: Span) -> Result<Vec<String>> {
         .as_slice()
         .iter()
         .map(|c| {
+            if c.rank() > 1 {
+                return Err(Error::new(
+                    ErrorKind::Rank,
+                    format!("{what} takes a name per box, which is a character list"),
+                    Some(span),
+                ));
+            }
+            // A box holding NOTHING carries no name of any type: it reads
+            // as the empty name, which is not a name a program could have
+            // written, rather than as data of the wrong type.
+            if c.count() == 0 {
+                return Ok(String::new());
+            }
             crate::gerund::text_of(c)
                 .ok_or_else(|| Error::domain(format!("{what} takes boxed names"), span))
         })

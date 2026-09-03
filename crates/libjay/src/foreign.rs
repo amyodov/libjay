@@ -35,6 +35,12 @@ fn byte_string(y: &Array, what: &str, span: Span) -> Result<Vec<u8>> {
             Some(span),
         ));
     }
+    // Nothing to read is no error, whatever type the empty was written
+    // at: an argument with no elements carries no byte the reading could
+    // object to.
+    if y.count() == 0 {
+        return Ok(Vec::new());
+    }
     let Data::Char(v) = y.row_major_data() else {
         return Err(Error::domain(
             format!("{what} reads bytes, so it takes a literal"),
