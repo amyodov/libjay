@@ -5592,7 +5592,12 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
         MakeComplex => cx::add(a, cx::mul(cx::I, b)),
         PolarBy => {
             // `a r. b` turns by the angle `b`, which is the exponent's
-            // imaginary part.
+            // imaginary part — unless `b`'s own imaginary part has already
+            // shrunk the magnitude to nothing, when the answer is zero
+            // whatever the angle and the limit is never reached.
+            if cx::vanishes(-b[1]) {
+                return Ok([0.0, 0.0]);
+            }
             turns(b[0], span)?;
             cx::mul(a, cx::exp(cx::mul(cx::I, b)))
         }
@@ -7532,15 +7537,22 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
     // `^ z` turns by the imaginary part and `r. z` by the real one, and
     // neither will turn further than a circle function reaches: `^ 0j1e10`
     // and `r. 1e10` are limit errors in jconsole.
+    // Neither turn is asked about where the magnitude it would turn has
+    // underflowed: the answer is zero whatever the angle, so the angle is
+    // never consulted.
     match op {
         Exp => {
             for z in v.iter() {
-                turns(z[1], span)?;
+                if !cx::vanishes(z[0]) {
+                    turns(z[1], span)?;
+                }
             }
         }
         Polar => {
             for z in v.iter() {
-                turns(z[0], span)?;
+                if !cx::vanishes(-z[1]) {
+                    turns(z[0], span)?;
+                }
             }
         }
         _ => {}

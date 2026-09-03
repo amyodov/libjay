@@ -122,8 +122,24 @@ fn principal(z: Cx) -> Cx {
     if z[1] == 0.0 { [z[0], 0.0] } else { z }
 }
 
+/// Whether `^ scale` has fallen to the smallest number a double holds, and
+/// so whether an exponential turning by that much is zero WHATEVER its
+/// angle. It is the question the angle limit has to be asked after: a turn
+/// nobody can measure does not matter where there is nothing left to turn,
+/// and `1 r. (1.7e9j1000)` is 0 in jconsole where `1 r. (1.7e9j100)` is a
+/// limit error.
+pub fn vanishes(scale: f64) -> bool {
+    scale.exp() <= f64::MIN_POSITIVE * f64::EPSILON
+}
+
 #[inline]
 pub fn exp(z: Cx) -> Cx {
+    // A magnitude that has underflowed leaves nothing for the angle to
+    // turn, and the answer is an exact zero rather than the last subnormal
+    // bit of one.
+    if vanishes(z[0]) {
+        return [0.0, 0.0];
+    }
     let m = z[0].exp();
     // An infinite magnitude along an axis stays on it: J multiplies an
     // infinity by a zero to a zero, which is what makes `_ ^ 0.5` the `_`
