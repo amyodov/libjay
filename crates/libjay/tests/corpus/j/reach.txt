@@ -92,3 +92,20 @@ q: 1 2 3x
 (s: <'a') = (s: <'a')
 4 s: s: <'ab'
 5 s: s: <'ab'
+
+// --- `s:` of a table whose rows hold no character at all: a row of no
+// characters is the empty name, and there is no chunk to cut
+s: (0 0 $ '')
+s: (2 0 $ '')
+$ s: (2 0 $ '')
+1 s:;.3 (0 0 $ '')
+
+// --- the conversion verbs read their left argument WHOLE: the left rank
+// of `u:`, `s:`, `x:` and `p:` is infinite, as their characteristics say
+(u:) b. 0
+(s:) b. 0
+(x:) b. 0
+(p:) b. 0
+2 x: 1r2
+_2 x: 1r2
+3 u: 'ab'

@@ -22450,10 +22450,17 @@ fn to_symbols(y: &Array, span: Span) -> Result<Array> {
     let chars = v.as_slice();
     if y.rank() >= 2 {
         let width = y.shape[y.rank() - 1];
-        let mut ids = Vec::with_capacity(chars.len() / width.max(1));
-        for row in chars.chunks(width) {
-            let name: String = row.iter().collect();
-            ids.push(crate::symbol::intern(name.trim_end_matches(' ')));
+        let rows: usize = y.shape[..y.rank() - 1].iter().product();
+        let mut ids = Vec::with_capacity(rows);
+        if width == 0 {
+            // A row of no characters is the empty name, and there is no
+            // chunk to cut the buffer into.
+            ids.resize(rows, crate::symbol::EMPTY);
+        } else {
+            for row in chars.chunks(width) {
+                let name: String = row.iter().collect();
+                ids.push(crate::symbol::intern(name.trim_end_matches(' ')));
+            }
         }
         return Ok(Array::new(y.shape[..y.rank() - 1].to_vec(), Data::Symbol(ids.into())));
     }

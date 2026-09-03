@@ -2090,11 +2090,11 @@ fn primitive(word: &str) -> Option<Prim> {
         ),
         // The dyad reads the whole argument: `2 x: y` gives every value a
         // numerator and a denominator, which becomes a trailing axis.
-        "x:" => prim("x:", M::ToExact, D::ExactForm, [INF, 0, INF]),
+        "x:" => prim("x:", M::ToExact, D::ExactForm, [INF, INF, INF]),
         // The right dyadic rank is infinite: form 3 reads the whole
         // argument, as `q:` does, and the forms that answer about one
         // number frame their own answers.
-        "p:" => prim("p:", M::NthPrime, D::PrimeMeta, [0, 0, RANK_INF]),
+        "p:" => prim("p:", M::NthPrime, D::PrimeMeta, [0, RANK_INF, RANK_INF]),
         // The coefficients are one vector and the point one atom, so the
         // rank machinery evaluates a whole array of points at once.
         "p." => prim("p.", M::PolyRoots, D::PolyEval, [1, 1, 0]),
@@ -2149,10 +2149,10 @@ fn primitive(word: &str) -> Option<Prim> {
         "A." => prim("A.", M::AnagramIndex, D::AnagramFrom, [1, 0, INF]),
         "C." => prim("C.", M::CycleForm, D::Permute, [1, 1, INF]),
         "E." => prim("E.", M::None, D::FindSeq, [INF, INF, INF]),
-        "u:" => prim("u:", M::Unicode { pass_chars: true }, D::UnicodeForm, [INF, 0, INF]),
+        "u:" => prim("u:", M::Unicode { pass_chars: true }, D::UnicodeForm, [INF, INF, INF]),
         // The monad reads the whole argument: one delimiter governs the
         // whole list. The dyad takes the form as an atom.
-        "s:" => prim("s:", M::Symbols, D::SymbolForm, [INF, 0, INF]),
+        "s:" => prim("s:", M::Symbols, D::SymbolForm, [INF, INF, INF]),
         "]" => prim("]", M::Same, D::Right, [INF, INF, INF]),
         "[" => prim("[", M::Same, D::Left, [INF, INF, INF]),
         "echo" => prim("echo", M::Echo, D::None, [INF, INF, INF]),
