@@ -10239,18 +10239,30 @@ fn bit_width(values: &[f64], span: Span) -> Result<usize> {
         }
         m = m.max(v.abs());
     }
+    // The width is the largest magnitude's, read off the exponent rather
+    // than counted down by halving: a double holds 1e300 exactly and
+    // jconsole writes out all 997 of its digits, so a value past the
+    // machine word is not a value past encoding. The exact paths above take
+    // every argument they can hold; this one is what is left — a list
+    // mixing a huge whole number with a fractional one, say — and the
+    // digits come off it by the same residue chain the reference runs.
     let whole = m.floor();
-    if whole >= 1e15 {
-        return Err(Error::domain("the value is too large to encode in binary", span));
-    }
-    let mut w = 1usize;
-    let mut n = whole as i64;
-    while n > 1 {
-        n /= 2;
-        w += 1;
+    let w = if whole >= 1.0 { (whole.log2().floor() as usize) + 1 } else { 1 };
+    if w > BIT_WIDTH_LIMIT {
+        return Err(Error::new(
+            ErrorKind::Limit,
+            format!("{w} binary digits is more than one array can hold"),
+            Some(span),
+        ));
     }
     Ok(w)
 }
+
+/// How many binary digits one encoding may run to. A double's largest
+/// value needs 1024 of them, so nothing a float argument can ask for comes
+/// near this; the bound is here so that an argument nobody meant cannot ask
+/// for an array the machine has no room for.
+const BIT_WIDTH_LIMIT: usize = 1 << 20;
 
 /// One value written in the radices `radix`, most significant first. A radix
 /// of 0 takes whatever is left, which is how both languages spell "and the
@@ -10437,8 +10449,25 @@ fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let k = bit_width(&values, span)?;
     let radix = vec![2.0; k];
     let mut out = vec![0.0f64; values.len() * k];
+    let two = Ext::from(2);
     for (j, &v) in values.iter().enumerate() {
-        encode_one(&radix, v, &mut out[j * k..(j + 1) * k], tol);
+        let slot = &mut out[j * k..(j + 1) * k];
+        // A WHOLE value keeps every bit even here, where a neighbour of it
+        // is fractional and sent the whole pass down this path: the float
+        // residue chain loses the low bits of anything past the machine
+        // word, and `#: (1e300 2.5)` would answer 1e300's row with a
+        // fraction in the middle of it.
+        match exact::f64_to_ext(v) {
+            Some(whole) => {
+                let mut rem = whole;
+                for digit in slot.iter_mut().rev() {
+                    let r = exact::ext_residue(&two, &rem);
+                    rem = (&rem - &r) / &two;
+                    *digit = if r.sign() == num_bigint::Sign::NoSign { 0.0 } else { 1.0 };
+                }
+            }
+            None => encode_one(&radix, v, slot, tol),
+        }
     }
     let mut shape = y.shape.clone();
     shape.push(k);

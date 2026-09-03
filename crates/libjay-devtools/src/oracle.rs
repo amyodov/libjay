@@ -111,7 +111,7 @@ impl Reply {
 /// is the whole run. A RECORDING is a gate: every line of it is one
 /// somebody chose, the run is a few hundred of them, and a limit that a
 /// loaded machine can reach turns the gate into a coin toss.
-const SWEEP_LIMIT: u64 = 20;
+pub const SWEEP_LIMIT: u64 = 20;
 pub const RECORD_LIMIT: u64 = 60;
 
 /// The default the process runs under, which [`set_default_limit`] moves.

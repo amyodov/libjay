@@ -1071,12 +1071,23 @@ enum Trait {
     Huge,
     /// Numeric, and both answers stay under 2^53.
     Small,
+    /// Numeric, of one shape, and every pair of atoms is of one sign and
+    /// within a factor of two. Two engines that BOTH lose a computation in
+    /// its last digits land near each other; one that is plainly wrong does
+    /// not.
+    Near,
 }
 
 /// The largest magnitude a printed answer holds, and `None` where nothing
 /// in it reads as a number. J and APL both write a negative sign the
 /// arithmetic does not, and an infinity as a bare mark.
 fn magnitude(text: &str) -> Option<f64> {
+    Some(numbers(text)?.into_iter().fold(0.0f64, |m, v| m.max(v.abs())))
+}
+
+/// Every number a printed answer holds, in the order it holds them, and
+/// `None` where anything in it is not one.
+fn numbers(text: &str) -> Option<Vec<f64>> {
     // One part of a written number: an infinity is a bare mark, an
     // extended one ends in `x`, and a rational is a quotient.
     fn part(text: &str) -> Option<f64> {
@@ -1092,21 +1103,57 @@ fn magnitude(text: &str) -> Option<f64> {
             None => plain.parse().ok(),
         }
     }
-    let mut most: Option<f64> = None;
+    let mut out: Vec<f64> = Vec::new();
     for token in text.split_whitespace() {
         // A complex number is written `aJb`, and its magnitude is the
         // hypotenuse of the two.
-        let value = match token.split_once('j') {
+        out.push(match token.split_once('j') {
             Some((re, im)) => part(re)?.hypot(part(im)?),
             None => part(token)?,
-        };
-        most = Some(most.map_or(value.abs(), |m: f64| m.max(value.abs())));
+        });
     }
-    most
+    (!out.is_empty()).then_some(out)
 }
 
 /// Where a double stops telling one whole number from the next.
 const DOUBLE_STEP: f64 = 9_007_199_254_740_992.0;
+
+/// A printed answer with the BOX DRAWING taken out of it, so that a family
+/// about numbers can be asked about numbers that arrived in boxes. Neither
+/// language writes a number with any of these characters — J spells a
+/// negative `_` and APL `¯` — so removing them can turn no value into
+/// another one.
+fn unframe(text: &str) -> String {
+    const FRAME: &str = "+-|┌┐└┘─│├┤┬┴┼";
+    if !text.contains('|') {
+        return text.to_string();
+    }
+    text.chars().map(|c| if FRAME.contains(c) { ' ' } else { c }).collect()
+}
+
+/// Whether two printed answers are the same numbers to within a factor of
+/// two, atom for atom and sign for sign. It is the mark of a computation
+/// BOTH engines lose in its last digits — where neither answer is the value
+/// and the two land beside one another — and not of one engine being
+/// plainly wrong, which shows as a different sign or a different order of
+/// magnitude.
+fn near(ours: &str, theirs: &str) -> bool {
+    let (a, b) = (numbers(&unframe(ours)), numbers(&unframe(theirs)));
+    let (Some(a), Some(b)) = (a, b) else { return false };
+    if a.len() != b.len() || a.is_empty() {
+        return false;
+    }
+    a.iter().zip(&b).all(|(x, y)| {
+        if x == y {
+            return true;
+        }
+        if (*x > 0.0) != (*y > 0.0) || !x.is_finite() || !y.is_finite() {
+            return false;
+        }
+        let (lo, hi) = (x.abs().min(y.abs()), x.abs().max(y.abs()));
+        lo > 0.0 && hi <= 2.0 * lo
+    })
+}
 
 impl Trait {
     fn parse(name: &str) -> Result<Trait, String> {
@@ -1116,13 +1163,16 @@ impl Trait {
             "exact" => Ok(Trait::Exact),
             "huge" => Ok(Trait::Huge),
             "small" => Ok(Trait::Small),
+            "near" => Ok(Trait::Near),
             other => Err(format!(
-                "unknown answer class {other:?}: numeric, inexact, exact, huge or small"
+                "unknown answer class {other:?}: numeric, inexact, exact, huge, small or near"
             )),
         }
     }
 
     fn holds(self, ours: &str, theirs: &str) -> bool {
+        let (ours, theirs) = (unframe(ours), unframe(theirs));
+        let (ours, theirs) = (ours.as_str(), theirs.as_str());
         let numeric = |text: &str| {
             !text.trim().is_empty() && text.chars().all(|c| NUMERIC_OUTPUT.contains(c))
         };
@@ -1138,6 +1188,7 @@ impl Trait {
             Trait::Small => [ours, theirs]
                 .iter()
                 .all(|t| magnitude(t).is_some_and(|m| m < DOUBLE_STEP)),
+            Trait::Near => near(ours, theirs),
         }
     }
 }
@@ -1153,7 +1204,7 @@ fn neutral(lang: Lang) -> &'static [&'static str] {
         Lang::J => &[
             "[", "]", "[:", "\"", "@", "@:", "&", "&:", "~", "`", "L:", "S:", "/", "\\", "\\.",
             "<", ">", ",", ";", "#", "$", "{", "}", "|.", "|:", "i.", "a:", "{.", "}.", "{:",
-            "}:", ",:", ",.", "/:", "\\:", "~.", "{::",
+            "}:", ",:", ",.", "/:", "\\:", "~.", "{::", ";.",
         ],
         Lang::Apl => &["⊢", "⊣", "∘", "⍤", "⍥", "¨", "⍨", "/", "⌿", "\\", "⍀", "⊂", "⊃", "⍴", "⌽", "⍉"],
     }

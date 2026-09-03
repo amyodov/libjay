@@ -63,10 +63,14 @@
 ? jconsole holds both in one double and libjay keeps them exact
 < 8.11296e31
 > j: 9.0072e15
-= (1e10) ! (1e10 + 1e_4)
+= _1 + ((100000000) ! (100000000.00000001))
 ? both sides lose this one; the reference's answer is not the value either
-< 1.00238
-> j: 1.00234
+< 2.4702e_7
+> j: 2.83907e_7
+= _1 + ((1e8) ! (1e8 + 1e_4))
+? both sides lose this one; the reference's answer is not the value either
+< 0.00190154
+> j: 0.00190162
 = (_2 0 2) C. 'hello'
 ? the reference's answer for a non-permutation is undefined; libjay refuses
 < <error>
@@ -475,3 +479,15 @@
 ? the reference widens a one-item NaN root to the complex type and a two-item one not
 < 8
 > j: 16
+= (1.5 2.5 _0.5) ^. (0)
+? every cell of this answers on its own there and the list of them does not
+< __ __ _j_
+> j: <error>
+= (_0.5 _0.5) ^. 0
+? every cell of this answers on its own there and the list of them does not
+< _j_ _j_
+> j: <error>
+= (1.5 _0.5) ^. 0
+? every cell of this answers on its own there and the list of them does not
+< __ _j_
+> j: <error>

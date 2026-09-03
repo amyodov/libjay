@@ -59,7 +59,17 @@ u: 233
 // matching its arithmetic rather than the mathematics. Where the difference
 // of the two arguments is a small WHOLE number both sides are exact and
 // agree, which is the ordinary case and is recorded in fuzz_found.txt.
-(1e10) ! (1e10 + 1e_4)
+//
+// The rows below are the same divergence at a size the REFERENCE can
+// answer quickly: `1e10 ! (1e10 + 1e_4)` costs jconsole twenty seconds on
+// its own, which is most of a sweep's patience, and a row the interpreter
+// does not finish measuring is a row that silently excuses nothing. The 1
+// is subtracted off because the difference is in digits the printer would
+// otherwise round away.
+_1 + ((100000000) ! (100000000.00000001))
+? both sides lose this one; the reference's answer is not the value either
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/text|differ:val:vector/text verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,&.,&.: answers=inexact,near
+_1 + ((1e8) ! (1e8 + 1e_4))
 ? both sides lose this one; the reference's answer is not the value either
 
 // `x C. y` over a left argument that is no permutation of y's items. The
@@ -145,7 +155,7 @@ p. (0 1 1 _)
 ? the same boundary over a table
 (2 7 1 8) *. (_9223372036854775806)
 ? the same boundary, the huge number on the right
-~ cause=differ:val:vector/num|differ:val:table/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
+~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
 (_9223372036854775806) +. (2.0 4.0 6.0)
 ? the same boundary in the GCD the LCM is built on
 
@@ -257,7 +267,7 @@ _1r2 ^. _1r2
 // anything else is not this family and stays unexplained.
 (o. 1) *. 3
 ? the two float Euclids cut the same residue chain at different steps
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=+.,*. also=o.,%,%:,^.,^,*,+,-,<.,>.,|,j.,!.,&.,&.: answers=inexact
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=+.,*. also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,<:,>:,=,~:,|,j.,r.,!.,&.,&.: answers=inexact
 
 // The same family REACHING A REFUSAL rather than a value. Where the two
 // GCDs part by one bit — `1 +. 1.0000000000000002` is exactly 1 there and
@@ -282,7 +292,7 @@ _1r2 ^. _1r2
 // rule to follow, so libjay keeps its own.
 !^:_1 ] 1.1
 ? two arguments have this factorial and the two engines pick different ones
-~ cause=differ:val:atom/num|differ:val:vector/num verb=! with=^: also=%,%:,-,+,*,&.,&.: answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/text|differ:val:vector/text verb=! with=^: also=%,%:,-,+,*,&.,&.: answers=numeric
 !^:_1 ] 1.0000001
 ? two arguments have this factorial and the two engines pick different ones
 !^:_1 ] 0.8
@@ -507,3 +517,18 @@ _10 10 #: 1234
 ? the reference widens a one-item NaN logarithm to the complex type and a two-item one not
 3!:0 (%: _.)
 ? the reference widens a one-item NaN root to the complex type and a two-item one not
+
+// A LOGARITHM OF ZERO TO A LIST OF BASES. Every cell of it answers on its
+// own there — `2 ^. 0` is `__`, `_0.5 ^. 0` is `_j_`, `_1 ^. 0` is `0j_`
+// and `_2 ^. 0` is `__j_` — and a list of bases against a list of
+// arguments answers too (`_0.5 ^. (0 1)` is `_j_ 0`), but a list of bases
+// against the single 0 is a NaN error, `(_0.5 _0.5) ^. 0` included, whose
+// two cells are the value the reference itself gives one at a time. libjay
+// answers the cells.
+(1.5 2.5 _0.5) ^. (0)
+? every cell of this answers on its own there and the list of them does not
+~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=^. also=%,*,+,-,+:,-:,*:,=,~:,<:,>:,|,j.,&.,&.:
+(_0.5 _0.5) ^. 0
+? every cell of this answers on its own there and the list of them does not
+(1.5 _0.5) ^. 0
+? every cell of this answers on its own there and the list of them does not

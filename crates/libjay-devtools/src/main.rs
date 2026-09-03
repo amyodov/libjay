@@ -755,10 +755,17 @@ fn accepted_divergences(lang: libjay_testkit::Lang, oracle: &oracle::Oracle) -> 
     }
     let entries = corpus::read(&path);
     let mut out = Accepted { path, ..Accepted::none() };
+    // The divergence list is a few hundred rows somebody CHOSE, measured
+    // once per sweep — a gate, not throughput — and a row the interpreter
+    // does not finish inside a sweep's patience is a row that silently
+    // excuses nothing. `(1e10) ! (1e10 + 1e_4)` is one: it costs jconsole
+    // most of the sweep limit on its own.
+    oracle::set_default_limit(oracle::RECORD_LIMIT);
     let measured: Vec<(&corpus::Entry, Outcome)> = entries
         .par_iter()
         .map(|entry| (entry, put(lang, oracle, &entry.expr, entry.io)))
         .collect();
+    oracle::set_default_limit(oracle::SWEEP_LIMIT);
     for (entry, seen) in measured {
         if !seen.verdict.is_mismatch() {
             continue;
