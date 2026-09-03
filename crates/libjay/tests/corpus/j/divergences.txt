@@ -138,14 +138,14 @@ p. (0 1 1 _)
 // LCM the reference's own GCD asks for.
 (9223372036854775806) *. (,5)
 ? the reference's own GCD of 1 contradicts the LCM it answers
-~ cause=differ:val:atom/num verb=*.,+. also=&.,&.: answers=inexact,huge
+~ cause=differ:val:atom/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
 (_9223372036854775806) *. "1 _ 0 (i. 5)
 ? the same boundary, one radix per cell
 (_9223372036854775806) *."_2 (i. 3 4)
 ? the same boundary over a table
 (2 7 1 8) *. (_9223372036854775806)
 ? the same boundary, the huge number on the right
-~ cause=differ:val:vector/num verb=*.,+. also=&.,&.: answers=inexact,huge
+~ cause=differ:val:vector/num,differ:val:table/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
 (_9223372036854775806) +. (2.0 4.0 6.0)
 ? the same boundary in the GCD the LCM is built on
 
@@ -237,9 +237,27 @@ _1r2 ^. _1r2
 // forty-four measured pairs.
 (o. 1) *. 1
 ? the two float Euclids cut the same residue chain at different steps
-~ cause=differ:val:atom/num verb=+.,*. also=o.,%,%:,^.,^,*,+,-,&.,&.: answers=inexact,small
 1e12 * ((o. 1) +. 1)
 ? the two float Euclids cut the same residue chain at different steps
+
+// THE WHOLE `+.`/`*.` FLOAT BOUNDARY, AS ONE FAMILY. A sweep draws a fresh
+// spelling of it every few thousand sentences and never the same one twice,
+// so neither the sentence nor the cause signature — which is
+// `differ:val:atom/num` for every arithmetic difference there is — can
+// match it. The family rule below is what does. What it covers is exactly
+// what the two notes above say: a GCD or an LCM whose two arguments the
+// engines' float arithmetic does not agree about, either because they have
+// no common measure (the residue chains are cut at different steps) or
+// because they are two whole numbers one double cannot tell apart. It asks
+// for a numeric answer with a float written in it, and lets the sentence
+// name, besides the GCD itself, only arithmetic that can BUILD such a pair
+// — pi, a root, a logarithm, a power, the four operations, a floor or a
+// ceiling, a residue, the two readings of a complex number, a tolerance —
+// and structure, which computes nothing of its own. A sentence naming
+// anything else is not this family and stays unexplained.
+(o. 1) *. 3
+? the two float Euclids cut the same residue chain at different steps
+~ cause=differ:val:atom/num,differ:val:vector/num,differ:val:table/num verb=+.,*. also=o.,%,%:,^.,^,*,+,-,<.,>.,|,j.,!.,&.,&.: answers=inexact
 
 // THE OBVERSE OF THE FACTORIAL, WHERE THE EQUATION HAS MORE THAN ONE
 // ANSWER. `! x = y` has two solutions between every pair of the gamma
@@ -253,6 +271,7 @@ _1r2 ^. _1r2
 // rule to follow, so libjay keeps its own.
 !^:_1 ] 1.1
 ? two arguments have this factorial and the two engines pick different ones
+~ cause=differ:val:atom/num,differ:val:vector/num verb=! with=^: also=%,%:,-,+,*,&.,&.: answers=numeric
 !^:_1 ] 1.0000001
 ? two arguments have this factorial and the two engines pick different ones
 !^:_1 ] 0.8
@@ -279,6 +298,7 @@ _1r2 ^. _1r2
 ? the reference searches into the complex plane; libjay has no real answer
 ! ^:(_1 0 1) (_5x)
 ? the reference searches into the complex plane; libjay has no real answer
+~ cause=we-refuse:err:NaN_error:_this_factorial_has_no_argument verb=! with=^: also=%,%:,-,+,*,&.,&.:
 
 // The same two whole numbers a double cannot tell apart, reached through a
 // VECTOR left argument, where the whole pass goes to floats at once:

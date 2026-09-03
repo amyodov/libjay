@@ -1025,8 +1025,9 @@ pub fn cause_class(signature: &str) -> &str {
 /// ~ cause=differ:val:atom/num verb=+.,*. answers=inexact
 /// ```
 ///
-/// - `cause=` (required) is the cause class the mismatch must have: how the
-///   two sides parted, and what libjay made of the sentence.
+/// - `cause=` (required) is the cause classes the mismatch may have — how
+///   the two sides parted, and what libjay made of the sentence — one of
+///   which it must be.
 /// - `verb=` (required, non-empty) is the primitives the family is about.
 ///   The cut-down sentence must name at least ONE of them.
 /// - `with=` is the primitives it must name as well, ALL of them: a family
@@ -1044,7 +1045,7 @@ pub fn cause_class(signature: &str) -> &str {
 /// re-measures it, and the day the family converges that row stops
 /// diverging and the check says so.
 pub struct Family {
-    cause: String,
+    cause: Vec<String>,
     verb: Vec<String>,
     with: Vec<String>,
     also: Vec<String>,
@@ -1075,15 +1076,29 @@ enum Trait {
 /// in it reads as a number. J and APL both write a negative sign the
 /// arithmetic does not, and an infinity as a bare mark.
 fn magnitude(text: &str) -> Option<f64> {
+    // One part of a written number: an infinity is a bare mark, an
+    // extended one ends in `x`, and a rational is a quotient.
+    fn part(text: &str) -> Option<f64> {
+        let plain = text.replace(['_', '¯'], "-");
+        let plain = plain.strip_suffix('x').unwrap_or(&plain);
+        match plain {
+            "-" => return Some(f64::INFINITY),
+            "--" => return Some(f64::NEG_INFINITY),
+            _ => {}
+        }
+        match plain.split_once('r') {
+            Some((num, den)) => Some(part(num)? / part(den)?),
+            None => plain.parse().ok(),
+        }
+    }
     let mut most: Option<f64> = None;
     for token in text.split_whitespace() {
-        let plain = token.replace(['_', '¯'], "-");
-        let value = match plain.as_str() {
-            "-" => f64::INFINITY,
-            "--" => f64::NEG_INFINITY,
-            other => other.parse().ok()?,
+        // A complex number is written `aJb`, and its magnitude is the
+        // hypotenuse of the two.
+        let value = match token.split_once('j') {
+            Some((re, im)) => part(re)?.hypot(part(im)?),
+            None => part(token)?,
         };
-        let value: f64 = value;
         most = Some(most.map_or(value.abs(), |m: f64| m.max(value.abs())));
     }
     most
@@ -1149,7 +1164,7 @@ impl Family {
     /// does nothing.
     pub fn parse(text: &str) -> Result<Family, String> {
         let mut family = Family {
-            cause: String::new(),
+            cause: Vec::new(),
             verb: Vec::new(),
             with: Vec::new(),
             also: Vec::new(),
@@ -1161,7 +1176,7 @@ impl Family {
                 .split_once('=')
                 .ok_or_else(|| format!("clause {clause:?} is not key=value"))?;
             match key {
-                "cause" => family.cause = value.to_string(),
+                "cause" => family.cause = list(value),
                 "verb" => family.verb = list(value),
                 "with" => family.with = list(value),
                 "also" => family.also = list(value),
@@ -1185,7 +1200,7 @@ impl Family {
     /// [`reduce`] cut the drawn one down to, and `ours` and `theirs` are the
     /// two answers as the comparison printed them.
     pub fn covers(&self, lang: Lang, verdict: Verdict, expr: &str, ours: &str, theirs: &str) -> bool {
-        if cause_class(&signature(lang, verdict, expr, ours)) != self.cause {
+        if !self.cause.iter().any(|c| c == cause_class(&signature(lang, verdict, expr, ours))) {
             return false;
         }
         let named = primitives(lang, expr);
@@ -1457,6 +1472,43 @@ mod tests {
         // than the cause, so it names nothing.
         let uncut = signature(Lang::J, we, "(+/ % #) @: (i. 3) , }: 4", "<error> domain error: x");
         assert_eq!(uncut, "we-refuse:err:domain_error:_x|…");
+    }
+
+    /// A family rule covers the spellings its reason covers and no others:
+    /// the cause class has to be one it names, the sentence has to name one
+    /// of its verbs and nothing outside what it allows, and the two answers
+    /// have to be of the class it asks for.
+    #[test]
+    fn a_family_rule_covers_what_its_reason_covers() {
+        let rule = Family::parse(
+            "cause=differ:val:atom/num verb=+.,*. also=o.,% answers=inexact",
+        )
+        .expect("a well-formed rule");
+        let covers = |expr: &str, ours: &str, theirs: &str| {
+            rule.covers(Lang::J, Verdict::Differ, expr, ours, theirs)
+        };
+        // The family itself, spelled two ways the accepted list has never
+        // seen: one names `o.`, the other only structure.
+        assert!(covers("(o. 1) *. 3", "3.19619e13", "1.34321e12"));
+        assert!(covers("{. ((o. 1) *. 3)", "3.19619e13", "1.34321e12"));
+        // A verb the rule does not name is a cause nobody has ruled out.
+        assert!(!covers("(!: 1) *. 3", "3.19619e13", "1.34321e12"));
+        // Exact answers are not this family: two whole numbers have a GCD
+        // both engines agree about.
+        assert!(!covers("(o. 1) *. 3", "12", "15"));
+        // Nor is another way of parting, nor another kind of answer.
+        assert!(!rule.covers(Lang::J, Verdict::WeRefuse, "(o. 1) *. 3", "<error> x", "1.5"));
+        assert!(!covers("(o. 1) *. 3", "3.19 4.5", "1.34 2.5"));
+        // `with=` asks for every one of its primitives, which is how a
+        // family about an obverse is about `^:` as well as the verb.
+        let obverse = Family::parse("cause=differ:val:atom/num verb=! with=^:").expect("rule");
+        assert!(obverse.covers(Lang::J, Verdict::Differ, "!^:_1 ] 1.1", "1.19699", "_0.136587"));
+        assert!(!obverse.covers(Lang::J, Verdict::Differ, "! 1.1", "1.19699", "_0.136587"));
+        // A rule with nothing to pin is a malformed rule, not a rule that
+        // excuses everything.
+        assert!(Family::parse("verb=+.").is_err());
+        assert!(Family::parse("cause=differ:val:atom/num").is_err());
+        assert!(Family::parse("cause=differ:val:atom/num verb=+. sideways=yes").is_err());
     }
 
     /// A cut-down sentence is the smallest one in reach that the predicate

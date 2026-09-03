@@ -78,10 +78,13 @@ fn every_rank_class_is_told_apart_by_the_shape_it_is_given() {
         ("] i. 0", "int/vector-empty"),
         ("] i. 2 3", "int/matrix"),
         ("] 1 3 $ 1 2 3", "int/matrix-1"),
-        ("] 0 3 $ 0", "int/matrix-empty"),
+        // The fill is a 5 rather than a 0: `0` is a BOOLEAN literal, and an
+        // empty reshape keeps the type it was given, so `0 3 $ 0` is an
+        // empty boolean matrix and says nothing about the integer class.
+        ("] 0 3 $ 5", "int/matrix-empty"),
         ("] i. 2 3 4", "int/rank3+"),
         ("] 1 2 3 $ i. 6", "int/rank3+-1"),
-        ("] 0 2 3 $ 0", "int/rank3+-empty"),
+        ("] 0 2 3 $ 5", "int/rank3+-empty"),
     ];
     for (expr, want) in cases {
         let cov = measure_j(&[expr]);
