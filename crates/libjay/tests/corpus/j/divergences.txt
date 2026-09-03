@@ -259,6 +259,17 @@ _1r2 ^. _1r2
 ? the two float Euclids cut the same residue chain at different steps
 ~ cause=differ:val:atom/num,differ:val:vector/num,differ:val:table/num verb=+.,*. also=o.,%,%:,^.,^,*,+,-,<.,>.,|,j.,!.,&.,&.: answers=inexact
 
+// The same family REACHING A REFUSAL rather than a value. Where the two
+// GCDs part by one bit — `1 +. 1.0000000000000002` is exactly 1 there and
+// 0.9999999999999998 here — a verb downstream can refuse what it is handed
+// on one side and not on the other: the logarithm of a value just under 1
+// is a tiny NEGATIVE number, its imaginary reading is not tolerantly real,
+// and an ordering of it carries no order. It is the divergence above,
+// shown through one more verb.
+(,: < j.) &.^. ((1) +. (1.0000000000000002))
+? the two float Euclids part by one bit and the ordering downstream refuses
+~ cause=we-refuse:err:domain_error:_complex_numbers_have_no_order;_only_equality_(=,_~:)_appli verb=+.,*. also=o.,%,%:,^.,^,*,+,-,<.,>.,|,j.,!.,&.,&.:
+
 // THE OBVERSE OF THE FACTORIAL, WHERE THE EQUATION HAS MORE THAN ONE
 // ANSWER. `! x = y` has two solutions between every pair of the gamma
 // function's poles, so which one `!^:_1` means is a choice. libjay takes

@@ -249,6 +249,10 @@
 ? the two float Euclids cut the same residue chain at different steps
 < 3.19619e13
 > j: 1.34321e12
+= (,: < j.) &.^. ((1) +. (1.0000000000000002))
+? the two float Euclids part by one bit and the ordering downstream refuses
+< <error>
+> j: 1
 = !^:_1 ] 1.1
 ? two arguments have this factorial and the two engines pick different ones
 < 1.19699
