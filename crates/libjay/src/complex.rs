@@ -166,8 +166,10 @@ pub fn sqrt(z: Cx) -> Cx {
     }
     // TWO INFINITE PARTS NAME NO DIRECTION, so the root of them is no
     // number: `%: _j_` and `_j__ ^ 0.5` are both `_.j_.` in the reference,
-    // where one infinite part alone still has a root.
-    if z[0].is_infinite() && z[1].is_infinite() {
+    // where one infinite part alone still has a root. A NaN in either part
+    // names no direction either, and takes the whole answer with it:
+    // `%: (_j_.)` is `_.j_.` there.
+    if (z[0].is_infinite() && z[1].is_infinite()) || z[0].is_nan() || z[1].is_nan() {
         return [f64::NAN, f64::NAN];
     }
     let t = ((abs(z) + z[0].abs()) / 2.0).sqrt();

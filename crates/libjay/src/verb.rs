@@ -274,8 +274,13 @@ impl Tol {
         // sends the other one to that infinity, which is the limit both
         // references answer with; the general formula cannot reach it,
         // because it runs into `inf * 0`.
+        // An infinite modulus leaves a value of its OWN SIGN alone and
+        // sends every other one — a NaN included, which is of no sign — to
+        // that infinity: `__ | _2` is `_2` and `__ | 2` and `__ | _.` are
+        // both `__`.
         if x.is_infinite() {
-            return if y == 0.0 || (y > 0.0) == (x > 0.0) { y } else { x };
+            let kept = y == 0.0 || (x > 0.0 && y > 0.0) || (x < 0.0 && y < 0.0);
+            return if kept { y } else { x };
         }
         if x == 0.0 {
             return y;
@@ -5565,6 +5570,15 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
             // refuses rather than answering a NaN — on either side, even
             // where the same infinity over the reals answers (`_ | 5` is 5
             // there, `_ | 1j2` a refusal).
+            // An INFINITE MODULUS with nothing imaginary beside it, over a
+            // real-valued dividend, is the real residue: `(_j0) | 2` is 2
+            // there, as `_ | 2` is. The modulus leaves a value of its own
+            // sign alone and sends every other one to itself.
+            if a[0].is_infinite() && a[1] == 0.0 && b[1] == 0.0 {
+                let kept =
+                    b[0] == 0.0 || (a[0] > 0.0 && b[0] > 0.0) || (a[0] < 0.0 && b[0] < 0.0);
+                return Ok([if kept { b[0] } else { a[0] }, 0.0]);
+            }
             if [a[0], a[1], b[0], b[1]].iter().any(|v| v.is_infinite()) {
                 return Err(Error::new(
                     ErrorKind::Nan,

@@ -459,3 +459,15 @@
 ? the reference's two-radix integer path reads a negative leading radix as a zero one
 < _7 4
 > j: 123 4
+= %: _.
+? the reference widens a one-item NaN root to the complex type and a two-item one not
+< _.
+> j: _.j_.
+= ^. _.
+? the reference widens a one-item NaN logarithm to the complex type and a two-item one not
+< _.
+> j: _.j_.
+= 3!:0 (%: _.)
+? the reference widens a one-item NaN root to the complex type and a two-item one not
+< 8
+> j: 16

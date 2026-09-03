@@ -480,3 +480,19 @@ _2 3 #: 11
 ? the reference's two-radix integer path reads a negative leading radix as a zero one
 _10 10 #: 1234
 ? the reference's two-radix integer path reads a negative leading radix as a zero one
+
+// THE ROOT AND THE LOGARITHM OF A NaN, WHERE THE ARGUMENT HOLDS ONE ITEM.
+// The reference answers `%: _.` and `^. _.` in the COMPLEX type — `_.j_.`,
+// with `3!:0` reporting 16 — and does the same for a one-item list
+// (`%: (, _.)`), but answers a list of two with the FLOAT NaN it was given:
+// `%: (_. _.)` is `_. _.` and `%: (1 _. 4)` is `1 _. 2`, both in the float
+// type. The same value under the same verb has two answers there, told
+// apart by how many items stand beside it. libjay keeps the float NaN
+// throughout, which is what the reference does for every argument of more
+// than one item.
+%: _.
+? the reference widens a one-item NaN root to the complex type and a two-item one not
+^. _.
+? the reference widens a one-item NaN logarithm to the complex type and a two-item one not
+3!:0 (%: _.)
+? the reference widens a one-item NaN root to the complex type and a two-item one not

@@ -828,3 +828,36 @@ r./ (20 21 22 23)
 ^ 0j1
 ^ 1j1
 2 r. 3
+
+// AN INFINITE MODULUS leaves a value of its own sign alone and sends every
+// other one — a NaN included, which has no sign — to that infinity. A
+// REAL-VALUED complex pair follows the same rule where an infinity with
+// something imaginary beside it has no residue to name.
+_ | 2
+__ | 2
+_ | _2
+__ | _2
+_ | 0
+__ | 0
+_ | 2.5
+__ | 2.5
+_ | _.
+__ | _.
+0 | _
+(_j0) | 2
+(_j0 _j0) | 2
+(_ _ _) | 2
+(_ __) | 2
+(^.^:3 (_ __ 0)) | 2
+
+// A NaN part names no direction, so the root of a complex number holding
+// one is a NaN in both parts, as two infinite parts already were.
+%: (_j_.)
+%: (_.j_)
+%: (_.j_.)
+%: (1j_.)
+%: (_.j1)
+%: (0j_)
+%: __
+%: (%: __)
+*: ^:_3 (_ __ 0)
