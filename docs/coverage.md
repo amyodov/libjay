@@ -2236,6 +2236,18 @@ families are the obverse of `[` or `]` composed on the LEFT
 - **The obverse of `-.@#:`.** The reference answers `-.@#: ^:_1 (1 2 3)`
   with `0 _1 _2` — `-.^:_1` alone — although its own `#:^:_1 (0 _1 _2)` is
   `_4`, which is what the composition's obverse should reach.
+- **A NEGATIVE LEADING RADIX in `x #: y` takes what is left**, as a zero
+  one does: `_2 2 #: 5` is `2 1` there and `0 1` here. The rule is not
+  simply "a negative radix is a zero one" — `_3 #: 5`, `2 _1 #: 5` and
+  `_2 _2 #: 5` all agree — so it shows only where the leading radix is
+  negative and something follows it.
+- **The binomial at an INFINITY and over a NEGATIVE y.** `1 ! __` is `__`
+  there and `_` here; `0.5 ! _` is a domain error there; `0.5 ! _5` and
+  `1e_15 ! _5` are both `__` there where libjay works the gamma quotient
+  out.
+- **The exact types through a SCAN'S OBVERSE.** `*/\^:_1 (1r2 1r3)` is
+  `1r2 2r3` there and the floats here, although the forward direction keeps
+  the rationals.
 - Around a dozen further singletons the round-5 sweep still names, each its
   own investigation: `S:` at a level of `_` over a scan, a boxed-empty
   `,/`, an empty box's width in a link's display, the value `(p. [)^:3`
