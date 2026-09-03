@@ -250,7 +250,20 @@ clauses, all of which the mismatch must satisfy:
 - `answers=` — the class the two printed answers must have: `numeric`,
   `inexact` (numeric, and at least one written as a float), `exact`, `huge`
   (a magnitude at or above 2^53, where a double stops telling whole numbers
-  apart) or `small`.
+  apart), `small`, or `near` (the same numbers to within a factor of two,
+  atom for atom and sign for sign — the mark of a computation BOTH engines
+  lose in its last digits). Box drawing is taken out of an answer before
+  its numbers are read, since neither language writes a number with any of
+  those characters, so a family about numbers reaches numbers that arrived
+  in boxes.
+
+Several cause classes are separated by `|`, since a cause class holds the
+refusal's own words — commas and all — but never a bar.
+
+The divergence list is measured once per sweep with a RECORDING's patience
+rather than a sweep's: it is a few hundred rows somebody chose, and a row
+the interpreter does not finish measuring is a row that silently excuses
+nothing.
 
 The row a rule hangs under is still an ordinary divergence: its two answers
 are recorded, and `record --check` re-measures it, so the day the family

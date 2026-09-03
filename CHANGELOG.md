@@ -297,6 +297,20 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Round 6A, second pass.** `#: y` took its width by halving a double and
+  refused anything past 1e15, so a list holding both a huge whole number
+  and a fractional one — what an under of `#.` makes of a polar pair — was
+  refused where every part of it answers on its own; the width is now read
+  off the largest magnitude's exponent and a whole value keeps every bit of
+  its own even on the float path. The ZEROTH ROOT is the limit `y ^ _`:
+  zero under a magnitude of one, one at 1, an infinity above it, and no
+  value where a NEGATIVE magnitude reaches one. An extremum reads a
+  complex value as the real it TOLERANTLY equals (`2 >. 1j1e_15` is 2),
+  and a logical verb reads a value tolerantly equal to 0 or 1 as that
+  value (`(1.00000000000005) *: 1` is 0). An infinite MODULUS leaves a
+  value of its own sign alone and sends every other one — a NaN included —
+  to that infinity, and a real-valued complex pair follows the same rule.
+  A NaN in either part of a complex number takes the whole root with it.
 - **Round 6A of the agreement sweep, the numeric singletons.** The BINOMIAL
   at an infinity: a whole left argument makes `x ! y` a polynomial in y of
   that degree, so at either infinity it takes the leading term's value and

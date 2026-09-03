@@ -5057,3 +5057,22 @@ the register.
   INTEGER path alone reads a negative leading radix as a zero one, and its
   own float and extended paths on the same numbers do not, so that case is
   pinned rather than followed.
+- 2026-09-03 — A LOGICAL VERB READS A VALUE TOLERANTLY EQUAL TO 0 OR 1 AS
+  THAT VALUE, and an EXTREMUM reads a complex value as the real it
+  tolerantly equals. Both were exact-value tests before, where every other
+  reading of a number in either engine is a tolerant one:
+  `(1.00000000000005) *: 1` is 0 and `2 >. 1j1e_15` is 2, while
+  `(1 + 1e_13) *: 1` and `2 >. 1j1e_13` carry no such reading and are
+  refused. Against ZERO the tolerance is relative and so no tolerance at
+  all, which is why `(1e_20) +: 0` is refused on both sides.
+- 2026-09-03 — THE BINARY ENCODING'S WIDTH IS READ OFF THE LARGEST
+  MAGNITUDE'S EXPONENT rather than counted down by halving a double, so a
+  value past the machine word is not a value past encoding; and a WHOLE
+  value keeps every bit of its own even where a fractional neighbour sends
+  the pass down the float path. `#: (1e300 2.5)` is the reference's 997
+  digits either way.
+- 2026-09-03 — A LOGARITHM OF THE SINGLE 0 TO A LIST OF BASES is PINNED:
+  every cell of it answers on its own in the reference — `2 ^. 0` is `__`,
+  `_0.5 ^. 0` is `_j_` — and a list of bases against a list of arguments
+  answers too, but the list of bases against the one 0 is a NaN error
+  there. libjay answers the cells.
