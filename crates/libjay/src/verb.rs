@@ -22461,6 +22461,12 @@ fn unicode(y: &Array, pass_chars: bool, near: NearInt, span: Span) -> Result<Arr
         }
         return Ok(chars_to_codes(y));
     }
+    if pass_chars {
+        // J's monad answers the TWO-BYTE type, so a code is read sixteen
+        // bits wide: `u: _2` is the character two below the top of that
+        // range, and nothing outside it names a character at all.
+        return codes_to_chars_width(y, 16, near, span);
+    }
     codes_to_chars(y, near, span)
 }
 
@@ -22477,6 +22483,30 @@ fn codes_to_chars(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     for &c in &v {
         let ch = u32::try_from(c).ok().and_then(char::from_u32).ok_or_else(|| {
             Error::domain(format!("{c} is not a Unicode codepoint"), span)
+        })?;
+        out.push(ch);
+    }
+    Ok(Array::new(y.shape.clone(), Data::Char(out.into())))
+}
+
+/// Codepoints read into a character type of a FIXED WIDTH: the two-byte
+/// type holds sixteen bits and the four-byte type thirty-two, and a value
+/// is the residue its width leaves — so a negative code names a character
+/// near the top of the range rather than none at all. Outside the width's
+/// own span in either direction there is no character to name.
+fn codes_to_chars_width(y: &Array, bits: u32, near: NearInt, span: Span) -> Result<Array> {
+    let v = y
+        .to_i64_vec_near(near)
+        .ok_or_else(|| Error::domain("a codepoint must be an integer", span))?;
+    let span_of_width = 1i64 << bits;
+    let mut out = Vec::with_capacity(v.len());
+    for &c in &v {
+        if c >= span_of_width || c < -span_of_width {
+            return Err(Error::domain(format!("{c} is not a Unicode codepoint"), span));
+        }
+        let code = c.rem_euclid(span_of_width) as u32;
+        let ch = char::from_u32(code).ok_or_else(|| {
+            Error::domain(format!("{code} is not a Unicode codepoint"), span)
         })?;
         out.push(ch);
     }
@@ -22504,10 +22534,12 @@ fn recoded_shape(y: &Array, len: usize) -> Vec<usize> {
 /// libjay has one, whose elements are codepoints. So the conversions that
 /// only change how a character is stored (2 and 10, and 9 over an argument
 /// that is not bytes) are the identity here, and the ones that pack a
-/// codepoint into bytes (1 and 8) or read bytes back (9) do the work they
-/// name. A character list every one of whose codepoints is below 256 is
-/// what stands for J's byte string: that is what 8 leaves alone and what 9
-/// decodes.
+/// codepoint into bytes (1, 5, 7 and 8) or read bytes back (6 and 9) do the
+/// work they name. A character list every one of whose codepoints is below
+/// 256 is what stands for J's byte string: that is what 8 leaves alone and
+/// what 9 decodes. Form 4 reads codes into the two-byte type as the monad
+/// does, and an argument with no elements answers the empty of the form's
+/// own result type rather than an error.
 fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let form = x
         .to_i64_vec()
@@ -22516,12 +22548,17 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
         .copied()
         .unwrap_or(0);
     let chars = chars_of(y);
+    // Nothing to read is no error, whatever the form and whatever the type
+    // it was written in: an empty carries no element the form could object
+    // to, and every form answers the empty of its own result type. Only
+    // form 3 answers numbers; the rest answer characters.
+    if y.count() == 0 && (1..=10).contains(&form) {
+        let data =
+            if form == 3 { Data::empty(DType::I64) } else { Data::Char(Vec::new().into()) };
+        return Ok(Array::new(y.shape.clone(), data));
+    }
     match (form, chars) {
         (3, Some(_)) => Ok(chars_to_codes(y)),
-        // Nothing to read is no error: an empty carries no character the
-        // form could object to, and the reference answers the whole-number
-        // empty whatever type the argument was written in.
-        (3, None) if y.count() == 0 => Ok(Array::new(y.shape.clone(), Data::empty(DType::I64))),
         (3, None) => Err(Error::domain("form 3 converts characters to codepoints", span)),
         // One byte per character, the codepoint taken modulo 256 — which is
         // what J's narrowing to a byte string keeps.
@@ -22536,6 +22573,43 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
         (2, Some(_)) => Ok(y.clone()),
         (1 | 2, None) => {
             Err(Error::domain(format!("form {form} converts characters, not numbers"), span))
+        }
+        // 4 reads codes into the two-byte type, which is what the monad
+        // does; it takes numbers alone.
+        (4, None) => codes_to_chars_width(y, 16, near, span),
+        (4, Some(_)) => {
+            Err(Error::domain("form 4 converts numbers, not characters", span))
+        }
+        // 5 and 7 narrow a wider character type to bytes, which changes
+        // nothing a codepoint can see.
+        (5 | 7, Some(_)) => Ok(y.clone()),
+        (5 | 7, None) => {
+            Err(Error::domain(format!("form {form} converts characters, not numbers"), span))
+        }
+        // 6 reads a byte PAIR as one two-byte character, least significant
+        // byte first, so it takes an even number of bytes.
+        (6, Some(v)) => {
+            if v.iter().any(|&c| (c as u32) >= 256) {
+                return Err(Error::domain("form 6 reads bytes, and these are wider", span));
+            }
+            if v.len() % 2 != 0 {
+                return Err(Error::new(
+                    ErrorKind::Length,
+                    "form 6 reads bytes two at a time",
+                    Some(span),
+                ));
+            }
+            let out: Vec<char> = v
+                .chunks(2)
+                .map(|p| {
+                    let code = (p[0] as u32) | ((p[1] as u32) << 8);
+                    char::from_u32(code).unwrap_or('\u{fffd}')
+                })
+                .collect();
+            Ok(Array::new(vec![out.len()], Data::Char(out.into())))
+        }
+        (6, None) => {
+            Err(Error::domain("form 6 converts characters, not numbers", span))
         }
         (8 | 9, _) if y.rank() > 1 => Err(Error::new(
             ErrorKind::Rank,
@@ -22569,7 +22643,9 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
             let shape = recoded_shape(y, out.len());
             Ok(Array::new(shape, Data::Char(out.into())))
         }
-        (9 | 10, None) => codes_to_chars(y, near, span),
+        // 9 and 10 answer the FOUR-byte type, whose codes are thirty-two
+        // bits wide.
+        (9 | 10, None) => codes_to_chars_width(y, 32, near, span),
         (10, Some(_)) => Ok(y.clone()),
         (n, _) => Err(Error::not_yet(format!("the unicode conversion form ({n} u:)"), span)),
     }
