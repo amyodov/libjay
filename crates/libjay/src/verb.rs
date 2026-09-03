@@ -2270,6 +2270,16 @@ pub enum Verb {
     /// J `m H. n`: the generalised hypergeometric function, summed as a
     /// series over the numerator parameters m and the denominator ones n.
     Hypergeometric { num: Vec<crate::complex::Cx>, den: Vec<crate::complex::Cx> },
+    /// J's fold family — `u F.. v`, `u F.: v`, `u F:. v` and `u F:: v`. v
+    /// folds the items of y into a running value, one step per item, with
+    /// the item on the LEFT and the running value on the right; u is
+    /// applied to each running value to make the answer. The first
+    /// inflection says whether the answer is the last result alone or every
+    /// one of them framed; the second says whether the items are taken from
+    /// the front or from the back. A left argument is where the running
+    /// value starts, and with none the first item in the direction of
+    /// travel is.
+    Fold { u: Box<Verb>, v: Box<Verb>, multiple: bool, reverse: bool },
     /// APL `f∘g` (beside): monad `f (g y)`, dyad `x f (g y)`. g prepares the
     /// right argument and the left one arrives untouched, which is what
     /// separates it from `⍥` (this crate's [`Verb::Compose`]).
@@ -2364,6 +2374,8 @@ impl Verb {
             Verb::Beside(..) => [RANK_INF, RANK_INF, RANK_INF],
             // The series is summed for one value at a time.
             Verb::Hypergeometric { .. } => [0, 0, 0],
+            // A fold walks the items of the whole argument.
+            Verb::Fold { .. } => [RANK_INF, RANK_INF, RANK_INF],
             // The determinant is over a table; the dyad reads both
             // arguments whole and takes their cells itself.
             Verb::InnerProduct { .. } => [2, RANK_INF, RANK_INF],
@@ -2442,6 +2454,13 @@ impl Verb {
             Verb::Hypergeometric { num, den } => {
                 format!("({} H. {})", cx_list(num), cx_list(den))
             }
+            Verb::Fold { u, v, multiple, reverse } => format!(
+                "({} F{}{} {})",
+                u.name(),
+                if *multiple { ":" } else { "." },
+                if *reverse { ":" } else { "." },
+                v.name()
+            ),
             Verb::Agenda(vs, w) => {
                 let names: Vec<String> = vs.iter().map(Verb::name).collect();
                 format!("({}@.{})", names.join("`"), w.name())
@@ -2546,6 +2565,7 @@ impl Verb {
             | Verb::Beside(v, w)
             | Verb::Before(v, w)
             | Verb::Ambivalent(v, w) => v.uses_tolerance() || w.uses_tolerance(),
+            Verb::Fold { u, v, .. } => u.uses_tolerance() || v.uses_tolerance(),
             Verb::KeyPairs(v) => v.uses_tolerance(),
             Verb::UserDerived { def, alpha, omega } => {
                 let operand = |o: &Operand| match o {
@@ -2649,6 +2669,7 @@ impl Verb {
             | Verb::Beside(v, w)
             | Verb::Before(v, w)
             | Verb::Ambivalent(v, w) => v.is_pure() && w.is_pure(),
+            Verb::Fold { u, v, .. } => u.is_pure() && v.is_pure(),
             Verb::KeyPairs(v) => v.is_pure(),
             // The body reads and writes the program's names, exactly as a
             // definition called any other way does.
@@ -2901,6 +2922,9 @@ impl Verb {
                 Err(e) if e.kind != ErrorKind::NotYet => w.monad(y, ctx, span),
                 other => other,
             },
+            Verb::Fold { u, v, multiple, reverse } => {
+                fold_family(u, v, *multiple, *reverse, None, y, ctx, span)
+            }
             Verb::Beside(f, g) => {
                 let r = g.monad(y, ctx, span)?;
                 f.monad(&r, ctx, span)
@@ -3123,6 +3147,9 @@ impl Verb {
                 Err(e) if e.kind != ErrorKind::NotYet => w.dyad(x, y, ctx, span),
                 other => other,
             },
+            Verb::Fold { u, v, multiple, reverse } => {
+                fold_family(u, v, *multiple, *reverse, Some(x), y, ctx, span)
+            }
             Verb::Beside(f, g) => {
                 let r = g.monad(y, ctx, span)?;
                 f.dyad(x, &r, ctx, span)
@@ -8804,6 +8831,9 @@ fn collate_grade(x: &Array, y: &Array, down: bool, origin: i64, span: Span) -> R
 /// A verb answers with the representation of the verb, a value with the
 /// noun pair; either way the answer is boxed, as the reference has it.
 fn atomic_rep(y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<Array> {
+    if y.count() == 0 {
+        return Ok(empty_representation());
+    }
     let name = match y.as_boxes() {
         Some([b]) if y.rank() == 0 => crate::gerund::text_of(b),
         _ => None,
@@ -11517,6 +11547,11 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
             Ok(Array::new(y.shape.clone(), Data::I64(classes.into())))
         }
         MonadOp::NamesOfClass => {
+            // No class asked about names nothing, whatever type the empty
+            // was written at.
+            if y.count() == 0 {
+                return Ok(boxed_names(Vec::new()));
+            }
             let classes = y.to_i64_vec().ok_or_else(|| {
                 Error::domain("4!:1 takes the name classes to list, as numbers", span)
             })?;
@@ -14253,6 +14288,60 @@ fn nwise(f: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
 
 /// `u^:n y` and `x u^:n y`: n applications of the verb, or iteration until
 /// the result stops changing.
+/// J's fold family: `x u F v y` folds the items of y into a running value
+/// with v, item on the left and running value on the right, and applies u
+/// to each running value to make the answer.
+///
+/// `multiple` says the answer is every result framed rather than the last
+/// one; `reverse` says the items are taken from the back. Where no left
+/// argument says where the running value starts, the first item in the
+/// direction of travel does — and with no item either, the running value is
+/// what an insert of v over the empty answers, which is v's identity
+/// element, so the SINGLE forms have an answer where the multiple ones have
+/// no step to report.
+#[inline(never)]
+fn fold_family(
+    u: &Verb,
+    v: &Verb,
+    multiple: bool,
+    reverse: bool,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    let mut items = if y.rank() == 0 { vec![y.clone()] } else { y.cells(1) };
+    if reverse {
+        items.reverse();
+    }
+    let (mut acc, rest) = match (x, items.split_first()) {
+        (Some(x), _) => (x.clone(), &items[..]),
+        (None, Some((first, rest))) => (first.clone(), rest),
+        (None, None) => {
+            if multiple {
+                return Err(Error::domain(
+                    "a fold of every result over no items has no item to start from",
+                    span,
+                ));
+            }
+            let seed = Verb::Reduce(Box::new(v.clone())).monad(y, ctx, span)?;
+            return u.monad(&seed, ctx, span);
+        }
+    };
+    let mut out: Vec<Array> = Vec::with_capacity(rest.len());
+    for item in rest {
+        acc = v.dyad(item, &acc, ctx, span)?;
+        out.push(u.monad(&acc, ctx, span)?);
+    }
+    if multiple {
+        return assemble(&[out.len()], out, span);
+    }
+    match out.pop() {
+        Some(last) => Ok(last),
+        None => u.monad(&acc, ctx, span),
+    }
+}
+
 fn power(
     u: &Verb,
     p: Power,
@@ -14374,17 +14463,24 @@ fn power_v(
         Some(x) => v.dyad(x, y, ctx, span)?,
         None => v.monad(y, ctx, span)?,
     };
+    // A count of `_` is the convergence the noun spelling asks for the same
+    // way, and it is read before the integers because no integer holds it.
+    if count.to_f64_vec().is_some_and(|v| v == [f64::INFINITY]) {
+        return power(u, Power::Converge, x, y, ctx, span);
+    }
     let n = count
         .to_i64_vec_near(ctx.cfg.near())
         .ok_or_else(|| Error::domain("the power count must be an integer", span))?;
-    if n.len() != 1 {
-        return Err(Error::not_yet("a list of power counts (u^:v with several)", span));
-    }
-    let n = n[0];
-    if n < 0 {
-        return Err(Error::not_yet("a negative power (the verb's inverse)", span));
-    }
-    power(u, Power::Times(n as u64), x, y, ctx, span)
+    // Whatever the count was computed BY, it means what the same count
+    // written as a literal means: one number is that many applications, a
+    // negative is that many of the obverse, and a list is one answer per
+    // count, framed.
+    let p = match n[..] {
+        [one] if one < 0 => Power::Inverse(one.unsigned_abs()),
+        [one] => Power::Times(one as u64),
+        _ => Power::Each(n),
+    };
+    power(u, p, x, y, ctx, span)
 }
 
 /// `f⍣g y` (APL): apply `f` until `new g old` holds.
@@ -19971,10 +20067,12 @@ fn agenda_pick(
 }
 
 /// One verb of a gerund by index, with the diagnostic the out-of-range case
-/// deserves.
+/// deserves. The index is read as `{` reads one, so a negative counts back
+/// from the end of the gerund.
 pub(crate) fn pick_gerund(vs: &[Verb], at: i64, span: Span) -> Result<Verb> {
-    usize::try_from(at)
-        .ok()
+    let from_end = if at < 0 { at.checked_add(vs.len() as i64) } else { Some(at) };
+    from_end
+        .and_then(|k| usize::try_from(k).ok())
         .and_then(|k| vs.get(k))
         .cloned()
         .ok_or_else(|| {
@@ -22718,8 +22816,14 @@ fn byte_conversion_kind(x: &Array, what: &str, span: Span) -> Result<i64> {
     }
 }
 
-/// The boxed names a `4!:` foreign takes, in order.
+/// The boxed names a `4!:` foreign takes, in order. An argument with no
+/// elements names nothing, whatever type it was written at: the reference
+/// answers an empty rather than reading the type, and an empty of the
+/// wrong type holds no name of the wrong type either.
 fn boxed_name_arg(y: &Array, what: &str, span: Span) -> Result<Vec<String>> {
+    if y.count() == 0 {
+        return Ok(Vec::new());
+    }
     let Data::Box(cells) = y.row_major_data() else {
         return Err(Error::domain(format!("{what} takes boxed names"), span));
     };
@@ -22731,6 +22835,13 @@ fn boxed_name_arg(y: &Array, what: &str, span: Span) -> Result<Vec<String>> {
                 .ok_or_else(|| Error::domain(format!("{what} takes boxed names"), span))
         })
         .collect()
+}
+
+/// What a `5!:` representation answers when it is asked about no name at
+/// all: the empty boolean list, which is the reference's answer whatever
+/// type the empty argument was written at.
+fn empty_representation() -> Array {
+    Array::empty(DType::Bool)
 }
 
 /// The empty argument a `9!:` reader is written with.
@@ -22767,6 +22878,9 @@ fn representation(op: MonadOp, y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<A
         MonadOp::LinearRep => "5!:5",
         _ => "5!:6",
     };
+    if y.count() == 0 {
+        return Ok(empty_representation());
+    }
     let name = match y.as_boxes() {
         Some([b]) if y.rank() == 0 => crate::gerund::text_of(b),
         _ => None,

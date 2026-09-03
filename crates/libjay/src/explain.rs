@@ -555,6 +555,21 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             verb_lines(u, depth + 1, p, tr, out);
             verb_lines(w, depth + 1, p, tr, out);
         }
+        Verb::Fold { u, v, multiple, reverse } => {
+            head(
+                out,
+                &format!(
+                    "fold F{}{} ({} result{}, items taken from the {})",
+                    if *multiple { ":" } else { "." },
+                    if *reverse { ":" } else { "." },
+                    if *multiple { "every" } else { "the last" },
+                    if *multiple { "s" } else { "" },
+                    if *reverse { "back" } else { "front" },
+                ),
+            );
+            verb_lines(u, depth + 1, p, tr, out);
+            verb_lines(v, depth + 1, p, tr, out);
+        }
         Verb::At { left, right } => {
             head(out, &format!("at @ ({} where {})", left.name(), right.name()));
             if let crate::verb::Operand::Func(f) = left {

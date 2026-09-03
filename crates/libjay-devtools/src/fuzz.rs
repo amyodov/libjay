@@ -20,9 +20,17 @@ pub const DEFAULT_SEED: u64 = 0x243F6A8885A308D3;
 /// tree never composed (`^:` with a negative, listed or boxed count, `L:`,
 /// `S:`, `&.` with a named obverse, `&.:`, `!.`, `;:`), deeper and emptier
 /// leaves in both pools, tolerance-edge pairs fed to every dyad, APL bracket
-/// axis, and J ranks of two and three elements. A run's findings are only
-/// comparable with another run's when the generation matches.
-pub const GENERATION: u32 = 2;
+/// axis, and J ranks of two and three elements. Generation 3 (2026-09-03)
+/// widened what the J tree can REACH at all: the reflex and passive `~`,
+/// explicit definitions in every spelling and the control words inside
+/// them, gerunds and the three modifiers that hand them out, `@.`, `:.`,
+/// `::`, `M.`, `f.`, `b.`, `H.`, the inner product, a verb's ranks and a
+/// verb's power count, names and sequencing, the fold family, the
+/// conversion verbs (`x:` `u:` `s:` `p:` `$.` `%.` `".`), the sandbox-safe
+/// foreigns, and the literals the pools had no spelling for. A run's
+/// findings are only comparable with another run's when the generation
+/// matches.
+pub const GENERATION: u32 = 3;
 
 /// A small xorshift, so a run is reproducible without any clock access.
 pub struct Rng(u64);
@@ -164,6 +172,22 @@ const J_NOUNS_EXTRA: &[&str] = &[
     "2 2 $ <i. 2 2",
     "3 $ a:",
     "2 2 $ (<1 2);(<'ab');(<i. 0);<0",
+    // Generation 3: the literal spellings the pools had no example of. The
+    // constant literals and the base forms are numbers the SCANNER builds
+    // rather than reads off, and the indeterminate is the one value that
+    // matches nothing, itself included.
+    "_.",
+    "_. 1 2",
+    "1p1",
+    "2p_1",
+    "1x1",
+    "16b1f",
+    "2b101",
+    "_16bff",
+    "1ad45",
+    "1ar1",
+    "3r4b11",
+    "1e_9 1 1e9",
 ];
 
 /// How often a leaf is drawn from the original pool rather than the extra
@@ -188,6 +212,10 @@ const J_DYADS: &[&str] =
 const J_STRUCT_DYADS: &[&str] = &[
     "}.", "|.", ",", ",.", ",:", "#.", "#:", "e.", "i.", "i:", "E.", "-.", "{", "/:", "\\:",
     "-:", "C.", "A.", ";", "!", "j.", "o.", "%:", "^.", "p.", "I.", "=", "~:",
+    // Generation 3. `%.` solves rather than allocates, `{::` reads a path,
+    // and `":` reads a format specification — none of the three reads its
+    // left argument as an amount.
+    "%.", "{::", "\":",
 ];
 
 /// Monads. `?` and `?.` are left out: a random answer has no oracle.
@@ -199,6 +227,15 @@ const J_MONADS: &[&str] = &[
     "{:", "}:", "<:", ">:", "+:", "*:", "-.", "-:", "/:", "\\:", "#.", "#:", "\":", "!",
     "+.", "*.", "=", "<", ">", ";", "L.", "o.", "%:", "^.", "^", "{::", "j.", "r.",
     "p.", "p..", "]", "[",
+    // Generation 3. `p:` is not here and `q:` is not either: each turns a
+    // VALUE into a search, so the y-th prime of a large number is a
+    // computation rather than an expression. `$.` is not here either: a
+    // sparse array does not survive a step in libjay, which is a decision
+    // docs/coverage.md carries, so every composition of it is a difference
+    // by design and drawing them would only count that decision again.
+    // `%.` is a solve, `x:` `u:` `s:` are conversions, and the constant
+    // verbs answer whatever they are handed.
+    "%.", "x:", "u:", "s:", "3:", "_:", "_9:",
 ];
 
 /// Folds that stay in the reals over any small integers.
@@ -233,9 +270,18 @@ const J_UNDER: &[&str] =
 
 /// Verbs that read a fit: `!.` gives a comparison its tolerance, a fill its
 /// fill element, and a base conversion its rounding.
-const J_FIT_MONADS: &[&str] = &["~.", "~:", "<.", ">.", "%:", "^.", "|", "=", "{.", ",", "#.", "q:"];
-const J_FIT_DYADS: &[&str] =
-    &["=", "~:", "-:", "i.", "e.", "E.", "<.", ">.", "|", "#.", "+", "*", ",", "{.", "#", "i:"];
+const J_FIT_MONADS: &[&str] = &[
+    "~.", "~:", "<.", ">.", "%:", "^.", "|", "=", "{.", ",", "#.", "q:",
+    // Generation 3: the rest of the verbs the fit gives a FILL to.
+    "$", ",.", ",:", ";", ">", "|.", "#", "/:", "p.",
+];
+const J_FIT_DYADS: &[&str] = &[
+    "=", "~:", "-:", "i.", "e.", "E.", "<.", ">.", "|", "#.", "+", "*", ",", "{.", "#", "i:",
+    // Generation 3. `$` is deliberately absent: its left argument is a
+    // shape, and a computed one is an allocation the size of whatever the
+    // tree below it produced.
+    ",.", ",:", ";", "}.", "|.", "I.", "/:",
+];
 
 /// Fits. Zero and one are the fill elements a take or a catenate wants;
 /// the small ones are the tolerances a comparison wants.
@@ -279,6 +325,127 @@ const J_TOLERANCE_DYADS: &[&str] = &[
     ",.", ",:", "e.", "i.", "i:", "E.", "-:", "#.", "#:", "j.", "o.", "!", "I.", "%:", "^.",
 ];
 
+// -------------------------------------------------------------------
+// Generation 3: the pools for the forms the tree could not reach at all
+// -------------------------------------------------------------------
+
+/// Verbs whose reflex `u~` and passive `x u~ y` are safe. Every one of them
+/// reads both arguments as VALUES: `$~`, `#~`, `{.~` and `i.~` are absent
+/// because each would turn its own argument into an amount, and a leaf as
+/// large as `9223372036854775806` reshaped or taken by itself is an
+/// allocation rather than an expression.
+const J_REFLEX_VERBS: &[&str] = &[
+    "+", "-", "*", "%", "<.", ">.", "|", "=", "~:", "<", ">", "<:", ">:", "*.", "+.", "-:", "-.",
+    "e.", "E.", "j.", "o.", "!", "%:", "^.", "/:", "\\:", "C.", "A.", "p.", ",", ",.", ",:", "|.",
+    "{", "#.", "#:", "I.", "i.", "i:",
+];
+
+/// Verbs a gerund is built out of: cheap, and spelled so that the tie after
+/// them is a tie rather than another inflection.
+const J_GERUND_VERBS: &[&str] =
+    &["+", "-", "*", "<", ">", "|.", "{.", "}.", "#", "$", "-:", "<.", ">.", ",", "]", "[", "<@:[", ">:", "%:"];
+
+/// Right operands for `@.`: a literal index, and the constant verbs that
+/// compute one. Nothing here can name a gerund element that is not there
+/// and nothing here is unbounded.
+const J_AGENDA_INDEX: &[&str] = &["0", "1", "2", "(0:)", "(1:)", "(2:)", "(#@:$)", "(0 1)", "_1"];
+
+/// Counts for `^:` given as a VERB. Every one is a constant, so the number
+/// of applications is bounded however large the argument is: a count the
+/// argument itself decides is what makes a power unbounded, which is what
+/// leaves a generator with no oracle.
+const J_POWER_VERBS: &[&str] =
+    &["(0:)", "(1:)", "(2:)", "(3:)", "(_1:)", "(_2:)", "(0 1 2\"_)", "(#@:$)"];
+
+/// The three explicit spellings a monadic body can be written in. `{{ }}`
+/// and `3 : '…'` define the same verb; a body given as a boxed list of
+/// lines is the third, and the reference writes all three back out the same
+/// way.
+const J_MONAD_BODIES: &[&str] = &[
+    "y",
+    "+/ y",
+    "y + 1",
+    "$ y",
+    "< y",
+    "if. 0 < # y do. {. y else. y end.",
+    "if. 2 > # $ y do. , y elseif. 1 do. |: y else. y end.",
+    "z =. 0 for_i. i. 3 do. z =. z + i end. z + # y",
+    "z =. y for_j. i. 2 do. z =. }: z end. z",
+    "while. 1 < # y do. y =. }. y end. y",
+    "whilst. 0 do. y =. }. y end. y",
+    "select. # $ y case. 0 do. < y case. 1 do. |. y fcase. 2 do. case. do. y end.",
+    "try. {. y catch. 'no' end.",
+    "try. 0 { y catcht. _1 end.",
+    "z =. 0 goto_end. z =. 1 label_end. z + # y",
+    "throw. 1",
+];
+
+/// The same for a dyadic body.
+const J_DYAD_BODIES: &[&str] = &[
+    "x + y",
+    "x , y",
+    "x -: y",
+    "x { y",
+    "if. x -: y do. 1 else. 0 end.",
+    "if. 0 = # x do. y else. x , y end.",
+    "try. x { y catch. _1 end.",
+    "z =. x for_i. i. 2 do. z =. z , y end. z",
+];
+
+/// Bodies for an explicit ADVERB (`1 : '…'`) and an explicit CONJUNCTION
+/// (`2 : '…'`). Both name their operands rather than their arguments, which
+/// is what makes them modifiers.
+const J_ADVERB_BODIES: &[&str] = &["u y", "u u y", "u/ y", "(u y) , u y", "< u y", "# u y"];
+const J_CONJUNCTION_BODIES: &[&str] =
+    &["u v y", "v u y", "(u y) , v y", "u&v y", "< u v y", "(u v y) , u y"];
+
+/// Bodies for `13 : '…'`, the tacit translation. Each is a sentence the
+/// abstraction can reach, so what the reference answers is a tacit verb
+/// rather than the explicit fallback.
+const J_TACIT_BODIES: &[&str] =
+    &["y + 1", "(+/ y) % # y", "y , |. y", "x + y", "x , x , y", "*: y"];
+
+/// Left arguments for the conversion verbs. Every form the reference
+/// defines is here, the ones it refuses included: a refusal both sides
+/// agree on is as much of an answer as a value.
+const J_EXTEND_LEFT: &[&str] = &["1", "2", "_1", "_2", "0", "3", "4"];
+const J_UNICODE_LEFT: &[&str] = &["1", "2", "3", "4", "8", "9", "10", "0", "5"];
+const J_SYMBOL_LEFT: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "_1"];
+/// `_1 p:` counts the primes below its argument and `_4 p:` reads the same
+/// table, so neither is here: a leaf near 2⁶³ would make the count the
+/// expression's cost. The rest answer in constant time whatever they are
+/// given.
+const J_PRIME_LEFT: &[&str] = &["0", "1", "2", "3", "4"];
+
+/// The foreigns a sweep may draw: the ones that only COMPUTE, and whose
+/// answer is printable text. `3!:1` is absent though `3!:2` of it is here —
+/// the bytes it answers are not all characters a comparison can carry.
+const J_FOREIGNS: &[&str] = &["3!:0", "3!:3", "128!:3", "3!:2@:(3!:1)", "4!:0", "5!:1", "5!:5"];
+
+/// Square matrices for the determinant. `u . v` monadically expands by
+/// minors down the first column, whose cost is the factorial of the number
+/// of rows, so it is drawn against a literal rather than against whatever
+/// the tree built.
+const J_SQUARE: &[&str] = &[
+    "(i. 2 2)",
+    "(2 2 $ 1 2 3 4)",
+    "(3 3 $ i. 9)",
+    "(3 3 $ 1 0 0 0 1 0 0 0 1)",
+    "(1 1 $ 5)",
+    "(0 0 $ 0)",
+    "(2 2 $ 1.5 2 3 4)",
+    "(2 2 $ 1r2 1 2 3)",
+    "(2 2 $ 1j1 2 3 4)",
+    "(2 2 $ 1 2 3x)",
+];
+
+/// Parameter pairs for `H.`, the hypergeometric conjunction. Only the
+/// DYADIC form is drawn: `x (m H. n) y` stops after x terms, where the
+/// monad sums the series to its limit and a series that neither converges
+/// nor overflows has no bound a generator can promise.
+const J_HYPER: &[(&str, &str)] =
+    &[("0", "1"), ("1", "1"), ("1", "2"), ("2 1", "3"), ("0 1", "2 3"), ("1 2", "1"), ("''", "''")];
+
 /// A verb phrase: a primitive, or a train, or a primitive under a
 /// conjunction, down to `depth` levels of nesting.
 fn j_verb(rng: &mut Rng, depth: u32) -> String {
@@ -286,7 +453,9 @@ fn j_verb(rng: &mut Rng, depth: u32) -> String {
         return rng.pick(J_MONADS).to_string();
     }
     let d = depth - 1;
-    match rng.below(14) {
+    // Arms 0 to 13 are generations 1 and 2's, unchanged and in their
+    // original proportion to one another; 14 to 21 are generation 3's.
+    match rng.below(22) {
         0 | 1 => rng.pick(J_MONADS).to_string(),
         2 => format!("{}/", rng.pick(J_FOLDS)),
         3 => format!("{}/\\", rng.pick(J_FOLDS)),
@@ -299,7 +468,53 @@ fn j_verb(rng: &mut Rng, depth: u32) -> String {
         10 => format!("{}&:{}", j_verb(rng, d), j_verb(rng, d)),
         11 => format!("{}&.>", j_verb(rng, d)),
         12 => format!("([: {} {})", j_verb(rng, d), j_verb(rng, d)),
-        _ => format!("{}&{}", rng.pick(&["1", "2", "_1", "0"]), rng.pick(J_DYADS)),
+        13 => format!("{}&{}", rng.pick(&["1", "2", "_1", "0"]), rng.pick(J_DYADS)),
+        // The reflex and the passive. Drawn from the pool whose verbs read
+        // both arguments as values rather than from the whole tree: `$~`
+        // and `#~` would hand a leaf to itself as an amount.
+        14 => format!("({}~)", rng.pick(J_REFLEX_VERBS)),
+        // The adverse, which answers what v says where u refuses, and the
+        // obverse, which declares what undoes u.
+        15 => format!("({} :: {})", j_verb(rng, d), j_verb(rng, d)),
+        16 => format!("({} :. {})", j_verb(rng, d), j_verb(rng, d)),
+        // Memo and fix. Neither changes what a verb answers, which is the
+        // property worth checking.
+        17 => format!("({} M.)", j_verb(rng, d)),
+        18 => format!("({} f.)", j_verb(rng, d)),
+        // A VERB on the right of the rank conjunction lends its own three
+        // ranks; a NOUN on the left is the constant verb.
+        19 => format!("({}\"({}))", j_verb(rng, d), j_verb(rng, d)),
+        20 => format!("({}\"{})", rng.pick(&["2", "1 2", "'a'", "(<1 2)", "0"]), rng.pick(J_RANKS)),
+        // A power whose count is a verb. Every count in the pool is a
+        // constant, so the number of applications is bounded however large
+        // the argument is.
+        _ => format!("({}^:{})", j_verb(rng, d), rng.pick(J_POWER_VERBS)),
+    }
+}
+
+/// One gerund of two or three verbs, parenthesised so that whatever reads
+/// it reads the whole tie.
+fn j_gerund(rng: &mut Rng, arms: usize) -> String {
+    let mut out = String::new();
+    for i in 0..arms {
+        if i > 0 {
+            out.push('`');
+        }
+        out.push_str(rng.pick(J_GERUND_VERBS));
+    }
+    format!("({out})")
+}
+
+/// One explicit definition of the given valence, in one of the spellings
+/// the language gives it. `{{ }}` and `n : '…'` define the same thing, and
+/// a body given as a boxed list of lines is the third way to write it.
+fn j_explicit(rng: &mut Rng, dyadic: bool) -> String {
+    let body = if dyadic { rng.pick(J_DYAD_BODIES) } else { rng.pick(J_MONAD_BODIES) };
+    let valence = if dyadic { "4" } else { "3" };
+    match rng.below(3) {
+        0 => format!("({{{{ {body} }}}})"),
+        1 => format!("({valence} : '{}')", body.replace('\'', "''")),
+        _ => format!("({valence} : (< '{}'))", body.replace('\'', "''")),
     }
 }
 
@@ -328,10 +543,10 @@ fn j_expr(rng: &mut Rng, depth: u32) -> String {
     // which makes a sentence the generator did not mean.
     let arg = |rng: &mut Rng| format!("({})", j_expr(rng, d));
     // Arms 0 to 20 are generation 1's, unchanged and in their original
-    // proportion to one another; 21 to 29 are generation 2's. Widening the
-    // draw rather than reweighting the old arms is what keeps the coverage
-    // the recorded findings came from.
-    match rng.below(30) {
+    // proportion to one another; 21 to 29 are generation 2's, 30 to 45
+    // generation 3's. Widening the draw rather than reweighting the old
+    // arms is what keeps the coverage the recorded findings came from.
+    match rng.below(46) {
         0..=2 => format!("{} {}", j_verb(rng, d), arg(rng)),
         3..=4 => format!("({}) {} {}", j_expr(rng, d), rng.pick(J_DYADS), arg(rng)),
         5 => format!("({}) {} {}", j_expr(rng, d), rng.pick(J_STRUCT_DYADS), arg(rng)),
@@ -448,11 +663,153 @@ fn j_expr(rng: &mut Rng, depth: u32) -> String {
         }
         // A rank of two or three elements, where the three cases of the
         // verb are given ranks of their own.
-        _ => format!(
+        29 => format!(
             "({}) {} \"{} {}",
             j_expr(rng, d),
             rng.pick(J_DYADS),
             rng.pick(J_LONG_RANKS),
+            arg(rng)
+        ),
+        // Generation 3 from here on.
+        // An explicit definition, in one of its three spellings, applied at
+        // the valence it was written for.
+        30 => format!("{} {}", j_explicit(rng, false), arg(rng)),
+        31 => format!("({}) {} {}", j_expr(rng, d), j_explicit(rng, true), arg(rng)),
+        // An explicit MODIFIER, whose body names its operands rather than
+        // its arguments.
+        32 => {
+            if rng.below(2) == 0 {
+                format!(
+                    "(({}) (1 : '{}')) {}",
+                    j_verb(rng, d),
+                    rng.pick(J_ADVERB_BODIES),
+                    arg(rng)
+                )
+            } else {
+                format!(
+                    "(({}) (2 : '{}') ({})) {}",
+                    j_verb(rng, d),
+                    rng.pick(J_CONJUNCTION_BODIES),
+                    j_verb(rng, d),
+                    arg(rng)
+                )
+            }
+        }
+        // The tacit translation, at both valences.
+        33 => {
+            let body = rng.pick(J_TACIT_BODIES);
+            if body.contains('x') {
+                format!("({}) (13 : '{body}') {}", j_expr(rng, d), arg(rng))
+            } else {
+                format!("(13 : '{body}') {}", arg(rng))
+            }
+        }
+        // Names. `[` sequences right to left, so the assignment happens
+        // first and the sentence around it reads the name — which is the
+        // whole of what a NAME adds to a sweep that has only ever drawn
+        // literals, without a second line for the report to carry.
+        34 => match rng.below(3) {
+            0 => format!("(({}) n) [ n =. {}", j_verb(rng, d), arg(rng)),
+            1 => format!("((f) {}) [ f =. ({})", arg(rng), j_verb(rng, d)),
+            _ => format!("(({}) n_ab_) [ n_ab_ =. {}", j_verb(rng, d), arg(rng)),
+        },
+        // Agenda: a gerund and the index that picks one of its verbs.
+        35 => {
+            let arms = 2 + rng.below(2);
+            let g = j_gerund(rng, arms);
+            if rng.below(3) == 0 {
+                format!("({}) ({g} @. {}) {}", j_expr(rng, d), rng.pick(J_AGENDA_INDEX), arg(rng))
+            } else {
+                format!("({g} @. {}) {}", rng.pick(J_AGENDA_INDEX), arg(rng))
+            }
+        }
+        // A gerund handed out by an adverb — one verb per item, per prefix,
+        // per suffix or per group — and the three forms of `` `: ``.
+        36 => {
+            let arms = 2 + rng.below(2);
+            let g = j_gerund(rng, arms);
+            match rng.below(6) {
+                0 => format!("({g}/) {}", arg(rng)),
+                1 => format!("({g}\\) {}", arg(rng)),
+                2 => format!("({g}\\.) {}", arg(rng)),
+                3 => format!("({g}/.) {}", arg(rng)),
+                4 => format!("({g} `:{}) {}", rng.pick(&["0", "3", "6"]), arg(rng)),
+                _ => format!("({}) ({g}\\) {}", j_int(rng, -3, 4), arg(rng)),
+            }
+        }
+        // The two conjunctions that hand a gerund out per piece, and the
+        // gerund amend, whose three verbs are the replacement, the indices
+        // and the array they go into.
+        37 => match rng.below(3) {
+            0 => format!(
+                "({}) ({};.{}) {}",
+                rng.pick(J_SIZES),
+                j_gerund(rng, 2),
+                rng.pick(&["0", "1", "2", "_1", "_2", "3", "_3"]),
+                arg(rng)
+            ),
+            1 => format!("({}\"{}) {}", j_gerund(rng, 2), rng.pick(J_RANKS), arg(rng)),
+            _ => format!("({}}}) {}", j_gerund(rng, 3), arg(rng)),
+        },
+        // The inner product. Only the dyad is drawn against the tree: the
+        // monad is a determinant by minors, whose cost is the factorial of
+        // the number of rows, so it goes against a literal square instead.
+        38 => format!(
+            "({}) ({}/ . {}) {}",
+            j_expr(rng, d),
+            rng.pick(J_FOLDS),
+            rng.pick(J_DYADS),
+            arg(rng)
+        ),
+        39 => format!(
+            "({}/ . {}) {}",
+            rng.pick(J_FOLDS),
+            rng.pick(J_DYADS),
+            rng.pick(J_SQUARE)
+        ),
+        // The characteristics of a verb, and the boolean functions.
+        40 => {
+            if rng.below(2) == 0 {
+                format!("({}) b. {}", j_verb(rng, d), rng.pick(&["0", "1", "_1"]))
+            } else {
+                format!(
+                    "({}) ({} b.) {}",
+                    j_expr(rng, d),
+                    j_int(rng, 0, 15),
+                    arg(rng)
+                )
+            }
+        }
+        // The conversion verbs, each against every left argument its
+        // reference defines — the ones it refuses included.
+        41 => match rng.below(4) {
+            0 => format!("{} x: {}", rng.pick(J_EXTEND_LEFT), arg(rng)),
+            1 => format!("{} u: {}", rng.pick(J_UNICODE_LEFT), arg(rng)),
+            2 => format!("{} s: {}", rng.pick(J_SYMBOL_LEFT), arg(rng)),
+            _ => format!("{} p: {}", rng.pick(J_PRIME_LEFT), arg(rng)),
+        },
+        // The foreigns that only compute and whose answer is text a
+        // comparison can carry.
+        42 => format!("{} {}", rng.pick(J_FOREIGNS), arg(rng)),
+        // The hypergeometric series, always with a term count on the left.
+        43 => {
+            let (m, n) = J_HYPER[rng.below(J_HYPER.len())];
+            format!("{} (({m}) H. ({n})) {}", j_int(rng, 0, 4), arg(rng))
+        }
+        // Formatting and reading back: `":` with a specification, and the
+        // round trip a value should survive.
+        44 => match rng.below(3) {
+            0 => format!("\". \": {}", arg(rng)),
+            1 => format!("({}) \": {}", rng.pick(&["8 2", "0", "6", "_8 2", "4 1 3 2"]), arg(rng)),
+            _ => format!("\". {}", arg(rng)),
+        },
+        // The fold family, which the tree has never composed and which
+        // docs/status.md's conjunction table has no row for.
+        _ => format!(
+            "({} {} {}) {}",
+            j_verb(rng, d),
+            rng.pick(&["F..", "F.:", "F:.", "F::"]),
+            j_verb(rng, d),
             arg(rng)
         ),
     }
@@ -795,6 +1152,14 @@ fn j_primitives(expr: &str) -> Vec<String> {
                     i += 1;
                 }
             }
+            continue;
+        }
+        // A direct definition opens and closes on a doubled brace, which is
+        // one word rather than two `{`s: a signature that named four
+        // braces would name the spelling instead of the cause.
+        if (c == '{' || c == '}') && chars.get(i + 1) == Some(&c) {
+            out.push(format!("{c}{c}"));
+            i += 2;
             continue;
         }
         if J_PRIMITIVE_CHARS.contains(c) {
@@ -1602,16 +1967,26 @@ mod tests {
         assert!(reductions("'(a' , ⍳3").is_empty());
     }
 
-    /// Generation 2's axes are reachable at the depths a sweep uses: a run
-    /// that never composes them is a run that cannot find what they hide.
+    /// Every generation's axes are reachable at the depths a sweep uses: a
+    /// run that never composes them is a run that cannot find what they
+    /// hide.
     #[test]
-    fn generation_two_axes_are_drawn() {
+    fn every_generation_of_axes_is_drawn() {
         let text: String = fuzz(Lang::J, 3000, DEFAULT_SEED, 4)
             .iter()
             .map(|p| p.expr.as_str())
             .collect::<Vec<_>>()
             .join("\n");
         for axis in ["^:_1", "L:", "S:", "&.:", "!.", ";:", "\"0 1 2", "1.0000000000001"] {
+            assert!(text.contains(axis), "no {axis} in 3000 J expressions");
+        }
+        // Generation 3's axes, in the same run: a form the tree cannot
+        // reach is a form the sweep cannot find anything behind.
+        for axis in [
+            "~)", "@.", "`:", "M.", " f.)", "b.", "H.", "3 : ", "{{", "13 : ", "1 : ", "2 : ",
+            "F..", "F::", "3!:", "x: ", "u: ", "s: ", "p: ", "/ . ", "n =. ", "n_ab_", "^:(0:)",
+            "_.", "1ad45", "16b1f", "%.", "\". ",
+        ] {
             assert!(text.contains(axis), "no {axis} in 3000 J expressions");
         }
         let text: String = fuzz(Lang::Apl, 3000, DEFAULT_SEED, 4)

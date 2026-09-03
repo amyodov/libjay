@@ -1,0 +1,83 @@
+// J's fold family: `u F.. v`, `u F.: v`, `u F:. v` and `u F:: v`.
+//
+// v folds the items of y into a running value — the ITEM on the left of v,
+// the running value on its right — and u is applied to each running value
+// to make the answer. The first inflection says whether the answer is the
+// last running value alone or every one of them framed; the second says
+// whether the items are taken from the front or from the back. A left
+// argument is where the running value starts; with none, the first item in
+// the direction of travel is, and with no item either the running value is
+// what an insert of v over the empty answers.
+//
+// `F.` and `F:`, the two spellings whose number of steps a test decides
+// rather than the argument, are NOT here: they are unbounded, and the
+// reference itself runs without end on the ordinary cases of them.
+
+// --- the four spellings, monadic and dyadic
+(+ F.. *) 1 2 3
+(+ F.: *) 1 2 3
+(+ F:. *) 1 2 3
+(+ F:: *) 1 2 3
+2 (+ F.. *) 1 2 3
+2 (+ F.: *) 1 2 3
+2 (+ F:. *) 1 2 3
+2 (+ F:: *) 1 2 3
+
+// --- the running value, and the direction it is built in
+(] F.. +) 1 2 3 4
+(] F:. +) 1 2 3 4
+(] F.: +) 1 2 3 4
+(] F:: +) 1 2 3 4
+0 (] F.. +) 1 2 3 4
+0 (] F:. +) 1 2 3 4
+0 (] F.: +) 1 2 3 4
+0 (] F:: +) 1 2 3 4
+(] F:. -) 1 2 3
+(] F:: -) 1 2 3
+(] F.: -) 1 2 3
+
+// --- u is applied to each running value and never fed back into it
+(*: F.. +) 1 2 3 4
+(*: F:. +) 1 2 3 4
+(*: F:: +) 1 2 3 4
+2 (*: F:. +) 1 2 3
+(+: F:. +) 1 2 3
+2 (+: F:. +) 1 2 3
+(<. F:. +) 1.5 2.5 3.5
+(<. F:: +) 1.5 2.5 3.5
+
+// --- the item is v's LEFT argument, which only a non-commutative v shows
+(] F.. ,) 1 2 3
+(] F:. ,) 1 2 3
+(] F.: ,) 1 2 3
+(] F:: ,) 1 2 3
+0 (] F.: ,) 1 2 3
+'a' (] F:. ,) 'bcd'
+
+// --- the items are the major cells, and a left argument agrees with them
+(] F:. +) i. 2 3
+2 (] F:. +) i. 2 3
+(1 2 3) (] F:. +) i. 2 3
+2 3 (] F.. +) 1 2 3
+
+// --- one item, no item, and an atom
+(] F.. +) 3
+(] F.. +) 1
+(] F.: +) 1
+(] F:. +) 1
+(] F:: +) 1
+(] F.. +) i. 0
+(] F.: +) i. 0
+(] F.. *) i. 0
+(] F.: *) i. 0
+(] F.. <.) i. 0
+(] F.. ,) i. 0
+(] F:. +) i. 0
+(] F:: +) i. 0
+0 (] F:. +) i. 0
+5 (] F.. +) i. 0
+
+// --- what the operands refuse, the fold refuses
+(] F:. +) 'abc'
+(] F.. +) (2 2 $ 1;2;3;4)
+(+ F.. -) (<'ab')

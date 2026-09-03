@@ -2224,9 +2224,14 @@ const ADVERBS: [&str; 9] = ["/", "\\", "/.", "\\.", "~", "}", "f.", "M.", "b."];
 
 /// Conjunction spellings. The ones without a meaning here are recognised so
 /// that their diagnostic names the conjunction rather than the word.
-const CONJUNCTIONS: [&str; 24] = [
+const CONJUNCTIONS: [&str; 28] = [
     "\"", "@", "@.", "@:", "&", "&.", "&.:", "&:", "^:", ";.", "!.", "!:", "`", "`:", ".", ":",
     ":.", "::", "L:", "S:", "H.", "T.", "t.", "t:",
+    // The fold family. `F.` and `F:`, the two forms whose count is not
+    // settled by the argument, are deliberately absent: each folds until a
+    // test says stop, which is unbounded, and the reference itself runs
+    // without end on the ordinary cases.
+    "F..", "F.:", "F:.", "F::",
 ];
 
 fn adverb(word: &str) -> Option<&'static str> {
@@ -3717,11 +3722,34 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                 let w = verb_operand(v, span)?;
                 return Ok(Frag::Verb(VerbFrag::V(Verb::Agenda(vs, Box::new(w))), span));
             }
-            let at = near_whole(one_atom(&v, "agenda", span)?);
-            if at.fract() != 0.0 {
-                return Err(Error::parse("an agenda index must be a whole number", span));
+            let at = agenda_index(&v, span)?;
+            // An atom picks one verb; a LIST picks several and makes the
+            // train they spell, which is what the reference answers — a
+            // one-element list is that verb, two are a hook and three a
+            // fork, and a fourth has no meaning here even though `` `:6 ``
+            // gives one.
+            if at.list {
+                if at.at.is_empty() {
+                    return Err(Error::new(
+                        ErrorKind::Length,
+                        "an agenda index has no elements",
+                        Some(span),
+                    ));
+                }
+                if at.at.len() > 3 {
+                    return Err(Error::domain(
+                        format!("an agenda train is 1, 2 or 3 verbs, not {}", at.at.len()),
+                        span,
+                    ));
+                }
+                let picked: Vec<Verb> = at
+                    .at
+                    .iter()
+                    .map(|k| crate::verb::pick_gerund(&vs, *k, span))
+                    .collect::<Result<_>>()?;
+                return train_of(picked, span);
             }
-            let picked = crate::verb::pick_gerund(&vs, at as i64, span)?;
+            let picked = crate::verb::pick_gerund(&vs, at.at[0], span)?;
             Ok(Frag::Verb(VerbFrag::V(picked), span))
         }
         // `u`v` ties two entities into a gerund, which is ordinary boxed
@@ -3781,6 +3809,23 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                     span,
                 )),
             }
+        }
+        // The fold family. The first inflection says whether the answer is
+        // the last running value or every one of them, the second whether
+        // the items are taken from the front or from the back.
+        "F.." | "F.:" | "F:." | "F::" => {
+            let f = verb_operand(u, span)?;
+            let g = verb_operand(v, span)?;
+            let bytes = glyph.as_bytes();
+            Ok(Frag::Verb(
+                VerbFrag::V(Verb::Fold {
+                    u: Box::new(f),
+                    v: Box::new(g),
+                    multiple: bytes[1] == b':',
+                    reverse: bytes[2] == b':',
+                }),
+                span,
+            ))
         }
         // `m H. n`: the generalised hypergeometric function, m the
         // numerator parameters and n the denominator ones. Both are nouns,
@@ -4160,6 +4205,57 @@ fn verb_operand(f: Frag, span: Span) -> Result<Verb> {
 /// itself. The two infinities are the two ends of the descent: `_` is the
 /// whole argument, boxed however deeply, and `__` its leaves, which is level
 /// 0 written the other way round.
+/// The index `u@.n` reads, and whether it was written as a LIST. The two
+/// spellings mean different things — an atom picks one verb of the gerund,
+/// a list picks several and makes the train they spell — so which was
+/// written has to travel with the numbers.
+struct AgendaIndex {
+    at: Vec<i64>,
+    list: bool,
+}
+
+/// `u@.n`'s right operand. It is read the way `{` reads an index: a boxed
+/// atom is opened, a negative counts back from the end of the gerund, and a
+/// rank above one has no meaning.
+#[inline(never)]
+fn agenda_index(f: &Frag, span: Span) -> Result<AgendaIndex> {
+    let Some(arr) = as_const(f) else {
+        return Err(Error::not_yet("a computed agenda specification", span));
+    };
+    // One box holding the index is the index, as `{` opens one.
+    let opened;
+    let arr = match arr.as_boxes().and_then(|bs| (bs.len() == 1).then(|| bs[0].clone())) {
+        Some(inner) => {
+            opened = inner;
+            &opened
+        }
+        None => arr,
+    };
+    if arr.shape.len() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "an agenda index is an atom or a list, not a table",
+            Some(span),
+        ));
+    }
+    let list = !arr.shape.is_empty();
+    let Some(vals) = arr.to_f64_vec() else {
+        return Err(Error::domain("an agenda index must be numeric", span));
+    };
+    if !list && vals.len() != 1 {
+        return Err(Error::parse("agenda takes one atom", span));
+    }
+    let mut at = Vec::with_capacity(vals.len());
+    for x in vals {
+        let x = near_whole(x);
+        if x.fract() != 0.0 {
+            return Err(Error::domain("an agenda index must be a whole number", span));
+        }
+        at.push(x as i64);
+    }
+    Ok(AgendaIndex { at, list })
+}
+
 fn level_spec(f: &Frag, span: Span) -> Result<crate::verb::Ranks> {
     let Some(arr) = as_const(f) else {
         return Err(Error::not_yet("a computed level specification", span));
