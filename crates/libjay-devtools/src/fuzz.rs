@@ -1028,12 +1028,14 @@ pub fn cause_class(signature: &str) -> &str {
 /// - `cause=` (required) is the cause class the mismatch must have: how the
 ///   two sides parted, and what libjay made of the sentence.
 /// - `verb=` (required, non-empty) is the primitives the family is about.
-///   The cut-down sentence must name at least one of them.
+///   The cut-down sentence must name at least ONE of them.
+/// - `with=` is the primitives it must name as well, ALL of them: a family
+///   about an obverse is about `^:` and the verb both.
 /// - `also=` is the further primitives it may name. Everything the sentence
-///   names has to be in `verb`, in `also`, or in [`neutral`] — the
-///   structural tokens that frame and compose but compute nothing of their
-///   own. A sentence naming any other primitive is NOT this family: nobody
-///   has shown which of the two verbs parted the sides.
+///   names has to be in `verb`, in `with`, in `also`, or in [`neutral`] —
+///   the structural tokens that frame, compose and reorder but compute
+///   nothing of their own. A sentence naming any other primitive is NOT
+///   this family: nobody has shown which of the two verbs parted the sides.
 /// - `answers=` is the value class the two answers must have, which is how
 ///   "of two values with no common measure" is written down.
 ///
@@ -1044,6 +1046,7 @@ pub fn cause_class(signature: &str) -> &str {
 pub struct Family {
     cause: String,
     verb: Vec<String>,
+    with: Vec<String>,
     also: Vec<String>,
     answers: Vec<Trait>,
 }
@@ -1059,7 +1062,35 @@ enum Trait {
     Inexact,
     /// Numeric, and neither side's answer is written as a float.
     Exact,
+    /// Numeric, and one of the two answers holds a magnitude at or above
+    /// 2^53, where a double stops telling whole numbers apart. That is what
+    /// separates a family about the size of a number from a family about
+    /// its inexactness.
+    Huge,
+    /// Numeric, and both answers stay under 2^53.
+    Small,
 }
+
+/// The largest magnitude a printed answer holds, and `None` where nothing
+/// in it reads as a number. J and APL both write a negative sign the
+/// arithmetic does not, and an infinity as a bare mark.
+fn magnitude(text: &str) -> Option<f64> {
+    let mut most: Option<f64> = None;
+    for token in text.split_whitespace() {
+        let plain = token.replace(['_', '¯'], "-");
+        let value = match plain.as_str() {
+            "-" => f64::INFINITY,
+            "--" => f64::NEG_INFINITY,
+            other => other.parse().ok()?,
+        };
+        let value: f64 = value;
+        most = Some(most.map_or(value.abs(), |m: f64| m.max(value.abs())));
+    }
+    most
+}
+
+/// Where a double stops telling one whole number from the next.
+const DOUBLE_STEP: f64 = 9_007_199_254_740_992.0;
 
 impl Trait {
     fn parse(name: &str) -> Result<Trait, String> {
@@ -1067,7 +1098,11 @@ impl Trait {
             "numeric" => Ok(Trait::Numeric),
             "inexact" => Ok(Trait::Inexact),
             "exact" => Ok(Trait::Exact),
-            other => Err(format!("unknown answer class {other:?}: numeric, inexact or exact")),
+            "huge" => Ok(Trait::Huge),
+            "small" => Ok(Trait::Small),
+            other => Err(format!(
+                "unknown answer class {other:?}: numeric, inexact, exact, huge or small"
+            )),
         }
     }
 
@@ -1083,6 +1118,10 @@ impl Trait {
             Trait::Numeric => true,
             Trait::Inexact => float(ours) || float(theirs),
             Trait::Exact => !float(ours) && !float(theirs),
+            Trait::Huge => [ours, theirs].iter().any(|t| magnitude(t) >= Some(DOUBLE_STEP)),
+            Trait::Small => [ours, theirs]
+                .iter()
+                .all(|t| magnitude(t).is_some_and(|m| m < DOUBLE_STEP)),
         }
     }
 }
@@ -1097,7 +1136,8 @@ fn neutral(lang: Lang) -> &'static [&'static str] {
     match lang {
         Lang::J => &[
             "[", "]", "[:", "\"", "@", "@:", "&", "&:", "~", "`", "L:", "S:", "/", "\\", "\\.",
-            "<", ">", ",", ";", "#", "$", "{", "}", "|.", "i.", "a:",
+            "<", ">", ",", ";", "#", "$", "{", "}", "|.", "|:", "i.", "a:", "{.", "}.", "{:",
+            "}:", ",:", ",.", "/:", "\\:", "~.", "{::",
         ],
         Lang::Apl => &["⊢", "⊣", "∘", "⍤", "⍥", "¨", "⍨", "/", "⌿", "\\", "⍀", "⊂", "⊃", "⍴", "⌽", "⍉"],
     }
@@ -1108,8 +1148,13 @@ impl Family {
     /// unknown key is a malformed rule rather than a clause that quietly
     /// does nothing.
     pub fn parse(text: &str) -> Result<Family, String> {
-        let mut family =
-            Family { cause: String::new(), verb: Vec::new(), also: Vec::new(), answers: Vec::new() };
+        let mut family = Family {
+            cause: String::new(),
+            verb: Vec::new(),
+            with: Vec::new(),
+            also: Vec::new(),
+            answers: Vec::new(),
+        };
         let list = |v: &str| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect();
         for clause in text.split_whitespace() {
             let (key, value) = clause
@@ -1118,6 +1163,7 @@ impl Family {
             match key {
                 "cause" => family.cause = value.to_string(),
                 "verb" => family.verb = list(value),
+                "with" => family.with = list(value),
                 "also" => family.also = list(value),
                 "answers" => {
                     family.answers =
@@ -1146,11 +1192,16 @@ impl Family {
         if !named.iter().any(|p| self.verb.contains(p)) {
             return false;
         }
+        if !self.with.iter().all(|p| named.contains(p)) {
+            return false;
+        }
         let neutral = neutral(lang);
-        if !named
-            .iter()
-            .all(|p| self.verb.contains(p) || self.also.contains(p) || neutral.contains(&p.as_str()))
-        {
+        if !named.iter().all(|p| {
+            self.verb.contains(p)
+                || self.with.contains(p)
+                || self.also.contains(p)
+                || neutral.contains(&p.as_str())
+        }) {
             return false;
         }
         self.answers.iter().all(|t| t.holds(ours, theirs))

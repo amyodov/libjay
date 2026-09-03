@@ -138,12 +138,14 @@ p. (0 1 1 _)
 // LCM the reference's own GCD asks for.
 (9223372036854775806) *. (,5)
 ? the reference's own GCD of 1 contradicts the LCM it answers
+~ cause=differ:val:atom/num verb=*.,+. also=&.,&.: answers=inexact,huge
 (_9223372036854775806) *. "1 _ 0 (i. 5)
 ? the same boundary, one radix per cell
 (_9223372036854775806) *."_2 (i. 3 4)
 ? the same boundary over a table
 (2 7 1 8) *. (_9223372036854775806)
 ? the same boundary, the huge number on the right
+~ cause=differ:val:vector/num verb=*.,+. also=&.,&.: answers=inexact,huge
 (_9223372036854775806) +. (2.0 4.0 6.0)
 ? the same boundary in the GCD the LCM is built on
 
@@ -235,6 +237,7 @@ _1r2 ^. _1r2
 // forty-four measured pairs.
 (o. 1) *. 1
 ? the two float Euclids cut the same residue chain at different steps
+~ cause=differ:val:atom/num verb=+.,*. also=o.,%,%:,^.,^,*,+,-,&.,&.: answers=inexact,small
 1e12 * ((o. 1) +. 1)
 ? the two float Euclids cut the same residue chain at different steps
 
@@ -421,3 +424,39 @@ p. (_ _ _ _ _)
 ? the same, with a boxed left
 $ (2 0 3 $ 'a') #. (0 $ 0)
 ? the reference's shape here is `2`, which no rank rule gives
+
+// THE BINOMIAL AT NEGATIVE INFINITY UNDER A FRACTIONAL LEFT ARGUMENT.
+// `x ! y` off the whole numbers is a ratio of gammas whose magnitude grows
+// as |y|^x, so the limit at `__` is unbounded for a positive x and zero for
+// a negative one, and `_1` is neither. The reference answers `_1` for
+// `0.5 !` and `_0.5 !` and `__` for `1.5 !` and `2.5 !`, where at a finite
+// negative y its own answers alternate in sign with both arguments
+// (`1.5 ! _5` is `_`, `2.5 ! _5` is `__`, `0.5 ! _6` is `__`), and its
+// `x ! _` for the same fractional x is a NaN error. libjay refuses both
+// infinities for a fractional x, which is what the reference does at one of
+// them.
+0.5 ! __
+? the limit is unbounded and the reference answers _1
+_0.5 ! __
+? the limit is zero and the reference answers _1
+1.5 ! __
+? the reference's limit does not alternate where its finite answers do
+
+// A NEGATIVE LEADING RADIX in `x #: y` where the left argument has exactly
+// TWO radices and both sides are integers. Everywhere else — one radix,
+// three or more, a non-leading position, a float side, an extended side —
+// the reference takes the residue the negative radix asks for, which is
+// libjay's answer throughout: `_2 2 2 #: 11` is `0 1 1` there and here, and
+// so are `_2 2 #: 5.0`, `_2 2 #: 11x` and `_2x 2 #: 11`. In the two-radix
+// integer case alone it reads the negative radix as a ZERO one and hands
+// back everything left over, so its own `_2 2 #: 11` is `5 1` where its
+// `_2 2 #: 11x` is `_1 1`: the same question of the same numbers, answered
+// two ways by the type they were written in.
+_2 2 #: 5
+? the reference's two-radix integer path reads a negative leading radix as a zero one
+_1 2 #: 7
+? the reference's two-radix integer path reads a negative leading radix as a zero one
+_2 3 #: 11
+? the reference's two-radix integer path reads a negative leading radix as a zero one
+_10 10 #: 1234
+? the reference's two-radix integer path reads a negative leading radix as a zero one

@@ -427,3 +427,31 @@
 ? the reference's shape here is `2`, which no rank rule gives
 < 2 0
 > j: 2
+= 0.5 ! __
+? the limit is unbounded and the reference answers _1
+< <error>
+> j: _1
+= _0.5 ! __
+? the limit is zero and the reference answers _1
+< <error>
+> j: _1
+= 1.5 ! __
+? the reference's limit does not alternate where its finite answers do
+< <error>
+> j: __
+= _2 2 #: 5
+? the reference's two-radix integer path reads a negative leading radix as a zero one
+< 0 1
+> j: 2 1
+= _1 2 #: 7
+? the reference's two-radix integer path reads a negative leading radix as a zero one
+< 0 1
+> j: 3 1
+= _2 3 #: 11
+? the reference's two-radix integer path reads a negative leading radix as a zero one
+< _1 2
+> j: 3 2
+= _10 10 #: 1234
+? the reference's two-radix integer path reads a negative leading radix as a zero one
+< _7 4
+> j: 123 4

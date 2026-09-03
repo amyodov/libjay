@@ -694,3 +694,97 @@ $ _2 <;.3 (i. 5)
 p. (_ __ 0)
 2 p. (_ __ 0)
 (0 1) p. 2
+
+// The binomial at an infinity. A WHOLE left argument makes `x ! y` a
+// polynomial in y of that degree, so at either infinity it takes the
+// leading term's value and the sign alternates with x; a FRACTIONAL one
+// makes a ratio of gammas, whose limit is a number in neither direction.
+1 ! __
+2 ! __
+3 ! __
+4 ! __
+5 ! __
+0 ! __
+_1 ! __
+1e15 ! __
+1 ! _
+2 ! _
+0.5 ! _
+1.5 ! _
+_0.5 ! _
+
+// The binomial over a NEGATIVE WHOLE y under a fractional x. Γ(y+1) sits
+// on a pole and nothing below it does, so the quotient is infinite; its
+// sign is the pole's own — alternating with the pole's index — times the
+// sign of the finite half.
+0.5 ! _5
+1.5 ! _5
+2.5 ! _5
+3.5 ! _5
+4.5 ! _5
+_0.5 ! _5
+_1.5 ! _5
+0.25 ! _5
+0.75 ! _5
+1e_15 ! _5
+0.5 ! _6
+1.5 ! _6
+0.5 ! _1
+0.5 ! _2
+1e_15 ! _1
+0.5 ! _100
+0.5 ! _1000
+0.5 ! _2.5
+0.5 ! _5.5
+
+// A NEGATIVE RADIX in `x #: y` takes the residue that radix asks for,
+// which for a negative one lies in (x, 0]: `_2 2 2 #: 11` is `0 1 1`
+// where the leading 2 that is left over is `_2 | 2`.
+_2 2 2 #: 11
+_1 2 2 #: 11
+_2 2 2 #: 20
+_5 2 2 #: 20
+_2 2 2 2 #: 100
+_2 2 2 #: 7
+_2 2 2 #: 3
+_2 10 10 #: 1234
+_2 2 2 #: _11
+2 _2 2 #: 11
+2 2 _2 #: 11
+_2 _2 2 #: 11
+_2 2 #: 5.5
+_2 2 #: 5.0
+_2x 2 #: 11
+_2 2 #: 11x
+_2 #: 5
+_2 0 2 #: 11
+
+// The obverse of a SCAN keeps the exact types the scan itself keeps:
+// the identity it shifts into the vacated place is a whole number, not a
+// float, so a rational or an extended argument comes back as one.
+*/\\^:_1 (1r2 1r3)
++/\\^:_1 (1r2 1r3)
+-/\\^:_1 (1r2 1r3)
+%/\\^:_1 (1r2 1r3)
+*/\\.^:_1 (1r2 1r3)
++/\\.^:_1 (1r2 1r3)
+-/\\.^:_1 (1r2 1r3)
+%/\\.^:_1 (1r2 1r3)
+*/\\^:_1 (1x 2x 6x)
++/\\^:_1 (1x 3x 6x)
+-/\\^:_1 (1x 3x 6x)
+*/\\^:_1 (2 4 8)
++/\\^:_1 (1 3 6)
++/\\^:_1 (1 1 0)
+*/\\^:_1 (0.5 0.25)
++/\\^:_1 (0.5 0.25)
+3!:0 (+/\\^:_1 (1 3 6))
+3!:0 (*/\\^:_1 (2 4 8))
+3!:0 (+/\\^:_1 (1r2 1r3))
+3!:0 (*/\\^:_1 (1r2 1r3))
+3!:0 (+/\\^:_1 (1x 3x))
+-/\\ ^:_3 (_1 ,/\\. (1r2 1r3))
++/\\^:_1 ] 5
+*/\\^:_1 ] 5
++/\\^:_1 (i. 0)
++/\\^:_2 (1 3 6)

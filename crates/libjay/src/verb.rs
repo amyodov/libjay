@@ -20410,12 +20410,17 @@ fn scan_obverse(f: &Verb, kind: WindowKind) -> Option<Verb> {
     };
     // The neighbour: one place to the right for a prefix fold, one to the
     // left for a suffix one, the vacated place taking the fill.
+    // The identity the vacated place takes. It is written as an INTEGER,
+    // not as a float: the undoing divides by it or subtracts it, and a
+    // float there would take a rational or an extended argument down to
+    // floats on the way back — `*/\ ^:_1 (1r2 1r3)` is `1r2 2r3`, not
+    // `0.5 0.666667`.
     let fill = match op {
-        SD::Add | SD::Sub => 0.0,
-        SD::Mul | SD::DivJ | SD::DivApl => 1.0,
+        SD::Add | SD::Sub => 0,
+        SD::Mul | SD::DivJ | SD::DivApl => 1,
         _ => return None,
     };
-    let shift = Verb::ShiftFill(Array::scalar_f64(fill));
+    let shift = Verb::ShiftFill(Array::scalar_i64(fill));
     let neighbour = if suffix {
         Verb::BondLeft(Array::scalar_i64(1), Box::new(shift))
     } else {
