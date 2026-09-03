@@ -995,7 +995,7 @@ pub fn could_part(verdict: Verdict, ours: Option<&libjay_testkit::eval::Answer>)
             Answer::Refused(e) => !matches!(e.kind, ErrorKind::NotYet | ErrorKind::Language),
             Answer::Value(_) => false,
         },
-        Verdict::Agree | Verdict::Unfinished | Verdict::OracleAbort => false,
+        Verdict::Agree | Verdict::Unfinished | Verdict::OracleAbort | Verdict::RunnerDied => false,
     }
 }
 
@@ -1003,6 +1003,158 @@ pub fn could_part(verdict: Verdict, ours: Option<&libjay_testkit::eval::Answer>)
 /// and what libjay made of the sentence.
 pub fn cause_class(signature: &str) -> &str {
     signature.split('|').next().unwrap_or(signature)
+}
+
+// ---------------------------------------------------------------------
+// Family rules
+// ---------------------------------------------------------------------
+
+/// A FAMILY of divergences, pinned by the `~ ` line under one of its
+/// sentences in `divergences.txt`.
+///
+/// The list of accepted divergences matches a sweep's mismatch by the
+/// SENTENCE and by the CAUSE SIGNATURE. Neither can pin an arithmetic
+/// family: its sentences are all different, and its signature —
+/// `differ:val:atom/num|…` — is the signature of every arithmetic
+/// difference there is. A family rule is the third kind, and it says in
+/// clauses what the row's `? ` note says in prose:
+///
+/// ```text
+/// (o. 1) +. 1
+/// ? the reference's cut is no common divisor of its own arguments
+/// ~ cause=differ:val:atom/num verb=+.,*. answers=inexact
+/// ```
+///
+/// - `cause=` (required) is the cause class the mismatch must have: how the
+///   two sides parted, and what libjay made of the sentence.
+/// - `verb=` (required, non-empty) is the primitives the family is about.
+///   The cut-down sentence must name at least one of them.
+/// - `also=` is the further primitives it may name. Everything the sentence
+///   names has to be in `verb`, in `also`, or in [`neutral`] — the
+///   structural tokens that frame and compose but compute nothing of their
+///   own. A sentence naming any other primitive is NOT this family: nobody
+///   has shown which of the two verbs parted the sides.
+/// - `answers=` is the value class the two answers must have, which is how
+///   "of two values with no common measure" is written down.
+///
+/// A rule is thereby bounded by what its reason covers, and the sentence it
+/// hangs under is still recorded with both answers: `record --check`
+/// re-measures it, and the day the family converges that row stops
+/// diverging and the check says so.
+pub struct Family {
+    cause: String,
+    verb: Vec<String>,
+    also: Vec<String>,
+    answers: Vec<Trait>,
+}
+
+/// The value class a family rule asks the two answers to have.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Trait {
+    /// Both sides answered a value made of nothing but numbers.
+    Numeric,
+    /// Numeric, and at least one side's answer is written as a float — a
+    /// point or an exponent. This is what "no common measure" looks like
+    /// from outside: an exact pair answers exactly on both sides.
+    Inexact,
+    /// Numeric, and neither side's answer is written as a float.
+    Exact,
+}
+
+impl Trait {
+    fn parse(name: &str) -> Result<Trait, String> {
+        match name {
+            "numeric" => Ok(Trait::Numeric),
+            "inexact" => Ok(Trait::Inexact),
+            "exact" => Ok(Trait::Exact),
+            other => Err(format!("unknown answer class {other:?}: numeric, inexact or exact")),
+        }
+    }
+
+    fn holds(self, ours: &str, theirs: &str) -> bool {
+        let numeric = |text: &str| {
+            !text.trim().is_empty() && text.chars().all(|c| NUMERIC_OUTPUT.contains(c))
+        };
+        let float = |text: &str| text.contains('.') || text.contains('e');
+        if !(numeric(ours) && numeric(theirs)) {
+            return false;
+        }
+        match self {
+            Trait::Numeric => true,
+            Trait::Inexact => float(ours) || float(theirs),
+            Trait::Exact => !float(ours) && !float(theirs),
+        }
+    }
+}
+
+/// The primitives a family rule need not name: the ones that frame, box,
+/// compose and reorder without computing anything of their own, so that a
+/// fresh spelling of one arithmetic family inside a wrapper is still that
+/// family. Everything that CAN make a number — including `^:`, whose
+/// negative left argument is an obverse and a family of its own — is left
+/// out, so a row that means to cover it has to say so in `also=`.
+fn neutral(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::J => &[
+            "[", "]", "[:", "\"", "@", "@:", "&", "&:", "~", "`", "L:", "S:", "/", "\\", "\\.",
+            "<", ">", ",", ";", "#", "$", "{", "}", "|.", "i.", "a:",
+        ],
+        Lang::Apl => &["⊢", "⊣", "∘", "⍤", "⍥", "¨", "⍨", "/", "⌿", "\\", "⍀", "⊂", "⊃", "⍴", "⌽", "⍉"],
+    }
+}
+
+impl Family {
+    /// Read the clauses of a `~ ` line. Every clause is `key=value`, and an
+    /// unknown key is a malformed rule rather than a clause that quietly
+    /// does nothing.
+    pub fn parse(text: &str) -> Result<Family, String> {
+        let mut family =
+            Family { cause: String::new(), verb: Vec::new(), also: Vec::new(), answers: Vec::new() };
+        let list = |v: &str| v.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect();
+        for clause in text.split_whitespace() {
+            let (key, value) = clause
+                .split_once('=')
+                .ok_or_else(|| format!("clause {clause:?} is not key=value"))?;
+            match key {
+                "cause" => family.cause = value.to_string(),
+                "verb" => family.verb = list(value),
+                "also" => family.also = list(value),
+                "answers" => {
+                    family.answers =
+                        value.split(',').map(Trait::parse).collect::<Result<Vec<_>, _>>()?;
+                }
+                other => return Err(format!("unknown clause {other:?}")),
+            }
+        }
+        if family.cause.is_empty() {
+            return Err("a family rule needs `cause=`: the class of mismatch it covers".to_string());
+        }
+        if family.verb.is_empty() {
+            return Err("a family rule needs `verb=`: the primitives it is about".to_string());
+        }
+        Ok(family)
+    }
+
+    /// Whether one mismatch belongs to this family. `expr` is the sentence
+    /// [`reduce`] cut the drawn one down to, and `ours` and `theirs` are the
+    /// two answers as the comparison printed them.
+    pub fn covers(&self, lang: Lang, verdict: Verdict, expr: &str, ours: &str, theirs: &str) -> bool {
+        if cause_class(&signature(lang, verdict, expr, ours)) != self.cause {
+            return false;
+        }
+        let named = primitives(lang, expr);
+        if !named.iter().any(|p| self.verb.contains(p)) {
+            return false;
+        }
+        let neutral = neutral(lang);
+        if !named
+            .iter()
+            .all(|p| self.verb.contains(p) || self.also.contains(p) || neutral.contains(&p.as_str()))
+        {
+            return false;
+        }
+        self.answers.iter().all(|t| t.holds(ours, theirs))
+    }
 }
 
 /// What libjay made of the sentence, coarsely enough that two runs of one
@@ -1099,6 +1251,11 @@ pub enum Verdict {
     /// libjay panicked. Always a bug: a refusal is a diagnostic, a panic is
     /// a crash.
     Panicked,
+    /// The RUNNER died on the sentence — a fatal signal or an abort, which
+    /// no `catch_unwind` can hold and which takes the whole process with
+    /// it. Nothing was compared. A supervised sweep carries on past it and
+    /// names the sentence; the sentence itself is then a bug of its own.
+    RunnerDied,
 }
 
 impl Verdict {
@@ -1112,17 +1269,39 @@ impl Verdict {
             Verdict::Unfinished => "unfinished",
             Verdict::OracleAbort => "oracle-abort",
             Verdict::Panicked => "panic",
+            Verdict::RunnerDied => "runner-died",
         }
+    }
+
+    /// The verdict a [`Verdict::label`] names, which is how a journal
+    /// written by one process is read back by another.
+    pub fn of_label(label: &str) -> Option<Verdict> {
+        [
+            Verdict::Agree,
+            Verdict::Differ,
+            Verdict::Gap,
+            Verdict::WeRefuse,
+            Verdict::TheyRefuse,
+            Verdict::Unfinished,
+            Verdict::OracleAbort,
+            Verdict::Panicked,
+            Verdict::RunnerDied,
+        ]
+        .into_iter()
+        .find(|v| v.label() == label)
     }
 
     /// A verdict worth a human's attention.
     pub fn is_mismatch(self) -> bool {
-        !matches!(self, Verdict::Agree | Verdict::Unfinished | Verdict::OracleAbort)
+        !matches!(
+            self,
+            Verdict::Agree | Verdict::Unfinished | Verdict::OracleAbort | Verdict::RunnerDied
+        )
     }
 
     /// Whether the two answers were compared at all.
     pub fn is_compared(self) -> bool {
-        !matches!(self, Verdict::Unfinished | Verdict::OracleAbort)
+        !matches!(self, Verdict::Unfinished | Verdict::OracleAbort | Verdict::RunnerDied)
     }
 }
 

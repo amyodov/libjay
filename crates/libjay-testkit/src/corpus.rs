@@ -16,6 +16,12 @@
 //!   starting with it is an expression. The expected-different list of a
 //!   dialect gate is read by [`read_annotated`], which is the same format
 //!   with the note required rather than forbidden.
+//! - `~ CLAUSES` after an expression and its note is a FAMILY RULE: the
+//!   divergence above it stands for a whole family of sentences, and the
+//!   clauses say which. Only `divergences.txt` carries one. `~` opens no
+//!   J sentence (it is an adverb, and needs a verb to its left) and no APL
+//!   line in the corpus begins with `~ `; an APL sentence that would has
+//!   to be written parenthesised.
 //!
 //! The comment marker is `//`, not `#`, because `#` is J's tally: `# i. 5 2`
 //! is one of the expressions below. `//` opens no sentence in either
@@ -26,13 +32,17 @@
 
 use std::path::{Path, PathBuf};
 
-/// One input: a sentence, the index origin it is read under, and the note
-/// that follows it in a divergence corpus.
+/// One input: a sentence, the index origin it is read under, the note that
+/// follows it in a divergence corpus, and the family rule that widens it
+/// from one sentence to a class of them.
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub expr: String,
     pub io: u8,
     pub note: Option<String>,
+    /// The clauses of a `~ ` line, unparsed: the reader knows the format of
+    /// a corpus file, and the sweeper knows what a family rule means.
+    pub family: Option<String>,
 }
 
 /// The corpus root, `crates/libjay/tests/corpus`.
@@ -150,9 +160,25 @@ fn read_lines(path: &Path, notes_allowed: bool) -> Vec<Entry> {
             entry.note = Some(note.to_string());
             continue;
         }
+        if let Some(rule) = trimmed.strip_prefix("~ ") {
+            assert!(notes_allowed, "line {line_no}: a `~ ` family rule belongs to divergences.txt");
+            let entry = entries
+                .last_mut()
+                .unwrap_or_else(|| panic!("line {line_no}: a family rule before any expression"));
+            assert!(
+                entry.note.is_some(),
+                "line {line_no}: a family rule widens a divergence, so the `? ` note saying why comes first"
+            );
+            assert!(
+                entry.family.is_none(),
+                "line {line_no}: one family rule to a divergence; put every clause on the one line"
+            );
+            entry.family = Some(rule.trim().to_string());
+            continue;
+        }
         let expr = try_unescape(trimmed)
             .unwrap_or_else(|e| panic!("{}: line {line_no}: {e}", path.display()));
-        entries.push(Entry { expr, io, note: None });
+        entries.push(Entry { expr, io, note: None, family: None });
     }
     entries
 }

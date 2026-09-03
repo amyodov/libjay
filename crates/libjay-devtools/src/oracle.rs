@@ -105,13 +105,32 @@ impl Reply {
     }
 }
 
+/// How long one sentence may keep an interpreter busy, in seconds, when
+/// nothing says otherwise. A SWEEP is throughput: it draws sentences that
+/// ask a reference for work measured in hours, and waiting on each of them
+/// is the whole run. A RECORDING is a gate: every line of it is one
+/// somebody chose, the run is a few hundred of them, and a limit that a
+/// loaded machine can reach turns the gate into a coin toss.
+const SWEEP_LIMIT: u64 = 20;
+pub const RECORD_LIMIT: u64 = 60;
+
+/// The default the process runs under, which [`set_default_limit`] moves.
+static DEFAULT_LIMIT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(SWEEP_LIMIT);
+
+/// Say how patient this run is with an interpreter, in seconds.
+/// `LIBJAY_ORACLE_TIMEOUT` still wins where it is set, and 0 waits for ever.
+pub fn set_default_limit(secs: u64) {
+    DEFAULT_LIMIT.store(secs, Ordering::Relaxed);
+}
+
 /// How long one sentence may keep an interpreter busy, in seconds.
 /// `LIBJAY_ORACLE_TIMEOUT` overrides it; 0 waits for ever.
 fn limit() -> Option<std::time::Duration> {
     let secs: u64 = std::env::var("LIBJAY_ORACLE_TIMEOUT")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(20);
+        .unwrap_or_else(|| DEFAULT_LIMIT.load(Ordering::Relaxed));
     (secs > 0).then(|| std::time::Duration::from_secs(secs))
 }
 
@@ -334,6 +353,19 @@ impl Oracle {
                 Reply::of(dyalog::eval(&self.path, &self.thread_dir(), expr, index_origin))
             }
             other => panic!("no runner for the {other} implementation"),
+        }
+    }
+
+    /// Run one sentence, and give a run the limit cut short one more
+    /// chance. A recording is a gate, and whether a line of it can be
+    /// recorded at all must not depend on what else the machine was doing:
+    /// a sentence that genuinely does not finish does not finish twice
+    /// either, and one that merely lost a race to a loaded machine answers
+    /// on the second ask.
+    pub fn eval_patiently(&self, expr: &str, index_origin: u8) -> Reply {
+        match self.eval(expr, index_origin) {
+            Reply::TimedOut => self.eval(expr, index_origin),
+            answered => answered,
         }
     }
 

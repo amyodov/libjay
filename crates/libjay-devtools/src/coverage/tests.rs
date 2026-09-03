@@ -10,7 +10,7 @@ use super::*;
 fn entries(exprs: &[&str], io: u8) -> Vec<corpus::Entry> {
     exprs
         .iter()
-        .map(|e| corpus::Entry { expr: (*e).to_string(), io, note: None })
+        .map(|e| corpus::Entry { expr: (*e).to_string(), io, note: None, family: None })
         .collect()
 }
 

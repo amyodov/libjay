@@ -18,6 +18,7 @@ mod dyalog;
 mod fuzz;
 mod generate;
 mod inventory;
+mod journal;
 mod oracle;
 
 use std::path::{Path, PathBuf};
@@ -50,6 +51,12 @@ jay-corpus — record what the reference interpreters answer to the corpus.
                    the index origin its `@ io=` directives give them
       --no-accepted  with --compare, do not read the accepted-divergence
                    list; every mismatch counts against agreement
+      --journal FILE  with --compare, keep the sweep's journal here. Every
+                   measurement is written down as it is made, so a sweep
+                   that is interrupted resumes rather than starting again
+      --no-supervise  with --compare, measure in this process instead of a
+                   worker. Faster to start, and one sentence that kills the
+                   runner takes the whole sweep with it
   jay-corpus coverage <j|apl>           which primitive × operand cells the
                                         recorded corpus exercises, and which
                                         are empty
@@ -141,6 +148,9 @@ fn record(args: &[String]) -> Result<(), String> {
         }
     }
     let lang = parse_lang(positional.first().copied())?;
+    // A recording is a gate rather than a sweep, so it waits longer on the
+    // interpreter than a sweep does.
+    oracle::set_default_limit(oracle::RECORD_LIMIT);
     let key = match chosen {
         Some(name) => {
             if !libjay_testkit::impls(lang).contains(&name.as_str()) {
@@ -209,7 +219,7 @@ fn record(args: &[String]) -> Result<(), String> {
                 });
                 record.note = entry.note.clone();
                 if !(missing_only && record.answer(&key).is_some()) {
-                    let reply = oracle.eval(&entry.expr, entry.io);
+                    let reply = oracle.eval_patiently(&entry.expr, entry.io);
                     // A corpus line the reference cannot answer — it never
                     // finished, or it printed more than one run may hold —
                     // is one no recording can hold: the previous answer
@@ -421,6 +431,9 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     let mut signatures = false;
     let mut accepted_wanted = true;
     let mut given: Option<String> = None;
+    let mut journal: Option<String> = None;
+    let mut journal_run: Option<String> = None;
+    let mut supervise = true;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -444,6 +457,13 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
                 let value = it.next().ok_or("--exprs needs a file")?;
                 given = Some(value.clone());
             }
+            "--journal" => {
+                journal = Some(it.next().ok_or("--journal needs a file")?.clone());
+            }
+            "--journal-run" => {
+                journal_run = Some(it.next().ok_or("--journal-run needs a file")?.clone());
+            }
+            "--no-supervise" => supervise = false,
             other if other.starts_with("--") => return Err(format!("unknown option {other:?}")),
             _ => positional.push(arg),
         }
@@ -475,38 +495,29 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
 
+    // The worker half of a supervised sweep: measure what the journal does
+    // not hold yet, write each result down as it comes, and report nothing.
+    // The supervisor does the reporting, from the journal, so that a run
+    // the worker does not survive still has every measurement it made.
+    if let Some(path) = journal_run {
+        let oracle = oracle::Oracle::find(lang, libjay_testkit::followed_impl(lang))
+            .map_err(|absent| absent.message().to_string())?;
+        return journal::work(lang, &oracle, &probes, std::path::Path::new(&path), signatures);
+    }
+
     let oracle = oracle::Oracle::find(lang, libjay_testkit::followed_impl(lang))
         .map_err(|absent| absent.message().to_string())?;
     let accepted = if accepted_wanted { accepted_divergences(lang, &oracle) } else { Accepted::none() };
-    let findings: Vec<Finding> = probes
-        .par_iter()
-        .map(|probe| {
-            let (expr, io) = (probe.expr.as_str(), probe.io);
-            let drawn = put(lang, &oracle, expr, io);
-            if !signatures || !drawn.verdict.is_mismatch() {
-                return Finding { expr: expr.to_string(), io, drawn: drawn.verdict, seen: drawn };
-            }
-            // A composed sentence is a tree with a bug somewhere inside it,
-            // and the whole tree names eight or ten primitives that are a
-            // property of the draw. Cutting it down to the smallest sentence
-            // that still parts the two sides the same way is what makes the
-            // signature name the cause: without it one cause is signed once
-            // per subset it can be drawn inside, and a seen-set grows for
-            // ever without learning anything.
-            let smallest = fuzz::reduce(expr, fuzz::REDUCE_BUDGET, |candidate| {
-                let ours = ours_of(lang, candidate, io);
-                fuzz::could_part(drawn.verdict, ours.as_ref())
-                    && compare(lang, &oracle, candidate, io, ours).verdict == drawn.verdict
-            });
-            let verdict = drawn.verdict;
-            let seen = if smallest == expr { drawn } else { put(lang, &oracle, &smallest, io) };
-            Finding { expr: smallest, io, drawn: verdict, seen }
-        })
-        .collect();
+    let findings: Vec<Finding> = if supervise {
+        journal::supervise(lang, &probes, signatures, journal.as_deref())?
+    } else {
+        measure_here(lang, &oracle, &probes, signatures)
+    };
 
     let mut counts = std::collections::BTreeMap::<&str, usize>::new();
     let mut by_signature = std::collections::BTreeMap::<String, usize>::new();
-    let mut matched_rows = std::collections::BTreeMap::<String, usize>::new();
+    let mut matched_rows = std::collections::BTreeMap::<(Excuse, String), usize>::new();
+    let mut by_excuse = std::collections::BTreeMap::<Excuse, usize>::new();
     let mut accepted_count = 0usize;
     for (finding, probe) in findings.iter().zip(&probes) {
         if !finding.drawn.is_mismatch() {
@@ -524,12 +535,13 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         // answers and a reason. It keeps its own class rather than the
         // verdict's, and stays out of the signature ranking, which is the
         // list of causes still to explain.
-        let row = accepted.row_for(&finding.expr, &sig);
+        let row = accepted.row_for(lang, &finding.expr, &sig, seen);
         match &row {
-            Some(row) => {
+            Some((row, how)) => {
                 accepted_count += 1;
+                *by_excuse.entry(*how).or_default() += 1;
                 *counts.entry("accepted").or_default() += 1;
-                *matched_rows.entry((*row).clone()).or_default() += 1;
+                *matched_rows.entry((*how, (*row).clone())).or_default() += 1;
             }
             None => {
                 *counts.entry(finding.drawn.label()).or_default() += 1;
@@ -542,14 +554,14 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
             let origin = if finding.io == 1 { String::new() } else { format!(" [io={}]", finding.io) };
             let field = if signatures { format!("sig={sig} ") } else { String::new() };
             let label = match &row {
-                Some(_) => format!("accepted/{}", seen.verdict.label()),
+                Some((_, how)) => format!("accepted-{}/{}", how.label(), seen.verdict.label()),
                 None => seen.verdict.label().to_string(),
             };
             println!("--- {field}{label}{origin} : {}", finding.expr);
             println!("  libjay:    {}", one_line(&seen.ours_text));
             println!("  reference: {}", one_line(&seen.theirs_text));
-            if let Some(row) = &row {
-                println!("  accepted:  {row}");
+            if let Some((row, how)) = &row {
+                println!("  accepted:  {row}   (by {})", how.label());
             }
             if finding.expr != probe.expr {
                 println!("  cut from:  {}", probe.expr);
@@ -573,10 +585,19 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         "  accepted-adjusted agreement  {:.2}%  ({accepted_count} accepted, {unexplained} unexplained)",
         ratio(total - unexplained, total)
     );
+    // The three ways a mismatch is excused, apart: a sentence and a
+    // signature each match something measured, a FAMILY matches a class,
+    // and the reader of a sweep is owed the difference.
+    println!(
+        "    accepted by sentence {:>5}, by signature {:>5}, by family {:>5}",
+        by_excuse.get(&Excuse::Sentence).copied().unwrap_or(0),
+        by_excuse.get(&Excuse::Signature).copied().unwrap_or(0),
+        by_excuse.get(&Excuse::Family).copied().unwrap_or(0),
+    );
     for (label, n) in counts {
         // A class that was never compared is not a share of the compared
         // total, so it is reported as a plain count.
-        if label == "oracle-abort" || label == "unfinished" {
+        if label == "oracle-abort" || label == "unfinished" || label == "runner-died" {
             println!("  {label:<12} {n:>5}");
         } else {
             println!("  {label:<12} {n:>5}  ({:.1}%)", ratio(n, total));
@@ -595,14 +616,28 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
             }
         }
     }
+    let killed: Vec<&Finding> =
+        findings.iter().filter(|f| f.drawn == fuzz::Verdict::RunnerDied).collect();
+    if !killed.is_empty() {
+        // Neither side was measured, and the fault is ours: a sentence that
+        // takes the process down with it is a libjay bug of its own, and
+        // the supervisor's whole purpose is that the sweep still reports it.
+        println!("\n{} sentences the runner died on (not compared):", killed.len());
+        let mut shown = std::collections::BTreeSet::<&str>::new();
+        for finding in &killed {
+            if shown.insert(finding.expr.as_str()) {
+                println!("  {}", finding.expr);
+            }
+        }
+    }
     if !matched_rows.is_empty() {
         // Which pinned row each accepted mismatch was excused by, so the
         // exclusion is auditable rather than a number to be trusted.
         println!("\naccepted divergences matched ({}):", accepted.path.display());
-        let mut ranked: Vec<(&String, &usize)> = matched_rows.iter().collect();
+        let mut ranked: Vec<(&(Excuse, String), &usize)> = matched_rows.iter().collect();
         ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-        for (row, n) in ranked {
-            println!("  {n:>5}  {row}");
+        for ((how, row), n) in ranked {
+            println!("  {n:>5}  {:<9}  {row}", how.label());
         }
     }
     if signatures {
@@ -642,6 +677,29 @@ struct Accepted {
     exprs: std::collections::HashSet<String>,
     /// A signature to the row that earned it.
     signatures: std::collections::HashMap<String, String>,
+    /// The `~ ` family rules, each with the sentence it hangs under.
+    families: Vec<(fuzz::Family, String)>,
+}
+
+/// Which of the three ways a mismatch was excused. They are counted apart
+/// because they are trusted apart: a sentence matches one recorded pair, a
+/// signature matches one recorded cause, and a family matches a class of
+/// sentences nobody has measured one by one.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Excuse {
+    Sentence,
+    Signature,
+    Family,
+}
+
+impl Excuse {
+    fn label(self) -> &'static str {
+        match self {
+            Excuse::Sentence => "sentence",
+            Excuse::Signature => "signature",
+            Excuse::Family => "family",
+        }
+    }
 }
 
 impl Accepted {
@@ -650,16 +708,31 @@ impl Accepted {
             path: std::path::PathBuf::from("(none)"),
             exprs: std::collections::HashSet::new(),
             signatures: std::collections::HashMap::new(),
+            families: Vec::new(),
         }
     }
 
-    /// The pinned row a mismatch is an instance of, and `None` where it is
-    /// something still to explain.
-    fn row_for(&self, expr: &str, signature: &str) -> Option<&String> {
+    /// The pinned row a mismatch is an instance of and how it was matched,
+    /// and `None` where it is something still to explain.
+    fn row_for(
+        &self,
+        lang: libjay_testkit::Lang,
+        expr: &str,
+        signature: &str,
+        seen: &Outcome,
+    ) -> Option<(&String, Excuse)> {
         if let Some(row) = self.exprs.get(expr) {
-            return Some(row);
+            return Some((row, Excuse::Sentence));
         }
-        self.signatures.get(signature)
+        if let Some(row) = self.signatures.get(signature) {
+            return Some((row, Excuse::Signature));
+        }
+        self.families
+            .iter()
+            .find(|(family, _)| {
+                family.covers(lang, seen.verdict, expr, &seen.ours_text, &seen.theirs_text)
+            })
+            .map(|(_, row)| (row, Excuse::Family))
     }
 }
 
@@ -673,27 +746,36 @@ fn accepted_divergences(lang: libjay_testkit::Lang, oracle: &oracle::Oracle) -> 
         return Accepted { path, ..Accepted::none() };
     }
     let entries = corpus::read(&path);
-    let mut out = Accepted {
-        path,
-        exprs: std::collections::HashSet::new(),
-        signatures: std::collections::HashMap::new(),
-    };
-    let measured: Vec<(String, Outcome)> = entries
+    let mut out = Accepted { path, ..Accepted::none() };
+    let measured: Vec<(&corpus::Entry, Outcome)> = entries
         .par_iter()
-        .map(|entry| (entry.expr.clone(), put(lang, oracle, &entry.expr, entry.io)))
+        .map(|entry| (entry, put(lang, oracle, &entry.expr, entry.io)))
         .collect();
-    for (expr, seen) in measured {
+    for (entry, seen) in measured {
         if !seen.verdict.is_mismatch() {
             continue;
         }
+        let expr = entry.expr.clone();
         let sig = fuzz::signature(lang, seen.verdict, &expr, &seen.ours_text);
         out.signatures.entry(sig).or_insert_with(|| expr.clone());
+        // A malformed family rule is a malformed corpus file: it is said
+        // once, by name, rather than silently excusing nothing.
+        if let Some(rule) = &entry.family {
+            let family = fuzz::Family::parse(rule)
+                .unwrap_or_else(|e| panic!("{expr:?}: the family rule {rule:?}: {e}"));
+            assert!(
+                family.covers(lang, seen.verdict, &expr, &seen.ours_text, &seen.theirs_text),
+                "{expr:?}: its own family rule does not cover it, so it covers the wrong thing"
+            );
+            out.families.push((family, expr.clone()));
+        }
         out.exprs.insert(expr);
     }
     out
 }
 
 /// One sentence put to both sides.
+#[derive(Clone)]
 struct Outcome {
     verdict: fuzz::Verdict,
     /// libjay's answer as a printed line: `<panic>`, `<no value>`,
@@ -706,11 +788,54 @@ struct Outcome {
 /// one, or the smallest cut of it that parts the two sides the same way —
 /// what that sentence came to, and how the drawn sentence itself parted,
 /// which is what the run's tallies count.
+#[derive(Clone)]
 struct Finding {
     expr: String,
     io: u8,
     drawn: fuzz::Verdict,
     seen: Outcome,
+}
+
+/// Measure every probe in this process. The plain path: fast, and one
+/// sentence that kills the process takes the whole measurement with it,
+/// which is what [`journal::supervise`] exists to prevent.
+fn measure_here(
+    lang: libjay_testkit::Lang,
+    oracle: &oracle::Oracle,
+    probes: &[fuzz::Probe],
+    signatures: bool,
+) -> Vec<Finding> {
+    probes.par_iter().map(|probe| measure_one(lang, oracle, probe, signatures)).collect()
+}
+
+/// One probe, put to both sides and — where it parted them and the caller
+/// asked for signatures — cut down to the smallest sentence that still
+/// parts them the same way.
+///
+/// A composed sentence is a tree with a bug somewhere inside it, and the
+/// whole tree names eight or ten primitives that are a property of the
+/// draw. The cut is what makes the signature name the cause: without it one
+/// cause is signed once per subset it can be drawn inside, and a seen-set
+/// grows for ever without learning anything.
+fn measure_one(
+    lang: libjay_testkit::Lang,
+    oracle: &oracle::Oracle,
+    probe: &fuzz::Probe,
+    signatures: bool,
+) -> Finding {
+    let (expr, io) = (probe.expr.as_str(), probe.io);
+    let drawn = put(lang, oracle, expr, io);
+    if !signatures || !drawn.verdict.is_mismatch() {
+        return Finding { expr: expr.to_string(), io, drawn: drawn.verdict, seen: drawn };
+    }
+    let smallest = fuzz::reduce(expr, fuzz::REDUCE_BUDGET, |candidate| {
+        let ours = ours_of(lang, candidate, io);
+        fuzz::could_part(drawn.verdict, ours.as_ref())
+            && compare(lang, oracle, candidate, io, ours).verdict == drawn.verdict
+    });
+    let verdict = drawn.verdict;
+    let seen = if smallest == expr { drawn } else { put(lang, oracle, &smallest, io) };
+    Finding { expr: smallest, io, drawn: verdict, seen }
 }
 
 /// libjay's answer to one sentence, or `None` where it panicked. A panic is
