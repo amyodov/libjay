@@ -8116,8 +8116,12 @@ fn head(y: &Array, filled: Option<FillAtom>) -> Array {
 }
 
 fn behead(y: &Array, span: Span) -> Result<Array> {
+    let _ = span;
+    // An atom is one item, so dropping that item leaves none: the answer is
+    // the empty list of the atom's own type, which is what the reference
+    // answers for `}. 2` and `}. <'a'` alike.
     if y.rank() == 0 {
-        return Err(Error::domain("cannot drop the first item of a scalar", span));
+        return Ok(Array::new(vec![0], Data::empty(y.dtype())));
     }
     if y.items() == 0 {
         return Ok(y.clone());
@@ -11676,21 +11680,7 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         // `q:` reads the whole argument: one row of factors per item, every
         // row padded to the longest with 1s so that each row still
         // multiplies back to the item it came from.
-        MonadOp::PrimeFactors => {
-            let ns = all_ext(y, "prime factors", ctx.cfg.near(), span)?;
-            let rows: Vec<Vec<Ext>> =
-                ns.iter().map(|n| prime_factors(n, span)).collect::<Result<_>>()?;
-            let width = rows.iter().map(Vec::len).max().unwrap_or(0);
-            let mut all = Vec::with_capacity(rows.len() * width);
-            for row in rows {
-                let pad = width - row.len();
-                all.extend(row);
-                all.extend(std::iter::repeat_n(Ext::from(1), pad));
-            }
-            let mut shape = y.shape.clone();
-            shape.push(width);
-            Ok(Array::new(shape, whole_data(all, y)))
-        }
+        MonadOp::PrimeFactors => prime_factor_rows(y, ctx.cfg.near(), span),
         MonadOp::MatrixInverse => matrix_inverse(y, span),
         MonadOp::Roll { origin, fixed, float_at_zero } => {
             roll(y, origin, fixed, float_at_zero, ctx.cfg.near(), span)
@@ -15739,7 +15729,16 @@ fn as_matrix(a: &Array, span: Span) -> Result<(Vec<f64>, usize, usize)> {
 /// pseudo-inverse of a taller one. A wider one is refused, as both
 /// references refuse it.
 fn matrix_inverse(y: &Array, span: Span) -> Result<Array> {
+    if y.dtype() == DType::Complex && y.count() != 0 {
+        return complex_matrix_inverse(y, span);
+    }
     let (a, m, n) = as_matrix(y, span)?;
+    // A vector with no elements is a column of no rows, and the reference
+    // answers it with an empty rather than reading it as a wider matrix
+    // than it is tall.
+    if a.is_empty() && y.rank() < 2 {
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::F64)));
+    }
     if m < n {
         return Err(Error::new(
             ErrorKind::Length,
@@ -15747,15 +15746,21 @@ fn matrix_inverse(y: &Array, span: Span) -> Result<Array> {
             Some(span),
         ));
     }
+    // A rank-2 argument gives the n by m pseudo-inverse; a vector or scalar
+    // keeps its own shape, which is what J prints for them.
+    let shape = if y.rank() == 2 { vec![n, m] } else { y.shape.clone() };
+    // Nothing to invert: the answer is the empty of the shape the inverse
+    // would have had. The width check above still runs first, so a wider
+    // empty is the length error it would be at any size.
+    if a.is_empty() {
+        return Ok(Array::new(shape, Data::empty(DType::F64)));
+    }
     let mut eye = vec![0.0f64; m * m];
     for i in 0..m {
         eye[i * m + i] = 1.0;
     }
     let x = lstsq(&a, m, n, &eye, m)
         .ok_or_else(|| Error::domain("the matrix is singular", span))?;
-    // A rank-2 argument gives the n by m pseudo-inverse; a vector or scalar
-    // keeps its own shape, which is what J prints for them.
-    let shape = if y.rank() == 2 { vec![n, m] } else { y.shape.clone() };
     Ok(Array::new(shape, Data::F64(x.into())))
 }
 
@@ -15764,6 +15769,9 @@ fn matrix_inverse(y: &Array, span: Span) -> Result<Array> {
 /// `planes` is J's reading of a right-hand side of rank 3 or more, which
 /// APL's `⌹` refuses instead.
 fn matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array> {
+    if (x.dtype() == DType::Complex || y.dtype() == DType::Complex) && y.count() != 0 {
+        return complex_matrix_divide(x, y, planes, span);
+    }
     let (a, m, n) = as_matrix(y, span)?;
     // `%.` takes its right-hand side WHOLE — its left rank is infinite —
     // so a right-hand side of rank 3 or more is one column per element of
@@ -15804,6 +15812,146 @@ fn matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array
         vec![n]
     };
     Ok(Array::new(shape, Data::F64(sol.into())))
+}
+
+/// A complex argument as an `m` by `n` row-major buffer of complex values,
+/// read the way [`as_matrix`] reads a real one.
+fn as_complex_matrix(a: &Array, span: Span) -> Result<(Vec<Cx>, usize, usize)> {
+    let v = match a.data.cast(DType::Complex) {
+        Some(Data::Complex(v)) => v.as_slice().to_vec(),
+        _ => return Err(Error::domain("matrix division needs numeric data", span)),
+    };
+    match a.rank() {
+        0 => Ok((v, 1, 1)),
+        1 => {
+            let m = a.shape[0];
+            Ok((v, m, 1))
+        }
+        2 => Ok((v, a.shape[0], a.shape[1])),
+        _ => Err(Error::new(
+            ErrorKind::Rank,
+            "matrix division needs an argument of rank 2 or less",
+            Some(span),
+        )),
+    }
+}
+
+/// The real matrix that stands for a complex one: `P + iQ` becomes the
+/// `2m` by `2n` block matrix `[[P, -Q], [Q, P]]`. A complex system solved
+/// this way is the real system of twice the size, so the least-squares pass
+/// libjay already has answers it without a second decomposition.
+fn complex_embedding(a: &[Cx], m: usize, n: usize) -> Vec<f64> {
+    let mut out = vec![0.0f64; 4 * m * n];
+    let w = 2 * n;
+    for i in 0..m {
+        for j in 0..n {
+            let z = a[i * n + j];
+            out[i * w + j] = z[0];
+            out[i * w + n + j] = -z[1];
+            out[(m + i) * w + j] = z[1];
+            out[(m + i) * w + n + j] = z[0];
+        }
+    }
+    out
+}
+
+/// The right-hand side of a complex system, stacked as `[Re; Im]`.
+fn complex_stack(b: &[Cx], m: usize, k: usize) -> Vec<f64> {
+    let mut out = vec![0.0f64; 2 * m * k];
+    for i in 0..m {
+        for j in 0..k {
+            let z = b[i * k + j];
+            out[i * k + j] = z[0];
+            out[(m + i) * k + j] = z[1];
+        }
+    }
+    out
+}
+
+/// The complex solution a stacked real one stands for: the first `n` rows
+/// are its real parts and the next `n` its imaginary ones.
+fn complex_unstack(sol: &[f64], n: usize, k: usize) -> Vec<Cx> {
+    let mut out = Vec::with_capacity(n * k);
+    for i in 0..n {
+        for j in 0..k {
+            out.push([sol[i * k + j], sol[(n + i) * k + j]]);
+        }
+    }
+    out
+}
+
+/// `%. y` over complex data, by the real system of twice the size.
+#[inline(never)]
+fn complex_matrix_inverse(y: &Array, span: Span) -> Result<Array> {
+    let (a, m, n) = as_complex_matrix(y, span)?;
+    if m < n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("cannot invert a {m} by {n} matrix: it has more columns than rows"),
+            Some(span),
+        ));
+    }
+    let ar = complex_embedding(&a, m, n);
+    let mut eye = vec![cx::ZERO; m * m];
+    for i in 0..m {
+        eye[i * m + i] = [1.0, 0.0];
+    }
+    let br = complex_stack(&eye, m, m);
+    let sol = lstsq(&ar, 2 * m, 2 * n, &br, m)
+        .ok_or_else(|| Error::domain("the matrix is singular", span))?;
+    let shape = if y.rank() == 2 { vec![n, m] } else { y.shape.clone() };
+    Ok(complex_or_real_shaped(complex_unstack(&sol, n, m), shape))
+}
+
+/// `x %. y` over complex data, by the same embedding.
+#[inline(never)]
+fn complex_matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array> {
+    let (a, m, n) = as_complex_matrix(y, span)?;
+    let (b, bm, k) = if planes && x.rank() > 2 {
+        let v = match x.data.cast(DType::Complex) {
+            Some(Data::Complex(v)) => v.as_slice().to_vec(),
+            _ => return Err(Error::domain("matrix division needs numeric data", span)),
+        };
+        let rows = x.shape[0];
+        let k = x.count() / rows.max(1);
+        (v, rows, k)
+    } else {
+        as_complex_matrix(x, span)?
+    };
+    if bm != m {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("the system has {m} rows but the right-hand side has {bm}"),
+            Some(span),
+        ));
+    }
+    if m < n {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!("the {m} by {n} system is underdetermined"),
+            Some(span),
+        ));
+    }
+    let ar = complex_embedding(&a, m, n);
+    let br = complex_stack(&b, m, k);
+    let sol = lstsq(&ar, 2 * m, 2 * n, &br, k)
+        .ok_or_else(|| Error::domain("the system is singular", span))?;
+    let shape = if x.rank() >= 2 {
+        let mut s = vec![n];
+        s.extend_from_slice(&x.shape[1..]);
+        s
+    } else {
+        vec![n]
+    };
+    Ok(complex_or_real_shaped(complex_unstack(&sol, n, k), shape))
+}
+
+/// A complex result at the shape it belongs at, narrowed to the reals where
+/// every value has lost its imaginary part.
+fn complex_or_real_shaped(v: Vec<Cx>, shape: Vec<usize>) -> Array {
+    let mut a = complex_or_real(v);
+    a.shape = shape;
+    a
 }
 
 // ----------------------------------------------------- indexing and amend
@@ -18067,11 +18215,19 @@ fn hypergeometric_partial(
     if terms < 0 {
         return Err(Error::domain("m H. n sums a nonnegative number of terms", span));
     }
+    // No term is summed at all, so no argument is read: the answer is a
+    // zero per element of y whatever type y was written at, which is what
+    // the reference answers for a character argument.
+    if terms == 0 {
+        return Ok(Array::new(y.shape.clone(), Data::I64(vec![0i64; y.count()].into())));
+    }
     let (num, den) = cancel_parameters(num, den);
     let at = poly_coeffs(y, span)?;
-    let z = at.first().copied().unwrap_or(cx::ZERO);
-    let v = hypergeometric_at(&num, &den, z, Some(terms as usize), span)?;
-    let mut a = complex_or_real(vec![v]);
+    let mut out = Vec::with_capacity(at.len());
+    for z in &at {
+        out.push(hypergeometric_at(&num, &den, *z, Some(terms as usize), span)?);
+    }
+    let mut a = complex_or_real(out);
     a.shape = y.shape.clone();
     Ok(a)
 }
@@ -19352,9 +19508,29 @@ fn format_spec(
     style: FormatSpec,
     span: Span,
 ) -> Result<Array> {
-    let spec = x
-        .to_i64_vec()
-        .ok_or_else(|| Error::domain("a format specification is whole numbers", span))?;
+    // A COMPLEX specification is J's `wjd`: the real part is the width and
+    // the imaginary one the number of digits, so one complex atom is the
+    // pair a real specification writes as two numbers.
+    let spec = match x.data.cast(DType::Complex) {
+        Some(Data::Complex(v)) if x.dtype() == DType::Complex => {
+            let mut out = Vec::with_capacity(v.len() * 2);
+            for z in v.as_slice() {
+                for part in *z {
+                    if part.fract() != 0.0 {
+                        return Err(Error::domain(
+                            "a format specification is whole numbers",
+                            span,
+                        ));
+                    }
+                    out.push(part as i64);
+                }
+            }
+            out
+        }
+        _ => x
+            .to_i64_vec()
+            .ok_or_else(|| Error::domain("a format specification is whole numbers", span))?,
+    };
     if y.dtype() == DType::Box {
         return Err(Error::not_yet("format by specification of a nested array", span));
     }
@@ -19751,6 +19927,11 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
     let Some(spec) = x.to_complex_vec() else {
         return Err(Error::domain("a format specification is numbers", span));
     };
+    // A complex specification is `wjd` — the width and the digit count in
+    // one number — so both parts are counts, and neither is a fraction.
+    if spec.iter().any(|[w, d]| w.fract() != 0.0 || d.fract() != 0.0) {
+        return Err(Error::domain("a format specification is whole numbers", span));
+    }
     if y.dtype() == DType::Box {
         return Err(Error::domain("format by specification takes numbers", span));
     }
@@ -22484,9 +22665,53 @@ fn pick(x: &Array, y: &Array, origin: i64, near: NearInt, span: Span) -> Result<
 
 /// `x p: y`: the facts about primes J spells with this conjunction of
 /// arguments. Every form here reads one integer and answers about it.
+/// `q: y`, and `3 p: y` with it: one row of factors per item of the whole
+/// argument, every row padded to the longest with 1s so that each row still
+/// multiplies back to the item it came from.
+#[inline(never)]
+fn prime_factor_rows(y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    let ns = all_ext(y, "prime factors", near, span)?;
+    let rows: Vec<Vec<Ext>> = ns.iter().map(|n| prime_factors(n, span)).collect::<Result<_>>()?;
+    let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let mut all = Vec::with_capacity(rows.len() * width);
+    for row in rows {
+        let pad = width - row.len();
+        all.extend(row);
+        all.extend(std::iter::repeat_n(Ext::from(1), pad));
+    }
+    let mut shape = y.shape.clone();
+    shape.push(width);
+    Ok(Array::new(shape, whole_data(all, y)))
+}
+
 fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
     let form = one_int(x, "a prime query", near, span)?;
+    // Form 3 is `q:` written the other way round, and reads the WHOLE
+    // argument as `q:` does: one row per item, padded with 1s rather than
+    // framed with the zero a rank-0 verb's frame would fill with.
+    if form == 3 {
+        return prime_factor_rows(y, near, span);
+    }
+    // The rest answer about ONE number, so the frame is y's own shape and
+    // the answers are assembled into it here — the right rank has to be
+    // infinite for form 3's sake, which takes the framing off the rank
+    // machinery and puts it here.
+    if y.rank() != 0 {
+        let ns = y
+            .to_i64_vec_near(near)
+            .ok_or_else(|| Error::domain("a prime query needs an integer", span))?;
+        let mut cells = Vec::with_capacity(ns.len());
+        for n in ns {
+            cells.push(prime_meta_at(form, n, span)?);
+        }
+        return assemble(&y.shape, cells, span);
+    }
     let n = one_int(y, "a prime query", near, span)?;
+    prime_meta_at(form, n, span)
+}
+
+/// One `x p: y`, for a single whole y and a form that is not 3.
+fn prime_meta_at(form: i64, n: i64, span: Span) -> Result<Array> {
     match form {
         // How many primes are below y.
         -1 => Ok(Array::scalar_i64(primes_below(n, span)?)),
@@ -22501,13 +22726,6 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
             all.extend(es);
             Ok(Array::new(vec![2, k], Data::I64(all.into())))
         }
-        // The factors with multiplicity, which is `q:` written the other way.
-        3 => Ok(Array::from_i64(
-            prime_factors(&Ext::from(n), span)?
-                .iter()
-                .filter_map(crate::exact::ext_to_i64)
-                .collect(),
-        )),
         // The neighbouring primes.
         4 => Ok(Array::scalar_i64(next_prime(n, span)?)),
         -4 => Ok(Array::scalar_i64(previous_prime(n, span)?)),
@@ -23786,8 +24004,11 @@ mod tests {
         assert_eq!(ints(&r), vec![0, 0]);
         assert_eq!(behead_v().monad(&e, &mut c, sp()).unwrap(), e);
         assert_eq!(head_v().monad(&Array::scalar_i64(5), &mut c, sp()).unwrap().shape, Vec::<usize>::new());
-        let err = behead_v().monad(&Array::scalar_i64(5), &mut c, sp()).unwrap_err();
-        assert_eq!(err.kind, ErrorKind::Domain);
+        // An atom is one item, so beheading it leaves the empty list of
+        // the atom's own type.
+        let r = behead_v().monad(&Array::scalar_i64(5), &mut c, sp()).unwrap();
+        assert_eq!(r.shape, vec![0]);
+        assert_eq!(r.dtype(), DType::I64);
     }
 
     #[test]

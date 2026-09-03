@@ -1,0 +1,82 @@
+// What the widened fuzz generator reached and the corpus had not: the
+// verbs and the shapes a sweep drawing only one-verb sentences over
+// rectangular data never composed.
+
+// --- `}.` of an ATOM. An atom is one item, so dropping it leaves none:
+// the answer is the empty list of the atom's own type
+}. 2
+}. 'a'
+}. 1j2
+}. <'a'
+}. 1r2
+}. 123x
+$ }. 2
+3!:0 }. 2
+3!:0 }. 'a'
+_1 }. 5
+0 }. 5
+2 }. 5
+1 }. 'a'
+
+// --- `%.` with nothing to invert, and over complex data
+%. 0 $ 2
+$ %. 0 $ 2
+%. 0 0 $ 0
+$ %. 0 0 $ 0
+%. 0 3 $ 0
+%. 3 0 $ 0
+$ %. 3 0 $ 0
+%. 1j0
+%. 1j1
+%. 2 2 $ 1j1 2 3 4
+%. 2 2 $ 1j1 0 0 1j1
+%. 3 2 $ 1j1 2 3 4 5 6
+1 %. 1j1
+2 %. 1j1
+(1j1 2) %. (2 2 $ 1j1 2 3 4)
+%. 2 2 $ 1 2 3 4
+
+// --- `x (m H. n) y` reads every element of y, and no term at all reads
+// none of it
+0 (2 H. 2) 'a'
+0 (2 H. 2) 'hello'
+0 (0 H. 1) 1 2 3
+1 (0 H. 1) 1 2 3
+2 (0 H. 1) 1 2 3
+3 (1 H. 2) 1 2 3
+2 (1 H. 2) 0.5 0.25
+0 (1 H. 2) i. 0
+
+// --- `":` with a complex specification: `wjd` is the width and the digits
+(1j2) ": 2
+(2j3) ": 1.5
+(1ad45) ": 2
+1.5 ": 2
+(0j2) ": 1.5 2.5
+1 2 ": 3.5
+
+// --- `x p: y` reads its right argument whole where the form is 3, which
+// is `q:` written the other way, and one number at a time otherwise
+3 p: 1 2 3
+3 p: 1 2 3x
+3 p: 2.0 4.0 6.0
+3 p: 12
+3 p: 1
+3 p: 100
+2 p: 12
+2 p: 1 2 3
+0 p: 1 2 3
+1 p: 7
+4 p: 1 2 3
+_1 p: 10
+_4 p: 10
+0 p: 4
+q: 1
+q: 1 2 3
+q: 1 2 3x
+
+// --- `u@.n`'s index, `u^:v`'s count and a foreign's empty are in
+// modifiers.txt and foreigns.txt; what is here is the sentence a verb
+// assignment inside a larger one would be, which libjay names as a gap
+2 [ n =. 3
+2 [ n =: 3

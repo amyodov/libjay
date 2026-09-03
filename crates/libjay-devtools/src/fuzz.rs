@@ -410,7 +410,12 @@ const J_TACIT_BODIES: &[&str] =
 /// agree on is as much of an answer as a value.
 const J_EXTEND_LEFT: &[&str] = &["1", "2", "_1", "_2", "0", "3", "4"];
 const J_UNICODE_LEFT: &[&str] = &["1", "2", "3", "4", "8", "9", "10", "0", "5"];
-const J_SYMBOL_LEFT: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "_1"];
+/// The `s:` forms that are the LANGUAGE rather than an interpreter's own
+/// symbol table. `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report how
+/// many symbols one interpreter has interned and where, which a second
+/// implementation has no counterpart to (docs/status.md names them), so
+/// drawing them would only count that decision again.
+const J_SYMBOL_LEFT: &[&str] = &["4", "5"];
 /// `_1 p:` counts the primes below its argument and `_4 p:` reads the same
 /// table, so neither is here: a leaf near 2⁶³ would make the count the
 /// expression's cost. The rest answer in constant time whatever they are
@@ -710,7 +715,7 @@ fn j_expr(rng: &mut Rng, depth: u32) -> String {
         // literals, without a second line for the report to carry.
         34 => match rng.below(3) {
             0 => format!("(({}) n) [ n =. {}", j_verb(rng, d), arg(rng)),
-            1 => format!("((f) {}) [ f =. ({})", arg(rng), j_verb(rng, d)),
+            1 => format!("(({}) n) [ n =: {}", j_verb(rng, d), arg(rng)),
             _ => format!("(({}) n_ab_) [ n_ab_ =. {}", j_verb(rng, d), arg(rng)),
         },
         // Agenda: a gerund and the index that picks one of its verbs.
@@ -769,8 +774,11 @@ fn j_expr(rng: &mut Rng, depth: u32) -> String {
         ),
         // The characteristics of a verb, and the boolean functions.
         40 => {
+            // Only the ranks are drawn: `b. 1` and `b. _1` answer a
+            // SPELLING out of the reference's own library, and libjay
+            // writes its own (docs/status.md's `b.` row).
             if rng.below(2) == 0 {
-                format!("({}) b. {}", j_verb(rng, d), rng.pick(&["0", "1", "_1"]))
+                format!("({}) b. 0", j_verb(rng, d))
             } else {
                 format!(
                     "({}) ({} b.) {}",

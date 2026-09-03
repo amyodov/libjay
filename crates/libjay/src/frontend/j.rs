@@ -2091,7 +2091,10 @@ fn primitive(word: &str) -> Option<Prim> {
         // The dyad reads the whole argument: `2 x: y` gives every value a
         // numerator and a denominator, which becomes a trailing axis.
         "x:" => prim("x:", M::ToExact, D::ExactForm, [INF, 0, INF]),
-        "p:" => prim("p:", M::NthPrime, D::PrimeMeta, [0, 0, 0]),
+        // The right dyadic rank is infinite: form 3 reads the whole
+        // argument, as `q:` does, and the forms that answer about one
+        // number frame their own answers.
+        "p:" => prim("p:", M::NthPrime, D::PrimeMeta, [0, 0, RANK_INF]),
         // The coefficients are one vector and the point one atom, so the
         // rank machinery evaluates a whole array of points at once.
         "p." => prim("p.", M::PolyRoots, D::PolyEval, [1, 1, 0]),
@@ -3034,6 +3037,21 @@ fn reduce_to_fragment(tokens: Vec<Frag>, scope: &Names) -> Result<Option<Frag>> 
         reduce(&mut stack, scope)?;
     }
     stack.insert(0, Frag::Mark);
+    // A verb or a modifier assignment used as a VALUE inside a larger
+    // sentence. The reference reads `2 [ f =. #` as the noun fork the
+    // assignment's value makes; libjay settles what a name stands for while
+    // the sentence is parsed, so an assignment is a sentence of its own
+    // here and has nothing to give the train around it. The check is here,
+    // before the last reduction, because the fragments to the LEFT of the
+    // definition are what that reduction would go on to complain about.
+    if stack.len() > 2
+        && let Some(at) = stack.iter().position(|f| matches!(f, Frag::VerbDef(..) | Frag::ModDef(..)))
+    {
+        return Err(Error::not_yet(
+            "a verb or modifier assignment used as a value inside a sentence",
+            stack[at].span(),
+        ));
+    }
     reduce(&mut stack, scope)?;
     if stack.len() == 2 {
         return Ok(Some(stack.pop().expect("checked length")));
