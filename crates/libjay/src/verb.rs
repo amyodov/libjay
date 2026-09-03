@@ -22754,6 +22754,18 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
     if !matches!(form, 4 | 5) {
         return Err(Error::not_yet(format!("the symbol-table form ({form} s:)"), span));
     }
+    // Nothing to read is no error: an argument with no elements holds no
+    // value the form could object to, whatever type it was written in, and
+    // the answer is the empty the form's own result would have — a name
+    // table of no rows and no columns, or no boxes at all.
+    if y.count() == 0 {
+        if form == 5 {
+            return Ok(Array::new(y.shape.clone(), Data::empty(DType::Box)));
+        }
+        let mut shape = y.shape.clone();
+        shape.push(0);
+        return Ok(Array::new(shape, Data::empty(DType::Char)));
+    }
     let row_major = y.to_row_major();
     let Data::Symbol(ids) = &row_major.data else {
         return Err(Error::domain(
