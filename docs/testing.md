@@ -41,6 +41,7 @@ marker no sentence of either language can begin with:
 @ reference=dyalog     the whole theme is that implementation's data
 2 + 2                  an expression
 ? why the two differ   a note (divergences.txt and an expected list only)
+~ cause=… verb=…       a family rule (divergences.txt only; see "Sweeping")
 ```
 
 The comment marker is `//`, not `#`, because `#` is J's tally: `# i. 5 2` is
@@ -185,33 +186,116 @@ primitives the sentence names — so a wrapper can tell a batch that found a
 new cause from one that found another spelling of a cause it has.
 
 The run also reads `corpus/<lang>/divergences.txt` and measures each of its
-rows against the oracle before it starts. A mismatch that matches a row —
-by the minimised sentence, or by the cause signature — is a difference the
-corpus already records with both answers and a reason, so it is counted
-under `accepted`, kept out of the signature ranking, and printed with the
-row that excused it. Both numbers are reported:
+rows against the oracle before it starts. A mismatch that matches a row is a
+difference the corpus already records with both answers and a reason, so it
+is counted under `accepted`, kept out of the signature ranking, and printed
+with the row that excused it. There are THREE ways it can match, and they
+are counted apart because they are trusted apart:
+
+- **by SENTENCE**: the minimised sentence is a pinned row, letter for
+  letter.
+- **by SIGNATURE**: it parted the same way over the same primitives as a
+  pinned row did. One cause, two spellings.
+- **by FAMILY**: a `~ ` rule under a pinned row says the row stands for a
+  CLASS of sentences, and this is one of them.
 
 ```
 generation 2: 5000 expressions, 68 mismatches (1.4%)
   raw agreement                98.64%
   accepted-adjusted agreement  98.86%  (11 accepted, 57 unexplained)
+    accepted by sentence     6, by signature     4, by family     1
   accepted        11  (0.2%)
   agree         4932  (98.6%)
   ...
 accepted divergences matched (…/corpus/j/divergences.txt):
-     10  5 <./\. (1;2)
-      1  0 >./\. (<'abc')
+     10  sentence   5 <./\. (1;2)
+      1  family     (o. 1) *. 3
 ```
 
-`--no-accepted` turns the list off and counts every mismatch against
+`--no-accepted` turns all three off and counts every mismatch against
 agreement. Nothing but a line of the divergence file is ever excused, and
 each of those is reasoned in docs/coverage.md.
+
+### Family rules
+
+Some divergences are a FAMILY rather than a sentence. A GCD of two values
+with no common measure is one: every sweep draws a fresh spelling of it and
+never the same one twice, so the sentence never matches, and its cause
+signature is `differ:val:atom/num` — the signature of every arithmetic
+difference there is, far too coarse to pin. Such a family stays unexplained
+for ever although it is recorded, reasoned and settled.
+
+A `~ ` line under a pinned row is what pins it. It is a conjunction of
+clauses, all of which the mismatch must satisfy:
+
+```
+(o. 1) *. 3
+? the two float Euclids cut the same residue chain at different steps
+~ cause=differ:val:atom/num,differ:val:vector/num verb=+.,*. also=o.,%,%: answers=inexact
+```
+
+- `cause=` (required) — the cause classes it covers, one of which the
+  mismatch must have. A cause class is how the two sides parted plus what
+  libjay made of the sentence: `differ:val:atom/num`,
+  `we-refuse:err:domain_error:…`.
+- `verb=` (required) — the primitives the family is about. The minimised
+  sentence must name at least ONE of them.
+- `with=` — primitives it must name as well, ALL of them. A family about an
+  obverse is about `^:` and the verb both.
+- `also=` — the further primitives it may name. Everything the sentence
+  names has to be in `verb`, `with`, `also`, or the fixed NEUTRAL set: the
+  tokens that frame, box, compose and reorder but compute nothing of their
+  own. A sentence naming any other primitive is not the family — nobody has
+  shown which of the two verbs parted the sides — and stays unexplained.
+- `answers=` — the class the two printed answers must have: `numeric`,
+  `inexact` (numeric, and at least one written as a float), `exact`, `huge`
+  (a magnitude at or above 2^53, where a double stops telling whole numbers
+  apart) or `small`.
+
+The row a rule hangs under is still an ordinary divergence: its two answers
+are recorded, and `record --check` re-measures it, so the day the family
+converges that row stops diverging and the check says so. A rule that does
+not cover its OWN row is refused when the list is read, which is what keeps
+a rule from quietly covering something else. What each family rule excuses
+is visible in the report, in its own column and in the matched-row list.
+
+### Surviving the sentence that kills the runner
+
+A sweep MEASURES in a worker process and REPORTS from a journal the worker
+appends to as it goes. libjay's answer is taken behind `catch_unwind`, so a
+panic is one finding rather than the end of a run, but a fatal signal is not
+a panic: a generator draws sentences that ask for an array of two thousand
+million items, and the process grinds until the kernel kills it. Nothing
+inside the process can stop that.
+
+So the supervisor announces every sentence in the journal before measuring
+it, and writes the result down after. When the worker dies — or goes quiet
+for longer than `LIBJAY_SWEEP_STALL` seconds (600 by default), which is how
+a request the machine cannot fill is caught — the supervisor names what it
+had in flight, marks those sentences `runner-died`, and starts another
+worker on what is left. They are reported in a section of their own and are
+in no denominator: nothing about them was measured.
+
+`--journal FILE` keeps the journal, so an interrupted sweep resumes instead
+of starting again. `--no-supervise` measures in the one process, which is
+faster to start and has no such protection.
+
+### How long an interpreter is waited on
+
+A SWEEP is throughput: it draws sentences that ask a reference for work
+measured in hours, and it waits 20 s on each. A RECORDING is a gate: every
+line of it is one somebody chose, the run is a few hundred of them, and a
+limit a loaded machine can reach turns the gate into a coin toss — so a
+recording waits 60 s, and gives a run the limit cut short one more chance
+before it says the line cannot be recorded. `LIBJAY_ORACLE_TIMEOUT` sets
+both, in seconds; 0 waits for ever.
 
 ## Divergences
 
 `corpus/apl/divergences.txt` and `corpus/j/divergences.txt` are where libjay
 answers differently from GNU APL and from jconsole on purpose, each
-expression with a `? ` note saying why. Its snapshot records
+expression with a `? ` note saying why, and some of them with a `~ ` family
+rule saying which other sentences the note covers. Its snapshot records
 BOTH answers. The replay holds libjay to its own recorded side and fails if
 the two recorded answers have converged; `record` re-measures both and fails
 on a pair that no longer disagrees, which is the signal that the note (and the

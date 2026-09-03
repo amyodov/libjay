@@ -242,6 +242,29 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **A sweep survives the sentence that kills the runner.** `fuzz --compare`
+  measures in a WORKER process and reports from a journal the worker
+  appends to as it goes: every sentence is announced before it is measured
+  and its result written after. A sentence that takes the process down —
+  one asking for an array of two thousand million items, which no
+  `catch_unwind` can hold — no longer ends a sweep with no output. The
+  supervisor names what the worker had in flight, marks it `runner-died`,
+  and carries on; a worker that writes nothing for `LIBJAY_SWEEP_STALL`
+  seconds (600 by default) is killed the same way. `--journal FILE` keeps
+  the journal, so an interrupted sweep resumes; `--no-supervise` measures
+  in the one process as before.
+- A `~ ` line under a row of `divergences.txt` is a FAMILY RULE: the row
+  stands for a class of sentences rather than one, named by the cause
+  classes it covers, the verbs it is about, what else the sentence may
+  name, and the class of the two answers. It is the third way the accepted
+  list excuses a mismatch, after the sentence and the cause signature, and
+  a sweep reports the three apart. It is what pins an arithmetic family
+  whose every spelling is new — a GCD of two values with no common measure,
+  the obverse of a factorial — where the sentence never repeats and the
+  cause signature is the signature of every arithmetic difference there is.
+- A RECORDING waits 60 s on an interpreter where a SWEEP waits 20, and
+  gives a run the limit cut short one more chance, so that the gate does
+  not turn on what else the machine was doing.
 - `jay-corpus fuzz --compare` now reports TWO agreement numbers. It measures
   every line of `corpus/<lang>/divergences.txt` against the oracle before it
   starts, and a mismatch that matches one — by the minimised sentence, or by
@@ -274,6 +297,22 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Round 6A of the agreement sweep, the numeric singletons.** The BINOMIAL
+  at an infinity: a whole left argument makes `x ! y` a polynomial in y of
+  that degree, so at either infinity it takes the leading term's value and
+  the sign alternates with x (`1 ! __` is `__` and `2 ! __` is `_`), while
+  a fractional one makes a ratio of gammas whose limit is a number in
+  neither direction and is refused. Over a NEGATIVE WHOLE y under a
+  fractional x, Γ(y+1) sits on a pole and nothing below it does, so the
+  answer is an infinity — the pole's own sign, alternating with its index,
+  times the sign of the finite half — where libjay worked the gammas out
+  and read the pole as a large finite number. AN EXPONENTIAL WHOSE
+  MAGNITUDE HAS UNDERFLOWED IS ZERO WHATEVER ITS ANGLE, so the circle
+  functions' angle limit is never reached: `1 r. (1.7e9j1000)` is 0 where
+  `1 r. (1.7e9j100)` is a limit error, which is what let `*. ^:_1` answer
+  over a cell of more than two items. The identity a SCAN'S OBVERSE shifts
+  into the vacated place is a whole number rather than a float, so
+  `*/\ ^:_1 (1r2 1r3)` comes back rational.
 - **Round 5B of the agreement sweep, the numeric residue.** The types
   arithmetic answers in: A REAL POWER LEAVES THE INTEGERS (`3!:0 (3^3)` is
   the float type, only the exponents 0 and 1 keeping an integer base

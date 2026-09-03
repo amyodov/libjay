@@ -5009,3 +5009,51 @@ the register.
   262144; libjay has one character type and everything but the reported
   type agrees. A wide dtype would touch every verb's type table to change
   one foreign's answer, so the accepted list carries the family instead.
+- 2026-09-03 — A DIVERGENCE MAY BE PINNED AS A FAMILY. The accepted list
+  matched a sweep's mismatch by the sentence or by the cause signature, and
+  an arithmetic family has neither: its sentences are all different, and its
+  signature — `differ:val:atom/num` — is the signature of every arithmetic
+  difference there is. So a `~ ` line under a row of `divergences.txt` says
+  in clauses which class the row's reason covers: the cause classes, the
+  verbs the family is about, the primitives that must be there as well, what
+  else the sentence may name (everything outside that and a fixed neutral
+  set of framing and composing tokens is NOT the family), and the class of
+  the two answers. A rule that does not cover its own row is refused when
+  the list is read; the row is still an ordinary divergence, with both
+  answers recorded and re-measured by `record --check`; and a sweep reports
+  what each rule excused in a column of its own. Three families are pinned
+  this way: the `+.`/`*.` float boundary, its big-number half, and the
+  obverse of the factorial.
+- 2026-09-03 — A SWEEP MEASURES IN A WORKER AND REPORTS FROM A JOURNAL. A
+  drawn sentence can ask libjay for an array of two thousand million items:
+  no panic to catch and no loop to break, a request the machine cannot fill,
+  which grinds until the kernel kills the process — and round 5's seed
+  130002 ended with no output at all because of one. The measuring is
+  therefore done in a child process that announces each sentence before it
+  runs it and writes the result after, and the supervisor steps past
+  whatever was in flight when the child died, or when it wrote nothing for
+  ten minutes. The probes go to the worker in a format of their own, since
+  the corpus format reserves the starts of lines and `? 5` is a roll.
+- 2026-09-03 — A RECORDING WAITS LONGER ON AN INTERPRETER THAN A SWEEP
+  DOES: 60 s against 20, and one retry where the limit cut a run short. A
+  sweep is throughput over sentences nobody chose; a recording is a gate
+  over a few hundred that somebody did, and a limit a loaded machine can
+  reach turns the gate into a coin toss.
+- 2026-09-03 — AN EXPONENTIAL WHOSE MAGNITUDE HAS UNDERFLOWED IS ZERO
+  WHATEVER ITS ANGLE, so the angle limit the circle functions carry is
+  asked about only where something is left to turn: `1 r. (1.7e9j1000)` is 0
+  and `1 r. (1.7e9j100)` a limit error, the boundary being where `^ -Im`
+  falls to the smallest number a double holds.
+- 2026-09-03 — THE BINOMIAL AT AN INFINITY IS THE LEADING TERM'S VALUE where
+  the left argument is whole, so its sign alternates with x, and is refused
+  where the left argument is not: a ratio of gammas has no limit in either
+  direction, and the reference's own `0.5 ! __` of `_1` is pinned against
+  the fact that the magnitude is unbounded. Over a NEGATIVE WHOLE y under a
+  fractional x the answer is the pole's infinity, signed by the pole's index
+  and by the finite half — libjay worked the gammas out numerically and read
+  the pole as a large finite number.
+- 2026-09-03 — A NEGATIVE RADIX in `x #: y` takes the residue it asks for,
+  in (x, 0], in every position and every type. The reference's TWO-RADIX
+  INTEGER path alone reads a negative leading radix as a zero one, and its
+  own float and extended paths on the same numbers do not, so that case is
+  pinned rather than followed.

@@ -2225,11 +2225,12 @@ families are the obverse of `[` or `]` composed on the LEFT
   `(5) *. "0 0 1 (_9223372036854775806)` part the two the way
   `(9007199254740992) *. (9007199254740993)` already does: the reference
   holds both in one double and libjay keeps them exact.
-- **A circle function of a very large angle.** `*.^:_1 (i. 2 3 4)` reaches
-  an argument above the limit libjay puts on an angle (2^53 divided by
-  2π, past which a period is no longer resolvable) and jconsole answers it
-  anyway. (Round 5 re-measured this one: every circle function of a large
-  angle the sweeps reach now agrees, `1 o. 1e300` included.)
+- ~~**A circle function of a very large angle.**~~ Closed in round 6: an
+  exponential whose magnitude has underflowed is zero WHATEVER its angle,
+  so the limit is never reached — `1 r. (1.7e9j1000)` is 0 on both sides
+  where `1 r. (1.7e9j100)` is a limit error on both. That is what
+  `*.^:_1 (i. 2 3 4)` was reaching, through the insert of `r.` the polar
+  obverse runs over a cell of more than two items.
 - **A cut's or a frame's EMPTY takes the type the verb would have made**,
   not the argument's: `3!:0 (0 *.;.2 (1;2 3))` is the float type there and
   the boxed one here, and `3!:0 (0 *:;.1 (a:))` is boolean there.
@@ -2271,18 +2272,22 @@ families are the obverse of `[` or `]` composed on the LEFT
 - **The obverse of `-.@#:`.** The reference answers `-.@#: ^:_1 (1 2 3)`
   with `0 _1 _2` — `-.^:_1` alone — although its own `#:^:_1 (0 _1 _2)` is
   `_4`, which is what the composition's obverse should reach.
-- **A NEGATIVE LEADING RADIX in `x #: y` takes what is left**, as a zero
-  one does: `_2 2 #: 5` is `2 1` there and `0 1` here. The rule is not
-  simply "a negative radix is a zero one" — `_3 #: 5`, `2 _1 #: 5` and
-  `_2 _2 #: 5` all agree — so it shows only where the leading radix is
-  negative and something follows it.
-- **The binomial at an INFINITY and over a NEGATIVE y.** `1 ! __` is `__`
-  there and `_` here; `0.5 ! _` is a domain error there; `0.5 ! _5` and
-  `1e_15 ! _5` are both `__` there where libjay works the gamma quotient
-  out.
-- **The exact types through a SCAN'S OBVERSE.** `*/\^:_1 (1r2 1r3)` is
-  `1r2 2r3` there and the floats here, although the forward direction keeps
-  the rationals.
+- ~~**A NEGATIVE LEADING RADIX in `x #: y`.**~~ Measured in round 6 and
+  PINNED. A negative radix takes the residue it asks for, which for a
+  negative one lies in (x, 0], everywhere except the TWO-RADIX INTEGER
+  case: `_2 2 2 #: 11` is `0 1 1` on both sides, and so are
+  `_2 2 #: 5.0`, `_2 2 #: 11x` and `_2x 2 #: 11`, while the reference's own
+  `_2 2 #: 11` is `5 1` — the same numbers, answered two ways by the type
+  they were written in.
+- ~~**The binomial at an INFINITY and over a NEGATIVE y.**~~ Closed in
+  round 6. A whole left argument makes a polynomial in y, so at either
+  infinity the sign alternates with x; a fractional one is refused, and at
+  `__` the reference's own `_1` is pinned (the limit is unbounded). Over a
+  negative whole y under a fractional x the answer is the pole's infinity,
+  signed by the pole's index and the finite half.
+- ~~**The exact types through a SCAN'S OBVERSE.**~~ Closed in round 6: the
+  identity the obverse shifts into the vacated place is a whole number
+  rather than a float.
 - Around a dozen further singletons the round-5 sweep still names, each its
   own investigation: `S:` at a level of `_` over a scan, a boxed-empty
   `,/`, an empty box's width in a link's display, the value `(p. [)^:3`
@@ -2295,9 +2300,11 @@ Every entry below is a place libjay's answer differs from a reference
 interpreter's on purpose — a documented choice, not an accident. The J half
 of the list is also what a differential sweep excuses: `fuzz --compare`
 measures every line of `crates/libjay/tests/corpus/j/divergences.txt`
-against the oracle and counts a mismatch that matches one — by sentence or
-by cause signature — under `accepted` rather than against agreement,
-printing the raw and the accepted-adjusted number side by side. The list is
+against the oracle and counts a mismatch that matches one — by sentence, by
+cause signature, or by a `~ ` FAMILY RULE under a row, which says in
+clauses which class of sentences the row's reason covers — under `accepted`
+rather than against agreement, printing the raw and the accepted-adjusted
+number side by side and the three kinds of match apart. The list is
 kept short on purpose: a mismatch is excused only where a reasoned entry
 here already accounts for it. The
 language and reference each entry compares against is named inline;
@@ -2413,7 +2420,13 @@ oracle directly, one entry per line of
   tolerance times the larger argument; the reference's rule could not be
   recovered from forty-four measured pairs, and no threshold on the
   residue relative to either argument, to the current pair or to the step
-  count reproduces it. It is the largest single family left in a sweep.
+  count reproduces it. It is the largest single family left in a sweep, and
+  since round 6 it is pinned as a FAMILY rather than sentence by sentence:
+  the `~ ` rule under `(o. 1) *. 3` in `divergences.txt` covers a GCD or an
+  LCM, of values the two engines' float arithmetic does not agree about,
+  answering a number with a float written in it, in a sentence naming
+  nothing but arithmetic that can build such a pair. Every other spelling
+  still counts against agreement.
 - THE OBVERSE OF THE FACTORIAL, WHERE THE EQUATION HAS MORE THAN ONE
   ANSWER. `! x = y` has two solutions between every pair of the gamma
   function's poles. libjay takes the smallest argument at or above zero
