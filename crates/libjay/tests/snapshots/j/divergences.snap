@@ -71,6 +71,10 @@
 ? both sides lose this one; the reference's answer is not the value either
 < 0.00190154
 > j: 0.00190162
+= 2 p: (3j4 1j_1)
+? the reference answers a factorisation of a complex number with nothing at all
+< <error>
+> j:
 = %. (i. 4 3)
 ? the reference answers a rank-deficient system with NaNs and refuses others
 < <error>

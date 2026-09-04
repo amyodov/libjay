@@ -72,6 +72,23 @@ _1 + ((100000000) ! (100000000.00000001))
 _1 + ((1e8) ! (1e8 + 1e_4))
 ? both sides lose this one; the reference's answer is not the value either
 
+// FACTORISING SOMETHING THAT IS NOT A WHOLE NUMBER: THE REFERENCE ANSWERS
+// NOTHING AT ALL. `2 p: (3j4 1j_1)` prints no value there — and neither
+// does `$` of it, nor `3!:0` of it, so there is no shape and no type to
+// read either. That is the signature of the SILENT DEATH the quarantine
+// list already carries for `q: _.`, which is the same verb: `3 p: y` IS
+// `q: y`. An answer with no readable type cannot be followed from outside
+// the interpreter, so libjay refuses a factorisation of anything that is
+// not a whole number and says which kind of data it was handed.
+//
+// THE NaN AND `q:` SPELLINGS OF THIS ARE NOT RECORDED HERE AND MUST NEVER
+// BE: `q: _.` and `n q: _.` kill jconsole silently, so a corpus file
+// holding one would take the recording down with it. The rule below
+// matches them by cause instead.
+2 p: (3j4 1j_1)
+? the reference answers a factorisation of a complex number with nothing at all
+~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer verb=p:,q: also=j.
+
 // A SINGULAR MATRIX UNDER `%.`, WHERE THE REFERENCE HAS NO RULE — ONLY THE
 // LUCK OF ITS OWN FACTORISATION. Four rank-deficient arguments, measured:
 //
@@ -646,6 +663,15 @@ x: 1e_15
 ? one convergent earlier than the reference's, and equally inside the tolerance
 x: 3.14159265358979
 ? the same, on a value with no short exact rational either
+// A sweep draws this family fresh every time and never the same spelling
+// twice — `x: &.%: 2`, `x:&:o. 2`, `x: &.:j. (1 -/\. 2)` — because any verb
+// that makes an irrational float feeds it. The rule below is what matches
+// those: the conversion itself, a sentence that names only arithmetic which
+// can BUILD such a float, and two answers that are both exact ratios.
+// No `answers=` clause: both sides answer a RATIONAL, whose `r` is not a
+// character any numeric answer class reads, so every one of them would be
+// false here. The cause, the verb and the restricted `also=` carry the rule.
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:
 
 // INTERVAL INDEX OVER SYMBOLS. The reference's own `<` and `/:` order
 // symbols by their NAME — `(s: <'a') < (s: <'b')` is 1 and

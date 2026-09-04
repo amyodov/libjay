@@ -15957,7 +15957,7 @@ fn matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array
     // A SCALAR right-hand side stands for the whole column of it, so
     // `2 %. (2 2 $ 1 2 3 4)` solves against `2 2` and answers `_2 2`;
     // reading it as a side of one row would make the shapes disagree.
-    let (b, bm, k) = if x.rank() == 0 && m > 0 {
+    let (b, bm, k) = if x.rank() == 0 {
         let v = x
             .to_f64_vec()
             .ok_or_else(|| Error::domain("matrix division needs numeric data", span))?;
@@ -15978,15 +15978,18 @@ fn matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array
             Some(span),
         ));
     }
-    if m < n {
+    // A VECTOR right-hand side is a COLUMN and its unknown is one number,
+    // not a list of one: `$ 2 %. (1 2 3)` is empty there. Only a rank-2
+    // system has an unknown per column, and only it can be too wide to
+    // solve.
+    let column = y.rank() < 2;
+    if !column && m < n {
         return Err(Error::new(
             ErrorKind::Length,
             format!("the {m} by {n} system is underdetermined"),
             Some(span),
         ));
     }
-    let sol = lstsq(&a, m, n, &b, k)
-        .ok_or_else(|| Error::domain("the system is singular", span))?;
     // The right-hand side's own rank decides the answer's: a vector in gives
     // one solution vector, and anything of a higher rank keeps every axis
     // but the leading one, which the solution's own length replaces.
@@ -15994,9 +15997,21 @@ fn matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array
         let mut s = vec![n];
         s.extend_from_slice(&x.shape[1..]);
         s
+    } else if column {
+        vec![]
     } else {
         vec![n]
     };
+    // A SYSTEM WITH NO ROWS constrains nothing, and its least-squares answer
+    // is the zero the reference's own `0 % 0` gives: `2 %. (0 $ 0)` is 0 and
+    // `2 %. (2 0 $ 0)` the empty of no unknowns. Handing it to the
+    // factorisation would report a singularity that is really an absence.
+    let count: usize = shape.iter().product();
+    if m == 0 || count == 0 {
+        return Ok(Array::new(shape, Data::F64(vec![0.0; count].into())));
+    }
+    let sol = lstsq(&a, m, n, &b, k)
+        .ok_or_else(|| Error::domain("the system is singular", span))?;
     Ok(Array::new(shape, Data::F64(sol.into())))
 }
 
