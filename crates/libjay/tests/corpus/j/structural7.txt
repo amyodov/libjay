@@ -1521,3 +1521,24 @@ $ ({ (i. 2 3))
 $ ({ 1 2 3)
 { 1 2 3
 $ ({ (<1 2))
+
+// The term COUNT and the infinity: a count that stops before the term
+// after leaves the infinity, and a NaN the arithmetic made is refused at
+// any count.
+
+2 (2 H. 2) (_ __ 0)
+1 (2 H. 2) (_ __ 0)
+3 (2 H. 2) (_ __ 0)
+4 (2 H. 2) (_ __ 0)
+2 (2 H. 2) (__)
+2 (2 H. 2) (_)
+2 (2 H. 2) (1j_)
+3 (2 H. 2) (1j_)
+2 ((0 1) H. 2) (_ __ 0)
+2 (('') H. 2) (_ __ 0)
+1 (('') H. 2) (_ __ 0)
+3 (('') H. 2) (_ __ 0)
+2 (('') H. 2) (_)
+4 (2 H. (1)) (_3)
+4 (2 H. 2) (_ __ 0)
+5 (2 H. 2) (__)

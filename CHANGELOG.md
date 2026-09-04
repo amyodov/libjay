@@ -7,6 +7,11 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The hypergeometric series reads the TERM COUNT before it refuses an
+  infinity: a count that stops before the term after it leaves the
+  infinity the sum reached, so `2 (2 H. 2) __` is `__` where
+  `3 (2 H. 2) __` alternates into `_ + __` and has no value. A NaN the
+  arithmetic itself made is refused at any count.
 - `_2 x:` is the OBVERSE of form 2 — `%/"1`, the alternating quotient over
   the last axis — where it used to return its argument untouched. It puts
   back together what form 2 split apart and keeps going over a longer axis,

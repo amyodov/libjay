@@ -18633,8 +18633,20 @@ fn hypergeometric_real(
             // term AFTER it points the other way, when the running total
             // is a NaN of the arithmetic's own making and the reference
             // refuses rather than answering: `3 (2 H. 2) _` is `_` there
-            // and `3 (2 H. 2) __` a NaN error.
+            // and `3 (2 H. 2) __` a NaN error. A count that STOPS here has
+            // no term after it, so `2 (2 H. 2) __` is `__`.
             let total = sum + term;
+            if k + 1 >= limit {
+                // The count stops here, so nothing follows to flip the
+                // sign — but a term that is already a NaN has made one of
+                // the arithmetic's own, and that is refused at any count:
+                // `2 ((0 1) H. 2) (_ __ 0)` is a NaN error there, where a
+                // zero parameter multiplies the infinity by nothing.
+                if total.is_nan() && !z.is_nan() {
+                    return Err(nan_of_its_own_making(span));
+                }
+                return Ok(total);
+            }
             let mut next = z;
             for a in num {
                 next *= a + kk + 1.0;
