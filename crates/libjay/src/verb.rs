@@ -11775,7 +11775,7 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         // row padded to the longest with 1s so that each row still
         // multiplies back to the item it came from.
         MonadOp::PrimeFactors => prime_factor_rows(y, ctx.cfg.near(), span),
-        MonadOp::MatrixInverse => matrix_inverse(y, span),
+        MonadOp::MatrixInverse => matrix_inverse(y, ctx.cfg, span),
         MonadOp::Roll { origin, fixed, float_at_zero } => {
             roll(y, origin, fixed, float_at_zero, ctx.cfg.near(), span)
         }
@@ -15825,12 +15825,89 @@ fn as_matrix(a: &Array, span: Span) -> Result<(Vec<f64>, usize, usize)> {
     }
 }
 
+/// `%. y` in the EXACT types, where the answer is a ratio of whole numbers
+/// and no float need be reached. A VECTOR is one row, whose pseudo-inverse
+/// is `y % (+/ y*y)`; a SQUARE matrix is inverted by Gauss-Jordan over the
+/// rationals, which is exact at every step. `None` sends the argument to
+/// the float path — a taller-than-wide matrix, a singular one, or a
+/// division the rationals cannot do — and the answer is always RATIONAL,
+/// which is the type the reference reports for every one of these.
+#[inline(never)]
+fn exact_matrix_inverse(y: &Array) -> Option<Array> {
+    let v = to_rat_vec(&y.data)?;
+    match y.shape.as_slice() {
+        [_] => {
+            let mut sumsq = Rat::zero();
+            for r in &v {
+                sumsq = sumsq.add(&r.mul(r)?)?;
+            }
+            if sumsq.is_zero() {
+                // Every component is zero and there is no direction to
+                // invert; the reference refuses it, and so does the float
+                // path this returns to.
+                return None;
+            }
+            let out: Option<Vec<Rat>> = v.iter().map(|r| r.div(&sumsq)).collect();
+            Some(Array::new(y.shape.clone(), Data::Rat(out?.into())))
+        }
+        [m, n] if m == n && *m > 0 => {
+            let n = *n;
+            let mut a = v;
+            let mut inv: Vec<Rat> = (0..n * n)
+                .map(|i| if i / n == i % n { Rat::one() } else { Rat::zero() })
+                .collect();
+            for col in 0..n {
+                let piv = (col..n).find(|&i| !a[i * n + col].is_zero())?;
+                if piv != col {
+                    for j in 0..n {
+                        a.swap(col * n + j, piv * n + j);
+                        inv.swap(col * n + j, piv * n + j);
+                    }
+                }
+                let d = a[col * n + col].recip()?;
+                for j in 0..n {
+                    a[col * n + j] = a[col * n + j].mul(&d)?;
+                    inv[col * n + j] = inv[col * n + j].mul(&d)?;
+                }
+                for i in 0..n {
+                    if i == col || a[i * n + col].is_zero() {
+                        continue;
+                    }
+                    let f = a[i * n + col].clone();
+                    for j in 0..n {
+                        a[i * n + j] = a[i * n + j].sub(&f.mul(&a[col * n + j])?)?;
+                        inv[i * n + j] = inv[i * n + j].sub(&f.mul(&inv[col * n + j])?)?;
+                    }
+                }
+            }
+            Some(Array::new(y.shape.clone(), Data::Rat(inv.into())))
+        }
+        _ => None,
+    }
+}
+
 /// `%. y` / `⌹ y`: the inverse of a square matrix, or the least-squares
 /// pseudo-inverse of a taller one. A wider one is refused, as both
 /// references refuse it.
-fn matrix_inverse(y: &Array, span: Span) -> Result<Array> {
+fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     if y.dtype() == DType::Complex && y.count() != 0 {
         return complex_matrix_inverse(y, span);
+    }
+    // A SCALAR is not a one-by-one matrix here: it is a reciprocal, and it
+    // answers wherever a reciprocal does. `%. 0` is `_` where a matrix of
+    // one zero (`%. (1 1 $ 0)`) is refused, `%. _.` is `_.`, and `%. 123x`
+    // keeps the exact types as `1r123`.
+    if y.rank() == 0 {
+        return scalar_monad(ScalarMonad::Recip, y, cfg, span);
+    }
+    // THE EXACT TYPES SURVIVE the inverse wherever the answer is exact:
+    // `%. (1 2 3x)` is `1r14 1r7 3r14` and `%. (2 2 $ 1 2 3 4x)` is
+    // `_2 1 / 3r2 _1r2`, both in the rational type. The float path below
+    // stands in wherever this one has no answer.
+    if matches!(y.dtype(), DType::Ext | DType::Rat)
+        && let Some(exact) = exact_matrix_inverse(y)
+    {
+        return Ok(exact);
     }
     let (a, m, n) = as_matrix(y, span)?;
     // A vector with no elements is a column of no rows, and the reference
@@ -15876,7 +15953,16 @@ fn matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Result<Array
     // `%.` takes its right-hand side WHOLE — its left rank is infinite —
     // so a right-hand side of rank 3 or more is one column per element of
     // an item, solved together and given the item's own axes back.
-    let (b, bm, k) = if planes && x.rank() > 2 {
+    //
+    // A SCALAR right-hand side stands for the whole column of it, so
+    // `2 %. (2 2 $ 1 2 3 4)` solves against `2 2` and answers `_2 2`;
+    // reading it as a side of one row would make the shapes disagree.
+    let (b, bm, k) = if x.rank() == 0 && m > 0 {
+        let v = x
+            .to_f64_vec()
+            .ok_or_else(|| Error::domain("matrix division needs numeric data", span))?;
+        (vec![v[0]; m], m, 1)
+    } else if planes && x.rank() > 2 {
         let v = x
             .to_f64_vec()
             .ok_or_else(|| Error::domain("matrix division needs numeric data", span))?;

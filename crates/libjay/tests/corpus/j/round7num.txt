@@ -161,3 +161,69 @@ _99999999999999999 ! _1
 ^ ^:_1 ] 1x
 3!:0 (^ ^:_1 ] 1x)
 3!:0 (^ ^:_1 (1x 1x))
+
+// `_2 x:` IS `%/"1`, THE ALTERNATING QUOTIENT over the last axis — the
+// obverse of form 2, which splits each value into a numerator and a
+// denominator along a new last axis. The division is the ordinary one, so
+// the exact types survive it and a complex pair divides as complex. An axis
+// with nothing along it folds to the identity 1; an axis of ONE item is
+// that item, never divided, which is why a lone character or box comes back
+// untouched where a table of them is refused.
+_2 x: (1 2 3)
+3!:0 (_2 x: (1 2 3))
+$ _2 x: (1 2 3)
+_2 x: (i. 2 3)
+$ _2 x: (i. 2 3)
+_2 x: (i. 2 3 4)
+_2 x: (1 2 3x)
+_2 x: (1.5 2.5)
+_2 x: (3j4 1j2)
+_2 x: (1 0)
+_2 x: (0 0)
+_2 x: 'a'
+_2 x: (a:)
+_2 x: (3j4)
+_2 x: (, 5)
+_2 x: (0 $ 0)
+3!:0 (_2 x: (0 $ 0))
+_2 x: (2 0 $ 0)
+_2 x: (2 1 $ 5)
+_2 x: (2 3 $ 'abcdef')
+_1 x: (1 2 3)
+1 x: (1 2 3)
+
+// `%.` OF A SCALAR IS A RECIPROCAL, not a one-by-one matrix: `%. 0` is `_`
+// where `%. (1 1 $ 0)` is refused, and the exact types survive.
+%. 0
+%. 2
+%. 0x
+%. (123x)
+3!:0 (%. (123x))
+%. (_5x)
+%. (1r2)
+3!:0 (%. (1r2))
+%. (_.)
+%. ('' $ 0)
+%. (1 1 $ 0)
+
+// THE EXACT TYPES SURVIVE THE INVERSE wherever the answer is exact — a
+// vector's pseudo-inverse and a square matrix's inverse alike, both
+// rational.
+%. (1 2 3x)
+3!:0 (%. (1 2 3x))
+%. (1r2 1r3)
+3!:0 (%. (1r2 1r3))
+%. (2 2 $ 1 2 3 4x)
+3!:0 (%. (2 2 $ 1 2 3 4x))
+%. (2 2 $ 1r2 1r3 1r4 1r5)
+3!:0 (%. (2 2 $ 1r2 1r3 1r4 1r5))
+%. (1 2 3)
+%. (i. 5)
+%. (2 2 $ 1 2 3 4)
+%. (i. 3 2)
+%. (3 3 $ 1 0 0 0 1 0 0 0 1)
+
+// A SCALAR RIGHT-HAND SIDE stands for the whole column of it.
+2 %. (2 2 $ 1 2 3 4)
+(1 2) %. (2 2 $ 1 2 3 4)
+2 %. 4

@@ -72,6 +72,41 @@ _1 + ((100000000) ! (100000000.00000001))
 _1 + ((1e8) ! (1e8 + 1e_4))
 ? both sides lose this one; the reference's answer is not the value either
 
+// A SINGULAR MATRIX UNDER `%.`, WHERE THE REFERENCE HAS NO RULE — ONLY THE
+// LUCK OF ITS OWN FACTORISATION. Four rank-deficient arguments, measured:
+//
+//   `%. (2 2 $ 1 1 1 1)`            a NaN ERROR
+//   `%. (3 2 $ 1 2 2 4 3 6)`        a NaN ERROR
+//   `%. (3 3 $ 1 2 3 4 5 6 7 8 9)`  a table of NaN VALUES
+//   `%. (i. 4 3)`                   a table of NaN VALUES
+//
+// Every one of them is rank-deficient and every one of them is the same
+// question; two are refused and two are answered. What separates them is
+// whether the factorisation lands on an EXACT zero pivot or merely a tiny
+// one — the reference's arithmetic rather than the mathematics, which is
+// what round 5B concluded about the float GCD as well. libjay refuses a
+// singular system consistently and says so, which is the answer the
+// reference gives to half of these.
+%. (i. 4 3)
+? the reference answers a rank-deficient system with NaNs and refuses others
+$ %. (i. 4 3)
+? the reference answers a rank-deficient system with NaNs and refuses others
+%. (3 3 $ 1 2 3 4 5 6 7 8 9)
+? the reference answers a rank-deficient system with NaNs and refuses others
+
+// THE INVERSE OF A NaN, AT ONE ITEM AND IN A LIST. The reference widens to
+// COMPLEX for the short ones and stays real for a table: `%. (1 1 $ _.)`
+// and `%. (_. 1 2)` are `_.j_.` there while `%. (2 2 $ _. 1 2 3)` is the
+// real `_.`, and `%. _.` — the scalar, which is a reciprocal and no matrix
+// at all — is the real `_.` on both sides. A NaN names no direction, so
+// nothing about it asks for an imaginary part; libjay keeps the argument's
+// own type throughout. This is the one-item boundary the root and the
+// logarithm already show.
+%. (_. 1 2)
+? the reference widens a NaN inverse to complex for a short argument only
+%. (1 1 $ _.)
+? the reference widens a NaN inverse to complex for a short argument only
+
 // A NaN OR AN INFINITY AMONG THE PRIMES, WHERE THE REFERENCE CONTRADICTS
 // ITSELF BETWEEN ONE ITEM AND SEVERAL. Every one of these is settled by the
 // reference's own answer to the same cell asked on its own:

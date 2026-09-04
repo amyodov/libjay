@@ -71,6 +71,30 @@
 ? both sides lose this one; the reference's answer is not the value either
 < 0.00190154
 > j: 0.00190162
+= %. (i. 4 3)
+? the reference answers a rank-deficient system with NaNs and refuses others
+< <error>
+> j: _. _. _. _.
+> j: _. _. _. _.
+> j: _. _. _. _.
+= $ %. (i. 4 3)
+? the reference answers a rank-deficient system with NaNs and refuses others
+< <error>
+> j: 3 4
+= %. (3 3 $ 1 2 3 4 5 6 7 8 9)
+? the reference answers a rank-deficient system with NaNs and refuses others
+< <error>
+> j: _. _. _.
+> j: _. _. _.
+> j: _. _. _.
+= %. (_. 1 2)
+? the reference widens a NaN inverse to complex for a short argument only
+< _. _. _.
+> j: _.j_. _.j_. _.j_.
+= %. (1 1 $ _.)
+? the reference widens a NaN inverse to complex for a short argument only
+< <error>
+> j: _.j_.
 = 1 p: (_. 1 2)
 ? the reference calls a lone NaN not prime and refuses the same NaN in a list
 < 0 0 1
