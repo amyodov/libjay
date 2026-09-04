@@ -22601,7 +22601,7 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
     // The forms that read a RUN of bytes take an atom or a list whatever
     // is in it, so the shape is refused before the elements are looked at
     // — an empty of rank 2 is the rank error it would be at any size.
-    if matches!(form, 7 | 8 | 9) && y.rank() > 1 {
+    if matches!(form, 7..=9) && y.rank() > 1 {
         return Err(Error::new(
             ErrorKind::Rank,
             format!("form {form} converts an atom or a list"),
