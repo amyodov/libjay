@@ -684,3 +684,15 @@ x: 3.14159265358979
 ? the reference's own `<` puts these the other way round
 (s: <'a') I. (s: <'a')
 ? the same pair, equal
+
+// THE NULL CHARACTER, WRITTEN OUT. A session shows a character array by
+// writing its characters, and the reference's own writing DROPS a null:
+// `u: 0 65 66` is `AB` there and a null before the `AB` here, though the
+// reference's own `# u: 0 65 66` counts three of them and its `3 u:` of
+// the same value answers `0 65 66` on both sides. The count and the
+// writing contradict each other there; libjay writes the character it
+// holds. Inside a BOX the two agree — a character that moves the cursor is
+// a blank in a cell on both sides, which is measured in wave10.
+u: 0 65 66
+? the reference's writing drops a null its own `#` counts
+~ cause=differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text|differ:val:empty/text verb=u: also=^:,&.,M.,f.,::,:

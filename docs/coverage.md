@@ -2252,6 +2252,14 @@ families are the obverse of `[` or `]` composed on the LEFT
   stands as a modifier's OPERAND, which a session writes in its braces
   there and in its header spelling here — `5!:5` gives the header spelling
   on both sides, so only the display parts.
+- **THE NULL CHARACTER, WRITTEN OUT.** A session shows a character array by
+  writing its characters, and the reference's writing drops a null:
+  `u: 0 65 66` is `AB` there and a null before the `AB` here, though its own
+  `# u: 0 65 66` counts three and its `3 u:` of the value answers `0 65 66`
+  on both sides — the count and the writing contradict each other there.
+  Pinned, with a family rule for its spellings. Inside a BOX the two agree:
+  a character that moves the cursor — the null, the backspace, the tab, the
+  newline and the return — is a blank in a cell on both sides.
 - **`". y` where the sentence yields an ENTITY.** A string that spells a
   verb — `". '+-+'`, and every row of the box drawing `": <a:` makes — is
   the empty there, one empty row per row of the argument, because nothing
