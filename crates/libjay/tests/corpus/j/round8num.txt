@@ -1,0 +1,184 @@
+// Round 8B: the complex floor and the complex residue, measured against
+// jconsole point by point.
+//
+// McDonnell's floor puts the Gaussian integer below y where the fractional
+// parts of the two components fall inside the unit triangle, and steps one
+// place along the larger of them otherwise. BOTH of its comparisons read
+// the comparison tolerance in force, and the reference reads them
+// differently: the triangle test is TOLERANT and the tie between the two
+// fractional parts is EXACT. `9!:19 ] 0` and `<.!.0` each put the tolerant
+// one back to an exact comparison, which is how it was identified.
+//
+// The residue is `y - x * <. y % x`, and the quotient inside it is the
+// textbook conjugate formula rather than the scaled division `%` itself
+// uses. The two part on a knife edge — a quotient exactly at a half in
+// both components — and on overflow.
+
+// --- the complex floor inside the unit triangle -------------------------
+<. 0.3j0.3
+<. 0.01j0.01
+<. _0.7j0.01
+<. 3j4
+<. 0.6j0.8
+<. 3.5j4.5
+<. 1.5j2.5
+<. _0.5j3.5
+<. _2.5j_2.5
+<. 2.5j_1.5
+<. 0.99j0.99
+<. 0.7j0.3
+<. 0.3j0.7
+
+// --- the tie between the fractional parts is EXACT ----------------------
+// Both parts a half: the real step, every time.
+<. 0.5j0.5
+<. 1.5j1.5
+<. _0.5j_0.5
+<. _3.5j0.5
+<. 2.5j2.5
+// A part one ulp under the other, still an exact comparison: the smaller
+// one loses, and the answer moves.
+<. 0.49999999999999j0.5
+<. 0.5j0.49999999999999
+<. 0.5000001j0.5
+<. 0.5j0.5000001
+
+// --- the triangle test is TOLERANT --------------------------------------
+// The two fractional parts sum to just under one; the tolerance reads that
+// sum as one, so the value is outside the triangle and the floor steps.
+<. 0.3j0.69999999999999
+<. 0.7j0.29999999999999
+<. 0.9j0.09999999999999
+// Far enough under, and it is inside again.
+<. 0.3j0.6999999999
+<. 0.7j0.2999999999
+// The fit spells the tolerance out. With none at all the sum is below one
+// and nothing steps.
+<.!.0 (0.49999999999999j0.5)
+<.!.0 (0.3j0.69999999999999)
+<.!.0 (0.5j0.5)
+
+// --- the ceiling is the floor reflected through the origin --------------
+>. 0.5j0.5
+>. 0.3j0.3
+>. _0.5j3.5
+>. 0.49999999999999j0.5
+>. 3j4
+>. 1.5j2.5
+>.!.0 (0.49999999999999j0.5)
+
+// --- the residue over a quotient at a half in both components -----------
+// The quotient here is a half in both parts as exact arithmetic has it,
+// and one ulp under it as the conjugate formula computes it, so the floor
+// takes the imaginary step and not the real one.
+(0.12j_0.16) | (0.5j0.5)
+(0.12j_0.16) | (0.42j_0.06)
+(0.12j_0.16) | (0.3j0.1)
+(_1j2) | (2.5j_7.5)
+1 | (1.5j2.5)
+1 | (0.5j0.5)
+1 | (2.5j2.5)
+(0j1) | (1.5j2.5)
+(1j1) | (0j5)
+(1j1) | (_5)
+
+// --- the residue elsewhere ----------------------------------------------
+5 | 3j4
+2 | 3j4
+3j4 | 2
+3j4 | 5
+0 | 3j4
+3j4 | 0
+_3 | 3j4
+0.5 | 2.5j2.5
+3j4 | 0.5
+3j4 | _2
+(0.12j_0.16) | (1.4j2.2)
+(3j4) | (17.5j2.5)
+(3j4) | (_7.5j2.5)
+(1j1) | (2.5j2.5)
+
+// --- the residue reads the tolerance the floor reads --------------------
+1 | (0.49999999999999j0.5)
+1 |!.0 (0.49999999999999j0.5)
+(1j1) | (1.99999999999999j0.99999999999999)
+
+// --- the quotient is the conjugate formula, and it overflows ------------
+(1e200j1e200) | (1e300j1e300)
+(1e200j1e200) | (1e_300)
+(1e_320j1e_320) | (1j1)
+(3j4) | (1e300)
+2 | (1e17j1e17)
+
+// --- the digits of an encode are residues, so they round with it --------
+2 #: 5j1
+2 #: 3j4
+(2 2 2) #: (5j1)
+(1j1) #: (3j4)
+2 #: 0.5j0.5
+#: 3j4
+
+// --- the residue under a reduction and a scan ---------------------------
+|/ (1j1 2j2 3j3)
+|/\\ (1j1 2j2 3j3)
+|/\\. (1j1 2j2 3j3)
+(0.12j_0.16) |/ (0.5j0.5 0.42j_0.06)
+| (0.12j_0.16) |"0 (0.5j0.5 1.5j1.5)
+
+// --- a NaN dividend takes no infinity ------------------------------------
+// `1 % 0` is an infinity; `_. % 0` is the NaN it started with.
+_. % 0
+(, _.) % 0
+(_. _.) % 0
+(_. 1 2) % (0)
+(_. 1 2) % (0 0 0)
+_. % (0 0)
+(_.) % (_.)
+0 % _.
+
+// --- a NaN is no angle, and the circle functions say so -------------------
+// The reference refuses it exactly as it refuses an infinite angle.
+1 o. _.
+2 o. _.
+3 o. _.
+5 o. _.
+6 o. _.
+1 o. (_. 1 2)
+1 o. _
+r. _.
+r. (, _.)
+r. (_. 1 2)
+r. (_.j1)
+r. 0j_.
+^ 0j_.
+^ _.
+^ _.j1
+_. o. 2
+(_. 1 2) o. 2
+
+// --- a NaN has no length and no angle -------------------------------------
+// `*.` is refused where `+.` answers the two parts it was handed.
+*. _.
+*. (, _.)
+*. (_. 1 2)
+*. (_.j1)
+*. 1j_.
+*. 3j4
++. _.
++. (_. 1 2)
+j. _.
+| _.
+
+// --- the two verbs that MAKE a complex number refuse what is not a number -
+// They reached an internal error over data of no numeric type; the answer is
+// the type error every other arithmetic verb gives. An argument with NO
+// elements never gets there: it is read as a boolean empty first.
+j. 'abc'
+j. (3 3 $ 'abc')
+j. (<1 2)
+j. (0 $ 'a')
+j. (0 3 $ 'a')
+r. 'abc'
+r. (<1 2)
+r. (0 3 $ 'a')
+$ j. (0 3 $ 'a')

@@ -5331,7 +5331,11 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
                 // A NEGATIVE zero divisor turns the infinity over, which is
                 // what makes `% ^:_2 (__)` the `__` it started as: `% __`
                 // is a negative zero and dividing by it gives `__` back.
-                if a == 0.0 {
+                // A NaN DIVIDEND has no infinity to take: `_. % 0` is `_.`
+                // there, where `1 % 0` is `_`.
+                if a.is_nan() {
+                    f64::NAN
+                } else if a == 0.0 {
                     0.0
                 } else if b.is_sign_negative() {
                     -f64::INFINITY.copysign(a)
@@ -5545,9 +5549,17 @@ fn stope(x: &Array, y: &Array, step: f64, cfg: EvalCfg, span: Span) -> Result<Ar
 const TURN_LIMIT: f64 = std::f64::consts::PI * 134_217_728.0 * std::f64::consts::SQRT_2;
 
 /// Refuse an angle too large to take a circle function of. An infinity is
-/// past the limit like any other magnitude; a NaN is not, since it is no
-/// magnitude at all and the arithmetic that made it reports itself.
+/// past the limit like any other magnitude, and SO IS A NaN: the reference
+/// answers `1 o. _.`, `r. _.` and `^ 0j_.` with a limit error, exactly as
+/// it answers `1 o. _`, and a NaN angle names no turn to take.
 fn turns(y: f64, span: Span) -> Result<()> {
+    if y.is_nan() {
+        return Err(Error::new(
+            ErrorKind::Limit,
+            "a NaN is no angle: a circle function needs a number".to_string(),
+            Some(span),
+        ));
+    }
     if y.abs() >= TURN_LIMIT {
         return Err(Error::new(
             ErrorKind::Limit,
@@ -5647,7 +5659,7 @@ fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
 
 /// One complex step.
 #[inline]
-fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
+fn cx_op(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx> {
     use ScalarDyad::*;
     Ok(match op {
         Add => cx::add(a, b),
@@ -5705,7 +5717,7 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, span: Span) -> Result<Cx> {
                     Some(span),
                 ));
             }
-            cx::residue(a, b)
+            cx::residue(a, b, tol)
         }
         Lcm | Gcd => {
             // An INFINITE part leaves no Gaussian integer to divide by, and
@@ -5797,6 +5809,7 @@ fn dyad_cx_chunk_body<A: Widen<Cx>, B: Widen<Cx>>(
     ydiv: usize,
     start: usize,
     out: &mut [Cx],
+    tol: Tol,
     span: Span,
 ) -> Result<()> {
     use ScalarDyad::*;
@@ -5820,7 +5833,7 @@ fn dyad_cx_chunk_body<A: Widen<Cx>, B: Widen<Cx>>(
     }
     let mut err = None;
     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut Cx| {
-        match cx_op(op, a.widen(), b.widen(), span) {
+        match cx_op(op, a.widen(), b.widen(), tol, span) {
             Ok(v) => {
                 *slot = v;
                 true
@@ -5851,6 +5864,7 @@ multiversioned! {
         ydiv: usize,
         start: usize,
         out: &mut [Cx],
+        tol: Tol,
         span: Span,
     ) -> Result<()> = dyad_cx_chunk_body;
 }
@@ -5865,10 +5879,11 @@ fn dyad_cx<A: Widen<Cx>, B: Widen<Cx>>(
     yoff: usize,
     ydiv: usize,
     n: usize,
+    tol: Tol,
     span: Span,
 ) -> Result<Vec<Cx>> {
     par::try_fill(n, |start, part| {
-        dyad_cx_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, span)
+        dyad_cx_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, tol, span)
     })
 }
 
@@ -5890,12 +5905,13 @@ fn complex_dyad_data(
     yoff: usize,
     ydiv: usize,
     n: usize,
+    tol: Tol,
     span: Span,
 ) -> Result<Data> {
     let (mut tx, mut ty) = (Vec::new(), Vec::new());
     macro_rules! pass {
         ($xs:expr, $ys:expr) => {
-            Data::Complex(dyad_cx(op, $xs, xoff, xdiv, $ys, yoff, ydiv, n, span)?.into())
+            Data::Complex(dyad_cx(op, $xs, xoff, xdiv, $ys, yoff, ydiv, n, tol, span)?.into())
         };
     }
     Ok(match (x, y) {
@@ -6510,6 +6526,14 @@ fn compare_data(
 }
 
 /// One tolerant float comparison.
+///
+/// A NaN compares FALSE against everything here, itself included, which is
+/// what the reference answers for an atom, for a one-item array, under
+/// `!.0` and wherever one side is not a float. Its tolerant float pass over
+/// MORE than one item answers the other way — `(1.0 1.0) = (_. _.)` is
+/// `1 1` there and `(, 1.0) = (, _.)` is `0` — and that difference is
+/// recorded in the divergence list rather than followed: the same values
+/// under the same verb cannot have two answers.
 #[inline(always)]
 pub(crate) fn tol_cmp(op: ScalarDyad, a: f64, b: f64, tol: Tol) -> bool {
     use ScalarDyad::*;
@@ -6777,7 +6801,7 @@ fn lcm_gcd_data(
     let mut t = arith_type(x.dtype(), y.dtype(), span)?;
     if t == DType::Complex {
         // The Gaussian-integer versions, which is what both references give.
-        return complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span);
+        return complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span);
     }
     if t.is_exact() {
         if let Some(d) = exact_dyad_data(op, t, x, xoff, xdiv, y, yoff, ydiv, n, span)? {
@@ -7333,7 +7357,7 @@ fn scalar_dyad_wide(
         || matches!(op, MakeComplex | PolarBy)
         || pass_leaves_reals(op, x, xoff, xdiv, y, yoff, ydiv, n)
     {
-        let data = complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, span)?;
+        let data = complex_dyad_data(op, x, xoff, xdiv, y, yoff, ydiv, n, tol, span)?;
         // GNU APL has no infinite logarithm in the complex domain either:
         // `¯1⍟0` is a DOMAIN ERROR there, exactly as `2⍟0` is on the reals,
         // and the real path above already refuses that one.
@@ -7757,6 +7781,11 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
         Signum => Data::Complex(
             par::map(v, |&z| if tol.is_zero_cx(z) { cx::ZERO } else { cx::signum(z) }).into(),
         ),
+        // McDonnell's complex floor READS THE COMPARISON TOLERANCE, so it
+        // is handed the one in force rather than compiled into the table
+        // of plain steps below.
+        Floor => Data::Complex(par::map(v, |&z| cx::floor(z, tol)).into()),
+        Ceil => Data::Complex(par::map(v, |&z| cx::ceil(z, tol)).into()),
         _ => {
             let step: fn(Cx) -> Cx = match op {
                 Factorial => cx::factorial,
@@ -7766,8 +7795,6 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
                 Sqrt => cx::sqrt,
                 Exp => cx::exp,
                 Ln => cx::ln,
-                Floor => cx::floor,
-                Ceil => cx::ceil,
                 OneMinus => |z| cx::sub(cx::ONE, z),
                 Inc => |z| cx::add(z, cx::ONE),
                 Dec => |z| cx::sub(z, cx::ONE),
@@ -7777,7 +7804,7 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
                 Pi => |z| [std::f64::consts::PI * z[0], std::f64::consts::PI * z[1]],
                 Imaginary => |z| cx::mul(cx::I, z),
                 Polar => |z| cx::exp(cx::mul(cx::I, z)),
-                Abs | Not | Signum => unreachable!("handled above"),
+                Abs | Not | Signum | Floor | Ceil => unreachable!("handled above"),
             };
             Data::Complex(par::map(v, |&z| step(z)).into())
         }
@@ -7890,9 +7917,13 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
         // Conjugation is the identity on reals.
         Conj if d.dtype().is_numeric() => d.clone(),
         Conj => return Err(wrong_type(d.dtype(), span)),
-        // Both make a complex value out of any argument, so they never
-        // reach the real path.
-        Imaginary | Polar => return Err(Error::internal("a complex monad on the real path")),
+        // Both make a complex value out of a NUMBER, and reach this path
+        // only over data that is not one — where the answer is the type
+        // error every other arithmetic verb gives, not an internal one.
+        // An argument with NO elements never gets here: it is read as a
+        // boolean empty above, which is why `j. (0 3 $ 'a')` is the
+        // complex empty and `j. (3 3 $ 'a')` a refusal.
+        Imaginary | Polar => return Err(wrong_type(d.dtype(), span)),
         Neg => match d {
             Data::Bool(v) => Data::I64(par::map(v, |&b| -(b as i64)).into()),
             Data::I64(v) => match par::try_map(v, i64::checked_neg) {
@@ -10243,7 +10274,7 @@ fn decode_complex(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
 /// `x #: y` where a radix or a value is complex. Each digit is a residue,
 /// and the complex residue rounds with McDonnell's complex floor, which is
 /// what makes `2 #: 5j1` the `_1j1` jconsole answers.
-fn encode_complex(x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn encode_complex(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let radix = complex_digits_of(x, "encode", span)?;
     let values = complex_digits_of(y, "encode", span)?;
     let (k, n) = (radix.len(), values.len());
@@ -10256,7 +10287,7 @@ fn encode_complex(x: &Array, y: &Array, span: Span) -> Result<Array> {
                 out[i * n + j] = rem;
                 rem = cx::ZERO;
             } else {
-                let r = cx::residue(b, rem);
+                let r = cx::residue(b, rem, tol);
                 out[i * n + j] = r;
                 rem = cx::div(cx::sub(rem, r), b);
             }
@@ -10270,7 +10301,7 @@ fn encode_complex(x: &Array, y: &Array, span: Span) -> Result<Array> {
 /// `#: y` over complex values: the digit count comes from the largest
 /// MAGNITUDE in the whole argument, which is why `#: 3j4` takes the three
 /// binary digits five takes.
-fn encode_bits_complex(y: &Array, span: Span) -> Result<Array> {
+fn encode_bits_complex(y: &Array, tol: Tol, span: Span) -> Result<Array> {
     let values = complex_digits_of(y, "encode", span)?;
     let magnitudes: Vec<f64> = values.iter().map(|&z| cx::abs(z)).collect();
     let k = bit_width(&magnitudes, span)?;
@@ -10279,7 +10310,7 @@ fn encode_bits_complex(y: &Array, span: Span) -> Result<Array> {
     for (j, &v) in values.iter().enumerate() {
         let mut rem = v;
         for i in (0..k).rev() {
-            let r = cx::residue(two, rem);
+            let r = cx::residue(two, rem, tol);
             out[j * k + i] = r;
             rem = cx::div(cx::sub(rem, r), two);
         }
@@ -10460,7 +10491,7 @@ fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
         return Ok(Array::new(shape, Data::empty(DType::I64)));
     }
     if has_imaginary(x) || has_imaginary(y) {
-        return encode_complex(x, y, span);
+        return encode_complex(x, y, tol, span);
     }
     if let Some(exact) = encode_exact(x, y) {
         let mut shape = if x.rank() == 0 { Vec::new() } else { vec![x.count()] };
@@ -10574,7 +10605,7 @@ fn bit_width_i128(values: &[i128]) -> usize {
 /// `#: y`: base-2 encode of the whole argument, the digits trailing.
 fn encode_bits(y: &Array, tol: Tol, span: Span) -> Result<Array> {
     if has_imaginary(y) {
-        return encode_bits_complex(y, span);
+        return encode_bits_complex(y, tol, span);
     }
     // Whole numbers keep every digit, past the width a double can divide
     // its way down: `$ #: 4503599627370497` is 53 and its last digit is 1.
@@ -11864,6 +11895,17 @@ fn complex_parts(y: &Array, polar: bool, span: Span) -> Result<Array> {
     };
     let z = v.first().copied().unwrap_or(cx::ZERO);
     if polar {
+        // A NaN in either part leaves no length and no angle, and the
+        // reference refuses rather than answering one: `*. _.`, `*. 1j_.`
+        // and `*. _.j1` are all NaN errors there, where `+.` of the same
+        // value answers the two parts it was given.
+        if z[0].is_nan() || z[1].is_nan() {
+            return Err(Error::new(
+                ErrorKind::Nan,
+                "a NaN has no length and no angle".to_string(),
+                Some(span),
+            ));
+        }
         return Ok(Array::from_f64(vec![cx::abs(z), cx::arg(z)]));
     }
     // The parts of a WHOLE number are whole: `+. 9223372036854775806` is

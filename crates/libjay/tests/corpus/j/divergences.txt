@@ -275,12 +275,48 @@ p. (0 1 1 _)
 // vectorised path parting from a scalar one rather than a rule. libjay
 // answers both the way the reference answers the pairs: a NaN loses the
 // comparison and the other value stands.
+//
+// ROUND 8 MEASURED THE WHOLE SPLIT, over 184 pairs. The reference keeps the
+// NaN where BOTH sides reach its float pass — `(1.0 1.0) <. (_. _.)` is
+// `_. _.` and so is the same question at three, eight and sixteen items —
+// and loses it wherever one side is INTEGER (`(1 1) <. (_. _.)` is `1 1`,
+// `(i. 3) <. (_. _. _.)` likewise) or wherever an ATOM stands against a
+// LIST of more than one item (`(1.0) <. (_. _.)` is `1 1`, while
+// `(1.0 1.0) <. (_.)` is `_. _.`). Four loops, three of them agreeing with
+// libjay and one not, over one question. The family rule covers the
+// spellings a sweep draws.
 1 <. (_.)
 ? the reference's own two-pair answer is `1 1`, which contradicts this one
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=<.,>. also=%,-,+,*,%:,^.,^,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#. answers=numeric
 1 >. (_.)
 ? the reference's own two-pair answer is `1 1`, which contradicts this one
 _ <. (_.)
 ? the same, with an infinity for the other value
+
+// THE TOLERANT COMPARISONS OF A NaN, the same split one verb further on.
+// The reference's tolerant FLOAT pass over MORE THAN ONE ITEM reads a NaN
+// as ordered against nothing and therefore EQUAL to everything: `=` and
+// `<:` and `>:` all answer 1 and `~:` answers 0, whatever stands beside it,
+// so `(1.0 1.0) = (_. _.)` is `1 1` and `(2.0 4.0 6.0) = (_. 1 2)` is
+// `1 0 0`. Every other path there reads a NaN as equal to NOTHING, libjay's
+// answer: the ATOM (`1.0 = _.` is 0), the ONE-ITEM array (`(, 1.0) = (, _.)`
+// is 0), the rank-2 argument against an atom (`(2 2 $ 1.0) = (_.)` is
+// `0 0 0 0`), the mixed INTEGER pass (`(1 1) = (_. _.)` is `0 0`) and the
+// EXACT comparison `= !.0` (0, where `= !.1e_13` is 1). The same values
+// under the same verb have two answers there, told apart by how many items
+// stand beside them and in which type they are held — the same vectorised
+// path parting from a scalar one that the extrema above show, one verb on.
+(1.0 1.0) = (_. _.)
+? the reference's own atom and one-item answers are 0, which contradict this one
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb==,~:,<:,>: also=%,-,+,*,%:,^.,^,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#. answers=numeric
+(1.0 1.0) ~: (_. _.)
+? the same question negated: 0 0 there, 1 1 here
+(2.0 4.0 6.0) = (_. 1 2)
+? the same over a list with one NaN in it
+(1.0 1.0) <: (_. _.)
+? the ordering that is `not above`, which a NaN passes there
+(1.0 1.0) >: (_. _.)
+? the ordering that is `not below`, which a NaN passes there
 
 // INTERVAL INDEX against a SINGLE EXACT bound. The reference answers
 // `(1x) I. 2` with 0 and `(1x 2x) I. 2` with 1: adding a bound that is NOT
@@ -629,10 +665,27 @@ _10 10 #: 1234
 // than one item.
 %: _.
 ? the reference widens a one-item NaN root to the complex type and a two-item one not
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S: answers=numeric
 ^. _.
 ? the reference widens a one-item NaN logarithm to the complex type and a two-item one not
 3!:0 (%: _.)
 ? the reference widens a one-item NaN root to the complex type and a two-item one not
+
+// THE POWER OF A NaN goes the same three ways, and round 8 measured them:
+// `(_.) ^ 0.5` is the complex `_.j_.` there (the one-item widening the root
+// shows), `_. ^ _.` and `(_. 1 2) ^ (_. 1 2)` are refused outright, and
+// `(_. 1 2) ^ (_.)` is the float `_. _. _.`. libjay keeps the float NaN
+// throughout, which is the reference's own answer for the longest of them.
+// The DYADIC ROOT does the same: `2 %: (_.)` is refused there where
+// `(_. 1 2) %: (0)` answers. The family rule above carries all of it.
+(_.) ^ (0.5)
+? the reference widens a one-item NaN power to the complex type, as it does the root
+_. ^ _.
+? the reference refuses the NaN power of a NaN where the same pair at three items answers
+2 %: (_.)
+? the reference refuses a one-item NaN root by a real where its own monadic root answers
+0 ^ _.
+? a zero base takes no NaN exponent there: the answer is a plain 0
 
 // A LOGARITHM OF ZERO TO A LIST OF BASES. Every cell of it answers on its
 // own there — `2 ^. 0` is `__`, `_0.5 ^. 0` is `_j_`, `_1 ^. 0` is `0j_`

@@ -309,3 +309,56 @@ fn a_made_nan_is_refused_at_every_width(#[case] n: usize) {
     let src = format!("+/ _ - _ * i. {n}");
     assert_eq!(refusal(Lang::J, &src), ErrorKind::Nan, "{src}");
 }
+
+/// A NaN DIVIDEND takes no infinity from a zero divisor. `1 % 0` is `_`
+/// there and `_. % 0` is the NaN it started with, at every length.
+#[rstest]
+#[case("_. % 0", "_.")]
+#[case("(, _.) % 0", "_.")]
+#[case("(_. _.) % 0", "_. _.")]
+#[case("(_. 1 2) % 0", "_. _ _")]
+#[case("_. % (0 0)", "_. _.")]
+fn a_nan_over_zero_stays_a_nan(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::J, src), want);
+}
+
+/// A NaN IS NO ANGLE. The reference refuses it with a LIMIT error exactly
+/// as it refuses an infinite one, wherever a turn has to be taken: the
+/// circular functions, `r.`, and an exponent with an imaginary part.
+#[rstest]
+#[case("1 o. _.")]
+#[case("2 o. _.")]
+#[case("3 o. _.")]
+#[case("1 o. (_. 1 2)")]
+#[case("r. _.")]
+#[case("r. (_. 1 2)")]
+#[case("r. (_.j1)")]
+#[case("^ 0j_.")]
+fn a_nan_angle_is_past_the_limit(#[case] src: &str) {
+    assert_eq!(refusal(Lang::J, src), ErrorKind::Limit, "{src}");
+}
+
+/// The functions that take no turn keep answering, and `+.` reads the two
+/// parts it was handed whatever they are.
+#[rstest]
+#[case("5 o. _.", "_.")]
+#[case("^ _.", "_.")]
+#[case("+. _.", "_. 0")]
+#[case("j. _.", "0j_.")]
+#[case("| _.", "_.")]
+fn a_nan_that_names_no_turn_answers(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::J, src), want);
+}
+
+/// `*. y` reads a LENGTH and an ANGLE, and a NaN in either part leaves
+/// neither: the reference answers a NaN error where `+.` of the same value
+/// answers its two parts.
+#[rstest]
+#[case("*. _.")]
+#[case("*. (, _.)")]
+#[case("*. (_. 1 2)")]
+#[case("*. (_.j1)")]
+#[case("*. 1j_.")]
+fn a_nan_has_no_length_and_no_angle(#[case] src: &str) {
+    assert_eq!(refusal(Lang::J, src), ErrorKind::Nan, "{src}");
+}

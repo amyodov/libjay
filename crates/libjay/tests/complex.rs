@@ -429,3 +429,68 @@ fn the_kernel_and_the_pipeline_agree_on_complex_arguments() {
         Some(&[[3.0, 4.0]; 3][..])
     );
 }
+
+// ------------------------------------------- the tolerant complex floor
+
+/// McDonnell's floor keeps the fractional parts inside the unit triangle,
+/// and the test that decides it READS THE COMPARISON TOLERANCE. The tie
+/// between the two parts does not: it is an exact comparison under J, so a
+/// part one ulp under the other loses.
+#[rstest]
+#[case("<. 0.3j0.3", "0")]
+#[case("<. 3j4", "3j4")]
+#[case("<. 0.6j0.8", "0j1")]
+#[case("<. 0.5j0.5", "1")]
+#[case("<. 1.5j2.5", "2j2")]
+#[case("<. _0.5j3.5", "0j3")]
+// One ulp under, and the exact tie test sends it the other way.
+#[case("<. 0.49999999999999j0.5", "0j1")]
+#[case("<. 0.5j0.49999999999999", "1")]
+// The triangle test is tolerant: a sum tolerantly equal to one is not
+// below it, so the floor steps rather than staying put.
+#[case("<. 0.3j0.69999999999999", "0j1")]
+#[case("<. 0.7j0.29999999999999", "1")]
+#[case("<.!.0 (0.3j0.69999999999999)", "0")]
+#[case("<.!.0 (0.49999999999999j0.5)", "0")]
+// The ceiling is the floor reflected through the origin.
+#[case(">. 0.5j0.5", "0j1")]
+#[case(">. 0.49999999999999j0.5", "0j1")]
+#[case(">.!.0 (0.49999999999999j0.5)", "0j1")]
+fn the_complex_floor_reads_the_tolerance(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::J, src), want);
+}
+
+/// `x | y` is `y - x * <. y % x`, and the quotient inside it is the
+/// textbook conjugate formula rather than the scaled division `%` uses.
+/// The two part where the quotient sits exactly on a half in both parts:
+/// the conjugate formula lands one ulp under it, so the floor takes the
+/// imaginary step. The overflow follows the formula too.
+#[rstest]
+#[case("(0.12j_0.16) | (0.5j0.5)", "_0.02j_0.14")]
+#[case("(0.12j_0.16) | (0.42j_0.06)", "_0.02j_0.14")]
+#[case("5 | 3j4", "3j_1")]
+#[case("3j4 | 2", "_2j3")]
+#[case("0 | 3j4", "3j4")]
+#[case("1 | (1.5j2.5)", "_0.5j0.5")]
+#[case("(1e200j1e200) | (1e300j1e300)", "_.j_.")]
+#[case("(1e_320j1e_320) | (1j1)", "_.j_.")]
+#[case("(1e200j1e200) | (1e_300)", "1e_300")]
+fn the_complex_residue_divides_by_the_conjugate(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::J, src), want);
+}
+
+/// The two verbs that MAKE a complex number out of a real one reached an
+/// internal error over data of no numeric type. The answer is the type
+/// error every other arithmetic verb gives; an argument with no elements
+/// never gets there, being read as a boolean empty first.
+#[rstest]
+#[case("j. 'abc'")]
+#[case("j. (3 3 $ 'abc')")]
+#[case("j. (<1 2)")]
+#[case("r. 'abc'")]
+#[case("r. (<1 2)")]
+fn a_complex_monad_over_no_number_is_a_type_error(#[case] src: &str) {
+    let e = err(Lang::J, src);
+    assert_eq!(e.kind, ErrorKind::Type, "{src}: {}", e.msg);
+    assert!(!e.msg.contains("internal"), "{src}: {}", e.msg);
+}

@@ -1,0 +1,271 @@
+# libjay reference snapshot: J — corpus/j/round8num.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= <. 0.3j0.3
+> j: 0
+= <. 0.01j0.01
+> j: 0
+= <. _0.7j0.01
+> j: _1
+= <. 3j4
+> j: 3j4
+= <. 0.6j0.8
+> j: 0j1
+= <. 3.5j4.5
+> j: 4j4
+= <. 1.5j2.5
+> j: 2j2
+= <. _0.5j3.5
+> j: 0j3
+= <. _2.5j_2.5
+> j: _2j_3
+= <. 2.5j_1.5
+> j: 3j_2
+= <. 0.99j0.99
+> j: 1
+= <. 0.7j0.3
+> j: 1
+= <. 0.3j0.7
+> j: 0j1
+= <. 0.5j0.5
+> j: 1
+= <. 1.5j1.5
+> j: 2j1
+= <. _0.5j_0.5
+> j: 0j_1
+= <. _3.5j0.5
+> j: _3
+= <. 2.5j2.5
+> j: 3j2
+= <. 0.49999999999999j0.5
+> j: 0j1
+= <. 0.5j0.49999999999999
+> j: 1
+= <. 0.5000001j0.5
+> j: 1
+= <. 0.5j0.5000001
+> j: 0j1
+= <. 0.3j0.69999999999999
+> j: 0j1
+= <. 0.7j0.29999999999999
+> j: 1
+= <. 0.9j0.09999999999999
+> j: 1
+= <. 0.3j0.6999999999
+> j: 0
+= <. 0.7j0.2999999999
+> j: 0
+= <.!.0 (0.49999999999999j0.5)
+> j: 0
+= <.!.0 (0.3j0.69999999999999)
+> j: 0
+= <.!.0 (0.5j0.5)
+> j: 1
+= >. 0.5j0.5
+> j: 0j1
+= >. 0.3j0.3
+> j: 0j1
+= >. _0.5j3.5
+> j: _1j4
+= >. 0.49999999999999j0.5
+> j: 0j1
+= >. 3j4
+> j: 3j4
+= >. 1.5j2.5
+> j: 1j3
+= >.!.0 (0.49999999999999j0.5)
+> j: 0j1
+= (0.12j_0.16) | (0.5j0.5)
+> j: _0.02j_0.14
+= (0.12j_0.16) | (0.42j_0.06)
+> j: _0.02j_0.14
+= (0.12j_0.16) | (0.3j0.1)
+> j: _0.02j_0.14
+= (_1j2) | (2.5j_7.5)
+> j: _0.5j_1.5
+= 1 | (1.5j2.5)
+> j: _0.5j0.5
+= 1 | (0.5j0.5)
+> j: _0.5j0.5
+= 1 | (2.5j2.5)
+> j: _0.5j0.5
+= (0j1) | (1.5j2.5)
+> j: _0.5j_0.5
+= (1j1) | (0j5)
+> j: _1
+= (1j1) | (_5)
+> j: _1
+= 5 | 3j4
+> j: 3j_1
+= 2 | 3j4
+> j: 1
+= 3j4 | 2
+> j: _2j3
+= 3j4 | 5
+> j: 1j3
+= 0 | 3j4
+> j: 3j4
+= 3j4 | 0
+> j: 0
+= _3 | 3j4
+> j: 0j_2
+= 0.5 | 2.5j2.5
+> j: 0
+= 3j4 | 0.5
+> j: _3.5j3
+= 3j4 | _2
+> j: _2
+= (0.12j_0.16) | (1.4j2.2)
+> j: 0.08j_0.04
+= (3j4) | (17.5j2.5)
+> j: _3.5j_0.5
+= (3j4) | (_7.5j2.5)
+> j: _3.5j_0.5
+= (1j1) | (2.5j2.5)
+> j: 0.5j0.5
+= 1 | (0.49999999999999j0.5)
+> j: 0.5j_0.5
+= 1 |!.0 (0.49999999999999j0.5)
+> j: 0.5j0.5
+= (1j1) | (1.99999999999999j0.99999999999999)
+> j: 1j_9.99201e_15
+= (1e200j1e200) | (1e300j1e300)
+> j: _.j_.
+= (1e200j1e200) | (1e_300)
+> j: 1e_300
+= (1e_320j1e_320) | (1j1)
+> j: _.j_.
+= (3j4) | (1e300)
+> j: 0
+= 2 | (1e17j1e17)
+> j: 0
+= 2 #: 5j1
+> j: _1j1
+= 2 #: 3j4
+> j: 1
+= (2 2 2) #: (5j1)
+> j: 1 1 _1j1
+= (1j1) #: (3j4)
+> j: _1
+= 2 #: 0.5j0.5
+> j: 0.5j0.5
+= #: 3j4
+> j: 0j1 1 1
+= |/ (1j1 2j2 3j3)
+> j: 0
+= |/\\ (1j1 2j2 3j3)
+> j: 1j1 0 0
+= |/\\. (1j1 2j2 3j3)
+> j: 0 1j1 3j3
+= (0.12j_0.16) |/ (0.5j0.5 0.42j_0.06)
+> j: _0.02j_0.14 _0.02j_0.14
+= | (0.12j_0.16) |"0 (0.5j0.5 1.5j1.5)
+> j: 0.141421 0.141421
+= _. % 0
+> j: _.
+= (, _.) % 0
+> j: _.
+= (_. _.) % 0
+> j: _. _.
+= (_. 1 2) % (0)
+> j: _. _ _
+= (_. 1 2) % (0 0 0)
+> j: _. _ _
+= _. % (0 0)
+> j: _. _.
+= (_.) % (_.)
+> j: _.
+= 0 % _.
+> j: _.
+= 1 o. _.
+> j: <error>
+= 2 o. _.
+> j: <error>
+= 3 o. _.
+> j: <error>
+= 5 o. _.
+> j: _.
+= 6 o. _.
+> j: _.
+= 1 o. (_. 1 2)
+> j: <error>
+= 1 o. _
+> j: <error>
+= r. _.
+> j: <error>
+= r. (, _.)
+> j: <error>
+= r. (_. 1 2)
+> j: <error>
+= r. (_.j1)
+> j: <error>
+= r. 0j_.
+> j: _.
+= ^ 0j_.
+> j: <error>
+= ^ _.
+> j: _.
+= ^ _.j1
+> j: _.j_.
+= _. o. 2
+> j: <error>
+= (_. 1 2) o. 2
+> j: <error>
+= *. _.
+> j: <error>
+= *. (, _.)
+> j: <error>
+= *. (_. 1 2)
+> j: <error>
+= *. (_.j1)
+> j: <error>
+= *. 1j_.
+> j: <error>
+= *. 3j4
+> j: 5 0.927295
+= +. _.
+> j: _. 0
+= +. (_. 1 2)
+> j: _. 0
+> j:  1 0
+> j:  2 0
+= j. _.
+> j: 0j_.
+= | _.
+> j: _.
+= j. 'abc'
+> j: <error>
+= j. (3 3 $ 'abc')
+> j: <error>
+= j. (<1 2)
+> j: <error>
+= j. (0 $ 'a')
+> j:
+= j. (0 3 $ 'a')
+> j:
+= r. 'abc'
+> j: <error>
+= r. (<1 2)
+> j: <error>
+= r. (0 3 $ 'a')
+> j:
+= $ j. (0 3 $ 'a')
+> j: 0 3

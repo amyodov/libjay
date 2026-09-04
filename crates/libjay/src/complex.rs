@@ -7,6 +7,8 @@
 //! Functions here are the mathematics only; the languages' type rules and
 //! diagnostics live in `verb.rs`.
 
+use crate::verb::Tol;
+
 /// One complex number: `[real, imaginary]`.
 pub type Cx = [f64; 2];
 
@@ -261,12 +263,21 @@ pub fn root(x: Cx, y: Cx) -> Cx {
 /// McDonnell's complex floor: the Gaussian integer at or below y, chosen so
 /// that the residue keeps a magnitude below one. Published in the J
 /// dictionary's account of `<.`; both references answer with it.
-pub fn floor(z: Cx) -> Cx {
+///
+/// Both of its two comparisons READ THE COMPARISON TOLERANCE, and the two
+/// references read it differently. The test that keeps the fractional
+/// parts inside the unit triangle is tolerant in each: jconsole answers
+/// `<. 0.49999999999999j0.5` with `0j1` where the exact comparison gives
+/// `0`, and `9!:19 ] 0` and `<.!.0` both put it back. The TIE between the
+/// two fractional parts is exact under J and tolerant under APL, which is
+/// what parts them: GNU APL answers that same argument with `1`, having
+/// read `r` and `s` as equal and taken the real step.
+pub fn floor(z: Cx, tol: Tol) -> Cx {
     let (bx, by) = (z[0].floor(), z[1].floor());
     let (r, s) = (z[0] - bx, z[1] - by);
-    if r + s < 1.0 {
+    if tol.lt(r + s, 1.0) {
         [bx, by]
-    } else if r >= s {
+    } else if if tol.is_j() { r >= s } else { tol.le(s, r) } {
         [bx + 1.0, by]
     } else {
         [bx, by + 1.0]
@@ -275,17 +286,35 @@ pub fn floor(z: Cx) -> Cx {
 
 /// The ceiling is the floor reflected through the origin.
 #[inline]
-pub fn ceil(z: Cx) -> Cx {
-    neg(floor(neg(z)))
+pub fn ceil(z: Cx, tol: Tol) -> Cx {
+    neg(floor(neg(z), tol))
+}
+
+/// The quotient by the textbook conjugate formula, `y * (+ x) % |x|^2`.
+///
+/// It is not [`div`], which scales the denominator to keep it from
+/// overflowing, and the difference is deliberate: the residue's rounding
+/// sits on a knife edge, and the reference's `|` divides this way where
+/// its own `%` does not. `0.12j_0.16 | 0.5j0.5` is the case that shows it —
+/// the quotient here is `1.4999999999999998j1.5`, one ulp under the
+/// half-integer the scaled division lands exactly on, so the floor takes
+/// the imaginary step rather than the real one. The overflow follows the
+/// formula too: `(1e200j1e200) | (1e300j1e300)` is a NaN there, which is a
+/// squared denominator reaching infinity, and `(1e_320j1e_320) | (1j1)`
+/// is a NaN the same way, the denominator underflowing to zero.
+#[inline]
+fn div_conjugate(a: Cx, b: Cx) -> Cx {
+    let d = b[0] * b[0] + b[1] * b[1];
+    [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d]
 }
 
 /// `x | y`: y reduced modulo x, with the complex floor doing the rounding.
 #[inline]
-pub fn residue(x: Cx, y: Cx) -> Cx {
+pub fn residue(x: Cx, y: Cx, tol: Tol) -> Cx {
     if x[0] == 0.0 && x[1] == 0.0 {
         return y;
     }
-    sub(y, mul(x, floor(div(y, x))))
+    sub(y, mul(x, floor(div_conjugate(y, x), tol)))
 }
 
 /// The Gaussian-integer greatest common divisor, by Euclid with the nearest
@@ -568,10 +597,16 @@ mod tests {
 
     #[test]
     fn complex_floor_keeps_the_residue_inside_the_unit_disc() {
-        assert_eq!(floor([3.0, 4.0]), [3.0, 4.0]);
-        assert_eq!(floor([0.6, 0.8]), [0.0, 1.0]);
-        assert_eq!(floor([3.5, 4.5]), [4.0, 4.0]);
-        assert!(close(residue([5.0, 0.0], [3.0, 4.0]), [3.0, -1.0]));
+        let j = Tol::J;
+        assert_eq!(floor([3.0, 4.0], j), [3.0, 4.0]);
+        assert_eq!(floor([0.6, 0.8], j), [0.0, 1.0]);
+        assert_eq!(floor([3.5, 4.5], j), [4.0, 4.0]);
+        assert!(close(residue([5.0, 0.0], [3.0, 4.0], j), [3.0, -1.0]));
+        // The unit-triangle test is tolerant, the tie between the parts is
+        // not: jconsole answers `0j1` here and GNU APL `1`.
+        assert_eq!(floor([0.49999999999999, 0.5], j), [0.0, 1.0]);
+        assert_eq!(floor([0.49999999999999, 0.5], Tol::APL), [1.0, 0.0]);
+        assert_eq!(floor([0.49999999999999, 0.5], Tol::EXACT), [0.0, 0.0]);
     }
 
     #[test]

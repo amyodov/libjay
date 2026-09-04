@@ -249,6 +249,26 @@
 ? the same, with an infinity for the other value
 < _
 > j: _.
+= (1.0 1.0) = (_. _.)
+? the reference's own atom and one-item answers are 0, which contradict this one
+< 0 0
+> j: 1 1
+= (1.0 1.0) ~: (_. _.)
+? the same question negated: 0 0 there, 1 1 here
+< 1 1
+> j: 0 0
+= (2.0 4.0 6.0) = (_. 1 2)
+? the same over a list with one NaN in it
+< 0 0 0
+> j: 1 0 0
+= (1.0 1.0) <: (_. _.)
+? the ordering that is `not above`, which a NaN passes there
+< 0 0
+> j: 1 1
+= (1.0 1.0) >: (_. _.)
+? the ordering that is `not below`, which a NaN passes there
+< 0 0
+> j: 1 1
 = (1x) I. 2
 ? the reference's own two-bound answer contradicts this one
 < 1
@@ -531,6 +551,22 @@
 ? the reference widens a one-item NaN root to the complex type and a two-item one not
 < 8
 > j: 16
+= (_.) ^ (0.5)
+? the reference widens a one-item NaN power to the complex type, as it does the root
+< _.
+> j: _.j_.
+= _. ^ _.
+? the reference refuses the NaN power of a NaN where the same pair at three items answers
+< _.
+> j: <error>
+= 2 %: (_.)
+? the reference refuses a one-item NaN root by a real where its own monadic root answers
+< _.
+> j: <error>
+= 0 ^ _.
+? a zero base takes no NaN exponent there: the answer is a plain 0
+< _.
+> j: 0
 = (1.5 2.5 _0.5) ^. (0)
 ? every cell of this answers on its own there and the list of them does not
 < __ __ _j_
