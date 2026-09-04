@@ -32,7 +32,13 @@ feature — that is a promise, not a refusal.
   the argument was complex, `*.` always float, a root as the division it is
   written from. The tables are the oracle's, measured cell by cell; `u:`
   answers in J's two-byte character type, which libjay does not have, and
-  that one cell is a known gap.
+  that one cell is a known gap. Where a RANKED verb's frame has no cell the
+  shape and type are learnt by running the verb on fills and asking again
+  with NUMBERS where it refused about a type; those numbers are BOOLEAN
+  zeros, the narrowest numeric type there is, so a side standing in for a
+  refused fill names no type of its own. A LOGARITHM and a ROOT are not
+  asked again at all: their frame stands alone in the boolean type and no
+  cell shape is learnt.
 - Dyadic agreement is per-language: J leading-prefix agreement (a 2×3 matrix
   pairs with a 2-vector row-wise), APL exact-shape-or-scalar.
 - A sequence's value is its last sentence's; a sentence that is an
@@ -2508,6 +2514,18 @@ oracle directly, one entry per line of
   (_5)` is `4.55654j_5.33834`), calls `!^:_1 ] 1.5` a NaN error although
   two arguments answer it, and never returns at all for the gamma minimum
   0.885603194410888.
+- THE DYADIC OUTFIX WHERE u IS EXACTLY `+/`, in its third spelling. The
+  reference has special code for `+/\.` that totals the argument once and
+  takes each outfix sum off that total, and it disagrees with the
+  reference's own ordinary path three ways: it refuses a non-numeric
+  argument with fewer items than x where `[: +/ ]` in u's place answers the
+  empty (round 5A); it gives an ATOM the shape `0 0` where `<\.` and `,/\.`
+  give `0` (round 6B); and a NaN in ANY item poisons EVERY answer, so
+  `2 +/\. (_. 1 2)` is `_. _.` there where the pieces themselves are `2`
+  and `_.`, and `_2 +/\. (_.)` is `_.` where the piece is empty and its sum
+  the fold's zero. `<./\.`, `,/\.`, `*/\.`, `+/\` and the same function
+  spelled `[: +/ ]` or `+/@:]` all answer the pieces. The NaN half carries
+  a `~ ` family rule so the arithmetic built around it matches too.
 - A REDUCTION INSIDE A CUT WHOSE ANSWER IS WHOLE. `%/ 7 1 8` is 56 and
   `<;._1 (2 7 1 8)` is the one piece `7 1 8`, but `%/;._1 (2 7 1 8)` is
   2.76677e_322 there — 56 times the smallest denormal, which is the
