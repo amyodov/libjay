@@ -14170,6 +14170,15 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         if ctx.cfg.rules.lang == crate::Lang::Apl {
             return Ok(Array::new(base.shape.clone(), Data::empty(base.dtype())));
         }
+        // A GERUND under the SUFFIXES answers the boxed empty, whatever the
+        // argument's type or rank: the verbs are handed out one per run and
+        // there is no run to hand one to, so nothing about the cells is
+        // learnt at all. `$ ((,`#)\. (i. 0 3))` is `0` in the reference and
+        // its type the boxed one, where the same gerund under the PREFIXES
+        // and under KEY takes the shape a run would have made.
+        if back && matches!(u, Verb::Cycle(_)) {
+            return Ok(Array::new(vec![0], Data::Box(Vec::new().into())));
+        }
         let cell = u.is_pure().then(|| base.clone());
         let j = ctx.cfg.rules.lang == crate::Lang::J;
         // Where the verb has nothing to say about that run at all, the
@@ -18540,6 +18549,13 @@ fn hypergeometric_at(num: &[Cx], den: &[Cx], z: Cx, terms: Option<usize>, span: 
     }
     // The first term is 1, so a count of n leaves n-1 to accumulate.
     let limit = terms.map_or(HYPERGEOMETRIC_TERMS, |n| n - 1);
+    // An INFINITE imaginary part has no series: the first product that
+    // multiplies it by a real makes a NaN, which the reference refuses —
+    // `3 (2 H. 2) (1j_)` is a NaN error there where `3 (2 H. 2) _` is `_`.
+    // A count that sums no term past the first reads none of it.
+    if limit > 0 && z[1].is_infinite() {
+        return Err(nan_of_its_own_making(span));
+    }
     let mut sum = cx::ONE;
     let mut term = cx::ONE;
     for k in 0..limit {
@@ -18554,8 +18570,15 @@ fn hypergeometric_at(num: &[Cx], den: &[Cx], z: Cx, terms: Option<usize>, span: 
         term = cx::div(cx::mul(term, ratio), [k as f64 + 1.0, 0.0]);
         if !term[0].is_finite() || !term[1].is_finite() {
             // A zero denominator parameter, or a term past the range of a
-            // double: the sum is the infinity (or NaN) the term became.
-            return Ok(term);
+            // double: the sum is the infinity the term became, unless the
+            // arithmetic has made a NaN of its own, which the reference
+            // refuses. An argument that was ALREADY a NaN travels through.
+            let total = cx::add(sum, term);
+            let wrote_nan = z[0].is_nan() || z[1].is_nan();
+            if !wrote_nan && (total[0].is_nan() || total[1].is_nan()) {
+                return Err(nan_of_its_own_making(span));
+            }
+            return Ok(total);
         }
         let before = sum;
         sum = cx::add(sum, term);
@@ -18571,6 +18594,17 @@ fn hypergeometric_at(num: &[Cx], den: &[Cx], z: Cx, terms: Option<usize>, span: 
         format!("the hypergeometric series did not converge within {HYPERGEOMETRIC_TERMS} terms"),
         span,
     ))
+}
+
+/// The refusal J answers a NaN its own arithmetic made with. A NaN the
+/// program itself wrote travels through unrefused, so the caller checks
+/// the argument before raising this.
+fn nan_of_its_own_making(span: Span) -> Error {
+    Error::new(
+        ErrorKind::Nan,
+        "the hypergeometric series has no value at an infinite argument",
+        Some(span),
+    )
 }
 
 fn hypergeometric_real(
@@ -18594,7 +18628,24 @@ fn hypergeometric_real(
         }
         term = term * ratio / (kk + 1.0);
         if !term.is_finite() {
-            return Ok(term);
+            // A zero denominator parameter, or a term past the range of a
+            // double. The sum is the infinity the term became — unless the
+            // term AFTER it points the other way, when the running total
+            // is a NaN of the arithmetic's own making and the reference
+            // refuses rather than answering: `3 (2 H. 2) _` is `_` there
+            // and `3 (2 H. 2) __` a NaN error.
+            let total = sum + term;
+            let mut next = z;
+            for a in num {
+                next *= a + kk + 1.0;
+            }
+            for b in den {
+                next /= b + kk + 1.0;
+            }
+            if (total + term * next / (kk + 2.0)).is_nan() && !z.is_nan() {
+                return Err(nan_of_its_own_making(span));
+            }
+            return Ok(total);
         }
         let before = sum;
         sum += term;

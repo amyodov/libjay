@@ -696,3 +696,18 @@ x: 3.14159265358979
 u: 0 65 66
 ? the reference's writing drops a null its own `#` counts
 ~ cause=differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text|differ:val:empty/text verb=u: also=^:,&.,M.,f.,::,:
+// The dyadic OUTFIX over an argument holding a NaN, with u exactly `+/`.
+// The reference totals the whole argument once and takes each outfix sum
+// off that total, so a NaN in ANY item poisons every answer: its
+// `2 +/\. (_. 1 2)` is `_. _.` where the pieces themselves are `2` and
+// `_.`, and its `_2 +/\. (_.)` is `_.` where the piece is empty and its
+// sum 0. `<./\.`, `,/\.` and `*/\.` over the same argument answer the
+// pieces, `+/\` (the prefixes) answers them, and so do
+// `2 ([: +/ ])\.` and `2 (+/@:])\.` — the SAME function spelled around
+// `+/`. This is the reference's special code for `+/\.` disagreeing with
+// its own ordinary path, the third spelling of the family pinned above.
+2 +/\\. (_. 1 2)
+? the same function spelled `[: +/ ]` answers the pieces there
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=+,/,\. also=_.,-,*,%,+:,-:,*:,<:,>:,|,j.,&.,&.: answers=numeric
+_2 +/\\. (_.)
+? the same where the piece is empty, so the sum should be the fold's zero

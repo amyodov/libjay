@@ -2122,7 +2122,7 @@ fn primitive(word: &str) -> Option<Prim> {
             D::Deal { origin: 0, fixed: true },
             [INF, 0, 0],
         ),
-        "{::" => prim("{::", M::MapPaths, D::Fetch, [INF, INF, INF]),
+        "{::" => prim("{::", M::MapPaths, D::Fetch, [INF, 1, INF]),
         "e." => prim("e.", M::RazeIn, D::MemberJ, [INF, INF, INF]),
         "/:" => prim(
             "/:",
@@ -4025,7 +4025,10 @@ const LARGEST_TOLERANCE: f64 = 5.820_766_091_346_741e-11;
 /// A conjunction's single numeric noun operand.
 /// One side's parameter list for `m H. n`: a numeric list, known now.
 fn series_parameters(f: &Frag, span: Span) -> Result<Vec<crate::complex::Cx>> {
-    let Some(arr) = as_const(f) else {
+    // A list written out — `(0 $ 0)`, `(i. 0)` — is as good as one typed
+    // in: what the conjunction needs is the numbers, and those settle
+    // while the sentence is parsed.
+    let Some(arr) = noun_value(f) else {
         return Err(Error::not_yet("computed hypergeometric parameters (m H. n)", span));
     };
     if arr.count() == 0 {

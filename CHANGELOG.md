@@ -67,6 +67,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   both, one nested magnitude block an item and two for a rational.
 - `__:`, the constant verb of the infinity below, which the lexer had read
   as a number and a definition's colon.
+- The FETCH `{::` has a left rank of 1, so a path of higher rank is a
+  FRAME of paths — `(2 1 $ 0 1) {:: ((1 2);(3 4))` stacks the two boxes
+  it opens — and a frame with no cell is the empty the frame spells.
+- The hypergeometric series refuses a running total that becomes a NaN of
+  the arithmetic's own making, as the reference does: `3 (2 H. 2) _` is
+  `_` where `3 (2 H. 2) __` and `3 (2 H. 2) (1j_)` have no value, and a
+  NaN the program itself wrote travels through. A parameter list written
+  out rather than typed in — `(i. 0) H. 2` — is folded where the sentence
+  is parsed instead of being refused as computed.
+- A GERUND under the OUTFIXES over an argument with no items answers the
+  boxed empty, where the same gerund under the prefixes and under key
+  takes the shape a run would have made.
 - The numbered symbol forms over an argument with NO ITEMS, which are
   answered whatever its type, since no value of one is read: `5 s: (i. 0)`
   is the boxed empty where `5 s: 5` is a domain error. `2 s:` (the names

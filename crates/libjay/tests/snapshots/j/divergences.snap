@@ -571,3 +571,11 @@
 ? the reference's writing drops a null its own `#` counts
 <  AB
 > j: AB
+= 2 +/\\. (_. 1 2)
+? the same function spelled `[: +/ ]` answers the pieces there
+< 2 _.
+> j: _. _.
+= _2 +/\\. (_.)
+? the same where the piece is empty, so the sum should be the fold's zero
+< 0
+> j: _.
