@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.4.9 — 2026-09-04
+
+### Added
+
 - The hypergeometric series reads the TERM COUNT before it refuses an
   infinity: a count that stops before the term after it leaves the
   infinity the sum reached, so `2 (2 H. 2) __` is `__` where
