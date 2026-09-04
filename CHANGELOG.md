@@ -26,6 +26,35 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   infinite counterparts are. `*. _.` reads no length and no angle and is a
   NaN error, where `+. _.` answers the two parts it was handed.
 
+- Round 8A's grammar rules, measured against jconsole. A VERB THAT NAMES A
+  VERB'S RANKS WRITES THE OPERAND BACK OUT: `u"v` runs v once to settle the
+  ranks, and thereafter it is the ranks alone — but `u:"(+:)` writes itself
+  as `u:"+:`, not as `u:"0`, in the session display and in `5!:1`, `5!:5`
+  and `5!:6` alike, and `f.` keeps the spelling. A `{{ }}` DEFINITION KEEPS
+  ITS BRACES WHEREVER IT STANDS: a session shows `{{ y + 1 }}@+:` while the
+  representation forms answer `3 : 'y + 1 '@+:`, which is two spellings of
+  one entity rather than two entities. THE GERUND A CYCLING ADVERB HOLDS is
+  written as the tie it was made from — `` >.`$`-/. ``, `` +`-\ `` — where
+  a tie of one box is simply the verb in it.
+- `". y` ANSWERS THE EMPTY WHERE THE SENTENCE PRODUCED NO NOUN. A string
+  that spells a verb or a modifier, one that gives a name to either, a
+  blank line and a comment all leave `".` with no value to hand back, and
+  the answer is a BOOLEAN empty — one empty row per row of a table
+  argument, since `".` reads a list. `". ": <a:` is therefore five empty
+  rows rather than the box drawing's text.
+- A NAME WITH NO VALUE IS A VERB in every place but the one that asks for
+  its value. `{: n` is a hook, `1 + n` a fork, `n&2` a bond and `+/ n` a
+  hook, while `n`, `n 1` and `2 n 3` are the value error they always were;
+  the reading is settled where the name stands, so a name that a `".`
+  gives a value to LATER is read as a verb here and as a noun there.
+- `u:` refuses a conversion form outside 1 to 10 and a form written as
+  anything but ONE number — `0 u: 'abc'` is a domain error and
+  `(,3) u: 'abc'` a rank error — and `7 u:` reads NUMBERS as codes into the
+  two-byte type, where it used to refuse them.
+- The four representation foreigns read ONE boxed name, at rank 0, so a
+  list of names is a frame: `5!:5 (2 $ <'a')` is two rows and
+  `5!:1 (0 $ 123x)` the empty.
+
 ### Changed
 
 ### Fixed

@@ -103,7 +103,7 @@ feature — that is a promise, not a refusal.
 | `E.` | — | find: 1 at each position of y where a copy of x begins, shaped like y's items; a pattern longer than y matches nowhere |
 | `A.` | anagram index: where the permutation y's items RANK as stands among the permutations of that length, lexicographically | the x-th permutation of y's items; a negative x counts back from the last. Characters have no anagram index monadically, as in J |
 | `C.` | a direct permutation as its cycles (each written from its largest element, the cycles ordered by those), or boxed cycles as the direct permutation. A list shorter than the permutation it names stands for one over `1 + >./ y` items | permute. A boxed x is cycles and leaves everything unmentioned in place; a numeric x is a direct permutation of y's items, ABBREVIATED where it is shorter — the items it never names come first, in ascending order, so `0 1 C. 'abcde'` is `cdeab`, `3 4 2 C. 'abcde'` is `abdec` and an atom is such a list of one. An element of a cycle is an index INTO y and counts back from the end where it is negative, so `(<_1 0) C. 1 2 3` is `3 2 1`; an index y has no item for is refused before the permutation is built, and so is a left argument that is no permutation of the items at all — the Dictionary does not define that, and the diagnostic names the value that spoils it |
-| `u:` | codepoints become characters; characters are answered with themselves. The answer is the TWO-BYTE type, so a code is read sixteen bits wide and `u: _2` is the character two below the top of that range; nothing outside `_65536` to `65535` names a character | form 3 gives codepoints, 4 the two-byte characters a run of codes names (as the monad does), 10 the four-byte ones, whose codes are thirty-two bits wide, 1 a codepoint modulo 256, 2 the same characters widened, 5 and 7 a wider character narrowed to bytes, 6 a byte PAIR read as one character least significant byte first, 8 the UTF-8 bytes of a codepoint and 9 the codepoints a run of UTF-8 bytes spells. An argument with NO ELEMENTS answers the empty of the form's own result type, whatever type it was written at |
+| `u:` | codepoints become characters; characters are answered with themselves. The answer is the TWO-BYTE type, so a code is read sixteen bits wide and `u: _2` is the character two below the top of that range; nothing outside `_65536` to `65535` names a character | form 3 gives codepoints, 4 the two-byte characters a run of codes names (as the monad does), 10 the four-byte ones, whose codes are thirty-two bits wide, 1 a codepoint modulo 256, 2 the same characters widened, 5 and 7 a wider character narrowed to bytes, 6 a byte PAIR read as one character least significant byte first, 8 the UTF-8 bytes of a codepoint and 9 the codepoints a run of UTF-8 bytes spells. 7 over NUMBERS reads them as codes, refusing one above `ffff`, which the reference writes as a surrogate pair. An argument with NO ELEMENTS answers the empty of the form's own result type, whatever type it was written at; a form outside 1 to 10 is a domain error, and a form written as anything but one number a rank error |
 | `;:` | words: J's own tokeniser over a string, one box per word. A run of numeric literals separated by blanks is ONE word (`;: '1 2 3'` has one), `NB.` swallows the rest of the line, and an unclosed quote is a parse error | the sequential machine — see below |
 | `s:` | symbols: the argument's text, interned. A character LIST carries its own delimiter in its first position, so ``s: '`a`b'`` is the two symbols `` `a `` and `` `b `` while `s: 'a b'` is the one name `" b"`, and the empty list has no delimiter and no names. A character TABLE gives one name per row with trailing blanks trimmed, the leading axes becoming the result's shape. A BOXED argument gives one name per box, the characters taken exactly as they stand — trailing blank and all. Anything else is a domain error; a box holding a rank-2 array is a rank error | the name forms: `4 s:` lays the names out as a character table, blank-padded to the longest (the shape gains that width as a trailing axis), and `5 s:` boxes them one apiece, keeping the shape. An argument with NO ELEMENTS answers the empty either form's result would have had — a name table of no rows and no columns, or no boxes at all — rather than reading its type. `0 s:` … `3 s:`, `6 s:`, `7 s:` and `_1 s:` report on an interpreter's own symbol table — how many slots it holds, which are in use, how it hashes them — and are named gaps rather than guesses |
 | `L.` | the boxing level: 0 for anything unboxed, one more than the deepest content otherwise. APL's `≡` counts the array itself as well, so the two differ by one on a simple array | — |
@@ -198,7 +198,8 @@ is cut, so those five refuse the same characters.
 
 Conjunctions: `"` (rank: 1–3 atoms, `_` = infinite, or a VERB on the right,
 which lends its own three — `u"v` is `u"(v b. 0)`, so `<"(+/)` boxes the
-whole argument and `<"(<"1)` boxes each row); `@:` (atop: monad
+whole argument and `<"(<"1)` boxes each row; the operand is kept beside the
+ranks, since the verb writes itself back out as `u"v`); `@:` (atop: monad
 `u v y`, dyad `u (x v y)`, at infinite rank) and `@` (the same thing at v's
 own ranks — one v-cell at a time, u run on each result, which is the entire
 difference between the two); `&:` (compose: monad `u v y`, dyad
@@ -520,7 +521,11 @@ reachable from APL's `⍣¯1` too. Three of them Dyalog does not hold — `⍋�
 
 `". y` (do) compiles the characters of y as a J program and runs it in the
 sentence's own scope: the names it can see are the names the sentence can
-see, in both directions, so `". 'a =. 3'` assigns where it stands. It
+see, in both directions, so `". 'a =. 3'` assigns where it stands. It reads
+a LIST, so a table is one row at a time; and where the sentence produced no
+NOUN — a verb, a modifier, a sentence that named one, a blank line, a
+comment — the answer is the boolean empty, which is what makes
+`". ": <a:` five empty rows rather than the box drawing's text. It
 reaches nothing the caller could not reach — the sandbox contract is about
 what a primitive may touch, and evaluation touches nothing new — and a
 `{name}` hole inside the string has nothing to bind to and is refused. A
@@ -540,6 +545,14 @@ assignment does. A name may change part of speech in either direction, and
 the last assignment before a sentence decides how that sentence reads; that
 is enough for the straight-line programs this frontend compiles, since
 there is no control flow for a definition to reach backwards through.
+A name with NO value is a VERB in every place but the one that asks for its
+value: `{: n` is a hook, `1 + n` a fork, `n&2` a bond and `n"0` an entity
+the session writes back out, while `n`, `n 1` and `2 n 3` are the value
+error the reference gives them. The reading is settled where the name
+stands, which is what lets `n` be the verb a train needs before anything
+has been given to it — except where the sentence ITSELF assigns the name,
+since the reference would have run that assignment first.
+
 Naming a bare adverb or conjunction — `m =. /`, `c =. @` — works the same
 way and for the same reason: a modifier is applied while the sentence
 holding it is parsed, so the name has to be resolved then, and from the
@@ -1925,8 +1938,12 @@ the `:` conjunction over its valence and its body in all four — the body a
 character vector for a body of one line, a character matrix for more, and
 the `0 1` matrix for none — whichever way the source spelled it, and a
 `{{ … }}` therefore represents itself as `3 : '…'` although a session
-DISPLAYS it as the words between its braces. A name of modifier class
-answers for the modifier it holds: `5!:5 <'m'` after `m =: /` is `/`.
+DISPLAYS it as the words between its braces — wherever it stands, so
+`{{ y + 1 }}@+:` is what a session shows and `3 : 'y + 1 '@+:` what the
+four forms answer. A name of modifier class answers for the modifier it
+holds: `5!:5 <'m'` after `m =: /` is `/`. All four read ONE boxed name, at
+rank 0, so a list of names is a frame and an argument with no elements is
+an empty one.
 
 `5!:0` is an ADVERB — the inverse of `5!:1` — and libjay settles it while
 the sentence is read, because what the representation names decides how the
@@ -2251,13 +2268,13 @@ families are the obverse of `[` or `]` composed on the LEFT
   (`2 p: 1.5`), by no rule black-box probing could settle; libjay refuses
   all of them. The generator does not draw the form, and the register
   carries the probe grid.
-- **How a verb that names a VERB'S RANKS writes itself back out.** `u"v`
-  runs v to settle the ranks and keeps only the ranks, so `u:"(+:)` is
-  written `u:"0` here and `u:"+:` there. The two verbs are the same verb;
-  only the spelling parts. The same holds for a `{{ }}` definition that
-  stands as a modifier's OPERAND, which a session writes in its braces
-  there and in its header spelling here — `5!:5` gives the header spelling
-  on both sides, so only the display parts.
+- **`u"n` over a GERUND.** `u"v` now writes its operand back out, and a
+  `{{ }}` definition keeps its braces wherever it stands; the one rank
+  spelling left is a gerund's. The reference writes the boxed data itself
+  there — `` +`-"0 `` is `(;:'+-')"0` — where the same gerund under `/.`,
+  `\`, `\.` and `;.` is written as the tie. libjay has no spelling for a
+  boxed noun that is not a tie, so it stays a gap rather than being written
+  the other way.
 - **THE NULL CHARACTER, WRITTEN OUT.** A session shows a character array by
   writing its characters, and the reference's writing drops a null:
   `u: 0 65 66` is `AB` there and a null before the `AB` here, though its own
@@ -2266,22 +2283,19 @@ families are the obverse of `[` or `]` composed on the LEFT
   Pinned, with a family rule for its spellings. Inside a BOX the two agree:
   a character that moves the cursor — the null, the backspace, the tab, the
   newline and the return — is a blank in a cell on both sides.
-- **`". y` where the sentence yields an ENTITY.** A string that spells a
-  verb — `". '+-+'`, and every row of the box drawing `": <a:` makes — is
-  the empty there, one empty row per row of the argument, because nothing
-  the execution produced was a noun. Here the sentence's own display text
-  is the value, which is what a verb sentence answers at the top level; the
-  two readings part only under `".`, and telling them apart would mean
-  carrying the sentence's part of speech through the compiled program.
-- **An UNDEFINED NAME to the RIGHT of a verb.** The reference reads a name
-  with no value as a VERB, so `{: n` is a hook it writes back out and
-  `1 + n` a fork, while a sentence that needs the name's value — `n + 1`,
-  `n 1`, `n` alone — is a value error there as it is here. libjay reads
-  such a name as a verb wherever the sentence would otherwise be an error
-  (`n {:`, `1 + n`, `+: n {:`), which is every position but the one where
-  the verb beside it would APPLY to it: a name is looked up when the
-  program runs, not when it compiles, so `{: n` cannot be settled at
-  compile time without breaking a name that a `".` gives a value to later.
+- **WHEN a name with no value is looked up.** The reading itself is the
+  reference's now — a name with no value is a VERB in every place but the
+  one that asks for its value — but the reference settles it when the
+  program RUNS and libjay when it COMPILES. A name that a `".` gives a
+  value to later is therefore a verb here and a noun there, and there is no
+  way to close that without carrying a run-time part of speech through the
+  compiled program.
+- **A four-byte code that names no character.** `10 u: _2` is the code
+  4294967294 there, which no codepoint names, and `9 u:` reads the same
+  thirty-two bits; libjay's one character type holds a codepoint and
+  refuses the rest. Pinned, with a family rule. The same width is why
+  `7 u:` refuses a code above `ffff`, which the reference writes as a
+  surrogate PAIR.
 - **The obverse of `!` off the principal branch.** `!^:_1` here is the
   smallest argument at or above zero whose factorial is the value, which is
   what the reference answers everywhere the sweep reaches. The reference

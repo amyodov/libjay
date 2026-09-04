@@ -5249,3 +5249,66 @@ the register.
   pairs behind it show: the reference keeps the NaN where both sides reach
   its float pass and loses it where one side is integer or where an atom
   stands against a longer list.
+- 2026-09-04 — a verb that names a verb's RANKS keeps the operand it was
+  written with. `u"v` runs v once to settle the three ranks and is
+  thereafter the ranks alone — nothing about what it DOES reads v again —
+  but the reference writes it back out as `u"v`: `u:"(+:)` is `u:"+:`, not
+  `u:"0`, in the session display and in `5!:1`, `5!:5` and `5!:6` alike,
+  and `f.` keeps it. The operand is therefore carried in `Ranks` beside the
+  three numbers and the atom count, which is the same place the atom count
+  is kept and for the same reason: it is part of the spelling and of
+  nothing else. It is not part of equality, and putting it there rather
+  than in `Verb::Rank` left the sixty-seven sites that match on the variant
+  alone (`Ranks` gave up `Copy` instead). `u"n` over a GERUND is the one
+  place the operand is not written back: the reference writes the boxed
+  data itself there — `(;:'+-')"0` — which is a spelling for boxed nouns
+  libjay does not have, so it stays a gap rather than being written as the
+  tie.
+- 2026-09-04 — a `{{ }}` direct definition has TWO spellings, and which one
+  is written depends on who is asking. A session shows the words between
+  its braces wherever the definition stands, nested included
+  (`{{ y + 1 }}@+:`, `+:@({{ y + 1 }})`); `5!:5` and `5!:6` answer the
+  header phrase (`3 : 'y + 1 '@+:`). The body the phrase quotes is the
+  source between the braces with its LEADING whitespace stripped and its
+  trailing kept, which is what makes the two forms round-trip: the display
+  is `{{ ` and that body and `}}`. The atomic representation carries a node
+  whose spelling is its own and whose data is the phrase, so one tree
+  serves both and a gerund still reads the phrase.
+- 2026-09-04 — `". y` answers the EMPTY where the sentence produced no
+  noun. A string that spells a verb, an adverb or a conjunction produces an
+  entity, which is not a value the execution can hand back; so does a
+  string that gives a name to one, and one that runs nothing at all — a
+  blank line, a comment. The answer is a BOOLEAN empty in every case, and
+  `".` reads a LIST, so a table argument answers one empty row per row.
+  `". ": <a:` is five empty rows rather than the text of the box drawing,
+  which is what a verb sentence answers at the top level and nowhere else.
+- 2026-09-04 — a NAME WITH NO VALUE IS A VERB, in every place but the one
+  that asks for its value. The reference reads it as one wherever the
+  sentence has a reading for a verb there — `{: n` is a hook, `1 + n` a
+  fork, `+/ n` a hook, `n&2` a bond, `n"0` and `n^:2` and `n@+:` all
+  entities it writes back out — and reports the missing value only when the
+  entity is APPLIED, which is what makes `n`, `n 1`, `2 n 3` and `n ] 3`
+  value errors on both sides. Round 7A had followed the rule in train
+  positions alone; it is now the rule everywhere, decided by the parse rule
+  that was about to read the name as a noun. The one place left out is
+  `u"v`, whose operand has to lend its ranks while the sentence is
+  compiled. A name is looked up when the program RUNS there and when it is
+  COMPILED here, so a name that a `".` gives a value to later is a verb
+  here and a noun there; that is the price of compiling ahead, and it is
+  the same price `n` has paid since round 7A. A name the SENTENCE ITSELF
+  assigns is exempt: the reference runs a sentence from the right as it
+  reads it, so `(u:) n [ n =. 2` has given n a value by the time the left
+  of it is read, and a scan of the sentence for its assignment targets is
+  what keeps such a name a noun here too.
+- 2026-09-04 — the four representation foreigns read ONE boxed name, at
+  rank 0. `5!:1`, `5!:2`, `5!:5` and `5!:6` frame over a list of names —
+  `5!:5 (2 $ <'a')` is two rows, padded as any frame is — and an argument
+  with no elements is an empty frame whatever it was written as, which is
+  what `5!:1 (0 $ 123x)` and `5!:5 (1 0 1 $ 5)` answer.
+- 2026-09-04 — `u:` has ten conversion forms and no others: a form outside
+  1 to 10 is a domain error whatever the argument holds, and the form is
+  ONE number, so a list of them is a rank error before the form is read at
+  all. `7 u:` reads NUMBERS as codes into the two-byte type; a code above
+  the sixteen bits that type holds is written there as a surrogate PAIR,
+  which libjay's one character type has no half of, so that much stays a
+  gap.
