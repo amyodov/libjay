@@ -116,14 +116,18 @@ fn a_binary_form_that_is_not_one_is_refused(#[case] src: &str, #[case] kind: Err
     assert_eq!(refusal(src).kind, kind, "{src}");
 }
 
-/// The exact types are the one hole left in the family, and it says so.
+/// An exact value survives the round trip through its bytes, sign, digit
+/// count and every digit: a rational, a number too wide for one digit, and
+/// the zero that has no digits at all.
 #[rstest]
-#[case("3!:1 ] 1r2")]
-#[case("3!:1 ] 123456789012345678901x")]
-fn the_exact_types_have_no_binary_form_yet(#[case] src: &str) {
-    let e = refusal(src);
-    assert_eq!(e.kind, ErrorKind::NotYet, "{src}: {}", e.msg);
-    assert!(e.msg.contains("binary representation"), "{src}: {}", e.msg);
+#[case("1r2 1r3")]
+#[case("123456789012345678901x")]
+#[case("_18446744073709551617x")]
+#[case("0x")]
+#[case("1 2 3x")]
+fn an_exact_value_survives_its_binary_form(#[case] value: &str) {
+    let src = format!("3!:2 (3!:1 ({value}))");
+    assert_eq!(text(&src), text(&format!("] {value}")), "{src}");
 }
 
 // ------------------------------------------------------ 3!:4 and 3!:5

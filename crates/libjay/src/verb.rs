@@ -15958,10 +15958,10 @@ fn matrix_divide(
     span: Span,
 ) -> Result<Array> {
     // An ATOM on the right is no matrix: the system it names has one
-    // unknown and one equation per item of x, and the reference answers
-    // the items' SUM over that atom — `(1 2) %. 4` is 0.75, and `2 %. 0`
-    // the infinity the plain division gives.
-    if y.rank() == 0 && y.count() == 1 {
+    // unknown and one equation per item of x, and J answers the items' SUM
+    // over that atom — `(1 2) %. 4` is 0.75, and `2 %. 0` the infinity the
+    // plain division gives. APL's `⌹` refuses a scalar divisor instead.
+    if y.rank() == 0 && y.count() == 1 && cfg.rules.lang == crate::Lang::J {
         // No item sums to zero, of the shape one item would have had.
         let mut total = if x.rank() == 0 {
             x.clone()

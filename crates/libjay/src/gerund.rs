@@ -292,6 +292,16 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
             "H.",
             vec![Ar::Noun(cx_noun(num)), Ar::Noun(cx_noun(den))],
         ),
+        // A NAME with nothing under it stands for a verb, and writes itself
+        // back out as the name. Every other deferral has a spelling that is
+        // not a name (`u^:n`, `n}`) or a locale to choose between.
+        Verb::Deferred(d)
+            if d.choices.is_empty()
+                && crate::verb::is_name(&d.spelling)
+                && matches!(&d.operand, crate::ir::Expr::Name(n, _) if *n == d.spelling) =>
+        {
+            Some(Ar::Prim(d.spelling.clone()))
+        }
         // `u . v` — J's inner product. APL's `f.g` is the same node under
         // a spelling J does not have.
         Verb::InnerProduct { u, v, apl: false } => {

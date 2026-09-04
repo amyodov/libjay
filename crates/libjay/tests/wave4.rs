@@ -165,14 +165,22 @@ fn unicode_converts_in_the_direction_the_form_asks_for() {
     assert_eq!(val(Lang::J, "9 u: 8 u: 10 u: 955"), text(&[1], "λ"));
     assert_eq!(val(Lang::J, "3 u: 1 u: 10 u: 955"), i64s(&[], &[187]));
     assert_eq!(val(Lang::J, "2 u: 'ab'"), text(&[2], "ab"));
-    // A form the reference gives no meaning to, and a fit only characters
-    // can take.
-    let e = err(Lang::J, "4 u: 'ab'");
-    assert_eq!(e.kind, ErrorKind::NotYet);
-    assert!(e.msg.contains("unicode conversion form"), "{}", e.msg);
+    // Form 4 reads codes into the two-byte type, as the monad does, and
+    // takes numbers alone; forms that convert characters take no number.
+    assert_eq!(val(Lang::J, "3 u: 4 u: 65"), i64s(&[], &[65]));
+    assert_eq!(err(Lang::J, "4 u: 'ab'").kind, ErrorKind::Domain);
     assert_eq!(err(Lang::J, "1 u: 955").kind, ErrorKind::Domain);
-    // Not a codepoint at all.
-    assert_eq!(err(Lang::J, "10 u: _1").kind, ErrorKind::Domain);
+    // A code is read as wide as the type that holds it, so a negative one
+    // names a character near the top of that range and nothing outside it
+    // names a character at all.
+    assert_eq!(val(Lang::J, "3 u: u: _2"), i64s(&[], &[65534]));
+    // The four-byte type's own width reaches past what a character is:
+    // `10 u: _2` asks for the code 4294967294, which no codepoint names,
+    // and libjay holds codepoints alone.
+    assert_eq!(err(Lang::J, "10 u: _2").kind, ErrorKind::Domain);
+    assert_eq!(val(Lang::J, "3 u: 10 u: _4294901761"), i64s(&[], &[65535]));
+    assert_eq!(err(Lang::J, "u: 65536").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::J, "10 u: 4294967296").kind, ErrorKind::Domain);
 }
 
 #[test]

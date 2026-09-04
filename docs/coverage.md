@@ -2252,11 +2252,15 @@ families are the obverse of `[` or `]` composed on the LEFT
   stands as a modifier's OPERAND, which a session writes in its braces
   there and in its header spelling here — `5!:5` gives the header spelling
   on both sides, so only the display parts.
-- **An UNDEFINED NAME inside a train.** The reference reads a name with no
-  value as a verb, so `{: n` is a hook it writes back out rather than an
-  error; libjay settles a name's part of speech while the sentence is
-  parsed and reports the undefined name. A sentence that needs the name's
-  VALUE — `n + 1`, `n 1`, `n` alone — is a value error on both sides.
+- **An UNDEFINED NAME to the RIGHT of a verb.** The reference reads a name
+  with no value as a VERB, so `{: n` is a hook it writes back out and
+  `1 + n` a fork, while a sentence that needs the name's value — `n + 1`,
+  `n 1`, `n` alone — is a value error there as it is here. libjay reads
+  such a name as a verb wherever the sentence would otherwise be an error
+  (`n {:`, `1 + n`, `+: n {:`), which is every position but the one where
+  the verb beside it would APPLY to it: a name is looked up when the
+  program runs, not when it compiles, so `{: n` cannot be settled at
+  compile time without breaking a name that a `".` gives a value to later.
 - **The obverse of `!` off the principal branch.** `!^:_1` here is the
   smallest argument at or above zero whose factorial is the value, which is
   what the reference answers everywhere the sweep reaches. The reference

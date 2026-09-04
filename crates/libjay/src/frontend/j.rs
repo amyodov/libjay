@@ -4628,8 +4628,9 @@ fn train_of(vs: Vec<Verb>, span: Span) -> Result<Frag> {
 
 fn apply_fork(f: Frag, g: Frag, h: Frag, scope: &Names) -> Result<Frag> {
     let span = Span::merge(Span::merge(f.span(), g.span()), h.span());
-    let (gv, _) = as_verb(g)?;
-    let (hv, _) = as_verb(h)?;
+    let f = as_train_part(f, scope)?;
+    let (gv, _) = as_verb(as_train_part(g, scope)?)?;
+    let (hv, _) = as_verb(as_train_part(h, scope)?)?;
     match f {
         // `[: g h` is g atop h: the left tine produces nothing to fork
         // over. The spelling is kept so that the verb writes itself back
@@ -4705,12 +4706,63 @@ fn built_noun_fork(
     Ok(Verb::NounFork(a.clone(), g.clone(), h.clone()))
 }
 
+/// A NAME with nothing under it, standing where a train wants a verb.
+///
+/// The reference reads such a name as a VERB: `{: n` is a hook it writes
+/// back out, `1 + n` a fork, and the missing value is reported only when
+/// the train is applied — which is what evaluating the name does here. A
+/// name that is not part of a train (`n` alone, `n 1`) never reaches this:
+/// there the value is what the sentence asked for.
+fn undefined_name_verb(name: &str, span: Span) -> Frag {
+    let deferred = crate::verb::Deferred {
+        operand: Expr::Name(name.to_string(), span),
+        template: verb_for("]").expect("`]` is a primitive"),
+        build: built_undefined_name,
+        spelling: name.to_string(),
+        choices: HashMap::new(),
+    };
+    Frag::Verb(VerbFrag::V(Verb::Deferred(std::sync::Arc::new(deferred))), span)
+}
+
+fn built_undefined_name(
+    _template: &Verb,
+    _operand: &Array,
+    span: Span,
+    _rules: crate::frontend::Rules,
+) -> Result<Verb> {
+    Err(Error::not_yet("a train over a name that held a noun where it was written", span))
+}
+
+/// The fragment a train should use for `f`: the name read as a verb where
+/// it has no value, and the fragment itself otherwise.
+fn as_train_part(f: Frag, scope: &Names) -> Result<Frag> {
+    let Frag::Name(n, span) = &f else { return Ok(f) };
+    if scope.is_noun(n) {
+        return Ok(f);
+    }
+    // An indirect locative's locale is a value, so what part of speech the
+    // name has is not known until the program runs; libjay reads one as a
+    // noun and names the verb reading as a gap.
+    if crate::verb::split_indirect(n).is_some() {
+        return Err(Error::not_yet(
+            format!("a verb named by the indirect locative `{n}`"),
+            *span,
+        ));
+    }
+    Ok(undefined_name_verb(n, *span))
+}
+
 fn apply_bident(a: Frag, b: Frag, scope: &Names) -> Result<Frag> {
     let span = Span::merge(a.span(), b.span());
-    // A name here is not a verb, or it would have been substituted; if it
-    // is not a value either, that is what is wrong with the sentence, and
-    // it is what the reference reports.
-    if let Frag::Name(n, nspan) = &a && !scope.is_noun(n) {
+    // A name here is not a verb, or it would have been substituted. Where
+    // the word beside it IS one the two make a train, and the reference
+    // reads a name with no value as the verb such a train needs. Where it
+    // is not, the name is what the sentence asked the value of, and the
+    // missing value is what is wrong with it.
+    let a = if b.is_real_verb() { as_train_part(a, scope)? } else { a };
+    if let Frag::Name(n, nspan) = &a
+        && !scope.is_noun(n)
+    {
         // An indirect locative's locale is a value, so what part of speech
         // the name has is not known until the program runs. libjay reads
         // one as a noun; a VERB spelled that way is a named gap rather than
