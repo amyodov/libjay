@@ -615,3 +615,15 @@
 ? the same where the piece is empty, so the sum should be the fold's zero
 < 0
 > j: _.
+= 10 u: _2
+? a four-byte code is a value there and a codepoint here
+< <error>
+> j: ￿�
+= 9 u: _3
+? the same over the other form that answers the four-byte type
+< <error>
+> j: ￿�
+= 128!:3 (u: 2)
+? the reference refuses the widened type, not the bytes in it
+< 1007455905
+> j: <error>

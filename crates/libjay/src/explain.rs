@@ -111,6 +111,9 @@ fn expr_lines(e: &Expr, depth: usize, p: &Program, tr: &Trace, out: &mut String)
         Expr::Const(a, _) => {
             let _ = writeln!(out, "{pad}const {}{}", brief(a), note(e, tr));
         }
+        Expr::Entity(a, _) => {
+            let _ = writeln!(out, "{pad}entity {}{}", brief(a), note(e, tr));
+        }
         Expr::Param(i, _) => {
             let name = p.params.get(*i).map_or("?", |s| s.name.as_str());
             let _ = writeln!(out, "{pad}{{{name}}}{}", note(e, tr));

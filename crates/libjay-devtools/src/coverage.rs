@@ -584,6 +584,7 @@ impl Walker<'_> {
     fn expr(&mut self, e: &Expr, at: Option<usize>) {
         match e {
             Expr::Const(..)
+            | Expr::Entity(..)
             | Expr::Param(..)
             | Expr::Name(..)
             | Expr::Input { .. }

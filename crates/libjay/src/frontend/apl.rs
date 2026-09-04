@@ -4592,6 +4592,7 @@ fn set_scopes(e: &mut Expr, own: &[String]) {
         }
     };
     match e {
+        Expr::Entity(..) => {}
         Expr::Assign { name, value, scope, .. } => {
             *scope = pick(name);
             set_scopes(value, own);

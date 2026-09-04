@@ -22,6 +22,12 @@ pub enum Ar {
     Derived(String, Vec<Ar>),
     /// A hook (two parts) or a fork (three).
     Train(Vec<Ar>),
+    /// A DIRECT DEFINITION as the source spelled it, with the `n : '…'`
+    /// phrase it stands for beside it. The reference has two paths where
+    /// everything else has one: a session DISPLAYS `{{ y + 1 }}` and the
+    /// representation forms answer `3 : 'y + 1 '`, so this node is built
+    /// only for the display and delegates everything else to the phrase.
+    Direct(String, Box<Ar>),
 }
 
 fn chars(s: &str) -> Array {
@@ -50,6 +56,7 @@ impl Ar {
                 let tag = if ops.len() == 2 { "2" } else { "3" };
                 pair(chars(tag), boxes(ops.iter().map(Ar::to_array).collect()))
             }
+            Ar::Direct(_, inner) => inner.to_array(),
         }
     }
 
@@ -110,6 +117,7 @@ fn part_rep(ar: &Ar) -> Array {
             boxes(items)
         }
         Ar::Train(ops) => boxes(ops.iter().map(part_rep).collect()),
+        Ar::Direct(_, inner) => part_rep(inner),
     }
 }
 
@@ -130,7 +138,7 @@ pub fn gerund_array(items: &[Ar]) -> Array {
 }
 
 /// A rank specification as the noun `u"n` was given.
-fn rank_noun(r: crate::verb::Ranks) -> Array {
+fn rank_noun(r: &crate::verb::Ranks) -> Array {
     let one = |v: i64| {
         if v == RANK_INF {
             f64::INFINITY
@@ -200,6 +208,17 @@ fn power_noun(p: &Power) -> Option<Array> {
 /// spelling to give it — a verb from the APL frontend, or one whose parts
 /// the tree no longer names.
 pub fn verb_ar(v: &Verb) -> Option<Ar> {
+    verb_ar_mode(v, false)
+}
+
+/// [`verb_ar`] for what a SESSION shows, where a direct definition is the
+/// words between its braces rather than the header phrase the
+/// representation forms answer.
+pub fn verb_ar_display(v: &Verb) -> Option<Ar> {
+    verb_ar_mode(v, true)
+}
+
+fn verb_ar_mode(v: &Verb, direct: bool) -> Option<Ar> {
     let der = |s: &str, ops: Vec<Ar>| Some(Ar::Derived(s.to_string(), ops));
     match v {
         // `m b.` is a truth table with no spelling of its own left in the
@@ -209,53 +228,53 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         // A noun operand to `@` is the constant verb, and writes itself
         // back out as the noun it was: `*:@_1 2`, not `*:@(_1 2"_)`.
         Verb::Constant(m) => Some(Ar::Noun(m.clone())),
-        Verb::Rank(inner, r) => rank_ar(inner, *r),
-        Verb::Reduce(u) => der("/", vec![verb_ar(u)?]),
-        Verb::Windowed(u, WindowKind::Prefix) => der("\\", vec![verb_ar(u)?]),
-        Verb::Windowed(u, WindowKind::Suffix) => der("\\.", vec![verb_ar(u)?]),
+        Verb::Rank(inner, r) => rank_ar(inner, r, direct),
+        Verb::Reduce(u) => der("/", vec![verb_ar_mode(u, direct)?]),
+        Verb::Windowed(u, WindowKind::Prefix) => der("\\", vec![verb_ar_mode(u, direct)?]),
+        Verb::Windowed(u, WindowKind::Suffix) => der("\\.", vec![verb_ar_mode(u, direct)?]),
         Verb::Windowed(_, WindowKind::Scan) => None,
-        Verb::Commute(u) => der("~", vec![verb_ar(u)?]),
-        Verb::PowerN(u, p) => der("^:", vec![verb_ar(u)?, Ar::Noun(power_noun(p)?)]),
-        Verb::PowerV(u, w) => der("^:", vec![verb_ar(u)?, verb_ar(w)?]),
-        Verb::Fork(f, g, h) => Some(Ar::Train(vec![verb_ar(f)?, verb_ar(g)?, verb_ar(h)?])),
+        Verb::Commute(u) => der("~", vec![verb_ar_mode(u, direct)?]),
+        Verb::PowerN(u, p) => der("^:", vec![verb_ar_mode(u, direct)?, Ar::Noun(power_noun(p)?)]),
+        Verb::PowerV(u, w) => der("^:", vec![verb_ar_mode(u, direct)?, verb_ar_mode(w, direct)?]),
+        Verb::Fork(f, g, h) => Some(Ar::Train(vec![verb_ar_mode(f, direct)?, verb_ar_mode(g, direct)?, verb_ar_mode(h, direct)?])),
         Verb::NounFork(n, g, h) => {
-            Some(Ar::Train(vec![Ar::Noun(n.clone()), verb_ar(g)?, verb_ar(h)?]))
+            Some(Ar::Train(vec![Ar::Noun(n.clone()), verb_ar_mode(g, direct)?, verb_ar_mode(h, direct)?]))
         }
-        Verb::Hook(f, g) => Some(Ar::Train(vec![verb_ar(f)?, verb_ar(g)?])),
+        Verb::Hook(f, g) => Some(Ar::Train(vec![verb_ar_mode(f, direct)?, verb_ar_mode(g, direct)?])),
         // `[: f g` is the fork whose left tine is the cap, and that is how
         // it is written back out: a three-part train with `[:` in front.
         Verb::Atop(f, g, AtopForm::Cap) => Some(Ar::Train(vec![
             Ar::Prim("[:".to_string()),
-            verb_ar(f)?,
-            verb_ar(g)?,
+            verb_ar_mode(f, direct)?,
+            verb_ar_mode(g, direct)?,
         ])),
-        Verb::Atop(f, g, AtopForm::At) => match under_ar(f, g, "&.:") {
+        Verb::Atop(f, g, AtopForm::At) => match under_ar(f, g, "&.:", direct) {
             Some(ar) => Some(ar),
-            None => der("@:", vec![verb_ar(f)?, verb_ar(g)?]),
+            None => der("@:", vec![verb_ar_mode(f, direct)?, verb_ar_mode(g, direct)?]),
         },
-        Verb::Compose(f, g) => der("&:", vec![verb_ar(f)?, verb_ar(g)?]),
-        Verb::BondLeft(m, u) => der("&", vec![Ar::Noun(m.clone()), verb_ar(u)?]),
-        Verb::BondRight(u, n) => der("&", vec![verb_ar(u)?, Ar::Noun(n.clone())]),
+        Verb::Compose(f, g) => der("&:", vec![verb_ar_mode(f, direct)?, verb_ar_mode(g, direct)?]),
+        Verb::BondLeft(m, u) => der("&", vec![Ar::Noun(m.clone()), verb_ar_mode(u, direct)?]),
+        Verb::BondRight(u, n) => der("&", vec![verb_ar_mode(u, direct)?, Ar::Noun(n.clone())]),
         Verb::Each(u, Enclose::Always) => {
-            der("&.", vec![verb_ar(u)?, Ar::Prim(">".to_string())])
+            der("&.", vec![verb_ar_mode(u, direct)?, Ar::Prim(">".to_string())])
         }
         Verb::Each(_, Enclose::ExceptSimpleScalar) => None,
-        Verb::Fit(u, n) => der("!.", vec![verb_ar(u)?, Ar::Noun(Array::scalar_f64(*n))]),
+        Verb::Fit(u, n) => der("!.", vec![verb_ar_mode(u, direct)?, Ar::Noun(Array::scalar_f64(*n))]),
         Verb::Amend(m) => der("}", vec![Ar::Noun(m.clone())]),
-        Verb::AmendVerb(u) => der("}", vec![verb_ar(u)?]),
-        Verb::Memo(u, _) => der("M.", vec![verb_ar(u)?]),
+        Verb::AmendVerb(u) => der("}", vec![verb_ar_mode(u, direct)?]),
+        Verb::Memo(u, _) => der("M.", vec![verb_ar_mode(u, direct)?]),
         Verb::Level { u, levels, spread } => der(
             if *spread { "S:" } else { "L:" },
-            vec![verb_ar(u)?, Ar::Noun(rank_noun(*levels))],
+            vec![verb_ar_mode(u, direct)?, Ar::Noun(rank_noun(levels))],
         ),
-        Verb::Characteristics(u) => der("b.", vec![verb_ar(u)?]),
-        Verb::Key(u) => der("/.", vec![verb_ar(u)?]),
-        Verb::Cut(u, n) => der(";.", vec![verb_ar(u)?, Ar::Noun(Array::scalar_i64(*n))]),
-        Verb::Adverse(u, w) => der("::", vec![verb_ar(u)?, verb_ar(w)?]),
-        Verb::WithObverse(u, w) => der(":.", vec![verb_ar(u)?, verb_ar(w)?]),
+        Verb::Characteristics(u) => der("b.", vec![verb_ar_mode(u, direct)?]),
+        Verb::Key(u) => der("/.", vec![verb_ar_mode(u, direct)?]),
+        Verb::Cut(u, n) => der(";.", vec![verb_ar_mode(u, direct)?, Ar::Noun(Array::scalar_i64(*n))]),
+        Verb::Adverse(u, w) => der("::", vec![verb_ar_mode(u, direct)?, verb_ar_mode(w, direct)?]),
+        Verb::WithObverse(u, w) => der(":.", vec![verb_ar_mode(u, direct)?, verb_ar_mode(w, direct)?]),
         Verb::Agenda(vs, w) => {
             let items: Option<Vec<Ar>> = vs.iter().map(verb_ar).collect();
-            der("@.", vec![Ar::Noun(gerund_array(&items?)), verb_ar(w)?])
+            der("@.", vec![Ar::Noun(gerund_array(&items?)), verb_ar_mode(w, direct)?])
         }
         Verb::Evoke(vs, n) => {
             let items: Option<Vec<Ar>> = vs.iter().map(verb_ar).collect();
@@ -264,19 +283,32 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
                 vec![Ar::Noun(gerund_array(&items?)), Ar::Noun(Array::scalar_i64(*n))],
             )
         }
+        // The GERUND an adverb cycles through is written as the tie it was
+        // made from: `` $`$/. `` and `` +`-\ ``, where the operand of the
+        // adverb is the boxed data itself. A tie of one box is the verb it
+        // holds, which is what the reference writes `` (<'+')/. `` back
+        // out as.
+        Verb::Cycle(vs) => match vs.as_slice() {
+            [only] => verb_ar_mode(only, direct),
+            _ => {
+                let items: Option<Vec<Ar>> =
+                    vs.iter().map(|w| verb_ar_mode(w, direct)).collect();
+                Some(Ar::Noun(gerund_array(&items?)))
+            }
+        },
         Verb::SelfRef => Some(Ar::Prim("$:".to_string())),
         // An explicit definition is the `:` conjunction over its valence
         // and its body, whichever way the source spelled it.
-        Verb::Explicit(def) => def.rep.as_ref().map(explicit_ar),
+        Verb::Explicit(def) => def.rep.as_ref().map(|r| explicit_ar_mode(r, direct)),
         // `u : v` — one verb out of two, which is the same conjunction
         // over two VERB operands.
-        Verb::Ambivalent(u, w) => der(":", vec![verb_ar(u)?, verb_ar(w)?]),
+        Verb::Ambivalent(u, w) => der(":", vec![verb_ar_mode(u, direct)?, verb_ar_mode(w, direct)?]),
         // `u&.,` is written with the ravel it is an under of.
         Verb::UnderRavel(u) => {
-            der("&.", vec![verb_ar(u)?, Ar::Prim(",".to_string())])
+            der("&.", vec![verb_ar_mode(u, direct)?, Ar::Prim(",".to_string())])
         }
         // `u!.f` where the fit is a FILL: the fill stands as its own noun.
-        Verb::Fill(u, f) => der("!.", vec![verb_ar(u)?, Ar::Noun(f.array())]),
+        Verb::Fill(u, f) => der("!.", vec![verb_ar_mode(u, direct)?, Ar::Noun(f.array())]),
         // `|.!.f` is the rotate with a fill, and the rotate is what it is
         // written from.
         Verb::ShiftFill(f) => {
@@ -305,10 +337,21 @@ pub fn verb_ar(v: &Verb) -> Option<Ar> {
         // `u . v` — J's inner product. APL's `f.g` is the same node under
         // a spelling J does not have.
         Verb::InnerProduct { u, v, apl: false } => {
-            der(".", vec![verb_ar(u)?, verb_ar(v)?])
+            der(".", vec![verb_ar_mode(u, direct)?, verb_ar_mode(v, direct)?])
         }
         _ => None,
     }
+}
+
+/// The representation of an explicit definition, as a session shows it: a
+/// direct definition keeps the words between its braces, and everything
+/// else is the `:` phrase.
+fn explicit_ar_mode(rep: &crate::ir::ExplicitRep, direct: bool) -> Ar {
+    let ar = explicit_ar(rep);
+    if direct && rep.direct {
+        return Ar::Direct(rep.display(), Box::new(ar));
+    }
+    ar
 }
 
 /// The representation of an explicit definition: the valence and the body
@@ -365,7 +408,12 @@ fn paren_spell(ar: &Ar) -> Option<(String, bool)> {
     }
     match ar {
         Ar::Prim(s) => Some((word(s), true)),
-        Ar::Noun(a) => Some((noun_text(a)?, true)),
+        // A TIE is not one word: `5!:6` brackets it as it brackets anything
+        // else a modifier made, `((>.`$)`-)/.`.
+        Ar::Noun(a) => {
+            let tie = a.rank() == 1 && a.as_boxes().is_some_and(|b| b.len() > 1);
+            Some((noun_text(a)?, !tie))
+        }
         Ar::Derived(sp, ops) => {
             let text = match ops.as_slice() {
                 [u] => join(&bracketed(u)?, &word(sp)),
@@ -381,6 +429,7 @@ fn paren_spell(ar: &Ar) -> Option<(String, bool)> {
             let parts: Option<Vec<String>> = ops.iter().map(bracketed).collect();
             Some((parts?.join(" "), false))
         }
+        Ar::Direct(_, inner) => paren_spell(inner),
     }
 }
 
@@ -450,6 +499,7 @@ fn spell(ar: &Ar) -> Option<(String, Shape)> {
         return Some((text, Shape::Modified));
     }
     match ar {
+        Ar::Direct(text, _) => Some((text.clone(), Shape::Modified)),
         Ar::Prim(s) => Some((word(s), Shape::Word)),
         Ar::Noun(a) => Some((noun_text(a)?, Shape::Word)),
         Ar::Derived(sp, ops) => {
@@ -592,50 +642,61 @@ fn noun_text(a: &Array) -> Option<String> {
 /// `u"n`, and the three conjunctions J spells by applying at an operand's
 /// own rank: `u@v`, `u&v` and `u&.v` are each a rank around what `@:`,
 /// `&:` and `&.:` derive, so the rank they set is what tells them apart.
-fn rank_ar(inner: &Verb, r: crate::verb::Ranks) -> Option<Ar> {
+fn rank_ar(inner: &Verb, r: &crate::verb::Ranks, direct: bool) -> Option<Ar> {
     let der = |s: &str, ops: Vec<Ar>| Some(Ar::Derived(s.to_string(), ops));
     // `u&.v` sets v's MONADIC rank around the same tree `&.:` builds, which
     // is what separates it from `u@v` — that one sets all three of g's.
+    // `u"v` keeps the operand it was written with, and is written back out
+    // with it: the ranks it settled on say nothing about the spelling.
+    if let Some(w) = r.operand() {
+        return der("\"", vec![verb_ar_mode(inner, direct)?, verb_ar_mode(w, direct)?]);
+    }
     if let Verb::Atop(f, g, AtopForm::At) = inner
-        && matches!(&**g, Verb::Compose(_, u) if r == [u.ranks()[0]; 3])
-        && let Some(ar) = under_ar(f, g, "&.")
+        && matches!(&**g, Verb::Compose(_, u) if *r == [u.ranks()[0]; 3])
+        && let Some(ar) = under_ar(f, g, "&.", direct)
     {
         return Some(ar);
+    }
+    // `u"n` over a GERUND is written with the data itself — `(;:'+-')"0`,
+    // not the tie — which is a spelling for boxed data libjay does not
+    // have. It stays a gap rather than being written the other way.
+    if matches!(inner, Verb::Cycle(vs) if vs.len() > 1) {
+        return None;
     }
     match inner {
         // `m"n`: the constant verb, whose left operand is the noun itself.
         Verb::Constant(m) => der("\"", vec![Ar::Noun(m.clone()), Ar::Noun(rank_noun(r))]),
         // `u@v` is `u@:v` at v's own ranks. A CAPPED fork carries the rank
         // it was written with instead, so it keeps the `"` spelling.
-        Verb::Atop(f, g, AtopForm::At) if r == g.ranks() => {
-            der("@", vec![verb_ar(f)?, verb_ar(g)?])
+        Verb::Atop(f, g, AtopForm::At) if *r == g.ranks() => {
+            der("@", vec![verb_ar_mode(f, direct)?, verb_ar_mode(g, direct)?])
         }
-        Verb::Compose(f, g) if r == [g.ranks()[0]; 3] => {
-            der("&", vec![verb_ar(f)?, verb_ar(g)?])
+        Verb::Compose(f, g) if *r == [g.ranks()[0]; 3] => {
+            der("&", vec![verb_ar_mode(f, direct)?, verb_ar_mode(g, direct)?])
         }
-        Verb::BondLeft(m, g) if r == [g.ranks()[2]; 3] => {
-            der("&", vec![Ar::Noun(m.clone()), verb_ar(g)?])
+        Verb::BondLeft(m, g) if *r == [g.ranks()[2]; 3] => {
+            der("&", vec![Ar::Noun(m.clone()), verb_ar_mode(g, direct)?])
         }
-        Verb::BondRight(g, n) if r == [g.ranks()[1]; 3] => {
-            der("&", vec![verb_ar(g)?, Ar::Noun(n.clone())])
+        Verb::BondRight(g, n) if *r == [g.ranks()[1]; 3] => {
+            der("&", vec![verb_ar_mode(g, direct)?, Ar::Noun(n.clone())])
         }
         // A RANK CONJUNCTION WHOSE RANKS ARE THE VERB'S OWN IS NOT WRITTEN
         // OUT: `#."1 1` writes itself back as `#.`, `+"0` as `+` and `,"_`
         // as `,`, where a rank that changes anything keeps every atom it
         // was written with (`u"2 _ 2` and `u"_ 2` write differently).
-        _ if r.triple() == inner.ranks() => verb_ar(inner),
-        _ => der("\"", vec![verb_ar(inner)?, Ar::Noun(rank_noun(r))]),
+        _ if r.triple() == inner.ranks() => verb_ar_mode(inner, direct),
+        _ => der("\"", vec![verb_ar_mode(inner, direct)?, Ar::Noun(rank_noun(r))]),
     }
 }
 
 /// `u&.v` and `u&.:v` are built as `v^:_1 @: (u &: v)`; this recognises
 /// that shape and gives the spelling back. The left part must really be v's
 /// obverse, which is what keeps an ordinary `f@:(g&:h)` out.
-fn under_ar(f: &Verb, g: &Verb, spelling: &str) -> Option<Ar> {
+fn under_ar(f: &Verb, g: &Verb, spelling: &str, direct: bool) -> Option<Ar> {
     let Verb::Compose(inner, under) = g else { return None };
     let obverse = crate::frontend::j::obverse_of(under, crate::error::Span::new(0, 0)).ok()?;
     if obverse.name() != f.name() {
         return None;
     }
-    Some(Ar::Derived(spelling.to_string(), vec![verb_ar(inner)?, verb_ar(under)?]))
+    Some(Ar::Derived(spelling.to_string(), vec![verb_ar_mode(inner, direct)?, verb_ar_mode(under, direct)?]))
 }

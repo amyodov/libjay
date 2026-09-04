@@ -609,7 +609,7 @@ fn slots(code: &[Instr]) -> usize {
 /// the world, and a chain with `echo` in it is not the kind worth fusing.
 fn replayable(e: &Expr) -> bool {
     match e {
-        Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => true,
+        Expr::Const(..) | Expr::Entity(..) | Expr::Param(..) | Expr::Name(..) => true,
         Expr::Assign { .. }
         | Expr::AssignMany { .. }
         | Expr::PrintPass { .. }
@@ -988,7 +988,7 @@ fn uses_land(e: &Expr, name: &str, def: &Expr, tol: Tol) -> Option<usize> {
     }
     match e {
         Expr::Name(n, _) if n == name => None,
-        Expr::Const(..) | Expr::Param(..) | Expr::Name(..) => Some(0),
+        Expr::Const(..) | Expr::Entity(..) | Expr::Param(..) | Expr::Name(..) => Some(0),
         Expr::Assign { value, .. }
         | Expr::AssignMany { value, .. }
         | Expr::PrintPass { value, .. } => uses_land(value, name, def, tol),
@@ -1142,6 +1142,7 @@ fn mentions(e: &Expr, name: &str) -> bool {
 /// Every name this subtree reads.
 fn free_names(e: &Expr, out: &mut Vec<String>) {
     match e {
+        Expr::Entity(..) => {}
         Expr::Name(n, _) => out.push(n.clone()),
         Expr::Assign { value, .. }
         | Expr::AssignMany { value, .. }
@@ -1177,6 +1178,7 @@ fn assigns_any(e: &Expr, names: &[String]) -> bool {
         Expr::Dyad { x, y, .. } => assigns_any(x, names) || assigns_any(y, names),
         Expr::Fused { inputs, .. } => inputs.iter().any(|i| assigns_any(i, names)),
         Expr::Const(..)
+        | Expr::Entity(..)
         | Expr::Param(..)
         | Expr::Name(..)
         | Expr::Elided { .. }
@@ -1194,6 +1196,7 @@ pub fn is_fused(p: &Program) -> bool {
         match e {
             Expr::Fused { .. } => true,
             Expr::Const(..)
+            | Expr::Entity(..)
             | Expr::Param(..)
             | Expr::Name(..)
             | Expr::Elided { .. }

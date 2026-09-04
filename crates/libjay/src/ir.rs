@@ -107,6 +107,12 @@ pub enum Expr {
         rep: Option<crate::gerund::Ar>,
         span: Span,
     },
+    /// A sentence that IS an ENTITY — a verb, an adverb or a conjunction —
+    /// rather than a noun. Its value is the text a session displays for it,
+    /// which is what the top level shows. `". y` tells it apart from a
+    /// character value: nothing the sentence produced was a noun, so the
+    /// execution answers the empty instead of the text.
+    Entity(Array, Span),
 }
 
 /// A control-flow sentence. Every body is a block: a list of sentences whose
@@ -218,6 +224,12 @@ impl ExplicitRep {
         let n = self.valence;
         match self.lines.as_slice() {
             [] => format!("{n} : ''"),
+            // A body of ONE character is an atom where the quotes alone
+            // would spell it, so the reference writes the ravel that makes
+            // it a list: `1 : (,'5')`, not `1 : '5'`.
+            [only] if only.chars().count() == 1 && !only.starts_with('\'') => {
+                format!("{n} : (,'{only}')")
+            }
             [only] => format!("{n} : '{}'", only.replace('\'', "''")),
             lines => format!("{n} : 0\n{}\n)", lines.join("\n")),
         }
@@ -343,6 +355,7 @@ impl Expr {
             deepest = deepest.max(d);
             let kids: Vec<&Expr> = match e {
                 Expr::Const(..)
+                | Expr::Entity(..)
                 | Expr::Param(..)
                 | Expr::Name(..)
                 | Expr::Control(..)
@@ -369,7 +382,7 @@ impl Expr {
 
     pub fn span(&self) -> Span {
         match self {
-            Expr::Const(_, s) | Expr::Param(_, s) | Expr::Name(_, s) => *s,
+            Expr::Const(_, s) | Expr::Entity(_, s) | Expr::Param(_, s) | Expr::Name(_, s) => *s,
             Expr::Control(_, s) => *s,
             Expr::AmendIndex { span, .. } | Expr::Input { span, .. } => *span,
             Expr::Assign { span, .. }
@@ -389,7 +402,7 @@ impl Expr {
     /// under it underlines something balanced.
     pub fn set_span(&mut self, to: Span) {
         match self {
-            Expr::Const(_, s) | Expr::Param(_, s) | Expr::Name(_, s) => *s = to,
+            Expr::Const(_, s) | Expr::Entity(_, s) | Expr::Param(_, s) | Expr::Name(_, s) => *s = to,
             Expr::Control(_, s) => *s = to,
             Expr::AmendIndex { span, .. } | Expr::Input { span, .. } => *span = to,
             Expr::Assign { span, .. }
@@ -738,6 +751,14 @@ fn eval_stmt(
     ctx: &mut Ctx<'_>,
     rec: &mut Option<Trace>,
 ) -> Result<(Option<Array>, Flow)> {
+    // Naming a verb or a modifier yields NOTHING, inside a block as at the
+    // top level: the sentence is silent, so a body whose last sentence is
+    // one has no value of its own to hand back.
+    if matches!(e, Expr::VerbDef { .. } | Expr::ModDef { .. }) {
+        eval(e, ctx, rec)?;
+        ctx.shy = false;
+        return Ok((None, Flow::Normal));
+    }
     let Expr::Control(c, span) = e else {
         let v = eval(e, ctx, rec)?;
         // An application hands out the shyness the verb left behind; every
@@ -1223,6 +1244,20 @@ pub(crate) fn call_explicit(
             ctx.shy = body_shy;
             Ok(v)
         }
+        // A body whose last sentence NAMED a verb or a modifier produced an
+        // entity, and a definition hands back a noun or nothing: the
+        // reference calls that "noun result was required" rather than
+        // giving it the empty an untaken branch leaves.
+        None if matches!(
+            def.body.last(),
+            Some(Expr::VerbDef { .. } | Expr::ModDef { .. })
+        ) =>
+        {
+            Err(Error::domain(
+                format!("{} ends by naming an entity, and a noun result was required", def.name),
+                span,
+            ))
+        }
         None => def.empty.clone().ok_or_else(|| {
             Error::new(
                 ErrorKind::Value,
@@ -1455,7 +1490,7 @@ fn assign_many(
 
 fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
     match e {
-        Expr::Const(a, _) => Ok(a.clone()),
+        Expr::Const(a, _) | Expr::Entity(a, _) => Ok(a.clone()),
         Expr::Param(i, _) => ctx.env.arg(*i),
         Expr::Name(n, span) => {
             // `V__n` names V in the locale n holds. The locale is a value,

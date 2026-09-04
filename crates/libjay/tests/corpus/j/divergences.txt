@@ -764,3 +764,27 @@ u: 0 65 66
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=+,/,\. also=_.,-,*,%,^,%:,^.,+:,-:,*:,<:,>:,|,j.,&.,&.: answers=numeric
 _2 +/\\. (_.)
 ? the same where the piece is empty, so the sum should be the fold's zero
+
+// A FOUR-BYTE CODE THAT NAMES NO CHARACTER. `9 u:` and `10 u:` answer J's
+// four-byte character type, whose element is thirty-two bits of anything:
+// `3 u: 10 u: _2` is 4294967294 there, a number no codepoint names, and
+// `3 u: 10 u: 4294967296` is 0, so the code is simply the residue those
+// thirty-two bits leave. libjay's one character type holds a CODEPOINT, so
+// a code outside the range Unicode names — and every surrogate — has no
+// character here to answer with. Reading such a code is the same standing
+// difference as the two-byte type itself: libjay has one character type
+// where the reference has three.
+10 u: _2
+? a four-byte code is a value there and a codepoint here
+9 u: _3
+? the same over the other form that answers the four-byte type
+~ cause=we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint|we-refuse:err:domain_error:_-#_is_not_a_Unicode_codepoint verb=u: also=x:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,~.,^:,&,@,:,f.,::,M.,S:,L:,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,/,\,\.
+
+// THE CRC OF A WIDE CHARACTER. `128!:3` reads a byte string, and the
+// reference refuses one whose type is not the one-byte one: `128!:3 (u: 2)`
+// is a domain error there although every code in it is a byte, because
+// `u:` widened the type. libjay has one character type and reads the codes,
+// so it answers the CRC of those bytes.
+128!:3 (u: 2)
+? the reference refuses the widened type, not the bytes in it
+~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num verb=u: with=!: also=^:,&.,f.,::,M.,:

@@ -24,24 +24,34 @@ use crate::simd::multiversioned;
 pub const RANK_INF: i64 = i64::MAX;
 
 /// The three ranks a `"` was written with — monadic, left, right — and how
-/// many atoms wrote them.
+/// they were written.
 ///
 /// The ranks alone decide what the verb DOES: one atom stands for all
 /// three, and two atoms `m n` for `n m n`, so `"2 _ 2` and `"_ 2` are the
 /// same verb. Only the SPELLING keeps them apart, and the reference spells
 /// a verb back the way it was written rather than in the shortest words
-/// that mean the same. The count is carried for that alone: it is not part
-/// of equality, and nothing reads it but the linear representation.
-#[derive(Clone, Copy, Debug)]
+/// that mean the same. The atom count and the operand verb are carried for
+/// that alone: neither is part of equality, and nothing reads them but the
+/// representation.
+#[derive(Clone, Debug)]
 pub struct Ranks {
     r: [i64; 3],
     atoms: u8,
+    from: Option<std::sync::Arc<Verb>>,
 }
 
 impl Ranks {
     /// The ranks as written, with the atom count as written (1, 2 or 3).
     pub fn spelled(r: [i64; 3], atoms: u8) -> Ranks {
-        Ranks { r, atoms: atoms.clamp(1, 3) }
+        Ranks { r, atoms: atoms.clamp(1, 3), from: None }
+    }
+
+    /// The ranks `u"v` took from a VERB operand, with the operand kept for
+    /// the representation to write back out. `u"v` runs v once to settle
+    /// the ranks and is thereafter the ranks alone, so this changes nothing
+    /// about what the verb does.
+    pub fn from_verb(r: [i64; 3], v: Verb) -> Ranks {
+        Ranks { r, atoms: 3, from: Some(std::sync::Arc::new(v)) }
     }
 
     /// The three ranks.
@@ -52,6 +62,11 @@ impl Ranks {
     /// How many atoms the noun operand held.
     pub fn atoms(&self) -> u8 {
         self.atoms
+    }
+
+    /// The VERB operand the ranks were written as, where one was.
+    pub fn operand(&self) -> Option<&Verb> {
+        self.from.as_deref()
     }
 }
 
@@ -67,7 +82,7 @@ impl From<[i64; 3]> for Ranks {
         } else {
             3
         };
-        Ranks { r, atoms }
+        Ranks { r, atoms, from: None }
     }
 }
 
@@ -2406,7 +2421,7 @@ impl Verb {
             // it was written with (`u"2 _ 2` and `u"_ 2` are one verb and
             // write differently).
             Verb::Rank(v, r) if r.triple() == v.ranks() => v.name(),
-            Verb::Rank(v, r) => format!("{}\"{}", v.name(), rank_str(*r)),
+            Verb::Rank(v, r) => format!("{}\"{}", v.name(), rank_str(r)),
             Verb::Reduce(v) | Verb::NWise(v) => format!("{}/", v.name()),
             Verb::Windowed(v, WindowKind::Suffix) => format!("{}\\.", v.name()),
             Verb::Windowed(v, _) => format!("{}\\", v.name()),
@@ -2445,7 +2460,7 @@ impl Verb {
             },
             Verb::Memo(v, _) => format!("{} M.", v.name()),
             Verb::Level { u, levels, spread } => {
-                let n = rank_str(*levels);
+                let n = rank_str(levels);
                 format!("{} {} {n}", u.name(), if *spread { "S:" } else { "L:" })
             }
             Verb::Key(v) => format!("{}/.", v.name()),
@@ -3521,7 +3536,7 @@ fn one_rank(r: i64) -> String {
 /// The rank or level list as `"`, `L:` and `S:` write it. Two atoms are
 /// `left right` with the monadic one taken from the right, so a triple
 /// whose ends agree is written as the pair it came from.
-fn rank_str(r: Ranks) -> String {
+fn rank_str(r: &Ranks) -> String {
     // As many atoms as were written, not as few as would do: `u"2 _ 2` and
     // `u"_ 2` are one verb, and the reference spells each back as it came.
     match r.atoms() {
@@ -8994,8 +9009,17 @@ fn collate_grade(x: &Array, y: &Array, down: bool, origin: i64, span: Span) -> R
 /// A verb answers with the representation of the verb, a value with the
 /// noun pair; either way the answer is boxed, as the reference has it.
 fn atomic_rep(y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<Array> {
+    // The four forms read ONE boxed name. A list of them is a FRAME — the
+    // results padded together as any frame is — and an argument with no
+    // elements is an empty frame of its own shape, in the boolean type
+    // whatever type it was written at: nothing ran, so nothing named one.
     if y.count() == 0 {
-        return Ok(empty_representation());
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Bool)));
+    }
+    if y.rank() > 0 {
+        let cells: Result<Vec<Array>> =
+            (0..y.shape[0]).map(|i| atomic_rep(&y.item(i), ctx, span)).collect();
+        return assemble(&y.shape[..1], cells?, span);
     }
     let name = match y.as_boxes() {
         Some([b]) if y.rank() == 0 => crate::gerund::text_of(b),
@@ -10961,7 +10985,7 @@ pub(crate) fn with_origin(v: &Verb, origin: i64) -> Option<Verb> {
             };
             changed.then_some(Verb::Prim(out))
         }
-        Verb::Rank(u, r) => Some(Verb::Rank(Box::new(with_origin(u, origin)?), *r)),
+        Verb::Rank(u, r) => Some(Verb::Rank(Box::new(with_origin(u, origin)?), r.clone())),
         Verb::Reduce(u) => Some(Verb::Reduce(Box::new(with_origin(u, origin)?))),
         Verb::NWise(u) => Some(Verb::NWise(Box::new(with_origin(u, origin)?))),
         Verb::Windowed(u, k) => Some(Verb::Windowed(Box::new(with_origin(u, origin)?), *k)),
@@ -20936,7 +20960,7 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
                     let ranks = b.ranks();
                     Verb::Rank(Box::new(inner), ranks.into())
                 }
-                _ => Verb::Rank(Box::new(inner), *r),
+                _ => Verb::Rank(Box::new(inner), r.clone()),
             }
         }
         // A fill only travels back through a PRIMITIVE: the reference has no
@@ -22764,12 +22788,25 @@ fn recoded_shape(y: &Array, len: usize) -> Vec<usize> {
 /// does, and an argument with no elements answers the empty of the form's
 /// own result type rather than an error.
 fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    // The form is ONE number: a list of them is a rank error, and a form
+    // outside the ten the language has is a domain error whatever the
+    // argument holds.
+    if x.rank() > 0 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            "a conversion form is one number",
+            Some(span),
+        ));
+    }
     let form = x
         .to_i64_vec()
         .ok_or_else(|| Error::domain("a conversion form is an integer", span))?
         .first()
         .copied()
         .unwrap_or(0);
+    if !(1..=10).contains(&form) {
+        return Err(Error::domain(format!("{form} is not a conversion form"), span));
+    }
     let chars = chars_of(y);
     // The forms that read a RUN of bytes take an atom or a list whatever
     // is in it, so the shape is refused before the elements are looked at
@@ -22816,7 +22853,29 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
         // 5 and 7 narrow a wider character type to bytes, which changes
         // nothing a codepoint can see.
         (5 | 7, Some(_)) => Ok(y.clone()),
-        (5 | 7, None) => {
+        // 7 reads NUMBERS as codes into the two-byte type, where a code
+        // above the sixteen bits it holds is written as a surrogate PAIR.
+        // libjay's one character type holds a codepoint and no half of one,
+        // so a code that needs the pair has no answer here.
+        (7, None) => {
+            let v = y
+                .to_i64_vec_near(near)
+                .ok_or_else(|| Error::domain("a codepoint must be an integer", span))?;
+            if v.iter().any(|&c| c < 0) {
+                return Err(Error::domain(
+                    "form 7 reads a code, and a negative one names no character",
+                    span,
+                ));
+            }
+            if v.iter().any(|&c| c >= 0x10000) {
+                return Err(Error::not_yet(
+                    "a code form 7 writes as a surrogate pair",
+                    span,
+                ));
+            }
+            codes_to_chars(y, near, span)
+        }
+        (5, None) => {
             Err(Error::domain(format!("form {form} converts characters, not numbers"), span))
         }
         // 6 reads a byte PAIR as one two-byte character, least significant
@@ -23682,6 +23741,22 @@ fn execute(y: &Array, apl: bool, ctx: &mut Ctx<'_>, span: Span) -> Result<Array>
     execute_source(&src, apl, ctx, span)
 }
 
+/// Whether the last sentence of a program produced an ENTITY rather than a
+/// noun: a sentence that IS a verb or a modifier, and one that gave a name
+/// to one. The fusion pass may have folded the sentences into a marker,
+/// which carries the ones it was built from.
+fn last_is_entity(stmts: &[crate::ir::Expr]) -> bool {
+    match stmts.last() {
+        Some(
+            crate::ir::Expr::Entity(..)
+            | crate::ir::Expr::VerbDef { .. }
+            | crate::ir::Expr::ModDef { .. },
+        ) => true,
+        Some(crate::ir::Expr::Elided { orig, .. }) => last_is_entity(orig),
+        _ => false,
+    }
+}
+
 /// [`execute`] over source that is already text: APL's `⎕` reads a line and
 /// runs it, which is execute over a string nobody boxed into an array.
 pub(crate) fn execute_source(
@@ -23701,8 +23776,18 @@ pub(crate) fn execute_source(
             span,
         ));
     }
+    // A J SENTENCE THAT PRODUCED NO NOUN ANSWERS THE EMPTY. A string that
+    // spells a verb, an adverb or a conjunction produces an entity, which
+    // is not a value `".` can hand back; so does a string that assigns one,
+    // and one that runs nothing at all — a blank line, a comment. The
+    // reference answers a boolean empty for every one of them, and the rank
+    // of `".` makes that one empty row per row of a table argument.
+    let entity = !apl && last_is_entity(&nested.stmts);
     let mut rec = None;
     let ran = crate::ir::run_block(&nested.stmts, None, ctx, &mut rec);
+    if entity && ran.is_ok() {
+        return Ok(Array::new(vec![0], Data::empty(DType::Bool)));
+    }
     // A J sentence that is nothing but an UNBOUND NAME leaves no value
     // rather than refusing: `". 'a'` and `". 'abc'` are the empty in
     // jconsole, where `". 'a 3'` — the same name with something to apply
@@ -23716,6 +23801,9 @@ pub(crate) fn execute_source(
         return Ok(Array::new(vec![0], Data::empty(DType::Bool)));
     }
     let (value, _) = ran.map_err(|e| nested_error(e, src, span))?;
+    if !apl && value.is_none() {
+        return Ok(Array::new(vec![0], Data::empty(DType::Bool)));
+    }
     // A nested program whose last sentence produced nothing — the empty
     // program among them — leaves the sentence that executed it with no
     // value to hand on. GNU APL reports that as a VALUE ERROR wherever the
@@ -23825,10 +23913,6 @@ fn boxed_name_arg(y: &Array, what: &str, span: Span) -> Result<Vec<String>> {
 /// What a `5!:` representation answers when it is asked about no name at
 /// all: the empty boolean list, which is the reference's answer whatever
 /// type the empty argument was written at.
-fn empty_representation() -> Array {
-    Array::empty(DType::Bool)
-}
-
 /// The empty argument a `9!:` reader is written with.
 fn empty_argument(y: &Array, what: &str, span: Span) -> Result<()> {
     if y.count() == 0 {
@@ -23863,8 +23947,16 @@ fn representation(op: MonadOp, y: &Array, ctx: &Ctx<'_>, span: Span) -> Result<A
         MonadOp::LinearRep => "5!:5",
         _ => "5!:6",
     };
+    // The three forms read ONE boxed name. A list of them is a FRAME, and
+    // an argument with no elements is an empty frame of its own shape, in
+    // the boolean type whatever type it was written at.
     if y.count() == 0 {
-        return Ok(empty_representation());
+        return Ok(Array::new(y.shape.clone(), Data::empty(DType::Bool)));
+    }
+    if y.rank() > 0 {
+        let cells: Result<Vec<Array>> =
+            (0..y.shape[0]).map(|i| representation(op, &y.item(i), ctx, span)).collect();
+        return assemble(&y.shape[..1], cells?, span);
     }
     let name = match y.as_boxes() {
         Some([b]) if y.rank() == 0 => crate::gerund::text_of(b),

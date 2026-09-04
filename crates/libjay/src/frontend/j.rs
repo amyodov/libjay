@@ -113,6 +113,12 @@ struct Names {
     /// diagnostics need this: a name that is neither a verb nor a value is
     /// an undefined name, not a sentence the parser has yet to learn.
     nouns: HashSet<String>,
+    /// Names the sentence being read ASSIGNS. J runs a sentence from the
+    /// right as it reads it, so `(u:) n [ n =. 2` has given n a value by
+    /// the time the left of it is read; here the whole sentence is
+    /// compiled before any of it runs, and this is what keeps such a name
+    /// from being taken for one that will never have a value.
+    assigned_here: HashSet<String>,
     /// The value of a name given a literal, for the operands that have to
     /// be known while the sentence is read. A gerund is data, so
     /// `` g =. +`- `` and then `g@.1` needs what g holds; an assignment
@@ -159,6 +165,7 @@ impl Default for Names {
             verbs,
             mods: HashMap::new(),
             nouns: HashSet::new(),
+            assigned_here: HashSet::new(),
             consts: HashMap::new(),
             char_bytes: false,
             source: Arc::from(""),
@@ -252,6 +259,14 @@ impl Names {
         self.lookup_keys(name).iter().any(|k| self.nouns.contains(k))
     }
 
+    /// Whether a name with nothing under it may be read as the VERB the
+    /// sentence around it wants. It may not where the sentence itself
+    /// assigns the name: the reference would have run that assignment
+    /// first and found a value there.
+    fn may_be_a_verb(&self, name: &str) -> bool {
+        !self.is_noun(name) && !self.assigned_here.contains(name)
+    }
+
     fn const_named(&self, name: &str) -> Option<Array> {
         self.lookup_keys(name).iter().find_map(|k| self.consts.get(k)).cloned()
     }
@@ -271,6 +286,7 @@ impl Names {
     fn parse_sentence(&mut self, mut sentence: Vec<Frag>) -> Result<Expr> {
         substitute_names(&mut sentence, self);
         let whole = sentence_span(&sentence);
+        self.assigned_here = names_this_sentence_assigns(&sentence);
         let frag = reduce_to_fragment(sentence, self)?;
         // A sentence that names a modifier is settled here rather than in
         // the IR: what the name stands for is a parser object, and the
@@ -3078,14 +3094,14 @@ fn lower_sentence(frag: Option<Frag>, whole: Span, char_bytes: bool) -> Result<E
         // what a session shows for it is its linear representation: the
         // text it would be written as. The value is that text.
         Some(Frag::Verb(VerbFrag::V(v), span)) => match verb_display(&v) {
-            Some(text) => Ok(Expr::Const(literal_text(&text, char_bytes), span)),
+            Some(text) => Ok(Expr::Entity(literal_text(&text, char_bytes), span)),
             None => Err(Error::not_yet(
                 format!("writing {} back out as J source", v.name()),
                 span,
             )),
         },
         Some(Frag::Adverb(m, span) | Frag::Conj(m, span)) => match m.display_text() {
-            Some(text) => Ok(Expr::Const(literal_text(&text, char_bytes), span)),
+            Some(text) => Ok(Expr::Entity(literal_text(&text, char_bytes), span)),
             None => Err(Error::not_yet(
                 "writing this modifier back out as J source",
                 span,
@@ -3104,7 +3120,7 @@ fn verb_display(v: &Verb) -> Option<String> {
     if let Verb::Explicit(def) = v {
         return def.spelling.clone();
     }
-    crate::gerund::linear(&crate::gerund::verb_ar(v)?)
+    crate::gerund::linear(&crate::gerund::verb_ar_display(v)?)
 }
 
 /// Report an unbalanced parenthesis at the parenthesis itself, before the
@@ -3213,6 +3229,16 @@ fn apply(stack: &mut Vec<Frag>, scope: &Names) -> Result<bool> {
     let Some(rule) = match_rule(stack) else {
         return Ok(false);
     };
+    // A NAME WITH NO VALUE IS A VERB wherever the sentence does not ask for
+    // its value: `{: n` is a hook, `1 + n` a fork, `n&2` a bond, and the
+    // missing value is reported only when the entity they make is applied.
+    // The reading is settled where the name STANDS, so the rule that was
+    // about to treat it as a noun is what says which places those are.
+    if let Some(i) = name_as_verb_slot(rule, stack, scope) {
+        let f = stack.remove(i);
+        stack.insert(i, as_train_part(f, scope)?);
+        return Ok(true);
+    }
     match rule {
         Rule::Monad1 => {
             let mut t = take(stack, 1..3);
@@ -3546,9 +3572,13 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         "\"" => {
             // A VERB on the right lends its own three ranks: `u"v` is
             // `u"(v b. 0)`, which is what makes `<"(+/)` box the whole
-            // argument and `<"(<"1)` box each of its rows.
+            // argument and `<"(<"1)` box each of its rows. The operand is
+            // kept beside them: it settles the ranks and then plays no
+            // part in what the verb does, but the reference writes the
+            // verb back out as `u"v` rather than as the ranks it stood for.
             let ranks = if v.is_verb() {
-                verb_operand(v.clone(), span)?.ranks().into()
+                let w = verb_operand(v.clone(), span)?;
+                crate::verb::Ranks::from_verb(w.ranks(), w)
             } else {
                 rank_spec(&v, span)?
             };
@@ -4552,6 +4582,9 @@ fn ar_verb(a: &Array, scope: &Names, span: Span) -> Result<Verb> {
 fn ar_frag(ar: &crate::gerund::Ar, scope: &Names, span: Span) -> Result<Frag> {
     use crate::gerund::Ar;
     match ar {
+        // A direct definition stands for the `:` phrase beside it; the
+        // braces are a spelling, and a gerund holds the phrase.
+        Ar::Direct(_, inner) => ar_frag(inner, scope, span),
         Ar::Noun(a) => Ok(Frag::Noun(Expr::Const(a.clone(), span))),
         Ar::Prim(word) => {
             if word == "[:" {
@@ -4726,6 +4759,31 @@ fn built_noun_fork(
     Ok(Verb::NounFork(a.clone(), g.clone(), h.clone()))
 }
 
+/// The names a sentence gives a value to, by the assignment arrow that
+/// follows them. A multiple assignment's target is a literal string of
+/// names, and those count too.
+fn names_this_sentence_assigns(sentence: &[Frag]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for (i, f) in sentence.iter().enumerate() {
+        if !f.is_assign() {
+            continue;
+        }
+        match sentence.get(i.wrapping_sub(1)) {
+            Some(Frag::Name(n, _)) => {
+                out.insert(n.clone());
+            }
+            Some(Frag::Noun(Expr::Const(a, _))) => {
+                if let Data::Char(cs) = a.row_major_data() {
+                    let text: String = cs.as_slice().iter().collect();
+                    out.extend(text.split_whitespace().map(str::to_string));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// A NAME with nothing under it, standing where a train wants a verb.
 ///
 /// The reference reads such a name as a VERB: `{: n` is a hook it writes
@@ -4757,7 +4815,7 @@ fn built_undefined_name(
 /// it has no value, and the fragment itself otherwise.
 fn as_train_part(f: Frag, scope: &Names) -> Result<Frag> {
     let Frag::Name(n, span) = &f else { return Ok(f) };
-    if scope.is_noun(n) {
+    if !scope.may_be_a_verb(n) {
         return Ok(f);
     }
     // An indirect locative's locale is a value, so what part of speech the
@@ -4782,6 +4840,7 @@ fn apply_bident(a: Frag, b: Frag, scope: &Names) -> Result<Frag> {
     let a = if b.is_real_verb() { as_train_part(a, scope)? } else { a };
     if let Frag::Name(n, nspan) = &a
         && !scope.is_noun(n)
+        && !scope.assigned_here.contains(n)
     {
         // An indirect locative's locale is a value, so what part of speech
         // the name has is not known until the program runs. libjay reads
@@ -4812,6 +4871,39 @@ fn apply_bident(a: Frag, b: Frag, scope: &Names) -> Result<Frag> {
         return Err(Error::parse("`[:` caps a fork; it has no verb of its own", span));
     }
     Err(Error::parse("syntax error", span))
+}
+
+/// The slot a rule is about to read as a NOUN that holds a name with no
+/// value, and so is a verb instead: the argument a verb would apply to, and
+/// a modifier's operand. The one place left out is `u"v`, where the rank
+/// the operand lends has to be known when the sentence is compiled.
+fn name_as_verb_slot(rule: Rule, s: &[Frag], scope: &Names) -> Option<usize> {
+    let undefined = |i: usize| {
+        matches!(s.get(i), Some(Frag::Name(n, _)) if scope.may_be_a_verb(n)
+            && crate::verb::split_indirect(n).is_none())
+    };
+    let slots: &[usize] = match rule {
+        Rule::Monad1 => &[2],
+        Rule::Monad2 | Rule::Dyad3 => &[3],
+        Rule::Adverb4 => &[1],
+        // Two words that make a TRAIN: a name with no value is the verb the
+        // train needs, whether the word beside it is a verb or another such
+        // name (`nq nq` and `[: nq +` are both trains there).
+        Rule::Bident7 => {
+            let beside = s.get(1).is_some_and(|f| f.is_verb())
+                || matches!(s.get(1), Some(Frag::Name(n, _)) if scope.may_be_a_verb(n));
+            if beside { &[2] } else { &[] }
+        }
+        Rule::Conj5 => {
+            if matches!(s.get(2), Some(Frag::Conj(Modifier::Prim("\""), _))) {
+                &[1]
+            } else {
+                &[1, 3]
+            }
+        }
+        _ => &[],
+    };
+    slots.iter().copied().find(|&i| undefined(i))
 }
 
 fn apply_assign(target: Frag, value: Frag, scope: Scope, names: &Names) -> Result<Frag> {
@@ -5168,7 +5260,10 @@ mod tests {
             }
             other => panic!("expected a name, got {other:?}"),
         }
-        let (_, x, y) = dyad_of(&one("x + y"));
+        // A name with a VALUE is a noun; one with none is the verb a
+        // train needs, which `a_name_with_no_value_is_a_verb` covers.
+        let s = stmts("x =. 1\ny =. 2\nx + y");
+        let (_, x, y) = dyad_of(s.last().expect("three sentences"));
         assert!(matches!(x, Expr::Name(..)));
         assert!(matches!(y, Expr::Name(..)));
     }
@@ -5265,7 +5360,7 @@ mod tests {
 
     #[test]
     fn rank_applies_to_the_derived_verb() {
-        let (v, _) = monad_of(&one("+/\"1 m"));
+        let (v, _) = monad_of(&one("+/\"1 (i. 2 3)"));
         match &v {
             Verb::Rank(inner, ranks) => {
                 assert_eq!(*ranks, [1, 1, 1]);
@@ -5276,12 +5371,12 @@ mod tests {
     }
 
     #[rstest]
-    #[case("+\"1 m", [1, 1, 1])]
-    #[case("+\"1 2 m", [2, 1, 2])]
-    #[case("+\"0 1 2 m", [0, 1, 2])]
-    #[case("+\"_ m", [RANK_INF, RANK_INF, RANK_INF])]
-    #[case("+\"_1 m", [-1, -1, -1])]
-    #[case("+\"2.0 m", [2, 2, 2])]
+    #[case("+\"1 (i. 2 3)", [1, 1, 1])]
+    #[case("+\"1 2 (i. 2 3)", [2, 1, 2])]
+    #[case("+\"0 1 2 (i. 2 3)", [0, 1, 2])]
+    #[case("+\"_ (i. 2 3)", [RANK_INF, RANK_INF, RANK_INF])]
+    #[case("+\"_1 (i. 2 3)", [-1, -1, -1])]
+    #[case("+\"2.0 (i. 2 3)", [2, 2, 2])]
     fn rank_specifications(#[case] src: &str, #[case] want: [i64; 3]) {
         let (v, _) = monad_of(&one(src));
         assert_eq!(v.ranks(), want);
@@ -5317,7 +5412,7 @@ mod tests {
 
     #[test]
     fn atop_conjunction() {
-        let (v, _) = monad_of(&one("+/ @: , y"));
+        let (v, _) = monad_of(&one("+/ @: , (i. 3)"));
         match &v {
             Verb::Atop(f, g, AtopForm::At) => {
                 assert!(matches!(**f, Verb::Reduce(_)), "got {f:?}");
@@ -5329,7 +5424,7 @@ mod tests {
 
     #[test]
     fn a_computed_power_count_is_read_at_each_application() {
-        let (v, _) = monad_of(&one("+ ^: {n} y"));
+        let (v, _) = monad_of(&one("+ ^: {n} (i. 3)"));
         match &v {
             Verb::Deferred(d) => assert_eq!(d.spelling, "+^:n"),
             other => panic!("expected a deferred count, got {other:?}"),
@@ -5357,12 +5452,12 @@ mod tests {
     /// holds what it then answers.
     #[test]
     fn a_computed_bond_noun_is_read_at_each_application() {
-        let (v, _) = monad_of(&one("(1 + 2) & , y"));
+        let (v, _) = monad_of(&one("(1 + 2) & , (i. 3)"));
         match &v {
             Verb::Deferred(d) => assert_eq!(d.spelling, "n&,"),
             other => panic!("expected a deferred bond, got {other:?}"),
         }
-        let (v, _) = monad_of(&one(", & (1 + 2) y"));
+        let (v, _) = monad_of(&one(", & (1 + 2) (i. 3)"));
         match &v {
             Verb::Deferred(d) => assert_eq!(d.spelling, ",&n"),
             other => panic!("expected a deferred bond, got {other:?}"),
@@ -5373,7 +5468,7 @@ mod tests {
     fn atop_at_rank_and_compose() {
         // `u@v` is `u@:v` at v's ranks; `u&v` is the composition at v's
         // monadic rank; `u&:v` is that composition on the arguments whole.
-        let (v, _) = monad_of(&one("+/ @ (,\"1) y"));
+        let (v, _) = monad_of(&one("+/ @ (,\"1) (i. 3)"));
         match &v {
             Verb::Rank(inner, ranks) => {
                 assert_eq!(*ranks, [1, 1, 1]);
@@ -5381,7 +5476,7 @@ mod tests {
             }
             other => panic!("expected a ranked atop, got {other:?}"),
         }
-        let (v, _) = monad_of(&one("+ & (*:\"0) y"));
+        let (v, _) = monad_of(&one("+ & (*:\"0) (i. 3)"));
         match &v {
             Verb::Rank(inner, ranks) => {
                 assert_eq!(*ranks, [0, 0, 0]);
@@ -5389,7 +5484,7 @@ mod tests {
             }
             other => panic!("expected a ranked composition, got {other:?}"),
         }
-        let (v, _) = monad_of(&one("+ &: *: y"));
+        let (v, _) = monad_of(&one("+ &: *: (i. 3)"));
         assert!(matches!(v, Verb::Compose(..)), "got {v:?}");
     }
 
@@ -5398,7 +5493,7 @@ mod tests {
         // `m&v y` is `m v y` whole. The bond's own rank is infinite — J's
         // `1 2&+ b. 0` reports `_ _ _` — and the verb inside it applies its
         // own ranks to the pair.
-        let (v, _) = monad_of(&one("1 & + y"));
+        let (v, _) = monad_of(&one("1 & + (i. 3)"));
         match &v {
             Verb::BondLeft(a, g) => {
                 assert_eq!(a.to_i64_vec(), Some(vec![1i64]));
@@ -5407,7 +5502,7 @@ mod tests {
             other => panic!("expected a left bond, got {other:?}"),
         }
         assert_eq!(v.ranks(), [crate::verb::RANK_INF; 3]);
-        let (v, _) = monad_of(&one("{. & 2 y"));
+        let (v, _) = monad_of(&one("{. & 2 (i. 3)"));
         assert!(matches!(v, Verb::BondRight(..)), "got {v:?}");
         assert_eq!(v.ranks(), [crate::verb::RANK_INF; 3]);
     }
@@ -5559,7 +5654,7 @@ mod tests {
     /// The text a sentence that reduces to an entity yields.
     fn text_of_const(e: &Expr) -> String {
         match e {
-            Expr::Const(a, _) => match a.row_major_data() {
+            Expr::Const(a, _) | Expr::Entity(a, _) => match a.row_major_data() {
                 Data::Char(v) => v.as_slice().iter().collect(),
                 other => panic!("expected text, got {other:?}"),
             },
@@ -5645,7 +5740,7 @@ mod tests {
             }
             other => panic!("expected a fork, got {other:?}"),
         }
-        let (v, _) = monad_of(&stmts("mean =. +/ % #\nmean\"1 m").pop().expect("two"));
+        let (v, _) = monad_of(&stmts("mean =. +/ % #\nmean\"1 (i. 2 3)").pop().expect("two"));
         match &v {
             Verb::Rank(inner, r) => {
                 assert_eq!(*r, [1, 1, 1]);
