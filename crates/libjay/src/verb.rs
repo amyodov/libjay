@@ -22598,6 +22598,16 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
         .copied()
         .unwrap_or(0);
     let chars = chars_of(y);
+    // The forms that read a RUN of bytes take an atom or a list whatever
+    // is in it, so the shape is refused before the elements are looked at
+    // — an empty of rank 2 is the rank error it would be at any size.
+    if matches!(form, 7 | 8 | 9) && y.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("form {form} converts an atom or a list"),
+            Some(span),
+        ));
+    }
     // Nothing to read is no error, whatever the form and whatever the type
     // it was written in: an empty carries no element the form could object
     // to, and every form answers the empty of its own result type. Only
@@ -22661,11 +22671,6 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
         (6, None) => {
             Err(Error::domain("form 6 converts characters, not numbers", span))
         }
-        (8 | 9, _) if y.rank() > 1 => Err(Error::new(
-            ErrorKind::Rank,
-            format!("form {form} converts an atom or a list"),
-            Some(span),
-        )),
         // 8 packs each codepoint into its UTF-8 bytes; an argument that is
         // bytes already is left as it stands.
         (8, Some(v)) => {
@@ -22694,7 +22699,9 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
             Ok(Array::new(shape, Data::Char(out.into())))
         }
         // 9 and 10 answer the FOUR-byte type, whose codes are thirty-two
-        // bits wide.
+        // bits wide. A code the width admits but no character names — which
+        // is most of that range — is a refusal here, where libjay holds
+        // codepoints and the reference holds the code itself.
         (9 | 10, None) => codes_to_chars_width(y, 32, near, span),
         (10, Some(_)) => Ok(y.clone()),
         (n, _) => Err(Error::not_yet(format!("the unicode conversion form ({n} u:)"), span)),

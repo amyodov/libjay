@@ -468,6 +468,20 @@ fn format_boxed(a: &Array, opts: &FmtOpts) -> String {
 /// as they are for an array with something in it: `<3 1 0$0` is five lines,
 /// three rows and the two blanks between the planes. The width has to
 /// travel beside the lines because a cell with no lines still has one.
+/// The same character array with every cursor-moving character written as
+/// a blank, or `None` where the array holds no such character — and for
+/// everything that is not characters, where a newline is a real line of a
+/// nested box's own drawing.
+fn laid_in_a_cell(a: &Array) -> Option<Array> {
+    let moves = |c: char| matches!(c, '\0' | '\u{8}' | '\t' | '\n' | '\r');
+    let Data::Char(v) = &a.data else { return None };
+    if !v.iter().any(|c| moves(*c)) {
+        return None;
+    }
+    let out: Vec<char> = v.iter().map(|c| if moves(*c) { ' ' } else { *c }).collect();
+    Some(Array::new(a.shape.clone(), Data::Char(out.into())))
+}
+
 fn block(a: &Array, opts: &FmtOpts) -> (Vec<String>, usize) {
     if a.count() == 0 && a.rank() > 0 {
         let rank = a.rank();
@@ -488,7 +502,13 @@ fn block(a: &Array, opts: &FmtOpts) -> (Vec<String>, usize) {
         };
         return (vec![" ".repeat(w); rows], w);
     }
-    let text = format_raw(a, opts);
+    // A character that MOVES THE CURSOR without printing would take the
+    // cell's contents out of the cell, so inside a box it is written as a
+    // blank: the null, the backspace, the tab, the newline and the return.
+    // Nothing else in the control range is touched, and an unboxed
+    // character array keeps every one of them.
+    let laid = laid_in_a_cell(a);
+    let text = format_raw(laid.as_ref().unwrap_or(a), opts);
     if text.is_empty() {
         return (vec![String::new()], 0);
     }
