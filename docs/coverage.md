@@ -2252,6 +2252,13 @@ families are the obverse of `[` or `]` composed on the LEFT
   stands as a modifier's OPERAND, which a session writes in its braces
   there and in its header spelling here — `5!:5` gives the header spelling
   on both sides, so only the display parts.
+- **`". y` where the sentence yields an ENTITY.** A string that spells a
+  verb — `". '+-+'`, and every row of the box drawing `": <a:` makes — is
+  the empty there, one empty row per row of the argument, because nothing
+  the execution produced was a noun. Here the sentence's own display text
+  is the value, which is what a verb sentence answers at the top level; the
+  two readings part only under `".`, and telling them apart would mean
+  carrying the sentence's part of speech through the compiled program.
 - **An UNDEFINED NAME to the RIGHT of a verb.** The reference reads a name
   with no value as a VERB, so `{: n` is a hook it writes back out and
   `1 + n` a fork, while a sentence that needs the name's value — `n + 1`,
