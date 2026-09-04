@@ -19491,11 +19491,15 @@ fn characteristics(u: &Verb, y: &Array, span: Span) -> Result<Array> {
     let chars = |s: String| Ok(Array::from_chars(s.chars().collect()));
     match which {
         Some(0) => {
+            // A NEGATIVE rank leaves a fixed number of frame axes, so what
+            // it will take of any argument has no bound, and the reference
+            // reports it as infinite: `(2"_1) b. 0` and `,. b. 0` are both
+            // `_ _ _` there.
             let ranks = u.ranks();
             Ok(Array::from_f64(
                 ranks
                     .iter()
-                    .map(|&r| if r == RANK_INF { f64::INFINITY } else { r as f64 })
+                    .map(|&r| if r == RANK_INF || r < 0 { f64::INFINITY } else { r as f64 })
                     .collect(),
             ))
         }

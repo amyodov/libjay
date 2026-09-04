@@ -2073,7 +2073,7 @@ fn primitive(word: &str) -> Option<Prim> {
         "o." => prim("o.", M::Scalar(SM::Pi), D::Scalar(SD::Circle), [0, 0, 0]),
         "j." => prim("j.", M::Scalar(SM::Imaginary), D::Scalar(SD::MakeComplex), [0, 0, 0]),
         "r." => prim("r.", M::Scalar(SM::Polar), D::Scalar(SD::PolarBy), [0, 0, 0]),
-        "{" => prim("{", M::Catalogue, D::From, [INF, 0, INF]),
+        "{" => prim("{", M::Catalogue, D::From, [1, 0, INF]),
         "{." => prim("{.", M::Head, D::Take, [INF, 1, INF]),
         "}." => prim("}.", M::Behead, D::Drop, [INF, 1, INF]),
         "{:" => prim("{:", M::Tail, D::None, [INF, INF, INF]),

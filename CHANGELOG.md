@@ -67,6 +67,11 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   both, one nested magnitude block an item and two for a rational.
 - `__:`, the constant verb of the infinity below, which the lexer had read
   as a number and a definition's colon.
+- The ranks a verb REPORTS under `u b. 0`: a negative rank leaves a fixed
+  number of frame axes, so what it takes of any argument has no bound and
+  the reference reports it as infinite — `(2"_1) b. 0` and `,. b. 0` are
+  both `_ _ _`. The CATALOGUE's own monad rank is 1, so `{ (i. 2 3)` is
+  the two rows boxed rather than the catalogue of the whole table.
 - The FETCH `{::` has a left rank of 1, so a path of higher rank is a
   FRAME of paths — `(2 1 $ 0 1) {:: ((1 2);(3 4))` stacks the two boxes
   it opens — and a frame with no cell is the empty the frame spells.
