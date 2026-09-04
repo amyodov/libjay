@@ -5138,3 +5138,30 @@ the register.
   were measured across the exact and float types this round and agree
   throughout; the note beside the rule says to re-measure them before
   trusting it if it is ever the only thing matching a mismatch.
+- 2026-09-04 — `_2 x:` is `%/"1`, the alternating quotient, not "the
+  argument unchanged". It is the OBVERSE of form 2: form 2 splits every
+  value into a numerator and a denominator along a new last axis, and this
+  puts one back together, continuing over a longer axis. Measured across the
+  types, the shapes and the empties; an axis of ONE item is that item and is
+  never divided, which is what lets a lone character or box through where a
+  table of them is refused.
+- 2026-09-04 — `%.` keeps the exact types, and a SCALAR under it is a
+  reciprocal rather than a one-by-one matrix. What is NOT followed is the
+  SINGULAR case: four rank-deficient arguments, all the same question, and
+  the reference refuses two with a NaN error while answering two with a
+  table of NaN values. What separates them is whether its factorisation
+  lands on an exact zero pivot or a tiny one — its arithmetic, not the
+  mathematics, the same conclusion round 5B reached about the float GCD.
+  libjay refuses consistently and the four points are pinned as the proof.
+- 2026-09-04 — two families that a sweep never spells the same way twice now
+  have `~ ` rules rather than a pinned sentence each: `x:` of a float with
+  no short exact rational, and factorising something that is not a whole
+  number. The second is pinned for ORACLE SILENCE — the reference answers
+  `2 p: (3j4 1j_1)` with no value, no shape and no type, which is the
+  signature of the silent `q: _.` death already in the quarantine list, and
+  `3 p: y` IS `q: y`. Its NaN and `q:` spellings are matched by cause and
+  are in no corpus file, because recording one would take the recording down
+  with it. The `x:` rule carries no `answers=` clause: both sides answer a
+  rational, whose `r` is not a character any numeric answer class reads, so
+  every class would be false — the self-coverage assertion refused the rule
+  until that clause came off, which is the check working as designed.

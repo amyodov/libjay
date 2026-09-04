@@ -7,6 +7,27 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `_2 x:` is the OBVERSE of form 2 — `%/"1`, the alternating quotient over
+  the last axis — where it used to return its argument untouched. It puts
+  back together what form 2 split apart and keeps going over a longer axis,
+  so `_2 x: (1 2 3)` is 1.5 and `_2 x: (1 2 3x)` the exact `3r2`. The
+  division is the ordinary one, so a complex pair divides as complex; an
+  axis with nothing along it folds to the identity 1 and an axis of one item
+  is that item, never divided.
+
+- `%.` keeps the EXACT types wherever the answer is exact, in the rational
+  type: a vector's pseudo-inverse is `y % (+/ y*y)` and a square matrix is
+  Gauss-Jordan over the rationals, so `%. (2 2 $ 1 2 3 4x)` is
+  `_2 1 / 3r2 _1r2`. A SCALAR under it is a reciprocal and no matrix at all
+  (`%. 0` is `_` where `%. (1 1 $ 0)` is refused). A scalar right-hand side
+  is the whole column of it, a vector one is a column whose unknown is a
+  single number, and a system with NO ROWS constrains nothing and answers
+  the zero `0 % 0` gives.
+
+- There is always a next prime, so `4 p:` answers one past the machine word
+  in the extended integers rather than refusing:
+  `4 p: 9223372036854775806` is 9223372036854775837.
+
 - Round 7B's numeric rules, measured against jconsole. `x p: y` over a y
   that is NOT WHOLE, which only the two forms that factorise refuse: every
   other form asks where y sits among the primes and reads any real, so
