@@ -5165,3 +5165,39 @@ the register.
   rational, whose `r` is not a character any numeric answer class reads, so
   every class would be false — the self-coverage assertion refused the rule
   until that clause came off, which is the check working as designed.
+- 2026-09-04 — a CHARACTER CODE is read as wide as the type that holds it.
+  The `u:` monad and `4 u:` answer J's two-byte type, so a code is the
+  residue sixteen bits leave (`u: _2` is the character two below the top of
+  that range) and nothing outside `_65536` to `65535` names one at all;
+  `9 u:` and `10 u:` answer the four-byte type and read thirty-two. libjay
+  has ONE character type, whose elements are codepoints, so the width is
+  the only thing the distinction leaves behind — and a code the width
+  admits but Rust's `char` cannot hold (a surrogate, or anything above
+  `10ffff` under `10 u:`) stays a refusal here.
+- 2026-09-04 — a conversion or symbol form over an argument with NO
+  ELEMENTS answers the empty of the form's own result type. It holds for
+  every `n u:`, for `4 s:` and `5 s:`, and for `128!:3`, which is the CRC
+  of no bytes. The argument's own type is never read, so an empty written
+  at the wrong type is not the error it would be at any size: nothing ran,
+  and nothing had a type to object to.
+- 2026-09-04 — an explicit modifier's NOUN operand answers to BOTH of its
+  spellings. `m` and `u` are one operand written two ways, so a body that
+  says `v` where the right operand is the noun 2 reads that noun, which is
+  what `(- (2 : 'v u y') 2) 10` answering `_8` says. A VERB operand answers
+  only to the verb spelling: `m` beside a verb operand is a name with
+  nothing under it, which is the reference's own value error.
+- 2026-09-04 — the BINARY REPRESENTATION of the exact types is the
+  reference's, measured rather than invented. An extended number is one
+  nested magnitude block an item and a rational two, reached through the
+  same offset table a box uses; a magnitude is the magic word, a 2, the
+  digits' byte count, a 1, the digit count carrying the sign, and then the
+  digits sixty-four bits apiece. `3!:3` of both now writes the reference's
+  own bytes, which is what settles that the layout is right rather than
+  merely self-consistent.
+- 2026-09-04 — how a train writes itself back out follows the tree it was
+  given, not the shortest words that reparse to it. A HOOK's right tine is
+  always bracketed — `+ (- * %)`, not `+ - * %`, though the four words
+  reparse the same way — and only a train that already counts out odd
+  absorbs an odd one in its last place. A constant verb is spelled by its
+  own word and never taken apart, and `{::` and a constant verb of a
+  negative atom are held off the conjunction that took them.

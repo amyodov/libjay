@@ -42,6 +42,31 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   has past 2^53. And the logarithm of an EXACT 1 is an exact 0 — the one
   argument whose natural logarithm keeps the extended type.
 
+- Round 7A's grammar rules, measured against jconsole. A CHARACTER CODE is
+  read as wide as the type that holds it: the `u:` monad and `4 u:` answer
+  the two-byte type, so a code is sixteen bits and a negative one names a
+  character near the top of that range, while `9 u:` and `10 u:` read
+  thirty-two. The byte forms `4 u:`, `5 u:`, `6 u:` and `7 u:` are
+  implemented, `6 u:` reading a byte pair as one character. `x u:` and the
+  symbol forms `4 s:` and `5 s:` over an argument with NO ELEMENTS answer
+  the empty of the form's own result type rather than objecting to a type
+  they never saw, and so does `128!:3`, which is the CRC of no bytes.
+- `%.` of an ATOM is the plain reciprocal, exact type and all, so `%. 0` is
+  an infinity where `%. (,0)` is a matrix too singular to invert; `x %. y`
+  over an atom y is the items' sum over it.
+- An explicit modifier's NOUN operand answers to both of its spellings —
+  `m` and `u` are one operand written two ways — while a verb operand
+  answers only to the verb spelling.
+- `x ":` writes BOXED data as it stands and lays a COMPLEX value out by its
+  real part.
+- `4!:0` and `4!:55` read a box holding nothing as the empty name, which is
+  not a name a program could have written; `4!:55` answers 1 for a name and
+  0 for what is not one.
+- The BINARY REPRESENTATION of an extended number and of a rational:
+  `3!:1`, `3!:2` and `3!:3` write and read the reference's own bytes for
+  both, one nested magnitude block an item and two for a rational.
+- `__:`, the constant verb of the infinity below, which the lexer had read
+  as a number and a definition's colon.
 - Round 6B's structural rules, measured grid by grid against jconsole. The
   identity of an INDEXING fold — `({)/` and `(C.)/` answer `i. #` of the
   cell, which they had no identity for before. The type a BOOLEAN fold
@@ -299,6 +324,11 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   value a machine word holds — so `1 p:`, `4 p:` and `_4 p:` cost
   logarithms where they used to cost a square root.
 
+- How a verb writes itself back out: a HOOK's right tine is always
+  bracketed, only a train that already counts out odd absorbs an odd one in
+  its last place, a constant verb is never taken apart, and `{::` and a
+  constant verb of a negative atom are held off the conjunction that took
+  them.
 - **A sweep survives the sentence that kills the runner.** `fuzz --compare`
   measures in a WORKER process and reports from a journal the worker
   appends to as it goes: every sentence is announced before it is measured
