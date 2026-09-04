@@ -227,6 +227,8 @@ fn write_block(a: &Array, out: &mut Vec<u8>, span: Span) -> Result<()> {
         DType::F64 => 8,
         DType::Complex => 16,
         DType::Box => 32,
+        DType::Ext => 64,
+        DType::Rat => 128,
         other => {
             return Err(Error::not_yet(
                 format!("the binary representation of {} data", other.name()),
@@ -288,9 +290,82 @@ fn write_block(a: &Array, out: &mut Vec<u8>, span: Span) -> Result<()> {
                 write_block(cell, out, span)?;
             }
         }
+        // An EXTENDED number is one nested magnitude block an item, and a
+        // RATIONAL two — the numerator and the denominator, in that order —
+        // reached through the same table of offsets a box uses.
+        Data::Ext(v) => {
+            let table = out.len();
+            out.resize(out.len() + 8 * v.as_slice().len(), 0);
+            for (i, n) in v.as_slice().iter().enumerate() {
+                let offset = (out.len() - start) as u64;
+                out[table + 8 * i..table + 8 * i + 8].copy_from_slice(&offset.to_le_bytes());
+                write_magnitude(n, out);
+            }
+        }
+        Data::Rat(v) => {
+            let table = out.len();
+            out.resize(out.len() + 16 * v.as_slice().len(), 0);
+            for (i, r) in v.as_slice().iter().enumerate() {
+                for (k, part) in [r.numer(), r.denom()].into_iter().enumerate() {
+                    let offset = (out.len() - start) as u64;
+                    let slot = table + 16 * i + 8 * k;
+                    out[slot..slot + 8].copy_from_slice(&offset.to_le_bytes());
+                    write_magnitude(part, out);
+                }
+            }
+        }
         _ => return Err(Error::internal("a type the block writer did not name")),
     }
     Ok(())
+}
+
+/// One extended MAGNITUDE, as the reference writes it: the magic word, a
+/// 2, how many bytes the digits take, a 1, then the digit count carrying
+/// the number's SIGN, then the digits themselves — sixty-four bits apiece,
+/// least significant first. A zero has no digits and a count of zero.
+fn write_magnitude(n: &crate::exact::Ext, out: &mut Vec<u8>) {
+    let (sign, limbs) = n.to_u64_digits();
+    push_word(out, REP_MAGIC);
+    push_word(out, 2);
+    push_word(out, (8 * limbs.len()) as u64);
+    push_word(out, 1);
+    let count = limbs.len() as i64;
+    let signed = if sign == num_bigint::Sign::Minus { -count } else { count };
+    push_word(out, signed as u64);
+    for l in &limbs {
+        push_word(out, *l);
+    }
+}
+
+/// The extended number one magnitude block stands for, and where the block
+/// ends.
+fn read_magnitude(bytes: &[u8], start: usize, span: Span) -> Result<(crate::exact::Ext, usize)> {
+    let bad = |what: &str| {
+        Error::domain(format!("3!:2 was not given a binary representation: {what}"), span)
+    };
+    if read_word(bytes, start, span)? != REP_MAGIC {
+        return Err(bad("a magnitude does not begin as one"));
+    }
+    let signed = read_word(bytes, start + 32, span)? as i64;
+    let n = signed.unsigned_abs() as usize;
+    let mut limbs = Vec::with_capacity(n);
+    for i in 0..n {
+        limbs.push(read_word(bytes, start + 40 + 8 * i, span)?);
+    }
+    let sign = match signed.signum() {
+        -1 => num_bigint::Sign::Minus,
+        0 => num_bigint::Sign::NoSign,
+        _ => num_bigint::Sign::Plus,
+    };
+    // `num-bigint` builds from thirty-two-bit digits, so each word becomes
+    // its low half and then its high one.
+    let mut digits = Vec::with_capacity(2 * n);
+    for l in &limbs {
+        digits.push(*l as u32);
+        digits.push((*l >> 32) as u32);
+    }
+    let mag = num_bigint::BigUint::new(digits);
+    Ok((crate::exact::Ext::from_biguint(sign, mag), start + 40 + 8 * n))
 }
 
 /// `3!:2 y`: the value a binary representation stands for.
@@ -370,6 +445,36 @@ fn read_block(bytes: &[u8], start: usize, span: Span) -> Result<(Array, usize)> 
                 end = end.max(cell_end);
             }
             (Data::Box(cells.into()), end)
+        }
+        64 => {
+            let offsets = words(count)?;
+            let mut cells = Vec::with_capacity(count);
+            let mut end = at + 8 * count;
+            for o in offsets {
+                let (n, block_end) = read_magnitude(bytes, start + o as usize, span)?;
+                cells.push(n);
+                end = end.max(block_end);
+            }
+            (Data::Ext(cells.into()), end)
+        }
+        128 => {
+            let offsets = words(2 * count)?;
+            let mut cells = Vec::with_capacity(count);
+            let mut end = at + 16 * count;
+            for p in offsets.chunks_exact(2) {
+                let (num, num_end) = read_magnitude(bytes, start + p[0] as usize, span)?;
+                let (den, den_end) = read_magnitude(bytes, start + p[1] as usize, span)?;
+                let r = crate::exact::Rat::new(num, den)
+                    .ok_or_else(|| {
+                        Error::domain(
+                            "3!:2 was not given a binary representation: a rational with no numerator and no denominator",
+                            span,
+                        )
+                    })?;
+                cells.push(r);
+                end = end.max(num_end.max(den_end));
+            }
+            (Data::Rat(cells.into()), end)
         }
         other => {
             return Err(Error::not_yet(
