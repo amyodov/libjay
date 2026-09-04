@@ -7,9 +7,32 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The complex FLOOR reads the comparison tolerance. `<.` on a complex value
+  is McDonnell's floor, and the test that keeps the fractional parts inside
+  the unit triangle is a TOLERANT comparison, so
+  `<. 0.49999999999999j0.5` is `0j1` where an exact one gives `0`, and
+  `<.!.0` of the same argument is `0` again. The TIE between the two parts
+  stays exact under J and is tolerant under APL, which is the one place the
+  two references answer that argument differently. `>.` mirrors it.
+
+- The complex RESIDUE divides by the textbook conjugate formula rather than
+  by the scaled division `%` uses, which is what settles
+  `0.12j_0.16 | 0.5j0.5` at `_0.02j_0.14` — a quotient exactly on a half in
+  both components, which the two formulas round either side of. The overflow
+  follows the formula: `(1e200j1e200) | (1e300j1e300)` is a NaN.
+
+- Four rules about a NaN. `_. % 0` is the NaN and not an infinity. A NaN is
+  no ANGLE, so `1 o. _.`, `r. _.` and `^ 0j_.` are limit errors as their
+  infinite counterparts are. `*. _.` reads no length and no angle and is a
+  NaN error, where `+. _.` answers the two parts it was handed.
+
 ### Changed
 
 ### Fixed
+
+- `j.` and `r.` over data that is no number reached an INTERNAL error
+  ("a complex monad on the real path") instead of the ordinary type error.
+  One cause behind every internal error a 50 000-sentence sweep found.
 
 ## 0.4.9 — 2026-09-04
 

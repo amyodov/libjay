@@ -2340,7 +2340,11 @@ families are the obverse of `[` or `]` composed on the LEFT
 - **A logarithm with a negative left and a non-numeric right.** Pinned: the
   reference neither answers nor refuses — no output, exit 0, no value.
 - **The extrema of a NaN, one pair at a time.** Pinned: the reference
-  answers `1 <. _.` with `_.` and `1 1 <. (_. _.)` with `1 1`.
+  answers `1 <. _.` with `_.` and `1 1 <. (_. _.)` with `1 1`. Round 8
+  measured the whole split over 184 pairs: the reference keeps the NaN
+  wherever BOTH sides reach its float pass (at two, three, eight and
+  sixteen items alike) and loses it wherever one side is INTEGER or an ATOM
+  stands against a list of more than one item. Four loops, one question.
 - **A MONADIC EMPTY'S TYPE, verb by verb.** A character empty answers as a
   boolean one would, which libjay follows, but the numeric empties do not
   all follow from the argument's type: `3!:0 (+. (0 $ 0.5))` is boolean
@@ -2547,7 +2551,12 @@ oracle directly, one entry per line of
   unpredictable results. The tolerance clause on the Dictionary's `=` page
   is written for a FINITE floating-point or complex operand, which a NaN is
   not, so the tolerant reading never reaches this pair and the exact
-  comparison is what remains.
+  comparison is what remains. Round 8 followed the vector path and reverted
+  it: it fixes the six spellings above and breaks the other four — the atom,
+  the one-item array, the rank-2 argument and the mixed integer pass — since
+  the split is by item count and storage type, not by value. The rows are
+  pinned in the divergence list with a family rule, so a sweep counts them
+  as recorded rather than unexplained.
 - `/:~` and `\:~` sort by the grade. jconsole special-cases the reflexive
   sort into a routine that puts a NaN somewhere its own `/:` does not:
   `/:~ 2 1 _. 0` is `0 1 _. 2` there, `0 1 2 _.` here, while

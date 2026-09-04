@@ -5201,3 +5201,51 @@ the register.
   absorbs an odd one in its last place. A constant verb is spelled by its
   own word and never taken apart, and `{::` and a constant verb of a
   negative atom are held off the conjunction that took them.
+- 2026-09-04 — THE COMPLEX FLOOR READS THE COMPARISON TOLERANCE, and the
+  complex residue divides by the conjugate formula. Rounds 5B, 6A and 7B
+  each left `0.12j_0.16 | 0.5j0.5` open, the last of them concluding that
+  the reference contradicted itself: its `|` needed a quotient of `_1j4`
+  where its own `<.` of that same quotient is `0j3`. Round 8 fitted the
+  whole question against a 214-pair residue grid and a 218-point floor
+  grid, and there is no contradiction. Two facts settle it. First, `<.` on
+  a complex value tests `r + s < 1` TOLERANTLY — at the tolerance in force,
+  which `9!:19 ] 0` and `<.!.0` both move — and tests the tie `r >= s`
+  EXACTLY; that fits the floor grid with no failures where the exact
+  version fails 23 of it. GNU APL takes the same tolerant triangle test and
+  a TOLERANT tie, which is why `⌊0.49999999999999J0.5` is `1` there and
+  `0j1` in jconsole, so the tie switches on the dialect. Second, the
+  residue's quotient is `y * (+ x) % |x|^2` and not the scaled division
+  libjay's `%` uses: with it the residue grid fits 214 of 214, where the
+  scaled division fits 212. The overflow confirms the formula rather than
+  the fit —`(1e200j1e200) | (1e300j1e300)` is a NaN there, which is a
+  squared denominator reaching infinity, and `(1e_320j1e_320) | (1j1)` is a
+  NaN the same way. So the reference's `|` and its `%` divide by different
+  formulas, and the half-integer quotient falls either side of the tie
+  depending on which. Nothing here is pinned.
+- 2026-09-04 — A NaN IS NO ANGLE, and `turns` refuses it. The earlier
+  reading was that a NaN is no magnitude and so is not past the turn limit,
+  the arithmetic that made it having reported itself already. The reference
+  says otherwise and uniformly: `1 o. _.`, `2 o. _.`, `r. _.`, `r. (_.j1)`
+  and `^ 0j_.` are all LIMIT errors, exactly as `1 o. _` and `r. _` are.
+  The functions that take no turn go on answering (`5 o. _.` is `_.`), and
+  `0 o. _.` and `_1 o. _.`, whose own arithmetic is a root, are NaN errors.
+  Beside it: `*. y` reads no length and no angle from a NaN and is refused,
+  where `+. y` answers the two parts it was given, and a NaN dividend takes
+  no infinity from a zero divisor (`_. % 0` is `_.`).
+- 2026-09-04 — THE NaN COMPARISONS ARE PINNED, NOT FOLLOWED. The
+  reference's tolerant float pass over MORE THAN ONE ITEM reads a NaN as
+  ordered against nothing and therefore equal to everything, so
+  `(1.0 1.0) = (_. _.)` is `1 1` and `(2.0 4.0 6.0) = (_. 1 2)` is `1 0 0`.
+  Every other path there reads a NaN as equal to nothing, which is libjay's
+  answer: the atom (`1.0 = _.` is 0), the one-item array
+  (`(, 1.0) = (, _.)` is 0), a rank-2 argument against an atom, the mixed
+  integer pass (`(1 1) = (_. _.)` is `0 0`) and the exact comparison
+  `= !.0`. Following the vector path was tried and reverted: it fixes six
+  spellings and breaks the other four paths, since the split is by item
+  count and storage type rather than by value. That is the same shape as
+  the extrema of a NaN (`1 <. _.` against `1 1 <. (_. _.)`) and the root of
+  one, both already pinned, and it joins them with a family rule and the
+  full measurement. Round 8 also widened the extrema pin with what the 184
+  pairs behind it show: the reference keeps the NaN where both sides reach
+  its float pass and loses it where one side is integer or where an atom
+  stands against a longer list.
