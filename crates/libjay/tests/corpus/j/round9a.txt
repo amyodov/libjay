@@ -154,3 +154,11 @@ p."1 (_.)
 2 I. (_. 1 2)
 2 I. (1 2 3)
 2 I. (1.0 2.0 3.0)
+
+// THE NEXT PRIME ABOVE A VALUE BELOW TWO IS 2, however far below it is.
+4 p: (_9223372036854775806)
+4 p: (_100)
+4 p: 0
+4 p: 1
+4 p: 2
+_4 p: 3

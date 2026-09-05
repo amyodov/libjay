@@ -168,6 +168,12 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `4 p: y` FOR A y BELOW TWO no longer walks the whole integer range. The
+  next prime above any such value is 2 — which is what the reference
+  answers for `4 p: (_9223372036854775806)` as for `4 p: 0` — where a
+  one-at-a-time search from the machine's floor never returns. It was the
+  one sentence in a 50 000-expression sweep that killed the runner.
+
 - `j.` and `r.` over data that is no number reached an INTERNAL error
   ("a complex monad on the real path") instead of the ordinary type error.
   One cause behind every internal error a 50 000-sentence sweep found.

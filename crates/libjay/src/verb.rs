@@ -23932,7 +23932,11 @@ fn primes_below(n: i64, span: Span) -> Result<i64> {
 /// 9223372036854775837, which no word holds.
 #[inline(never)]
 fn next_prime(n: i64) -> Array {
-    let mut k = n;
+    // BELOW TWO THERE IS NOTHING TO WALK PAST: the next prime above any
+    // such value is 2, which is what the reference answers for
+    // `4 p: (_9223372036854775806)` as for `4 p: 0`. Walking up one at a
+    // time from a value near the machine's floor never returns.
+    let mut k = n.max(1);
     loop {
         match k.checked_add(1) {
             Some(next) => {
