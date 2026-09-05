@@ -2364,10 +2364,13 @@ impl Verb {
             Verb::Fit(v, _) | Verb::Fill(v, _) => v.ranks(),
             // Amend reads the whole argument, and the rest run their own
             // verb over the argument as a whole.
+            // `|.!.n` is the ROTATE it fits, and takes the same left cell:
+            // one count per axis, so a table of counts is a frame of
+            // shifts. `(|.!.0) b. 0` is `_ 1 _` there as `|. b. 0` is.
+            Verb::ShiftFill(_) => [RANK_INF, 1, RANK_INF],
             Verb::Amend(_)
             | Verb::Choose(_)
             | Verb::AmendVerb(_)
-            | Verb::ShiftFill(_)
             | Verb::Level { .. }
             | Verb::Characteristics(_)
             | Verb::UserDerived { .. }
@@ -3089,6 +3092,10 @@ impl Verb {
             Verb::Windowed(_, WindowKind::Prefix | WindowKind::Suffix) | Verb::Cut(..) => {
                 self.dyad_ranked(x, y, ctx, span)
             }
+            // `x |.!.n y` takes the same left cell the rotate it fits does
+            // — one count per axis — so a TABLE of counts is a frame of
+            // shifts: `(2 2 $ 1 0 0 1) |.!.0 (i. 3 3)` is two planes there.
+            Verb::ShiftFill(_) => self.dyad_ranked(x, y, ctx, span),
             Verb::Windowed(_, WindowKind::Scan) => {
                 Err(Error::not_yet("dyadic scan (x f\\ y)", span))
             }
@@ -3138,7 +3145,6 @@ impl Verb {
                 let m = u.dyad(x, y, ctx, span)?;
                 amend(&m, x, y, ctx.cfg.near(), span)
             }
-            Verb::ShiftFill(fill) => shift_fill(x, y, fill, ctx.cfg.near(), span),
             Verb::Memo(u, cache) => memoised(u, cache, Some(x), y, ctx, span),
             Verb::Characteristics(_) => {
                 Err(Error::domain("u b. has no dyadic meaning", span))
@@ -3317,7 +3323,9 @@ impl Verb {
             // `m b.` below 16 reads two BITS, and a value that is no bit is
             // refused whatever the frame holds: `2 (0 b.) (i. 0)` is a
             // domain error in the reference where `1 (0 b.) (i. 0)` is the
-            // empty. From 16 up the table reads whole integers and nothing
+            // empty. A bit is read EXACTLY — no tolerance stands in for one
+            // — so `(1 1.0000000000001) (14 b.) (2 0 3 $ 0)` is refused as
+            // readily as a 2 would be. From 16 up the table reads whole integers and nothing
             // about a value is out of range, so the frame stands there.
             let bits_eager = {
                 let mut v = self;
@@ -3327,12 +3335,20 @@ impl Verb {
                 matches!(v, Verb::Prim(Prim { dyad: DyadOp::TruthTable(m), .. }) if *m < 16)
                     && [x, y].into_iter().any(|a| {
                         a.count() > 0
-                            && a.to_i64_vec()
-                                .is_none_or(|v| v.iter().any(|&n| !(0..=1).contains(&n)))
+                            && a.to_f64_vec()
+                                .is_none_or(|v| v.iter().any(|&n| n != 0.0 && n != 1.0))
                     })
             };
+            // A value that is no bit is refused OUTRIGHT: it is a fact
+            // about the values themselves, so there is nothing for a fill
+            // run to discover and nothing for the frame to hide.
+            if bits_eager {
+                return Err(Error::domain(
+                    "m b. below 16 reads two bits, and this value is neither",
+                    span,
+                ));
+            }
             let keep_any = eager
-                || bits_eager
                 || (decode_eager
                     && matches!(self, Verb::Prim(Prim { dyad: DyadOp::Decode, .. })));
             // CATENATION settles the type of an answer with no cell the way
@@ -3449,6 +3465,7 @@ impl Verb {
                 Ok(enclose(&r, *rule))
             }
             Verb::Cut(u, n) => cut(u, Some(x), y, *n, ctx, span),
+            Verb::ShiftFill(fill) => shift_fill(x, y, fill, ctx.cfg.near(), span),
             Verb::Hypergeometric { num, den } => {
                 hypergeometric_partial(num, den, x, y, ctx.cfg.near(), span)
             }
@@ -3529,6 +3546,10 @@ fn one_rank(r: i64) -> String {
     match r {
         RANK_INF => "_".to_string(),
         _ if r == -RANK_INF => "__".to_string(),
+        // A rank is written as J writes a negative number, with the
+        // underscore that makes it one word: `%"_2 b. _1` is `%"_2` there,
+        // and `-2` would not read back as the same verb.
+        _ if r < 0 => format!("_{}", r.unsigned_abs()),
         _ => r.to_string(),
     }
 }
@@ -10898,8 +10919,14 @@ fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
         return outer_product(u, x, y, ctx, span);
     }
     let ranks = u.ranks();
-    let fxl = x.rank() - effective_rank(ranks[1], x.rank());
-    let fyl = y.rank() - effective_rank(ranks[2], y.rank());
+    // A NEGATIVE rank leaves a fixed number of frame axes wherever a verb
+    // frames on its own, but the table makes the frame itself: there the
+    // count has no bound and the whole argument is one cell, which is what
+    // `(1 2) (+"_1)/ (3 4)` answering `4 6` says — one application, not a
+    // two-by-two table — and `(i. 2 2) ,./ (i. 2 2)` a single stitch.
+    let cell_rank = |r: i64, arg: usize| if r < 0 { arg } else { effective_rank(r, arg) };
+    let fxl = x.rank() - cell_rank(ranks[1], x.rank());
+    let fyl = y.rank() - cell_rank(ranks[2], y.rank());
     let mut frame = x.shape[..fxl].to_vec();
     frame.extend_from_slice(&y.shape[..fyl]);
     let nx: usize = x.shape[..fxl].iter().product();
@@ -12668,7 +12695,31 @@ const APL_EXTREME: f64 = 1.7976e308;
 /// and APL's are the extremes of the representable range, so the table
 /// reads the language.
 fn reduce_identity(v: &Verb, n: usize, lang: crate::Lang) -> Option<Data> {
+    // A verb WRAPPED without changing what it does between two values keeps
+    // the identity of what is inside it: a memo, and a reduce whose own
+    // operand is what the identity is really about. `(+ M.)/ (0 $ 0)` is 0
+    // there and `(<./)/ (0 $ 0)` is `_`.
+    //
+    // A RANK keeps it only at rank ZERO, which is the rank an identity
+    // element has: `(-"0)/ (0 $ 0)` is 0 there and `(-"1)/ (0 $ 0)`,
+    // `(-"2)/ (0 3 $ 0)` and `(="1)/ (0 3 $ 0)` are domain errors.
+    match v {
+        Verb::Rank(inner, r) if r.triple() == [0, 0, 0] => {
+            return reduce_identity(inner, n, lang);
+        }
+        Verb::Rank(..) => return None,
+        Verb::Memo(inner, _) | Verb::Reduce(inner) => {
+            return reduce_identity(inner, n, lang);
+        }
+        _ => {}
+    }
     let Verb::Prim(p) = v else { return None };
+    // Matrix division divides, and divides an empty into the same 1 the
+    // ordinary division does: `%./ (0 $ 0)` is 1 there. GNU APL refuses
+    // `⌹/⍬`, which apl/divergences.txt records, so this is J's alone.
+    if p.dyad == DyadOp::MatrixDivide {
+        return (lang == crate::Lang::J).then(|| Data::Bool(vec![1u8; n].into()));
+    }
     let DyadOp::Scalar(op) = p.dyad else { return None };
     // Every numeric identity here is 0 or 1, and both references report a
     // boolean for each of them.
@@ -13535,6 +13586,20 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
             let k = cell_shape.first().copied().unwrap_or(1) as i64;
             return Ok(Array::new(vec![k as usize], Data::I64((0..k).collect::<Vec<i64>>().into())));
         }
+        // MATRIX DIVISION's identity is the identity MATRIX a cell divides
+        // by unchanged, and its order is the cell's LEADING axis — one for
+        // a cell that has no axis at all: `$ (%./ (i. 0 3))` is `3 3`,
+        // `$ (%./ (0 $ 0))` is `1 1` and `$ (%./ (i. 0 0 3))` is `0 0`.
+        if ctx.cfg.rules.lang == crate::Lang::J
+            && matches!(v, Verb::Prim(p) if p.dyad == DyadOp::MatrixDivide)
+        {
+            let k = cell_shape.first().copied().unwrap_or(1);
+            let mut d = vec![0u8; k * k];
+            for i in 0..k {
+                d[i * k + i] = 1;
+            }
+            return Ok(Array::new(vec![k, k], Data::Bool(d.into())));
+        }
         return match reduce_identity(v, m, ctx.cfg.rules.lang) {
             Some(d) => Ok(Array::new(cell_shape, d)),
             None => Err(Error::domain(
@@ -14351,8 +14416,22 @@ fn probe_windows(
     Some(Array::new(shape, Data::empty(cell.dtype())))
 }
 
-/// The window size: one integer atom.
-fn window_size(x: &Array, near: NearInt, span: Span) -> Result<i64> {
+/// The window size: one integer atom, or an INFINITY.
+///
+/// `n` is how many items the window is to hold, so an infinite one asks for
+/// more than any argument has: `_ +/\ (1 2 3)` is the empty there, and
+/// `__ +/\ (1 2 3)` — the chunks of infinitely many items — is the one
+/// chunk that holds them all, `6`. `items` is how many the argument has,
+/// which is what the positive infinity is answered with: one item further
+/// than the argument reaches is already no window at all, and every larger
+/// count answers alike.
+fn window_size(x: &Array, items: usize, near: NearInt, span: Span) -> Result<i64> {
+    if x.count() == 1
+        && let Some(f) = x.to_f64_vec().and_then(|v| v.first().copied())
+        && f.is_infinite()
+    {
+        return Ok(if f > 0.0 { items as i64 + 1 } else { i64::MIN });
+    }
     let v = x
         .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("the window size must be an integer", span))?;
@@ -14374,11 +14453,11 @@ fn window_size(x: &Array, near: NearInt, span: Span) -> Result<i64> {
 /// takes the n+1 empty runs between and around the items, which is what J
 /// does with it.
 fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
-    let k = window_size(x, ctx.cfg.near(), span)?;
     let promoted = as_items(y);
     let base = promoted.as_ref().unwrap_or(y);
     let n = base.items();
     let m = base.item_size();
+    let k = window_size(x, n, ctx.cfg.near(), span)?;
     let j = ctx.cfg.rules.lang == crate::Lang::J;
     if k < 0 {
         let w = k.unsigned_abs() as usize;
@@ -14447,7 +14526,7 @@ fn nwise(f: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
             Some(span),
         ));
     }
-    let k = window_size(x, ctx.cfg.near(), span)?;
+    let k = window_size(x, y.items(), ctx.cfg.near(), span)?;
     let promoted = as_items(y);
     // A rank-0 argument has no axis to window. One item is what `≢` counts
     // it as, and a window of one leaves it exactly as it was, rank included;
@@ -14547,6 +14626,18 @@ fn fold_family(
         out.push(u.monad(&acc, ctx, span)?);
     }
     if multiple {
+        // A fold that kept EVERY result and had no step to take still asks
+        // u what a result looks like: the answer is the empty of one
+        // result's own shape and type, and a refusal u makes about the
+        // value it was handed stands. `(s: F:. +:) 2` is a domain error
+        // there where the empty alone would have hidden it, and
+        // `$ ((+/\ F:: -@\:) 2)` is `0 1` rather than `0`.
+        if out.is_empty() {
+            let cell = u.monad(&acc, ctx, span)?;
+            let mut shape = vec![0usize];
+            shape.extend_from_slice(&cell.shape);
+            return Ok(Array::new(shape, Data::empty(cell.dtype())));
+        }
         return assemble(&[out.len()], out, span);
     }
     match out.pop() {
@@ -17946,8 +18037,32 @@ fn shift_fill(
     span: Span,
 ) -> Result<Array> {
     let counts = axis_counts(x, "shift", near, span)?;
-    if y.rank() == 0 {
+    let mismatch = || {
+        Error::new(ErrorKind::Type, "the fill and the argument differ in kind", Some(span))
+    };
+    // A left argument that moves NOTHING — no axis named, or a count of
+    // zero for each one — vacates no place, so the fill is not read at
+    // all, not even for its kind: `(i. 0) |.!.0.5 (1;2 3)` and
+    // `0 |.!.0.5 (1;2 3)` are the boxed pair itself there, where a number
+    // filling a box would be refused at any size.
+    if counts.len() <= y.rank().max(1) && counts.iter().all(|&n| n == 0) {
         return Ok(y.clone());
+    }
+    // A SCALAR is one item with no axis to slide it along, so a shift of
+    // any amount leaves the place the item vacated: `|.!.0 (5)` is `0`
+    // there and `|.!.'z' 'a'` is `z`, each at the type the fill and the
+    // argument make between them — and a fill of another kind is refused
+    // as it would be at any size, `|.!.0 (<1)` being a domain error.
+    if y.rank() == 0 {
+        if fill.count() != 1 {
+            return Err(Error::new(ErrorKind::Length, "a fill is one atom", Some(span)));
+        }
+        let t = DType::promote(y.dtype(), fill.dtype()).ok_or_else(mismatch)?;
+        let src = if counts.iter().any(|&n| n != 0) { fill } else { y };
+        return match src.data.cast(t) {
+            Some(d) => Ok(Array::new(Vec::new(), d)),
+            None => Err(mismatch()),
+        };
     }
     if counts.len() > y.rank() {
         return Err(Error::new(
@@ -17959,9 +18074,6 @@ fn shift_fill(
     if fill.count() != 1 {
         return Err(Error::new(ErrorKind::Length, "a fill is one atom", Some(span)));
     }
-    let mismatch = || {
-        Error::new(ErrorKind::Type, "the fill and the argument differ in kind", Some(span))
-    };
     // An argument with no atoms never has a place to put the fill, so the
     // fill's kind is not consulted at all and the argument's own type
     // stands: `1 |.!.1 (0 $ '')` is the empty of CHARACTERS in jconsole,
@@ -20359,16 +20471,27 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
         }
         return Ok(format_chars(y, fmt));
     }
+    // CHARACTERS have no field to lay out and no number to round: the
+    // reference refuses them whatever the specification and whatever the
+    // shape, `2 ": ('')` and `2 ": ('ab')` alike.
+    if y.dtype() == DType::Char {
+        return Err(Error::domain("format by specification takes numbers", span));
+    }
     // A COMPLEX value is laid out by its REAL part, which is what a field
     // of a width and a digit count can hold.
     let values = match y.to_complex_vec() {
         Some(v) => v.iter().map(|[re, _]| *re).collect::<Vec<f64>>(),
         None => return Err(Error::domain("format by specification takes numbers", span)),
     };
+    let exact = matches!(y.dtype(), DType::Rat | DType::Ext);
     let cols = if y.rank() == 0 { 1 } else { y.shape[y.rank() - 1] };
     let rows = if cols == 0 { 0 } else { y.count() / cols };
+    // ONE field for every column, or a lone ATOM that stands for them all.
+    // A one-item LIST is not that atom: it names the first column and no
+    // other, so `(,5) ": (i. 0)` is a length error there where `5 ": (i. 0)`
+    // is the empty.
     let fields: Vec<[f64; 2]> = match spec.len() {
-        1 => vec![spec[0]; cols],
+        1 if x.rank() == 0 => vec![spec[0]; cols],
         n if n == cols => spec,
         n => {
             return Err(Error::new(
@@ -20393,7 +20516,19 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
         // overflows the field — the point and the digits alone are wider —
         // so rendering past that point cannot change the answer.
         let digits = if w == 0.0 { d.max(0.0) } else { d.max(0.0).min(w.abs()) };
-        format_field(values[r * cols + c], digits as usize, w < 0.0, fmt.neg)
+        let mut v = values[r * cols + c];
+        // A value written EXACTLY breaks a tie the other way from a double:
+        // `2 ": (1r2 1r3)` is `1 0` in the reference where `2 ": 0.5` is
+        // `0`, and `2 ": (_1r2 _3r2)` is `0 _1` — the half goes to the
+        // LARGER number, not to the even one.
+        if exact && digits < 18.0 {
+            let scale = 10f64.powi(digits as i32);
+            let scaled = v * scale;
+            if scaled.fract().abs() == 0.5 {
+                v = (scaled.floor() + 1.0) / scale;
+            }
+        }
+        format_field(v, digits as usize, w < 0.0, fmt.neg)
     };
     // A width of zero is the widest value in the column, and a blank
     // between it and whatever stands to its left.
@@ -20840,8 +20975,20 @@ fn folds_eagerly(u: &Verb) -> Option<bool> {
 /// A run of x items has `1 + (#y) - x` places to sit, and that is how many
 /// results there are.
 fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
-    let k = one_int(x, "an outfix width", ctx.cfg.near(), span)?;
     let n = y.items() as i64;
+    // An INFINITE width, as for the infix: a positive one leaves out more
+    // items than there are, so there is no run to leave out and the answer
+    // is empty; a negative one takes the whole argument as its one run.
+    let k = match x.to_f64_vec().filter(|_| x.count() == 1).and_then(|v| v.first().copied()) {
+        Some(f) if f.is_infinite() => {
+            if f > 0.0 {
+                n + 1
+            } else {
+                i64::MIN
+            }
+        }
+        _ => one_int(x, "an outfix width", ctx.cfg.near(), span)?,
+    };
     let list = as_list(y);
     // A positive width leaves out every run of x consecutive items, so
     // there are `1 + n - x` of them and none at all once x is longer than
@@ -20990,6 +21137,27 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
         }
         Verb::BondLeft(m, f) => bond_obverse(m, f, true)?,
         Verb::BondRight(f, n) => bond_obverse(n, f, false)?,
+        // `u~ y` is `y u y`, and only a handful of those can be undone. The
+        // reference halves for `+~` and takes the square root for `*~`; the
+        // three that JOIN a value to itself come back by taking the FRONT
+        // of what they made — the first half of the items for `,~`, the
+        // first item for `,:~`, and the first box opened for `;~`. Every
+        // other commuted verb has no obverse there either.
+        Verb::Commute(f) => {
+            let Verb::Prim(p) = &**f else { return None };
+            match p.name {
+                "+" => named("-:")?,
+                "*" => named("%:")?,
+                "," => Verb::Fork(
+                    Box::new(atop(named("<.")?, atop(named("-:")?, named("#")?))),
+                    Box::new(named("{.")?),
+                    Box::new(named("]")?),
+                ),
+                ",:" => named("{.")?,
+                ";" => atop(named(">")?, named("{.")?),
+                _ => return None,
+            }
+        }
         _ => return None,
     })
 }
@@ -23028,7 +23196,8 @@ fn to_symbols(y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(vec![ids.len()], Data::Symbol(ids.into())))
 }
 
-/// `x s: y`: the numbered symbol forms. 2 razes the names into one list, 3
+/// `x s: y`: the numbered symbol forms. 2 razes the names into one list,
+/// a null after each, 3
 /// and 4 lay them out as a character table blank-padded to the longest, and
 /// 5 boxes them one apiece. The remaining numbers J defines report on its
 /// own symbol table — its index for each symbol, how many slots it holds,
@@ -23083,8 +23252,10 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
         }
         return Ok(match form {
             -2 | -1 => Array::new(vec![0], Data::Symbol(Vec::new().into())),
-            6 => Array::new(y.shape.clone(), Data::I64(Vec::new().into())),
-            _ => Array::new(vec![0], Data::I64(Vec::new().into())),
+            // 6 and 7 both number a symbol, one number per symbol, so each
+            // answers in the argument's own shape: `$ (7 s: (0 0 $ 0))` is
+            // `0 0` there as `$ (6 s: (0 0 $ 0))` is.
+            _ => Array::new(y.shape.clone(), Data::I64(Vec::new().into())),
         });
     }
     let names = crate::symbol::names(ids);
@@ -23093,9 +23264,14 @@ fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
             names.iter().map(|n| Array::from_chars(n.chars().collect())).collect();
         return Ok(Array::new(y.shape.clone(), Data::Box(boxes.into())));
     }
-    // The RAZE: every name run together, whatever the argument's shape.
+    // The RAZE: every name run together, whatever the argument's shape,
+    // each one TERMINATED by a null, which is what keeps two names apart
+    // where one of them may be empty: `2 s: (s: ;:'a b')` is four
+    // characters there — `a`, a null, `b`, a null — and the one symbol
+    // with no name at all is a single null.
     if form == 2 {
-        let out: Vec<char> = names.iter().flat_map(|n| n.chars()).collect();
+        let out: Vec<char> =
+            names.iter().flat_map(|n| n.chars().chain(std::iter::once('\0'))).collect();
         return Ok(Array::new(vec![out.len()], Data::Char(out.into())));
     }
     let width = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);

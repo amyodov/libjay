@@ -55,6 +55,50 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   list of names is a frame: `5!:5 (2 $ <'a')` is two rows and
   `5!:1 (0 $ 123x)` the empty.
 
+- Round 8C's structural rules, measured against jconsole. The TABLE adverb
+  reads a NEGATIVE rank as no frame at all — under `u/` the whole argument
+  is one cell — so `(1 2) ,./ (3 4)` is the single stitch `1 3 / 2 4` and
+  `(1 2) (+"_1)/ (3 4)` is `4 6`, where both used to frame. A rank is
+  written back out with the underscore that makes it one word, so
+  `(%"_2) b. _1` is `%"_2`.
+
+- `|.!.n` takes the rotate's own left rank of 1: a TABLE of counts is a
+  frame of shifts, and `(2 2 $ 1 0 0 1) |.!.0 (i. 3 3)` is two planes where
+  it used to be a rank error. A SCALAR argument is one item with no axis to
+  slide it along, so `|.!.0 (5)` is `0` and `|.!.'z' 'a'` is `z`; and a
+  shift that moves NOTHING — no axis named, or a count of zero for each —
+  never reads the fill, not even for its kind, which is what makes
+  `(i. 0) |.!.0.5 (1;2 3)` the boxed pair itself.
+
+- Neither GRADE takes a fit in J: `/: !.0 (1 2 3)` and
+  `(1 2 3) \: !.0 (3 1 2)` are domain errors, in either valence, although
+  both order by comparing. APL's `⍠('CT' n)` still reaches them.
+
+- A FOLD that keeps EVERY result and has no step to take asks u what a
+  result looks like: the empty carries that result's own shape and type, so
+  `$ ((+/\ F:: -@\:) 2)` is `0 1`, and a refusal u makes about the value it
+  was handed stands — `(s: F:. +:) 2` and `(<. F:. +:) 'a'` are domain
+  errors where the empty alone had hidden them. A fold also writes itself
+  back out as the conjunction its two inflections spell.
+
+- `x ": y` refuses CHARACTERS at any shape, and the EXACT types break a tie
+  toward the larger number where a double breaks it toward the even one:
+  `2 ": (1r2 1r3)` is `1 0` and `2 ": (0.5 1.5)` is `0 2`.
+
+- An INFINITE window: `_ u\ y` asks for more items than the argument has, so
+  there is no window and the answer is the empty of one window's shape;
+  `_ u\. y` has no run to leave out; and `__ u\ y` is the one chunk that
+  holds everything, `__ +/\ (1 2 3)` being `6`.
+
+- The obverse of a verb applied to ITSELF, for the three that join: `,~`
+  comes back by taking the first half of the items, `,:~` and `;~` the
+  first item.
+
+- `7 s:` numbers one symbol apiece and so answers in the argument's own
+  shape, `$ (7 s: (0 0 $ 0))` being `0 0`; `2 s:` runs the names together
+  with a NULL after each, which keeps two apart where one of them may be
+  empty.
+
 ### Changed
 
 ### Fixed
@@ -66,7 +110,6 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 ## 0.4.9 — 2026-09-04
 
 ### Added
-
 - The hypergeometric series reads the TERM COUNT before it refuses an
   infinity: a count that stops before the term after it leaves the
   infinity the sum reached, so `2 (2 H. 2) __` is `__` where

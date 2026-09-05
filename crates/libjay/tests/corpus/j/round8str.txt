@@ -1,0 +1,236 @@
+// Round 8C, the structural wave: what the generation-3 sweep still parted
+// libjay and jconsole on in the structural families — the table adverb's
+// own ranks, the rotate with a fill, the two grades' refusal of a fit, the
+// fold that kept every result and had none, the format by specification,
+// the infinite window, and the obverses of a verb applied to itself.
+
+// The TABLE adverb reads a NEGATIVE rank as no frame at all: the whole
+// argument is one cell, so `,.` stitches once rather than framing.
+(1 2) ,./ (3 4)
+(i. 2 2) ,./ (i. 2 2)
+$ ((i. 2 2) ,./ (i. 2 2))
+(1;2) ,./ (3;4)
+(1 2) (+"_1)/ (3 4)
+$ ((1 2) (+"_1)/ (3 4))
+(i. 2 3) (+"_1)/ (i. 2 3)
+(i. 2 3) (+"_2)/ (i. 2 3)
+(1 2) (,"_1)/ (3 4)
+(1 2) ,.~/ (3 4)
+(1 2 3) +/ (10 20)
+(1;2) ,/ (3;4)
+(1;2) ,"0/ (3;4)
+
+// A rank is written back out with the underscore that makes it one word.
+(%"_2) b. _1
+(%"_2) b. 0
+(%"_1) b. 0
+((,.~)) b. 0
+%"_2
+%"_1 _2
+(-:"_3) b. _1
+
+// `|.!.n` takes the rotate's own left rank of 1: a table of counts is a
+// frame of shifts, and a scalar has one item and no axis to slide it along.
+(|.!.0) b. 0
+(|.!.'z') b. 0
+(2 2 $ 1 0 0 1) |.!.0 (i. 3 3)
+$ ((2 2 $ 1 0 0 1) |.!.0 (i. 3 3))
+(2 1 $ 1 0) |. !.0 (i. 3)
+(1 2 $ 1 0) |. !.0 (i. 3 3)
+(4 1 $ 1 0 1 0) |.!.0 (i. 3)
+(2 0 $ 0) |.!.0 (i. 3)
+$ ((2 0 $ 0) |.!.0 (i. 3))
+(0 3 $ 0) |.!.0 (i. 3)
+$ ((0 3 $ 0) |.!.0 (i. 3))
+3!:0 ((0 3 $ 0) |.!.0 (i. 3))
+(,."1 1 (0 1 1 0)) |. !.0 (2 2)
+|. !.0 (5)
+$ (|. !.0 (5))
+3!:0 (|. !.0 (5))
+|. !.'z' ('a')
+|. !.1 (5)
+|. !.0 (i. 2 2)
+|. !.7 (i. 2 2)
+1 |.!.0 (5)
+0 |.!.0 (5)
+2 |.!.'z' (3)
+// A shift that moves nothing never reads the fill, not even for its kind.
+(i. 0) |. !.0.5 (1;2 3)
+0 |. !.0.5 (1;2 3)
+(0 $ 0) |. !.0 (1;2)
+3!:0 ((i. 0) |. !.0.5 (1 2))
+1 |. !.0.5 (1;2 3)
+|. !.0 (<1)
+
+// Neither grade takes a fit, in either valence.
+/: !.0 (1 2 3)
+\\: !.0 (1 2 3)
+/: !.1e_13 (1 2 3)
+(1 2 3) /: !.0 (3 1 2)
+(1 2 3) \\: !.0 (3 1 2)
+/: !.0 (<1)
+2 /: !.0 (i. 0)
+// The verbs that DO take one still do.
+~. !.0 (1 2 1)
+~: !.0 (1 2 1)
+(1 2) i. !.0 (1 2)
+<. !.0 (1.5)
+2 = !.0 (2)
+
+// A fold that keeps EVERY result and has no step to take still asks u what
+// a result looks like: the empty carries that shape and type, and a refusal
+// u makes about the value it was handed stands.
+(<. F:. +:) (2)
+$ ((<. F:. +:) (2))
+3!:0 ((<. F:. +:) (2))
+(+: F:: _9:) (2)
+(<. F:. +:) ('a')
+(<. F:: +:) ('a')
+(| F:: =) ('a')
+(*. F:: [) ('a')
+(^. F:. #:) ('a')
+(+: F:. _9:) ('a')
+(s: F:. +:) 2
+(<. F:. +:) (0 $ 0)
+(<. F:. +:) (i. 0)
+(<. F.. +:) ('a')
+(<. F.: +:) ('a')
+$ ((+/\\ F:: -@\\:) 2)
+2 2 {. ((+/\\ F:: -@\\:) 2)
+((~: f.) F:. _9:&.>) 2
+((_: >. }:) F:. -.&.>) 2
+((,/\\. :. *.) F:. (^. :. +:)&.>) 2
+// A fold writes itself back out as the conjunction its inflections spell.
+>: F:: <:
++ F.. -
++ F.: -
+
+// `x ": y` refuses characters at any shape, and the EXACT types break a
+// tie toward the larger number where a double breaks it toward the even.
+2 ": ('')
+2 ": ('ab')
+2 ": (2 2 $ 'ab')
+2 ": (1r2 1r3)
+2 ": (_1r2 _3r2)
+6 ": (1r2 1r3)
+6j2 ": (1r2 1r3)
+2 ": (0.5 1.5 2.5 _0.5)
+2 ": (2x)
+2 ": (1 2 3x)
+2 ": (0 $ 0)
+$ (2 ": (0 $ 0))
+6 2 4 ": (2 3 $ 1 2 3 4 5 6)
+(2 2 $ 6 2) ": (2 2 $ 1.5)
+(2 3 $ 8 2) ": (2 3 $ 1 2 3 4 5 6)
+
+// An INFINITE window asks for more items than the argument has, so the
+// infix has no window and the outfix no run to leave out; the negative
+// infinity is the one chunk that holds everything.
+_ +/\\ (1 2 3)
+$ (_ +/\\ (1 2 3))
+3!:0 (_ +/\\ (1 2 3))
+__ +/\\ (1 2 3)
+$ (__ +/\\ (1 2 3))
+_ +/\\ (2 2 $ 1)
+$ (_ +/\\ (2 2 $ 1))
+_ +/\\ (i. 0)
+_ <@:] \\ (1 2 3)
+$ (_ <@:] \\ (1 2 3))
+_ +/\\. (1 2 3)
+$ (_ +/\\. (1 2 3))
+__ +/\\. (1 2 3)
+(+/\\ {::&:3:) (((}: *. |:)) b. 0)
+
+// The obverse of a verb applied to ITSELF: the three that join come back by
+// taking the front of what they made.
+(,~) ^:_1 (1 2 3 4)
+(,~) ^:_1 (1 2 3)
+(,~) ^:_1 (i. 2 2)
+(,:~) ^:_1 (2 2 $ 1 2 1 2)
+(+~) ^:_1 (4)
+(*~) ^:_1 (4)
+(,.~) ^:_1 (2 2 $ 1 1 2 2)
+
+// `7 s:` numbers one symbol apiece, so it answers in the argument's own
+// shape as `6 s:` does; `2 s:` runs the names together with a null after
+// each, which only `a. i.` can show.
+$ (7 s: (0 0 $ 0))
+$ (7 s: (0 $ 0))
+$ (7 s: (i. 0))
+$ (6 s: (0 0 $ 0))
+3!:0 (7 s: (0 0 $ 0))
+a. i. (2 s: (s: ;:'a bc'))
+a. i. (2 s: (s: ,'a'))
+$ (2 s: (s: ;:'a bc'))
+
+// A format specification is one field per COLUMN, or a lone ATOM that
+// stands for them all; a one-item LIST is not that atom.
+(,5) ": (i. 0 0)
+(,5) ": (i. 0)
+(,5) ": (0 3 $ 0)
+(2 2 $ 5) ": (i. 0 0)
+5 ": (i. 0 0)
+(,6) ": (1 2 3)
+(,6) ": (,5)
+
+// The identity of an empty REDUCTION: a verb wrapped without changing what
+// it does between two values keeps the identity of what is inside it, a
+// cell with no atoms needs no identity at all, and matrix division's is the
+// identity matrix whose order is the cell's leading axis.
+%./ (0 $ 0)
+$ (%./ (0 $ 0))
+%./ (i. 0 3)
+$ (%./ (i. 0 3))
+$ (%./ (i. 0 2 3))
+$ (%./ (i. 0 0 3))
+$ (%./ (0 4 $ 0))
+%./ (0 0 $ 0)
+(-"(<.))/ (0 $ 0)
+(-"0)/ (0 $ 0)
+(+ M.)/ (0 $ 0)
+(r. M.)/ (0 0 $ 0)
+(<./)/ (0 $ 0)
+(+/)/ (0 $ 0)
+[/ (0 $ 0)
+(,"0)/ (0 $ 0)
+(] F.. %.) ('')
+(] F.: %.) ('')
+$ ((> F.: %.) (i. 0 0 3))
+(*/ F.. (-"(<.))) (-^:2 (0 $ 'a'))
+((<./) (1 : 'u/ y')) (5 +/\\ 2)
+
+// A bit is read EXACTLY: no tolerance stands in for one, and a value that
+// is no bit is refused whatever the frame holds.
+(1 1.0000000000001) (14 b.) (2 0 3 $ 0)
+(1 1.0000000000001) (14 b.) 1
+1.0000000000001 (14 b.) 1
+1 (14 b.) (2 0 3 $ 0)
+1 (2 b.) (0 3 $ 0)
+2 (2 b.) (0 3 $ 0)
+2 (16 b.) (0 3 $ 0)
+2 (22 b.) (0 $ 2.5)
+2.0 (16 b.) 3
+
+// A RANK keeps the identity only at rank ZERO, which is the rank an
+// identity element has; a cell with no atoms is answered by the identity
+// reshaped to it, not by skipping the question.
+(-"1)/ (0 $ 0)
+(-"2)/ (0 $ 0)
+(-"_)/ (0 $ 0)
+(-"0)/ (0 3 $ 0)
+(-"2)/ (0 3 $ 0)
+(="1)/ (0 3 $ 0)
+(="0)/ (0 3 $ 0)
+(=)/ (0 3 $ 0)
+(+"1)/ (0 3 $ 0)
+(_9: F.. _:) (0 0 $ 0)
+((+:) (1 : 'u/ y')) (0 0 $ '')
+((p..) (1 : 'u/ y')) (0 0 $ '')
+(({::) (1 : 'u/ y')) (0 0 $ '')
+((o.) (1 : 'u/ y')) (i. 0 0 3)
+(< F.: #:) (i. 0 0 3)
+((_9:"2) F.. (="2)) ((0 3 $ 0) ^ 0.5)
+$ ((r. M.)/ (0 0 $ 0))
+$ (%./ (0 0 $ 0))
++:/ (0 0 $ '')
++:/ (0 $ 0)

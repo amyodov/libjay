@@ -5312,3 +5312,41 @@ the register.
   the sixteen bits that type holds is written there as a surrogate PAIR,
   which libjay's one character type has no half of, so that much stays a
   gap.
+- 2026-09-04 — a NEGATIVE rank means one thing where a verb FRAMES on its
+  own and another where the frame is made for it. `u"_1` leaves one axis of
+  frame when it is applied, but under the TABLE adverb the frame is the
+  table itself, so the count has no bound and the whole argument is one
+  cell: `(1 2) (+"_1)/ (3 4)` is `4 6` and `(i. 2 2) ,./ (i. 2 2)` a single
+  stitch. This is the same reading `u b. 0` reports when it writes a
+  negative rank as an infinity.
+- 2026-09-04 — a shift with a FILL is the rotate it fits, ranks and all. It
+  takes one count per axis at a left rank of 1, so a table of counts frames
+  it; a scalar argument has one item and no axis to slide it along, which
+  leaves the fill behind; and a shift that moves nothing never reads the
+  fill, so a number filling a box is refused only where a place is actually
+  vacated.
+- 2026-09-04 — the two GRADES take no `!.` fit although they order by
+  comparing, which is measured rather than reasoned: every other comparison
+  J gives a fit to takes one. The refusal is in the J frontend rather than
+  in the tolerance list, because APL's `⍠('CT' n)` reaches the same grades
+  and must go on doing so.
+- 2026-09-04 — a fold that keeps EVERY result and has no step to take is
+  still asked what a result looks like. The answer is the empty of one
+  result's own shape and type, and a refusal the operand makes about the
+  value it was handed stands rather than being hidden by the empty. It is
+  the same rule an empty frame follows: nothing ran, but something was
+  asked.
+- 2026-09-04 — format by specification reads the type of the data it is
+  given. Characters have no field to lay out and are refused at any shape,
+  and a value written EXACTLY breaks a tie toward the larger number where
+  the same value written as a double breaks it toward the even one — so
+  `2 ": (1r2)` is 1 and `2 ": (0.5)` is 0.
+- 2026-09-04 — an INFINITE window size is a count like any other: a
+  positive infinity asks for more items than the argument has, which is no
+  window at all, and a negative one asks for chunks of infinitely many,
+  which is the one chunk that holds everything.
+- 2026-09-04 — `2 s:` separates the names it razes with a NULL after each,
+  which is what keeps two apart where one may be empty. A null does not
+  survive the recording pipeline, so the rule is held to the oracle through
+  `a. i.` rather than by the text of the answer; the three corpus rows that
+  showed it directly were rewritten that way.

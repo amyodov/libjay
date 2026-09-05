@@ -3726,6 +3726,15 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
         // feature and not this one.
         "!." => {
             let f = verb_operand(u, span)?;
+            // The two GRADES order by comparing, and every comparison J
+            // gives a fit to takes one — but not these: `/: !.0 (1 2 3)`
+            // and `(1 2 3) \: !.0 (3 1 2)` are domain errors in the
+            // reference, in either valence. APL's `⍠('CT' n)` is a
+            // different conjunction and does reach them, which is why the
+            // refusal is here rather than in the tolerance list.
+            if matches!(&f, Verb::Prim(p) if matches!(p.name, "/:" | "\\:")) {
+                return Err(Error::domain(format!("{} takes no fit (u!.n)", f.name()), span));
+            }
             // `|.!.f` is the fill shift: the fit specifies what the places
             // an item left behind are filled with, not a tolerance.
             if matches!(&f, Verb::Prim(p) if p.name == "|.") {

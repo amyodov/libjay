@@ -319,6 +319,17 @@ fn verb_ar_mode(v: &Verb, direct: bool) -> Option<Ar> {
             let items: Option<Vec<Ar>> = vs.iter().map(verb_ar).collect();
             der("}", vec![Ar::Noun(gerund_array(&items?))])
         }
+        // A FOLD is the conjunction its two inflections spell, over the two
+        // verbs it was given: `>: F:: <:` writes itself back out as itself.
+        Verb::Fold { u, v, multiple, reverse } => der(
+            match (multiple, reverse) {
+                (false, false) => "F..",
+                (false, true) => "F.:",
+                (true, false) => "F:.",
+                (true, true) => "F::",
+            },
+            vec![verb_ar(u)?, verb_ar(v)?],
+        ),
         // `m H. n`: the two parameter lists, as they were written.
         Verb::Hypergeometric { num, den } => der(
             "H.",
