@@ -19812,7 +19812,7 @@ fn characteristics(u: &Verb, y: &Array, span: Span) -> Result<Array> {
             if ranks.iter().all(|&r| !unbounded(r)) {
                 return Ok(Array::new(
                     vec![ranks.len()],
-                    Data::I64(ranks.iter().copied().collect::<Vec<i64>>().into()),
+                    Data::I64(ranks.to_vec().into()),
                 ));
             }
             Ok(Array::from_f64(

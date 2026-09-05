@@ -63,8 +63,10 @@ fn a_commuted_verb_reports_its_operands_ranks_exchanged() {
     assert_eq!(j("(|.~) b. 0"), f64s(&[3], &[INF, INF, 1.0]));
     assert_eq!(j("(#~) b. 0"), f64s(&[3], &[INF, INF, 1.0]));
     assert_eq!(j("(,~) b. 0"), f64s(&[3], &[INF, INF, INF]));
-    // An explicit rank overrides it, as it overrides any other.
-    assert_eq!(j("(%~\"1) b. 0"), f64s(&[3], &[1.0, 1.0, 1.0]));
+    // An explicit rank overrides it, as it overrides any other — and
+    // ranks that are all finite are reported as WHOLE NUMBERS, which is
+    // what `3!:0 ((%~"1) b. 0)` is in the reference.
+    assert_eq!(j("(%~\"1) b. 0"), i64s(&[3], &[1, 1, 1]));
 }
 
 #[test]
@@ -98,7 +100,7 @@ fn adverse_reports_infinite_ranks_because_the_verb_is_not_settled() {
     // Which of `u :: v` runs is not known until one of them fails, so no
     // finite rank would be honest. `u :. v` runs u and has u's ranks.
     assert_eq!(j("(* :: -) b. 0"), f64s(&[3], &[INF, INF, INF]));
-    assert_eq!(j("(+ :. -) b. 0"), f64s(&[3], &[0.0, 0.0, 0.0]));
+    assert_eq!(j("(+ :. -) b. 0"), i64s(&[3], &[0, 0, 0]));
 }
 
 // --- the negative power ---------------------------------------------------
