@@ -2402,6 +2402,46 @@ families are the obverse of `[` or `]` composed on the LEFT
   iterates to, `(<i. 0) I. (2;5)`, and `_j_ ^ 0j1` (a NaN error there,
   `_.j_.` here, where `%: _j_` answers `_.j_.` on both sides).
 
+### Round 9A: the whole remaining residue, largest family first
+
+Two 50 000-sentence sweeps on generation 3 put the residue at 92 and 72
+unexplained rows. Round 9A worked it by size and closed a little over half
+of it outright: the null character's writing (the largest family, every
+`u:` of a value holding a zero), the oblique above rank 2, the root, the
+logarithm, the inverse and the encodings of a NaN, the exact form of a
+complex value, the polynomial with no coefficient of x, the identity a
+swapped or annotated verb reduces an empty to, the types `b.`, `p:` and
+`-.` answer in, and the interval index's NaN.
+
+What is left is 🔴 and named here with a spelling apiece, so that the next
+round starts from facts:
+
+- **`x:` OF A FLOAT WITH NO SHORT EXACT RATIONAL** — pinned, and the
+  measurement is in the decision log. `x:^:2 (2p_1)`, `x: 1x1`.
+- **THE MONADIC GERUND AMEND `` u`v`w} ``** — the reference reads the index
+  the gerund's middle verb makes more narrowly than libjay does, and
+  answers where libjay raises a rank error. Round 8C measured it and left
+  it; round 9A did not open it either. `((+`,`<.)}) (i. 0 0)`,
+  `((+`{.`[)}) (2 3 $ i. 6)`.
+- **THE TYPE AN EXACT, COMPLEX OR EMPTY FRAME DECLARES**, which `3!:3` and
+  `3!:0` make visible where a display does not. `3!:3 ((0.1 0.2 0.3) +/ (0 $ 1 2 3))`
+  is the float type there and the integer one here. Round 8B measured a
+  546-cell grid of it and found a per-verb table rather than a rule.
+- **THE POLYNOMIAL VERBS' ROOT FINDING AND RANK RULES** — `p. (1e_9 1 1e9)`
+  is a pair of complex roots there and a repeated real one here;
+  `p.;.0 (4 $ (_ __ 0))` and `p."1 0 _ (j.&.> 2)` are refused there and
+  answered here.
+- **FORMAT BY SPECIFICATION, AND `":` OF A HUGE WHOLE NUMBER** —
+  `(_8 2) ": (1r2 1r3)` is `5e_1 0` there and `1e0 0` here, and
+  `(0) ": (_9223372036854775806)` keeps its last digit there and rounds it
+  through a double here.
+- **WRITING A GERUND WITH A RANK BACK OUT AS J SOURCE** — `(*`<.)"_2` is
+  `(;:'*<.')"_2` there and "not supported yet" here. The grammar sibling's
+  family.
+- **THE OBVERSES STILL UNKNOWN** — `o.&:{:: ^:(_1 0 1) 2`,
+  `(r."2)&:}:&.> ^:(_1 0 1) 2`.
+- **THE SYMBOL-TABLE FORM `# s:`** — one row in a hundred thousand.
+
 ## Known divergences (deliberate, revisit later)
 
 Every entry below is a place libjay's answer differs from a reference

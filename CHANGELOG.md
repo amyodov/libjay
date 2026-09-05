@@ -7,6 +7,67 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- THE NULL CHARACTER IS NOT WRITTEN OUT. A session drops it, so
+  `u: 0 65 66` shows `AB` although its own `#` counts three characters and
+  `2 2 $ u: 0 65 66 67` shows a row of one beside a row of two, unpadded.
+  Inside a BOX it is a blank instead, the drawing being laid out before the
+  writing, and `": u: 0 65 66` is three characters on either path. This is
+  J's session alone: GNU APL writes the byte, and `FmtOpts::nul_written`
+  keeps the two apart. It closes the largest single family the agreement
+  loop had left — every `u:`, `8 u:`, `9 u:`, `10 u:` and `s:@u:` of a
+  value holding a zero.
+
+- THE OBLIQUE ABOVE RANK 2. `u/.` runs its diagonals over the FIRST TWO
+  axes at every rank, and what a diagonal gathers is the CELL each pair of
+  indices names: the diagonals of `i. 2 3 4` are tables of four-item rows,
+  so `+//. (i. 2 3 4)` is a four by four table and `<@:]/. (i. 2 3 4 5)`
+  four boxes of rank-3 blocks. An axis of no length leaves no diagonal at
+  all, and the answer's missing axes come from running `u` once on a cell
+  holding no items, as the rank-2 oblique already did.
+
+- THE ROOT AND THE LOGARITHM OF A NaN leave the reals where there is ONE
+  item to take them of: `%: _.`, `%: (, _.)` and `^. _.` are the complex
+  `_.j_.` with `3!:0` reporting 16, while `%: (_. 1 2)` and
+  `%: (2 2 $ _.)` stay float. The matrix inverse follows it for a VECTOR —
+  `%. (, _.)` and `%. (_. 1 2)` are complex NaNs — and a SCALAR under `%.`
+  is a reciprocal whether it is complex or not, so `%. (j. 0)` is `_`.
+
+- A NaN HAS NO WIDTH AND TAKES NONE FROM THE OTHERS. `#: (_. 1 2)` writes
+  the NaN's row out as NaNs at the width `1 2` asks for, `#: (_. 5)` at
+  three digits, and only an argument with nothing left to measure — `#: _.`
+  — is refused. A NaN radix or a NaN value is a residue the encoding takes
+  and answers with: `(_. 1 2) #: 2` is `_. 0 0`, `2 #: _.` and `_. #: 2`
+  are `_.`.
+
+- A COMPLEX VALUE WITH NO IMAGINARY PART CONVERTS TO THE EXACT TYPES as
+  the real it displays as: `x: (3j0)` is 3 and `2 x: (3j0)` is `3 1`, where
+  `x: (3j4)` stays a domain error. An empty complex has no part to be
+  imaginary and converts as well.
+
+- A CONSTANT POLYNOMIAL WITH NO VALUE has the zero polynomial's root form:
+  `p. _.` and `p. (_. 0)` are `0 ; ''` as `p. 0` is, where `p. 5` — a
+  constant that IS a number — still has no root form. A NaN beside a
+  coefficient of x is an ordinary coefficient at the FIRST degree, so
+  `p. (0 _.)` is `_. ; _.` and `p. (_. 1)` is `1 ; _.`, while `p. _. 1 2`
+  is the refusal it was.
+
+- THE IDENTITY A SWAPPED OR ANNOTATED VERB REDUCES AN EMPTY TO. `u~` keeps
+  its operand's identity for seventeen of the twenty spellings measured —
+  `(j.~)/ (0 $ 0)` is 0, `(>.~)/ (0 $ 0)` is `__` — and the three that part
+  are the reference's own table: `^~` and `|~` answer `_` and `%:~`
+  answers 0. `u :. v` keeps u's identity, so `((+ :. ^.)/) (0 $ 0)` is 0.
+
+- Types the reference declares that libjay was guessing. RANKS THAT ARE ALL
+  FINITE are whole numbers, so `3!:0 ((*:) b. 0)` is the integer type where
+  `,. b. 0` stays a float `_ _ _`. An EMPTY PRIME QUERY answers in its
+  form's own type, so `3!:0 (1 p: (0 0 $ ''))` is boolean. THE ITEMS `-.`
+  KEEPS are written in the type the two arguments share, so
+  `(1r2 1r3) -. (_ __ 0)` is `0.5 0.333333`.
+
+- A NaN SITS ABOVE EVERY ASCENDING BOUND in the interval index's search:
+  `2 I. (_. 1 2)` is `1 0 0`, where comparisons that are false whichever
+  way they are asked would leave it at the bottom.
+
 - The complex FLOOR reads the comparison tolerance. `<.` on a complex value
   is McDonnell's floor, and the test that keeps the fractional parts inside
   the unit triangle is a TOLERANT comparison, so
@@ -100,6 +161,10 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   empty.
 
 ### Changed
+
+- Five divergence rows converged and their notes went: the root, the
+  logarithm and the type of a one-item NaN, the inverse of a NaN vector,
+  and the null character's writing.
 
 ### Fixed
 

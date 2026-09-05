@@ -35,6 +35,13 @@ pub struct FmtOpts {
     /// False for APL, whose characters are Unicode, and for J under the
     /// `j_unicode_strings` extension.
     pub bytes: bool,
+    /// Whether a null character reaches the session's output. J's does not:
+    /// `u: 65 0 66` writes `AB` although its own `#` counts three
+    /// characters, and a boxed cell holding one is a blank rather than a
+    /// gap, since [`format_array`] drops the null after the drawing is
+    /// laid out. GNU APL writes the byte. Only the session writing is
+    /// affected — `": u: 65 0 66` is three characters on both sides.
+    pub nul_written: bool,
     /// Significant digits kept when a float is displayed. APL's `⎕PP` sets
     /// it for the rest of the run; [`DEFAULT_PRECISION`] is where both
     /// languages start.
@@ -55,6 +62,7 @@ impl FmtOpts {
         imag: 'j',
         boxes: BoxStyle::Fenced,
         bytes: true,
+        nul_written: false,
         precision: DEFAULT_PRECISION,
         sci_at_precision: true,
     };
@@ -63,6 +71,7 @@ impl FmtOpts {
         imag: 'J',
         boxes: BoxStyle::Spaced,
         bytes: false,
+        nul_written: true,
         precision: DEFAULT_PRECISION,
         sci_at_precision: false,
     };
@@ -95,6 +104,7 @@ pub const MAX_PRECISION: u8 = 17;
 /// does when a terminal is handed one.
 pub fn format_array(a: &Array, opts: &FmtOpts) -> String {
     let text = format_raw(a, opts);
+    let text = if opts.nul_written { text } else { text.replace('\0', "") };
     if !opts.bytes {
         return text;
     }

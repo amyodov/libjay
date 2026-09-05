@@ -7149,7 +7149,22 @@ fn to_exact(y: &Array, span: Span) -> Result<Array> {
             }
             exact_data(DType::Ext, out)
         }
-        Data::Complex(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => {
+        // A COMPLEX VALUE WITH NO IMAGINARY PART IS THE REAL IT DISPLAYS
+        // AS, as it is for the gamma function: `x: (3j0)` is 3 and
+        // `2 x: (3j0)` is `3 1` in the reference, where `x: (3j4)` is a
+        // domain error. An empty complex has no part to be imaginary, so
+        // it converts as well.
+        Data::Complex(_) if y.count() == 0 => Data::empty(DType::Ext),
+        Data::Complex(_) => match as_real(y) {
+            Some(r) => return to_exact(&r, span),
+            None => {
+                return Err(Error::domain(
+                    format!("x: needs real numbers, not {} data", y.dtype().name()),
+                    span,
+                ));
+            }
+        },
+        Data::Char(_) | Data::Symbol(_) | Data::Box(_) => {
             return Err(Error::domain(
                 format!("x: needs real numbers, not {} data", y.dtype().name()),
                 span,
@@ -7763,8 +7778,16 @@ fn monad_leaves_reals(op: ScalarMonad, d: &Data) -> bool {
     match op {
         // The two that make a complex number out of a real one.
         Imaginary | Polar => d.dtype().is_numeric(),
+        // A ROOT OR A LOGARITHM OF A NaN LEAVES THE REALS WHERE THERE IS
+        // ONE ITEM TO TAKE IT OF. `%: _.` and `^. _.` are `_.j_.` in the
+        // reference, at the atom and at the one-item list alike, where
+        // `%: (_. 1 2)` is the float `_. 1 1.41421` and `%: (2 2 $ _.)`
+        // four float NaNs: the widening a negative value gets is the
+        // reference's answer for the value that is neither negative nor
+        // not, and only its ONE-ITEM pass takes it.
         Sqrt | Ln => match d {
             Data::I64(v) => par::any(v, |&x| x < 0),
+            Data::F64(v) if v.len() == 1 => v[0] < 0.0 || v[0].is_nan(),
             Data::F64(v) => par::any(v, |&x| x < 0.0),
             Data::Ext(v) => v.iter().any(|x| x.sign() == num_bigint::Sign::Minus),
             Data::Rat(v) => v.iter().any(|x| x < &Rat::zero()),
@@ -10470,12 +10493,25 @@ fn bit_width(values: &[f64], span: Span) -> Result<usize> {
     if values.is_empty() {
         return Ok(0);
     }
+    // A NaN HAS NO WIDTH AND TAKES NONE FROM THE OTHERS. The reference
+    // writes its row out as NaNs at whatever width the rest of the
+    // argument asks for — `#: (_. 1 2)` is `_. _.` over `0 1` and `1 0`,
+    // `#: (_. 5)` three digits wide — and refuses only where NOTHING is
+    // left to measure: `#: _.` and `#: (, _.)` are domain errors.
     let mut m = 0.0f64;
+    let mut measured = false;
     for &v in values {
+        if v.is_nan() {
+            continue;
+        }
         if !v.is_finite() {
             return Err(Error::domain("cannot encode an infinite value", span));
         }
+        measured = true;
         m = m.max(v.abs());
+    }
+    if !measured {
+        return Err(Error::domain("cannot encode a value with no digits", span));
     }
     // The width is the largest magnitude's, read off the exponent rather
     // than counted down by halving: a double holds 1e300 exactly and
@@ -10552,8 +10588,12 @@ fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     for (j, &v) in values.iter().enumerate() {
         encode_one(&radix, v, &mut cell, tol);
         // Each digit is a residue, so a digit with no value is refused
-        // where the residue itself would be: `5 #: _` has none.
-        if cell.iter().any(|&d| tol.made_nan(d, v, 0.0)) {
+        // where the residue itself would be: `5 #: _` has none. A NaN on
+        // either side is not that — it is a residue the reference takes
+        // and answers with, `2 #: _.` and `_. #: 2` both being `_.` and
+        // `(_. 1 2) #: 2` being `_. 0 0`.
+        let nan_given = v.is_nan() || radix.iter().any(|b| b.is_nan());
+        if !nan_given && cell.iter().any(|&d| tol.made_nan(d, v, 0.0)) {
             return Err(Error::nan(
                 format!("`{}` has no digits in this base", j_number(v)),
                 span,
@@ -12709,6 +12749,30 @@ fn reduce_identity(v: &Verb, n: usize, lang: crate::Lang) -> Option<Data> {
         }
         Verb::Rank(..) => return None,
         Verb::Memo(inner, _) | Verb::Reduce(inner) => {
+            return reduce_identity(inner, n, lang);
+        }
+        // DECLARING AN OBVERSE leaves what the verb does between two values
+        // alone, so it keeps its identity: `((+ :. ^.)/) (0 $ 0)` is 0.
+        Verb::WithObverse(inner, _) => return reduce_identity(inner, n, lang),
+        // SWAPPING THE ARGUMENTS keeps it too, for all but three of the
+        // twenty spellings measured: `(j.~)/ (0 $ 0)` is 0 there,
+        // `(>.~)/ (0 $ 0)` is `__`, `(-~)/` is 0 and `(<:~)/` is 1, each
+        // its operand's own. The three that part are the reference's table
+        // and not a rule — `(^~)/ (0 $ 0)` and `(|~)/ (0 $ 0)` are `_`
+        // where `^/` and `|/` are 1 and 0, and `(%:~)/ (0 $ 0)` is 0 where
+        // `%:/` is 1.
+        Verb::Commute(inner) if lang == crate::Lang::J => {
+            if let Verb::Prim(p) = &**inner
+                && let DyadOp::Scalar(op) = p.dyad
+            {
+                match op {
+                    ScalarDyad::Pow | ScalarDyad::Residue => {
+                        return Some(Data::F64(vec![f64::INFINITY; n].into()));
+                    }
+                    ScalarDyad::Root => return Some(Data::Bool(vec![0u8; n].into())),
+                    _ => {}
+                }
+            }
             return reduce_identity(inner, n, lang);
         }
         _ => {}
@@ -15516,6 +15580,13 @@ fn interval_index(
         .map(|&v| {
             if bisect {
                 let n = bounds.len();
+                // A NaN SITS ABOVE EVERY ASCENDING BOUND: `2 I. (_. 1 2)`
+                // is `1 0 0` in the reference, where the bisection's own
+                // comparisons — false whichever way they are asked against
+                // a NaN — would leave it at the bottom with the smallest.
+                if v.is_nan() && !down {
+                    return offset + n as i64;
+                }
                 return offset
                     + bisect_bounds(n, |i| {
                         if down { tol.lt(v, bounds[i]) } else { tol.lt(bounds[i], v) }
@@ -16104,15 +16175,29 @@ fn exact_matrix_inverse(y: &Array) -> Option<Array> {
 /// pseudo-inverse of a taller one. A wider one is refused, as both
 /// references refuse it.
 fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
+    // A SCALAR is not a one-by-one matrix here: it is a reciprocal, and it
+    // answers wherever a reciprocal does — a COMPLEX scalar with it, so
+    // `%. (j. 0)` is `_` rather than the refusal a one-by-one zero matrix
+    // gets. `%. 0` is `_`, `%. _.` is `_.`, and `%. 123x` keeps the exact
+    // types as `1r123`.
+    if y.rank() == 0 {
+        return scalar_monad(ScalarMonad::Recip, y, cfg, span);
+    }
     if y.dtype() == DType::Complex && y.count() != 0 {
         return complex_matrix_inverse(y, span);
     }
-    // A SCALAR is not a one-by-one matrix here: it is a reciprocal, and it
-    // answers wherever a reciprocal does. `%. 0` is `_` where a matrix of
-    // one zero (`%. (1 1 $ 0)`) is refused, `%. _.` is `_.`, and `%. 123x`
-    // keeps the exact types as `1r123`.
-    if y.rank() == 0 {
-        return scalar_monad(ScalarMonad::Recip, y, cfg, span);
+    // A VECTOR HOLDING A NaN INVERTS TO THE COMPLEX NaN, whatever else it
+    // holds: `%. (, _.)` is `_.j_.` there, `%. (_. 1 2)` three of them and
+    // `%. (_. _.)` two, where the same vector without the NaN inverts on
+    // the reals. The pseudo-inverse divides by a sum the NaN poisons, and
+    // the reference's answer for the quotient is complex.
+    if y.rank() == 1
+        && y.dtype() == DType::F64
+        && let Data::F64(v) = &y.data
+        && v.iter().any(|x| x.is_nan())
+    {
+        let nan = [f64::NAN, f64::NAN];
+        return Ok(Array::new(y.shape.clone(), Data::Complex(vec![nan; v.len()].into())));
     }
     // THE EXACT TYPES SURVIVE the inverse wherever the answer is exact:
     // `%. (1 2 3x)` is `1r14 1r7 3r14` and `%. (2 2 $ 1 2 3 4x)` is
@@ -16975,15 +17060,27 @@ fn oblique(u: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> 
         }
         return assemble(&[n], cells, span);
     }
-    if y.rank() > 2 {
-        return Err(Error::not_yet("oblique (u/.) on a rank-3 or higher argument", span));
-    }
+    // The diagonals are read off the buffer by index, so a column-major
+    // argument is materialised first.
+    let laid;
+    let y = if y.is_row_major() {
+        y
+    } else {
+        laid = y.to_row_major();
+        &laid
+    };
     let (rows, cols) = (y.shape[0], y.shape[1]);
+    // Above rank 2 the diagonals still run over the FIRST TWO axes, and
+    // what they gather is the cell each pair of indices names: the
+    // diagonals of `i. 2 3 4` are tables of 4-item rows, so
+    // `+//. i. 2 3 4` is a 4 by 4 table.
+    let cell_shape = &y.shape[2..];
+    let cell: usize = cell_shape.iter().product();
     // A table with no rows or no columns has no diagonals at all — not the
     // `rows + cols - 1` a table with both has, which at 0 by 0 would not
     // even be a count.
     if rows == 0 || cols == 0 {
-        return Ok(no_cells(u, &[], y.dtype(), ctx, span));
+        return Ok(no_cells(u, cell_shape, y.dtype(), ctx, span));
     }
     let mut cells = Vec::with_capacity(rows + cols - 1);
     for d in 0..rows + cols - 1 {
@@ -16991,11 +17088,16 @@ fn oblique(u: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> 
         let mut len = 0usize;
         for i in 0..rows {
             if d >= i && d - i < cols {
-                push_elem(&mut data, &y.data, i * cols + (d - i));
+                let at = (i * cols + (d - i)) * cell;
+                for k in 0..cell {
+                    push_elem(&mut data, &y.data, at + k);
+                }
                 len += 1;
             }
         }
-        cells.push(cycled(u, d).monad(&Array::new(vec![len], data), ctx, span)?);
+        let mut shape = vec![len];
+        shape.extend_from_slice(cell_shape);
+        cells.push(cycled(u, d).monad(&Array::new(shape, data), ctx, span)?);
     }
     assemble(&[rows + cols - 1], cells, span)
 }
@@ -19045,7 +19147,19 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
         ];
         return Ok(Array::new(vec![2], Data::Box(pair.into())));
     }
+    // A CONSTANT WITH NO VALUE IS THE ZERO POLYNOMIAL'S ANSWER. `p. _.`
+    // and `p. (_. 0)` are `0 ; ''` in the reference, exactly as `p. 0` is,
+    // where `p. 5` — a constant that IS a number — has no root form. A NaN
+    // beside a coefficient of x is an ordinary coefficient again:
+    // `p. (0 _.)` is `_. ; _.`.
     if c.len() < 2 {
+        if c.iter().any(|k| k[0].is_nan() || k[1].is_nan()) {
+            let pair = vec![
+                Array::new(vec![], Data::Bool(vec![0].into())),
+                Array::new(vec![0], Data::empty(DType::Bool)),
+            ];
+            return Ok(Array::new(vec![2], Data::Box(pair.into())));
+        }
         return Err(Error::domain("a polynomial's roots need a coefficient of x", span));
     }
     let lead = c[c.len() - 1];
@@ -19071,19 +19185,24 @@ fn poly_roots(y: &Array, span: Span) -> Result<Array> {
     } else {
         durand_kerner(&monic)
     };
-    // A NaN among the COEFFICIENTS is a NaN error, and so is a root of the
-    // FIRST degree that has no value: `p. _. 1 2` and `p. _ __ 0` are both
-    // refusals there. A root of the second degree or higher that has no
-    // value is ANSWERED instead, as `_.j_.` — `p. 0 __ __` is
-    // `__ ; _.j_. _.j_.` — and one root without a value costs them all.
-    if c.iter().any(|k| k[0].is_nan() || k[1].is_nan()) {
+    // A NaN among the COEFFICIENTS is a NaN error ABOVE the first degree,
+    // and so is a root of the first degree that has no value where the
+    // coefficients themselves had one: `p. _. 1 2` and `p. _ __ 0` are
+    // both refusals there. A NaN coefficient AT the first degree is
+    // answered — `p. (0 _.)` and `p. (1 _.)` are `_. ; _.`, `p. (_. 1)` is
+    // `1 ; _.` — the NaN going through to the multiplier and the root. A
+    // root of the second degree or higher that has no value is ANSWERED
+    // as well, as `_.j_.` — `p. 0 __ __` is `__ ; _.j_. _.j_.` — and one
+    // root without a value costs them all.
+    let given_nan = c.iter().any(|k| k[0].is_nan() || k[1].is_nan());
+    if given_nan && c.len() > 2 {
         return Err(Error::nan("this polynomial's roots have no value", span));
     }
     // An INFINITE leading coefficient leaves no root either, unless the
     // constant term is zero and the roots are the zeros that divides out:
     // `p. 0 0 _` is `_ ; 0 0` where `p. 2 1 _` has no root at all.
     let unbounded = !lead[0].is_finite() || !lead[1].is_finite();
-    if roots.iter().any(|r| r[0].is_nan() || r[1].is_nan())
+    if (!given_nan && roots.iter().any(|r| r[0].is_nan() || r[1].is_nan()))
         || (unbounded && c[0] != cx::ZERO && roots.len() > 1)
     {
         if roots.len() < 2 {
@@ -19685,11 +19804,21 @@ fn characteristics(u: &Verb, y: &Array, span: Span) -> Result<Array> {
             // it will take of any argument has no bound, and the reference
             // reports it as infinite: `(2"_1) b. 0` and `,. b. 0` are both
             // `_ _ _` there.
+            // Ranks that are all finite are WHOLE NUMBERS and reported as
+            // such: `3!:0 ((*:) b. 0)` is the integer type there, where
+            // an infinity in the list makes it a float one.
             let ranks = u.ranks();
+            let unbounded = |r: i64| r == RANK_INF || r < 0;
+            if ranks.iter().all(|&r| !unbounded(r)) {
+                return Ok(Array::new(
+                    vec![ranks.len()],
+                    Data::I64(ranks.iter().copied().collect::<Vec<i64>>().into()),
+                ));
+            }
             Ok(Array::from_f64(
                 ranks
                     .iter()
-                    .map(|&r| if r == RANK_INF || r < 0 { f64::INFINITY } else { r as f64 })
+                    .map(|&r| if unbounded(r) { f64::INFINITY } else { r as f64 })
                     .collect(),
             ))
         }
@@ -21749,6 +21878,23 @@ fn item_marks(y: &Array, x: &Array, tol: Tol) -> Vec<bool> {
 
 /// `x -. y` / `x ~ y`: x's items with the ones y also has removed.
 fn set_less(x: &Array, y: &Array, tol: Tol) -> Array {
+    // THE ITEMS THAT SURVIVE ARE WRITTEN IN THE TYPE THE TWO ARGUMENTS
+    // SHARE, not in the one the left was written in: `(1r2 1r3) -. (_ __ 0)`
+    // is `0.5 0.333333` in the reference, a FLOAT answer to a rational
+    // question, because the float on the right is the wider of the two.
+    let widened;
+    let x = match DType::promote(x.dtype(), y.dtype()) {
+        Some(t) if t != x.dtype() && x.dtype().is_exact() && y.dtype().is_numeric() => {
+            match x.cast(t) {
+                Some(a) => {
+                    widened = a;
+                    &widened
+                }
+                None => x,
+            }
+        }
+        _ => x,
+    };
     let xs = as_list(x);
     let marks = item_marks(&xs, y, tol);
     let keep: Vec<usize> = (0..marks.len()).filter(|&i| !marks[i]).collect();
@@ -23514,6 +23660,13 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
     }
     if y.rank() == 0 {
         return cells.pop().ok_or_else(|| Error::domain("a prime query needs a number", span));
+    }
+    // An empty argument has no value to answer about, so the answer's TYPE
+    // is the form's alone: `3!:0 (1 p: (0 0 $ ''))` is the boolean type
+    // there, which is what every `0 p:` and `1 p:` answers in.
+    if cells.is_empty() {
+        let t = if form == 0 || form == 1 { DType::Bool } else { DType::I64 };
+        return Ok(Array::new(y.shape.clone(), Data::empty(t)));
     }
     assemble(&y.shape, cells, span)
 }

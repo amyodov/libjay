@@ -1,0 +1,156 @@
+// Round 9A: what the residue of the agreement loop turned out to be —
+// the null character's writing, the oblique above rank 2, the NaN under
+// the root, the logarithm, the encodings and the inverse, the exact form
+// of a complex value, the polynomial with no coefficient, the identity a
+// swapped verb reduces an empty to, and the types `b.`, `p:` and `-.`
+// answer in.
+
+// THE NULL CHARACTER IS NOT WRITTEN. A session drops it, so a character
+// array holding one shows one character fewer than it counts, and the row
+// it is in is not padded back out. Inside a BOX it is a blank instead,
+// because the drawing is laid out before the writing.
+u: 0 65 66
+u: 65 0 66
+u: 0
+$ (u: 0 65 66)
+# ": u: 65 0 66
+a. i. (u: 0 65 66)
+2 2 $ u: 0 65 66 67
+,. u: 0 65 66
+< u: 65 0 66
+(u: 65 0 66) ; 5
+10 u: ((0) ^ 0.5)
+u:"1 1 ((3 3 $ 1 0 0 0 1 0 0 0 1) <. 2)
+
+// THE OBLIQUE ABOVE RANK 2. The diagonals still run over the first two
+// axes, and what they gather is the CELL each pair of indices names, so
+// the diagonals of `i. 2 3 4` are tables of four-item rows. An axis of no
+// length leaves no diagonal at all.
+<@:] /. (i. 3 2)
+<@:] /. (i. 2 3 4)
+$ (<@:] /. (i. 2 3 4))
++/ /. (i. 2 3 4)
+$ (+/ /. (i. 2 3 4))
+<@:] /. (i. 2 3 4 5)
+$ (<@:] /. (i. 2 3 4 5))
+#/. (i. 2 3 4)
+{. /. (i. 2 3 4)
+<@:] /. (i. 1 1 1)
+$ (<@:] /. (i. 2 0 3))
+$ (<@:] /. (i. 0 2 3))
+$ (<@:] /. (1 0 1 $ 5))
+$ (#/. (i. 2 0 3))
+$ (,//. (i. 2 0 3))
+$ (+//. (i. 2 0 3))
+$ (]//. (i. 2 0 3))
+$ ($@:]/. (i. 2 0 3))
+(,`*)/. (i. 2 3 4)
+(-`,`>.)/. (i. 2 3 4)
+(|.`%:`-:)/. (i. 2 3 4)
+
+// THE ROOT AND THE LOGARITHM OF A NaN leave the reals where there is ONE
+// item to take them of, and stay on the reals where there are more.
+%: _.
+^. _.
+%: (, _.)
+^. (, _.)
+3!:0 (%: _.)
+3!:0 (^. _.)
+%: (_. 1 2)
+^. (_. 1 2)
+%: (2 2 $ _.)
+^. (2 2 $ _.)
+<. %: _.
+%:&.> (_.)
+
+// A NaN HAS NO WIDTH AND TAKES NONE FROM THE OTHERS: `#:` writes its row
+// out as NaNs at whatever width the rest of the argument asks for, and
+// refuses only where nothing is left to measure. A NaN radix or a NaN
+// value is a residue the encoding takes and answers with.
+#: (_. 1 2)
+#: (_. 5)
+#: _.
+(_. 1 2) #: 2
+2 #: _.
+_. #: 2
+#. (_. 1 2)
+
+// A COMPLEX VALUE WITH NO IMAGINARY PART IS THE REAL IT DISPLAYS AS, and
+// converts to the exact types as that real does.
+x: (3j0)
+x: (0j0)
+2 x: (3j0)
+x: (0 $ 3j4)
+x: (r. ('' $ 0))
+x: (3j4)
+
+// A CONSTANT POLYNOMIAL WITH NO VALUE has the zero polynomial's root
+// form; a NaN beside a coefficient of x is an ordinary coefficient.
+p. 0
+p. _.
+p. (_. 0)
+p. (0 _.)
+p. (_. 1)
+p. (1 _.)
+p. (_. _.)
+p. (_. 1 2)
+p."1 (_.)
+
+// THE IDENTITY A SWAPPED VERB REDUCES AN EMPTY TO is its operand's own for
+// all but three of the twenty spellings, and declaring an obverse changes
+// none of it.
+(+~)/ (0 $ 0)
+(-~)/ (0 $ 0)
+(*~)/ (0 $ 0)
+(%~)/ (0 $ 0)
+(^~)/ (0 $ 0)
+(<.~)/ (0 $ 0)
+(>.~)/ (0 $ 0)
+(|~)/ (0 $ 0)
+(+.~)/ (0 $ 0)
+(*.~)/ (0 $ 0)
+(!~)/ (0 $ 0)
+(%:~)/ (0 $ 0)
+(j.~)/ (0 $ 0)
+(r.~)/ (0 $ 0)
+(=~)/ (0 $ 0)
+(~:~)/ (0 $ 0)
+(<~)/ (0 $ 0)
+(>~)/ (0 $ 0)
+(<:~)/ (0 $ 0)
+(>:~)/ (0 $ 0)
+(^.~)/ (0 $ 0)
+(o.~)/ (0 $ 0)
+(+ :. ^.)/ (0 $ 0)
+
+// RANKS THAT ARE ALL FINITE ARE WHOLE NUMBERS, and an empty prime query
+// answers in the type its form answers in.
+(*:) b. 0
+3!:0 ((*:) b. 0)
+3!:0 ((+:) b. 0)
+,. b. 0
+3!:0 (,. b. 0)
+1 p: (i. 0)
+3!:0 (1 p: (0 0 $ ''))
+3!:0 (1 p: (i. 5))
+
+// A SCALAR UNDER `%.` IS A RECIPROCAL, a complex one with it; a VECTOR
+// holding a NaN inverts to the complex NaN.
+%. 2
+%. 0
+%. (j. 0)
+%. (, _.)
+%. (_. 1 2)
+%. (_. _.)
+3!:0 (%. (, _.))
+
+// THE ITEMS `-.` KEEPS ARE WRITTEN IN THE TYPE THE TWO ARGUMENTS SHARE.
+(1r2 1r3) -. (_ __ 0)
+(1r2 1r3) -. (1 2)
+(1 2) -. (1r2 1r3)
+((_5x) ^ _1) -. (2 ^ _1)
+
+// A NaN SITS ABOVE EVERY ASCENDING BOUND in the interval index's search.
+2 I. (_. 1 2)
+2 I. (1 2 3)
+2 I. (1.0 2.0 3.0)

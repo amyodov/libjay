@@ -17,6 +17,7 @@
 // alike too.
 u: 'é'
 ? a widened literal writes its bytes here and its characters there
+~ cause=differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text|differ:val:empty/text|differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=u: also=^:,&.,&.:,M.,f.,::,:,!:,F..,F.:,F::,p.,p:,q:,;.,*:,+:,-:,+,-,*,%,^,^.,<.,>.,=,~:,<:,>:,|,e.,i.,x:,b.,#.,#:,j.,r.,o.,!.,H.,=.,=:
 u: 233
 ? a character between 128 and 255 writes as its byte here
 10 u: 233
@@ -87,7 +88,7 @@ _1 + ((1e8) ! (1e8 + 1e_4))
 // matches them by cause instead.
 2 p: (3j4 1j_1)
 ? the reference answers a factorisation of a complex number with nothing at all
-~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer verb=p:,q: also=j.
+~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer verb=p:,q: also=j.,r.,#:,#.,o.,F..,F.:,F::,M.,^,^.,%:,+,-,*,%
 
 // A SINGULAR MATRIX UNDER `%.`, WHERE THE REFERENCE HAS NO RULE — ONLY THE
 // LUCK OF ITS OWN FACTORISATION. Four rank-deficient arguments, measured:
@@ -111,18 +112,15 @@ $ %. (i. 4 3)
 %. (3 3 $ 1 2 3 4 5 6 7 8 9)
 ? the reference answers a rank-deficient system with NaNs and refuses others
 
-// THE INVERSE OF A NaN, AT ONE ITEM AND IN A LIST. The reference widens to
-// COMPLEX for the short ones and stays real for a table: `%. (1 1 $ _.)`
-// and `%. (_. 1 2)` are `_.j_.` there while `%. (2 2 $ _. 1 2 3)` is the
-// real `_.`, and `%. _.` — the scalar, which is a reciprocal and no matrix
-// at all — is the real `_.` on both sides. A NaN names no direction, so
-// nothing about it asks for an imaginary part; libjay keeps the argument's
-// own type throughout. This is the one-item boundary the root and the
-// logarithm already show.
-%. (_. 1 2)
-? the reference widens a NaN inverse to complex for a short argument only
+// THE INVERSE OF A NaN, IN A TABLE OF ONE ITEM. The reference widens a
+// VECTOR holding a NaN to the complex type — `%. (, _.)` and `%. (_. 1 2)`
+// are `_.j_.` there, which round 9 followed — and it widens the ONE-ITEM
+// TABLE with it, while a wider table stays real: `%. (1 1 $ _.)` is
+// `_.j_.` and `%. (2 2 $ _. 1 2 3)` is the real `_.`. That last split is
+// the item count deciding a type again, with no rule behind it, so the
+// table is left as it stands.
 %. (1 1 $ _.)
-? the reference widens a NaN inverse to complex for a short argument only
+? the reference widens a one-item NaN table to complex where a wider one stays real
 
 // A NaN OR AN INFINITY AMONG THE PRIMES, WHERE THE REFERENCE CONTRADICTS
 // ITSELF BETWEEN ONE ITEM AND SEVERAL. Every one of these is settled by the
@@ -287,7 +285,7 @@ p. (0 1 1 _)
 // spellings a sweep draws.
 1 <. (_.)
 ? the reference's own two-pair answer is `1 1`, which contradicts this one
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=<.,>. also=%,-,+,*,%:,^.,^,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#. answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=<.,>. also=%,-,+,*,%:,^.,^,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#.,.,:,!,F..,F.:,F::,^:,=.,=: answers=numeric
 1 >. (_.)
 ? the reference's own two-pair answer is `1 1`, which contradicts this one
 _ <. (_.)
@@ -308,7 +306,7 @@ _ <. (_.)
 // path parting from a scalar one that the extrema above show, one verb on.
 (1.0 1.0) = (_. _.)
 ? the reference's own atom and one-item answers are 0, which contradict this one
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb==,~:,<:,>: also=%,-,+,*,%:,^.,^,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#. answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb==,~:,<:,>:,-: also=%,-,+,*,%:,^.,^,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#.,.,:,!,F..,F.:,F::,^:,=.,=: answers=numeric
 (1.0 1.0) ~: (_. _.)
 ? the same question negated: 0 0 there, 1 1 here
 (2.0 4.0 6.0) = (_. 1 2)
@@ -654,32 +652,18 @@ _2 3 #: 11
 _10 10 #: 1234
 ? the reference's two-radix integer path reads a negative leading radix as a zero one
 
-// THE ROOT AND THE LOGARITHM OF A NaN, WHERE THE ARGUMENT HOLDS ONE ITEM.
-// The reference answers `%: _.` and `^. _.` in the COMPLEX type — `_.j_.`,
-// with `3!:0` reporting 16 — and does the same for a one-item list
-// (`%: (, _.)`), but answers a list of two with the FLOAT NaN it was given:
-// `%: (_. _.)` is `_. _.` and `%: (1 _. 4)` is `1 _. 2`, both in the float
-// type. The same value under the same verb has two answers there, told
-// apart by how many items stand beside it. libjay keeps the float NaN
-// throughout, which is what the reference does for every argument of more
-// than one item.
-%: _.
-? the reference widens a one-item NaN root to the complex type and a two-item one not
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S: answers=numeric
-^. _.
-? the reference widens a one-item NaN logarithm to the complex type and a two-item one not
-3!:0 (%: _.)
-? the reference widens a one-item NaN root to the complex type and a two-item one not
-
-// THE POWER OF A NaN goes the same three ways, and round 8 measured them:
+// THE POWER OF A NaN goes three ways, and round 8 measured them:
 // `(_.) ^ 0.5` is the complex `_.j_.` there (the one-item widening the root
 // shows), `_. ^ _.` and `(_. 1 2) ^ (_. 1 2)` are refused outright, and
 // `(_. 1 2) ^ (_.)` is the float `_. _. _.`. libjay keeps the float NaN
 // throughout, which is the reference's own answer for the longest of them.
 // The DYADIC ROOT does the same: `2 %: (_.)` is refused there where
-// `(_. 1 2) %: (0)` answers. The family rule above carries all of it.
+// `(_. 1 2) %: (0)` answers. The family rule under the first row carries
+// all of it, and the root and the logarithm it also names are the DYADIC
+// spellings: their monads were followed in round 9A.
 (_.) ^ (0.5)
 ? the reference widens a one-item NaN power to the complex type, as it does the root
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S: answers=numeric
 _. ^ _.
 ? the reference refuses the NaN power of a NaN where the same pair at three items answers
 2 %: (_.)
@@ -724,7 +708,7 @@ x: 3.14159265358979
 // No `answers=` clause: both sides answer a RATIONAL, whose `r` is not a
 // character any numeric answer class reads, so every one of them would be
 // false here. The cause, the verb and the restricted `also=` carry the rule.
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:,^:,=.,=:,:,`:,p.
 
 // INTERVAL INDEX OVER SYMBOLS. The reference's own `<` and `/:` order
 // symbols by their NAME — `(s: <'a') < (s: <'b')` is 1 and
@@ -738,17 +722,6 @@ x: 3.14159265358979
 (s: <'a') I. (s: <'a')
 ? the same pair, equal
 
-// THE NULL CHARACTER, WRITTEN OUT. A session shows a character array by
-// writing its characters, and the reference's own writing DROPS a null:
-// `u: 0 65 66` is `AB` there and a null before the `AB` here, though the
-// reference's own `# u: 0 65 66` counts three of them and its `3 u:` of
-// the same value answers `0 65 66` on both sides. The count and the
-// writing contradict each other there; libjay writes the character it
-// holds. Inside a BOX the two agree — a character that moves the cursor is
-// a blank in a cell on both sides, which is measured in wave10.
-u: 0 65 66
-? the reference's writing drops a null its own `#` counts
-~ cause=differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text|differ:val:empty/text verb=u: also=^:,&.,M.,f.,::,:
 // The dyadic OUTFIX over an argument holding a NaN, with u exactly `+/`.
 // The reference totals the whole argument once and takes each outfix sum
 // off that total, so a NaN in ANY item poisons every answer: its
@@ -788,3 +761,36 @@ _2 +/\\. (_.)
 128!:3 (u: 2)
 ? the reference refuses the widened type, not the bytes in it
 ~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num verb=u: with=!: also=^:,&.,f.,::,M.,:
+
+// THE FOLD CONJUNCTION ANSWERS TWO SHAPES TO ONE SENTENCE. In a fresh
+// interpreter `$ ((+: F.. ,:) (2 3 $ i. 6))` is `1 6`; run the fold itself
+// once first and the same `$` is `2 3`, twice over, so the answer depends
+// on what the process has already evaluated and not on the sentence. The
+// WRITING follows the first of them — `6 8 10 0 2 4` on one line — while
+// `] ` of the same value and `0 + ` of it both write the two rows the
+// `2 3` shape names. libjay answers the rank-2 result on every path and
+// writes the two rows. `(<. F:: ,:) (i. 3 4)` is the same fold one
+// conjunction over: `$` of it is `2 2 2 4` and the writing is of rows
+// eight wide. A clause cannot name `,:` — the comma separates the list —
+// so the rule leans on the neutral set for it and keeps `also=` to the
+// arithmetic that cannot make an infinity of its own.
+(+: F.. ,:) (2 3 $ i. 6)
+? the reference's own `$` of this is `1 6` in a fresh process and `2 3` in a used one
+~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/num verb=F..,F.:,F:.,F:: also=+:,-:,*:,+,-,*,<.,>.,=,~:,<:,>:,e.,x:,!. answers=numeric
+
+// INTERVAL INDEX OVER THE EXACT TYPES, WHERE THE REFERENCE CONTRADICTS THE
+// SAME NUMBER WRITTEN INEXACTLY. `2 I. 3` is 1 there and `2 I. (3x)` is 0 —
+// one value, two spellings, two answers — and `2 I. (1 2 3x)` is `0 1 0`,
+// which puts the 1 on the bound itself and not on the item above it. Its
+// own `(1 2) I. (1 2 3x)` is `0 1 2` and reads the extended items
+// correctly, so the fault is in the one-bound search and not in the type.
+// libjay answers the intervals: `0 0 1`.
+2 I. (1 2 3x)
+? the reference's own `2 I. 3` is 1 where its `2 I. (3x)` is 0
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=I. also=x:,o.,_.,+,-,*,%,^,%:,|,<.,>.,j.,r.,!.,&.,&.:
+// BOUNDS THAT DO NOT ASCEND. `I.` searches its bounds rather than counting
+// them, which the Dictionary defines only for a list in order; a NaN among
+// them is in no order at all, and the two engines' bisections part on where
+// it sends them. Nothing here is defined to follow.
+(_. 1 2) I. 2
+? the bisection of bounds that are in no order is defined nowhere

@@ -5350,3 +5350,34 @@ the register.
   survive the recording pipeline, so the rule is held to the oracle through
   `a. i.` rather than by the text of the answer; the three corpus rows that
   showed it directly were rewritten that way.
+- 2026-09-05 — a NULL CHARACTER is not written out. A J session drops it,
+  so `u: 0 65 66` shows `AB` and a row of a character table that holds one
+  is a character shorter than its neighbours rather than padded back out;
+  inside a box it is a blank, because the drawing is laid out before the
+  writing and a null there would take the cell's contents out of the cell.
+  The rule is the SESSION's alone — `": u: 0 65 66` is three characters on
+  either path — and it is J's alone: GNU APL writes the byte. `FmtOpts`
+  carries it as a flag rather than the formatter reading a language, which
+  is how every other divergence between the two displays is spelled.
+- 2026-09-05 — the OBLIQUE runs over the first two axes at every rank, and
+  a diagonal gathers the CELL each pair of indices names rather than an
+  atom. The rank-2 case is that rule with a cell of no axes, so the two
+  are one loop; an axis of no length leaves no diagonal, and the answer's
+  missing axes come from running `u` once on a cell holding no items, as
+  the key already did.
+- 2026-09-05 — `x:` OF A FLOAT is left as it stands. The Dictionary
+  defines it as a rational within the comparison tolerance and no further,
+  and twenty measured values show the reference is not choosing a
+  convergent of the value's continued fraction — exact or in floating
+  point — nor the simplest rational inside the double's own interval, nor
+  the first one that converts back to the double. Its answer for `1p1`
+  (`1285290289249r409120605684`) is a WORSE approximation than libjay's,
+  relative error 4.7e_14 against a convergent's 1e_16, and does not round
+  trip. Four hypotheses were fitted and refused; the row stays pinned with
+  both answers and the measurement in the register.
+- 2026-09-05 — the FOLD CONJUNCTIONS' answer is pinned rather than
+  followed, because the reference gives two of them to one sentence: in a
+  fresh interpreter `$ ((+: F.. ,:) (2 3 $ i. 6))` is `1 6`, and after the
+  fold itself has been evaluated once in the same process it is `2 3`,
+  repeatably. The WRITING follows the first and `] ` of the same value the
+  second. libjay answers the rank-2 result on every path.

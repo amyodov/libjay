@@ -91,12 +91,8 @@
 > j: _. _. _.
 > j: _. _. _.
 > j: _. _. _.
-= %. (_. 1 2)
-? the reference widens a NaN inverse to complex for a short argument only
-< _. _. _.
-> j: _.j_. _.j_. _.j_.
 = %. (1 1 $ _.)
-? the reference widens a NaN inverse to complex for a short argument only
+? the reference widens a one-item NaN table to complex where a wider one stays real
 < <error>
 > j: _.j_.
 = 1 p: (_. 1 2)
@@ -539,18 +535,6 @@
 ? the reference's two-radix integer path reads a negative leading radix as a zero one
 < _7 4
 > j: 123 4
-= %: _.
-? the reference widens a one-item NaN root to the complex type and a two-item one not
-< _.
-> j: _.j_.
-= ^. _.
-? the reference widens a one-item NaN logarithm to the complex type and a two-item one not
-< _.
-> j: _.j_.
-= 3!:0 (%: _.)
-? the reference widens a one-item NaN root to the complex type and a two-item one not
-< 8
-> j: 16
 = (_.) ^ (0.5)
 ? the reference widens a one-item NaN power to the complex type, as it does the root
 < _.
@@ -603,10 +587,6 @@
 ? the same pair, equal
 < 0
 > j: 1
-= u: 0 65 66
-? the reference's writing drops a null its own `#` counts
-<  AB
-> j: AB
 = 2 +/\\. (_. 1 2)
 ? the same function spelled `[: +/ ]` answers the pieces there
 < 2 _.
@@ -627,3 +607,16 @@
 ? the reference refuses the widened type, not the bytes in it
 < 1007455905
 > j: <error>
+= (+: F.. ,:) (2 3 $ i. 6)
+? the reference's own `$` of this is `1 6` in a fresh process and `2 3` in a used one
+< 6 8 10
+< 0 2  4
+> j: 6 8 10 0 2 4
+= 2 I. (1 2 3x)
+? the reference's own `2 I. 3` is 1 where its `2 I. (3x)` is 0
+< 0 0 1
+> j: 0 1 0
+= (_. 1 2) I. 2
+? the bisection of bounds that are in no order is defined nowhere
+< 2
+> j: 1

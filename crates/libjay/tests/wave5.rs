@@ -357,8 +357,10 @@ fn the_boolean_functions_are_numbered_by_their_truth_table() {
     let e = err(Lang::J, "5 (1 b.) 3");
     assert_eq!(e.kind, ErrorKind::Domain);
     assert!(e.msg.contains("16"), "{}", e.msg);
-    // A verb operand asks after the verb: `0` is its three ranks.
-    assert_eq!(val(Lang::J, "+ b. 0"), f64s(&[3], &[0.0, 0.0, 0.0]));
+    // A verb operand asks after the verb: `0` is its three ranks, which
+    // are WHOLE NUMBERS wherever none of them is unbounded — the
+    // reference's `3!:0 ((*:) b. 0)` is the integer type.
+    assert_eq!(val(Lang::J, "+ b. 0"), i64s(&[3], &[0, 0, 0]));
     assert_eq!(
         val(Lang::J, "(+/) b. 0"),
         f64s(&[3], &[f64::INFINITY, f64::INFINITY, f64::INFINITY])
