@@ -5381,3 +5381,36 @@ the register.
   fold itself has been evaluated once in the same process it is `2 3`,
   repeatably. The WRITING follows the first and `] ` of the same value the
   second. libjay answers the rank-2 result on every path.
+- 2026-09-05 — the MONADIC GERUND AMEND uses its gerund's LAST TWO verbs
+  and nothing else: `(u`v`w)} y` is `(v y)} (w y)` and `(u`v)} y` is
+  `(u y)} (v y)`, which is why `(+`{.`[)} y` and `({.`[)} y` are one verb.
+  And `m} y` is item SELECTION whose index is shaped like an ITEM of y —
+  one index per atom of a cell, saying which item that atom comes from —
+  not the single index libjay had been reading. Rounds 8C and 9A both left
+  this family open for want of a reading that fitted the probes; a 27-cell
+  grid fits both halves with none left over.
+- 2026-09-05 — a NEGATIVE WIDTH in `x ": y` is the EXPONENTIAL field, and
+  it keeps the value's own exponent: `(_8 2) ": (1r2 1r3)` is ` 5e_1    0`.
+  The tie an exactly held value breaks upward is the FIXED field's alone —
+  `(_8 2) ": (5r2 1r3)` is what its float twin gets — and a width of ZERO
+  with no digits asks for no field at all, so an exact value is then
+  written as it stands and only a float is rounded.
+- 2026-09-05 — a NaN WINS OVER J'S ALGEBRAIC SHORTCUTS on every arithmetic
+  pass but two: the BOOLEAN one and the one holding a single pair. `0 * _.`
+  is 0 and `1 ^ _.` is 1 there, `(i. 5) * (_.)` and `(1 2 3) ^ _.` are all
+  NaNs, and the split is by the operands' TYPE and the pass's LENGTH, not
+  by any value — which is why it is carried into the kernel as a flag on
+  the tolerance rather than decided from the numbers. The exact types never
+  take the shortcut over a NaN although they still take it over an
+  infinity, and an exactly held value COMPARED with a NaN reads as EQUAL.
+- 2026-09-05 — a `{::` PATH STEP THAT IS ITSELF A BOX selects ITEMS: all
+  the indices the box holds, along the leading axis. `(<<1 2) {::
+  (2 7 1 8)` is `7 1` where `(<1 2) { (2 7 1 8)` is a length error, so the
+  two verbs read a boxed index by different rules and the fetch's is the
+  simpler one.
+- 2026-09-05 — how well a merged pair of polynomial roots fits the
+  coefficients is measured COEFFICIENT BY COEFFICIENT and relatively. A
+  polynomial's coefficients need not be of one size: the constant term of
+  `1e_18 1e_9 1` decides its roots, and an error measured against the
+  leading 1 called a repeated real as good a fit there as the conjugate
+  pair the polynomial really has.

@@ -3456,9 +3456,12 @@ fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
                 && is_gerund(&m)
             {
                 let verbs = gerund_verbs(&u, scope, span)?;
-                if verbs.len() != 3 {
+                // TWO verbs make an amend as well, and its monad is the
+                // same selection three make: `({.`[)} y` and `(+`{.`[)} y`
+                // are one verb. Its DYAD is what has no reading yet.
+                if !(2..=3).contains(&verbs.len()) {
                     return Err(Error::not_yet(
-                        "a gerund amend of other than three verbs (u`v`w})",
+                        "a gerund amend of other than two or three verbs (u`v`w})",
                         span,
                     ));
                 }

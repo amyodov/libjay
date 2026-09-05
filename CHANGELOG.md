@@ -160,13 +160,92 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   with a NULL after each, which keeps two apart where one of them may be
   empty.
 
+- THE MONADIC GERUND AMEND AMENDS NOTHING — IT SELECTS. `m} y` is J's item
+  selection, and its index is shaped like an ITEM of y rather than like a
+  scalar: `(1 0 1)} (2 3 $ i. 6)` is `3 1 5`, one index per atom of a row
+  saying which row that atom comes from. An index of the wrong rank is a
+  rank error and one of the right rank and the wrong axes a length error;
+  negative indices count from the end, and a fractional or boxed index has
+  no place. The GERUND uses its LAST TWO verbs and never the first, so
+  `(+`{.`[)} y` and `({.`[)} y` are one verb, and a gerund of four is a
+  length error.
+
+- FORMAT BY SPECIFICATION IN THE EXPONENTIAL FIELD keeps the value's own
+  exponent: `(_8 2) ": (1r2 1r3)` is ` 5e_1    0`, where rounding the half
+  to a whole number first — the tie the FIXED field takes — wrote `1e0`.
+  And a WIDTH OF ZERO WITH NO DIGITS asks for no field at all, so an
+  exactly held value is written as it stands: `0 ": (1r2 1r3)` is
+  `1r2 1r3` and `0 ": (_9223372036854775806)` keeps its last digit, where
+  a float is still rounded to no decimals. A specification of no value
+  names no column, boxed data included.
+
+- A NaN WINS OVER J'S ALGEBRAIC SHORTCUTS on every pass but two. `0 * _.`
+  is 0 and `1 ^ _.` is 1, and so they are over BOOLEAN data of any size
+  and over any pass holding ONE PAIR, while the same pair held as integers
+  or floats answers with the NaN: `(i. 5) * (_.)` and `(1 2 3) ^ _.` are
+  all NaNs. The exact types never take the shortcut over a NaN, though
+  they still take it over an infinity.
+
+- AN EXACTLY HELD VALUE COMPARED WITH A NaN READS AS EQUAL. `2x = _.`,
+  `2x <: _.` and `2x >: _.` are 1 and `2x < _.` and `2x ~: _.` are 0,
+  where two floats read a NaN as ordered against nothing.
+
+- `%.` OF A VECTOR is a column's pseudo-inverse in closed form,
+  `v % (+/ v * v)`: `%. (0 1 1 0)` is `0 0.5 0.5 0` rather than the same
+  numbers with a general elimination's rounding in the first place.
+
+- A PATH STEP THAT IS ITSELF A BOX SELECTS ITEMS — all the indices it
+  holds at once, along the leading axis. `(<<1 2) {:: (2 7 1 8)` is `7 1`
+  and `(<<0 1) {:: (2 3 $ i. 6)` the whole table, where the same two
+  indices spelled as a path of two steps stay the length error they were.
+  `{` reads a boxed index the other way, one index per axis.
+
+- A COMPLEX INDEX WITH NO IMAGINARY PART TO SPEAK OF is the real number it
+  displays as, as an ordering already read one: `(1j1e_17) { (1 2 3)` is
+  2, `(0j0.5) { (1 2 3)` a domain error.
+
+- A PRIME QUERY REFUSES A VALUE WITH NO VALUE AMONG OTHERS. `0 p: _.` is 1
+  and `0 p: (, _.)` is too, while `0 p: (_. _.)`, `0 p: (_. 1 2)` and
+  `0 p: (2 3 $ _.)` are domain errors.
+
+- `x %: y` IS `y ^ (1 % x)` IN THE EXACT TYPES TOO, wherever that exponent
+  is a whole number written as a rational: `1r2 %: 1r3` is `1r9`,
+  `1r3 %: 8` is 512 and `1r2 %: (2 3x)` is `4 9`.
+
+
 ### Changed
 
-- Five divergence rows converged and their notes went: the root, the
+- Six divergence rows converged and their notes went: the root, the
   logarithm and the type of a one-item NaN, the inverse of a NaN vector,
-  and the null character's writing.
+  the null character's writing, and `1 p: (_. 1 2)`, which libjay now
+  refuses as the reference does.
 
 ### Fixed
+
+- THE ROOTS OF A BADLY SCALED QUADRATIC are the conjugate pair the
+  discriminant names again. `p. (1e_9 1 1e9)` answered a repeated real:
+  Durand–Kerner's repeated-root polish gathers roots within
+  `1e_3 * (1 + max |z|)` of one another, which is the whole pair when the
+  roots are 1e_9 apart, and the fit test meant to reject a wrong merge
+  measured the coefficient error against the LARGEST coefficient — 1 here,
+  where the constant term is 1e_18 and is what decides the roots. The fit
+  is now relative coefficient by coefficient, and the snap to the real
+  axis is relative to the root's own size.
+
+- MATRIX DIVISION REFUSES DATA THAT IS NOT NUMERIC. `(1 0 1 $ 5) %. ('a')`
+  is a domain error rather than an empty, an empty left argument not
+  excusing the right one; data with no element names no type at all, which
+  is what keeps `2 %. (0 $ 'a')` answering. A column whose sum of squares
+  runs to an infinity has no inverse either — `%. (_ __ 0)` and
+  `%. (_ 1 2)` are refused as a singular matrix is.
+
+- DURAND–KERNER STOPS WHEN THE STEP IS SMALL BESIDE THE ROOT IT IS MOVING,
+  not when it is small in absolute terms. A fixed 1e_15 ends the iteration
+  before a root of 1e_20 is resolved at all, and a threshold taken from the
+  widest root does the same to the small roots of a polynomial whose roots
+  differ in size — `p. (1e_20 1 1e20)` and `p. (1e_9 1 1e9 1)` are their
+  conjugate pairs again.
+
 
 - `4 p: y` FOR A y BELOW TWO no longer walks the whole integer range. The
   next prime above any such value is 2 — which is what the reference

@@ -1,0 +1,298 @@
+// Round 9B: what the two 50k sweeps still parted on, one measured grid per
+// family. The rules the grids fitted are written above each block.
+
+// THE MONADIC GERUND AMEND AMENDS NOTHING — IT SELECTS. `m} y` is J's item
+// selection: one index per atom of an ITEM of y, saying which item that
+// atom comes from. The index is shaped like an item (a rank error where
+// the rank is wrong, a length error where the rank is right and the axes
+// are not), the indices count from the end where they are negative, and an
+// index that is not a whole number — a box included — is a domain error.
+(0 1)} (2 2 $ 0 1 2 3)
+(1 0 1)} (2 3 $ i. 6)
+(_1 0 1)} (2 3 $ i. 6)
+(1 0)} (2 3 $ i. 6)
+(2 3 $ 0 1 0 1 0 1)} (2 3 $ i. 6)
+(2 2 $ 0)} (2 2 2 $ i. 8)
+(2 2 $ 0)} (2 2 3 $ i. 12)
+(0)} (2 3 $ i. 6)
+(0)} (2 $ 1 2)
+(0)} 5
+(<0)} (2 3 $ i. 6)
+(0.5 0 0)} (2 3 $ i. 6)
+(2 0 0)} (2 3 $ i. 6)
+(0 0 0)} (2 0 $ 0)
+(i. 0)} (2 0 $ 0)
+(0 0 0)} ('abcdef' $~ 2 3)
+(0 0 0)} (2 3 $ 1;2;3;4;5;6)
+$ ((0 0 0)} (2 3 $ i. 6))
+
+// A GERUND OF THREE SELECTS WITH ITS LAST TWO, one of two with both, and a
+// gerund of any other length is a length error.
+(+`{.`[)} (2 2 $ 0 1 2 3)
+({.`[)} (2 2 $ 0 1 2 3)
+(+`{.)} (2 2 $ 0 1 2 3)
+(+`(0 0 0"_)`[)} (2 3 $ i. 6)
+(]`(0:)`+)} (2 3 $ i. 6)
+(0:`+)} (2 3 $ i. 6)
+({.`[`]`+)} (2 3 $ i. 6)
+({.)} (2 3 $ i. 6)
+(+`{.`[)} (i. 3 4)
+(+`>.`[)} (i. 3 4)
+(>.`{.`[)} (1;2;3)
+(|.`{.`[)} (a:)
+(%:`[`<)} (<'')
+(%:`{.`}.)} (2 0 3 $ 0)
+
+// FORMAT BY SPECIFICATION takes one field per column of y's last axis — a
+// width `w`, or `w j. d` with the digits after the point — or one field
+// for every column. A NEGATIVE width is the EXPONENTIAL form, and the
+// value keeps its own exponent there: `(_8 2) ": (1r2 1r3)` is
+// ` 5e_1    0`, where a value rounded to no decimals first would give
+// `1e0`. The exponential field takes no tie either: `(_8 2) ": (5r2 1r3)`
+// is what its float twin gets.
+(_8 2) ": (1r2 1r3)
+(_8 2) ": (0.5 0.33333333)
+(_8 2) ": (1.5 2.5)
+(_8 2) ": (5r2 1r3)
+(_8 2) ": (2.5 1r3)
+(_8 2) ": (123.456 0.001)
+(_10 3) ": (123.456 0.001)
+(_8 2) ": (0 0)
+(_8 2) ": (_1.5 _0.25)
+(_6 1) ": (1r2 1r3)
+(_16 8) ": (1r2 1r3)
+(_12) ": (0.5)
+(_12) ": (1.5)
+(_12) ": (123.456)
+(_12) ": (0.001234)
+(_12) ": (_0.5)
+(_12) ": (0)
+(_12) ": (1e100)
+(_12) ": (1e_100)
+(_12) ": (9.99)
+(_12) ": (9.999999)
+(_12) ": (1r3)
+(_8 0) ": (0.5 0.25)
+(_10 3) ": (0.5 0.25)
+(_8 2) ": (1 2 3)
+(_8 2) ": (0.5)
+(_12 3) ": (0.5)
+(8 2) ": (0.5 0.25)
+(8) ": (0.5 0.25)
+(8 2) ": (2 2 $ 0.5 0.25 1.5 2.5)
+(8 2) ": (2 3 $ 0.5)
+(8 2 6 3) ": (2 2 $ 0.5 0.25 1.5 2.5)
+
+// A WIDTH OF ZERO WITH NO DIGITS ASKS FOR NO FIELD: an exactly held value
+// is written as it stands — `0 ": (1r2 1r3)` is `1r2 1r3` and
+// `0 ": (_9223372036854775806)` keeps its last digit — where a float is
+// still rounded to no decimals. A field of some width rounds either.
+0 ": (1r2)
+0 ": (1r2 1r3)
+0 ": (3r2 5r2)
+0 ": (_1r2)
+0 ": (2 3x)
+0 ": (1 2 3)
+0 ": (1.5 2.5)
+0 ": (123.456)
+0 ": (0.1 0.25)
+0 ": (9223372036854775806)
+0 ": (_9223372036854775806)
+0 ": (12345678901234567890x)
+0 ": (2 3 $ 1r2 1r3 2r5 1 2 3)
+0 0 ": (1r2 1r3)
+0 2 ": (1r2 1r3)
+2 0 ": (1r2 1r3)
+0j1 ": (1r2 1r3)
+0j2 ": (1r2 1r3)
+0 ": (3j4)
+0 ": (_.)
+0 ": ''
+2 ": (1r2 1r3)
+4 ": (1r2 1r3)
+10 3 ": (1r2 1r3)
+$ (0 ": (1r2 1r3))
+
+// A SPECIFICATION OF NO VALUE names no column at all, boxed data included.
+(i. 0) ": (<0)
+'' ": (<0)
+(0 $ 0) ": (2 3)
+
+// A NaN WINS OVER J'S ALGEBRAIC SHORTCUTS everywhere but the BOOLEAN pass
+// and the pass over ONE PAIR. `0 * _.` is 0 and `1 ^ _.` is 1, and so they
+// are over boolean data of any size, while the same pair held as integers
+// or floats answers with the NaN. The exact types never take the shortcut
+// over a NaN at all, though they still take it over an infinity.
+0 * _.
+_. * 0
+(,0) * (,_.)
+(0.0) * (_.)
+(0 0) * (_. _.)
+(0 1) * (_. _.)
+(2 2 $ 0) * (_.)
+0 * (_. 1)
+(0.0 0.0) * (_. _.)
+(0.0) * (_. 1)
+(i. 2) * (_. _.)
+(i. 5) * (_.)
+(_. 1 2) * (i. 3 4)
+_. * (0 0)
+_. * (i. 2)
+(0 1 2) * (_. _. _.)
+(0x) * (_.)
+(0r1) * (_.)
+(0x) * (_)
+0j0 * _.
+0 * _
+(i. 5) * _
+(0 1) * (_ _)
+(,0) * (,_)
+1 ^ _.
+(1 1) ^ (_. _.)
+(,1) ^ (,_.)
+(1 2 3) ^ _.
+(1.0) ^ (_.)
+(1.0 1.0) ^ (_. _.)
+(1x) ^ (_.)
+(1 2 3x) ^ (_.)
+(1r2) ^ (_.)
+_. ^ 0x
+_. %: (1 2 3x)
+(_.) ((%:`*`%:) @. 2) (1 2 3x)
+
+// AN EXACTLY HELD VALUE COMPARED WITH A NaN READS AS EQUAL, at every
+// spelling of the comparison, where two floats read a NaN as ordered
+// against nothing.
+2x = _.
+2x ~: _.
+2x < _.
+2x > _.
+2x <: _.
+2x >: _.
+(2r3) <: _.
+(2r3) < _.
+(2 3x) <: (_. _.)
+2x <: (_. 1)
+_. <: 2x
+(123x) <: &.:*: (_.)
+2x <. _.
+2x >. _.
+2x + _.
+2x - _.
+2x * _.
+2x % _.
+
+// `%.` OF A VECTOR is a column's pseudo-inverse, `v % (+/ v * v)`, which
+// the general least-squares solve reaches only to within its own rounding.
+%. (0 1 1 0)
+%. (_2 0 2)
+%. (1 2 3)
+%. (1 2 3 4 5)
+%. (2 4 4 2)
+%. (1e_9 1 1e9)
+%. (0 0)
+%. (,0)
+%. (0 0 0.0)
+%. (_ __ 0)
+%. (_ 1 2)
+%. (1 __ 2)
+%. (_. 1 2)
+%. (%. (_2 0 2))
+|/\\ (%. L:_1 (0 1 1 0))
+
+// NEITHER SIDE OF A MATRIX DIVISION IS A MATRIX UNLESS IT IS NUMERIC, and
+// data with NO ELEMENT names no type at all: it is read as the boolean
+// empty it stands in for.
+(1 2) %. ('ab')
+('ab') %. (1 2)
+%. ('ab')
+(1 0 1 $ 5) %. ('a')
+(0 0 $ 0) %. ('a')
+2 %. (0 $ 'a')
+
+// THE ROOTS OF A BADLY SCALED QUADRATIC are still the conjugate pair the
+// discriminant names. How well a merged pair of roots fits the
+// coefficients is measured coefficient by coefficient and RELATIVELY,
+// because a polynomial's coefficients need not be of one size.
+p. (1e_9 1 1e9)
+p. (1e_20 1 1e20)
+1 { p. (1 1 1e9)
+p. (1e_9 1 1e9 1)
+p. (1e_18 2e_9 1)
+p. (1 0 1)
+p. (1 1 1)
+p. (1 2 1)
+p. (0 0 1)
+p. (1 3 3 1)
+p. (_1 3 _3 1)
+p. (0 0 0 1)
+p. (6 _11 6 _1)
+p. (4 0 _5 0 1)
+p. (1 _2 1)
+p. (2 _3 1)
+1 { p. (1 1e9)
+p. (0 1)
+
+// A PATH STEP THAT IS ITSELF A BOX selects ITEMS — all the indices it
+// holds at once, along the leading axis — where the same indices spelled
+// as a path of two steps reach two levels down instead.
+(<<1 2) {:: (2 7 1 8)
+(<<0) {:: (1 2 3)
+(<<_1) {:: (2 7 1 8)
+(<<1) {:: (2 3 $ i. 6)
+(<<0 1) {:: (2 3 $ i. 6)
+(<<1 2) {:: (i. 3 4)
+(<1 2) {:: (2 7 1 8)
+(<(1;2)) {:: (2 7 1 8)
+((<0);(<1)) {:: ((1 2);(3 4))
+
+// `{` READS A BOXED INDEX THE OTHER WAY, one index per axis.
+(<1 2) { (2 7 1 8)
+(<0 1) { (2 3 $ i. 6)
+(<0;1) { (2 3 $ i. 6)
+(<(<0 1)) { (2 3 $ i. 6)
+
+// A COMPLEX INDEX WITH NO IMAGINARY PART TO SPEAK OF is the real number it
+// displays as, exactly as an ordering reads one.
+(1j1e_17) { (1 2 3)
+(0j0.5) { (1 2 3)
+(0 _2j2.44929e_16 2) { (0 _2j2.44929e_16 2)
+
+// A PRIME QUERY REFUSES A VALUE WITH NO VALUE AMONG OTHERS: the answer
+// stands only where the NaN is the whole argument.
+0 p: (_.)
+0 p: (, _.)
+0 p: (_. _.)
+0 p: (_. 1 2)
+0 p: (2 3 $ _.)
+1 p: (_.)
+0 p: (1.5)
+0 p: (1.5 2.5)
+
+// `x %: y` IS `y ^ (1 % x)`, and where that exponent is a WHOLE number
+// written in the rational type the root is an exact power.
+1r2 %: 1r3
+1r3 %: 8
+1r2 %: 3
+1r2 %: (2 3x)
+2 %: 1r9
+_1 %: 8x
+_1r2 %: 4x
+_2 %: 4x
+1 %: 8x
+3 %: 8x
+3 %: 8r27
+(1r2 1r3) %:/ (1r2 1r3)
+((%:) (1 : 'u/ y')) (1r2 1r3)
+
+// A RESHAPE OF AN EMPTY WHOSE ITEMS ARE EMPTY TOO stays empty: the shape
+// asked for is followed by the item's own shape, and only a result that
+// would need an atom it was never given is a length error.
+3 $ (0 0 $ 0)
+$ (3 $ (0 0 $ 0))
+$ (3 4 $ (0 0 $ 0))
+$ (3 1 $ (0 0 3 $ 0))
+2 $ (0 5 $ 0)
+3 $ (i. 0)
+3 $ (0 3 $ 0)
+3 $ (<i. 0)

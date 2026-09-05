@@ -137,16 +137,34 @@ pub struct Tol {
     /// Which reading `⌊` and `⌈` take. Unread under J, whose floor is
     /// the tolerant comparison itself.
     pub floor_rule: FloorRule,
+    /// Whether a NaN operand wins over J's algebraic shortcuts — `0 * y`
+    /// is 0 and `1 ^ y` is 1 — in the pass this tolerance is applied to.
+    ///
+    /// The reference keeps the shortcuts on its BOOLEAN pass and on a pass
+    /// over ONE pair (`0 * _.` is 0, `(0 0) * (_. _.)` is `0 0`,
+    /// `1 ^ _.` is 1) and drops them everywhere else: `(i. 5) * (_.)` and
+    /// `(1 2 3) ^ _.` are all NaNs there, where IEEE and J's own rule both
+    /// answer with the shortcut. The caller sets it per operation, since
+    /// the split is by the operands' type and count and not by their
+    /// values.
+    pub nan_wins: bool,
 }
 
 impl Tol {
     /// No tolerance at all — J's `u!.0`.
-    pub const EXACT: Tol = Tol { ct: 0.0, by_smaller: true, floor_rule: FloorRule::Shift };
+    pub const EXACT: Tol =
+        Tol { ct: 0.0, by_smaller: true, floor_rule: FloorRule::Shift, nan_wins: false };
     /// J's default comparison tolerance, 2^-44.
     pub const J: Tol =
-        Tol { ct: 5.684_341_886_080_802e-14, by_smaller: true, floor_rule: FloorRule::Shift };
+        Tol {
+            ct: 5.684_341_886_080_802e-14,
+            by_smaller: true,
+            floor_rule: FloorRule::Shift,
+            nan_wins: false,
+        };
     /// GNU APL's default `⎕CT`.
-    pub const APL: Tol = Tol { ct: 1e-13, by_smaller: false, floor_rule: FloorRule::Shift };
+    pub const APL: Tol =
+        Tol { ct: 1e-13, by_smaller: false, floor_rule: FloorRule::Shift, nan_wins: false };
 
     /// Tolerant equality.
     #[inline(always)]
@@ -333,6 +351,9 @@ impl Tol {
     /// alone and a finite pair is untouched, negative zero included.
     #[inline(always)]
     pub fn mul(self, x: f64, y: f64) -> f64 {
+        if self.nan_wins && (x.is_nan() || y.is_nan()) {
+            return f64::NAN;
+        }
         if self.is_j() && (x == 0.0 || y == 0.0) && !(x.is_finite() && y.is_finite()) {
             return 0.0;
         }
@@ -2898,17 +2919,8 @@ impl Verb {
             Verb::Choose(_) => {
                 Err(Error::domain("⊢[m] selects between two arguments and needs both", span))
             }
-            // `m} y` with one index is J's item selection.
-            Verb::Amend(m) => {
-                if m.rank() != 0 || y.rank() > 1 {
-                    return Err(Error::new(
-                        ErrorKind::Rank,
-                        "selecting with m} takes one index into a list",
-                        Some(span),
-                    ));
-                }
-                from_index(m, y, ctx.cfg.near(), span)
-            }
+            // `m} y` is J's item selection: one index per atom of an item.
+            Verb::Amend(m) => item_select(m, y, ctx.cfg.near(), span),
             // `u} y` computes the indices first: it is `(u y)} y`.
             Verb::AmendVerb(u) => {
                 let m = u.monad(y, ctx, span)?;
@@ -5360,6 +5372,11 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
         Add => a + b,
         Sub => a - b,
         Mul => tol.mul(a, b),
+        // An EXACT operand beside a NaN keeps the NaN: `2x <. _.` and
+        // `2x >. _.` are `_.` there, where two floats read a NaN as
+        // ordered against nothing.
+        Min if tol.nan_wins && (a.is_nan() || b.is_nan()) => f64::NAN,
+        Max if tol.nan_wins && (a.is_nan() || b.is_nan()) => f64::NAN,
         Min => a.min(b),
         Max => a.max(b),
         DivJ => {
@@ -5394,7 +5411,14 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
             }
         }
         Pow => {
-            if a == 0.0 && b == 0.0 {
+            // A pass that lets a NaN win takes no algebraic shortcut over
+            // an EXPONENT with no value: `(1 2 3) ^ _.` and `(1.0) ^ (_.)`
+            // are NaNs there where IEEE's own `1 ^ NaN` is 1. A NaN BASE
+            // still answers where the exponent decides the value on its
+            // own — `_. ^ 0` is 1 — so only the exponent is tested.
+            if tol.nan_wins && b.is_nan() && a != 0.0 {
+                f64::NAN
+            } else if a == 0.0 && b == 0.0 {
                 1.0
             } else if a == 0.0 && b < 0.0 && !tol.is_j() {
                 // GNU APL refuses `0⋆¯1`: it is a division by zero under
@@ -5447,6 +5471,12 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
             r
         }
         Root => {
+            // A pass that lets a NaN win takes no algebraic shortcut over
+            // it, the root's own `1 ^ y` included: `_. %: (1 2 3x)` is
+            // three NaNs there.
+            if tol.nan_wins && (a.is_nan() || b.is_nan()) {
+                return Ok(f64::NAN);
+            }
             // The ZEROTH root is the limit `y ^ _`: zero where the
             // magnitude is under one, whatever the sign, and no value at
             // all where a negative magnitude is one or more, since the
@@ -6210,8 +6240,10 @@ fn dyad_f64_chunk_body<A: Widen<f64>, B: Widen<f64>>(
         Add => plain_checked!(|a: f64, b: f64| a + b),
         Sub => plain_checked!(|a: f64, b: f64| a - b),
         Mul => plain_checked!(|a: f64, b: f64| a * b),
-        Min => plain!(f64::min),
-        Max => plain!(f64::max),
+        // The extrema's fast path answers without consulting [`f64_op`],
+        // so a pass that lets a NaN win has to go the long way round.
+        Min if !tol.nan_wins => plain!(f64::min),
+        Max if !tol.nan_wins => plain!(f64::max),
         _ => {}
     }
     let mut err = None;
@@ -6528,6 +6560,15 @@ fn compare_data(
         });
         return Ok(Data::Bool(out.into()));
     }
+    // AN EXACTLY HELD VALUE COMPARED WITH A NaN READS AS EQUAL. The exact
+    // pass above has no answer for a value the rational type cannot hold,
+    // and where the pair falls through to the floats the reference does
+    // not read the NaN as ordered against nothing: `2x = _.`, `2x <: _.`
+    // and `2x >: _.` are 1 there, `2x < _.` and `2x ~: _.` are 0, and a
+    // rational left argument answers the same way. Only the EXACT side
+    // brings the reading; two floats keep the ordinary one.
+    let exact_side = matches!(dx, DType::Ext | DType::Rat)
+        || matches!(dy, DType::Ext | DType::Rat);
     // Floats compare with the dialect's tolerance; integers are exact
     // whatever it is, so the integer pass below is untouched by it.
     let out = if DType::promote(dx, dy) == Some(DType::F64) {
@@ -6536,7 +6577,12 @@ fn compare_data(
             f64_source!(y, ty, ys, {
                 par::fill(n, |start, part: &mut [u8]| {
                     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
-                        *slot = tol_cmp(op, a.widen(), b.widen(), tol) as u8;
+                        let (a, b): (f64, f64) = (a.widen(), b.widen());
+                        *slot = if exact_side && (a.is_nan() || b.is_nan()) {
+                            cmp_result(op, Some(std::cmp::Ordering::Equal)) as u8
+                        } else {
+                            tol_cmp(op, a, b, tol) as u8
+                        };
                         true
                     })
                 })
@@ -7010,6 +7056,19 @@ fn exact_dyad_data(
                 (Some(k), Some(m)) => exact::ext_binomial(&k, &m).map(Rat::from_int),
                 _ => None,
             },
+            // `x %: y` IS `y ^ (1 % x)`, and where that exponent is a
+            // WHOLE number the root is an exact power: `1r2 %: 1r3` is
+            // `1r9`, `1r3 %: 8` is 512 and `1r2 %: (2 3x)` is `4 9`.
+            Root
+                if Rat::from_int(Ext::from(1)).div(a).is_some_and(|e| {
+                    e.to_int().is_some() && (t == DType::Rat || e >= Rat::from_int(Ext::from(1)))
+                }) =>
+            {
+                let e = Rat::from_int(Ext::from(1))
+                    .div(a)
+                    .expect("the reciprocal was just taken");
+                exact_pow(b, &e, span)?
+            }
             // An exact root exists only between whole numbers: the
             // reference answers `3 %: 8r27` with a float, not with `2r3`.
             Root if t == DType::Ext => {
@@ -7670,6 +7729,25 @@ fn scalar_dyad(
         }
         return Ok(Array::new(p.frame, Data::empty(empty_result_type(x, y))));
     }
+    // WHICH PASS THIS IS decides whether J's algebraic shortcuts survive a
+    // NaN: the reference keeps them over ONE pair and over BOOLEAN data,
+    // and drops them everywhere else. See [`Tol::nan_wins`].
+    // BOOLEAN data keeps the shortcuts whatever the operand; the EXACT
+    // types never keep them; and the rest keep them only where the
+    // multiply has a single pair to make. The power and the root drop them
+    // at every length.
+    let exact_side = matches!(x.dtype(), DType::Ext | DType::Rat)
+        || matches!(y.dtype(), DType::Ext | DType::Rat);
+    let boolean_side = x.dtype() == DType::Bool || y.dtype() == DType::Bool;
+    let nan_wins = cfg.rules.lang == crate::Lang::J
+        && !boolean_side
+        && match op {
+            ScalarDyad::Mul => p.n > 1 || exact_side,
+            ScalarDyad::Pow | ScalarDyad::Root => true,
+            ScalarDyad::Min | ScalarDyad::Max => exact_side,
+            _ => false,
+        };
+    let tol = Tol { nan_wins, ..cfg.tol };
     let data = scalar_dyad_data(
         op,
         &x.data,
@@ -7679,7 +7757,7 @@ fn scalar_dyad(
         0,
         p.y_div,
         p.n,
-        cfg.tol,
+        tol,
         cfg.rules,
         span,
     )?;
@@ -9806,12 +9884,72 @@ fn amend_gerund_monad(
     ctx: &mut Ctx<'_>,
     span: Span,
 ) -> Result<Array> {
-    let [_, v, w] = vs else {
-        return Err(Error::not_yet("a gerund amend of other than three verbs", span));
+    // The monadic valence amends nothing, so it has no use for the verb
+    // that would make the new items: it is the LAST TWO of the gerund that
+    // act, `(v y)} (w y)` of three and `(u y)} (v y)` of two. A gerund of
+    // any other length is a length error, as it is in the reference.
+    let (at, into) = match vs {
+        [_, v, w] => (v, w),
+        [u, v] => (u, v),
+        _ => {
+            return Err(Error::new(
+                ErrorKind::Length,
+                "a gerund amend selects with two or three verbs",
+                Some(span),
+            ))
+        }
     };
-    let at = v.monad(y, ctx, span)?;
-    let into = w.monad(y, ctx, span)?;
-    Verb::Amend(at).monad(&into, ctx, span)
+    let at = at.monad(y, ctx, span)?;
+    let into = into.monad(y, ctx, span)?;
+    item_select(&at, &into, ctx.cfg.near(), span)
+}
+
+/// `m} y`: one index per atom of an ITEM of y, choosing which item that
+/// atom comes from. The result is shaped like an item; `m` has to be
+/// shaped like one too, and the indices count from the end where they are
+/// negative.
+fn item_select(m: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
+    let cell: Vec<usize> = if y.rank() == 0 { Vec::new() } else { y.shape[1..].to_vec() };
+    if m.rank() != cell.len() {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!(
+                "selecting with m}} takes an index of rank {}, not {}",
+                cell.len(),
+                m.rank()
+            ),
+            Some(span),
+        ));
+    }
+    if m.shape != cell {
+        return Err(Error::new(
+            ErrorKind::Length,
+            format!(
+                "selecting with m}} takes {} index(es), not {}",
+                cell.iter().product::<usize>(),
+                m.count()
+            ),
+            Some(span),
+        ));
+    }
+    let idx = m
+        .to_i64_vec_near(near)
+        .ok_or_else(|| Error::domain("index must be an integer", span))?;
+    let items = if y.rank() == 0 { 1 } else { y.shape[0] } as i64;
+    let src = y.to_row_major();
+    let width = idx.len();
+    let mut data = Data::empty(src.dtype());
+    for (j, &i) in idx.iter().enumerate() {
+        let k = if i < 0 { i + items } else { i };
+        if k < 0 || k >= items {
+            return Err(Error::domain(
+                format!("index {i} is out of range: the argument has {items} items"),
+                span,
+            ));
+        }
+        push_elem(&mut data, &src.data, k as usize * width + j);
+    }
+    Ok(Array::new(cell, data))
 }
 
 fn amend_gerund(
@@ -12516,7 +12654,21 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
             let (x, y) = align_mixed(x, y, apl);
             Ok(member_apl(&x, &y, tol))
         }
-        DyadOp::From => from_index(x, y, cfg.near(), span),
+        DyadOp::From => {
+            // A COMPLEX INDEX WITH NO IMAGINARY PART TO SPEAK OF is the
+            // real number it displays as, exactly as an ordering reads
+            // one: `(1j1e_17) { (1 2 3)` is 2 in the reference, where
+            // `(0j0.5) { (1 2 3)` is refused.
+            if x.dtype() == DType::Complex
+                && tolerantly_real(&x.data, cfg.tol)
+                && let Some(v) = x.to_complex_vec()
+            {
+                let real: Vec<f64> = v.iter().map(|z| z[0]).collect();
+                let real = Array::new(x.shape.clone(), Data::F64(real.into()));
+                return from_index(&real, y, cfg.near(), span);
+            }
+            from_index(x, y, cfg.near(), span)
+        }
         DyadOp::Match => {
             // APL tells an empty CHARACTER array from an empty numeric one
             // — their prototypes differ — where J's `-:` reads only the
@@ -16208,6 +16360,28 @@ fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     {
         return Ok(exact);
     }
+    // A VECTOR IS A COLUMN, and the pseudo-inverse of a column is written
+    // in closed form: `v % (+/ v * v)`. Running it through the general
+    // least-squares solve gives the same numbers only to within its own
+    // rounding, and the reference's are exact — `%. (0 1 1 0)` is
+    // `0 0.5 0.5 0` there, where an elimination leaves `_1.6e_16` in the
+    // first place. A column of nothing but zeros has no inverse at all,
+    // which the solve reports as a singular matrix and so does this.
+    if y.rank() == 1
+        && y.count() > 0
+        && matches!(y.dtype(), DType::Bool | DType::I64 | DType::F64)
+        && let Some(v) = y.to_f64_vec()
+    {
+        let total: f64 = v.iter().map(|a| a * a).sum();
+        // A column of nothing but zeros has no inverse, and neither has one
+        // whose sum of squares runs to an infinity: `%. (_ __ 0)` and
+        // `%. (_ 1 2)` are refused there, as the elimination refused them.
+        if total == 0.0 || !total.is_finite() {
+            return Err(Error::domain("the matrix is singular", span));
+        }
+        let out: Vec<f64> = v.iter().map(|a| a / total).collect();
+        return Ok(Array::new(y.shape.clone(), Data::F64(out.into())));
+    }
     let (a, m, n) = as_matrix(y, span)?;
     // A vector with no elements is a column of no rows, and the reference
     // answers it with an empty rather than reading it as a wider matrix
@@ -16251,6 +16425,15 @@ fn matrix_divide(
     cfg: EvalCfg,
     span: Span,
 ) -> Result<Array> {
+    // NEITHER SIDE IS A MATRIX UNLESS IT IS NUMERIC. The reference refuses
+    // `(1 2) %. ('ab')` and `('ab') %. (1 2)` with a domain error, and an
+    // EMPTY left argument does not excuse the right one: `(1 0 1 $ 5) %.
+    // ('a')` is refused there as well. Data with NO ELEMENT names no type
+    // at all and is read as the boolean empty it stands in for, which is
+    // what makes `2 %. (0 $ 'a')` the 0 it is there.
+    if [x, y].into_iter().any(|a| !a.dtype().is_numeric() && a.count() > 0) {
+        return Err(Error::domain("matrix division needs numeric data", span));
+    }
     // An ATOM on the right is no matrix: the system it names has one
     // unknown and one equation per item of x, and J answers the items' SUM
     // over that atom — `(1 2) %. 4` is 0.75, and `2 %. 0` the infinity the
@@ -16781,14 +16964,38 @@ fn fetch(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
             continue;
         }
         // A step that is itself a boxed SCALAR holds the indices one box
-        // deeper: `(<<0) {:: (1 2 3)` is 1 in the reference, and so is the
-        // first step of `((<0);(<1)) {:: ((1 2);(3 4))`, which links its
-        // two paths one level down.
-        let step = if step.rank() == 0 && step.dtype() == DType::Box && cur.rank() > 0 {
-            open_cell(&step)
-        } else {
-            step
-        };
+        // deeper, and they are read the way `{` reads a boxed index —
+        // along the LEADING axis, all of them at once. `(<<0) {:: (1 2 3)`
+        // is 1 in the reference and `(<<1 2) {:: (2 7 1 8)` is `7 1`,
+        // where the same two indices spelled as a path of two steps
+        // (`(<1 2) {::`) is the length error it is. It is also what links
+        // the two paths of `((<0);(<1)) {:: ((1 2);(3 4))` one level down.
+        if step.rank() == 0 && step.dtype() == DType::Box && cur.rank() > 0 {
+            let inner = open_cell(&step);
+            let idx = inner
+                .to_i64_vec_near(near)
+                .ok_or_else(|| Error::domain("a fetch path holds integers", span))?;
+            let items = cur.items() as i64;
+            let mut cells = Vec::with_capacity(idx.len());
+            for &i in &idx {
+                let k = if i < 0 { i + items } else { i };
+                if k < 0 || k >= items {
+                    return Err(Error::domain(
+                        format!("index {i} is out of range: the value has {items} items"),
+                        span,
+                    ));
+                }
+                cells.push(cur.item(k as usize));
+            }
+            let cell = if inner.rank() == 0 {
+                cells.pop().expect("an atom names one item")
+            } else {
+                assemble(&inner.shape, cells, span)?
+            };
+            opened = cell.rank() == 0 && cell.dtype() == DType::Box;
+            cur = open_cell(&cell);
+            continue;
+        }
         let idx = step
             .to_i64_vec_near(near)
             .ok_or_else(|| Error::domain("a fetch path holds integers", span))?;
@@ -19409,19 +19616,42 @@ fn durand_kerner(monic: &[Cx]) -> Vec<Cx> {
             }
             let step = cx::div(value(monic, z[i]), denom);
             z[i] = cx::sub(z[i], step);
-                moved = moved.max(step[0].hypot(step[1]));
+            // The step that means convergence is measured against THIS
+            // root's own size. An absolute 1e_15 stops the iteration
+            // before a root of 1e_20 is resolved at all — which is how
+            // `p. (1e_20 1 1e20)` came out as a repeated real — and a
+            // threshold taken from the WIDEST root does the same to the
+            // small roots of `p. (1e_9 1 1e9 1)`. A root at the origin has
+            // no size to measure against and keeps the absolute reading.
+            let s = step[0].hypot(step[1]);
+            let d = cx::abs(z[i]);
+            moved = moved.max(if d > 0.0 { s / d } else { s });
         }
         if moved < 1e-15 {
             break;
         }
     }
     let mut z = polished_repeats(monic, z);
-    // A root within rounding of the real axis is a real root.
+    // A root within rounding of the real axis is a real root — and what
+    // counts as rounding is measured AGAINST THE ROOT'S OWN MAGNITUDE. A
+    // fixed threshold reads a whole conjugate pair as one repeated real as
+    // soon as the roots are small enough: `p. (1e_9 1 1e9)` is
+    // `_5e_10j8.66025e_10` and its conjugate in the reference, and an
+    // absolute 1e_9 flattens both to `_5e_10`. A root THIRTY ORDERS OF
+    // MAGNITUDE below the widest is the zero the constant term names,
+    // whatever the iteration left in its last digits — `p. 0 1 2 1` is
+    // `_1 _1 0` — and no root a double can resolve stands that far down.
+    let widest = z.iter().map(|&r| cx::abs(r)).fold(0.0f64, f64::max);
     for r in &mut z {
-        if r[1].abs() < 1e-9 {
+        let scale = cx::abs(*r);
+        if widest.is_finite() && scale < 1e-30 * widest {
+            *r = cx::ZERO;
+            continue;
+        }
+        if r[1].abs() < 1e-9 && r[1].abs() < 1e-6 * scale {
             r[1] = 0.0;
         }
-        if r[0].abs() < 1e-12 {
+        if r[0].abs() < 1e-12 && r[0].abs() < 1e-6 * scale {
             r[0] = 0.0;
         }
     }
@@ -19459,8 +19689,7 @@ fn polished_repeats(monic: &[Cx], z: Vec<Cx>) -> Vec<Cx> {
         return z;
     }
     let raw = coefficient_error(monic, &z);
-    let scale = monic.iter().map(|&k| cx::abs(k)).fold(1.0f64, f64::max);
-    let allowed = raw.max(1e-13 * scale);
+    let allowed = raw.max(1e-13);
     for reach in [1e-3, 1e-4, 1e-5, 1e-6, 1e-7] {
         // Single linkage: a chain of near neighbours is one group, which
         // is what a triple root's three points around the true value are.
@@ -19572,10 +19801,19 @@ fn coefficient_error(monic: &[Cx], roots: &[Cx]) -> f64 {
         }
         built = next;
     }
+    // The error is measured COEFFICIENT BY COEFFICIENT and RELATIVELY,
+    // because a polynomial's coefficients need not be of one size: the
+    // constant term of `1e_18 1e_9 1` decides its roots, and an error
+    // measured against the leading 1 would call a repeated real as good a
+    // fit there as the conjugate pair the polynomial really has.
     let mut worst: f64 = 0.0;
     for (k, &want) in monic.iter().enumerate() {
         let got = built.get(k).copied().unwrap_or(cx::ZERO);
-        worst = worst.max(cx::abs(cx::sub(got, want)) / (1.0 + cx::abs(want)));
+        let scale = cx::abs(want).max(cx::abs(got));
+        if scale == 0.0 {
+            continue;
+        }
+        worst = worst.max(cx::abs(cx::sub(got, want)) / scale);
     }
     worst
 }
@@ -20585,6 +20823,16 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
     // refuse one it does not know, which is anything past a pair of the
     // three smallest whole numbers.
     if y.dtype() == DType::Box {
+        // A specification of NO value names no column at all, boxed data
+        // included: `(i. 0) ": (<0)` is a length error in the reference,
+        // as `(0 $ 0) ": (2 3)` is.
+        if spec.is_empty() {
+            return Err(Error::new(
+                ErrorKind::Length,
+                "no specification value for boxed data",
+                Some(span),
+            ));
+        }
         if spec.len() > 2 {
             return Err(Error::new(
                 ErrorKind::Length,
@@ -20638,8 +20886,19 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
         crate::limits::count(w.abs() as u128, span)?;
         crate::limits::count(d.max(0.0) as u128, span)?;
     }
+    // A field of NO width and no digits asks for no field at all: an
+    // EXACTLY held value is written the way it is ordinarily written, so
+    // `0 ": (1r2 1r3)` is `1r2 1r3` and `0 ": (_9223372036854775806)`
+    // keeps its last digit, where a double would round both away. A float
+    // in the same field is still rounded to no decimals — `0 ": 123.456`
+    // is `123` — since that is what no digits asks for.
+    let held_exactly = matches!(y.dtype(), DType::Rat | DType::Ext | DType::I64 | DType::Bool);
+    let rows_of = y.to_row_major();
     let text = |r: usize, c: usize| {
         let [w, d] = fields[c];
+        if held_exactly && w == 0.0 && d <= 0.0 {
+            return crate::fmt::format_atom(&rows_of.data, r * cols + c, fmt);
+        }
         // Only a column of automatic width renders every digit asked for.
         // Where the width is given, a digit count that reaches it already
         // overflows the field — the point and the digits alone are wider —
@@ -20649,8 +20908,10 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
         // A value written EXACTLY breaks a tie the other way from a double:
         // `2 ": (1r2 1r3)` is `1 0` in the reference where `2 ": 0.5` is
         // `0`, and `2 ": (_1r2 _3r2)` is `0 _1` — the half goes to the
-        // LARGER number, not to the even one.
-        if exact && digits < 18.0 {
+        // LARGER number, not to the even one. The EXPONENTIAL field takes
+        // no such tie: `(_8 2) ": (5r2 1r3)` is ` 2e0    0`, the same
+        // answer its float twin gets.
+        if exact && w >= 0.0 && digits < 18.0 {
             let scale = 10f64.powi(digits as i32);
             let scaled = v * scale;
             if scaled.fract().abs() == 0.5 {
@@ -23654,6 +23915,13 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
         return factor_table_at(n, span);
     }
     let zs = complex_digits_of(y, "a prime query", span)?;
+    // A VALUE WITH NO VALUE among others is refused. `0 p: _.` is 1 there
+    // and `0 p: (, _.)` is too, but `0 p: (_. _.)`, `0 p: (_. 1 2)` and
+    // `0 p: (2 3 $ _.)` are all domain errors: the answer stands only
+    // where the NaN is the whole argument.
+    if zs.len() > 1 && zs.iter().any(|z| z[0].is_nan() || z[1].is_nan()) {
+        return Err(Error::domain("a prime query needs a number", span));
+    }
     let mut cells = Vec::with_capacity(zs.len());
     for z in zs {
         cells.push(prime_query_at(form, z, span)?);

@@ -88,7 +88,7 @@ _1 + ((1e8) ! (1e8 + 1e_4))
 // matches them by cause instead.
 2 p: (3j4 1j_1)
 ? the reference answers a factorisation of a complex number with nothing at all
-~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer verb=p:,q: also=j.,r.,#:,#.,o.,F..,F.:,F::,M.,^,^.,%:,+,-,*,%
+~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer verb=p:,q: also=j.,r.,#:,#.,o.,F..,F.:,F::,M.,^,^.,%:,+,-,*,%,^:,L:,S:,-.,>,e.,~:,=,<:,>:,<.,>.,|.,{.,}.
 
 // A SINGULAR MATRIX UNDER `%.`, WHERE THE REFERENCE HAS NO RULE — ONLY THE
 // LUCK OF ITS OWN FACTORISATION. Four rank-deficient arguments, measured:
@@ -126,21 +126,18 @@ $ %. (i. 4 3)
 // ITSELF BETWEEN ONE ITEM AND SEVERAL. Every one of these is settled by the
 // reference's own answer to the same cell asked on its own:
 //
-//   `1 p: _.` is 0 there — a NaN is not prime — but `1 p: (_. 1 2)` is a
-//   domain error, the same question of the same value with two neighbours.
 //   `4 p: _.` is a domain error there, but `4 p: (_. 1 2)` is `2 2 3`, so
 //   the NaN that had no next prime alone has one in company.
 //   `4 p: (_ 1 2)` is `2 2 2`, although the reference's own `4 p: 2` is 3:
 //   an infinity ANYWHERE makes every cell answer with the smallest prime,
 //   including the cells that hold ordinary numbers.
 //
-// libjay keeps ONE rule, applied cell by cell, and it is the rule the
-// reference itself follows whenever the cell is asked on its own: a NaN is
-// no prime but has no place in the order, an infinity has no place either
+// The two forms that ask whether a value IS prime were followed in round
+// 9B — `0 p:` and `1 p:` refuse a NaN they are handed among others, as the
+// reference does — and what is left here is the rest, where libjay keeps
+// ONE rule applied cell by cell: an infinity has no place in the order
 // except that the next prime after one is the smallest there is, and no
 // cell changes what a neighbouring cell answers.
-1 p: (_. 1 2)
-? the reference calls a lone NaN not prime and refuses the same NaN in a list
 4 p: (_. 1 2)
 ? the reference refuses a lone NaN's next prime and answers one in a list
 4 p: (_. 1)
@@ -415,7 +412,7 @@ _1r2 ^. _1r2
 // re-measure them before trusting it.
 (o. 1) *. 3
 ? the two float Euclids cut the same residue chain at different steps
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=+.,*. also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,<:,>:,=,~:,|,j.,r.,!.,&.,&.:,#.,#:,^: answers=inexact
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=+.,*. also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,<:,>:,=,~:,|,j.,r.,!.,&.,&.:,#.,#:,^:,%.,L:,S:,f.,|:,# answers=inexact
 
 // The same family REACHING A REFUSAL rather than a value. Where the two
 // GCDs part by one bit — `1 +. 1.0000000000000002` is exactly 1 there and
@@ -469,7 +466,7 @@ _1r2 ^. _1r2
 ? the reference searches into the complex plane; libjay has no real answer
 ! ^:_1 (3j4 1j_1)
 ? the reference searches the complex plane; libjay's obverse reads reals
-~ cause=we-refuse:err:NaN_error:_this_factorial_has_no_argument|we-refuse:err:domain_error:_the_obverse_of_!_needs_numeric_data verb=! with=^: also=%,%:,-,+,*,j.,&.,&.:
+~ cause=we-refuse:err:NaN_error:_this_factorial_has_no_argument|we-refuse:err:domain_error:_the_obverse_of_!_needs_numeric_data verb=! with=^: also=%,%:,-,+,*,j.,&.,&.:,r.,;.,o.,^.
 
 // The same two whole numbers a double cannot tell apart, reached through a
 // VECTOR left argument, where the whole pass goes to floats at once:
@@ -708,7 +705,7 @@ x: 3.14159265358979
 // No `answers=` clause: both sides answer a RATIONAL, whose `r` is not a
 // character any numeric answer class reads, so every one of them would be
 // false here. The cause, the verb and the restricted `also=` carry the rule.
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:,^:,=.,=:,:,`:,p.
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:,^:,=.,=:,:,`:,p.,#.,#:,F..,F.:,F:.,F::,L:,S:,;.
 
 // INTERVAL INDEX OVER SYMBOLS. The reference's own `<` and `/:` order
 // symbols by their NAME — `(s: <'a') < (s: <'b')` is 1 and
@@ -734,7 +731,7 @@ x: 3.14159265358979
 // its own ordinary path, the third spelling of the family pinned above.
 2 +/\\. (_. 1 2)
 ? the same function spelled `[: +/ ]` answers the pieces there
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=+,/,\. also=_.,-,*,%,^,%:,^.,+:,-:,*:,<:,>:,|,j.,&.,&.: answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=+,/,\. also=_.,-,*,%,^,%:,^.,+:,-:,*:,<:,>:,|,j.,&.,&.:,$,<,> answers=numeric
 _2 +/\\. (_.)
 ? the same where the piece is empty, so the sum should be the fold's zero
 
@@ -751,7 +748,7 @@ _2 +/\\. (_.)
 ? a four-byte code is a value there and a codepoint here
 9 u: _3
 ? the same over the other form that answers the four-byte type
-~ cause=we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint|we-refuse:err:domain_error:_-#_is_not_a_Unicode_codepoint verb=u: also=x:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,~.,^:,&,@,:,f.,::,M.,S:,L:,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,/,\,\.
+~ cause=we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint|we-refuse:err:domain_error:_-#_is_not_a_Unicode_codepoint verb=u: also=x:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,~.,^:,&,@,:,f.,::,M.,S:,L:,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,/,\,\.,+.,*.,;.,{::,{,e.,~.,<,>
 
 // THE CRC OF A WIDE CHARACTER. `128!:3` reads a byte string, and the
 // reference refuses one whose type is not the one-byte one: `128!:3 (u: 2)`
@@ -776,7 +773,7 @@ _2 +/\\. (_.)
 // arithmetic that cannot make an infinity of its own.
 (+: F.. ,:) (2 3 $ i. 6)
 ? the reference's own `$` of this is `1 6` in a fresh process and `2 3` in a used one
-~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/num verb=F..,F.:,F:.,F:: also=+:,-:,*:,+,-,*,<.,>.,=,~:,<:,>:,e.,x:,!. answers=numeric
+~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/num verb=F..,F.:,F:.,F:: also=+:,-:,*:,+,-,*,<.,>.,=,~:,<:,>:,e.,x:,!.,*.,+.,%,%:,^,^.,|,o.,j.,r.,&.,&.:,L:,S: answers=numeric
 
 // INTERVAL INDEX OVER THE EXACT TYPES, WHERE THE REFERENCE CONTRADICTS THE
 // SAME NUMBER WRITTEN INEXACTLY. `2 I. 3` is 1 there and `2 I. (3x)` is 0 —
@@ -794,3 +791,24 @@ _2 +/\\. (_.)
 // it sends them. Nothing here is defined to follow.
 (_. 1 2) I. 2
 ? the bisection of bounds that are in no order is defined nowhere
+
+// TWO ARGUMENTS TO `!` A DOUBLE CANNOT TELL APART, at the far end of the
+// range this time. `(1p1) ! (9223372036854775806)` is 0 in the reference
+// where the binomial is about 5.3e58: the answer is a difference of three
+// log-gammas of arguments near 4.4e19, and the cancellation takes every
+// digit it had. `(1e_9) ! (_9223372036854775806)` is `_1` there for the
+// same reason, where the limit as the upper argument falls to zero is 1.
+// libjay takes the ratio directly and answers the mathematics.
+(1p1) ! (9223372036854775806)
+? the reference's log-gamma difference loses every digit at this size
+(1e_9 1 1e9) ! (_9223372036854775806)
+? the reference's log-gamma difference loses every digit at this size
+
+// THE RADIX COUNT OF AN EMPTY, WHERE THE REFERENCE CONTRADICTS ITSELF BY
+// TYPE. `(1 2) #. (1 0 1 $ 5)` is a length error there — two radices for a
+// last axis of one — while `(1r2 1r3) #. (1 0 1 $ 5)` is the empty of
+// shape `1 0`: the same two radices against the same shape, written in the
+// rational type instead. libjay applies the one check to both.
+(1r2 1r3) #. (1 0 1 $ 5)
+? the reference checks the radix count for integers and not for rationals
+~ cause=we-refuse:err:length_error:_#_radices_for_#_digits verb=#.,#: also=$,x:,%,r.,j.,+,-,*,^,%:,^.,|,<.,>.,L:,S:,&.,&.:

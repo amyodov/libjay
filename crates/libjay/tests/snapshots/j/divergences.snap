@@ -95,10 +95,6 @@
 ? the reference widens a one-item NaN table to complex where a wider one stays real
 < <error>
 > j: _.j_.
-= 1 p: (_. 1 2)
-? the reference calls a lone NaN not prime and refuses the same NaN in a list
-< 0 0 1
-> j: <error>
 = 4 p: (_. 1 2)
 ? the reference refuses a lone NaN's next prime and answers one in a list
 < <error>
@@ -620,3 +616,15 @@
 ? the bisection of bounds that are in no order is defined nowhere
 < 2
 > j: 1
+= (1p1) ! (9223372036854775806)
+? the reference's log-gamma difference loses every digit at this size
+< 5.28865e58
+> j: 0
+= (1e_9 1 1e9) ! (_9223372036854775806)
+? the reference's log-gamma difference loses every digit at this size
+< _ _9.22337e18 _
+> j: _1 _9.22337e18 _
+= (1r2 1r3) #. (1 0 1 $ 5)
+? the reference checks the radix count for integers and not for rationals
+< <error>
+> j:

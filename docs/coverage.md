@@ -2427,14 +2427,44 @@ round starts from facts:
   `3!:0` make visible where a display does not. `3!:3 ((0.1 0.2 0.3) +/ (0 $ 1 2 3))`
   is the float type there and the integer one here. Round 8B measured a
   546-cell grid of it and found a per-verb table rather than a rule.
-- **THE POLYNOMIAL VERBS' ROOT FINDING AND RANK RULES** — `p. (1e_9 1 1e9)`
-  is a pair of complex roots there and a repeated real one here;
-  `p.;.0 (4 $ (_ __ 0))` and `p."1 0 _ (j.&.> 2)` are refused there and
-  answered here.
-- **FORMAT BY SPECIFICATION, AND `":` OF A HUGE WHOLE NUMBER** —
-  `(_8 2) ": (1r2 1r3)` is `5e_1 0` there and `1e0 0` here, and
-  `(0) ": (_9223372036854775806)` keeps its last digit there and rounds it
-  through a double here.
+- **THE POLYNOMIAL VERBS' RANK RULES** — `p.;.0 (4 $ (_ __ 0))` and
+  `p."1 0 _ (j.&.> 2)` are refused there and answered here, and
+  `p.. (j.&.>;.0 (2 2 {. 2))` is an index error there. The ROOT FINDING
+  was followed in round 9B.
+
+Round 9B closed nine more families — the monadic gerund amend, format by
+specification, the NaN that wins over J's algebraic shortcuts, the exact
+comparison against a NaN, the vector matrix inverse, a boxed `{::` path
+step, a tolerantly real complex index, the prime query's NaN, and the
+exact root — and left these, every one of them measured on both sides:
+
+- **A VALUE THE ARITHMETIC MADE OUT OF INFINITIES, SEEN THROUGH AN
+  OBVERSE** — six spellings, each the reference refusing where libjay
+  answers: `! &.%: (_ __ 0)` and `#. &.:%: (_ __ 0)` (its `! (_ 0j_ 0)` is
+  a limit error and its `*: (_j_)` a NaN error), `(%:~) ((_. 1 2) ^ 3)`,
+  `*/ &.*: (3 1 $ ((_ __ 0) % &.:{. (3j4 1j_1)))`,
+  `_1 2 {. (-/\^:_1 (! L:_1 (1e_15)))` and
+  `j.&:>./\.;.0 ((13 : 'y + 1') ((,.) b. 0))`. Which verb refuses which
+  unbounded value is a table nobody has measured, and the grid that would
+  have measured it ran into a jconsole hazard (`! (_.j_.)` never returns).
+- **THE EMPTY FRAME'S CELL SHAPE** — `$ ((_1) ((>:`-)\) (0 3 $ 0))` is
+  `0 0 3` there and `0 1 3` here, so a reshape of it parts too. Rounds 8B
+  and 9A left the same family.
+- **`%.` UNDER THE FOLD CONJUNCTIONS** — `(%. F:. %.) (_2 0 2)` is `_ 0`
+  there and `__ 0` here.
+- **A TINY IMAGINARY RESIDUE THE REFERENCE KEEPS** — `(^.~) (…)` is
+  `1j_2.09983e_18 1j9.05253e_18` there where libjay's answer is the exact
+  `1 1`.
+- **THE CONVERSION FORMS NOBODY HAS A RULE FOR** — a three-item EXTENDED
+  left argument to `x:` answers there where the same three items written
+  as integers are a rank error; `10 u: 1e10` takes the low bits of a
+  codepoint far past the Unicode range.
+- **A WHOLE FLOAT INSIDE A BOX**, found by round 9B's own corpus rather
+  than by a sweep: `<1e9` is `1000000000` in the reference and `1e9` here,
+  where the BARE `1e9` is `1000000000` on both sides and `<1.5e9` keeps its
+  exponent on both. So it is the whole values that part, and libjay's box
+  path is using an exponent threshold its top level does not. A display
+  wave's family, not a sweep's.
 - **WRITING A GERUND WITH A RANK BACK OUT AS J SOURCE** — `(*`<.)"_2` is
   `(;:'*<.')"_2` there and "not supported yet" here. The grammar sibling's
   family.

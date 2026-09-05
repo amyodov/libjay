@@ -645,7 +645,12 @@ pub struct Rules {
 impl Rules {
     /// The dialect's comparison tolerance, with the language's scale.
     pub fn tol(&self) -> Tol {
-        Tol { ct: self.ct, by_smaller: self.lang == Lang::J, floor_rule: self.floor_rule }
+        Tol {
+            ct: self.ct,
+            by_smaller: self.lang == Lang::J,
+            floor_rule: self.floor_rule,
+            nan_wins: false,
+        }
     }
 
     /// The host-facing form, for a nested compilation (`⍎`, `".`) that has

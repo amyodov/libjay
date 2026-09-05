@@ -646,7 +646,7 @@ fn width(s: &str, opts: &FmtOpts) -> usize {
     s.chars().count()
 }
 
-fn format_atom(data: &Data, i: usize, opts: &FmtOpts) -> String {
+pub(crate) fn format_atom(data: &Data, i: usize, opts: &FmtOpts) -> String {
     match data {
         Data::Bool(v) => (if v[i] != 0 { "1" } else { "0" }).to_string(),
         Data::I64(v) => format_i64(v[i], opts),
