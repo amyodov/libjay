@@ -1,0 +1,184 @@
+// Round 9D: the empty frame's fill run, the exact matrix paths, and what a
+// complex infinity does to the verbs whose definition divides by a
+// magnitude. One measured grid per mechanism; the rule is written above its
+// block.
+
+// THE EMPTY FRAME'S FILL RUN IS ONE FUNCTION. Where a frame has no cell to
+// compute, the reference settles the answer's type by running the verb on a
+// pair of FILL CELLS, reading the types as written with a non-numeric side
+// standing in for the boolean it fills with. A 368-cell grid over eight
+// types found the scalar dyad, the TABLE `x u/ y` and the RANK frame `u"n`
+// answering the same thing cell for cell, where libjay had the rule on the
+// scalar dyad alone and the table answered the integers whatever it was
+// handed.
+3!:0 (2 %/ (''))
+3!:0 (2 %/ (0 $ 1x))
+3!:0 ((0 $ 1x) %/ (0 $ 5))
+3!:0 (2 %/ (0 $ 1r2))
+3!:0 (2 %/ (0 $ 3j4))
+3!:0 (2 +/ (0 $ 1.5))
+3!:0 (2 +/ (0 $ 1x))
+3!:0 (2 +/ (0 $ 1r2))
+3!:0 (2 +/ (0 $ 3j4))
+3!:0 (2 <./ (0 $ 1x))
+3!:0 (('') <./ (0 $ 5))
+3!:0 ((0 $ a:) <./ (0 $ 5))
+3!:0 (2 <./ (''))
+3!:0 (2 !/ (''))
+3!:0 (('') !/ (0 $ 5))
+3!:0 (2 !/ (0 $ 1r2))
+3!:0 (2 !/ (0 $ 3j4))
+3!:0 (2 ^/ (0 $ 5))
+3!:0 (('') ^/ (0 $ 5))
+3!:0 (2 j./ (''))
+3!:0 (('') j./ (0 $ 5))
+3!:0 ((0 $ a:) j./ (0 $ 5))
+3!:0 (2 j./ (0 $ a:))
+3!:0 (2 |/ (0 $ 1x))
+3!:0 (2 *./ (0 $ 3j4))
+3!:0 ((0 3 $ 0) !"1 (0 3 $ 5))
+3!:0 ((0 3 $ 0) !"1 (0 3 $ 1r2))
+3!:0 ((0 3 $ 0) ^"1 (0 3 $ 5))
+3!:0 ((0 3 $ 0) + (0 3 $ 5))
+3!:0 ((0 3 $ 0) <."1 (0 3 $ 1x))
+3!:0 (2 <."1 (0 2 $ <0))
+3!:0 ((2x) <."1 (0 2 $ <0))
+$ ((2 3 $ 2) ^."1 _ 0 (0 $ 'a'))
+3!:0 ((2 3 $ 2) ^."1 _ 0 (0 $ 'a'))
+
+// AN INSERT'S IDENTITY CARRIES NO TYPE OF ITS OWN under the scan: the
+// identity stands for a run that was never made, and the ARGUMENT'S type
+// stands instead. `3!:0 (<./\ (0 $ 1x))` is 64 there, not the 8 the
+// identity `_` would have made it, and `3!:0 (+/\ (0 $ 'a'))` is 2. Three
+// scalar dyads part from it and leave a boolean whatever the argument
+// held — `j.`, `r.` and `%:`, the same three the empty scalar dyad's fill
+// run treats apart.
+3!:0 (<./\\ (0 $ 0))
+3!:0 (<./\\ (0 $ 5))
+3!:0 (<./\\ (0 $ 1x))
+3!:0 (<./\\ (0 $ 1r2))
+3!:0 (<./\\ (0 $ 3j4))
+3!:0 (<./\\. (0 $ 1x))
+3!:0 (>./\\ (0 $ 1r2))
+3!:0 (+/\\ (0 $ 1x))
+3!:0 (+/\\ (0 $ 3j4))
+3!:0 (j./\\ (0 $ 5))
+3!:0 (j./\\ (0 $ 1x))
+3!:0 (j./\\. (0 $ 3j4))
+3!:0 (r./\\ (0 $ 1.5))
+3!:0 (%:/\\ (0 $ 1x))
+3!:0 (%/\\ (0 $ 1x))
+3!:0 (*/\\ (0 $ 1r2))
+3!:0 (+/ (0 $ 1x))
+3!:0 (<./ (0 $ 1x))
+
+// THE EXACT TYPES ARE CLOSED UNDER THE MATRIX PRODUCT. `%` divides the
+// exact types exactly and the machine integers into floats, and the inner
+// product follows it: `3!:0 ((1 2x) +/ . * (1 2))` is the extended type
+// there and a product of two rational matrices the rational one, where a
+// blocked float pass answers eight. One exact side is enough.
+3!:0 ((1 2x) +/ . * (1 2))
+(1 2x) +/ . * (1 2)
+3!:0 ((2 2 $ 1 2 3 4x) +/ . * (1 2))
+(1r2 1r3) +/ . * (2 2 $ 1 2 3 4)
+(2 2 $ 1 2 3 4) +/ . * (1r2 1r3)
+3!:0 ((2 2 $ 1r2 1r3 1r4 1r5) +/ . * (2 2 $ 1r2 1r3 1r4 1r5))
+(2 2 $ 1r2 1r3 1r4 1r5) +/ . * (2 2 $ 1r2 1r3 1r4 1r5)
+(2 2 $ 1 2 3 4x) +/ . * (2 2 $ 1 2 3 4x)
+(1 2x) +/ . * (2 2 $ 1r2 1r3 1r4 1r5)
+
+// THE DIVIDE KEEPS THEM TOO, since it is the inverse followed by that
+// product. It is the SYSTEM alone that asks for the exact path — the
+// inverse is what carries the type — so `(1r2 1r3) %. (2 2 $ 1 2 3 4)` is
+// a float there where `(1r2 1r3) %. (2 2 $ 1 2 3 4x)` is `_2r3 7r12`.
+2 %. (1 2x)
+3!:0 (2 %. (1 2x))
+2 %. (1r2 1r3)
+(1 2) %. (1r2 1r3)
+2 %. (2 2 $ 1 2 3 4x)
+(2 2 $ 1 2 3 4x) %. (1 2x)
+(1 2) %. (2 2 $ 1 2 3 4x)
+(1r2 1r3) %. (2 2 $ 1 2 3 4x)
+(1r2 1r3) %. (2 2 $ 1r2 1r3 1r4 1r5)
+(1 2x) %. (2 2 $ 1 2 3 4)
+(1r2 1r3) %. (2 2 $ 1 2 3 4)
+2 %. (1 2)
+%. (1 2 3x)
+2 %. (1 2 3x)
+
+// A COMPLEX SYSTEM TAKES A SCALAR RIGHT-HAND SIDE as the whole column of
+// it, as a real one does, and a VECTOR system's unknown is one number.
+2 %. (1j1 2)
+3!:0 (2 %. (1j1 2))
+$ (2 %. (1j1 2))
+
+// A DIVISOR OF INFINITE MAGNITUDE LEAVES NOTHING BEHIND. `2 % _j_` is 0 in
+// the reference as `2 % _` is over the reals, where scaling the
+// denominator divides one infinity by another and makes a NaN of it.
+2 % _j_
+2 %. _j_
+2 % 0j_
+2 % 1j_
+
+// AN INFINITE PART NAMES A COMPLEX VALUE'S DIRECTION ON ITS OWN, and the
+// finite part beside it counts for nothing: `* 0j_` and `* 1j_` are both
+// `0j1`, `* _j1` is 1. An infinite part is already whole, so the floor and
+// the ceiling leave it where it is.
+* 0j_
+* 1j_
+* _j1
+* (0j_ 1)
+<. _j1
+>. _j1
+<. 1j_
+>. (0j_ 1)
+
+// THE COMPLEX BINOMIAL HAS NO LIMIT AT AN INFINITY. The gamma functions it
+// is a ratio of run off in every direction at once and the reference
+// refuses the pairing, where the REAL binomial answers at an infinity and
+// the complex MONAD answers a NaN.
+2 ! 0j_
+0j_ ! 2
+2 ! _j_
+_j_ ! 2
+2 ! _j1
+_j1 ! 2
+2 ! 1j_
+2 ! (0j_ 1)
+(0j_ 1) ! 2
+2 ! _
+! 0j_
+
+// THE NEXT PRIME ABOVE A VALUE THAT IS NOT WHOLE IS EXTENDED. It is the
+// value's PLACE in the order and not the verb that widens, one rule over
+// the fractions, the infinities and a NaN among others alike; a whole
+// number written as a float stays in the integers.
+4 p: 1.5
+3!:0 (4 p: 1.5)
+3!:0 (4 p: 2.5)
+3!:0 (4 p: _1.5)
+3!:0 (4 p: (1.5 2.5))
+4 p: (1.5 2.5)
+4 p: 2.0
+3!:0 (4 p: 2.0)
+4 p: (_. 1 4)
+3!:0 (4 p: (_. 1 4))
+4 p: (0 1 2 3 4 5 6 7)
+
+// `5 p: y` IS EULER'S TOTIENT, how many of the numbers below y share no
+// factor with it. A fraction, a negative and an infinity are all refused,
+// none of them having a factorisation to count over.
+5 p: (i. 12)
+5 p: 100
+3!:0 (5 p: 10)
+3!:0 (5 p: 0)
+5 p: 1.5
+5 p: _1
+5 p: _
+5 p: 97
+5 p: (2 2 $ 1 2 3 4)
+4 p: (_. 1 2)
+4 p: (_. 1)
+4 p: _.
+0 p: (_. 1 2)
+1 p: (_. 1 2)

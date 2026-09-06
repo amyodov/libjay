@@ -95,14 +95,6 @@
 ? the reference widens a one-item NaN table to complex where a wider one stays real
 < _.
 > j: _.j_.
-= 4 p: (_. 1 2)
-? the reference refuses a lone NaN's next prime and answers one in a list
-< <error>
-> j: 2 2 3
-= 4 p: (_. 1)
-? the reference refuses a lone NaN's next prime and answers one in a list
-< <error>
-> j: 2 2
 = 4 p: (_ 1 2)
 ? an infinity makes the reference answer 2 for cells whose own answer is 3
 < 2 2 3
@@ -653,3 +645,7 @@
 ? the same one exponent down, the first size a double cannot tell apart
 < _1
 > j: 1
+= 5 p: (_ 1 2)
+? the reference's own `5 p: _` and `5 p: 1` contradict this vector
+< <error>
+> j: 1 0 1

@@ -2472,6 +2472,44 @@ exact root — and left these, every one of them measured on both sides:
   `(r."2)&:}:&.> ^:(_1 0 1) 2`.
 - **THE SYMBOL-TABLE FORM `# s:`** — one row in a hundred thousand.
 
+### Round 9D: what the mechanism grids left red
+
+Three grids — 368 cells over the empty frame, 179 over the exact matrix
+paths and 624 over the complex infinities — closed most of what they
+measured. What they left is 🔴 and named here with a spelling apiece:
+
+- **THE CUT'S EMPTY FRAME HAS NO RULE THE REFERENCE KEEPS.** Where a `;.1`
+  makes no piece at all, the type the reference answers is a per-verb,
+  per-argument table with no ordering behind it: `(0 $ 0) <./;.1 (0 $ 1x)`
+  is the extended type there while the same over a RATIONAL empty is a
+  float, and `(0 $ 0) +/;.1 (0 $ 1x)` is boolean while the same over a
+  COMPLEX empty is complex. Eleven cells of the grid. libjay answers the
+  fold's own identity, which is what its `u/` answers.
+
+- **`j."n` OVER A NON-NUMERIC RIGHT.** `3!:0 ((0 3 $ 0) j."1 (0 3 $ 'a'))`
+  is 1 in the reference where the same pair at the verb's own rank —
+  `(0 3 $ 0) j. (0 3 $ 'a')` — is 16 on both sides. The rank frame's fill
+  cells are refused there and the retry with numbers answers complex; two
+  cells, and no rule was found that keeps the bare dyad right.
+
+- **THE DETERMINANT OF ORDER THREE AND UP IS RATIONAL IN THE REFERENCE**
+  where its own order-two determinant is extended:
+  `3!:0 (-/ . * (3 3 $ 1 2 3 4 5 6 7 8 10x))` is 128 and
+  `3!:0 (-/ . * (2 2 $ 1 2 3 4x))` is 64. The values agree; the type is its
+  elimination showing through and is not followed.
+
+- **`x: _j1`** is `_` in the reference, where libjay refuses a complex
+  value the exact types have no place for. One cell.
+
+- **`*. _j_`, `* _j_` and `*: _j_`** are refused there and answered here: a
+  complex value with BOTH parts infinite has no direction, and the polar
+  form, the signum and the square each need one. libjay's signum answers
+  the NaN it makes rather than refusing it, since the complex scalar MONAD
+  has no made-NaN check.
+
+- **`2 %. (_. 1 2)`** is `_.j_.` there and `_.` here — the NaN inverse's
+  widening reaching the DYAD, where round 9C followed it for the monad.
+
 ## Known divergences (deliberate, revisit later)
 
 Every entry below is a place libjay's answer differs from a reference
@@ -3137,9 +3175,11 @@ sections above is also collected here.
   types) are too — see "The numeric tower and the exact types" above — and
   so are symbols, see "Symbols".
 - Complex numbers reach every scalar verb, `!` included, the reductions,
-  the scans and the structural verbs. They do NOT reach: matrix inverse
-  and matrix divide (`%.` / `⌹`, which
-  work in f64), `#.`/`⊥` and `#:`/`⊤` (decode and encode), and the fused
+  the scans and the structural verbs. Matrix inverse and matrix divide
+  (`%.` / `⌹`) take them through a real embedding of twice the size, and
+  the EXACT types go through their own rational elimination; the machine
+  types keep the float least-squares path. They do NOT reach:
+  `#.`/`⊥` and `#:`/`⊤` (decode and encode), and the fused
   blockwise kernel, which computes in one real type and declines a chain
   that touches complex data — the ordinary pipeline runs it instead, with
   the same answer.

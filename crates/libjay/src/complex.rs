@@ -75,6 +75,14 @@ pub fn div(a: Cx, b: Cx) -> Cx {
         let step = |x: f64| if x == 0.0 { 0.0 } else { f64::INFINITY.copysign(x) };
         return [step(a[0]), step(a[1])];
     }
+    // A DIVISOR OF INFINITE MAGNITUDE LEAVES NOTHING BEHIND: `2 % _j_` is 0
+    // in the reference, as `2 % _` is over the reals. Smith's scaling below
+    // divides one infinity by another where both parts are infinite and
+    // makes a NaN of the quotient, which is what had `2 %. _j_` refused
+    // here and answered 0 there.
+    if (b[0].is_infinite() || b[1].is_infinite()) && a[0].is_finite() && a[1].is_finite() {
+        return ZERO;
+    }
     // Smith's scaling keeps the denominator from overflowing. The cross
     // terms multiply as J does — an infinity by a zero is a zero — so a
     // real divisor leaves an infinite part where it found one:
@@ -108,6 +116,18 @@ pub fn arg(z: Cx) -> f64 {
 /// `y % | y`: the unit complex in y's direction, and 0 at the origin.
 #[inline]
 pub fn signum(z: Cx) -> Cx {
+    // AN INFINITE PART NAMES THE DIRECTION ON ITS OWN: `* 0j_` and `* 1j_`
+    // are both `0j1` in the reference and `* _j1` is 1, the finite part
+    // counting for nothing beside an infinite one. Dividing by the infinite
+    // magnitude instead leaves a NaN where the finite part was.
+    if z[0].is_infinite() || z[1].is_infinite() {
+        // BOTH parts infinite is two directions at once and no answer.
+        if z[0].is_infinite() && z[1].is_infinite() {
+            return [f64::NAN, f64::NAN];
+        }
+        let unit = |x: f64| if x.is_infinite() { 1.0f64.copysign(x) } else { 0.0 };
+        return [unit(z[0]), unit(z[1])];
+    }
     let m = abs(z);
     if m == 0.0 { ZERO } else { [z[0] / m, z[1] / m] }
 }
@@ -273,6 +293,14 @@ pub fn root(x: Cx, y: Cx) -> Cx {
 /// what parts them: GNU APL answers that same argument with `1`, having
 /// read `r` and `s` as equal and taken the real step.
 pub fn floor(z: Cx, tol: Tol) -> Cx {
+    // AN INFINITE PART IS ALREADY WHOLE and the step never reaches it:
+    // `<. _j1` and `>. _j1` are both `_j1` in the reference, where taking
+    // the fractional part of an infinity gives a NaN and the comparison
+    // below then steps the wrong axis.
+    if z[0].is_infinite() || z[1].is_infinite() {
+        let part = |x: f64| if x.is_finite() { x.floor() } else { x };
+        return [part(z[0]), part(z[1])];
+    }
     let (bx, by) = (z[0].floor(), z[1].floor());
     let (r, s) = (z[0] - bx, z[1] - by);
     if tol.lt(r + s, 1.0) {

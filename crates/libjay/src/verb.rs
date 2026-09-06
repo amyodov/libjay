@@ -3385,6 +3385,8 @@ impl Verb {
             // naming none of its own: `3!:0 (2 <."1 (0 2 $ <0))` is the
             // integer type in the reference, not the boxed one.
             let mut by_numbers = None;
+            // What the fill cells themselves made of it, before any retry.
+            let mut by_fills = None;
             // A LEFT side that is already numeric stands as it is when the
             // numbers are asked again: it is the right side's type the verb
             // objected to, and the left's own type is what the answer keeps
@@ -3416,17 +3418,32 @@ impl Verb {
                     right
                 };
                 let answer = self.dyad_cell(left, right, c, span);
-                if numeric && let Ok(a) = &answer {
-                    by_numbers = Some(a.dtype());
+                if let Ok(a) = &answer {
+                    if numeric { by_numbers = Some(a.dtype()) } else { by_fills = Some(a.dtype()) }
                 }
                 answer
             })?;
+            // THE EMPTY FRAME'S FILL RUN, for a scalar dyad, is the one
+            // [`empty_scalar_dtype`] computes — the table of what the
+            // reference's own run of fill cells comes back with, which a run
+            // of libjay's fill VALUES does not always reproduce:
+            // `3!:0 ((0 3 $ 0) !"1 (0 3 $ 5))` is the float type there where
+            // `0 ! 0` is 1, and `3!:0 ((0 3 $ 0) !"1 (0 3 $ 1r2))` the
+            // extended type where the rational fill kept its own. It applies
+            // only where the fill cells HAD an answer: where they were
+            // refused, the frame stands on its own and what stands is what
+            // the retry or the refusal left — `$ ((2 3 $ 2) ^."1 _ 0 (0 $
+            // 'a'))` is the boolean `0` there.
+            let by_rule = (by_fills.is_some() && by_numbers.is_none())
+                .then(|| self.scalar_dyad_op())
+                .flatten()
+                .map(|op| empty_scalar_dtype(op, x, y, ctx.cfg, span));
             // The SHAPE of a catenation with no cell is what the fill cells
             // join to; the TYPE is the order's, whatever type that join
             // happened to take. `3!:0 ((0 $ 0) ,"0 1 (0 $ 'a'))` is the
             // character type there, where a boolean atom joined to an empty
             // character list is boolean.
-            return Ok(match (joining, by_numbers) {
+            return Ok(match (joining, by_numbers.or(by_rule)) {
                 (Some(dt), _) => Array::new(framed.shape, Data::empty(dt)),
                 (None, Some(dt)) => Array::new(framed.shape, Data::empty(dt)),
                 (None, None) => framed,
@@ -5864,7 +5881,23 @@ fn cx_op_value(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx>
             })?
         }
         Min | Max => return Err(no_complex_order(span)),
-        Binomial => cx::binomial(a, b),
+        // THE COMPLEX BINOMIAL HAS NO LIMIT AT AN INFINITY. The gamma
+        // functions it is a ratio of run off in every direction at once, and
+        // the reference refuses every pairing where either side has an
+        // infinite part — `2 ! 0j_`, `0j_ ! 2`, `2 ! _j1`, `_j1 ! 2`,
+        // `2 ! 1j_`, `2 ! _j_` and their mirrors — where the REAL binomial
+        // answers at an infinity and the complex MONAD `! _j1` answers a
+        // NaN. Only the dyad over the complex type is refused.
+        Binomial => {
+            if [a, b].iter().any(|z| z[0].is_infinite() || z[1].is_infinite()) {
+                return Err(Error::new(
+                    ErrorKind::Limit,
+                    "the complex binomial has no limit at an infinity",
+                    Some(span),
+                ));
+            }
+            cx::binomial(a, b)
+        }
         Eq | Ne | Lt | Le | Gt | Ge => {
             return Err(Error::internal("a comparison in the complex arithmetic path"));
         }
@@ -7736,40 +7769,9 @@ fn scalar_dyad(
         {
             return Err(wrong_type(bad.0.dtype(), span));
         }
-        // What TYPE the empty carries is what the verb would have made of
-        // one pair — of the types AS WRITTEN, a non-numeric one read as the
-        // boolean it stands in for. So `3!:0 ((0 $ 0) + (0 $ 1.5))` is the
-        // float type and `3!:0 ((0 $ 5) * (0 $ 5))` the integer one, as the
-        // reference has them, rather than whichever side happened to be
-        // numeric first.
-        if cfg.rules.lang == crate::Lang::J {
-            // A non-numeric side reads as a boolean, and takes an EMPTY
-            // numeric side down with it: neither empty held a value, so
-            // neither names a type for the answer, and `3!:0 ((0 $ 1.5) +
-            // (0 $ 'a'))` is the integer type there, what two boolean
-            // empties make. A numeric side WITH A VALUE keeps its own type
-            // against the boolean: `3!:0 ((123x) *. (0 $ 'a'))` is the
-            // extended type, `(5) + (0 $ 'a')` the integer one and `(1.5) *
-            // (0 $ 'a')` the float one, measured over nine verbs.
-            let plain = x.dtype().is_numeric() && y.dtype().is_numeric();
-            let read = |a: &Array| {
-                if a.dtype().is_numeric() && (plain || a.count() > 0) { a.dtype() } else { DType::Bool }
-            };
-            let (xt, yt) = (read(x), read(y));
-            if let Some(t) = empty_dyad_type(op, xt, yt, x.dtype(), y.dtype()) {
-                return Ok(Array::new(p.frame, Data::empty(t)));
-            }
-            // A ROOT types its empty exactly as the division it is written
-            // from does.
-            let probe = if op == ScalarDyad::Root { ScalarDyad::DivJ } else { op };
-            if let (Some(a), Some(b)) = (empty_of_type(xt, 1), empty_of_type(yt, 1))
-                && let Ok(one) =
-                    scalar_dyad_data(probe, &a, 0, 1, &b, 0, 1, 1, cfg.tol, cfg.rules, span)
-            {
-                return Ok(Array::new(p.frame, Data::empty(one.dtype())));
-            }
-        }
-        return Ok(Array::new(p.frame, Data::empty(empty_result_type(x, y))));
+        // What TYPE the empty carries is the FILL RUN's — see
+        // [`empty_scalar_dtype`], which every frame maker asks.
+        return Ok(Array::new(p.frame, Data::empty(empty_scalar_dtype(op, x, y, cfg, span))));
     }
     // WHICH PASS THIS IS decides whether J's algebraic shortcuts survive a
     // NaN: the reference keeps them over ONE pair and over BOOLEAN data,
@@ -7804,6 +7806,66 @@ fn scalar_dyad(
         span,
     )?;
     Ok(Array::new(p.frame, data))
+}
+
+/// THE EMPTY FRAME'S FILL RUN, in one place: the type a scalar dyad's
+/// answer carries where the frame has no cell to compute.
+///
+/// The reference settles it by running the verb on a pair of FILL CELLS and
+/// keeping the type of what comes back, and it reads the types AS WRITTEN,
+/// a non-numeric one standing in for the boolean it fills with. So
+/// `3!:0 ((0 $ 0) + (0 $ 1.5))` is the float type and
+/// `3!:0 ((0 $ 5) * (0 $ 5))` the integer one, rather than whichever side
+/// happened to be numeric first.
+///
+/// A non-numeric side reads as a boolean, and takes an EMPTY numeric side
+/// down with it: neither empty held a value, so neither names a type for the
+/// answer, and `3!:0 ((0 $ 1.5) + (0 $ 'a'))` is the integer type there,
+/// what two boolean empties make. A numeric side WITH A VALUE keeps its own
+/// type against the boolean: `3!:0 ((123x) *. (0 $ 'a'))` is the extended
+/// type, `(5) + (0 $ 'a')` the integer one and `(1.5) * (0 $ 'a')` the float
+/// one, measured over nine verbs.
+///
+/// EVERY frame maker asks this and not its own private rule: the scalar dyad
+/// itself, the table `x u/ y`, and the rank frame `u"n`. A 368-cell grid over
+/// the eight types found the three answering the same thing, cell for cell.
+fn empty_scalar_dtype(
+    op: ScalarDyad,
+    x: &Array,
+    y: &Array,
+    cfg: EvalCfg,
+    span: Span,
+) -> DType {
+    if cfg.rules.lang == crate::Lang::J {
+        let plain = x.dtype().is_numeric() && y.dtype().is_numeric();
+        let read = |a: &Array| {
+            if a.dtype().is_numeric() && (plain || a.count() > 0) { a.dtype() } else { DType::Bool }
+        };
+        let (xt, yt) = (read(x), read(y));
+        if let Some(t) = empty_dyad_type(op, xt, yt, x.dtype(), y.dtype()) {
+            return t;
+        }
+        // A ROOT types its empty exactly as the division it is written
+        // from does.
+        let probe = if op == ScalarDyad::Root { ScalarDyad::DivJ } else { op };
+        if let (Some(a), Some(b)) = (empty_of_type(xt, 1), empty_of_type(yt, 1))
+            && let Ok(one) =
+                scalar_dyad_data(probe, &a, 0, 1, &b, 0, 1, 1, cfg.tol, cfg.rules, span)
+        {
+            return one.dtype();
+        }
+    }
+    empty_result_type(x, y)
+}
+
+/// The stand-in a frame maker hands [`empty_scalar_dtype`]: an argument
+/// with the same TYPE and the same has-a-value-or-not, whose own frame is
+/// empty so that the two agree however the maker's frames were shaped.
+fn fill_stand_in(a: &Array) -> Array {
+    if a.count() == 0 {
+        return Array::new(vec![0], Data::empty(a.dtype()));
+    }
+    atom(&a.to_row_major(), 0)
 }
 
 /// The type an empty answer carries where the pair of zeros the ordinary
@@ -11174,6 +11236,16 @@ fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     let ny: usize = y.shape[..fyl].iter().product();
     let n = nx * ny;
     if n == 0 {
+        // THE EMPTY FRAME'S FILL RUN. The table had settled its own type —
+        // the integers, always — where the scalar dyad had run the verb on
+        // a pair of fill cells since round 8C. They are one mechanism:
+        // `3!:0 (2 %/ (''))` is the float type in the reference exactly as
+        // `3!:0 (2 % (''))` is, and `3!:0 (('') <./ (0 $ 5))` the boolean
+        // one on both sides. So the table asks the same function.
+        if let Some(op) = u.scalar_dyad_op() {
+            let t = empty_scalar_dtype(op, &fill_stand_in(x), &fill_stand_in(y), ctx.cfg, span);
+            return Ok(Array::new(frame, Data::empty(t)));
+        }
         return assemble(&frame, Vec::new(), span);
     }
     if frame.is_empty() {
@@ -11473,6 +11545,20 @@ fn matrix_product(u: &Verb, v: &Verb, x: &Array, y: &Array, span: Span) -> Optio
     let mut shape = x.shape[..x.rank() - 1].to_vec();
     shape.extend_from_slice(&y.shape[1..]);
     if crate::limits::elements(&shape, span).is_err() {
+        return None;
+    }
+    // THE EXACT TYPES ARE CLOSED UNDER THE MATRIX PRODUCT, so the blocked
+    // float pass has nothing to say about them: `3!:0 ((1 2x) +/ . * (1 2))`
+    // is the extended type in the reference and
+    // `3!:0 ((2 2 $ 1r2 1r3 1r4 1r5) +/ . * (2 2 $ 1r2 1r3 1r4 1r5))` the
+    // rational one, where a `to_f64_vec` answers eight. The general cell
+    // path already sums `+/ (row * col)` in whatever type the two make, so
+    // it takes them. The COMPLEX type goes the same way: nothing here holds
+    // an imaginary part.
+    if [x.dtype(), y.dtype()]
+        .into_iter()
+        .any(|t| matches!(t, DType::Ext | DType::Rat | DType::Complex))
+    {
         return None;
     }
     let whole = matches!(x.dtype(), DType::Bool | DType::I64)
@@ -14600,12 +14686,39 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
             empty_frame(&[0], base.dtype(), cell, false, false, false, true, j, refused, ctx, |cell, _n, c| {
                 u.monad(cell, c, span)
             })?;
-        // That run gives the shape, and its type too — except a boolean,
-        // which carries no type of its own here: an insert's identity is
-        // boolean whatever it was folding, and then the argument's type
-        // stands. `+/\ 0$'a'` is an empty CHARACTER list, `":\ i.0` an
-        // empty character one, and `#\ 0$'a'` an empty integer one.
-        let dt = if framed.dtype() == DType::Bool { base.dtype() } else { framed.dtype() };
+        // That run gives the shape, and its type too — except AN INSERT'S
+        // IDENTITY, which carries no type of its own here: the identity
+        // stands for the run that was never made, and the argument's type
+        // stands instead. `+/\ 0$'a'` is an empty CHARACTER list and
+        // `<./\ 0$1x` an empty EXTENDED one, where the identity `_` would
+        // have made it a float. Round 9C had the rule for a BOOLEAN
+        // identity only, which is why the two extrema — whose identities
+        // are `_` and `__` — answered a float for every argument. `":\ i.0`
+        // is an empty character one and `#\ 0$'a'` an empty integer one:
+        // neither is an insert, and there the run's own type stands.
+        // THREE SCALAR DYADS LEAVE A BOOLEAN THERE, whatever the argument
+        // held: `3!:0 (j./\ (0 $ 1x))`, `3!:0 (r./\ (0 $ 1.5))` and
+        // `3!:0 (%:/\ (0 $ 3j4))` are all 1 in the reference where every
+        // other scalar dyad — `+ - * % <. >. | ! ^ ~: = < +. *. o.` over
+        // eight types — answers the argument's own. They are the same three
+        // the empty scalar dyad's fill run treats apart, `%:` typing itself
+        // from `%` and the other two from their right argument alone.
+        let inner_op = match u {
+            Verb::Reduce(v) => v.scalar_dyad_op(),
+            _ => None,
+        };
+        let boolean_run = matches!(
+            inner_op,
+            Some(ScalarDyad::Root | ScalarDyad::MakeComplex | ScalarDyad::PolarBy)
+        );
+        let identity = matches!(u, Verb::Reduce(_)) && !boolean_run;
+        let dt = if boolean_run {
+            DType::Bool
+        } else if identity || framed.dtype() == DType::Bool {
+            base.dtype()
+        } else {
+            framed.dtype()
+        };
         return Ok(Array::new(framed.shape, Data::empty(dt)));
     }
     if n > 0 && base.dtype().is_numeric() && let Some(op) = folded_op(u) {
@@ -16386,6 +16499,78 @@ fn exact_matrix_inverse(y: &Array) -> Option<Array> {
     }
 }
 
+/// `x %. y` in the EXACT types, which the inverse has kept since round 8
+/// and the divide had not.
+///
+/// The divide IS the inverse followed by a matrix product — `x %. y` is
+/// `(%. y) +/ . * x` — so once both of those are exact the whole of it is,
+/// and the reference has it so: `2 %. (1 2 3x)` is `6r7`, `2 %. (1r2 1r3)`
+/// is `60r13`, `(2 2 $ 1 2 3 4x) %. (1 2x)` is `7r5 2` and
+/// `2 %. (2 2 $ 1 2 3 4x)` is `_2 2`, every one of them in the RATIONAL
+/// type whatever the LEFT side was written in. It is the SYSTEM alone that
+/// asks for the exact path — the inverse is what carries the type, and
+/// `(1r2 1r3) %. (2 2 $ 1 2 3 4)` is `_0.666667 0.583333` there, a rational
+/// left against a machine system giving floats as surely as
+/// `2 %. (1 2)` does.
+///
+/// `None` sends the pair back to the float path, which is where a
+/// non-square system, a singular one, and every shape error are settled.
+fn exact_matrix_divide(x: &Array, y: &Array) -> Option<Array> {
+    let exact = |t: DType| matches!(t, DType::Ext | DType::Rat);
+    let whole = |t: DType| matches!(t, DType::Bool | DType::I64 | DType::Ext | DType::Rat);
+    if !whole(x.dtype()) || !whole(y.dtype()) {
+        return None;
+    }
+    if !exact(y.dtype()) {
+        return None;
+    }
+    if x.rank() > 2 {
+        return None;
+    }
+    let (m, n) = match y.shape.as_slice() {
+        [m] => (*m, 1usize),
+        [m, n] => (*m, *n),
+        _ => return None,
+    };
+    // `n` by `m`, whatever shape it was printed with.
+    let iv = to_rat_vec(&exact_matrix_inverse(y)?.data)?;
+    // The right-hand side as `m` by `k`. A SCALAR stands for the whole
+    // column of it, which is what makes `2 %. (2 2 $ 1 2 3 4x)` a system of
+    // two equations rather than one.
+    let xs = to_rat_vec(&x.data)?;
+    let (b, k) = if x.rank() == 0 {
+        (vec![xs[0].clone(); m], 1)
+    } else if x.shape[0] == m {
+        let k = if m == 0 { 0 } else { xs.len() / m };
+        (xs, k)
+    } else {
+        return None;
+    };
+    if m == 0 || k == 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(n * k);
+    for i in 0..n {
+        for j in 0..k {
+            let mut acc = Rat::zero();
+            for t in 0..m {
+                acc = acc.add(&iv[i * m + t].mul(&b[t * k + j])?)?;
+            }
+            out.push(acc);
+        }
+    }
+    let shape = if x.rank() >= 2 {
+        let mut s = vec![n];
+        s.extend_from_slice(&x.shape[1..]);
+        s
+    } else if y.rank() < 2 {
+        Vec::new()
+    } else {
+        vec![n]
+    };
+    Some(Array::new(shape, Data::Rat(out.into())))
+}
+
 /// `%. y` / `⌹ y`: the inverse of a square matrix, or the least-squares
 /// pseudo-inverse of a taller one. A wider one is refused, as both
 /// references refuse it.
@@ -16532,6 +16717,13 @@ fn matrix_divide(
     }
     if (x.dtype() == DType::Complex || y.dtype() == DType::Complex) && y.count() != 0 {
         return complex_matrix_divide(x, y, planes, span);
+    }
+    // THE EXACT TYPES SURVIVE THE DIVIDE as they survive the inverse.
+    if cfg.rules.lang == crate::Lang::J
+        && y.count() != 0
+        && let Some(exact) = exact_matrix_divide(x, y)
+    {
+        return Ok(exact);
     }
     let (a, m, n) = as_matrix(y, span)?;
     // `%.` takes its right-hand side WHOLE — its left rank is infinite —
@@ -16718,6 +16910,13 @@ fn complex_matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Resu
         let rows = x.shape[0];
         let k = x.count() / rows.max(1);
         (v, rows, k)
+    } else if x.rank() == 0 {
+        // A SCALAR right-hand side stands for the whole column of it, as it
+        // does over the reals: `2 %. (1j1 2)` is `1j_0.333333` in the
+        // reference, one equation per row of the system, where reading it
+        // as a side of one row made the shapes disagree.
+        let (v, _, _) = as_complex_matrix(x, span)?;
+        (vec![v[0]; m], m, 1)
     } else {
         as_complex_matrix(x, span)?
     };
@@ -16743,6 +16942,10 @@ fn complex_matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Resu
         let mut s = vec![n];
         s.extend_from_slice(&x.shape[1..]);
         s
+    } else if y.rank() < 2 {
+        // A VECTOR system is a COLUMN and its unknown is one number, not a
+        // list of one — the same rule the reals follow.
+        Vec::new()
     } else {
         vec![n]
     };
@@ -24046,15 +24249,46 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
     // and `0 p: (, _.)` is too, but `0 p: (_. _.)`, `0 p: (_. 1 2)` and
     // `0 p: (2 3 $ _.)` are all domain errors: the answer stands only
     // where the NaN is the whole argument.
-    if zs.len() > 1 && zs.iter().any(|z| z[0].is_nan() || z[1].is_nan()) {
+    // THE NEXT PRIME IS THE ONE FORM THAT ANSWERS ABOUT A NaN AMONG OTHERS,
+    // because it reads a value with no place in the order as one below every
+    // prime rather than as one it cannot answer about:
+    // `4 p: (_. 1 4)` is `2 2 5` there, the smallest prime for the NaN.
+    if form != 4 && zs.len() > 1 && zs.iter().any(|z| z[0].is_nan() || z[1].is_nan()) {
         return Err(Error::domain("a prime query needs a number", span));
     }
+    // A NaN AMONG OTHERS reaches the next prime where a NaN ALONE does not:
+    // `4 p: (_. 1 4)` is `2 2 5` in the reference and `4 p: _.` a domain
+    // error there. The two are the reference's own contradiction, recorded
+    // in the corpus; what stands here is what each spelling answers.
+    let among = form == 4 && zs.len() > 1;
     let mut cells = Vec::with_capacity(zs.len());
     for z in zs {
+        if among && (z[0].is_nan() || z[1].is_nan()) {
+            cells.push(smallest_prime_extended());
+            continue;
+        }
         cells.push(prime_query_at(form, z, span)?);
     }
+    // THE NEXT PRIME ABOVE A FLOAT IS EXTENDED. It is the ARGUMENT'S TYPE
+    // and not its value that widens: `3!:0 (4 p: 2.0)` is 64 in the
+    // reference although 2.0 is as whole as the 2 whose answer is the
+    // integer 3, and so are `3!:0 (4 p: 1.5)` and `3!:0 (4 p: (_. 1 4))`.
+    // The same reading covers the infinities round 9C followed one at a
+    // time.
+    let widen = |a: Array| {
+        if form != 4 || y.dtype() != DType::F64 {
+            return a;
+        }
+        match a.data.cast(DType::Ext) {
+            Some(d) => Array::new(a.shape.clone(), d),
+            None => a,
+        }
+    };
     if y.rank() == 0 {
-        return cells.pop().ok_or_else(|| Error::domain("a prime query needs a number", span));
+        return cells
+            .pop()
+            .map(widen)
+            .ok_or_else(|| Error::domain("a prime query needs a number", span));
     }
     // An empty argument has no value to answer about, so the answer's TYPE
     // is the form's alone: `3!:0 (1 p: (0 0 $ ''))` is the boolean type
@@ -24063,7 +24297,7 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
         let t = if form == 0 || form == 1 { DType::Bool } else { DType::I64 };
         return Ok(Array::new(y.shape.clone(), Data::empty(t)));
     }
-    assemble(&y.shape, cells, span)
+    assemble(&y.shape, cells, span).map(widen)
 }
 
 /// One `x p: y` for a single value and a form that neither factorises nor
@@ -24125,6 +24359,10 @@ fn prime_meta_at(form: i64, n: f64, span: Span) -> Result<Array> {
         // The neighbouring primes, strictly either side of y. EITHER
         // infinity answers the smallest prime there is, which is what the
         // reference does; a NaN answers nothing.
+        // A VALUE WITH NO PLACE IN THE ORDER answers the smallest prime
+        // there is: a NaN among others as well as either infinity. The
+        // EXTENDED type the reference reports for a float argument is the
+        // caller's business, not this cell's — see [`prime_meta`].
         4 => {
             if n.is_infinite() {
                 return Ok(smallest_prime_extended());
@@ -24134,6 +24372,25 @@ fn prime_meta_at(form: i64, n: f64, span: Span) -> Result<Array> {
             }
             Ok(next_prime(n.floor() as i64))
         }
+        // `5 p: y`: EULER'S TOTIENT, how many of the numbers below y share
+        // no factor with it. `5 p: (i. 12)` is `0 1 1 2 2 4 2 6 4 6 4 10`
+        // in the reference and `5 p: 100` is 40; a fraction, a negative and
+        // an infinity are all refused, since none of them has a
+        // factorisation to count over.
+        5 => {
+            if !n.is_finite() || n.fract() != 0.0 || !(0.0..9e18).contains(&n) {
+                return Err(Error::domain(
+                    "the totient needs a whole number that is not negative",
+                    span,
+                ));
+            }
+            let t = totient(n as i64, span)?;
+            Ok(if (0..=1).contains(&t) {
+                Array::scalar_bool(t == 1)
+            } else {
+                Array::scalar_i64(t)
+            })
+        }
         -4 => {
             if !n.is_finite() {
                 return Err(unordered("the value looked below"));
@@ -24142,6 +24399,30 @@ fn prime_meta_at(form: i64, n: f64, span: Span) -> Result<Array> {
         }
         other => Err(Error::domain(format!("{other} is not a prime query"), span)),
     }
+}
+
+/// Euler's totient: `n` times the product of `1 - 1/p` over n's distinct
+/// prime factors, which is `p^(e-1) * (p-1)` multiplied out. Zero has none.
+#[inline(never)]
+fn totient(n: i64, span: Span) -> Result<i64> {
+    if n == 0 {
+        return Ok(0);
+    }
+    let (ps, es) = factor_table(&Ext::from(n), span)?;
+    let mut acc: i64 = 1;
+    for (p, e) in ps.iter().zip(es.iter()) {
+        let p = crate::exact::ext_to_i64(p)
+            .ok_or_else(|| Error::domain("the totient needs a machine-sized number", span))?;
+        acc = acc
+            .checked_mul(p - 1)
+            .ok_or_else(|| Error::new(ErrorKind::Limit, "the totient overflows", Some(span)))?;
+        for _ in 1..*e {
+            acc = acc
+                .checked_mul(p)
+                .ok_or_else(|| Error::new(ErrorKind::Limit, "the totient overflows", Some(span)))?;
+        }
+    }
+    Ok(acc)
 }
 
 /// `2 p: y`: y's distinct prime factors over the number of times each

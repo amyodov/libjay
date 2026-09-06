@@ -5450,3 +5450,96 @@ the register.
   provable, the reference's is not, so this is the "proven-wrong
   reference" case of the pinning rule: both answers stand in the
   divergence list and the corpus rows that recorded the loss are gone.
+
+## 2026-09-06 — The empty frame's fill run is one function, not five
+
+Round 9C measured the reference settling an empty frame's type by RUNNING
+THE VERB ON A PAIR OF FILL CELLS and left the routing as the shape of the
+next round's work. Round 9D built the grid — 368 cells, eight types
+(boolean, integer, float, extended, rational, complex, character, box)
+against nine scalar dyads across every frame maker — and it says the three
+paths answer alike, cell for cell: the scalar dyad, the TABLE `x u/ y` and
+the RANK frame `u"n`.
+
+So `empty_scalar_dtype` is now the one function, and the table and the rank
+frame ask it. The table had settled its own type before — the integers,
+always, `3!:0 (2 %/ (''))` answering 4 where the reference answers 8 — and
+the rank frame had run its own fill VALUES through the verb, which is not
+the same computation: `0 ! 0` is 1, so `3!:0 ((0 3 $ 0) !"1 (0 3 $ 5))` came
+out integer where the reference reports the float type its own fill run
+gives. Ninety-eight of the grid's cells fell to the table's routing and
+three to the rank frame's.
+
+The rank frame's override applies only where its own fill cells HAD an
+answer: where they were refused, the frame stands on its own and what stands
+is the retry's or the refusal's — `$ ((2 3 $ 2) ^."1 _ 0 (0 $ 'a'))` is the
+boolean `0` there and stays so.
+
+Two frame makers were measured and NOT routed. The SCAN is not a fill run at
+all: `u/\ (0 $ y)` answers an empty of the ARGUMENT'S type for every scalar
+dyad but three, which is the insert's identity standing for a run that was
+never made. Round 9C had that rule for a boolean identity only, so the two
+extrema answered a float; it is now the whole of it, with `j.`, `r.` and
+`%:` — the same three the fill run treats apart — leaving a boolean
+whatever the argument held. The CUT `;.1` has no rule the reference keeps:
+`(0 $ 0) <./;.1 (0 $ 1x)` is extended there while the same over a RATIONAL
+empty is a float, and `(0 $ 0) +/;.1 (0 $ 1x)` is boolean while the same
+over a COMPLEX empty is complex. No ordering of the types puts those four
+together, so libjay answers the fold's own identity and the difference is
+left, measured, in docs/coverage.md.
+
+## 2026-09-06 — The exact types are closed under the matrix product
+
+`%` is not the closure everyone assumes — `3!:0 (2 % 1)` is the float type
+while `3!:0 (2x % 1x)` is extended and `3!:0 (1r2 % 2)` rational — and
+round 9C found `%.` following that law for the MONAD only, leaving four
+spellings of the dyad on the floats. The root cause was one level down: the
+INNER PRODUCT converted both arguments with `to_f64_vec` and ran a blocked
+float pass, so `3!:0 ((1 2x) +/ . * (1 2))` reported eight where the
+reference reports 64. The blocked pass now takes the machine types alone and
+sends the exact and the complex ones to the general cell path, which already
+sums `+/ (row * col)` in whatever type the two make.
+
+The divide follows, being the inverse and that product: an exact system is
+inverted over the rationals and multiplied out over them. It is the SYSTEM
+alone that asks for the exact path, since the inverse carries the type —
+`(1r2 1r3) %. (2 2 $ 1 2 3 4)` is a float there and
+`(1r2 1r3) %. (2 2 $ 1 2 3 4x)` is `_2r3 7r12`. Left: the reference's
+DETERMINANT of order three and up is RATIONAL where its own order-two
+determinant is extended (`3!:0 (-/ . * (3 3 $ 1 2 3 4 5 6 7 8 10x))` is
+128), which is its elimination showing through; the values agree and the
+type is not followed.
+
+## 2026-09-06 — A complex infinity has a magnitude and sometimes a direction
+
+The verbs whose definition divides by a magnitude answer at an infinite one,
+and libjay's componentwise arithmetic made NaNs of them. Measured over a
+624-cell grid of thirteen values against thirty verbs:
+
+- A DIVISOR OF INFINITE MAGNITUDE LEAVES NOTHING: `2 % _j_` is 0, as
+  `2 % _` is over the reals. Smith's scaling divided one infinity by another.
+- AN INFINITE PART NAMES THE DIRECTION ON ITS OWN: `* 0j_` and `* 1j_` are
+  `0j1`, `* _j1` is 1. Both parts infinite is two directions and no answer.
+- AN INFINITE PART IS ALREADY WHOLE: `<. _j1` and `>. _j1` leave it alone
+  rather than taking a fractional part of it and stepping the wrong axis.
+- THE COMPLEX BINOMIAL HAS NO LIMIT AT AN INFINITY and the reference refuses
+  every pairing where either side has an infinite part, although the REAL
+  binomial answers at one and the complex MONAD `! _j1` answers a NaN. Only
+  the dyad over the complex type is refused.
+
+## 2026-09-06 — `5 p:` is Euler's totient, and `4 p:` is typed by its argument
+
+`5 p: (i. 12)` is `0 1 1 2 2 4 2 6 4 6 4 10` and `5 p: 100` is 40: the count
+of the numbers below y that share no factor with it. libjay had refused the
+form by name. A fraction, a negative and an infinity are refused, none of
+them having a factorisation to count over — and `5 p: (_ 1 2)` is pinned as
+an oracle self-contradiction, since it answers `1 0 1` in the RATIONAL type
+where the reference's own `5 p: _` is a domain error and its `5 p: 1` is 1.
+
+`4 p:` widens by the ARGUMENT'S TYPE and not by the value's place in the
+order: `3!:0 (4 p: 2.0)` is extended although 2.0 is as whole as the 2 whose
+answer is the integer 3. That is one rule over the fractions and the
+infinities round 9C had followed one value at a time. A NaN AMONG OTHERS
+reaches the next prime with them — `4 p: (_. 1 4)` is `2 2 5` — where a NaN
+ALONE is refused; the two are the reference's own split and both are now
+followed rather than pinned.

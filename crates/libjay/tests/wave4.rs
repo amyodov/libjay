@@ -225,8 +225,12 @@ fn the_prime_queries_answer_what_their_left_argument_asks() {
     // The exponents of the first x primes, and the whole table for `__`.
     assert_eq!(val(Lang::J, "3 q: 12"), i64s(&[3], &[2, 1, 0]));
     assert_eq!(val(Lang::J, "__ q: 60"), i64s(&[2, 3], &[2, 3, 5, 2, 1, 1]));
+    // `5 p:` is Euler's totient: how many of the numbers below y share no
+    // factor with it.
+    assert_eq!(val(Lang::J, "5 p: 10"), Array::scalar_i64(4));
+    assert_eq!(val(Lang::J, "5 p: 100"), Array::scalar_i64(40));
     // A left argument that names no query at all.
-    let e = err(Lang::J, "5 p: 10");
+    let e = err(Lang::J, "6 p: 10");
     assert_eq!(e.kind, ErrorKind::Domain);
     assert!(e.msg.contains("prime query"), "{}", e.msg);
     // A negative left argument keeps the LAST that many columns of the

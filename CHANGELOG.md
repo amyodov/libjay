@@ -245,6 +245,12 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   is a whole number written as a rational: `1r2 %: 1r3` is `1r9`,
   `1r3 %: 8` is 512 and `1r2 %: (2 3x)` is `4 9`.
 
+- `5 p: y` IS EULER'S TOTIENT: how many of the numbers below y share no
+  factor with it. `5 p: (i. 12)` is `0 1 1 2 2 4 2 6 4 6 4 10` and
+  `5 p: 100` is 40; a fraction, a negative and an infinity are refused,
+  none of them having a factorisation to count over. It was refused by
+  name before, as a query the conjunction had no reading for.
+
 
 ### Changed
 
@@ -258,6 +264,34 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   logarithm and the type of a one-item NaN, the inverse of a NaN vector,
   the null character's writing, and `1 p: (_. 1 2)`, which libjay now
   refuses as the reference does.
+
+- THE EMPTY FRAME'S FILL RUN IS ONE FUNCTION AND EVERY FRAME MAKER ASKS
+  IT. Where a frame has no cell to compute, the reference settles the
+  answer's type by running the verb on a pair of FILL CELLS — reading the
+  types as written, a non-numeric side standing in for the boolean it
+  fills with. libjay had that rule on the scalar-dyad path alone, and the
+  TABLE `x u/ y` answered the integers whatever it was handed: `3!:0 (2 %/
+  (''))` is the float type and `3!:0 (2 +/ (0 $ 1r2))` the rational one.
+  The RANK frame `u"n` asks the same function now, so
+  `3!:0 ((0 3 $ 0) !"1 (0 3 $ 5))` is the float type where a run of
+  libjay's own fill VALUES had answered the integers. A 368-cell grid over
+  eight types found the three paths answering alike, cell for cell.
+
+- AN INSERT'S IDENTITY CARRIES NO TYPE OF ITS OWN under the scan: the
+  identity stands for a run that was never made, and the argument's type
+  stands instead. Round 9C had the rule for a BOOLEAN identity only, so
+  the two extrema — whose identities are `_` and `__` — answered a float
+  for every argument; `3!:0 (<./\ (0 $ 1x))` is the extended type there.
+  Three scalar dyads part from it and leave a boolean whatever the
+  argument held: `j.`, `r.` and `%:`.
+
+- THE NEXT PRIME ABOVE A FLOAT IS EXTENDED. It is the ARGUMENT'S TYPE and
+  not its value that widens — `3!:0 (4 p: 2.0)` is the extended type
+  although 2.0 is as whole as the 2 whose answer is the integer 3 — which
+  is one rule over the fractions and the infinities round 9C had followed
+  one value at a time. A NaN AMONG OTHERS reaches the next prime with
+  them, `4 p: (_. 1 4)` being `2 2 5`, where a NaN alone is still refused
+  as the reference refuses it.
 
 ### Fixed
 
@@ -300,6 +334,36 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - `j.` and `r.` over data that is no number reached an INTERNAL error
   ("a complex monad on the real path") instead of the ordinary type error.
   One cause behind every internal error a 50 000-sentence sweep found.
+
+- THE EXACT TYPES ARE CLOSED UNDER THE MATRIX PRODUCT AND THE DIVIDE, as
+  they already were under the inverse. The blocked float pass had nothing
+  to say about them and floated every exact argument, so
+  `3!:0 ((1 2x) +/ . * (1 2))` reported eight where the reference reports
+  the extended type, and a product of two rational matrices the rational
+  one. The divide follows, being the inverse and that product:
+  `2 %. (1 2 3x)` is `6r7`, `2 %. (1r2 1r3)` is `60r13` and
+  `2 %. (2 2 $ 1 2 3 4x)` is `_2 2`. It is the SYSTEM alone that asks for
+  the exact path, since the inverse is what carries the type — a rational
+  left against a machine system still answers in floats.
+
+- A COMPLEX SYSTEM under `%.` reads a SCALAR right-hand side as the whole
+  column of it, as a real one does, and a VECTOR system's unknown is one
+  number: `2 %. (1j1 2)` is `1j_0.333333` where it had been a length
+  error about a system of two rows against a side of one.
+
+- A DIVISOR OF INFINITE MAGNITUDE LEAVES NOTHING BEHIND: `2 % _j_` is 0,
+  as `2 % _` is over the reals, where scaling the denominator divided one
+  infinity by another and made a NaN error of it.
+
+- AN INFINITE PART NAMES A COMPLEX VALUE'S DIRECTION ON ITS OWN, the
+  finite part beside it counting for nothing: `* 0j_` and `* 1j_` are
+  `0j1` and `* _j1` is 1. An infinite part is already whole, so `<. _j1`
+  and `>. _j1` leave it where it is rather than stepping the wrong axis.
+
+- THE COMPLEX BINOMIAL HAS NO LIMIT AT AN INFINITY, and the pairing is
+  refused as the reference refuses it — `2 ! 0j_`, `2 ! _j1`, `2 ! _j_`
+  and their mirrors — where the REAL binomial answers at an infinity and
+  the complex MONAD `! _j1` answers a NaN.
 
 ## 0.4.9 — 2026-09-04
 

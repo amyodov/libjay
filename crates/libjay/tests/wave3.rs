@@ -702,8 +702,10 @@ fn j_primes_and_factors() {
 fn primes_refuse_what_they_have_no_answer_for() {
     assert_eq!(err(Lang::J, "p: _1").kind, ErrorKind::Domain);
     assert_eq!(err(Lang::J, "q: 0").kind, ErrorKind::Domain);
-    // A left argument that names no query at all is refused by name.
-    assert_eq!(err(Lang::J, "5 p: 10").kind, ErrorKind::Domain);
+    // A left argument that names no query at all is refused by name; `5 p:`
+    // is Euler's totient, so it is `6 p:` that names nothing.
+    assert_eq!(err(Lang::J, "6 p: 10").kind, ErrorKind::Domain);
+    assert_eq!(err(Lang::J, "5 p: 1.5").kind, ErrorKind::Domain);
 }
 
 // --- roll and deal -------------------------------------------------------

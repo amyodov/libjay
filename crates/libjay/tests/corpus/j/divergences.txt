@@ -122,26 +122,18 @@ $ %. (i. 4 3)
 %. (1 1 $ _.)
 ? the reference widens a one-item NaN table to complex where a wider one stays real
 
-// A NaN OR AN INFINITY AMONG THE PRIMES, WHERE THE REFERENCE CONTRADICTS
-// ITSELF BETWEEN ONE ITEM AND SEVERAL. Every one of these is settled by the
-// reference's own answer to the same cell asked on its own:
+// AN INFINITY AMONG THE PRIMES, WHERE THE REFERENCE CONTRADICTS ITSELF
+// BETWEEN ONE ITEM AND SEVERAL. `4 p: (_ 1 2)` is `2 2 2` there, although
+// the reference's own `4 p: 2` is 3: an infinity ANYWHERE makes every cell
+// answer with the smallest prime, the cells holding ordinary numbers
+// included. libjay keeps ONE rule applied cell by cell, so no cell changes
+// what a neighbouring cell answers.
 //
-//   `4 p: _.` is a domain error there, but `4 p: (_. 1 2)` is `2 2 3`, so
-//   the NaN that had no next prime alone has one in company.
-//   `4 p: (_ 1 2)` is `2 2 2`, although the reference's own `4 p: 2` is 3:
-//   an infinity ANYWHERE makes every cell answer with the smallest prime,
-//   including the cells that hold ordinary numbers.
-//
-// The two forms that ask whether a value IS prime were followed in round
-// 9B — `0 p:` and `1 p:` refuse a NaN they are handed among others, as the
-// reference does — and what is left here is the rest, where libjay keeps
-// ONE rule applied cell by cell: an infinity has no place in the order
-// except that the next prime after one is the smallest there is, and no
-// cell changes what a neighbouring cell answers.
-4 p: (_. 1 2)
-? the reference refuses a lone NaN's next prime and answers one in a list
-4 p: (_. 1)
-? the reference refuses a lone NaN's next prime and answers one in a list
+// The NaN half of this note was followed in round 9D rather than pinned:
+// `4 p: _.` is a domain error there and `4 p: (_. 1 4)` is `2 2 5`, and
+// libjay now answers both as the reference does — a NaN has no next prime
+// alone and reads as one below every prime in company. The two forms that
+// ask whether a value IS prime were followed in round 9B.
 4 p: (_ 1 2)
 ? an infinity makes the reference answer 2 for cells whose own answer is 3
 
@@ -856,3 +848,13 @@ _1e17 ! _1
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,&.,&.:,^,^:,|,<.,>.,x:,!.,",/,L:,S:
 _1e16 ! _1
 ? the same one exponent down, the first size a double cannot tell apart
+
+// EULER'S TOTIENT OF A VECTOR HOLDING AN INFINITY — ORACLE
+// SELF-CONTRADICTION. `5 p: _` is a domain error in the reference and so is
+// `5 p: 1.5`, yet `5 p: (_ 1 2)` answers `1 0 1` in the RATIONAL type,
+// whose middle value contradicts its own `5 p: 1`, which is 1. Two of the
+// three answers cannot both be the totient, so libjay refuses the vector as
+// the reference refuses the atom.
+5 p: (_ 1 2)
+? the reference's own `5 p: _` and `5 p: 1` contradict this vector
+~ cause=we-refuse:err:domain_error:_the_totient_needs_a_whole_number_that_is_not_negative verb=p: also=%,*,+,-,^,|,<.,>.,x:,",/,\,\.,L:,S:,&.,&.:,@,@:,^:,!.
