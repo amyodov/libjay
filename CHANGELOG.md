@@ -7,6 +7,39 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A WHOLE NUMBER WRITTEN WITH AN EXPONENT IS AN INTEGER, as it is in the
+  reference: `3!:0 (1e9)` and `3!:0 (5e18)` report the integer type where
+  `3!:0 (1e19)` — a value no machine word holds — reports the float one.
+  The SPELLING decides and not the value, so `1.5e3` and the whole
+  `1.23e5` are floats for the point in their mantissas. It is what the
+  display shows as well: `1e9` and `<1e9` both write their ten digits,
+  where a float that wide takes an exponent.
+
+- MATCH READS A NaN AS MATCHING EVERY NUMBER. The reference's `-:` tests
+  for INEQUALITY by magnitude of difference and no difference from a NaN
+  is ever large enough to separate the two, so `2 -: _.` is 1 and
+  `(1 2 3) -: (_. _. _.)` is 1, while `(_. 1) -: (_. 2)` is 0 — the 1 and
+  the 2 part them — and `1 2 3 -: _.` is 0 for the shape. The same reading
+  reaches inside a box, where equality reads it too (`(<_.) = (<2)`), and
+  the SET verbs are untouched: `~. (<_.) , (<2)` keeps both items.
+
+- ANYTHING HOLDING A NaN INVERTS TO NaNs OF ITS OWN SHAPE rather than
+  being refused as a singular matrix. A real VECTOR widens to the complex
+  NaN where a real TABLE stays on the reals, and a complex argument
+  answers complex NaNs at either rank — which is what `%.^:2 (_. 1 2)`
+  walks into once the first inverse has widened its vector.
+
+- THE NEXT PRIME ABOVE A VALUE WITH NO PLACE IN THE ORDER is answered in
+  the EXTENDED type: `3!:0 (4 p: _)` is 64, so `(4 p: (_ __ 0)) ^ _1` is
+  the exact `1r2 1r2 1r2` and not `0.5 0.5 0.5`. A COMPLEX value whose
+  real part is infinite reaches the same answer, where a finite complex is
+  the domain error it was.
+
+- A BOOLEAN FUNCTION READS ITS TWO BITS UNDER THE COMPARISON TOLERANCE and
+  in any numeric type: `(0.9999999999999999) (15 b.) 1` answers 1 and so
+  does the complex `(1j1e_15) (12 b.) 1`, while a value past `⎕CT` —
+  `(1 1.0000000000001) (14 b.) …` — is refused as readily as a 2 is.
+
 - THE NULL CHARACTER IS NOT WRITTEN OUT. A session drops it, so
   `u: 0 65 66` shows `AB` although its own `#` counts three characters and
   `2 2 $ u: 0 65 66 67` shows a row of one beside a row of two, unpadded.
@@ -221,6 +254,11 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   refuses as the reference does.
 
 ### Fixed
+
+- A COMPLEX VECTOR IS A COLUMN under `%.`, and its pseudo-inverse is now
+  the closed form the reals already had, with the conjugate the sum of
+  magnitudes needs: `%. &.:j. (1 1.0000000000001)` is `_0.5 _0.5` where
+  the general least-squares solve left an imaginary residue of 8e_17.
 
 - THE ROOTS OF A BADLY SCALED QUADRATIC are the conjugate pair the
   discriminant names again. `p. (1e_9 1 1e9)` answered a repeated real:

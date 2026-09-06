@@ -1,0 +1,131 @@
+// Round 9C: what three 50k sweep pairs still parted on, one measured grid
+// per family. The rule each grid fitted is written above its block.
+
+// MATCH READS A NaN AS MATCHING EVERY NUMBER. The reference's `-:` tests
+// for INEQUALITY by magnitude of difference, and no difference from a NaN
+// is ever large enough to separate the two, so `2 -: _.` is 1 and
+// `(1 2 3) -: (_. _. _.)` is 1 while `(_. 1) -: (_. 2)` is 0 — the 1 and
+// the 2 part them. The shape and the type still have to agree, and the
+// same reading reaches inside a box, where equality reads it too. The SET
+// verbs are untouched: `~. (<_.) , (<2)` keeps both items.
+_. -: _.
+2 -: _.
+_. -: 2
+2.0 -: _.
+2 -: 3
+2 -: _
+_ -: 2
+2 -: _.j_.
+'a' -: _.
+1 2 3 -: _.
+(_.) -: (0 $ 0)
+(_. 1) -: (_. 2)
+(1 2 3) -: (_. _. _.)
+(2 2 $ _.) -: (2 2 $ i. 4)
+(<_.) -: (<2)
+(<_.) -: (<_.)
+(<_.) = (<2)
+(<_.) e. (<1)
+~. (<_.) , (<2)
+~. (_. , _.)
+2 ~: _.
+_. e. 1 2 3
+1 2 3 i. _.
+
+// A WHOLE NUMBER WRITTEN WITH AN EXPONENT IS AN INTEGER. `3!:0 (1e9)` is
+// the integer type there and `3!:0 (1e19)` — which no machine word holds —
+// the float one; the point in the mantissa is what parts `1.5e3` from
+// `15e2`, and the spelling decides rather than the value, so the whole
+// `1.23e5` is still a float. It is what the display shows as well, since a
+// float that wide takes an exponent where the integer writes its digits.
+3!:0 (1e9)
+3!:0 (2e2)
+3!:0 (15e2)
+3!:0 (1.5e3)
+3!:0 (1.23e5)
+3!:0 (1e_3)
+3!:0 (1e18)
+3!:0 (5e18)
+3!:0 (1e19)
+3!:0 (_1e9)
+1e9
+<1e9
+<1e18
+<1e19
+<1e20
+<1.5e9
+<9007199254740992
+1e10 +. 2
+3!:0 ((1e10) +. 2)
+2 + 1e9
+
+// ANYTHING HOLDING A NaN INVERTS TO NaNs OF ITS OWN SHAPE rather than
+// being refused as a singular matrix. A real VECTOR widens to the complex
+// NaN, where a real TABLE stays on the reals; a complex argument answers
+// complex NaNs at either rank. That is what `%.^:2` walks into once the
+// first inverse has widened its vector.
+%. (, _.)
+%. (_. 1 2)
+%. (2 2 $ _. _. 1 0)
+%. (2 2 $ _. 1 2 3)
+%. (3 3 $ _. 1 2 3 4 5 6 7 8)
+%. (_.j_. _.j_.)
+%. (, _.j_.)
+%. (2 2 $ _.j_.)
+%. (_.j1 1 2)
+%.^:2 (_. 1 2)
+%.^:3 (_. 1 2)
+%.@] &.#: ((_.) ,/ 2)
+
+// A COMPLEX VECTOR IS A COLUMN, and its pseudo-inverse is the conjugate
+// over the sum of the magnitudes, which the general least-squares solve
+// reaches only to within its own rounding.
+%. (0j1 0j2 0j3)
+%. (0j1 0j1.0000000000001)
+%. &.:j. (1 1.0000000000001)
+%. (1j1 2j2)
+
+// THE NEXT PRIME ABOVE A VALUE WITH NO PLACE IN THE ORDER is the smallest
+// prime there is, answered in the EXTENDED type: `3!:0 (4 p: _)` is 64
+// there, so `(4 p: (_ __ 0)) ^ _1` is the exact `1r2 1r2 1r2`. A COMPLEX
+// value whose real part is infinite reaches the same answer, while a
+// finite complex is the domain error it was.
+4 p: 5
+3!:0 (4 p: 5)
+4 p: _
+3!:0 (4 p: _)
+4 p: __
+4 p: 0
+4 p: (_ __ 0)
+(4 p: (_ __ 0)) ^ _1
+3!:0 (4 p: (_ __ 0))
+4 p: (^.^:3 (0 1 1 0))
+4 p: 1e10
+3!:0 (4 p: 1e10)
+
+// A BOOLEAN FUNCTION READS ITS TWO BITS UNDER THE COMPARISON TOLERANCE,
+// and in any numeric type: `(0.9999999999999999) (15 b.) 1` answers 1 and
+// so does the complex `(1j1e_15) (12 b.) 1`, while a value a tenth of a
+// thousandth of a billionth away — past `⎕CT` — is refused as readily as a
+// 2 is. The refusal is still EAGER, ahead of the frame.
+(0.9999999999999999) (15 b.) 1
+1 (15 b.) (0.9999999999999999)
+(1.0000000000000002) (15 b.) 1
+0.0 (15 b.) 1
+(1j0) (15 b.) 1
+(1j1e_15) (12 b.) 1
+(1j1e_15) (12 b.) 0
+0 (12 b.) 1
+1 (12 b.) 1
+(1e_15) (15 b.) 1
+(1 1.0000000000001) (14 b.) (2 0 3 $ 0)
+2 (0 b.) (i. 0)
+1 (0 b.) (i. 0)
+(0 $ 0.5) (7 b.) (0 $ 0)
+1 (7 b.) (0 $ 0)
+(0 3 $ 0) (7 b.) (0 3 $ 0)
+
+// The two sentences a sweep worker hung on before round 9B's fixes, kept
+// so that neither loop can come back.
+0 +/\\ ((0 0 # (2 0 3 $ 0)) + ((_9223372036854775806) <. L:_2 (a:)))
+(3 p: (_3)) >./. ((6) ;: (0.1 0.2 0.3))

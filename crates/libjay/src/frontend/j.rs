@@ -2938,6 +2938,22 @@ fn parse_plain(word: &str, span: Span) -> Result<Num> {
             norm.push(ch);
         }
     }
+    // A WHOLE NUMBER WRITTEN WITH AN EXPONENT IS AN INTEGER. The reference
+    // reads `1e9` and `5e18` in the integer type and `1e19` — which no
+    // machine word holds — in the float one, and the point in the mantissa
+    // is what parts `1.5e3` (a float) from `15e2` (an integer). The
+    // spelling decides, not the value: `1.23e5` is a whole number and still
+    // a float. This is what `3!:0` reports and what the display shows,
+    // since a float that wide takes an exponent where the integer does not.
+    if norm.contains('e')
+        && !norm.contains('.')
+        && let Some((m, e)) = norm.split_once('e')
+        && let Ok(exp) = e.parse::<u32>()
+        && let Ok(mantissa) = m.parse::<i64>()
+        && let Some(v) = 10i64.checked_pow(exp).and_then(|p| mantissa.checked_mul(p))
+    {
+        return Ok(Num::I(v));
+    }
     // Exponent notation yields a float, as a fractional part does.
     if norm.contains('.') || norm.contains('e') {
         return norm.parse::<f64>().map(Num::F).map_err(|_| invalid());

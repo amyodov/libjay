@@ -282,7 +282,7 @@ p. (0 1 1 _)
 // spellings a sweep draws.
 1 <. (_.)
 ? the reference's own two-pair answer is `1 1`, which contradicts this one
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=<.,>. also=%,-,+,*,%:,^.,^,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#.,.,:,!,F..,F.:,F::,^:,=.,=: answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=<.,>. also=%,-,+,*,%:,^.,^,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#.,.,:,!,F..,F.:,F::,^:,=.,=:,%.,@.,`:,+:,-:,*:,A.,#:,I.,e.,i:,x:,u:,-.,;:,":,q:,p.,b.,s:,M.,f.,::,/. answers=numeric
 1 >. (_.)
 ? the reference's own two-pair answer is `1 1`, which contradicts this one
 _ <. (_.)
@@ -303,7 +303,7 @@ _ <. (_.)
 // path parting from a scalar one that the extrema above show, one verb on.
 (1.0 1.0) = (_. _.)
 ? the reference's own atom and one-item answers are 0, which contradict this one
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb==,~:,<:,>:,-: also=%,-,+,*,%:,^.,^,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#.,.,:,!,F..,F.:,F::,^:,=.,=: answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb==,~:,<:,>: also=%,-,+,*,%:,^.,^,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#.,.,:,!,F..,F.:,F::,^:,=.,=:,%.,@.,`:,+:,-:,*:,A.,#:,I.,e.,i:,x:,u:,-.,;:,":,q:,p.,b.,s:,M.,f.,::,/. answers=numeric
 (1.0 1.0) ~: (_. _.)
 ? the same question negated: 0 0 there, 1 1 here
 (2.0 4.0 6.0) = (_. 1 2)
@@ -705,7 +705,7 @@ x: 3.14159265358979
 // No `answers=` clause: both sides answer a RATIONAL, whose `r` is not a
 // character any numeric answer class reads, so every one of them would be
 // false here. The cause, the verb and the restricted `also=` carry the rule.
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:,^:,=.,=:,:,`:,p.,#.,#:,F..,F.:,F:.,F::,L:,S:,;.
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:,^:,=.,=:,:,`:,p.,#.,#:,F..,F.:,F:.,F::,L:,S:,;.,/.,M.,-.,@.,u:,b.,":,;:,I.,e.,A.
 
 // INTERVAL INDEX OVER SYMBOLS. The reference's own `<` and `/:` order
 // symbols by their NAME — `(s: <'a') < (s: <'b')` is 1 and
@@ -748,7 +748,7 @@ _2 +/\\. (_.)
 ? a four-byte code is a value there and a codepoint here
 9 u: _3
 ? the same over the other form that answers the four-byte type
-~ cause=we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint|we-refuse:err:domain_error:_-#_is_not_a_Unicode_codepoint verb=u: also=x:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,~.,^:,&,@,:,f.,::,M.,S:,L:,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,/,\,\.,+.,*.,;.,{::,{,e.,~.,<,>
+~ cause=we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint|we-refuse:err:domain_error:_-#_is_not_a_Unicode_codepoint verb=u: also=x:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,~.,^:,&,@,:,f.,::,M.,S:,L:,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,/,\,\.,+.,*.,;.,{::,{,e.,~.,<,>,=:,=.,;:,s:,":,@.,`:,%.,A.,I.,-.,/.
 
 // THE CRC OF A WIDE CHARACTER. `128!:3` reads a byte string, and the
 // reference refuses one whose type is not the one-byte one: `128!:3 (u: 2)`
@@ -812,3 +812,19 @@ _2 +/\\. (_.)
 (1r2 1r3) #. (1 0 1 $ 5)
 ? the reference checks the radix count for integers and not for rationals
 ~ cause=we-refuse:err:length_error:_#_radices_for_#_digits verb=#.,#: also=$,x:,%,r.,j.,+,-,*,^,%:,^.,|,<.,>.,L:,S:,&.,&.:
+
+// A BOXED ROOT FORM WHOSE ROOT IS ONE COMPLEX NUMBER, where the reference
+// contradicts itself by rank. `p. (<c)` reads the box as the roots of a
+// polynomial and answers its coefficients: `p. (< 2)` is `_2 1` and
+// `p. (< 2 3j4)` — two roots, one of them complex — is `6j8 _5j_4 1`. The
+// same verb over a box holding ONE complex number is an INDEX error there,
+// `p. (< 0j0)` and `p. (< 1j0)` included, so it is not the imaginary part
+// that is refused but the pairing of one root with the complex type. `p..`
+// answers the same way. libjay reads the box the same at every length.
+p. &.< (1ad45)
+? the reference's own `p. (< 2 3j4)` answers where this one is an index error
+~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=p.,p.. also=j.,r.,o.,^,^.,%:,+,-,*,%,+.,*.,<.,>.,|,&.,&.:,^:,L:,S:,x:,!.,f.,::,M.,:
+p. &.< (0j1)
+? the same with the imaginary unit for the root
+p.. &.< (1ad45)
+? the same under the polynomial derivative

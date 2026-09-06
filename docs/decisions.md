@@ -5414,3 +5414,31 @@ the register.
   `1e_18 1e_9 1` decides its roots, and an error measured against the
   leading 1 called a repeated real as good a fit there as the conjugate
   pair the polynomial really has.
+- 2026-09-05 — a WHOLE NUMBER WRITTEN WITH AN EXPONENT is read in the
+  INTEGER type: `3!:0 (1e9)` and `3!:0 (5e18)` are 4 there and
+  `3!:0 (1e19)` is 8, so the machine word is the bound and not the
+  notation. The SPELLING decides, not the value: `1.5e3` and the whole
+  `1.23e5` are floats for the point in their mantissas. It settles a
+  display family nobody had a reading for — `<1e9` writes its ten digits
+  where a float that wide takes an exponent — since the box was never the
+  question, the literal's type was.
+- 2026-09-05 — MATCH READS A NaN AS MATCHING EVERY NUMBER. `-:` tests for
+  INEQUALITY by magnitude of difference in the reference, and no
+  difference from a NaN is ever large enough to separate the two, so
+  `2 -: _.` and `(1 2 3) -: (_. _. _.)` are 1 while `(_. 1) -: (_. 2)` is
+  0. Equality between two BOXES reads it the same way; the SET verbs
+  (`~.`, `~:`, `-.`) keep their own reading, under which a NaN is no value
+  at all, so `~. (<_.) , (<2)` keeps both items. The three readings sit in
+  one enum rather than one averaged rule because the reference answers
+  each family differently.
+- 2026-09-05 — `%.` OF ANYTHING HOLDING A NaN answers NaNs of its own
+  shape instead of reporting a singular matrix. The elimination divides by
+  a pivot the NaN poisons; the reference carries the NaN through. A real
+  VECTOR widens to the complex NaN where a real TABLE stays on the reals,
+  which is what makes `%.^:2 (_. 1 2)` a complex answer.
+- 2026-09-05 — a BOOLEAN FUNCTION (`m b.` below 16) reads its two bits
+  under the COMPARISON TOLERANCE and in any numeric type, the complex
+  included. Round 8 had recorded the read as exact on the evidence of
+  `(1 1.0000000000001) (14 b.) …`, which is refused — but that value is a
+  tenth of a thousandth of a billionth away, past `⎕CT`, where
+  `0.9999999999999999` is not and answers.

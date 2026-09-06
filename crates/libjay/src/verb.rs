@@ -3335,21 +3335,21 @@ impl Verb {
             // `m b.` below 16 reads two BITS, and a value that is no bit is
             // refused whatever the frame holds: `2 (0 b.) (i. 0)` is a
             // domain error in the reference where `1 (0 b.) (i. 0)` is the
-            // empty. A bit is read EXACTLY — no tolerance stands in for one
-            // — so `(1 1.0000000000001) (14 b.) (2 0 3 $ 0)` is refused as
-            // readily as a 2 would be. From 16 up the table reads whole integers and nothing
-            // about a value is out of range, so the frame stands there.
+            // empty. A bit is read under the COMPARISON TOLERANCE, so
+            // `(0.9999999999999999) (15 b.) 1` answers 1 while
+            // `(1 1.0000000000001) (14 b.) (2 0 3 $ 0)` — a tenth of a
+            // thousandth of a billionth away, past `⎕CT` — is refused as
+            // readily as a 2 would be. From 16 up the table reads whole
+            // integers and nothing about a value is out of range, so the
+            // frame stands there.
             let bits_eager = {
                 let mut v = self;
                 while let Verb::Rank(inner, _) = v {
                     v = inner;
                 }
+                let tol = ctx.cfg.tol;
                 matches!(v, Verb::Prim(Prim { dyad: DyadOp::TruthTable(m), .. }) if *m < 16)
-                    && [x, y].into_iter().any(|a| {
-                        a.count() > 0
-                            && a.to_f64_vec()
-                                .is_none_or(|v| v.iter().any(|&n| n != 0.0 && n != 1.0))
-                    })
+                    && [x, y].into_iter().any(|a| a.count() > 0 && !reads_as_bits(a, tol))
             };
             // A value that is no bit is refused OUTRIGHT: it is a fact
             // about the values themselves, so there is nothing for a fill
@@ -4182,6 +4182,13 @@ fn padded_with(cells: Vec<Array>, filled: FillAtom, span: Span) -> Result<Vec<Ar
         for (k, slot) in common.iter_mut().enumerate() {
             *slot = (*slot).max(c.shape[k]);
         }
+    }
+    // WHERE NOTHING NEEDS PADDING the fill is never laid down, and the
+    // cells keep the type they were held in: `; !.1e_9 (1r2 1r3)` is
+    // `1r2 1r3` in the rational type there, not the floats a float fill
+    // would otherwise promote them to.
+    if raised.iter().all(|c| c.shape == common) {
+        return Ok(raised);
     }
     let counts = Array::from_i64(common.iter().map(|&n| n as i64).collect());
     raised
@@ -5726,6 +5733,25 @@ fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
 /// One complex step.
 #[inline]
 fn cx_op(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx> {
+    let r = cx_op_value(op, a, b, tol, span)?;
+    // THE ARITHMETIC THAT MADE THIS NaN is refused here as it is on the
+    // real path, and by the same test — a NaN in the answer that neither
+    // operand brought. The reference draws no line at the complex type:
+    // `0j_ - 0j_` and `(_ __ 0) - (_ 0j_ 0)` are NaN errors there exactly
+    // as `_ - _` is, and `(_j2) % 0` is one too. A NaN the program itself
+    // wrote still travels on.
+    if tol.is_j()
+        && !a.iter().chain(b.iter()).any(|v| v.is_nan())
+        && let Some(k) = (0..2).find(|&k| r[k].is_nan())
+    {
+        return Err(nan_error(op, a[k], b[k], span));
+    }
+    Ok(r)
+}
+
+/// The complex answer itself, before the NaN the arithmetic made is
+/// refused.
+fn cx_op_value(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx> {
     use ScalarDyad::*;
     Ok(match op {
         Add => cx::add(a, b),
@@ -6413,7 +6439,7 @@ fn compare_data(
                     &a[xoff + i / xdiv],
                     &b[yoff + i / ydiv],
                     tol,
-                    NanRule::Same,
+                    NanRule::Match,
                 );
                 *slot = u8::from(if op == Eq { e } else { !e });
             }
@@ -9308,9 +9334,19 @@ pub(crate) enum NanRule {
     /// A NaN is no value at all, not even its own — the reading of the set
     /// verbs `~.`, `~:` and `-.`.
     Distinct,
-    /// A NaN is the same value as a NaN and as nothing else — the reading
-    /// of `-:` and of equality between two boxes.
+    /// A NaN is the same value as a NaN and as nothing else. This is what
+    /// a set verb finds INSIDE a box: `~. (<_.) , (<2)` keeps both items
+    /// there where `~. _. , 2` keeps both too, and `~. (<_.) , (<_.)`
+    /// keeps one.
     Same,
+    /// A NaN is indistinguishable from every number — the reading of `-:`
+    /// and of equality between two boxes. The reference's match tests for
+    /// INEQUALITY by magnitude of difference, and no difference from a NaN
+    /// is ever large enough to separate the two, so `2 -: _.` is 1,
+    /// `(1 2 3) -: (_. _. _.)` is 1, `(_. 1) -: (_. 2)` is 0 (the 1 and
+    /// the 2 part them) and `(<_.) -: (<2)` is 1 as well. The shape and
+    /// the type still have to agree: `1 2 3 -: _.` and `'a' -: _.` are 0.
+    Match,
     /// A NaN is indistinguishable from every number, which is what a
     /// comparison by magnitude of difference makes of it. This is the
     /// reading of the search family — `i.`, `i:`, `e.` and the `=` monad
@@ -9355,6 +9391,7 @@ pub(crate) fn arrays_match_rule(x: &Array, y: &Array, tol: Tol, rule: NanRule) -
         // instead, whatever their length.
         let inner = match rule {
             NanRule::Search | NanRule::SearchBoxed => NanRule::SearchBoxed,
+            NanRule::Match => NanRule::Match,
             _ => NanRule::Same,
         };
         return a.iter().zip(b.iter()).all(|(p, q)| arrays_match_rule(p, q, tol, inner));
@@ -9382,7 +9419,7 @@ pub(crate) fn arrays_match_rule(x: &Array, y: &Array, tol: Tol, rule: NanRule) -
             // `(_. , 1) i. 1`.
             let loose = match rule {
                 NanRule::Search => a.len() == 1,
-                NanRule::SearchBoxed => true,
+                NanRule::SearchBoxed | NanRule::Match => true,
                 _ => false,
             };
             if loose && tol.is_j() {
@@ -12104,7 +12141,7 @@ fn monad_op_inner(p: &Prim, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
         MonadOp::Split => Ok(split_items(y)),
         MonadOp::Execute { apl } => execute(y, apl, ctx, span),
         MonadOp::Bitwise(op) => bit_monad(op, y, ctx.cfg, span),
-        MonadOp::TruthTable(m) => truth_table(m, &Array::scalar_i64(0), y, span),
+        MonadOp::TruthTable(m) => truth_table(m, &Array::scalar_i64(0), y, ctx.cfg.tol, span),
         MonadOp::CharClass => char_class(y, ctx.cfg.near(), span),
         MonadOp::NameClass => name_class(y, ctx.env, span),
         MonadOp::CharRep => char_rep(y, ctx.env, span),
@@ -12677,11 +12714,11 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
                 && x.count() == 0
                 && y.count() == 0
                 && (x.dtype() == DType::Char) != (y.dtype() == DType::Char);
-            let same = arrays_match_rule(x, y, tol, NanRule::Same);
+            let same = arrays_match_rule(x, y, tol, NanRule::Match);
             Ok(Array::scalar_bool(!empties_differ && same))
         }
         DyadOp::NotMatch => {
-            Ok(Array::scalar_bool(!arrays_match_rule(x, y, tol, NanRule::Same)))
+            Ok(Array::scalar_bool(!arrays_match_rule(x, y, tol, NanRule::Match)))
         }
         DyadOp::GradeSelect { down } => grade_select(x, y, down, cfg.rules, cfg.tol, span),
         DyadOp::Copy => copy_items(
@@ -12791,7 +12828,7 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::Fetch => fetch(x, y, cfg.near(), span),
         DyadOp::PolyEval => poly_eval(x, y, span),
         DyadOp::PolyIntegral => poly_integral(x, y, span),
-        DyadOp::TruthTable(m) => truth_table(m, x, y, span),
+        DyadOp::TruthTable(m) => truth_table(m, x, y, cfg.tol, span),
         DyadOp::FormatSpec => format_spec(x, y, &cfg.fmt, cfg.rules.format_spec, span),
         DyadOp::FormatSpecJ => format_spec_j(x, y, &cfg.fmt, span),
         DyadOp::ParseNumbers => parse_numbers(x, y, span),
@@ -16335,21 +16372,35 @@ fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     if y.rank() == 0 {
         return scalar_monad(ScalarMonad::Recip, y, cfg, span);
     }
+    // ANYTHING HOLDING A NaN INVERTS TO NaNs OF ITS OWN SHAPE rather than
+    // being refused as a singular matrix: `%. (2 2 $ _. _. 1 0)` is four
+    // `_.` there, `%. (2 2 $ _.j_.)` four complex ones and
+    // `%. (_.j_. _.j_.)` two, which is what `%.^:2 (_. 1 2)` walks into
+    // once the vector rule below has widened the first inverse to the
+    // complex NaN. The elimination divides by a pivot the NaN poisons, and
+    // the reference carries the NaN through instead of reporting the
+    // singularity it would otherwise find.
+    if y.count() != 0
+        && y.rank() > 0
+        && let Some(zs) = y.to_complex_vec()
+        && zs.iter().any(|z| z[0].is_nan() || z[1].is_nan())
+    {
+        let shape =
+            if y.rank() == 2 { vec![y.shape[1], y.shape[0]] } else { y.shape.clone() };
+        let n = shape.iter().product();
+        return Ok(if y.dtype() == DType::Complex {
+            Array::new(shape, Data::Complex(vec![[f64::NAN, f64::NAN]; n].into()))
+        } else if y.rank() == 1 {
+            // A REAL VECTOR HOLDING A NaN widens to the complex NaN, where
+            // a wider argument stays on the reals: `%. (, _.)` is `_.j_.`
+            // there and `%. (2 2 $ _. _. 1 0)` four bare `_.`.
+            Array::new(shape, Data::Complex(vec![[f64::NAN, f64::NAN]; n].into()))
+        } else {
+            Array::new(shape, Data::F64(vec![f64::NAN; n].into()))
+        });
+    }
     if y.dtype() == DType::Complex && y.count() != 0 {
         return complex_matrix_inverse(y, span);
-    }
-    // A VECTOR HOLDING A NaN INVERTS TO THE COMPLEX NaN, whatever else it
-    // holds: `%. (, _.)` is `_.j_.` there, `%. (_. 1 2)` three of them and
-    // `%. (_. _.)` two, where the same vector without the NaN inverts on
-    // the reals. The pseudo-inverse divides by a sum the NaN poisons, and
-    // the reference's answer for the quotient is complex.
-    if y.rank() == 1
-        && y.dtype() == DType::F64
-        && let Data::F64(v) = &y.data
-        && v.iter().any(|x| x.is_nan())
-    {
-        let nan = [f64::NAN, f64::NAN];
-        return Ok(Array::new(y.shape.clone(), Data::Complex(vec![nan; v.len()].into())));
     }
     // THE EXACT TYPES SURVIVE the inverse wherever the answer is exact:
     // `%. (1 2 3x)` is `1r14 1r7 3r14` and `%. (2 2 $ 1 2 3 4x)` is
@@ -16591,6 +16642,24 @@ fn complex_unstack(sol: &[f64], n: usize, k: usize) -> Vec<Cx> {
 /// `%. y` over complex data, by the real system of twice the size.
 #[inline(never)]
 fn complex_matrix_inverse(y: &Array, span: Span) -> Result<Array> {
+    // A COMPLEX VECTOR IS A COLUMN, and the pseudo-inverse of a column is
+    // written in closed form here as it is on the reals — with the
+    // CONJUGATE, since the sum below is of magnitudes:
+    // `(+ v) % (+/ v * + v)`. The general least-squares solve reaches the
+    // same numbers only to within its own rounding, and the reference's
+    // are exact: `%. &.:j. (1 1.0000000000001)` is `_0.5 _0.5` there where
+    // the elimination leaves an imaginary residue of 8e_17.
+    if y.rank() == 1
+        && y.count() > 0
+        && let Some(v) = y.to_complex_vec()
+    {
+        let total: f64 = v.iter().map(|z| z[0] * z[0] + z[1] * z[1]).sum();
+        if total != 0.0 && total.is_finite() {
+            let out: Vec<Cx> =
+                v.iter().map(|z| [z[0] / total, -z[1] / total]).collect();
+            return Ok(complex_or_real_shaped(out, y.shape.clone()));
+        }
+    }
     let (a, m, n) = as_complex_matrix(y, span)?;
     if m < n {
         return Err(Error::new(
@@ -21018,14 +21087,46 @@ fn carry_exact2(result: Array, x: &Array, y: &Array) -> Array {
     carry_exact(widened, y)
 }
 
+/// Whether every value here is a bit under the comparison tolerance.
+///
+/// The reference reads a bit tolerantly and in any numeric type: the
+/// complex `(1j1e_15) (12 b.) 1` answers as `1 (12 b.) 1` does, and the
+/// float `(0.9999999999999999) (15 b.) 1` answers 1. A value that is not
+/// numeric at all is no bit.
+fn reads_as_bits(a: &Array, tol: Tol) -> bool {
+    let Some(zs) = a.to_complex_vec() else { return false };
+    zs.iter().all(|&z| tol.eq_cx(z, [0.0, 0.0]) || tol.eq_cx(z, [1.0, 0.0]))
+}
+
+/// One bit read out of a value under the comparison tolerance, or `None`
+/// where the value is no bit.
+fn bit_of(a: &Array, tol: Tol) -> Option<i64> {
+    let z = a.to_complex_vec()?.first().copied().unwrap_or([0.0, 0.0]);
+    if tol.eq_cx(z, [0.0, 0.0]) {
+        Some(0)
+    } else if tol.eq_cx(z, [1.0, 0.0]) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
 /// `m b.`: one of the sixteen boolean functions of two bits, and — sixteen
 /// higher — the same function applied to every bit of a pair of integers.
-fn truth_table(m: i8, x: &Array, y: &Array, span: Span) -> Result<Array> {
+fn truth_table(m: i8, x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
     if m < 0 {
         return Err(Error::domain("m b. takes a number from 0 to 34", span));
     }
     let table = (m as u8) & 15;
     let bit = |a: i64, b: i64| ((table >> (3 - (2 * a + b))) & 1) as i64;
+    // BELOW SIXTEEN the two operands are BITS, which the reference reads
+    // under the comparison tolerance and in any numeric type; from sixteen
+    // up they are whole machine integers and nothing else will do.
+    if m < 16
+        && let (Some(a), Some(b)) = (bit_of(x, tol), bit_of(y, tol))
+    {
+        return Ok(Array::scalar_bool(bit(a, b) != 0));
+    }
     let xs = x
         .to_i64_vec()
         .ok_or_else(|| Error::domain("a boolean function takes integers", span))?;
@@ -23946,6 +24047,13 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
 #[inline(never)]
 fn prime_query_at(form: i64, z: Cx, span: Span) -> Result<Array> {
     if z[1] != 0.0 {
+        // A COMPLEX VALUE WITH NO FINITE REAL PART reaches the next prime
+        // all the same, where the reference answers the smallest prime
+        // there is: `4 p: (_j1)` is 2, as `4 p: _` is, while the finite
+        // `4 p: 3j4` stays a domain error.
+        if form == 4 && !z[0].is_finite() && !z[0].is_nan() {
+            return Ok(smallest_prime_extended());
+        }
         return match form {
             0 => Ok(Array::scalar_bool(true)),
             1 => Ok(Array::scalar_bool(false)),
@@ -23993,7 +24101,7 @@ fn prime_meta_at(form: i64, n: f64, span: Span) -> Result<Array> {
         // reference does; a NaN answers nothing.
         4 => {
             if n.is_infinite() {
-                return Ok(Array::scalar_i64(2));
+                return Ok(smallest_prime_extended());
             }
             if n.is_nan() {
                 return Err(unordered("a NaN"));
@@ -24192,6 +24300,15 @@ fn primes_below(n: i64, span: Span) -> Result<i64> {
         }
     }
     Ok(large[1])
+}
+
+/// The smallest prime there is, in the EXTENDED type. `4 p:` of a value
+/// with no place in the order — either infinity, or a complex one whose
+/// real part is infinite — answers 2 there, and answers it in the type a
+/// value outside the machine word forces: `3!:0 (4 p: _)` is 64, so
+/// `(4 p: (_ __ 0)) ^ _1` is the exact `1r2 1r2 1r2` and not `0.5 0.5 0.5`.
+fn smallest_prime_extended() -> Array {
+    Array::new(vec![], Data::Ext(vec![Ext::from(2)].into()))
 }
 
 /// The smallest prime strictly greater than n. There is always one, and
@@ -24691,6 +24808,16 @@ fn words(y: &Array, span: Span) -> Result<Array> {
     let Data::Char(v) = &y.data else {
         return Err(Error::domain("words reads a character list", span));
     };
+    // A WORD IS MADE OF BYTES. The reference reads its one-byte character
+    // type and converts a wider one down to it, so `;: (u: 65 0 66)` and
+    // `;: (u: 'abc')` read as their literals do while `;: (u: 955)` and
+    // `;: (u: 65534)` — codes no byte holds — are domain errors.
+    if let Some(c) = v.iter().find(|&&c| c as u32 > 255) {
+        return Err(Error::domain(
+            format!("words reads bytes, and {} is no byte", *c as u32),
+            span,
+        ));
+    }
     let src: Vec<char> = v.as_slice().to_vec();
     let n = src.len();
     let mut out: Vec<Array> = Vec::new();
