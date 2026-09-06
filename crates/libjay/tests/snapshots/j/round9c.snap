@@ -1,0 +1,270 @@
+# libjay reference snapshot: J — corpus/j/round9c.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= _. -: _.
+> j: 1
+= 2 -: _.
+> j: 1
+= _. -: 2
+> j: 1
+= 2.0 -: _.
+> j: 1
+= 2 -: 3
+> j: 0
+= 2 -: _
+> j: 0
+= _ -: 2
+> j: 0
+= 2 -: _.j_.
+> j: 0
+= 'a' -: _.
+> j: 0
+= 1 2 3 -: _.
+> j: 0
+= (_.) -: (0 $ 0)
+> j: 0
+= (_. 1) -: (_. 2)
+> j: 0
+= (1 2 3) -: (_. _. _.)
+> j: 1
+= (2 2 $ _.) -: (2 2 $ i. 4)
+> j: 1
+= (<_.) -: (<2)
+> j: 1
+= (<_.) -: (<_.)
+> j: 1
+= (<_.) = (<2)
+> j: 1
+= (<_.) e. (<1)
+> j: 1
+= ~. (<_.) , (<2)
+> j: +--+-+
+> j: |_.|2|
+> j: +--+-+
+= ~. (_. , _.)
+> j: _. _.
+= 2 ~: _.
+> j: 1
+= _. e. 1 2 3
+> j: 1
+= 1 2 3 i. _.
+> j: 0
+= 3!:0 (1e9)
+> j: 4
+= 3!:0 (2e2)
+> j: 4
+= 3!:0 (15e2)
+> j: 4
+= 3!:0 (1.5e3)
+> j: 8
+= 3!:0 (1.23e5)
+> j: 8
+= 3!:0 (1e_3)
+> j: 8
+= 3!:0 (1e18)
+> j: 4
+= 3!:0 (5e18)
+> j: 4
+= 3!:0 (1e19)
+> j: 8
+= 3!:0 (_1e9)
+> j: 4
+= 1e9
+> j: 1000000000
+= <1e9
+> j: +----------+
+> j: |1000000000|
+> j: +----------+
+= <1e18
+> j: +-------------------+
+> j: |1000000000000000000|
+> j: +-------------------+
+= <1e19
+> j: +----+
+> j: |1e19|
+> j: +----+
+= <1e20
+> j: +----+
+> j: |1e20|
+> j: +----+
+= <1.5e9
+> j: +-----+
+> j: |1.5e9|
+> j: +-----+
+= <9007199254740992
+> j: +----------------+
+> j: |9007199254740992|
+> j: +----------------+
+= 1e10 +. 2
+> j: 2
+= 3!:0 ((1e10) +. 2)
+> j: 4
+= 2 + 1e9
+> j: 1000000002
+= %. (, _.)
+> j: _.j_.
+= %. (_. 1 2)
+> j: _.j_. _.j_. _.j_.
+= %. (2 2 $ _. _. 1 0)
+> j: _. _.
+> j: _. _.
+= %. (2 2 $ _. 1 2 3)
+> j: _. _.
+> j: _. _.
+= %. (3 3 $ _. 1 2 3 4 5 6 7 8)
+> j: _. _. _.
+> j: _. _. _.
+> j: _. _. _.
+= %. (_.j_. _.j_.)
+> j: _.j_. _.j_.
+= %. (, _.j_.)
+> j: _.j_.
+= %. (2 2 $ _.j_.)
+> j: _.j_. _.j_.
+> j: _.j_. _.j_.
+= %. (_.j1 1 2)
+> j: _.j_. _.j_. _.j_.
+= %.^:2 (_. 1 2)
+> j: _.j_. _.j_. _.j_.
+= %.^:3 (_. 1 2)
+> j: _.j_. _.j_. _.j_.
+= %.@] &.#: ((_.) ,/ 2)
+> j: _. _.
+= %. (0j1 0j2 0j3)
+> j: 0j_0.0714286 0j_0.142857 0j_0.214286
+= %. (0j1 0j1.0000000000001)
+> j: 0j_0.5 0j_0.5
+= %. &.:j. (1 1.0000000000001)
+> j: _0.5 _0.5
+= %. (1j1 2j2)
+> j: 0.1j_0.1 0.2j_0.2
+= 4 p: 5
+> j: 7
+= 3!:0 (4 p: 5)
+> j: 4
+= 4 p: _
+> j: 2
+= 3!:0 (4 p: _)
+> j: 64
+= 4 p: __
+> j: 2
+= 4 p: 0
+> j: 2
+= 4 p: (_ __ 0)
+> j: 2 2 2
+= (4 p: (_ __ 0)) ^ _1
+> j: 1r2 1r2 1r2
+= 3!:0 (4 p: (_ __ 0))
+> j: 64
+= 4 p: (^.^:3 (0 1 1 0))
+> j: 2 2 2 2
+= 4 p: 1e10
+> j: 10000000019
+= 3!:0 (4 p: 1e10)
+> j: 4
+= (0.9999999999999999) (15 b.) 1
+> j: 1
+= 1 (15 b.) (0.9999999999999999)
+> j: 1
+= (1.0000000000000002) (15 b.) 1
+> j: 1
+= 0.0 (15 b.) 1
+> j: 1
+= (1j0) (15 b.) 1
+> j: 1
+= (1j1e_15) (12 b.) 1
+> j: 0
+= (1j1e_15) (12 b.) 0
+> j: 0
+= 0 (12 b.) 1
+> j: 1
+= 1 (12 b.) 1
+> j: 0
+= (1e_15) (15 b.) 1
+> j: <error>
+= (1 1.0000000000001) (14 b.) (2 0 3 $ 0)
+> j: <error>
+= 2 (0 b.) (i. 0)
+> j: <error>
+= 1 (0 b.) (i. 0)
+> j:
+= (0 $ 0.5) (7 b.) (0 $ 0)
+> j:
+= 1 (7 b.) (0 $ 0)
+> j:
+= (0 3 $ 0) (7 b.) (0 3 $ 0)
+> j:
+= 0 +/\\ ((0 0 # (2 0 3 $ 0)) + ((_9223372036854775806) <. L:_2 (a:)))
+> j:
+= (3 p: (_3)) >./. ((6) ;: (0.1 0.2 0.3))
+> j: <error>
+= 0j_ - 0j_
+> j: <error>
+= (0j_ 1) - (0j_ 2)
+> j: <error>
+= _ - 0j_
+> j: _j__
+= (_ __ 0) - (_ 0j_ 0)
+> j: <error>
+= (_j2) % 0
+> j: <error>
+= (2j3) % 0
+> j: _j_
+= ! _
+> j: _
+= ! (0j_)
+> j: <error>
+= ! (_ 0j_ 0)
+> j: <error>
+= %: (_ __ 0)
+> j: _ 0j_ 0
+= ; !.1e_9 (1r2 1r3)
+> j: 1r2 1r3
+= 3!:0 (; !.1e_9 (1r2 1r3))
+> j: 128
+= ; !.1e_9 (1 2 3x)
+> j: 1 2 3
+= ; !.1e_9 (0.5 0.25)
+> j: 0.5 0.25
+= ; (1r2 1r3)
+> j: 1r2 1r3
+= ;: (u: 'abc')
+> j: +---+
+> j: |abc|
+> j: +---+
+= ;: (2 u: 'abc')
+> j: +---+
+> j: |abc|
+> j: +---+
+= ;: (u: 65 0 66)
+> j: +-+-+-+
+> j: |A| |B|
+> j: +-+-+-+
+= ;: (u: 955)
+> j: <error>
+= ;: (u: 65534)
+> j: <error>
+= ;: (u: (_2 0 2))
+> j: <error>
+= ;: (200 { a.)
+> j: +-+
+> j: |�|
+> j: +-+

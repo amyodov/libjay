@@ -5740,8 +5740,17 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx> {
     // `0j_ - 0j_` and `(_ __ 0) - (_ 0j_ 0)` are NaN errors there exactly
     // as `_ - _` is, and `(_j2) % 0` is one too. A NaN the program itself
     // wrote still travels on.
+    // The NaN has to have come from an INFINITY the operands carried, not
+    // from a finite pass that overflowed on its way: `(1e200j1e200) |
+    // (1e300j1e300)` answers there, where the quotient runs past the
+    // doubles and the residue is recovered all the same.
+    // It is the four steps of the ARITHMETIC that refuse. The transcendental
+    // ones answer a NaN of their own where the reference does — `(_j_) ^ 2`
+    // is `_.j_` there and `_j_ ^ 0.5` is `_.j_.`.
     if tol.is_j()
+        && matches!(op, ScalarDyad::Add | ScalarDyad::Sub | ScalarDyad::Mul | ScalarDyad::DivJ)
         && !a.iter().chain(b.iter()).any(|v| v.is_nan())
+        && a.iter().chain(b.iter()).any(|v| v.is_infinite())
         && let Some(k) = (0..2).find(|&k| r[k].is_nan())
     {
         return Err(nan_error(op, a[k], b[k], span));
@@ -7956,6 +7965,16 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
         // of plain steps below.
         Floor => Data::Complex(par::map(v, |&z| cx::floor(z, tol)).into()),
         Ceil => Data::Complex(par::map(v, |&z| cx::ceil(z, tol)).into()),
+        // THE FACTORIAL HAS NO LIMIT AT AN INFINITE IMAGINARY PART.
+        // `! (0j_)` and `! (0j__)` are limit errors in the reference where
+        // `! (_j0)` — the real infinity the value displays as — is `_`.
+        Factorial if v.iter().any(|z| z[1].is_infinite()) => {
+            return Err(Error::new(
+                ErrorKind::Limit,
+                "this factorial runs past every value there is",
+                Some(span),
+            ));
+        }
         _ => {
             let step: fn(Cx) -> Cx = match op {
                 Factorial => cx::factorial,

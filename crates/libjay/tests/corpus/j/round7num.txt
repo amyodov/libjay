@@ -118,15 +118,13 @@ _1e17 ! _1e17
 1e17 ! 1
 1e17 ! _1
 _1e17 ! 0
-_1e17 ! _1
 _1e17 ! _2
 _1e17 ! 2
 
 // TWO NEGATIVE WHOLE ARGUMENTS: the upper-negation identity, whose sign
-// alternates with the parity of `y - x` READ OFF THE DOUBLE. Past 2^53 a
-// double cannot tell an odd whole number from an even one, so
-// `_1e17 ! _1` is 1 although 99999999999999999 is odd, and
-// `_99999999999999999 ! _1` is 1 for the same reason.
+// alternates with the parity of `y - x`. Past 2^53 the reference reads
+// that parity OFF A DOUBLE and loses it, which libjay does not follow —
+// the two spellings are in the divergence list with their reason.
 _5 ! _1
 _5 ! _2
 _5 ! _3
@@ -144,7 +142,6 @@ _6 ! _1
 _6 ! _2
 _7 ! _1
 _1e17 ! _3
-_99999999999999999 ! _1
 
 // THE LOGARITHM OF AN EXACT 1 is an exact 0, and 1 is the only argument
 // whose natural logarithm keeps the extended type. The rational type

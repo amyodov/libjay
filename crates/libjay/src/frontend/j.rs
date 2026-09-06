@@ -5140,14 +5140,31 @@ mod tests {
     }
 
     #[rstest]
-    #[case("1e3", 1000.0)]
     #[case("1e_3", 0.001)]
     #[case("2.5e2", 250.0)]
     #[case("_1.5", -1.5)]
+    #[case("1e19", 1e19)]
+    #[case("1.23e5", 123000.0)]
     fn exponent_and_sign_forms(#[case] src: &str, #[case] want: f64) {
         let a = konst(&one(src));
         assert_eq!(a.dtype(), DType::F64);
         assert_eq!(a.to_f64_vec().expect("numeric"), vec![want]);
+    }
+
+    /// A whole number written with an exponent is an INTEGER, as it is in
+    /// the reference: `3!:0 (1e9)` is 4 there and `3!:0 (1e19)` — a value
+    /// no machine word holds — is 8. The point in the mantissa is what
+    /// parts `1.5e3` from `15e2`.
+    #[rstest]
+    #[case("1e3", 1000)]
+    #[case("1e9", 1_000_000_000)]
+    #[case("15e2", 1500)]
+    #[case("5e18", 5_000_000_000_000_000_000)]
+    #[case("_1e9", -1_000_000_000)]
+    fn whole_exponent_forms_are_integers(#[case] src: &str, #[case] want: i64) {
+        let a = konst(&one(src));
+        assert_eq!(a.dtype(), DType::I64);
+        assert_eq!(a.as_i64_slice(), Some(&[want][..]));
     }
 
     #[test]

@@ -93,7 +93,7 @@
 > j: _. _. _.
 = %. (1 1 $ _.)
 ? the reference widens a one-item NaN table to complex where a wider one stays real
-< <error>
+< _.
 > j: _.j_.
 = 4 p: (_. 1 2)
 ? the reference refuses a lone NaN's next prime and answers one in a list
@@ -628,3 +628,28 @@
 ? the reference checks the radix count for integers and not for rationals
 < <error>
 > j:
+= p. &.< (1ad45)
+? the reference's own `p. (< 2 3j4)` answers where this one is an index error
+< _0.707107j_0.707107 1
+> j: <error>
+= p. &.< (0j1)
+? the same with the imaginary unit for the root
+< 0j_1 1
+> j: <error>
+= p.. &.< (1ad45)
+? the same under the polynomial derivative
+< 1
+> j: <error>
+= -/\\. (2 2 $ _ 1 _ 2)
+? the reference's own `-/` of this is a NaN error, which contradicts it
+< <error>
+> j: _. _1
+> j:  _  2
+= _1e17 ! _1
+? the reference rounds 1e17-1 to an even double and loses the sign
+< _1
+> j: 1
+= _1e16 ! _1
+? the same one exponent down, the first size a double cannot tell apart
+< _1
+> j: 1
