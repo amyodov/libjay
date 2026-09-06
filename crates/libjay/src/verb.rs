@@ -2570,6 +2570,9 @@ impl Verb {
                         | DyadOp::MemberApl
                         | DyadOp::IndexOf { .. }
                         | DyadOp::IndexOfLast { .. }
+                        // `2 -.!.0 (1.5)` is 2 in jconsole: the sieve is
+                        // the comparison pass and takes its fit.
+                        | DyadOp::Less
                         // `'ab' E.!.0 'abc'` is `1 0 0` in jconsole: the
                         // search takes a tolerance like the comparisons it
                         // is built out of.
@@ -5396,11 +5399,15 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
         Add => a + b,
         Sub => a - b,
         Mul => tol.mul(a, b),
-        // An EXACT operand beside a NaN keeps the NaN: `2x <. _.` and
-        // `2x >. _.` are `_.` there, where two floats read a NaN as
-        // ordered against nothing.
-        Min if tol.nan_wins && (a.is_nan() || b.is_nan()) => f64::NAN,
-        Max if tol.nan_wins && (a.is_nan() || b.is_nan()) => f64::NAN,
+        // A NaN NEVER WINS A MIN OR A MAX. The reference picks the left
+        // operand only where the STRICT comparison says to, so a NaN —
+        // which fails every strict test — leaves standing whichever
+        // operand the pass reads as its BASE. [`Tol::nan_wins`] carries
+        // which one that is for these two verbs; away from the extrema it
+        // means something else.
+        Min | Max if tol.is_j() && (a.is_nan() || b.is_nan()) => {
+            if tol.nan_wins { a } else { b }
+        }
         Min => a.min(b),
         Max => a.max(b),
         DivJ => {
@@ -6340,17 +6347,6 @@ fn dyad_f64_chunk_body<A: Widen<f64>, B: Widen<f64>>(
     span: Span,
 ) -> Result<()> {
     use ScalarDyad::*;
-    // The arithmetic that cannot fail is picked before the loop, so the
-    // compiler sees one operation per pass instead of a match per element.
-    macro_rules! plain {
-        ($step:expr) => {{
-            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
-                *slot = $step(a.widen(), b.widen());
-                true
-            });
-            return Ok(());
-        }};
-    }
     // The arithmetic that cannot fail runs in the plain loop; under J's
     // rules a NaN in what it wrote means the pass has to be redone one pair
     // at a time, because only there are both operands in hand to tell a NaN
@@ -6368,14 +6364,32 @@ fn dyad_f64_chunk_body<A: Widen<f64>, B: Widen<f64>>(
             }
         }};
     }
+    macro_rules! extremum {
+        ($step:expr) => {{
+            let mut saw_nan = false;
+            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
+                let (a, b): (f64, f64) = (a.widen(), b.widen());
+                saw_nan |= a.is_nan() || b.is_nan();
+                *slot = $step(a, b);
+                true
+            });
+            if !(tol.is_j() && saw_nan) {
+                return Ok(());
+            }
+        }};
+    }
     match op {
         Add => plain_checked!(|a: f64, b: f64| a + b),
         Sub => plain_checked!(|a: f64, b: f64| a - b),
         Mul => plain_checked!(|a: f64, b: f64| a * b),
         // The extrema's fast path answers without consulting [`f64_op`],
-        // so a pass that lets a NaN win has to go the long way round.
-        Min if !tol.nan_wins => plain!(f64::min),
-        Max if !tol.nan_wins => plain!(f64::max),
+        // and `f64::min` keeps the number where the reference keeps
+        // whichever operand a failed strict comparison leaves standing, so
+        // a pass with a NaN anywhere in its OPERANDS goes the long way
+        // round. The answer alone does not say: `1.5 <. _.` is `_.` there
+        // and `f64::min` answers 1.5, with no NaN in it to notice.
+        Min => extremum!(f64::min),
+        Max => extremum!(f64::max),
         _ => {}
     }
     let mut err = None;
@@ -6692,15 +6706,14 @@ fn compare_data(
         });
         return Ok(Data::Bool(out.into()));
     }
-    // AN EXACTLY HELD VALUE COMPARED WITH A NaN READS AS EQUAL. The exact
-    // pass above has no answer for a value the rational type cannot hold,
-    // and where the pair falls through to the floats the reference does
-    // not read the NaN as ordered against nothing: `2x = _.`, `2x <: _.`
-    // and `2x >: _.` are 1 there, `2x < _.` and `2x ~: _.` are 0, and a
-    // rational left argument answers the same way. Only the EXACT side
-    // brings the reading; two floats keep the ordinary one.
-    let exact_side = matches!(dx, DType::Ext | DType::Rat)
-        || matches!(dy, DType::Ext | DType::Rat);
+    // A NaN IS THE VALUE THE TOLERANT PASS CANNOT REJECT. The reference
+    // writes its tolerant comparisons as negations of the two strict ones
+    // — unequal only where the difference EXCEEDS the tolerance — and a
+    // NaN fails every strict test, so it satisfies every non-strict one:
+    // `=`, `<:` and `>:` answer 1 against it and `<`, `>` and `~:` answer
+    // 0. Its EXACT pass is machine equality, where a NaN equals nothing,
+    // not even itself. See [`nan_reads_equal`] for which pass runs.
+    let nan_equal = nan_reads_equal(dx, dy, n, tol);
     // Floats compare with the dialect's tolerance; integers are exact
     // whatever it is, so the integer pass below is untouched by it.
     let out = if DType::promote(dx, dy) == Some(DType::F64) {
@@ -6710,7 +6723,7 @@ fn compare_data(
                 par::fill(n, |start, part: &mut [u8]| {
                     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
                         let (a, b): (f64, f64) = (a.widen(), b.widen());
-                        *slot = if exact_side && (a.is_nan() || b.is_nan()) {
+                        *slot = if nan_equal && (a.is_nan() || b.is_nan()) {
                             cmp_result(op, Some(std::cmp::Ordering::Equal)) as u8
                         } else {
                             tol_cmp(op, a, b, tol) as u8
@@ -6749,6 +6762,53 @@ fn compare_data(
 /// recorded in the divergence list rather than followed: the same values
 /// under the same verb cannot have two answers.
 #[inline(always)]
+/// WHETHER THIS PASS READS A NaN AS EQUAL TO EVERY NUMBER.
+///
+/// The reference has two comparison loops and a NaN parts them. Its
+/// TOLERANT loop asks whether the difference exceeds the tolerance, which
+/// a NaN difference never does, so a NaN is equal to whatever it is set
+/// against; its EXACT loop is machine equality, where a NaN equals nothing
+/// at all. Which one runs is settled by the operands and not by their
+/// values, and a 470-cell grid over `= < <: > >: ~: E. -.` fixes it:
+///
+/// - an INTEGER, BOOLEAN or COMPLEX operand is compared exactly at every
+///   length — `(_. 1 2) = (1 2 3)` is `0 0 0` and `_. = 1j0` is 0;
+/// - two FLOATS are compared exactly where the pass has ONE pair to make
+///   and tolerantly where it has more — `_. = _.` is 0 while
+///   `(_. 1 2) = (_. 1 2)` is `1 1 1` and `(2 2 $ _.) = (2 2 $ 1.5)` is
+///   all ones;
+/// - an EXTENDED or RATIONAL operand is compared tolerantly at every
+///   length, having no loop of its own to fall into: `(,_.) = 1x` is 1.
+///
+/// A zero tolerance (`=!.0`) is the exact loop whatever the operands are,
+/// which the caller gets for free: it asks this only to decide the NaN,
+/// and `Tol::eq` at zero separates the pair anyway.
+///
+/// `exact_side_counts` is the third clause above. The COMPARISONS have it;
+/// the SIEVE `-.` does not, and answers to the length alone —
+/// `(,_.) -. (,1x)` keeps its NaN where `(,_.) = 1x` is 1 — because the
+/// exact side is widened to a float before its items are looked up.
+fn nan_reads_equal_by(
+    dx: DType,
+    dy: DType,
+    n: usize,
+    tol: Tol,
+    exact_side_counts: bool,
+) -> bool {
+    if !tol.is_j() || tol.ct == 0.0 {
+        return false;
+    }
+    let loose = |t: DType| matches!(t, DType::F64 | DType::Ext | DType::Rat);
+    let exact_side = exact_side_counts
+        && (matches!(dx, DType::Ext | DType::Rat) || matches!(dy, DType::Ext | DType::Rat));
+    loose(dx) && loose(dy) && (exact_side || n > 1)
+}
+
+/// [`nan_reads_equal_by`] as the comparison verbs ask it.
+fn nan_reads_equal(dx: DType, dy: DType, n: usize, tol: Tol) -> bool {
+    nan_reads_equal_by(dx, dy, n, tol, true)
+}
+
 pub(crate) fn tol_cmp(op: ScalarDyad, a: f64, b: f64, tol: Tol) -> bool {
     use ScalarDyad::*;
     match op {
@@ -7029,11 +7089,22 @@ fn lcm_gcd_data(
     let both_bool = x.dtype() == DType::Bool && y.dtype() == DType::Bool;
     let float = t == DType::F64;
     let (xs, ys) = if float {
+        // A FLOAT OPERAND PUTS THE WHOLE PAIR THROUGH THE FLOAT EUCLID,
+        // whole or not. J's reference does no integer shortcut for a value
+        // that merely happens to be whole, and its float Euclid stops as
+        // soon as a remainder falls within `⎕CT` of the LARGER operand —
+        // an absolute threshold of about 5e5 beside 9e18, which is wider
+        // than the divisor itself. So `(_9223372036854775806) +. (6.0)` is
+        // 6 there and `(4611686018427387903) +. (2.0)` is 2, neither of
+        // them the exact divisor of the numbers as written, while
+        // `(_9223372036854775806) +. (2)` — two integers, no float in
+        // sight — is the exact 2. GNU APL keeps the whole-number
+        // shortcut, having rounded its operands to whole numbers first.
         let (mut tx, mut ty) = (Vec::new(), Vec::new());
         let xf = borrow_f64(x, &mut tx);
         let yf = borrow_f64(y, &mut ty);
         let integral = |v: &[f64]| v.iter().all(|&a| a.fract() == 0.0 && fits_i64(a));
-        if !integral(xf) || !integral(yf) {
+        if !gnu || !integral(xf) || !integral(yf) {
             return real_lcm_gcd(op, xf, xoff, xdiv, yf, yoff, ydiv, n, tol, gnu, span);
         }
         (
@@ -7777,6 +7848,41 @@ fn as_real(a: &Array) -> Option<Array> {
     Some(Array::new(a.shape.clone(), Data::F64(real?.into())))
 }
 
+/// WHICH OPERAND A FAILED COMPARISON LEAVES STANDING, for `<.` and `>.`.
+///
+/// The two extrema pick the left operand only where the STRICT comparison
+/// says to, and a NaN fails every strict test, so the answer there is
+/// whichever operand the reference's loop reads as its BASE. A 240-cell
+/// grid over both verbs, three types and five shapes fixes which one that
+/// is, in this order:
+///
+/// - ONE PAIR: the right. `1 <. (_.)` is `_.` and `(_.) <. 1` is 1.
+/// - An INTEGER beside a float: the integer, whichever side it is written
+///   on. `(1 1) <. (_. _.)` is `1 1` and `(_.) <. (1 1)` is `1 1` — the
+///   pass converts and reads the integers as the base it has.
+/// - A BROADCAST operand: the broadcast one. `(1.0) <. (_. _.)` is `1 1`
+///   and `(_.) <. (1.0 1.0)` is `_. _.`.
+/// - Otherwise the right: `(1.0 1.0) <. (_. _.)` is `_. _.`.
+///
+/// It is answered as a FLAG rather than by writing the base operand on the
+/// right, because the two extrema are symmetric away from a NaN in every
+/// way but one: `f64::min` hands back whichever ±0 it was given first, and
+/// swapping the pair would part the fused pipeline from the plain one on
+/// the sign of a zero.
+fn extremum_base_is_left(x: &Array, y: &Array) -> bool {
+    let (xc, yc) = (x.count(), y.count());
+    let int = |t: DType| matches!(t, DType::I64 | DType::Bool);
+    if xc.max(yc) <= 1 {
+        false
+    } else if int(x.dtype()) && y.dtype() == DType::F64 {
+        true
+    } else if int(y.dtype()) && x.dtype() == DType::F64 {
+        false
+    } else {
+        xc < yc
+    }
+}
+
 fn scalar_dyad(
     op: ScalarDyad,
     x: &Array,
@@ -7841,11 +7947,14 @@ fn scalar_dyad(
         || matches!(y.dtype(), DType::Ext | DType::Rat);
     let boolean_side = x.dtype() == DType::Bool || y.dtype() == DType::Bool;
     let nan_wins = cfg.rules.lang == crate::Lang::J
-        && !boolean_side
         && match op {
+            // For the two EXTREMA the flag carries something else: which
+            // operand a failed comparison leaves standing. See
+            // [`extremum_base_is_left`].
+            ScalarDyad::Min | ScalarDyad::Max => extremum_base_is_left(x, y),
+            _ if boolean_side => false,
             ScalarDyad::Mul => p.n > 1 || exact_side,
             ScalarDyad::Pow | ScalarDyad::Root => true,
-            ScalarDyad::Min | ScalarDyad::Max => exact_side,
             _ => false,
         };
     let tol = Tol { nan_wins, ..cfg.tol };
@@ -9598,7 +9707,9 @@ pub(crate) fn arrays_match_rule(x: &Array, y: &Array, tol: Tol, rule: NanRule) -
                 NanRule::SearchBoxed | NanRule::Match => true,
                 _ => false,
             };
-            if loose && tol.is_j() {
+            // A ZERO TOLERANCE IS THE EXACT PASS, fit and all: `2 i.!.0 (_.)`
+            // is 1 there — not found — where `2 i. (_.)` is 0.
+            if loose && tol.is_j() && tol.ct != 0.0 {
                 return a
                     .iter()
                     .zip(b)
@@ -15992,22 +16103,25 @@ fn interval_index(
     let vals = y
         .to_f64_vec()
         .ok_or_else(|| Error::domain("interval index needs numeric values", span))?;
-    let down = descending_bounds(bounds.len(), |i, j| tol.lt(bounds[j], bounds[i]));
+    // EVERY TEST THE BISECTION MAKES IS A NEGATION, which is what settles
+    // a NaN among the bounds. "a comes before b" is the reference's
+    // `!(b <: a)`, false for two ordinary numbers exactly where `a < b`
+    // is true and TRUE wherever a NaN is one of the pair — so a NaN bound
+    // never stops the search and a NaN value is carried past every bound.
+    // The same negation reads the DIRECTION, `!(first <: last)`, which is
+    // why `_. 1 2` and `1 2 _.` are searched as descending runs. All
+    // eighteen cells of the `I.` grid follow from it, the eight where the
+    // bounds are unsorted included.
+    let before = |a: f64, b: f64| if a.is_nan() || b.is_nan() { true } else { !tol.le(b, a) };
+    let down = descending_bounds(bounds.len(), |i, j| before(bounds[j], bounds[i]));
     let out: Vec<i64> = vals
         .iter()
         .map(|&v| {
             if bisect {
                 let n = bounds.len();
-                // A NaN SITS ABOVE EVERY ASCENDING BOUND: `2 I. (_. 1 2)`
-                // is `1 0 0` in the reference, where the bisection's own
-                // comparisons — false whichever way they are asked against
-                // a NaN — would leave it at the bottom with the smallest.
-                if v.is_nan() && !down {
-                    return offset + n as i64;
-                }
                 return offset
                     + bisect_bounds(n, |i| {
-                        if down { tol.lt(v, bounds[i]) } else { tol.lt(bounds[i], v) }
+                        if down { before(v, bounds[i]) } else { before(bounds[i], v) }
                     }) as i64;
             }
             // APL counts a bound EQUAL to the value, J does not: `1 3 5⍸3`
@@ -18820,9 +18934,16 @@ fn shift_fill(
             return Err(Error::new(ErrorKind::Length, "a fill is one atom", Some(span)));
         }
         let t = DType::promote(y.dtype(), fill.dtype()).ok_or_else(mismatch)?;
-        let src = if counts.iter().any(|&n| n != 0) { fill } else { y };
+        // A LIST OF COUNTS GIVES AN ATOM ONE AXIS OF LENGTH ONE APIECE,
+        // AND ONLY THE LEADING COUNT MOVES IT. `$ ((0 1) |.!.9 (5))` is
+        // `1 1` in the reference and its value 5, while `(1 0) |.!.9 (5)`
+        // is the fill: the counts after the first add an axis and shift
+        // nothing. A single count — an atom, or a one-item list — leaves
+        // the answer a scalar, which is the ordinary shift.
+        let src = if counts.first().is_some_and(|&n| n != 0) { fill } else { y };
+        let shape = if counts.len() > 1 { vec![1usize; counts.len()] } else { Vec::new() };
         return match src.data.cast(t) {
-            Some(d) => Ok(Array::new(Vec::new(), d)),
+            Some(d) => Ok(Array::new(shape, d)),
             None => Err(mismatch()),
         };
     }
@@ -22650,10 +22771,24 @@ fn item_marks(y: &Array, x: &Array, tol: Tol) -> Vec<bool> {
     let n = if y.rank() == 0 { 1 } else { y.items() };
     let item_rank = y.rank().saturating_sub(1);
     let against = conforming_cells(x, item_rank);
+    // `-.` AGAINST A SINGLE ITEM IS THE COMPARISON PASS, and carries the
+    // comparison's NaN with it: `(_. 1 2) -. (1.5)` is `1 2` there, the
+    // NaN removed by a value it is not. Against MORE than one item the
+    // reference builds a lookup instead and compares exactly, which is
+    // why `(_. 1 2) -. (_. 1 2)` keeps its NaN and removes the rest; and
+    // `(,_.) -. (,1.5)` keeps it too, one pair being the comparison's own
+    // exact case. An INTEGER on either side is exact at every length, so
+    // `(_. 1 2) -. (1)` is `_. 2`. `~.` and `~:` are not this path and
+    // hold a NaN apart from everything at every length.
+    let rule = if against.len() == 1 && nan_reads_equal_by(y.dtype(), x.dtype(), n, tol, false) {
+        NanRule::Search
+    } else {
+        NanRule::Distinct
+    };
     (0..n)
         .map(|i| {
             let cell = item_or_self(y, i);
-            against.iter().any(|c| arrays_match(&cell, c, tol))
+            against.iter().any(|c| arrays_match_rule(&cell, c, tol, rule))
         })
         .collect()
 }
@@ -22735,11 +22870,22 @@ fn union_items(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
 /// pads the pattern with leading axes of one and takes any rank up to y's.
 fn find_seq(x: &Array, y: &Array, tol: Tol, apl: bool, span: Span) -> Result<Array> {
     let (xr, yr) = (x.rank(), y.rank());
+    // `E.` COMPARES ITS ATOMS THE WAY THE COMPARISON VERBS DO, so a NaN
+    // in either side is equal to every number once the pass has more than
+    // one atom to look at: `(_.) E. (_. 1 2)` is `1 1 1` and
+    // `(_. 1) E. (_. 1 2 _. 1)` is `1 0 1 1 0`, where `(_.) E. (1.5)` —
+    // one atom against one — is 0. The count that decides is the
+    // argument's, which is how many comparisons the whole search can make.
+    let rule = if nan_reads_equal(x.dtype(), y.dtype(), y.count(), tol) {
+        NanRule::Search
+    } else {
+        NanRule::Distinct
+    };
     // J reads an atom as a one-item list on BOTH sides, so a pattern of
     // one atom has exactly one place to sit in an argument of one atom:
     // `0 E. 5` is 0 and `1 E. 1` is 1, both of them scalars.
     if !apl && xr == 0 && yr == 0 {
-        let hit = arrays_match(x, y, tol);
+        let hit = arrays_match_rule(x, y, tol, rule);
         return Ok(Array::new(Vec::new(), Data::Bool(vec![u8::from(hit)].into())));
     }
     if apl && xr > yr {
@@ -22767,7 +22913,7 @@ fn find_seq(x: &Array, y: &Array, tol: Tol, apl: bool, span: Span) -> Result<Arr
             let mut hit = true;
             for k in 0..cells {
                 let i: usize = (0..yr).map(|a| (at[a] + off[a]) * yst[a]).sum();
-                if !arrays_match(&atom(&xrm, k), &atom(&yrm, i), tol) {
+                if !arrays_match_rule(&atom(&xrm, k), &atom(&yrm, i), tol, rule) {
                     hit = false;
                     break;
                 }
@@ -24435,7 +24581,22 @@ fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> 
         let n = one_int(y, "a prime query", near, span)?;
         return factor_table_at(n, span);
     }
-    let zs = complex_digits_of(y, "a prime query", span)?;
+    let mut zs = complex_digits_of(y, "a prime query", span)?;
+    // A VALUE WITHIN THE ADMISSION OF A WHOLE NUMBER IS THAT NUMBER, in
+    // every form of the query. `1 p: (2.9999999999999)` is 1 there, where
+    // `1 p: (3.999999999999)` — a gap of 1e_12 beside 4, which is wider
+    // than the admission — is 0 and `5 p:` of it a domain error; and
+    // `4 p: (2.9999999999999)` is 5, the prime above the 3 it stands for,
+    // rather than the 3 above the 2 its floor would ask for. Measured over
+    // thirty-six cells, six forms against six values.
+    for z in zs.iter_mut() {
+        if z[1] == 0.0
+            && let Some(n) = near.round(z[0])
+        {
+            z[0] = n as f64;
+        }
+    }
+    let zs = zs;
     // A VALUE WITH NO VALUE among others is refused. `0 p: _.` is 1 there
     // and `0 p: (, _.)` is too, but `0 p: (_. _.)`, `0 p: (_. 1 2)` and
     // `0 p: (2 3 $ _.)` are all domain errors: the answer stands only

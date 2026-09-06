@@ -5638,3 +5638,114 @@ forms found no other gap: `q: 4.0` is `2 2` and `q: 2.5`, `q: 1r2`,
 `q: _`, `q: 0` and `q: (2^0.5)` are domain errors on both sides. The
 residue's "prime factors need an integer" rows are the `3 p:` and
 `*/^:_1` spellings that kill the interpreter and cannot be measured.
+
+## 2026-09-06 — A NaN is the value the tolerant comparison cannot reject
+
+The reference has two comparison loops and a NaN parts them. The TOLERANT
+one asks whether a difference EXCEEDS the tolerance, and builds every
+non-strict test out of the negation of a strict one; a NaN fails every
+strict test, so it satisfies every non-strict one. It is equal to
+everything, neither less nor greater than anything, never removed from a
+sieve by inequality, and never the winner of a min or a max. The EXACT
+loop is machine equality, where a NaN equals nothing at all — not even
+itself. Which loop runs is settled by the operands and never by their
+values: an INTEGER, BOOLEAN or COMPLEX operand is exact at every length,
+an EXTENDED or RATIONAL one tolerant at every length, and two FLOATS are
+exact where the pass has one pair to make and tolerant where it has more.
+A zero tolerance is the exact loop throughout.
+
+That is one mechanism where rounds 8, 8B, 9B and 9D had four notes. A
+470-cell grid over `= < <: > >: ~: -. e. i. i: ~. ~: /: \: <. >. -: E. I.`
+against five arrangements of a NaN and six types measured it, and the
+verbs that had their own readings now share it: `E.` follows the
+comparison rule (the count that decides is the argument's), `-.` follows
+it against a SINGLE item and hashes exactly against more, and `~.`/`~:`
+follow neither, holding a NaN apart from everything at every length —
+which is the reference's own split and not three rules of ours.
+
+The pins come off with it. `(1.0 1.0) = (_. _.)` and its four neighbours
+were pinned in round 8B as "a vectorised path parting from a scalar one
+rather than a rule"; the rule is the count and the type, the same split
+`Tol::nan_wins` already followed for `0 * _.`, so libjay follows it here
+too and the five rows move into the recorded corpus.
+
+## 2026-09-06 — The extrema keep the base operand, and `I.` bisects by a negation
+
+`<.` and `>.` pick the LEFT operand only where the strict comparison says
+to, so a NaN leaves standing whichever operand the reference's loop reads
+as its base. A 240-cell grid over both verbs, three types and five shapes
+fixes which one that is, in this order: the RIGHT over one pair, the
+INTEGER side beside a float whichever side it is written on, the
+BROADCAST side where one is broadcast, and the right otherwise. Away from
+a NaN the two extrema are symmetric, so libjay writes the base operand on
+the right and computes `x < y ? x : y`. Round 8's pin on `1 <. (_.)` was
+the one-pair case of exactly this and comes off.
+
+`I.` is the same mechanism one verb along. "a comes before b" is the
+reference's `!(b <: a)` — false for two ordinary numbers exactly where
+`a < b` is true, and TRUE wherever a NaN is one of the pair — and the
+DIRECTION of the run is read by the same negation, `!(first <: last)`.
+Every one of the eighteen measured cells follows, including the eight
+whose bounds hold a NaN and are therefore in no order: `(_.) I. 0` is 1,
+`(_. 1 2)` and `(1 2 _.)` are searched as DESCENDING runs, and
+`(1 _. 2)` as an ascending one. The special case that put a NaN VALUE
+above every ascending bound was this rule seen from one side and is gone.
+
+## 2026-09-06 — The grade of a NaN compared cell by cell is pinned
+
+The reference's FLAT float grade is coherent and libjay follows it: a NaN
+above every number and every infinity, stable among NaNs. Where the items
+are ROWS, BOXES or COMPLEX numbers the comparison is made cell by cell,
+and there the reference answers three things that cannot all be an order.
+`/: (_.j1 1 2)` puts the NaN last and `/: (1 2 _.j1)` — the same three
+values, written in another order — puts it first. `/:` and `\:` of two
+IDENTICAL rows are both `1 0`, where a stable grade of equal items leaves
+them where they were in either direction; three identical rows reverse
+outright. `/: (2 ; _. ; 1)` is `0 1 2` and `\:` of it `1 0 2`, and no
+order of three values gives both. libjay keeps the flat rule everywhere,
+and the interval index over a complex bound holding a NaN — where the
+reference puts each of a pair above the other — is pinned with it.
+
+## 2026-09-06 — A float operand puts a GCD through the float Euclid
+
+J's reference has no integer shortcut for a value that merely happens to
+be whole: a float on either side puts the pair through its float Euclid,
+whose remainder is taken for zero once it falls within `⎕CT` of the LARGER
+operand. Beside 9e18 that threshold is about 5e5 — wider than the divisor
+itself — so the first step already returns the smaller operand:
+`(_9223372036854775806) +. (6.0)` is 6, `(4611686018427387903) +. (2.0)`
+is 2 and `(9007199254740993) +. (2.0)` is 2, none of them the exact
+divisor of the numbers as written. Two INTEGERS are divided out exactly,
+and `(_9223372036854775806) +. (2)` is the exact 2.
+
+libjay had it the other way round — every whole-valued pair took an exact
+i128 Euclid, which read the integer side through a double first and lost
+its last digits. Only GNU APL keeps the whole-number shortcut, having
+rounded its operands to whole numbers before anything else.
+
+The COMPLEX arm is pinned instead of followed. Neither engine's answer to
+`(_9223372036854775806) +. (3j4)` is a common divisor — 3 does not divide
+`3j4` in the Gaussian integers and `3j4` does not divide an integer that
+is not a multiple of 5 — so both are float Euclids with no digits left to
+cut, stopping at different steps. The true divisor is 1.
+
+## 2026-09-06 — An atom shifted by a list of counts, and the direction of a zero
+
+`|.!.n` gives an ATOM one axis of length one per count and moves it by the
+LEADING count alone: `$ ((0 1) |.!.9 (5))` is `1 1` and its value 5, where
+`(1 0) |.!.9 (5)` is the fill. A single count — an atom, or a one-item
+list — leaves the answer the scalar it was. The plain rotate already read
+its left argument this way; the fill shift returned a scalar and let any
+count move it.
+
+A complex ZERO points nowhere, and the reference calls that direction 0
+whatever signs its two zeros carry. IEEE's arctangent reads a negative
+zero real part as the negative axis and answers π, which sent
+`r. ^:_2 (1e_9 1 1e9)` — whose middle value is a zero the arithmetic
+signed — to `3.14159j_` where the reference answers `0j_`.
+
+Every form of `p:` reads a value within the whole-number admission as that
+number: `1 p: (2.9999999999999)` is 1, `4 p:` of it is 5 and `5 p:` of it
+2, while `5 p: (3.999999999999)` — a gap of 1e_12 beside 4, wider than the
+admission — stays a domain error. Thirty-six cells, six forms against six
+values.

@@ -270,6 +270,10 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   here as they have none there.
 
 
+- `-.!.n` TAKES A FIT, as the comparison it is built out of does:
+  `2 -.!.0 (1.5)` is 2 in the reference where libjay refused the fit by
+  name.
+
 ### Changed
 
 - Round 9C's divergence bookkeeping: `_1 |/\\. (_ 1 2)` and
@@ -330,6 +334,59 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   where `5 o. 1e10j1` is not. The tangent is the exception, having
   saturated to ±1 wherever the real part is large enough that the turn no
   longer shows — `7 o. 1e10j1e10` and `7 o. _j_` are both 1.
+
+- A NaN IS THE VALUE THE REFERENCE'S TOLERANT COMPARISON CANNOT REJECT,
+  and one rule now carries it through every verb that compares. The
+  tolerant pass asks whether a difference EXCEEDS the tolerance and writes
+  every non-strict test as the negation of a strict one, so a NaN — which
+  fails every strict test — is EQUAL to everything, is neither less nor
+  greater than anything, and never wins a min or a max: `(_. 1 2) = (1.5)`
+  is `1 0 0`, `(_. 1 2) <: (_)` is `1 1 1`, `(_. 1 2) -. (1p1)` is `1 2`
+  and `(_.) E. (_. 1 2)` is `1 1 1`. The EXACT pass is machine equality,
+  where a NaN equals nothing at all — `_. = _.` is 0 — and which pass runs
+  is settled by the operands and never by their values: an integer,
+  boolean or complex operand is exact at every length, an extended or
+  rational one tolerant at every length, and two floats are exact over ONE
+  pair and tolerant over more. A zero tolerance (`= !.0`, `i.!.0`) is the
+  exact pass throughout. Measured over 470 cells; it dissolves the pins
+  rounds 8 and 8B left on `(1.0 1.0) = (_. _.)` and its four neighbours.
+
+- `<.` AND `>.` LEAVE THE BASE OPERAND STANDING AT A NaN, which a 240-cell
+  grid over both verbs, three types and five shapes settles: the RIGHT
+  operand over one pair (`1 <. (_.)` is `_.`), the INTEGER side beside a
+  float whichever side it is on (`(1 1) <. (_. _.)` is `1 1`), the
+  BROADCAST side where one is broadcast (`(1.0) <. (_. _.)` is `1 1`,
+  `(_.) <. (1.0 1.0)` is `_. _.`), and the right otherwise. Round 8's pin
+  on `1 <. (_.)` comes off with it.
+
+- `I.` BISECTS BY THE SAME NEGATION. "a comes before b" is the reference's
+  `!(b <: a)`, true wherever a NaN is one of the pair, and the DIRECTION
+  of the run is read the same way, `!(first <: last)` — so `(_.) I. 0` is
+  1, `(_. 1 2) I. (0 1 2 3)` is `3 1 1 1` and `(1 2 _.)` is searched as a
+  descending run. All eighteen cells of the grid follow from it, the eight
+  whose bounds are unsorted included, and the special case that put a NaN
+  VALUE above every ascending bound falls away as a consequence.
+
+- A FLOAT OPERAND PUTS A GCD OR AN LCM THROUGH THE FLOAT EUCLID, whole or
+  not. The reference has no integer shortcut for a value that merely
+  happens to be whole, and its float Euclid stops as soon as a remainder
+  falls within `⎕CT` of the LARGER operand — a threshold of about 5e5
+  beside 9e18, wider than the divisor itself. So
+  `(_9223372036854775806) +. (6.0)` is 6 there and
+  `(4611686018427387903) +. (2.0)` is 2, neither of them the exact divisor
+  of the numbers as written, while `(_9223372036854775806) +. (2)` — two
+  integers — stays the exact 2.
+
+- A LIST OF COUNTS GIVES AN ATOM ONE AXIS OF LENGTH ONE APIECE UNDER
+  `|.!.n`, AND ONLY THE LEADING COUNT MOVES IT: `$ ((0 1) |.!.9 (5))` is
+  `1 1` and its value 5, where `(1 0) |.!.9 (5)` is the fill. A single
+  count leaves the answer the scalar it was. The plain rotate already read
+  its left argument that way; the fill shift did not.
+
+- A VALUE WITHIN THE ADMISSION OF A WHOLE NUMBER IS THAT NUMBER IN EVERY
+  FORM OF `p:`: `1 p: (2.9999999999999)` is 1, `4 p: (2.9999999999999)` is
+  5 and `5 p:` of it is 2, while `5 p: (3.999999999999)` — a gap wider
+  than the admission — stays the domain error it is.
 
 ### Fixed
 
@@ -441,6 +498,12 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   refused as the reference refuses it — `2 ! 0j_`, `2 ! _j1`, `2 ! _j_`
   and their mirrors — where the REAL binomial answers at an infinity and
   the complex MONAD `! _j1` answers a NaN.
+
+- A ZERO POINTS NOWHERE AND THAT DIRECTION IS 0, whatever signs the two
+  zeros of a complex zero carry. IEEE's arctangent reads a negative zero
+  real part as the negative axis and answers π, which sent
+  `r. ^:_2 (1e_9 1 1e9)` — whose middle value is a zero the arithmetic
+  signed — to `3.14159j_` where the reference answers `0j_`.
 
 ## 0.4.9 — 2026-09-04
 

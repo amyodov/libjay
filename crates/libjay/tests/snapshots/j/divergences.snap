@@ -197,10 +197,6 @@
 ? the same boundary, the huge number on the right
 < _9.22337e18 _6.45636e19 _9.22337e18 _3.68935e19
 > j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
-= (_9223372036854775806) +. (2.0 4.0 6.0)
-? the same boundary in the GCD the LCM is built on
-< 2 4 2
-> j: 2 4 6
 = (1.5 2.5 _0.5) ^. (a:)
 ? the reference neither answers nor refuses; the sign of an unrelated atom decides
 < <error>
@@ -221,38 +217,6 @@
 ? the same silence with the infinities for the negative atom
 < <error>
 > j:
-= 1 <. (_.)
-? the reference's own two-pair answer is `1 1`, which contradicts this one
-< 1
-> j: _.
-= 1 >. (_.)
-? the reference's own two-pair answer is `1 1`, which contradicts this one
-< 1
-> j: _.
-= _ <. (_.)
-? the same, with an infinity for the other value
-< _
-> j: _.
-= (1.0 1.0) = (_. _.)
-? the reference's own atom and one-item answers are 0, which contradict this one
-< 0 0
-> j: 1 1
-= (1.0 1.0) ~: (_. _.)
-? the same question negated: 0 0 there, 1 1 here
-< 1 1
-> j: 0 0
-= (2.0 4.0 6.0) = (_. 1 2)
-? the same over a list with one NaN in it
-< 0 0 0
-> j: 1 0 0
-= (1.0 1.0) <: (_. _.)
-? the ordering that is `not above`, which a NaN passes there
-< 0 0
-> j: 1 1
-= (1.0 1.0) >: (_. _.)
-? the ordering that is `not below`, which a NaN passes there
-< 0 0
-> j: 1 1
 = (1x) I. 2
 ? the reference's own two-bound answer contradicts this one
 < 1
@@ -604,10 +568,6 @@
 ? the reference's own `2 I. 3` is 1 where its `2 I. (3x)` is 0
 < 0 0 1
 > j: 0 1 0
-= (_. 1 2) I. 2
-? the bisection of bounds that are in no order is defined nowhere
-< 2
-> j: 1
 = (1p1) ! (9223372036854775806)
 ? the reference's log-gamma difference loses every digit at this size
 < 5.28865e58
@@ -649,3 +609,47 @@
 ? the reference's own `5 p: _` and `5 p: 1` contradict this vector
 < <error>
 > j: 1 0 1
+= /: (2 3 $ _. 1 2)
+? the reference's own ascending and descending grades of these rows agree, which contradicts it
+< 0 1
+> j: 1 0
+= \\: (2 3 $ _. 1 2)
+? the same argument graded downwards, which answers the same permutation
+< 0 1
+> j: 1 0
+= /: (3 3 $ _. 1 2)
+? three identical rows reversed outright
+< 0 1 2
+> j: 2 1 0
+= \\: (_.j1 1 2)
+? the complex grade, whose ascending answer puts the NaN at the other end
+< 0 2 1
+> j: 2 1 0
+= /: (1 2 _.j1)
+? the same three complex values written in another order, and the NaN moves ends
+< 0 1 2
+> j: 2 0 1
+= \\: (_. ; 1)
+? the boxed grade, where the reference's own ascending answer is the identity
+< 0 1
+> j: 1 0
+= \\: (2 ; _. ; 1)
+? three boxes whose two grades are not each other's reverse
+< 0 1 2
+> j: 1 0 2
+= (_. ; 1) \\: (_. ; 1)
+? the grade-select built on the same comparison
+< +--+-+
+< |_.|1|
+< +--+-+
+> j: +-+--+
+> j: |1|_.|
+> j: +-+--+
+= (_.) I. (1j2)
+? the reference puts each of the pair above the other
+< 0
+> j: 1
+= (_9223372036854775806) +. (3j4)
+? neither answer divides both arguments; two float Euclids at 9e18
+< 3j4
+> j: 3

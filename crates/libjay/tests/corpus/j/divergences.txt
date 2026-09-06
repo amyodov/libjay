@@ -234,8 +234,6 @@ p. (0 1 1 _)
 (2 7 1 8) *. (_9223372036854775806)
 ? the same boundary, the huge number on the right
 ~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
-(_9223372036854775806) +. (2.0 4.0 6.0)
-? the same boundary in the GCD the LCM is built on
 
 // A LOGARITHM whose left argument holds a NEGATIVE number and whose right
 // is not numeric. The reference neither answers it nor refuses it: the
@@ -255,55 +253,6 @@ p. (0 1 1 _)
 ? the same silence over a longer character list
 (_ __ 0) ^. (1;2 3)
 ? the same silence with the infinities for the negative atom
-
-// The EXTREMA of a NaN, one pair at a time. The reference answers `1 <. _.`
-// with `_.` and `1 1 <. (_. _.)` with `1 1` — the same operation on the
-// same values, differing only in how many pairs it was handed, which is a
-// vectorised path parting from a scalar one rather than a rule. libjay
-// answers both the way the reference answers the pairs: a NaN loses the
-// comparison and the other value stands.
-//
-// ROUND 8 MEASURED THE WHOLE SPLIT, over 184 pairs. The reference keeps the
-// NaN where BOTH sides reach its float pass — `(1.0 1.0) <. (_. _.)` is
-// `_. _.` and so is the same question at three, eight and sixteen items —
-// and loses it wherever one side is INTEGER (`(1 1) <. (_. _.)` is `1 1`,
-// `(i. 3) <. (_. _. _.)` likewise) or wherever an ATOM stands against a
-// LIST of more than one item (`(1.0) <. (_. _.)` is `1 1`, while
-// `(1.0 1.0) <. (_.)` is `_. _.`). Four loops, three of them agreeing with
-// libjay and one not, over one question. The family rule covers the
-// spellings a sweep draws.
-1 <. (_.)
-? the reference's own two-pair answer is `1 1`, which contradicts this one
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=<.,>. also=%,-,+,*,%:,^.,^,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#.,.,:,!,F..,F.:,F::,^:,=.,=:,%.,@.,`:,+:,-:,*:,A.,#:,I.,e.,i:,x:,u:,-.,;:,":,q:,p.,b.,s:,M.,f.,::,/. answers=numeric
-1 >. (_.)
-? the reference's own two-pair answer is `1 1`, which contradicts this one
-_ <. (_.)
-? the same, with an infinity for the other value
-
-// THE TOLERANT COMPARISONS OF A NaN, the same split one verb further on.
-// The reference's tolerant FLOAT pass over MORE THAN ONE ITEM reads a NaN
-// as ordered against nothing and therefore EQUAL to everything: `=` and
-// `<:` and `>:` all answer 1 and `~:` answers 0, whatever stands beside it,
-// so `(1.0 1.0) = (_. _.)` is `1 1` and `(2.0 4.0 6.0) = (_. 1 2)` is
-// `1 0 0`. Every other path there reads a NaN as equal to NOTHING, libjay's
-// answer: the ATOM (`1.0 = _.` is 0), the ONE-ITEM array (`(, 1.0) = (, _.)`
-// is 0), the rank-2 argument against an atom (`(2 2 $ 1.0) = (_.)` is
-// `0 0 0 0`), the mixed INTEGER pass (`(1 1) = (_. _.)` is `0 0`) and the
-// EXACT comparison `= !.0` (0, where `= !.1e_13` is 1). The same values
-// under the same verb have two answers there, told apart by how many items
-// stand beside them and in which type they are held — the same vectorised
-// path parting from a scalar one that the extrema above show, one verb on.
-(1.0 1.0) = (_. _.)
-? the reference's own atom and one-item answers are 0, which contradict this one
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb==,~:,<:,>: also=%,-,+,*,%:,^.,^,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,#.,.,:,!,F..,F.:,F::,^:,=.,=:,%.,@.,`:,+:,-:,*:,A.,#:,I.,e.,i:,x:,u:,-.,;:,":,q:,p.,b.,s:,M.,f.,::,/. answers=numeric
-(1.0 1.0) ~: (_. _.)
-? the same question negated: 0 0 there, 1 1 here
-(2.0 4.0 6.0) = (_. 1 2)
-? the same over a list with one NaN in it
-(1.0 1.0) <: (_. _.)
-? the ordering that is `not above`, which a NaN passes there
-(1.0 1.0) >: (_. _.)
-? the ordering that is `not below`, which a NaN passes there
 
 // INTERVAL INDEX against a SINGLE EXACT bound. The reference answers
 // `(1x) I. 2` with 0 and `(1x 2x) I. 2` with 1: adding a bound that is NOT
@@ -777,12 +726,6 @@ _2 +/\\. (_.)
 2 I. (1 2 3x)
 ? the reference's own `2 I. 3` is 1 where its `2 I. (3x)` is 0
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=I. also=x:,o.,_.,+,-,*,%,^,%:,|,<.,>.,j.,r.,!.,&.,&.:
-// BOUNDS THAT DO NOT ASCEND. `I.` searches its bounds rather than counting
-// them, which the Dictionary defines only for a list in order; a NaN among
-// them is in no order at all, and the two engines' bisections part on where
-// it sends them. Nothing here is defined to follow.
-(_. 1 2) I. 2
-? the bisection of bounds that are in no order is defined nowhere
 
 // TWO ARGUMENTS TO `!` A DOUBLE CANNOT TELL APART, at the far end of the
 // range this time. `(1p1) ! (9223372036854775806)` is 0 in the reference
@@ -858,3 +801,65 @@ _1e16 ! _1
 5 p: (_ 1 2)
 ? the reference's own `5 p: _` and `5 p: 1` contradict this vector
 ~ cause=we-refuse:err:domain_error:_the_totient_needs_a_whole_number_that_is_not_negative verb=p: also=%,*,+,-,^,|,<.,>.,x:,",/,\,\.,L:,S:,&.,&.:,@,@:,^:,!.
+
+// THE GRADE OF A VALUE CARRYING A NaN, WHEREVER THE COMPARISON IS
+// CELL BY CELL — ORACLE SELF-CONTRADICTION. The reference's FLAT float
+// grade is coherent and libjay follows it exactly: `/: (_. 1 2)` is
+// `1 2 0` and `\: (_. 1 2)` is `0 2 1`, a NaN above every number and an
+// infinity, stable among NaNs. The moment the items being ordered are
+// ROWS of a table, BOXES or COMPLEX numbers the comparison is made cell
+// by cell, and there the reference answers three things that cannot all
+// be an order:
+//
+// - the SAME verb puts the same three values at opposite ends when they
+//   are written in a different order: `/: (_.j1 1 2)` is `1 2 0`, the NaN
+//   last, and `/: (1 2 _.j1)` is `2 0 1`, the NaN first;
+// - the ascending and the descending grade of two IDENTICAL rows are the
+//   same permutation and it is not the identity: `/: (2 2 $ _. 1 _. 1)`
+//   and `\: (2 2 $ _. 1 _. 1)` are both `1 0`, where a stable grade of
+//   equal items leaves them where they were in both directions;
+// - `/: (2 ; _. ; 1)` is `0 1 2` and `\: (2 ; _. ; 1)` is `1 0 2`, and no
+//   order of three values gives both.
+//
+// A three-row table reverses outright — `/: (3 3 $ _. 1 2)` is `2 1 0`
+// where its three rows are identical — which is an insertion order and
+// not a comparison. libjay orders a NaN above every number in every one
+// of them, which is the reference's own flat answer.
+/: (2 3 $ _. 1 2)
+? the reference's own ascending and descending grades of these rows agree, which contradicts it
+~ cause=differ:val:vector/num|differ:val:table/num|differ:val:table/text|differ:val:atom/num|differ:val:planes/num verb=/:,\\: also=$,;,<,>,j.,r.,o.,+,-,*,%,^,%:,^.,|,<.,>.,+.,*.,x:,!.,&.,&.:,",@,@:,^:,L:,S:,f.,::,M.,/,\\,\\.,#,{,},:
+\\: (2 3 $ _. 1 2)
+? the same argument graded downwards, which answers the same permutation
+/: (3 3 $ _. 1 2)
+? three identical rows reversed outright
+\\: (_.j1 1 2)
+? the complex grade, whose ascending answer puts the NaN at the other end
+/: (1 2 _.j1)
+? the same three complex values written in another order, and the NaN moves ends
+\\: (_. ; 1)
+? the boxed grade, where the reference's own ascending answer is the identity
+\\: (2 ; _. ; 1)
+? three boxes whose two grades are not each other's reverse
+(_. ; 1) \\: (_. ; 1)
+? the grade-select built on the same comparison
+
+// THE INTERVAL INDEX OVER A COMPLEX BOUND CARRYING A NaN, which is the
+// same cell-by-cell order one verb along: `(_.) I. (1j2)` is 1 there and
+// `(1j2) I. (_.)` is 1 as well, so the value is above the bound and the
+// bound above the value. libjay reads a NaN as above every number, as its
+// grade does.
+(_.) I. (1j2)
+? the reference puts each of the pair above the other
+~ cause=differ:val:atom/num|differ:val:vector/num verb=I. also=j.,r.,o.,+,-,*,%,^,%:,^.,|,<.,>.,+.,*.,x:,!.,&.,&.:,",@,@:,^:,L:,S:,f.,::,M.,$,<,>,;
+
+// THE COMPLEX GCD OF A VALUE PAST THE DOUBLE'S WHOLE-NUMBER RANGE, where
+// NEITHER engine answers a common divisor. `(_9223372036854775806) +. (3j4)`
+// is 3 in the reference and `3j4` here, and `3` divides `3j4` no more than
+// `3j4` divides the integer: 3+4i over 3 is not a Gaussian integer, and
+// _9223372036854775806 is not a multiple of 5, which is what 3+4i would
+// need to divide it. Both are float Euclids whose residue chain has no
+// digits left to cut at 9e18, stopping at different steps. The true
+// divisor is 1.
+(_9223372036854775806) +. (3j4)
+? neither answer divides both arguments; two float Euclids at 9e18
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=+.,*. also=j.,r.,",@,@:,^:,&.,&.:,L:,S:,f.,::,M.,/,\\,\\.,x:,!.,$,<,>,;,o. answers=numeric

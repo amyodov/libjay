@@ -2517,12 +2517,6 @@ not an ordering of the types). What is still 🔴:
 - **`7 o. _.j1`** is a NaN error there where the turn is finite; libjay
   answers `_.j_.`, as the hyperbolic turn rule leaves it.
 
-- **THE ROTATE OF AN ATOM BY A LIST OF COUNTS.**
-  `$ ((3 3 $ 1 0 0 0 1 0 0 0 1) |. !.0.5 (16b1f))` is `3 1 1 1` in the
-  reference — the atom takes the rank the count list gives it — and `3`
-  here, and only the LEADING count decides: `(0 1 0) |.!.0.5 31` is 31
-  where `(1 0 0) |.!.0.5 31` is the fill.
-
 - **`x:` OF A FLOAT CONVERGES FURTHER THERE.** `1 x: (2 ^ 0.5)` is
   `431273813145r304956637823` in the reference and `3880899r2744210` here;
   `1 x: (o. 1)` is `1285290289249r409120605684` there and
@@ -2536,6 +2530,54 @@ not an ordering of the types). What is still 🔴:
   Round 9A fitted and refused four hypotheses for this; a fifth — the
   tolerant expansion whose remainder is rounded to whole — was fitted and
   refused here.
+
+### Round 9F: what the mechanism grids left red
+
+Five grids — 470 cells over a NaN through comparison, ordering and the set
+verbs, 240 over the two extrema, 81 over the prime queries and `%.`/`%:`
+of the unfinite reals, 52 over the shift of an atom, and 28 over the
+cell-by-cell grades — closed round 9E's rotate row (the fill shift now
+reads its count list as the plain rotate always did) and dissolved rounds
+8 and 8B's pins on the tolerant comparison and the extrema. What is still
+🔴:
+
+- **THE GRADE OF A VALUE CARRYING A NaN, COMPARED CELL BY CELL** — rows of
+  a table, boxes, complex numbers, and the interval index over a complex
+  bound. Pinned as oracle self-contradiction; see the divergence list for
+  the three measurements that cannot all be an order.
+
+- **`%.` OF A VECTOR HOLDING A NaN ANSWERS COMPLEX NaNs.**
+  `%. (_. 1 2)` is `_.j_. _.j_. _.j_.` in the reference and
+  `(0.1 0.2 0.3) %. (_. 1 2)` is `_.j_.`, while the same NaN on the LEFT
+  (`(_. 1 2) %. (0.1 0.2 0.3)`) and the same value as a TABLE
+  (`%. (2 2 $ _. 1 2 3)`) both answer real NaNs. libjay answers the real
+  NaN throughout. Which rank widens is an artefact of the reference's
+  vector path and not a rule anything else follows, so no arm was written
+  for it: three cells, and the residue row `2 %. (_. 1 2)`.
+
+- **`(_ __ 0) %. (0.1 0.2 0.3)` IS A NaN ERROR THERE**, where libjay
+  answers the NaN the division `_ % _` made. The reference's own
+  `%. (2 2 $ _ __ 0 1)` is refused and `%. (_ __ 0)` is a DOMAIN error —
+  two refusals for one shape of fault — and the residue rows
+  `(= F:: %.) (_ __ 0)` and its neighbours sit on the other side of the
+  same split, where libjay refuses and the reference answers. Two cells.
+
+- **`2 %: (0 $ a:)` IS A DOMAIN ERROR THERE** and the empty here. The
+  root's "types before the frame" table reads the EXPONENT's type against
+  a boxed argument, and an argument that is an EMPTY box is never
+  consulted at all — one cell, and no second spelling to fix the rule by.
+
+- **THE LINEAR REPRESENTATION OF A TRAIN.** `u: *. 3:` displays as
+  `u: (*.) 3:` in the reference and `u: *. 3:` here, while `+ *. -` and
+  `+ p.. -` take no parentheses on either side; and `(<^:2) :: 2` is
+  `<^:2 ::2` there against `<^:2 ::2:` here, the reference keeping the
+  NOUN operand of `::` a noun where libjay writes the constant verb it
+  makes of it. Two rows, and the parenthesising rule was not found.
+
+- **`x:` OF A FLOAT CONVERGES FURTHER THERE**, as round 9E left it: five
+  hypotheses fitted and refused, and the reference's answers are not
+  continued-fraction convergents at all. The four reference answers are
+  written down in the round 9E section above.
 
 ## Known divergences (deliberate, revisit later)
 

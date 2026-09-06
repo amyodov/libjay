@@ -126,6 +126,14 @@ pub fn abs(z: Cx) -> f64 {
 /// The argument, in radians; `arg(0)` is 0.
 #[inline]
 pub fn arg(z: Cx) -> f64 {
+    // A ZERO POINTS NOWHERE, AND THE REFERENCE CALLS THAT DIRECTION 0
+    // whichever signs its two zeros carry. IEEE's arctangent reads a
+    // negative zero real part as the negative axis and answers π, which
+    // sends `r. ^:_2 1` — whose middle value is a zero the arithmetic
+    // signed — to `3.14159j_` where the reference answers `0j_`.
+    if z[0] == 0.0 && z[1] == 0.0 {
+        return 0.0;
+    }
     // A negative zero imaginary part would put a real negative value on the
     // lower branch; every value that reaches here as a widened real has to
     // land on the principal one.

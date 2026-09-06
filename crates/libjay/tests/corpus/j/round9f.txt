@@ -1,0 +1,267 @@
+// Round 9F: a NaN through comparison, ordering and the set verbs, and the
+// GCD at the edge of the machine word.
+//
+// One mechanism runs through the whole first half. The reference has two
+// comparison loops. Its TOLERANT loop asks whether a difference EXCEEDS
+// the tolerance and builds every non-strict test out of the negation of a
+// strict one, so a NaN — which fails every strict test — is equal to
+// everything it is set against, is never less or greater than anything,
+// and never wins a min or a max. Its EXACT loop is machine equality,
+// where a NaN equals nothing at all, not even itself. Which loop runs is
+// settled by the operands and never by their values: an integer, boolean
+// or complex operand is exact at every length, an extended or rational
+// one tolerant at every length, and two floats are exact over ONE pair
+// and tolerant over more.
+
+// THE COMPARISONS. One pair is the exact loop.
+_. = _.
+_. = 1.5
+(,_.) = (,1.5)
+(1 1 $ _.) = (1 1 $ _.)
+_. <: _.
+_. >: 1
+_. ~: _.
+_. < _.
+_. > 1
+
+// More than one pair, and two floats, is the tolerant loop.
+(_. 1 2) = (_. 1 2)
+(_. 1 2) = (1.5)
+(_. 1 2) = (_)
+(2 2 $ _.) = (2 2 $ _.)
+(2 2 $ _.) = (2 2 $ 1.5)
+(1.0 1.0) = (_. _.)
+(2.0 4.0 6.0) = (_. 1 2)
+(_.) <: (_. 1 2)
+(_. 1 2) <: (1.5)
+(_. 1 2) <: (_)
+(1.0 1.0) <: (_. _.)
+(_. 1 2) >: (1.5)
+(_. 1 2) >: (_)
+(1.0 1.0) >: (_. _.)
+(_. 1 2) ~: (1.5)
+(1.0 1.0) ~: (_. _.)
+(_. 1 2) < (1.5)
+(_. 1 2) > (1.5)
+(<: (_. 1 2)) >: (1 2 3)
+
+// An INTEGER or COMPLEX operand is the exact loop at every length.
+(_. 1 2) = (1 2 3)
+(_. 1 2) = (1)
+(2 2 $ _.) = (2 2 $ 1)
+(_. 1 2) <: (1 2 3)
+(_. 1 2) >: (1 2 3)
+(_. 1 2) ~: (1 2 3)
+(,_.) = (,1j2)
+_. = 1j0
+
+// An EXTENDED or RATIONAL operand is the tolerant loop at every length.
+(,_.) = 1x
+(,_.) = 1r2
+(,_.) = (,1x)
+(_. 1 2) <: (1x)
+(_. 1 2) >: (1x)
+(_. 1 2) ~: (1x)
+
+// A ZERO TOLERANCE is the exact loop whatever the operands are.
+(_. 1 2) = !.0 (1.5)
+(_. 1 2) = !.0 (_. 1 2)
+(_. 1 2) i.!.0 (1)
+(_. 1 2) i.!.0 (_.)
+(_. 1 2) e.!.0 (1)
+(_. 1 2) -.!.0 (1.5)
+2 -.!.0 (1.5)
+
+// THE SEARCH FAMILY compares by magnitude of difference throughout, so a
+// NaN is found wherever it is looked for.
+(_. 1 2) i. (_. 1 2)
+(_. 1 2) i. (1)
+(_. 1 2) i. (1j2)
+(_. 1 2) i: (_. 1 2)
+(_. 1 2) i: (1 2 3)
+(_. 1 2) e. (1)
+(_. 1 2) e. (1j2)
+(_.) e. (_. 1 2)
+_. -: 1
+_. -: 1j2
+(_. 1 2) -: (_. 1 2)
+(<_.) -: (<1)
+(_.j_.) -: (_.j_.)
+
+// `E.` follows the COMPARISON rule and not the search one: the count that
+// decides is the argument's.
+(_.) E. (_.)
+(_.) E. (1.5)
+(_.) E. (1x)
+(_.) E. (_. 1 2)
+(_.) E. (1 2 3)
+(_. 1) E. (_. 1 2 _. 1)
+(_. 1 2) E. (_. 1 2)
+
+// `-.` AGAINST A SINGLE ITEM is the comparison pass; against more it is an
+// exact lookup. `~.` and `~:` hold a NaN apart from everything at every
+// length.
+(_. 1 2) -. (_.)
+(_. 1 2) -. (1)
+(_. 1 2) -. (1.5)
+(_. 1 2) -. (1p1)
+(_. 1 2) -. (1x)
+(_. 1 2) -. (_)
+(_. 1 2) -. (_. 1 2)
+(_. 1 2) -. (1 2 3)
+(,_.) -. (,1.5)
+(,_.) -. (,1x)
+(,1) -. (,_.)
+(_.) -. (1 2 3)
+~. (_. 1 2)
+~. (_. _. 1 1 _.)
+~: (_. _. 1 1 _.)
+~: (2 2 $ _.)
+i.~ (_. 1 2)
+i:~ (_. 1 2)
+=  (_. 1 2)
+=  (1 _. 2)
+
+// THE EXTREMA. `<.` and `>.` pick the left operand only where the strict
+// comparison says to, so a NaN leaves the BASE operand standing: the right
+// over one pair, the INTEGER side beside a float, the BROADCAST side where
+// one is broadcast, and the right otherwise.
+1 <. (_.)
+1 >. (_.)
+_ <. (_.)
+(1.0) <. (_.)
+(_.) <. (1.0)
+(1x) <. (_.)
+(_.) <. (1x)
+(1 1) <. (_. _.)
+(_.) <. (1 1)
+(_. 1 2) <. (1 2 3)
+(1.0) <. (_. _.)
+(_.) <. (1.0 1.0)
+(_. 1 2) <. (1.5)
+(_.) <. (_. 1 2)
+2 <. (_. 1 2)
+2 >. (_. 1 2)
+(1.0 1.0) <. (_. _.)
+(1x 1x) <. (_. _.)
+(_. _.) <. (1x 1x)
+(1.0 1.0) <. (2 2 $ _.)
+(2 2 $ _.) <. (1.0 1.0)
+(1 1) >. (_. _.)
+(_. 1 2) >. (1x)
+(_. 1 2) >. (_)
+<./ (_. 1 2)
+>./ (1 2 _.)
+
+// THE INTERVAL INDEX bisects by the same negation, which is what settles a
+// NaN among the bounds and reads the direction of a run that holds one.
+(_.) I. (0)
+(_.) I. (_)
+(_. 1 2) I. (0 1 2 3)
+(1 _. 2) I. (0 1 2 3)
+(1 2 _.) I. (0 1 2 3)
+(_. _.) I. (0 1)
+(1 2 3) I. (_. 0)
+(0 10 20) I. (5 15 _1 25)
+
+// THE FLAT FLOAT GRADE orders a NaN above every number, an infinity
+// included, and is stable among NaNs.
+/: (_. 1 2)
+\\: (_. 1 2)
+/: (1 _. 2)
+/: (_ _. __ 0)
+\\: (_ _. __ 0)
+/: (_. _. 1)
+(_. 1 2) /: (_. 1 2)
+(_. 1 2) \\: (_. 1 2)
+/: (_. ; 1)
+
+// THE GCD AND THE LCM AT THE EDGE OF THE MACHINE WORD. A float operand
+// puts the whole pair through the reference's float Euclid, whose
+// remainder is taken for zero once it falls within the comparison
+// tolerance of the LARGER operand — about 5e5 beside 9e18, wider than the
+// divisor itself. Two integers are divided out exactly.
+(_9223372036854775806) +. (2.0)
+(_9223372036854775806) +. (4.0)
+(_9223372036854775806) +. (6.0)
+(_9223372036854775806) +. (2.0 4.0 6.0)
+(_9223372036854775806) +."1 0 (2.0 4.0 6.0)
+(_9223372036854775806) +. (2)
+(_9223372036854775806) +. (2x)
+(_9223372036854775806) *. (2.0)
+(_9223372036854775806) *. (2)
+(9223372036854775806) +. (3.0)
+(4611686018427387903) +. (2.0)
+(9007199254740993) +. (2.0)
+(_9007199254740993) +. (2.0)
+(1e18) +. (2.0)
+(1e15) +. (2.0)
+(_2147483647) +. (3.0)
+3!:0 ((_9223372036854775806) +. (2.0))
+3!:0 ((_9223372036854775806) +. (2))
+
+// A LIST OF COUNTS GIVES AN ATOM ONE AXIS OF LENGTH ONE APIECE, and only
+// the leading count moves it. The fill's own type still widens the answer.
+$ ((0 1) |.!.9 (5))
+(0 1) |.!.9 (5)
+$ ((1 0) |.!.9 (5))
+(1 0) |.!.9 (5)
+$ ((0 0) |.!.9 (5))
+(0 0) |.!.9 (5)
+$ ((0 0 0) |.!.9 (5))
+$ ((,0) |.!.9 (5))
+(,1) |.!.9 (5)
+0 |.!.9 (5)
+1 |.!.9 (5)
+$ ((0 1) |. (5))
+$ ((i. 3 4) |.!.1e_13 (5))
+(i. 3 4) |.!.1e_13 (5)
+3!:0 ((i. 3 4) |.!.1e_13 (5))
+(i. 2 3 4) |. !.0.5 (1ar1)
+1 0 1 ,/\\.;.3 ((i. 5) |. !.1e_13 (3r4b11))
+$ ((1 1) {.!.9 (5))
+$ ((2 2) {.!.9 (5))
+(2 2) {.!.9 (5)
+3!:0 ((2 2) {.!.9 (5))
+
+// A ZERO POINTS NOWHERE and the reference calls that direction 0, whatever
+// signs the two zeros of a complex zero carry.
+^. (0j0)
+r. ^:_1 (1)
+r. ^:_1 (0)
+r. ^:_2 (1)
+r. ^:_2 (1e_9 1 1e9)
+12 o. (0j0)
+
+// A VALUE WITHIN THE ADMISSION OF A WHOLE NUMBER IS THAT NUMBER in every
+// form of the prime query.
+_1 p: (2.9999999999999)
+_1 p: (3.0000000000001)
+0 p: (2.9999999999999)
+0 p: (3.0000000000001)
+1 p: (2.9999999999999)
+1 p: (3.0000000000001)
+1 p: (3.999999999999)
+1 p: (2.5)
+4 p: (2.9999999999999)
+4 p: (3.999999999999)
+5 p: (2.9999999999999)
+5 p: (4.0000000000001)
+5 p: (3.999999999999)
+_4 p: (3.0000000000001)
+1 p: ((3) +. (3 - 1e_13))
+
+// `%.` and `%:` over the unfinite reals, where the reference refuses what
+// its own arithmetic made and answers what the argument brought.
+%: (_ __ 0)
+3!:0 (%: (_ __ 0))
+%. (_)
+%: (_)
+%. (_.)
+%: (_.)
+%. (2 2 $ _. 1 2 3)
+%: (2 2 $ _. 1 2 3)
+(_ __ 0) %: (2)
+(_ __ 0) %: (0.1 0.2 0.3)
+(_. 1 2) %. (0.1 0.2 0.3)
+(_. 1 2) %: (2)
