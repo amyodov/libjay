@@ -5990,6 +5990,14 @@ mod tests {
     }
 
     #[test]
+    fn an_apostrophe_in_a_comment_does_not_quote_the_next_line() {
+        // `NB. it's` leaves an apostrophe open to the end of its line and no
+        // further: a hole on the line after it is still a hole.
+        let sp = SourceParts::from_source("NB. it's a comment\n2 + {x}").expect("source parts");
+        assert_eq!(sp.param_names, vec!["x".to_string()]);
+    }
+
+    #[test]
     fn parts_of_one_sentence_lex_across_a_hole() {
         // The t-string path: literal parts with a hole between them.
         let sp = SourceParts::from_parts(&["1 + ", " * 2"], &["v"]);

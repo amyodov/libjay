@@ -1,0 +1,33 @@
+# libjay reference snapshot: J — corpus/j/algorithms.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= ER =. 4 : 0\n  path =. x +/\\ | 2 -~/\\ y\n  net  =. | (x }. y) - (-x) }. y\n  net % path + path = 0\n)\nKSTEP =. 4 : 'y + ({. x) * ({: x) - y'\nKAMA =. 4 : 0\n  per  =. 0 { x\n  fast =. 2 % 1 + 1 { x\n  slow =. 2 % 1 + 2 { x\n  sc   =. *: slow + (per ER y) * fast - slow\n  q    =. per }. y\n  seed =. {. q\n  seed , seed (] F:. KSTEP) }. sc ,. q\n)\nRANDOM =. 4 : 0\n  p =. 2147483647\n  u =. p | 1103515245 * x + >: i. y\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 48271 * u\n  _1 + 2 * u % p\n)\nn =. 200\nclose =. 100 * ^ +/\\ 0.002 * 7 RANDOM n\nk =. 10 2 30 KAMA close\n(# k) , <. 0.5 + 100 * (3 {. k) , (_3 {. k) , (+/ k) % # k
+> j: 190 10001 10001 10001 9954 9956 9956 9929
+= DELTA =. 4 : '+/ (x }. y) * (-x) }. y'\nVR =. 4 : 0\n  q  =. x\n  n  =. <: # y\n  mu =. (({: y) - {. y) % n\n  e  =. mu -~ 2 -~/\\ y            NB. demeaned one-bar returns\n  s2 =. *: e\n  va =. (+/ s2) % <: n            NB. one-bar variance, unbiased\n  ec =. (q * mu) -~ (q }. y) - (-q) }. y\n  m  =. q * (1 + n - q) * 1 - q % n\n  vc =. (+/ *: ec) % m            NB. q-bar variance, overlapping, unbiased\n  vr =. vc % va\n  z1 =. ((%: n) * vr - 1) % %: (2 * (<: 2 * q) * <: q) % 3 * q\n  js =. >: i. <: q\n  dl =. (n * js DELTA"0 _ s2) % *: +/ s2\n  th =. +/ dl * *: 2 * (q - js) % q\n  z2 =. ((%: n) * vr - 1) % %: th\n  vr , z1 , z2\n)\nRANDOM =. 4 : 0\n  p =. 2147483647\n  u =. p | 1103515245 * x + >: i. y\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 48271 * u\n  _1 + 2 * u % p\n)\nn =. 1200\nw =. 7 RANDOM n\nwalk =. +/\\ 0.01 * w + 0.6 * _1 |. w\n<. 0.5 + 1000 * , (2 4 8) VR"0 _ walk
+> j: 1416 14404 13544 1618 11443 10977 1891 10431 10161
+= RS =. 4 : 0\n  k   =. <. (# y) % x\n  b   =. (k, x) $ (k * x) {. y\n  dev =. b -"1 0 (+/"1 b) % x\n  cs  =. +/\\"1 dev\n  r   =. (>./"1 cs) - <./"1 cs\n  s   =. %: (+/"1 *: dev) % x\n  (+/ r % s) % k\n)\nHURST =. 4 : 0\n  lx =. ^. x\n  ly =. ^. x RS"0 _ y\n  mx =. (+/ lx) % # lx\n  my =. (+/ ly) % # ly\n  dx =. lx - mx\n  h  =. (+/ dx * ly - my) % +/ *: dx\n  h , my - h * mx\n)\nRANDOM =. 4 : 0\n  p =. 2147483647\n  u =. p | 1103515245 * x + >: i. y\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 48271 * u\n  _1 + 2 * u % p\n)\nn =. 2048\nw =. 11 RANDOM n\nlens =. 16 32 64 128 256\n<. 0.5 + 10000 * (lens HURST w) , lens RS"0 _ w
+> j: 5624 _1651 39694 58677 91339 133848 184582
+= HIDDEN =. 4 : 0\n  w =. > 0 { x\n  b =. > 1 { x\n  7 o. (y +/ . * w) +"1 b\n)\nRIDGE =. 4 : 0\n  h   =. > 0 { y\n  t   =. > 1 { y\n  ht  =. |: h\n  (ht +/ . * t) %. ((ht +/ . * h) + x * =/~ i. {: $ h)\n)\nELMFIT =. 4 : 0\n  hid =. (2 {. x) HIDDEN > 0 { y\n  (> 2 { x) RIDGE hid ; > 1 { y\n)\nPREDICT =. 4 : '((2 {. x) HIDDEN y) +/ . * > 2 { x'\nRANDOM =. 4 : 0\n  p =. 2147483647\n  u =. p | 1103515245 * x + >: i. y\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 48271 * u\n  _1 + 2 * u % p\n)\nn =. 200\nd =. 3\nh =. 20\nx =. (n, d) $ 2 RANDOM n * d\nt =. (,. 1 o. 3 * 0 {"1 x) + 0.5 * ,. (1 {"1 x) * 2 {"1 x\nw =. (d, h) $ 4 * 5 RANDOM d * h\nb =. 2 * 9 RANDOM h\nnet =. w ; b ; 0.1\nbeta =. net ELMFIT x ; t\np =. (w ; b ; beta) PREDICT x\n<. 0.5 + 1000 * (, 8 {. p) , %: (+/ *: (, p) - , t) % n
+> j: 778 _645 _1137 _808 _28 1023 376 _9 384
+= STORE =. 3 : 0\n  n =. {: $ y\n  (((|: y) +/ . * y) * -. =/~ i. n) % n\n)\nFLIP =. 4 : 0\n  f =. y +/ . * x\n  (* f) + y * 0 = f\n)\nRECALL =. 4 : '((> 0 { x) & FLIP) ^: (> 1 { x) y'\nENERGY =. 4 : '_0.5 * +/"1 y * y +/ . * x'\nRANDOM =. 4 : 0\n  p =. 2147483647\n  u =. p | 1103515245 * x + >: i. y\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 48271 * u\n  _1 + 2 * u % p\n)\nn =. 64\np =. 3\npat =. * (p, n) $ 17 RANDOM p * n\nw =. STORE pat\nmask =. _1 ^ 12 > /:"1 /:"1 (p, n) $ 23 RANDOM p * n\nprobe =. pat * mask\nrec =. (w ; 6) RECALL probe\n(+/"1 probe ~: pat) , (+/"1 rec ~: pat) , <. 0.5 + 100 * (w ENERGY probe) , w ENERGY rec
+> j: 12 12 12 0 0 0 _1106 _1241 _1178 _3056 _3066 _3066
+= SGCOEF =. 3 : 0\n  h =. 0 { y\n  k =. 1 { y\n  d =. 2 { y\n  a =. (i: h) ^/ i. >: k\n  g =. (%. (|: a) +/ . * a) +/ . * |: a\n  (! d) * d { g\n)\nSGFILT =. 4 : '(# x) (+/ @ (x & *))\\ y'\nRANDOM =. 4 : 0\n  p =. 2147483647\n  u =. p | 1103515245 * x + >: i. y\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 12345 + 1103515245 * p | u * u\n  u =. p | 48271 * u\n  _1 + 2 * u % p\n)\nn =. 400\nt =. (i. n) % n\nsig =. (1 o. 6 * t) + 0.1 * 13 RANDOM n\nc =. SGCOEF 4 3 0\ns =. c SGFILT sig\n(<. 0.5 + 35 * SGCOEF 2 2 0) , (<. 0.5 + 231 * c) , (<. 0.5 + 60 * SGCOEF 4 3 1) , <. 0.5 + 10000 * (4 {. s) , %: (+/ *: s - 4 }. _4 }. 1 o. 6 * t) % # s
+> j: _3 12 17 12 _3 _21 14 39 54 59 54 39 14 _21 4 _7 _10 _6 0 6 10 7 _4 602 652 627 648 296

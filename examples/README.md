@@ -24,6 +24,12 @@ uvx libjay complex.ijs            # sqrt of a negative, polar form
 printf 'hello\n' | uvx libjay examples/input.apl   # ⍞ reads a line, ⍞← echoes it
 printf 'hello\n' | uvx libjay examples/input.ijs   # 1!:1 ]1 / 1!:2 ]2, same idea
 uv run --with libjay --no-project python quickstart.py          # the Python API end to end
+uvx libjay algos/kama.ijs          # Kaufman's adaptive moving average
+uvx libjay algos/varratio.ijs      # the Lo-MacKinlay variance-ratio test
+uvx libjay algos/hurst.ijs         # the Hurst exponent by rescaled range
+uvx libjay algos/elm.ijs           # an extreme learning machine
+uvx libjay algos/hopfield.ijs      # a Hopfield network, stored and recalled
+uvx libjay algos/savgol.ijs        # a Savitzky-Golay filter, designed
 ```
 
 ## Output
@@ -177,3 +183,17 @@ Run as `printf 'hello\n' | uvx libjay examples/input.apl` (piped input, since
 ```
 you said: hello
 ```
+
+## `algos/`
+
+Six number-crunching algorithms written in J from their own mathematics —
+three indicators from technical analysis, a neural network, an associative
+memory and a filter design. Each file is in two halves: the definitions,
+then a demonstration below a line reading `NB. === demo`. The definitions
+are what the tests, the corpus and the benchmarks read, so the code here is
+the code that is checked.
+
+[docs/algorithms.md](../docs/algorithms.md) has the reasoning, what each was
+checked against, the tolerances, the measurements and what the checking
+found. `bench/algos` holds a numpy reference for each, written from the same
+mathematics and independently of the J.

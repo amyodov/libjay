@@ -753,6 +753,13 @@ impl SourceParts {
         let mut i = 0;
         while i < src.len() {
             let ch = src[i..].chars().next().unwrap();
+            if ch == '\n' {
+                // No string literal of either language crosses a line, so an
+                // apostrophe still open at the newline never opened one: it
+                // was an apostrophe in a comment. Without this, one `NB. it's`
+                // would quote every hole after it.
+                in_quote = false;
+            }
             if ch == '\'' {
                 in_quote = !in_quote;
                 parts.last_mut().unwrap().push(ch);

@@ -7,6 +7,21 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- SIX NUMBER-CRUNCHING ALGORITHMS WRITTEN IN J, in `examples/algos`:
+  Kaufman's adaptive moving average, the Lo-MacKinlay variance-ratio test,
+  the Hurst exponent by rescaled range, an extreme learning machine, a
+  Hopfield network and a Savitzky-Golay filter designed rather than
+  tabulated. Each is written from its own mathematics, has a numpy
+  reference in `bench/algos` written the same way and independently, and is
+  checked three ways — libjay against the reference, jconsole against the
+  reference, and libjay against jconsole on the very same source. The
+  programs are in the corpus as the `algorithms` theme, the checks are
+  `python/tests/test_algos.py` (which also runs four of them over the OHLCV
+  and DSP series `bench/data.py` builds), and `bench/algos_bench.py` times
+  all three implementations. docs/algorithms.md is the prose, the
+  tolerances and the measurements.
+
+
 - A WHOLE NUMBER WRITTEN WITH AN EXPONENT IS AN INTEGER, as it is in the
   reference: `3!:0 (1e9)` and `3!:0 (5e18)` report the integer type where
   `3!:0 (1e19)` — a value no machine word holds — reports the float one.
@@ -389,6 +404,17 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- AN APOSTROPHE IN A COMMENT NO LONGER QUOTES THE INTERPOLATION HOLES AFTER
+  IT. The pre-pass that splits `{name}` holes out of a source string
+  toggled a quote flag on every apostrophe with no notion of `NB.` running
+  to the end of the line, so one `NB. it's` left the flag set and every
+  hole after it was read as text inside a string —
+  `jay.j("NB. it's a comment\n2 + {x}", {"x": 1})` was a syntax error where
+  the same source without a hole always evaluated. No string literal of
+  either language crosses a line, so an apostrophe still open at a newline
+  never opened one and the flag is cleared there.
+
 
 - THE ARITHMETIC THAT MADE A NaN IS REFUSED ON THE COMPLEX MONAD PATH TOO.
   Round 9C put the check on the complex DYAD; the monads that ARE those
