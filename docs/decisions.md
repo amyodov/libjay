@@ -5442,3 +5442,11 @@ the register.
   `(1 1.0000000000001) (14 b.) …`, which is refused — but that value is a
   tenth of a thousandth of a billionth away, past `⎕CT`, where
   `0.9999999999999999` is not and answers.
+- 2026-09-06 — the BINOMIAL'S SIGN past 2^53 is the true parity of
+  `y - x`, and the reference's answer is PINNED rather than followed.
+  Round 7B had implemented the reference's reading of that parity off a
+  double, so `_1e17 ! _1` came out 1 although 99999999999999999 is odd;
+  that reproduced an arithmetic loss instead of a rule. The value is
+  provable, the reference's is not, so this is the "proven-wrong
+  reference" case of the pinning rule: both answers stand in the
+  divergence list and the corpus rows that recorded the loss are gone.

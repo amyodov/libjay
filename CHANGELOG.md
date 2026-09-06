@@ -248,6 +248,12 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Round 9C's divergence bookkeeping: `_1 |/\\. (_ 1 2)` and
+  `_99999999999999999 ! _1` converged and their notes went, while
+  `_1e17 ! _1` and `_1e16 ! _1` moved OUT of the recorded corpus and into
+  the divergence list — now that a whole exponent literal is an integer,
+  libjay answers the parity where the reference reads it off a double.
+
 - Six divergence rows converged and their notes went: the root, the
   logarithm and the type of a one-item NaN, the inverse of a NaN vector,
   the null character's writing, and `1 p: (_. 1 2)`, which libjay now

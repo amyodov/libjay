@@ -853,6 +853,6 @@ p.. &.< (1ad45)
 // the integer type on both sides — and answers the parity.
 _1e17 ! _1
 ? the reference rounds 1e17-1 to an even double and loses the sign
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,&.,&.:,^,^:,|,<.,>.,x:,!.,",/,L:,S: answers=huge
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,&.,&.:,^,^:,|,<.,>.,x:,!.,",/,L:,S:
 _1e16 ! _1
 ? the same one exponent down, the first size a double cannot tell apart
