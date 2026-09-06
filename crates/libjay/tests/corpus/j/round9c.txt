@@ -129,3 +129,38 @@ _. e. 1 2 3
 // so that neither loop can come back.
 0 +/\\ ((0 0 # (2 0 3 $ 0)) + ((_9223372036854775806) <. L:_2 (a:)))
 (3 p: (_3)) >./. ((6) ;: (0.1 0.2 0.3))
+
+// THE NaN THE ARITHMETIC MADE IS REFUSED ON THE COMPLEX PATH TOO. The
+// reference draws no line at the type: `0j_ - 0j_` and
+// `(_ __ 0) - (_ 0j_ 0)` are NaN errors exactly as `_ - _` is, and
+// `(_j2) % 0` is one where `(2j3) % 0` is `_j_`. A NaN the program itself
+// wrote still travels on. The FACTORIAL has no limit at a complex
+// infinity where it has one at a real infinity.
+0j_ - 0j_
+(0j_ 1) - (0j_ 2)
+_ - 0j_
+(_ __ 0) - (_ 0j_ 0)
+(_j2) % 0
+(2j3) % 0
+! _
+! (0j_)
+! (_ 0j_ 0)
+%: (_ __ 0)
+
+// A FILL THAT IS NEVER LAID DOWN CHANGES NO TYPE.
+; !.1e_9 (1r2 1r3)
+3!:0 (; !.1e_9 (1r2 1r3))
+; !.1e_9 (1 2 3x)
+; !.1e_9 (0.5 0.25)
+; (1r2 1r3)
+
+// A WORD IS MADE OF BYTES. The reference converts its wider character
+// types down to the one-byte one and refuses a code no byte holds; it is
+// not the widened TYPE that is refused.
+;: (u: 'abc')
+;: (2 u: 'abc')
+;: (u: 65 0 66)
+;: (u: 955)
+;: (u: 65534)
+;: (u: (_2 0 2))
+;: (200 { a.)

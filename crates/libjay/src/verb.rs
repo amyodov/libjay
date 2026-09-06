@@ -5916,12 +5916,19 @@ fn dyad_cx_chunk_body<A: Widen<Cx>, B: Widen<Cx>>(
             return Ok(());
         }};
     }
-    match op {
-        Add => plain!(cx::add),
-        Sub => plain!(cx::sub),
-        Mul => plain!(cx::mul),
-        DivJ => plain!(cx::div),
-        _ => {}
+    // Under J's rule an ANSWER that is a NaN neither operand brought is
+    // refused, and a fast path that never looks at what it made cannot
+    // see one: `(_ __ 0) - (_ 0j_ 0)` is a NaN error there. So the four
+    // steps that cannot fail on their own are picked before the loop only
+    // where no such rule stands over them.
+    if !tol.is_j() {
+        match op {
+            Add => plain!(cx::add),
+            Sub => plain!(cx::sub),
+            Mul => plain!(cx::mul),
+            DivJ => plain!(cx::div),
+            _ => {}
+        }
     }
     let mut err = None;
     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut Cx| {

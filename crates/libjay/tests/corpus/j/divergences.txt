@@ -828,3 +828,17 @@ p. &.< (0j1)
 ? the same with the imaginary unit for the root
 p.. &.< (1ad45)
 ? the same under the polynomial derivative
+
+// THE NaN THE ARITHMETIC MADE, SEEN THROUGH A SCAN, where the reference
+// contradicts itself. `-/ (2 2 $ _ 1 _ 2)` is a NaN error there — `_ - _`
+// has no value — and `-/\. (2 2 $ _ 1 _ 2)`, whose FIRST ITEM is that very
+// reduction, answers `_. _1` over `_ 2`. The scan's own loop does not
+// consult the check where its cells hold more than one atom; at atom cells
+// it does, and `-/\. (_ _)`, `-/\ (_ _)`, `+/\. (_ __)` and `+/\ (_ __)`
+// are all NaN errors. The same two arguments cannot have two answers, so
+// libjay refuses on every path.
+-/\\. (2 2 $ _ 1 _ 2)
+? the reference's own `-/` of this is a NaN error, which contradicts it
+~ cause=we-refuse:err:NaN_error:_`__-__`_has_no_value|we-refuse:err:NaN_error:_`__+___`_has_no_value|we-refuse:err:NaN_error:_a_residue_of_an_infinity_has_no_value|we-refuse:err:NaN_error:_`___`_has_no_value verb=/,\,\. also=-,+,*,%,|,^,^.,%:,<.,>.,*.,+.,o.,j.,r.,!,!.,&.,&.:,",@,@:,:,L:,S:,x:,F..,F.:,F::,^:,;.,M.,f.,::,#:,#.
+_1 |/\\. (_ 1 2)
+? the same under a residue, where its own `|/` refuses too

@@ -2490,6 +2490,19 @@ language and reference each entry compares against is named inline;
 oracle directly, one entry per line of
 `crates/libjay/tests/corpus/apl/divergences.txt`.
 
+- J's NaN error — the refusal of a value the arithmetic MADE — is skipped
+  by the reference's own SCAN loop wherever its cells hold more than one
+  atom: `-/ (2 2 $ _ 1 _ 2)` is a NaN error there and `-/\. (2 2 $ _ 1 _ 2)`,
+  whose first item is that very reduction, answers `_. _1`. At atom cells
+  the scan refuses as the reduction does. libjay applies one rule on every
+  path and refuses both.
+
+- A boxed ROOT FORM holding ONE COMPLEX number is an INDEX error in J —
+  `p. (< 0j0)`, `p. (< 1j0)` and `p. (< 1ad45)` alike — where a box holding
+  one REAL root (`p. (< 2)` is `_2 1`) and a box holding a complex LIST
+  (`p. (< 2 3j4)` is `6j8 _5j_4 1`) both answer. libjay reads the box the
+  same way at every length and type.
+
 - J's `u:` widens a literal to a wider character type, which libjay does
   not have: the widened value has the same items and the same codes here
   (`# u: 'é'` is 2 and `3 u: u: 'é'` is `195 169` in both), and only the
@@ -2956,6 +2969,22 @@ compiler names the feature and the corresponding cell in
 [status.md](status.md) is 🔴. Every gap named inline in the
 sections above is also collected here.
 
+- `x %. y` DOES NOT KEEP THE EXACT TYPES where the monad `%. y` does.
+  `%. (1 2 3x)` is `1r14 1r7 3r14` here as there, while `2 %. (1 2 3x)` is
+  `6r7` in J and the float 0.857143 here; `2 %. (1r2 1r3)` (`60r13`),
+  `(2 2 $ 1 2 3 4x) %. (1 2x)` (`7r5 2`) and `2 %. (2 2 $ 1 2 3 4x)`
+  (`_2 2`) part the same way. The divide is the inverse followed by a
+  matrix product, so what is missing is an EXACT matrix product.
+- The EMPTY FRAME'S TYPE is settled by running the verb on a fill cell —
+  a non-numeric side read as a numeric zero — which libjay does for the
+  SCALAR DYAD path and not for the outer product, the cut, the rank frame
+  or the fold: `3!:0 (2 %/ (''))` is the float type in J and the integer
+  one here, although `3!:0 (2 % (0 $ 'a'))` agrees. One probe wants
+  routing through four frame makers.
+- `2 p:` and `3 p:` of a COMPLEX value, and `2 p:` of a value past the
+  machine word, print NOTHING in the reference — neither an error nor a
+  value — so there is nothing to follow and nothing safe to record: the
+  spellings sit one step from `q: 3j4`, which kills the interpreter.
 - Catenating items whose shapes differ fills in J and is refused in APL, as
   each reference has it: `1 2 3 , i. 2 2` overtakes both sides to 3 columns,
   while `(2 2⍴⍳4) ⍪ 1 2 3` is a length error.
