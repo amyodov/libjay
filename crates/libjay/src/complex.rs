@@ -80,7 +80,15 @@ pub fn div(a: Cx, b: Cx) -> Cx {
     // divides one infinity by another where both parts are infinite and
     // makes a NaN of the quotient, which is what had `2 %. _j_` refused
     // here and answered 0 there.
-    if (b[0].is_infinite() || b[1].is_infinite()) && a[0].is_finite() && a[1].is_finite() {
+    // A NaN BESIDE THE INFINITY IS NOT A MAGNITUDE, and the shortcut does
+    // not apply to it: `% _.j_` is `_.j_.` in the reference where `% _j_`
+    // is 0.
+    if (b[0].is_infinite() || b[1].is_infinite())
+        && !b[0].is_nan()
+        && !b[1].is_nan()
+        && a[0].is_finite()
+        && a[1].is_finite()
+    {
         return ZERO;
     }
     // Smith's scaling keeps the denominator from overflowing. The cross
@@ -101,7 +109,18 @@ pub fn div(a: Cx, b: Cx) -> Cx {
 
 #[inline]
 pub fn abs(z: Cx) -> f64 {
-    z[0].hypot(z[1])
+    // THE LARGER PART SETS THE SCALE, AND A NaN NEVER COMPARES LARGER, so
+    // it is the REAL part that decides wherever the imaginary one is a NaN.
+    // That is what the reference's own answers say, and no IEEE hypotenuse
+    // gives them: `| 0j_.` is 0 — a zero scale leaves nothing for the NaN
+    // to spoil — where `| 1e_300j_.` is `_.` and `| _j_.` is `_`, and on
+    // the other side `| _.j_` is `_.` where the hypotenuse answers `_`.
+    let m = if z[1].abs() > z[0].abs() { z[1].abs() } else { z[0].abs() };
+    if m == 0.0 || m.is_infinite() || m.is_nan() {
+        return m;
+    }
+    let (a, b) = (z[0] / m, z[1] / m);
+    m * (a * a + b * b).sqrt()
 }
 
 /// The argument, in radians; `arg(0)` is 0.
@@ -111,6 +130,22 @@ pub fn arg(z: Cx) -> f64 {
     // lower branch; every value that reaches here as a widened real has to
     // land on the principal one.
     z[1].atan2(z[0])
+}
+
+/// The direction `z` points in, and `None` where it has none.
+///
+/// A NaN part leaves no direction at all, and two infinite parts name two
+/// at once, where the IEEE arctangent answers the diagonal between them.
+/// The reference refuses both — `12 o. _.`, `12 o. _j_` and `*. _j_` are
+/// NaN errors — while the LOGARITHM of the same value keeps the diagonal
+/// (`^. _j_` is `_j0.785398`), so this is the angle a value is asked to
+/// NAME, not the one the transcendental functions compute with.
+#[inline]
+pub fn angle(z: Cx) -> Option<f64> {
+    if z[0].is_nan() || z[1].is_nan() || (z[0].is_infinite() && z[1].is_infinite()) {
+        return None;
+    }
+    Some(arg(z))
 }
 
 /// `y % | y`: the unit complex in y's direction, and 0 at the origin.
@@ -129,6 +164,11 @@ pub fn signum(z: Cx) -> Cx {
         return [unit(z[0]), unit(z[1])];
     }
     let m = abs(z);
+    // A VALUE WITH NO MAGNITUDE IS LEFT WHERE IT IS rather than divided by
+    // one: `* _.j1` is `_.j1` there and `* 1j_.` is `1j_.`.
+    if m.is_nan() {
+        return z;
+    }
     if m == 0.0 { ZERO } else { [z[0] / m, z[1] / m] }
 }
 
@@ -301,6 +341,12 @@ pub fn floor(z: Cx, tol: Tol) -> Cx {
         let part = |x: f64| if x.is_finite() { x.floor() } else { x };
         return [part(z[0]), part(z[1])];
     }
+    // A NaN PART IS ALREADY WHOLE for the same reason: `<. _.j1` and
+    // `>. _.j1` are `_.j1` there, where the comparison below reads the
+    // NaN as failing every test and steps an axis it should not.
+    if z[0].is_nan() || z[1].is_nan() {
+        return z;
+    }
     let (bx, by) = (z[0].floor(), z[1].floor());
     let (r, s) = (z[0] - bx, z[1] - by);
     if tol.lt(r + s, 1.0) {
@@ -448,7 +494,22 @@ pub fn cosh(z: Cx) -> Cx {
 
 #[inline]
 pub fn tanh(z: Cx) -> Cx {
+    // A REAL PART LARGE ENOUGH HAS ALREADY SATURATED THE TANGENT and the
+    // angle beside it counts for nothing: `7 o. _j_` is 1 in the reference
+    // and `7 o. 1e10j1e10` is 1, where the quotient of two infinities
+    // below would be a NaN.
+    if saturates(z[0]) {
+        return [1.0f64.copysign(z[0]), 0.0];
+    }
     div(sinh(z), cosh(z))
+}
+
+/// Whether the hyperbolic tangent of this real part has run out to ±1, so
+/// that the imaginary part it would turn by is never consulted. It is the
+/// same question [`vanishes`] asks of the exponential, over the `^ _2|re|`
+/// that separates `tanh re` from 1.
+pub fn saturates(re: f64) -> bool {
+    vanishes(-2.0 * re.abs())
 }
 
 /// `_1 o. y`: `-i ln(iy + sqrt(1 - y^2))`.
@@ -579,6 +640,19 @@ pub fn gamma(z: Cx) -> Cx {
 
 /// `!z`: the factorial, which is Γ(z+1).
 pub fn factorial(z: Cx) -> Cx {
+    // THE GAMMA FUNCTION VANISHES WHERE THE REAL PART RUNS OFF BELOW,
+    // whatever the imaginary part does: `! __j1` and `! __j_` are both 0 in
+    // the reference, where the reflection formula's own arithmetic would
+    // leave a NaN.
+    if z[0] == f64::NEG_INFINITY {
+        return ZERO;
+    }
+    // AND IT HAS NO VALUE WHERE THE REAL PART RUNS OFF ABOVE beside a
+    // turning imaginary one: `! _j1` is `_.j_.` there where `! _` — the
+    // same infinity with no imaginary part at all — is `_`.
+    if z[0] == f64::INFINITY && z[1] != 0.0 {
+        return [f64::NAN, f64::NAN];
+    }
     gamma(add(z, ONE))
 }
 

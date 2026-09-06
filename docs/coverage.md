@@ -2478,14 +2478,6 @@ Three grids — 368 cells over the empty frame, 179 over the exact matrix
 paths and 624 over the complex infinities — closed most of what they
 measured. What they left is 🔴 and named here with a spelling apiece:
 
-- **THE CUT'S EMPTY FRAME HAS NO RULE THE REFERENCE KEEPS.** Where a `;.1`
-  makes no piece at all, the type the reference answers is a per-verb,
-  per-argument table with no ordering behind it: `(0 $ 0) <./;.1 (0 $ 1x)`
-  is the extended type there while the same over a RATIONAL empty is a
-  float, and `(0 $ 0) +/;.1 (0 $ 1x)` is boolean while the same over a
-  COMPLEX empty is complex. Eleven cells of the grid. libjay answers the
-  fold's own identity, which is what its `u/` answers.
-
 - **`j."n` OVER A NON-NUMERIC RIGHT.** `3!:0 ((0 3 $ 0) j."1 (0 3 $ 'a'))`
   is 1 in the reference where the same pair at the verb's own rank —
   `(0 3 $ 0) j. (0 3 $ 'a')` — is 16 on both sides. The rank frame's fill
@@ -2501,14 +2493,49 @@ measured. What they left is 🔴 and named here with a spelling apiece:
 - **`x: _j1`** is `_` in the reference, where libjay refuses a complex
   value the exact types have no place for. One cell.
 
-- **`*. _j_`, `* _j_` and `*: _j_`** are refused there and answered here: a
-  complex value with BOTH parts infinite has no direction, and the polar
-  form, the signum and the square each need one. libjay's signum answers
-  the NaN it makes rather than refusing it, since the complex scalar MONAD
-  has no made-NaN check.
-
 - **`2 %. (_. 1 2)`** is `_.j_.` there and `_.` here — the NaN inverse's
   widening reaching the DYAD, where round 9C followed it for the monad.
+
+### Round 9E: what the mechanism grids left red
+
+Four grids — 905 cells over the complex monads and the circle table, 446
+over the cut's empty type, 175 over the obverse of a fork and 92 over the
+prime queries — closed 230 cells between them, and closed round 9D's cut
+row above (it is a fill run guarded by the reduce's own kernel coverage,
+not an ordering of the types). What is still 🔴:
+
+- **THE CIRCLE FUNCTIONS `0 4 8` OVER A NaN OR AN INFINITY.** `0 o. _.`,
+  `4 o. _.j1` and `8 o. _j_` are all NaN errors in the reference, and
+  fifteen more cells with them; libjay answers `_.j_.`. The refusal is
+  uniform over every value the grid held, but where it STOPS was not
+  measured — `0 o. _` and `4 o. _` over the reals were not in it — so no
+  arm was written on three values' evidence.
+
+- **`1 2 3 o. 0j_.`**, whose sine, cosine and tangent are `0j_.`, a domain
+  error and a NaN error there, and `_.j_.` here for all three.
+
+- **`7 o. _.j1`** is a NaN error there where the turn is finite; libjay
+  answers `_.j_.`, as the hyperbolic turn rule leaves it.
+
+- **THE ROTATE OF AN ATOM BY A LIST OF COUNTS.**
+  `$ ((3 3 $ 1 0 0 0 1 0 0 0 1) |. !.0.5 (16b1f))` is `3 1 1 1` in the
+  reference — the atom takes the rank the count list gives it — and `3`
+  here, and only the LEADING count decides: `(0 1 0) |.!.0.5 31` is 31
+  where `(1 0 0) |.!.0.5 31` is the fill.
+
+- **`x:` OF A FLOAT CONVERGES FURTHER THERE.** `1 x: (2 ^ 0.5)` is
+  `431273813145r304956637823` in the reference and `3880899r2744210` here;
+  `1 x: (o. 1)` is `1285290289249r409120605684` there and
+  `5419351r1725033` here; `1 x: 1e_15` is `1r1000000000000000` there and
+  `1r999999999999999` here. `1 x: 0.1`, `0.2`, `0.5`, `1.5`, `123.456`,
+  `% 3` and `% 7` agree exactly. libjay stops at the first
+  continued-fraction convergent within the comparison tolerance; the
+  reference's answers are not convergents at all (`431273813145r304956637823`
+  is 3.1e_14 out where the convergent of that denominator size is
+  2.3e_25 out), so no continued fraction of any depth produces them.
+  Round 9A fitted and refused four hypotheses for this; a fifth — the
+  tolerant expansion whose remainder is rounded to whole — was fitted and
+  refused here.
 
 ## Known divergences (deliberate, revisit later)
 

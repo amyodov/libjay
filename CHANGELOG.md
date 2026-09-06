@@ -251,6 +251,24 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   none of them having a factorisation to count over. It was refused by
   name before, as a query the conjunction had no reading for.
 
+- `_ q: y` RUNS THE EXPONENTS OUT TO y'S LARGEST PRIME FACTOR and stops
+  there: one place per prime up to it, whether or not that prime divides
+  y. `_ q: 12x` is `2 1`, `_ q: 4.0` is `,2` and `_ q: 1e100` the several
+  thousand places its largest factor asks for. The infinite left argument
+  was refused by name before; it sieves to the largest factor now, and a
+  factor past fifty million is a limit error rather than a sieve nobody
+  can hold.
+
+- THE OBVERSE OF A FORK WHOSE TINE IS A CONSTANT VERB. Such a fork never
+  reads its argument through that tine, so it is a composition:
+  `(u v n:) y` is `u (y v n)`, and its obverse undoes the bond `v&n` and
+  then u — `(#. + 3:)^:_1 2` is `#.^:_1 (2 - 3)`, and `(#. ^ 3:)^:_1 2`
+  the cube root of 2. A constant on the LEFT tine reads the same way
+  round, `(3: + #.)^:_1 2` being `#.^:_1 (2 - 3)` as well. The middle has
+  an obverse for `+ - * %` and `^`; a fork whose right tine READS its
+  argument, and one whose left tine cannot itself be undone, have none
+  here as they have none there.
+
 
 ### Changed
 
@@ -293,7 +311,66 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   them, `4 p: (_. 1 4)` being `2 2 5`, where a NaN alone is still refused
   as the reference refuses it.
 
+- THE CUT'S EMPTY ANSWER IS A GUARDED FILL RUN. Where a cut has no
+  interval to compute, the reference types the answer by running the verb
+  on a pair of FILL CELLS where the reduce has a kernel for the pair, and
+  by the identity of `u/` over an empty where it has none. The coverage is
+  small and measured: `+ - * %` take the fill over the boolean, integer,
+  float and complex types and the identity's boolean over the rest;
+  `<. >.` take it over the boolean, integer, float and EXTENDED types and
+  the identity's float over the rest; every other scalar dyad answers the
+  identity's type whatever it was handed. That puts
+  `3!:0 ((0 $ 0) <./;.1 (0 $ 1x))` at the extended type and
+  `3!:0 ((0 $ 0) +/;.1 (0 $ 0))` at the integer one, which round 9D had
+  measured as eleven cells no ordering of the types fits. `;.0`, `;.3` and
+  `;._3` are not this path and answer the identity throughout.
+
+- THE HYPERBOLIC CIRCLE FUNCTIONS TURN BY THE IMAGINARY PART, as the
+  trigonometric ones turn by the real: `5 o. 1j1e10` is a limit error
+  where `5 o. 1e10j1` is not. The tangent is the exception, having
+  saturated to ±1 wherever the real part is large enough that the turn no
+  longer shows — `7 o. 1e10j1e10` and `7 o. _j_` are both 1.
+
 ### Fixed
+
+- THE ARITHMETIC THAT MADE A NaN IS REFUSED ON THE COMPLEX MONAD PATH TOO.
+  Round 9C put the check on the complex DYAD; the monads that ARE those
+  four steps had none, so `*: _j_` — a multiply — and `* _j_` — a divide —
+  answered the NaN two infinite parts make where the reference refuses
+  them. A verb that is neither is untouched: `%: _j_` is `_.j_.` there and
+  here.
+
+- A COMPLEX VALUE WITH NO MAGNITUDE IS LEFT WHERE IT IS rather than
+  divided by one: `* _.j1` is `_.j1` and `* 1j_.` is `1j_.`. The complex
+  floor and ceiling leave a NaN part alone for the same reason an infinite
+  part is already whole — `<. _.j1` is `_.j1`, where taking a fractional
+  part of the NaN stepped the wrong axis.
+
+- A NaN BESIDE AN INFINITY IS NOT A MAGNITUDE, so the quotient's shortcut
+  for an infinite divisor does not apply to it: `% _.j_` is `_.j_.` where
+  `% _j_` is 0.
+
+- THE LARGER PART SETS THE SCALE OF A COMPLEX MAGNITUDE, AND A NaN NEVER
+  COMPARES LARGER, so the REAL part decides wherever the imaginary one is
+  a NaN. `| 0j_.` is 0 — a zero scale leaves nothing for the NaN to spoil
+  — where `| 1e_300j_.` is `_.`, `| _j_.` is `_` and `| _.j_` is `_.`;
+  no IEEE hypotenuse gives those four, and the scaled form gives all
+  thirteen cells the grid measured.
+
+- THE FOUR CIRCLE FUNCTIONS THAT PULL A REAL OUT OF A COMPLEX VALUE REFUSE
+  TO PULL A NaN. `9 o.` and `11 o.` are the two parts, `10 o.` the
+  magnitude and `12 o.` the angle; each refuses wherever what it would
+  answer is a NaN and answers readily beside a NaN it does not report, so
+  `9 o. 0j_.` is 0 and `9 o. _.j1` a refusal. `*. y` is the length beside
+  the ANGLE and refuses on the same values `12 o.` does — a NaN part, or
+  two infinite parts naming two directions at once — while `| y` and
+  `+. y`, which are not asked that question, carry the NaN on.
+
+- THE COMPLEX FACTORIAL VANISHES WHERE THE REAL PART RUNS OFF BELOW,
+  whatever the imaginary part does: `! __j_` and `! __j__` are 0, as
+  `! __j1` is, where the limit at an infinite imaginary part had refused
+  them. It has no value where the real part runs off ABOVE beside a
+  turning imaginary one, `! _j1` being `_.j_.` where `! _` is `_`.
 
 - A COMPLEX VECTOR IS A COLUMN under `%.`, and its pseudo-inverse is now
   the closed form the reals already had, with the conjugate the sum of

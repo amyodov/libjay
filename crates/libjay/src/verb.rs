@@ -5728,9 +5728,29 @@ fn circle(k: f64, y: f64, span: Span) -> Result<f64> {
         }
         // The parts of a number that happens to be real.
         9 | -9 | -10 => y,
-        10 => y.abs(),
+        // The magnitude a value is asked to NAME, which a NaN has none of:
+        // `10 o. _.` is a NaN error there where `| _.` is `_.`.
+        10 => {
+            if y.is_nan() {
+                return Err(Error::new(
+                    ErrorKind::Nan,
+                    "this value has no such part to report".to_string(),
+                    Some(span),
+                ));
+            }
+            y.abs()
+        }
         11 => 0.0,
         12 => {
+            // A NaN POINTS NOWHERE: `12 o. _.` is a NaN error there, where
+            // every comparison against it is false and would answer 0.
+            if y.is_nan() {
+                return Err(Error::new(
+                    ErrorKind::Nan,
+                    "this value has no angle to report".to_string(),
+                    Some(span),
+                ));
+            }
             if y < 0.0 {
                 std::f64::consts::PI
             } else {
@@ -5875,6 +5895,43 @@ fn cx_op_value(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx>
             // `2 o. 1e10j1` is a limit error and `1 o. 0j1e10` is not.
             if matches!(a[0] as i64, 1..=3) {
                 turns(b[0], span)?;
+            }
+            // THE HYPERBOLIC ONES TURN BY THE IMAGINARY PART as the
+            // trigonometric ones turn by the real: `5 o. 1j1e10` is a
+            // limit error there and `5 o. 1e10j1` is not. The tangent is
+            // the exception, having saturated to ±1 wherever the real part
+            // is large enough that the turn no longer shows.
+            if matches!(a[0] as i64, 5 | 6) || (a[0] as i64 == 7 && !cx::saturates(b[0])) {
+                turns(b[1], span)?;
+            }
+            // THE FOUR THAT PULL A REAL OUT OF A COMPLEX VALUE REFUSE TO
+            // PULL A NaN. `9 o.` and `11 o.` are the two parts, `10 o.` the
+            // magnitude and `12 o.` the angle, and each of them is a
+            // refusal in the reference wherever what it would answer is a
+            // NaN — `9 o. _.j1`, `11 o. 1j_.`, `10 o. _.j1`, `12 o. _j_` —
+            // where the same four answer readily beside a NaN they do not
+            // report (`9 o. 0j_.` is 0, `11 o. _.j1` is 1). It is the
+            // question a value is asked to NAME, so the answer stands or
+            // the sentence stops; `| _.j1` and `+. _.j1`, which are not
+            // asked it, carry the NaN on.
+            if matches!(a[0] as i64, 9..=12) {
+                let part = match a[0] as i64 {
+                    9 => b[0],
+                    // The magnitude is asked of the PARTS and not of the
+                    // scale they come to: `10 o. 0j_.` is a NaN error
+                    // there where `| 0j_.` is 0.
+                    10 if b[0].is_nan() || b[1].is_nan() => f64::NAN,
+                    10 => cx::abs(b),
+                    11 => b[1],
+                    _ => cx::angle(b).unwrap_or(f64::NAN),
+                };
+                if part.is_nan() {
+                    return Err(Error::new(
+                        ErrorKind::Nan,
+                        "this value has no such part to report".to_string(),
+                        Some(span),
+                    ));
+                }
             }
             cx::circle(a[0] as i64, b).ok_or_else(|| {
                 Error::domain("the circle functions run from _12 to 12", span)
@@ -8027,10 +8084,13 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
         // of plain steps below.
         Floor => Data::Complex(par::map(v, |&z| cx::floor(z, tol)).into()),
         Ceil => Data::Complex(par::map(v, |&z| cx::ceil(z, tol)).into()),
-        // THE FACTORIAL HAS NO LIMIT AT AN INFINITE IMAGINARY PART.
+        // THE FACTORIAL HAS NO LIMIT AT AN INFINITE IMAGINARY PART — unless
+        // the REAL part has already run off below, where the gamma
+        // function thins out to nothing whatever the imaginary part does:
         // `! (0j_)` and `! (0j__)` are limit errors in the reference where
-        // `! (_j0)` — the real infinity the value displays as — is `_`.
-        Factorial if v.iter().any(|z| z[1].is_infinite()) => {
+        // `! (_j0)` — the real infinity the value displays as — is `_`, and
+        // `! __j_` is 0, as `! __j1` is.
+        Factorial if v.iter().any(|z| z[1].is_infinite() && z[0] != f64::NEG_INFINITY) => {
             return Err(Error::new(
                 ErrorKind::Limit,
                 "this factorial runs past every value there is",
@@ -8060,6 +8120,34 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
             Data::Complex(par::map(v, |&z| step(z)).into())
         }
     };
+    // THE ARITHMETIC THAT MADE A NaN IS REFUSED ON THE MONAD PATH TOO.
+    // `cx_op` refuses a NaN the four complex arithmetic steps made out of
+    // an infinity, and the monads that ARE those steps are held to the same
+    // rule: `*: _j_` is a multiply and `* _j_` a divide, and both are NaN
+    // errors in the reference, while `%: _j_` — which is neither — answers
+    // `_.j_.` there. A NaN the program itself wrote still travels on.
+    if tol.is_j()
+        && matches!(op, Neg | Conj | Recip | OneMinus | Inc | Dec | Double | Halve | Square | Signum)
+        && let Data::Complex(out) = &data
+    {
+        for (z, r) in v.iter().zip(out.iter()) {
+            if !z[0].is_nan()
+                && !z[1].is_nan()
+                && (z[0].is_infinite() || z[1].is_infinite())
+                && r.iter().any(|v| v.is_nan())
+            {
+                return Err(Error::nan(
+                    format!(
+                        "`{} {}j{}` has no value",
+                        crate::fuse::monad_name(op),
+                        j_number(z[0]),
+                        j_number(z[1])
+                    ),
+                    span,
+                ));
+            }
+        }
+    }
     Ok(Array::new(y.shape.clone(), data).with_layout(y.layout()))
 }
 
@@ -12273,18 +12361,20 @@ fn complex_parts(y: &Array, polar: bool, span: Span) -> Result<Array> {
     };
     let z = v.first().copied().unwrap_or(cx::ZERO);
     if polar {
-        // A NaN in either part leaves no length and no angle, and the
-        // reference refuses rather than answering one: `*. _.`, `*. 1j_.`
-        // and `*. _.j1` are all NaN errors there, where `+.` of the same
-        // value answers the two parts it was given.
-        if z[0].is_nan() || z[1].is_nan() {
+        // `*. y` is the length beside the ANGLE, and where the angle has no
+        // answer neither has the pair: `*. _.`, `*. 1j_.` and `*. _.j1` are
+        // NaN errors there for the NaN, and `*. _j_` for the two infinite
+        // parts that name two directions at once, where `+.` of the same
+        // value answers the two parts it was given. It is the same question
+        // `12 o. y` asks, and it refuses on the same values.
+        let Some(angle) = cx::angle(z) else {
             return Err(Error::new(
                 ErrorKind::Nan,
-                "a NaN has no length and no angle".to_string(),
+                "this value has no angle to report".to_string(),
                 Some(span),
             ));
-        }
-        return Ok(Array::from_f64(vec![cx::abs(z), cx::arg(z)]));
+        };
+        return Ok(Array::from_f64(vec![cx::abs(z), angle]));
     }
     // The parts of a WHOLE number are whole: `+. 9223372036854775806` is
     // that number and a zero, which an f64 pair could not spell. An EXACT
@@ -17759,15 +17849,55 @@ fn cut(
         // A verb with nothing to say about that piece leaves a list of
         // empty lists, as the prefixes do.
         let refused: &[usize] = if j { &[0] } else { &[] };
-        return empty_frame(&[0], items.dtype(), cell, false, false, false, true, j, refused, ctx, |cell, _n, c| {
+        let out = empty_frame(&[0], items.dtype(), cell, false, false, false, true, j, refused, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
-        });
+        })?;
+        if let Some(t) = cut_empty_dtype(u, items.dtype(), ctx.cfg, span) {
+            return Ok(Array::new(out.shape, Data::empty(t)));
+        }
+        return Ok(out);
     }
     let mut cells = Vec::with_capacity(ranges.len());
     for (piece, (s, e)) in ranges.iter().enumerate() {
         cells.push(cycled(u, piece).monad(&section(&items, *s, *e), ctx, span)?);
     }
     assemble(&[ranges.len()], cells, span)
+}
+
+/// The type a CUT with no interval to compute answers in, where the
+/// identity of `u/` over an empty does not settle it. `None` leaves that
+/// identity standing, which is what every verb and type not named here
+/// answers with.
+///
+/// The cut is not one fill run: it is a fill run WHERE THE REDUCE HAS A
+/// KERNEL FOR THE PAIR and the identity's type everywhere else. Measured
+/// over the eight types and seventeen scalar dyads, in all four fret
+/// spellings (`;.1`, `;.2`, `;._1`, `;._2`): the four arithmetic steps run
+/// the fill over the boolean, integer, float and complex types —
+/// `3!:0 ((0 $ 0) +/;.1 (0 $ 0))` is the integer 4 that `0 + 0` makes and
+/// `(0 $ 3j4)` gives 16 — and answer the identity's boolean over the
+/// extended, rational, character and boxed ones. The two extrema run it
+/// over the boolean, integer, float and EXTENDED types —
+/// `(0 $ 1x)` gives 64 — and answer the identity's float over the rest.
+/// Every other verb answers the identity's type whatever it was handed.
+fn cut_empty_dtype(u: &Verb, t: DType, cfg: EvalCfg, span: Span) -> Option<DType> {
+    use DType::*;
+    use ScalarDyad::*;
+    if cfg.rules.lang != crate::Lang::J {
+        return None;
+    }
+    let Verb::Reduce(v) = u else { return None };
+    let op = scalar_dyad_of(v)?;
+    let covered = match op {
+        Add | Sub | Mul | DivJ => matches!(t, Bool | I64 | F64 | Complex),
+        Min | Max => matches!(t, Bool | I64 | F64 | Ext),
+        _ => false,
+    };
+    if !covered {
+        return None;
+    }
+    let cell = Array::new(vec![0], empty_of_type(t, 0)?);
+    Some(empty_scalar_dtype(op, &cell, &cell, cfg, span))
 }
 
 /// Where one axis's frets cut it, given the axis's own length.
@@ -17833,7 +17963,15 @@ fn per_axis_cut(
     for (k, flags) in boxes.iter().enumerate() {
         ranges.push(axis_ranges(flags, y.shape[k], mode, span)?);
     }
-    let frame: Vec<usize> = ranges.iter().map(Vec::len).collect();
+    let mut frame: Vec<usize> = ranges.iter().map(Vec::len).collect();
+    // A LIST OF BOXES WITH NO BOX IN IT names no axis and leaves the
+    // argument in ONE piece — `(0 $ a:) <;.1 (i. 3)` is the one box of
+    // `0 1 2` — but an argument with no item of its own has no piece at
+    // all, as it has none under a plain fret list:
+    // `$ ((0 $ a:) +/;.1 (0 $ 0))` is `,0` there and an atom here.
+    if frame.is_empty() && y.items() == 0 {
+        frame.push(0);
+    }
     let total: usize = frame.iter().product();
     // No interval on some axis, so no piece at all: the verb run on an
     // empty piece says what shape the pieces would have had.
@@ -17842,9 +17980,10 @@ fn per_axis_cut(
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, false, false, false, true, j, &[], ctx, |cell, _n, c| {
+        let out = empty_frame(&frame, y.dtype(), cell, false, false, false, true, j, &[], ctx, |cell, _n, c| {
             u.monad(cell, c, span)
-        });
+        })?;
+        return Ok(retype_empty_cut(out, u, y, ctx.cfg, span));
     }
     let mut cells = Vec::with_capacity(total);
     let mut coord = vec![0usize; frame.len()];
@@ -17859,7 +17998,23 @@ fn per_axis_cut(
         cells.push(cycled(u, piece).monad(&subarray(y, &origin, &size, span)?, ctx, span)?);
         odometer(&mut coord, &frame);
     }
-    assemble(&frame, cells, span)
+    let out = assemble(&frame, cells, span)?;
+    Ok(retype_empty_cut(out, u, y, ctx.cfg, span))
+}
+
+/// The per-axis cut's empty answer, retyped by the same fill run the plain
+/// fret list uses. A boxed left argument with no box in it names no axis
+/// and cuts nothing, and the reference types what comes back exactly as it
+/// types the fret list's own empty: `3!:0 ((0 $ a:) +/;.1 (0 $ 0))` is 4
+/// and `3!:0 ((0 $ a:) <./;.1 (0 $ 0))` is 1.
+fn retype_empty_cut(out: Array, u: &Verb, y: &Array, cfg: EvalCfg, span: Span) -> Array {
+    if out.count() > 0 || y.count() > 0 {
+        return out;
+    }
+    match cut_empty_dtype(u, y.dtype(), cfg, span) {
+        Some(t) => Array::new(out.shape, Data::empty(t)),
+        None => out,
+    }
 }
 
 /// The left argument of `;.0` and `;.3`: one row of origins (or movements)
@@ -21857,6 +22012,30 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
         }
         Verb::BondLeft(m, f) => bond_obverse(m, f, true)?,
         Verb::BondRight(f, n) => bond_obverse(n, f, false)?,
+        // A FORK WHOSE RIGHT TINE IS A CONSTANT VERB IS A COMPOSITION.
+        // `(u v n:) y` is `u (y v n)` — the constant tine never reads y —
+        // so it comes back the way every composition does, by undoing the
+        // bond `v&n` and then u: `(#. + 3:)^:_1 2` is `#.^:_1 (2 - 3)` and
+        // `(#. ^ 3:)^:_1 2` the cube root of 2. A fork whose right tine
+        // reads its argument has no obverse here, as it has none there.
+        Verb::Fork(f, g, h) => match constant_noun(h) {
+            Some(n) => {
+                let bond = Verb::BondRight(g.clone(), n);
+                Verb::Atop(Box::new(obverse(f)?), Box::new(obverse(&bond)?), AtopForm::At)
+            }
+            // The constant on the other tine reads the same way round:
+            // `(3: + #.) y` is `3 + #. y`.
+            None => {
+                let bond = Verb::BondLeft(constant_noun(f)?, g.clone());
+                Verb::Atop(Box::new(obverse(h)?), Box::new(obverse(&bond)?), AtopForm::At)
+            }
+        },
+        // `(n g h) y` is `n g (h y)`, the same composition with the
+        // constant on the LEFT of the step instead.
+        Verb::NounFork(n, g, h) => {
+            let bond = Verb::BondLeft(n.clone(), g.clone());
+            Verb::Atop(Box::new(obverse(h)?), Box::new(obverse(&bond)?), AtopForm::At)
+        }
         // `u~ y` is `y u y`, and only a handful of those can be undone. The
         // reference halves for `+~` and takes the square root for `*~`; the
         // three that JOIN a value to itself come back by taking the FRONT
@@ -22230,6 +22409,18 @@ fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
         // of n turns back, and the other way round.
         (SD::Log, false) => Some(Verb::BondRight(Box::new(named("%:")?), n.clone())),
         (SD::Root, false) => Some(Verb::BondRight(Box::new(named("^.")?), n.clone())),
+        _ => None,
+    }
+}
+
+/// The value a CONSTANT verb answers, and `None` for a verb that reads its
+/// argument. `n:` is written `n [ ]`, which is the noun fork whose two
+/// tines take the left and the right of the pair.
+fn constant_noun(v: &Verb) -> Option<Array> {
+    let prim = |v: &Verb, name: &str| matches!(v, Verb::Prim(p) if p.name == name);
+    match v {
+        Verb::Constant(n) => Some(n.clone()),
+        Verb::NounFork(n, g, h) if prim(g, "[") && prim(h, "]") => Some(n.clone()),
         _ => None,
     }
 }
@@ -24455,6 +24646,47 @@ fn prime_exponents(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Ar
         let mut all = ps[from..].to_vec();
         all.extend(es[from..].iter().map(|&e| Ext::from(e)));
         return Ok(Array::new(vec![2, keep], whole_data(all, y)));
+    }
+    // `_ q: y` RUNS THE EXPONENTS OUT TO y'S LARGEST PRIME FACTOR and stops
+    // there — one place per prime up to it, whether or not that prime
+    // divides y: `_ q: 12x` is `2 1`, `_ q: 4.0` is `,2`, and `_ q: 1e100`
+    // is the several thousand places its largest factor asks for. A value
+    // with no factor at all leaves no place.
+    if count == f64::INFINITY {
+        let Some(top) = ps.last().and_then(crate::exact::ext_to_i64) else {
+            return Ok(Array::from_i64(Vec::new()));
+        };
+        const SIEVE_LIMIT: i64 = 50_000_000;
+        if top > SIEVE_LIMIT {
+            return Err(Error::new(
+                ErrorKind::Limit,
+                format!("the largest prime factor is {top}, past the {SIEVE_LIMIT} this sieves to"),
+                Some(span),
+            ));
+        }
+        let n = top as usize;
+        let mut sieve = vec![true; n + 1];
+        sieve[0] = false;
+        sieve[1] = false;
+        let mut p = 2usize;
+        while p * p <= n {
+            if sieve[p] {
+                let mut q = p * p;
+                while q <= n {
+                    sieve[q] = false;
+                    q += p;
+                }
+            }
+            p += 1;
+        }
+        let mut out = Vec::new();
+        for (p, &is) in sieve.iter().enumerate().skip(2) {
+            if is {
+                let at = Ext::from(p as i64);
+                out.push(ps.iter().position(|q| *q == at).map_or(0, |k| es[k]));
+            }
+        }
+        return Ok(Array::from_i64(out));
     }
     let want = one_int(x, "prime exponents", near, span)?;
     let mut out = Vec::with_capacity(want as usize);

@@ -2830,7 +2830,7 @@ pub fn inlined_names(p: &Program) -> Vec<String> {
 
 /// J spellings for the elementwise operations a kernel can hold. Only the
 /// naming lives here; the meanings are [`crate::verb`]'s.
-fn monad_name(op: ScalarMonad) -> &'static str {
+pub(crate) fn monad_name(op: ScalarMonad) -> &'static str {
     use ScalarMonad::*;
     match op {
         Conj => "+",

@@ -5543,3 +5543,98 @@ infinities round 9C had followed one value at a time. A NaN AMONG OTHERS
 reaches the next prime with them — `4 p: (_. 1 4)` is `2 2 5` — where a NaN
 ALONE is refused; the two are the reference's own split and both are now
 followed rather than pinned.
+
+## 2026-09-06 — What a value carrying a NaN is asked to NAME
+
+Round 9C put the made-NaN check on the complex DYAD and left the monad
+path; a 650-cell grid over fifteen values and twenty-two monads, and 255
+more over the circle table, settle the whole of it as one question rather
+than a list of verbs.
+
+- THE FOUR ARITHMETIC STEPS REFUSE A NaN THEY MADE WHEREVER THEY ARE
+  REACHED. `*: z` is a multiply and `* z` a divide, so both refuse at two
+  infinite parts, while `%: _j_` — neither of the four — answers `_.j_.`.
+- A VALUE WITH NO MAGNITUDE IS LEFT WHERE IT IS: `* _.j1` is `_.j1`, and
+  the complex floor and ceiling leave a NaN part alone as they leave an
+  infinite one.
+- THE MAGNITUDE IS SCALED BY THE LARGER PART, AND A NaN NEVER COMPARES
+  LARGER, so the real part decides wherever the imaginary one is a NaN:
+  `| 0j_.` is 0, `| 1e_300j_.` is `_.`, `| _j_.` is `_`, `| _.j_` is `_.`.
+  No IEEE hypotenuse gives those four; the scaled form gives all thirteen
+  measured cells.
+- THE FOUR CIRCLE FUNCTIONS THAT PULL A REAL OUT OF A COMPLEX VALUE — the
+  two parts, the magnitude and the angle — refuse to pull a NaN, and
+  `*. y` refuses with `12 o.` because it IS the angle beside the length.
+  `| y` and `+. y` are not asked that question and carry the NaN on.
+  The distinction is between a value a computation passes through and a
+  value the program asks a number to NAME.
+
+Two more facts of the same grid: the complex factorial vanishes where the
+real part runs off below (`! __j_` is 0) and has no value where it runs
+off above beside a turning imaginary part (`! _j1` is `_.j_.`); and the
+hyperbolic circle functions turn by the IMAGINARY part as the
+trigonometric ones turn by the real, with the tangent excepted where its
+real part has already saturated it.
+
+Left, with the reason: the circle functions `0 4 8` refuse every NaN and
+every infinity there and answer `_.j_.` here — the refusal is uniform over
+the grid but where it stops was not measured, so no arm was written on
+three values' evidence.
+
+## 2026-09-06 — The cut's empty type is a fill run guarded by the kernel
+
+Round 9D measured eleven cells of `x u/;.1 y` over an empty and found no
+ordering of the eight types that fits them, and wrote them into
+docs/coverage.md rather than guessing. A 446-cell grid — the seven cut
+spellings against seventeen scalar dyads and the eight types, with the
+fill-cell dyad `f u f` and the reduce identity `u/ (0 $ T)` measured
+beside every one of them — shows that it is not an ordering at all.
+
+The cut types its empty answer by the FILL RUN where the reduce has a
+kernel for the pair, and by the IDENTITY of `u/` over an empty where it
+has none. The coverage is small and is itself the measurement: `+ - * %`
+take the fill over the boolean, integer, float and complex types and the
+identity's boolean over the extended, the rational, the character and the
+boxed; `<. >.` take it over the boolean, integer, float and extended
+types and the identity's float over the rest; every other scalar dyad
+answers the identity's type whatever it was handed. That is exactly what
+puts `(0 $ 0) <./;.1 (0 $ 1x)` at 64 and the same over a rational empty
+at 8 — the two cells 9D could not reconcile — and it needs no table of
+its own beyond naming which pairs the kernel covers. `;.0`, `;.3` and
+`;._3` are not this path and answer the identity throughout; `;.1`,
+`;.2`, `;._1` and `;._2` are, and so is the per-axis form a boxed fret
+list asks for.
+
+## 2026-09-06 — A fork with a constant tine is a composition, and inverts as one
+
+`(u v n:)` never reads its argument through the constant tine, so
+`(u v n:) y` is `u (y v n)` — one verb of y after another — and its
+obverse is what any composition's is: undo the bond `v&n`, then undo u.
+`(#. + 3:)^:_1 2` is `#.^:_1 (2 - 3)` and `(#. ^ 3:)^:_1 2` the cube root
+of 2, measured over 175 cells. A constant on the LEFT tine reads the same
+way round, `(n g h) y` being `n g (h y)`.
+
+libjay's obverse table had no Fork arm at all, so every such fork said
+"no inverse is known". The arm is three lines because the bond's own
+obverse table already holds the middles: `+ - * %` and `^` have one there,
+`| <. +. *.` do not, and a left tine with no obverse leaves the whole
+without one — which is the reference's answer for `(<. + 3:)^:_1` and
+`(* % 2:)^:_1` too. `[: u n:` and `u@:n:` are constant functions outright
+and have no obverse on either side.
+
+## 2026-09-06 — `_ q: y` runs out to the largest prime factor
+
+`x q: y` gives the exponents of the first x primes and `_x q: y` the last
+x columns of the factor table; the INFINITE left argument, which libjay
+refused by name, runs the exponent vector out to y's largest prime factor
+and stops there — one place per prime up to it, whether or not that prime
+divides y. `_ q: 12x` is `2 1`, `_ q: 4.0` is `,2`, `_ q: 1e100` the
+several thousand places its largest factor asks for. It is one sieve to
+that factor; past fifty million it is a limit error rather than a sieve
+nobody can hold.
+
+A 92-cell grid over `q:`, `*/^:_1`, `2 q:`, `_ q:` and the five safe `p:`
+forms found no other gap: `q: 4.0` is `2 2` and `q: 2.5`, `q: 1r2`,
+`q: _`, `q: 0` and `q: (2^0.5)` are domain errors on both sides. The
+residue's "prime factors need an integer" rows are the `3 p:` and
+`*/^:_1` spellings that kill the interpreter and cannot be measured.

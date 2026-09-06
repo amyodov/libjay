@@ -1,0 +1,206 @@
+// Round 9E: the complex monad's own arithmetic, the polar queries, the
+// cut's empty type, and the obverse of a fork with a constant tine. One
+// measured grid per mechanism; the rule is written above its block.
+
+// THE ARITHMETIC THAT MADE A NaN IS REFUSED ON THE MONAD PATH TOO. Round
+// 9C put the check on the complex DYAD; the monads that ARE those four
+// steps had none, so a square and a signum answered the NaN two infinite
+// parts make. `*: z` is a multiply and `* z` a divide, and both refuse
+// there, while `%: _j_` — which is neither — answers `_.j_.`.
+* (_j_)
+*: (_j_)
+* (__j_)
+*: (_j__)
+* (__j__)
+%: (_j_)
+%: (__j_)
+^. (_j_)
+- (_j_)
++: (_j_)
+>: (_j_)
+-. (_j_)
+% (_j_)
+o. (_j_)
+j. (_j_)
+
+// A VALUE WITH NO MAGNITUDE IS LEFT WHERE IT IS. The signum divides by a
+// magnitude, and where that magnitude is a NaN the reference answers the
+// value itself rather than a pair of NaNs. The complex floor and ceiling
+// leave a NaN part alone for the same reason the infinite part is already
+// whole: the comparison that steps an axis reads a NaN as failing.
+* (_.j1)
+* (1j_.)
+* (_.j_.)
+* (_.j_)
+* (_j_.)
+<. (_.j1)
+>. (_.j1)
+<. (1j_.)
+>. (_.j_.)
+
+// A NaN BESIDE AN INFINITY IS NOT A MAGNITUDE, so the quotient's shortcut
+// for an infinite divisor does not apply to it.
+% (_.j_)
+% (_j_.)
+% (0j_)
+% (1j_)
+
+// THE LARGER PART SETS THE SCALE OF A MAGNITUDE, AND A NaN NEVER COMPARES
+// LARGER, so the REAL part decides wherever the imaginary one is a NaN.
+// No hypotenuse gives these five answers: a zero scale leaves nothing for
+// the NaN to spoil, an infinite one answers the infinity, and anything
+// between carries the NaN out.
+| (0j_.)
+| (1e_300j_.)
+| (_j_.)
+| (__j_.)
+| (_.j_)
+| (_.j__)
+| (_.j1)
+| (2j_.)
+| (0j_)
+| (3j4)
+
+// THE FOUR CIRCLE FUNCTIONS THAT PULL A REAL OUT OF A COMPLEX VALUE REFUSE
+// TO PULL A NaN. `9 o.` and `11 o.` are the two parts, `10 o.` the
+// magnitude and `12 o.` the angle; each refuses wherever what it would
+// answer is a NaN, and answers readily beside a NaN it does not report.
+// `| y` and `+. y`, which are not asked the question, carry the NaN on.
+9 o. (_.j1)
+9 o. (0j_.)
+9 o. (_.)
+11 o. (1j_.)
+11 o. (_.j1)
+11 o. (_.)
+10 o. (_.)
+10 o. (_.j1)
+10 o. (0j_.)
+10 o. (_j_)
+12 o. (_.)
+12 o. (_j_)
+12 o. (0j_)
+12 o. (2)
++. (_.j1)
++. (0j_.)
+
+// `*. y` IS THE LENGTH BESIDE THE ANGLE, and where the angle has no answer
+// neither has the pair: a NaN part leaves no direction, and two infinite
+// parts name two at once, where the IEEE arctangent answers the diagonal
+// between them. The LOGARITHM of the same value keeps that diagonal.
+*. (_j_)
+*. (_.j1)
+*. (_.)
+*. (0j_)
+*. (_j1)
+*. (2)
+^. (__j_)
+
+// THE COMPLEX FACTORIAL VANISHES WHERE THE REAL PART RUNS OFF BELOW,
+// whatever the imaginary part does, and has no value where it runs off
+// ABOVE beside a turning imaginary one.
+! (__j_)
+! (__j__)
+! (__j1)
+! (_j1)
+! (0j_)
+
+// THE HYPERBOLIC CIRCLE FUNCTIONS TURN BY THE IMAGINARY PART as the
+// trigonometric ones turn by the real. The tangent is the exception: it
+// has saturated to ±1 wherever the real part is large enough that the
+// turn no longer shows, and the angle is never consulted there.
+5 o. (1j1e10)
+5 o. (1e10j1)
+6 o. (1j1e10)
+6 o. (1e10j1)
+7 o. (1j1e10)
+7 o. (1e10j1e10)
+7 o. (_j_)
+5 o. (1j2)
+7 o. (1j2)
+
+// THE CUT'S EMPTY ANSWER IS A FILL RUN WHERE THE REDUCE HAS A KERNEL FOR
+// THE PAIR, and the identity's type where it has none. Measured over eight
+// types and seventeen scalar dyads in all four fret spellings: the four
+// arithmetic steps run the fill over the boolean, integer, float and
+// complex types and answer the identity's boolean over the rest; the two
+// extrema run it over the boolean, integer, float and EXTENDED types and
+// answer the identity's float over the rest; every other verb answers the
+// identity's type whatever it was handed. `;.0`, `;.3` and `;._3` are not
+// this path and answer the identity throughout.
+3!:0 ((0 $ 0) +/;.1 (0 $ 0))
+3!:0 ((0 $ 0) -/;.1 (0 $ 0))
+3!:0 ((0 $ 0) */;.1 (0 $ 0))
+3!:0 ((0 $ 0) %/;.1 (0 $ 0))
+3!:0 ((0 $ 0) <./;.1 (0 $ 0))
+3!:0 ((0 $ 0) +/;.1 (0 $ 5))
+3!:0 ((0 $ 0) */;.1 (0 $ 5))
+3!:0 ((0 $ 0) <./;.1 (0 $ 5))
+3!:0 ((0 $ 0) +/;.1 (0 $ 1.5))
+3!:0 ((0 $ 0) <./;.1 (0 $ 1x))
+3!:0 ((0 $ 0) >./;.1 (0 $ 1x))
+3!:0 ((0 $ 0) +/;.1 (0 $ 1x))
+3!:0 ((0 $ 0) +/;.1 (0 $ 3j4))
+3!:0 ((0 $ 0) %/;.1 (0 $ 3j4))
+3!:0 ((0 $ 0) <./;.1 (0 $ 3j4))
+3!:0 ((0 $ 0) <./;.1 (0 $ 1r2))
+3!:0 ((0 $ 0) +/;.1 (0 $ 1r2))
+3!:0 ((0 $ 0) <./;.1 (0 $ a:))
+3!:0 ((0 $ 0) !/;.1 (0 $ 1.5))
+3!:0 ((0 $ 0) %:/;.1 (0 $ 5))
+3!:0 ((0 $ 0) j./;.1 (0 $ 3j4))
+3!:0 ((0 $ 0) +/;.2 (0 $ 3j4))
+3!:0 ((0 $ 0) <./;._1 (0 $ 1x))
+3!:0 ((0 $ 0) %/;._2 (0 $ 0))
+3!:0 ((0 $ 0) +/;.3 (0 $ 3j4))
+3!:0 ((0 $ 0) <./;.3 (0 $ 1x))
+3!:0 ((0 $ 0) <./;.0 (0 $ 1x))
+3!:0 ((0 $ a:) +/;.1 (0 $ 0))
+3!:0 ((0 $ a:) <./;.1 (0 $ 0))
+3!:0 ((0 $ a:) %/;.1 (0 $ 0))
+3!:0 ((0 $ 1.5) +/;.1 (0 $ 0))
+3!:0 ((0 $ 3j4) <./;.1 (0 $ 0))
+
+// A FORK WHOSE RIGHT TINE IS A CONSTANT VERB IS A COMPOSITION, and it
+// comes back the way every composition does: `(u v n:) y` is `u (y v n)`,
+// so its obverse undoes the bond `v&n` and then u. The constant on the
+// LEFT tine reads the same way round. A fork whose right tine READS its
+// argument has no obverse there, and a left tine that cannot be undone —
+// `<.`, `*` — leaves the whole without one.
+(#. + 3:) ^:_1 (2)
+(#. - 3:) ^:_1 (2)
+(#. * 3:) ^:_1 (2)
+(#. % 3:) ^:_1 (2)
+(#. ^ 3:) ^:_1 (2)
+(#. + _9:) ^:_1 (2)
+(#. - 2:) ^:_1 (2)
+(j. + 3:) ^:_1 (2)
+(j. % _9:) ^:_1 (2)
+(+ - 3:) ^:_1 (2)
+(%: + _9:) ^:_1 (2)
+(%: % 2:) ^:_1 (2)
+(*: - 3:) ^:_1 (2)
+(*: % _9:) ^:_1 (2)
+(3: + #.) ^:_1 (2)
+(3 % #.) ^:_1 (2)
+(3: - j.) ^:_1 (2)
+(#. + 3:) ^:(_1 0 1) 2
+(<. + 3:) ^:_1 (2)
+(* % 2:) ^:_1 (2)
+(#. | 3:) ^:_1 (2)
+(#. <. 3:) ^:_1 (2)
+([: #. 3:) ^:_1 (2)
+(#.@:3:) ^:_1 (2)
+
+// `_ q: y` RUNS THE EXPONENTS OUT TO y'S LARGEST PRIME FACTOR and stops
+// there — one place per prime up to it, whether or not that prime divides
+// y — where `n q: y` gives the first n places and `_n q:` the last n
+// columns of the table.
+_ q: (12x)
+_ q: (4.0)
+_ q: (2)
+_ q: (6)
+_ q: (1)
+_ q: (100)
+_ q: (1024)
+2 q: (12x)
+__ q: (12x)

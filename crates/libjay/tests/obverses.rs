@@ -446,3 +446,41 @@ fn apl_reads_the_same_table() {
     expect_near(Lang::Apl, &[(",⌹⍣¯1⌹2 2⍴1 2 3 4", &[1.0, 2.0, 3.0, 4.0])]);
     expect_gap(Lang::Apl, &["⌈⍣¯1⊢1", "(2∘↑)⍣¯1⊢1 2"]);
 }
+
+// --- A fork with a constant tine -----------------------------------------
+
+/// A FORK WHOSE TINE IS A CONSTANT VERB IS A COMPOSITION: `(u v n:) y` is
+/// `u (y v n)`, so its obverse undoes the bond `v&n` and then u. The
+/// constant on the LEFT tine reads the same way round.
+#[test]
+fn a_fork_with_a_constant_tine_inverts_as_a_composition() {
+    expect_ints(
+        Lang::J,
+        &[
+            ("(#. + 3:) ^:_1 (2)", &[1]),
+            ("(#. + _9:) ^:_1 (2)", &[1, 0, 1, 1]),
+            ("(#. - 3:) ^:_1 (2)", &[1, 0, 1]),
+            ("(#. % 3:) ^:_1 (2)", &[1, 1, 0]),
+            ("(%: + _9:) ^:_1 (2)", &[121]),
+            ("(%: - 2:) ^:_1 (2)", &[16]),
+            ("(3: + #.) ^:_1 (2)", &[1]),
+            ("(#. + 3:) ^:(_1 0 1) 2", &[1, 2, 5]),
+        ],
+    );
+    expect_near(
+        Lang::J,
+        &[
+            ("(#. * 3:) ^:_1 (2)", &[2.0 / 3.0]),
+            ("(#. ^ 3:) ^:_1 (2)", &[2.0f64.cbrt()]),
+            ("(+ - 3:) ^:_1 (2)", &[5.0]),
+            ("(3 % #.) ^:_1 (2)", &[1.5]),
+        ],
+    );
+    // A tine that reads its argument, a left tine with no obverse of its
+    // own, and the constant functions `[: u n:` and `u@:n:` have none
+    // there either.
+    expect_gap(
+        Lang::J,
+        &["(<. + 3:) ^:_1 (2)", "(* % 2:) ^:_1 (2)", "(#. | 3:) ^:_1 (2)", "([: #. 3:) ^:_1 (2)"],
+    );
+}

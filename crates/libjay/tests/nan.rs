@@ -362,3 +362,89 @@ fn a_nan_that_names_no_turn_answers(#[case] src: &str, #[case] want: &str) {
 fn a_nan_has_no_length_and_no_angle(#[case] src: &str) {
     assert_eq!(refusal(Lang::J, src), ErrorKind::Nan, "{src}");
 }
+
+/// THE ARITHMETIC THAT MADE A NaN IS REFUSED ON THE MONAD PATH TOO. The
+/// complex monads that ARE one of the four arithmetic steps are held to the
+/// rule `cx_op` holds the dyad to: `*: z` is a multiply and `* z` a divide.
+#[rstest]
+#[case("* _j_")]
+#[case("*: _j_")]
+#[case("* __j_")]
+#[case("*: _j__")]
+#[case("* __j__")]
+fn the_complex_monad_refuses_the_nan_its_arithmetic_made(#[case] src: &str) {
+    assert_eq!(refusal(Lang::J, src), ErrorKind::Nan, "{src}");
+}
+
+/// A verb that is NOT one of the four answers the NaN it makes, and a NaN
+/// the program wrote travels on through the monads that would refuse one
+/// they made.
+#[rstest]
+#[case("%: _j_", "_.j_.")]
+#[case("%: __j_", "_.j_.")]
+#[case("* _.j1", "_.j1")]
+#[case("* 1j_.", "1j_.")]
+#[case("* _.j_", "0j1")]
+#[case("<. _.j1", "_.j1")]
+#[case(">. _.j1", "_.j1")]
+#[case("% _.j_", "_.j_.")]
+#[case("% _j_.", "_.j_.")]
+#[case("% _j_", "0")]
+fn a_written_nan_travels_through_the_complex_monads(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::J, src), want, "{src}");
+}
+
+/// THE LARGER PART SETS THE SCALE OF A MAGNITUDE, AND A NaN NEVER COMPARES
+/// LARGER, so the real part decides wherever the imaginary one is a NaN.
+#[rstest]
+#[case("| 0j_.", "0")]
+#[case("| 1e_300j_.", "_.")]
+#[case("| _j_.", "_")]
+#[case("| __j_.", "_")]
+#[case("| _.j_", "_.")]
+#[case("| _.j__", "_.")]
+#[case("| _.j1", "_.")]
+#[case("| 2j_.", "_.")]
+#[case("| 0j_", "_")]
+#[case("| 3j4", "5")]
+fn a_complex_magnitude_is_scaled_by_the_larger_part(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::J, src), want, "{src}");
+}
+
+/// THE FOUR CIRCLE FUNCTIONS THAT PULL A REAL OUT OF A COMPLEX VALUE refuse
+/// to pull a NaN, and answer readily beside a NaN they do not report.
+#[rstest]
+#[case("9 o. (_.j1)")]
+#[case("11 o. (1j_.)")]
+#[case("10 o. (_.j1)")]
+#[case("10 o. (0j_.)")]
+#[case("10 o. _.")]
+#[case("12 o. _.")]
+#[case("12 o. (_j_)")]
+fn the_polar_queries_refuse_a_nan(#[case] src: &str) {
+    assert_eq!(refusal(Lang::J, src), ErrorKind::Nan, "{src}");
+}
+
+#[rstest]
+#[case("9 o. (0j_.)", "0")]
+#[case("11 o. (_.j1)", "1")]
+#[case("10 o. (_j_)", "_")]
+#[case("12 o. (0j_)", "1.5708")]
+#[case("+. (_.j1)", "_. 1")]
+fn the_polar_queries_answer_beside_a_nan_they_do_not_report(
+    #[case] src: &str,
+    #[case] want: &str,
+) {
+    assert_eq!(shown(Lang::J, src), want, "{src}");
+}
+
+/// The complex factorial vanishes where the real part runs off below and
+/// has no value where it runs off above beside a turning imaginary one.
+#[rstest]
+#[case("! __j_", "0")]
+#[case("! __j__", "0")]
+#[case("! __j1", "0")]
+#[case("! _j1", "_.j_.")]
+fn the_complex_factorial_reads_an_infinite_real_part(#[case] src: &str, #[case] want: &str) {
+    assert_eq!(shown(Lang::J, src), want, "{src}");
+}
