@@ -669,3 +669,172 @@
 ? the reference's own `(0.5) % (0x)` is `_` where this is `__`; reason: self-contradiction
 < _
 > j: __
+= <./ ((_.) , (_.))
+? `(_.) <. (_.)` is `_.` there and `<./\ ((_.) , (_.))` is `_. _.`, whose last item is this insert; reason: self-contradiction
+< _.
+> j: _
+= >./ ((_.) , (_.))
+? `(_.) >. (_.)` is `_.` there and `>./\ ((_.) , (_.))` is `_. _.`, whose last item is this insert; reason: self-contradiction
+< _.
+> j: __
+= -/\\. (2 2 $ (__))
+? `-/ ((__) , (__))` is refused there and this scan's first row is that insert; reason: self-contradiction
+< <error>
+> j: _. _.
+> j: __ __
+= %/\\. (2 2 $ (_))
+? `%/ ((_) , (_))` is refused there and this scan's first row is that insert; reason: self-contradiction
+< <error>
+> j: _. _.
+> j:  _  _
+= %/\\. (2 2 $ (__))
+? the same quotient over the negative infinity; reason: self-contradiction
+< <error>
+> j: _. _.
+> j: __ __
+= %/\\. (2 2 $ (_j0))
+? the same over a complex infinity with no imaginary part; reason: self-contradiction
+< <error>
+> j: _.j_. _.j_.
+> j:     _     _
+= %/\\. (2 2 $ (0j_))
+? the same over a complex infinity with no real part; reason: self-contradiction
+< <error>
+> j: _.j_. _.j_.
+> j:   0j_   0j_
+= %/\\. (2 2 $ (_j_))
+? the same over the complex infinity in both parts; reason: self-contradiction
+< <error>
+> j: _.j_. _.j_.
+> j:   _j_   _j_
+= %/ ((_.j_.) , (_.j_.))
+? `(_.j_.) % (_.j_.)` is `_.j_.` there, which is this insert; reason: self-contradiction
+< _.j_.
+> j: <error>
+= %/\\ ((_.j_.) , (_.j_.))
+? the same fold under a prefix scan; reason: self-contradiction
+< _.j_. _.j_.
+> j: <error>
+= %/\\. ((_.j_.) , (_.j_.))
+? the same fold under a suffix scan; reason: self-contradiction
+< _.j_. _.j_.
+> j: <error>
+= %/\\ (2 2 $ (_.j_.))
+? the same fold over the rows of a table; reason: self-contradiction
+< _.j_. _.j_.
+< _.j_. _.j_.
+> j: <error>
+= (_j_) % (2 , 2)
+? `(_j_) % (2)` is `_j_` there and `((_j_) , 2) % (2 , 2)` is `_j_ 1`; reason: self-contradiction
+< _j_ _j_
+> j: <error>
+= ((_j_) , (_j_)) %"0 _ ((2) , (2))
+? the same division under a rank frame, which makes that atom-against-list cell; reason: self-contradiction
+< _j_ _j_
+< _j_ _j_
+> j: <error>
+= +:&.% (__)
+? `% (2 * (% (__)))` is `__` there and `% (+: (% (__)))` is `_`, though `+: y` is `2 * y`; reason: self-contradiction
+< __
+> j: _
+= +:&.% ((__) , (__))
+? the same doubling over a list; reason: self-contradiction
+< __ __
+> j: _ _
+= o.&.% (__)
+? `% (o. (% (__)))` is `_` there where `% (2 * (% (__)))` is `__`: the same multiplication by a constant, and only one of them keeps the sign; reason: self-contradiction
+< __
+> j: _
+= o.&.% ((__) , (__))
+? the same circle function over a list; reason: self-contradiction
+< __ __
+> j: _ _
+= |&.% (__)
+? the reference's magnitude of a negative zero is NEGATIVE — `% (| (% (__)))` is `__` there — where a magnitude is never negative and its own `| (__)` is `_`; reason: proven-wrong
+< _
+> j: __
+= |&.% ((__) , (__))
+? the same magnitude over a list; reason: proven-wrong
+< _ _
+> j: __ __
+= (_.) ^. ('a')
+? the reference prints no answer and no error at all; reason: abort
+< <error>
+> j:
+= (_.) ^. (<2)
+? the same silence over a boxed right argument; reason: abort
+< <error>
+> j:
+= ('a') ^.~ (_.)
+? the same silence, reached through a commute; reason: abort
+< <error>
+> j:
+= (<2) ^.~ (_.)
+? the same silence over a box, reached through a commute; reason: abort
+< <error>
+> j:
+= ((_.) , (_.)) ^."0 _ (('a') , ('a'))
+? the same silence under a rank frame; reason: abort
+< <error>
+> j:
+= ((_.) , (_.)) ^."0 _ ((<2) , (<2))
+? the same silence over boxes under a rank frame; reason: abort
+< <error>
+> j:
+= ((_.) , 2) = (0x)
+? `(_.) = (0x)` is 1 there and `((0x) , 2) = (_.)` is `1 1`; reason: self-contradiction
+< 1 0
+> j: 0 0
+= ((_.) , 2) <: (0x)
+? the same asymmetry through the non-strict comparison; reason: self-contradiction
+< 1 0
+> j: 0 0
+= ((_.) , (_.)) ="_ 0 ((0x) , (0x))
+? the same comparison under a rank frame; reason: self-contradiction
+< 1 1
+< 1 1
+> j: 0 0
+> j: 0 0
+= ((_.) , (_.)) <:"_ 0 ((0x) , (0x))
+? the same under a rank frame; reason: self-contradiction
+< 1 1
+< 1 1
+> j: 0 0
+> j: 0 0
+= ((0x) , (0x)) ="0 _ ((_.) , (_.))
+? the frame the other way round, which makes the same cell; reason: self-contradiction
+< 1 1
+< 1 1
+> j: 0 0
+> j: 0 0
+= ((0x) , (0x)) <:"0 _ ((_.) , (_.))
+? the same the other way round; reason: self-contradiction
+< 1 1
+< 1 1
+> j: 0 0
+> j: 0 0
+= */\\ (2 2 $ (_j_))
+? `*/ (2 2 $ (_j_))` is refused there and this scan's last row is that insert; reason: self-contradiction
+< <error>
+> j:  _j_  _j_
+> j: _.j_ _.j_
+= */\\. (2 2 $ (_j_))
+? the same insert under a suffix scan; reason: self-contradiction
+< <error>
+> j: _.j_ _.j_
+> j:  _j_  _j_
+= -/\\. (2 2 $ (_j0))
+? `-/ (2 2 $ (_j0))` is refused there and this scan's first row is that insert; reason: self-contradiction
+< <error>
+> j: _. _.
+> j:  _  _
+= -/\\. (2 2 $ (0j_))
+? the same over a complex infinity with no real part; reason: self-contradiction
+< <error>
+> j: 0j_. 0j_.
+> j:  0j_  0j_
+= -/\\. (2 2 $ (_j_))
+? the same over the complex infinity in both parts; reason: self-contradiction
+< <error>
+> j: _.j_. _.j_.
+> j:   _j_   _j_
