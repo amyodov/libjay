@@ -376,6 +376,65 @@ for f in chunk-??; do
 done
 ```
 
+### The fold grid, the dyadic grid and the composition grid
+
+The two tables above cross a VALUE with a verb and then with a modifier,
+and the residue of the second said what the next three had to be. A fold
+conjunction takes TWO verbs, so no crossing of one verb with a value ever
+writes one; a left argument that is a WIDTH, a KEY, a FRET or a RECTANGLE
+is not a value to compute with, so the modifier table's dyadic half never
+reaches it; and a composition is two or three verbs joined so that one of
+them decides what the others see, which is again not a crossing of one.
+
+`jay-corpus grid j --folds` writes the first: the four fold conjunctions
+`F..`, `F.:`, `F:.` and `F::` over eight reporting verbs and seven
+stepping ones (`%.` and `p.` among them, which the modifier grid's residue
+named), monadic at list and table shape over all twenty-eight classes and
+dyadic over the twelve representative ones, plus a slice of the fold's own
+STOP — `n Z: v` for each control in `_2 _1 0 1 2` and each of three tests,
+over a three-item argument, since a fold over two items takes one step and
+one step cannot tell a stop that ends the fold from one that leaves a
+single result out of it. 16,352 sentences. `F.` and `F:` are NOT in it:
+they fold until something stops them, and jconsole hangs on every spelling
+of them that does not error out at once.
+
+`jay-corpus grid j --dyadic` writes the second: over the thirty verbs of
+the modifier grid, an outer product `x u/ y` across the representative
+classes both ways, an infix `x u\ y` and an outfix `x u\. y` at the eight
+widths `_3 _2 _1 0 1 2 3 _`, a key `x u/. y` with the class in the key and
+again in the value, and a cut `x u;.n y` for the four interval forms with a
+fret and the two rectangle forms with an origin and a size. 24,016
+sentences.
+
+`jay-corpus grid j --compositions` writes the third: `u@v`, `u@:v`, `u&v`,
+`u&:v`, `u&.v`, `u&.:v`, a hook `(u v)` and a capped fork `([: u v)` over
+thirty-six operand pairs, and a fork `(u v w)` over sixty-four triples,
+each monadic at atom and list shape and dyadic over the same class on both
+sides. 29,568 sentences.
+
+Every one of them runs the same way as the first two:
+
+```
+jay-corpus grid j --folds > folds.txt
+split -l 2000 folds.txt chunk-
+for f in chunk-??; do
+  jay-corpus fuzz j --compare --quiet --no-accepted \
+      --journal "$f.jnl" --exprs "$f"
+done
+```
+
+The hazard filter is shared, and these three add nothing to it beyond
+leaving `F.` and `F:` out: the fold asks `dyad_ok` about its stepping verb
+and `monad_ok` about its reporting one, the dyadic table asks the same
+questions about the form it is writing, and the composition table's operand
+sets hold no verb that sizes its answer by a value.
+
+There is one rule of SPELLING rather than of hazard, and the cut is what
+makes it matter: `;.` takes a NOUN right operand, so `(1 0 1) +;.1 1 2 3`
+reads as `;.(1 1 2 3)` and is a rank error about the operand rather than
+the cut it looks like. Every argument all three tables write is
+parenthesised, which is what keeps the cut rows a measurement of the cut.
+
 ### Surviving the sentence that kills the runner
 
 A sweep MEASURES in a worker process and REPORTS from a journal the worker

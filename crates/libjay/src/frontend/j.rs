@@ -2248,7 +2248,7 @@ const ADVERBS: [&str; 9] = ["/", "\\", "/.", "\\.", "~", "}", "f.", "M.", "b."];
 
 /// Conjunction spellings. The ones without a meaning here are recognised so
 /// that their diagnostic names the conjunction rather than the word.
-const CONJUNCTIONS: [&str; 28] = [
+const CONJUNCTIONS: [&str; 29] = [
     "\"", "@", "@.", "@:", "&", "&.", "&.:", "&:", "^:", ";.", "!.", "!:", "`", "`:", ".", ":",
     ":.", "::", "L:", "S:", "H.", "T.", "t.", "t:",
     // The fold family. `F.` and `F:`, the two forms whose count is not
@@ -2256,6 +2256,8 @@ const CONJUNCTIONS: [&str; 28] = [
     // test says stop, which is unbounded, and the reference itself runs
     // without end on the ordinary cases.
     "F..", "F.:", "F:.", "F::",
+    // The stop the fold family carries. It has no meaning anywhere else.
+    "Z:",
 ];
 
 fn adverb(word: &str) -> Option<&'static str> {
@@ -3922,6 +3924,26 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
                     multiple: bytes[1] == b':',
                     reverse: bytes[2] == b':',
                 }),
+                span,
+            ))
+        }
+        // `n Z: v`: the fold's stop. The left operand is the control — the
+        // four the fold reads are `_2 _1 0 1` and every other number is
+        // refused when the stop is APPLIED, since a stop that is never
+        // reached is never asked what it says.
+        "Z:" => {
+            let Some(arr) = noun_value(&u) else {
+                return Err(Error::not_yet("a computed fold stop control (n Z: v)", span));
+            };
+            let control = match arr.data.cast(crate::dtype::DType::F64) {
+                Some(Data::F64(vals)) if arr.rank() == 0 && vals.as_slice()[0].fract() == 0.0 => {
+                    vals.as_slice()[0] as i64
+                }
+                _ => return Err(Error::parse("a fold stop's control is one whole number", span)),
+            };
+            let g = verb_operand(v, span)?;
+            Ok(Frag::Verb(
+                VerbFrag::V(Verb::FoldStop { control, cond: Box::new(g) }),
                 span,
             ))
         }

@@ -733,6 +733,11 @@
 < _j_ _j_
 < _j_ _j_
 > j: <error>
+= ((_j_) , (_j_)) %/ ((2) , (2))
+? the same division through an outer product, which makes the same cell; reason: self-contradiction
+< _j_ _j_
+< _j_ _j_
+> j: <error>
 = +:&.% (__)
 ? `% (2 * (% (__)))` is `__` there and `% (+: (% (__)))` is `_`, though `+: y` is `2 * y`; reason: self-contradiction
 < __
@@ -779,6 +784,14 @@
 > j:
 = ((_.) , (_.)) ^."0 _ ((<2) , (<2))
 ? the same silence over boxes under a rank frame; reason: abort
+< <error>
+> j:
+= ((_.) , (_.)) ^./ (('a') , ('a'))
+? the same silence through an outer product; reason: abort
+< <error>
+> j:
+= ((_.) , (_.)) ^./ ((<2) , (<2))
+? the same silence over boxes through an outer product; reason: abort
 < <error>
 > j:
 = ((_.) , 2) = (0x)
@@ -838,3 +851,49 @@
 < <error>
 > j: _.j_. _.j_.
 > j:   _j_   _j_
+= ((0.5) , (0.5)) <./ ((_.) , (_.))
+? `(0.5) <. (_.)` is `_.` there and this outer product of the pair is 0.5; reason: self-contradiction
+< _. _.
+< _. _.
+> j: 0.5 0.5
+> j: 0.5 0.5
+= ((_.) , (_.)) >./ ((0.5) , (0.5))
+? `(_.) >. (0.5)` is 0.5 there and this outer product of the pair is `_.`; reason: self-contradiction
+< 0.5 0.5
+< 0.5 0.5
+> j: _. _.
+> j: _. _.
+= ((_.) , (_.)) =/ ((0.5) , (0.5))
+? `(_.) = (0.5)` is 0 there and this outer product of the pair is 1; reason: self-contradiction
+< 0 0
+< 0 0
+> j: 1 1
+> j: 1 1
+= (<. @ ^.) (0x)
+? `<. (^. (0x))` is `__` there and the composition of the two is `_9223372036854775808`; reason: self-contradiction
+< __
+> j: _9223372036854775808
+= (<. @: ^.) (0x)
+? the same at the composition that joins the two whole; reason: self-contradiction
+< __
+> j: _9223372036854775808
+= (<. @ ^.) (0r1)
+? the same over the rational zero; reason: self-contradiction
+< __
+> j: _9223372036854775808
+= ((_.) , (_.)) #. ((0) , (0))
+? `(_.) * (0)` is 0 there and this weighed sum of that product is `_.`; reason: self-contradiction
+< 0
+> j: _.
+= ((_.) , (_.)) #. ((0x) , (0x))
+? the same over the exact zero; reason: self-contradiction
+< 0
+> j: _.
+= ((1e300) , (1e300)) %. ((1e300) , (1e300))
+? the same system at 1e150 is 1 there, and scaling one does not change its solution; reason: proven-wrong
+< _.
+> j: <error>
+= ((1e160) , (1e160)) %. ((1e160) , (1e160))
+? the smallest scale measured at which the reference's own method overflows; reason: proven-wrong
+< _.
+> j: <error>

@@ -2325,6 +2325,15 @@ pub enum Verb {
     /// value starts, and with none the first item in the direction of
     /// travel is.
     Fold { u: Box<Verb>, v: Box<Verb>, multiple: bool, reverse: bool },
+    /// J `n Z: v`: the fold's STOP. It is applied inside a fold's stepping
+    /// verb, where it answers the empty and its value is discarded; what it
+    /// is there for is the control it leaves behind when v says so, which
+    /// the fold reads after the step. `1` keeps the step's result and ends
+    /// the fold, `0` keeps the result as the running value but leaves it out
+    /// of the answer, `_1` throws the step away and carries on from the
+    /// value before it, and `_2` throws it away and ends the fold. No other
+    /// control exists, and outside a fold the stop means nothing at all.
+    FoldStop { control: i64, cond: Box<Verb> },
     /// APL `f∘g` (beside): monad `f (g y)`, dyad `x f (g y)`. g prepares the
     /// right argument and the left one arrives untouched, which is what
     /// separates it from `⍥` (this crate's [`Verb::Compose`]).
@@ -2423,7 +2432,7 @@ impl Verb {
             // The series is summed for one value at a time.
             Verb::Hypergeometric { .. } => [0, 0, 0],
             // A fold walks the items of the whole argument.
-            Verb::Fold { .. } => [RANK_INF, RANK_INF, RANK_INF],
+            Verb::Fold { .. } | Verb::FoldStop { .. } => [RANK_INF, RANK_INF, RANK_INF],
             // The determinant is over a table; the dyad reads both
             // arguments whole and takes their cells itself.
             Verb::InnerProduct { .. } => [2, RANK_INF, RANK_INF],
@@ -2509,6 +2518,14 @@ impl Verb {
                 if *reverse { ":" } else { "." },
                 v.name()
             ),
+            Verb::FoldStop { control, cond } => {
+                let n = if *control < 0 {
+                    format!("_{}", control.unsigned_abs())
+                } else {
+                    control.to_string()
+                };
+                format!("({n} Z: {})", cond.name())
+            }
             Verb::Agenda(vs, w) => {
                 let names: Vec<String> = vs.iter().map(Verb::name).collect();
                 format!("({}@.{})", names.join("`"), w.name())
@@ -2617,6 +2634,7 @@ impl Verb {
             | Verb::Before(v, w)
             | Verb::Ambivalent(v, w) => v.uses_tolerance() || w.uses_tolerance(),
             Verb::Fold { u, v, .. } => u.uses_tolerance() || v.uses_tolerance(),
+            Verb::FoldStop { cond, .. } => cond.uses_tolerance(),
             Verb::KeyPairs(v) => v.uses_tolerance(),
             Verb::UserDerived { def, alpha, omega } => {
                 let operand = |o: &Operand| match o {
@@ -2721,6 +2739,7 @@ impl Verb {
             | Verb::Before(v, w)
             | Verb::Ambivalent(v, w) => v.is_pure() && w.is_pure(),
             Verb::Fold { u, v, .. } => u.is_pure() && v.is_pure(),
+            Verb::FoldStop { cond, .. } => cond.is_pure(),
             Verb::KeyPairs(v) => v.is_pure(),
             // The body reads and writes the program's names, exactly as a
             // definition called any other way does.
@@ -2968,6 +2987,9 @@ impl Verb {
                 let kind = FoldKind { multiple: *multiple, reverse: *reverse };
                 fold_family(u, v, kind, None, y, ctx, span)
             }
+            Verb::FoldStop { control, cond } => {
+                fold_stop(*control, cond, None, y, ctx, span)
+            }
             Verb::Beside(f, g) => {
                 let r = g.monad(y, ctx, span)?;
                 f.monad(&r, ctx, span)
@@ -3196,6 +3218,9 @@ impl Verb {
             Verb::Fold { u, v, multiple, reverse } => {
                 let kind = FoldKind { multiple: *multiple, reverse: *reverse };
                 fold_family(u, v, kind, Some(x), y, ctx, span)
+            }
+            Verb::FoldStop { control, cond } => {
+                fold_stop(*control, cond, Some(x), y, ctx, span)
             }
             Verb::Beside(f, g) => {
                 let r = g.monad(y, ctx, span)?;
@@ -14245,7 +14270,11 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         // unchanged: no item, and then the cell's own shape less the axis
         // the catenation joins along. `,/ i. 0 3` is `i. 0`, and
         // `$ ,/ (0 3 4 $ 0)` is `0 4`.
-        if matches!(v, Verb::Prim(p) if matches!(p.dyad, DyadOp::AppendLeading | DyadOp::AppendLast))
+        // J's STITCH is spelled with the same dyad and has NO identity at
+        // all: `,./ (i. 0)`, `,./ (i. 0 3)` and `,./ (0 $ 'a')` are domain
+        // errors there where every one of `,/` is an empty.
+        if matches!(v, Verb::Prim(p) if matches!(p.dyad, DyadOp::AppendLeading | DyadOp::AppendLast)
+            && p.name != ",.")
         {
             let mut shape = vec![0usize];
             shape.extend_from_slice(cell_shape.get(1..).unwrap_or(&[]));
@@ -15302,6 +15331,88 @@ struct FoldKind {
     reverse: bool,
 }
 
+thread_local! {
+    /// The stop a fold is running under, one cell per fold in flight on
+    /// this thread. `n Z: v` writes the innermost one and `fold_family`
+    /// reads it after every step; a stop with no fold around it has nowhere
+    /// to write and is refused. The stack is per THREAD because a fold runs
+    /// on one, and a cell handed to another worker starts a stack of its
+    /// own.
+    static FOLD_STOPS: std::cell::RefCell<Vec<Option<i64>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `x (n Z: v) y` inside a fold's stepping verb: run v on the step's own
+/// arguments, and where it says so leave the control n behind for the fold
+/// to read. The answer is the empty, which is what the step's other verbs
+/// see; nothing but the control is meant to survive.
+fn fold_stop(
+    control: i64,
+    cond: &Verb,
+    x: Option<&Array>,
+    y: &Array,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Result<Array> {
+    if FOLD_STOPS.with(|s| s.borrow().is_empty()) {
+        return Err(Error::domain("n Z: v stops a fold, and there is no fold here", span));
+    }
+    if !(-2..=1).contains(&control) {
+        let written = if control < 0 {
+            format!("_{}", control.unsigned_abs())
+        } else {
+            control.to_string()
+        };
+        return Err(Error::domain(
+            format!("{written} is not one of the fold stop's controls _2 _1 0 1"),
+            span,
+        ));
+    }
+    let said = match x {
+        Some(x) => cond.dyad(x, y, ctx, span)?,
+        None => cond.monad(y, ctx, span)?,
+    };
+    if said.rank() != 0 {
+        return Err(Error::domain("a fold stop's test answers one atom", span));
+    }
+    let flag = match said.data.cast(crate::dtype::DType::F64) {
+        Some(Data::F64(v)) if v.as_slice() == [0.0] => false,
+        Some(Data::F64(v)) if v.as_slice() == [1.0] => true,
+        _ => return Err(Error::domain("a fold stop's test answers 0 or 1", span)),
+    };
+    if flag {
+        FOLD_STOPS.with(|s| {
+            if let Some(cell) = s.borrow_mut().last_mut() {
+                *cell = Some(control);
+            }
+        });
+    }
+    Ok(Array::new(vec![0usize], Data::empty(crate::dtype::DType::I64)))
+}
+
+/// A fold's own frame on [`FOLD_STOPS`], removed however the fold leaves.
+struct FoldFrame;
+
+impl FoldFrame {
+    fn open() -> Self {
+        FOLD_STOPS.with(|s| s.borrow_mut().push(None));
+        FoldFrame
+    }
+    /// The control the step just taken left behind, and the cell cleared for
+    /// the next one.
+    fn taken(&self) -> Option<i64> {
+        FOLD_STOPS.with(|s| s.borrow_mut().last_mut().and_then(Option::take))
+    }
+}
+
+impl Drop for FoldFrame {
+    fn drop(&mut self) {
+        FOLD_STOPS.with(|s| {
+            s.borrow_mut().pop();
+        });
+    }
+}
+
 #[inline(never)]
 fn fold_family(
     u: &Verb,
@@ -15332,9 +15443,42 @@ fn fold_family(
         }
     };
     let mut out: Vec<Array> = Vec::with_capacity(rest.len());
+    // Three of the four controls keep a step out of the answer, and a fold
+    // that stepped and kept every one of them out has no answer to give —
+    // which is not the same thing as a fold that never stepped at all, and
+    // is why the two are told apart here.
+    let mut left_out = false;
+    let frame = FoldFrame::open();
     for item in rest {
-        acc = v.dyad(item, &acc, ctx, span)?;
-        out.push(u.monad(&acc, ctx, span)?);
+        let stepped = v.dyad(item, &acc, ctx, span)?;
+        match frame.taken() {
+            None => {
+                acc = stepped;
+                out.push(u.monad(&acc, ctx, span)?);
+            }
+            // Keep the step's result and end the fold.
+            Some(1) => {
+                acc = stepped;
+                out.push(u.monad(&acc, ctx, span)?);
+                break;
+            }
+            // Carry the result on as the running value, but leave it out.
+            Some(0) => {
+                acc = stepped;
+                left_out = true;
+            }
+            // Throw the step away and carry on from the value before it.
+            Some(-1) => left_out = true,
+            // Throw the step away and end the fold.
+            _ => {
+                left_out = true;
+                break;
+            }
+        }
+    }
+    drop(frame);
+    if left_out && out.is_empty() {
+        return Err(Error::domain("every step of the fold was left out of its answer", span));
     }
     if multiple {
         // A fold that kept EVERY result and had no step to take still asks
@@ -17035,7 +17179,40 @@ fn matrix_divide(
         for i in 1..x.items() {
             total = scalar_dyad(ScalarDyad::Add, &total, &x.item(i), cfg, span)?;
         }
-        return scalar_dyad(ScalarDyad::DivJ, &total, y, cfg, span);
+        // A ONE-UNKNOWN SYSTEM, in three cases the whole 28-by-28 table of
+        // classes was read to separate.
+        //
+        // A LEFT ARGUMENT WITH NO ITEMS constrains nothing, so the answer
+        // is a zero and not what dividing that zero would give:
+        // `(i. 0) %. (_.)` is 0 there where `0 % (_.)` is `_.`.
+        //
+        // COMPLEX DATA on either side goes through the RECIPROCAL — the
+        // reference's own answers are `x * (% y)` cell for cell, and no
+        // pair of them is the division: `(_.) %. (_j0)` is 0 there where
+        // `(_.) % (_j0)` is `_.j_.`, `(_j_) %. (0x)` is `_j_` where the
+        // division refuses, and `(0j_) %. (_.)` is `0j_.`.
+        //
+        // REAL DATA is the DIVISION, and a zero wherever the division has
+        // no value at all: `_. %. _` is `_.` as `_. % _` is and `2 %. 0`
+        // is `_` as `2 % 0` is, while `_ %. _`, `__ %. __` and the rest of
+        // the pairs `%` refuses are the 0 a solve reports an absent
+        // constraint as. `3!:0 (_ %. _)` is 8, so that zero is a float.
+        let complex = total.dtype() == DType::Complex || y.dtype() == DType::Complex;
+        let count: usize = total.shape.iter().product();
+        let zeros = |data: Data| Array::new(total.shape.clone(), data);
+        if x.rank() > 0 && x.items() == 0 {
+            return Ok(zeros(Data::F64(vec![0.0; count].into())));
+        }
+        if complex {
+            let recip = scalar_monad(ScalarMonad::Recip, y, cfg, span)?;
+            return scalar_dyad(ScalarDyad::Mul, &total, &recip, cfg, span);
+        }
+        return match scalar_dyad(ScalarDyad::DivJ, &total, y, cfg, span) {
+            Err(e) if e.kind == ErrorKind::Nan => {
+                Ok(zeros(Data::F64(vec![0.0; count].into())))
+            }
+            other => other,
+        };
     }
     if (x.dtype() == DType::Complex || y.dtype() == DType::Complex) && y.count() != 0 {
         return complex_matrix_divide(x, y, planes, span);
@@ -17048,6 +17225,30 @@ fn matrix_divide(
         return Ok(exact);
     }
     let (a, m, n) = as_matrix(y, span)?;
+    // A SYSTEM WITH NO ROWS constrains nothing WHATEVER THE LEFT ARGUMENT
+    // IS MADE OF, so it is answered before that argument is read at all:
+    // `(_j_) %. (i. 0)` is 0 there, and reading a complex left argument as
+    // doubles to get this far would refuse it.
+    // The left argument's own shape still has to fit the system, and a
+    // system with no rows and more than one column is still underdetermined:
+    // `2 %. (0 2 $ 0)` and `(1 2) %. (0 $ 0)` are refused there.
+    let fits = {
+        let bm = if x.rank() == 0 { m } else { x.shape[0] };
+        bm == m && (y.rank() < 2 || m >= n)
+    };
+    if m == 0 && fits {
+        let shape = if x.rank() >= 2 {
+            let mut s = vec![n];
+            s.extend_from_slice(&x.shape[1..]);
+            s
+        } else if y.rank() < 2 {
+            Vec::new()
+        } else {
+            vec![n]
+        };
+        let count: usize = shape.iter().product();
+        return Ok(Array::new(shape, Data::F64(vec![0.0; count].into())));
+    }
     // `%.` takes its right-hand side WHOLE — its left rank is infinite —
     // so a right-hand side of rank 3 or more is one column per element of
     // an item, solved together and given the item's own axes back.
@@ -17107,6 +17308,19 @@ fn matrix_divide(
     let count: usize = shape.iter().product();
     if m == 0 || count == 0 {
         return Ok(Array::new(shape, Data::F64(vec![0.0; count].into())));
+    }
+    // A SYSTEM WHOSE COEFFICIENTS HOLD A NaN has no pivot to find, and the
+    // answer is a NaN rather than a refusal: `(2 2 $ _.) %. (2 2 $ _.)` is
+    // a table of `_.` there. A COLUMN system answers a COMPLEX NaN, which
+    // is the reference's own reading of the same absence and holds however
+    // few of the coefficients are the NaN — `((1) , (1)) %. ((_.) , (2))`
+    // is `_.j_.` there where `((_.) , (_.)) %. ((2) , (2))`, whose system
+    // is finite, is the plain `_.`.
+    if a.iter().any(|v| v.is_nan()) {
+        if column {
+            return Ok(cx_fill(shape, [f64::NAN, f64::NAN]));
+        }
+        return Ok(Array::new(shape, Data::F64(vec![f64::NAN; count].into())));
     }
     let sol = lstsq(&a, m, n, &b, k)
         .ok_or_else(|| Error::domain("the system is singular", span))?;
@@ -17258,6 +17472,20 @@ fn complex_matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Resu
     }
     let ar = complex_embedding(&a, m, n);
     let br = complex_stack(&b, m, k);
+    // The same absence as over the reals: a coefficient that is a NaN
+    // leaves no pivot, and the answer is a NaN of the system's own width.
+    if a.iter().any(|z| z[0].is_nan() || z[1].is_nan()) {
+        let shape = if x.rank() >= 2 {
+            let mut sh = vec![n];
+            sh.extend_from_slice(&x.shape[1..]);
+            sh
+        } else if y.rank() < 2 {
+            Vec::new()
+        } else {
+            vec![n]
+        };
+        return Ok(cx_fill(shape, [f64::NAN, f64::NAN]));
+    }
     let sol = lstsq(&ar, 2 * m, 2 * n, &br, k)
         .ok_or_else(|| Error::domain("the system is singular", span))?;
     let shape = if x.rank() >= 2 {
@@ -17272,6 +17500,12 @@ fn complex_matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Resu
         vec![n]
     };
     Ok(complex_or_real_shaped(complex_unstack(&sol, n, k), shape))
+}
+
+/// An array of one complex value, at a shape.
+fn cx_fill(shape: Vec<usize>, z: Cx) -> Array {
+    let count: usize = shape.iter().product();
+    Array::new(shape, Data::Complex(vec![z; count].into()))
 }
 
 /// A complex result at the shape it belongs at, narrowed to the reals where
@@ -22090,16 +22324,32 @@ fn folds_eagerly(u: &Verb) -> Option<bool> {
 /// results there are.
 fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     let n = y.items() as i64;
-    // An INFINITE width, as for the infix: a positive one leaves out more
-    // items than there are, so there is no run to leave out and the answer
-    // is empty; a negative one takes the whole argument as its one run.
+    // AN INFINITE WIDTH IS REFUSED FOR EVERY OPERAND BUT THE SUM-INSERT,
+    // which is where the outfix parts from the infix. `_ u\ y` is the one
+    // window of the whole and `__ u\ y` the argument itself, but
+    // `_ u\. y` and `__ u\. y` are limit errors there for `+`, `<`, `#`,
+    // `|.`, `]` and for `*/`, `<./`, `-/`, `,/` and `+./` alike — an
+    // outfix leaves a run OUT, and there is no leaving out a run of no
+    // length at all. `+/` is the one exception, and it is the reference's
+    // own special code for the running sum rather than a rule:
+    // `_ +/\. (1 2 3)` is the empty there and `__ +/\. (1 2 3)` is 0,
+    // where `_ */\. (1 2 3)` is refused. The reference refuses a large
+    // enough FINITE width the same way; where that limit lies is between
+    // 2^31 and 2^53 and is in no documentation.
+    let sum_insert = matches!(folds_eagerly(u), Some(true));
     let k = match x.to_f64_vec().filter(|_| x.count() == 1).and_then(|v| v.first().copied()) {
         Some(f) if f.is_infinite() => {
-            if f > 0.0 {
-                n + 1
-            } else {
-                i64::MIN
+            if !sum_insert {
+                return Err(Error::new(
+                    ErrorKind::Length,
+                    "an outfix leaves out a run of items, and no run has an infinite length",
+                    Some(span),
+                ));
             }
+            // A positive width leaves out more items than there are, so
+            // there is no run to leave out and the answer is empty; a
+            // negative one takes the whole argument as its one run.
+            if f > 0.0 { n + 1 } else { i64::MIN }
         }
         _ => one_int(x, "an outfix width", ctx.cfg.near(), span)?,
     };

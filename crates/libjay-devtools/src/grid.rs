@@ -468,3 +468,396 @@ mod modifier_tests {
         assert!(all.contains(&"(_.) +~ (2)".to_string()));
     }
 }
+
+// ---------------------------------------------------------------------
+// The FOLD GRID
+// ---------------------------------------------------------------------
+//
+// The two tables above cross a VALUE with a verb and then with a modifier.
+// Neither reaches the fold conjunctions, because those take TWO verbs: `u
+// F.. v` folds the items of y into a running value under v and reports it
+// under u, and no crossing of one verb with a value writes that shape. The
+// residue of the second table said so — six of its twenty unexplained rows
+// were `F..`, `F.:` and `F:.` over an empty, an infinity or a matrix
+// divide, which was the largest single kind left.
+//
+// `F.` and `F:` are NOT in this table. They are the folds that run until
+// something stops them, and jconsole hangs on every spelling of them that
+// does not error out at once — `(+ F. *) 1 2 3`, `1 (+ F. *) 1 2 3`,
+// `(+ F. -) 2`, `(>: F. (] [ (0 Z: 4 < ]))) 1` were all measured hanging
+// and none of them is run again.
+
+/// The four fold conjunctions that always stop: single or multiple answer,
+/// forward or reverse travel.
+const FOLD_CONJ: [&str; 4] = ["F..", "F.:", "F:.", "F::"];
+
+/// The verbs the fold reports its running values under. Applied MONADICALLY,
+/// so the monad's hazard rules are the ones that apply.
+const FOLD_U: [&str; 8] = ["+", "-", "*", "%", "<.", "+:", "-.", ","];
+
+/// The verbs the fold steps with. Applied DYADICALLY, item on the left and
+/// the running value on the right. `%.` and `p.` are here because the
+/// second table's residue named them.
+const FOLD_V: [&str; 7] = ["+", "*", "%.", ",.", ",", "]", "p."];
+
+/// The controls the fold's stop is written with: the four it reads and one
+/// that is out of range, which the reference refuses when the stop is
+/// applied rather than when it is written.
+const STOP_CONTROL: [&str; 5] = ["_2", "_1", "0", "1", "2"];
+
+/// What the stop tests. One that never fires, one that always does, and one
+/// that fires on an item of a particular value.
+const STOP_TEST: [&str; 3] = ["0:", "1:", "(2 = [)"];
+
+/// The verbs the stopped fold reports under. Two are enough: the stop is
+/// what is being measured, and every other verb of `FOLD_U` is crossed with
+/// the fold without one.
+const STOP_U: [&str; 2] = ["+", "]"];
+
+/// Every sentence of the fold grid, in a fixed order, each one written once.
+pub fn fold_sentences() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut push = |s: String, out: &mut Vec<String>| {
+        if seen.insert(s.clone()) {
+            out.push(s);
+        }
+    };
+    for conj in FOLD_CONJ {
+        for u in FOLD_U {
+            for v in FOLD_V {
+                for cls in CLASSES.iter() {
+                    // v steps dyadically over two values of the class, u
+                    // reports monadically over one.
+                    if !dyad_ok(v, cls.name, cls.name) || !monad_ok(u, cls.name) {
+                        continue;
+                    }
+                    for shape in [Shape::List, Shape::Table] {
+                        let y = written(cls.name, shape);
+                        push(format!("({u} {conj} {v}) {y}"), &mut out);
+                    }
+                }
+                // The dyad, whose left argument is where the running value
+                // starts, over the twelve representative classes.
+                for cls in LIST_CLASSES {
+                    if !dyad_ok(v, cls, cls) || !monad_ok(u, cls) {
+                        continue;
+                    }
+                    push(
+                        format!(
+                            "{} ({u} {conj} {v}) {}",
+                            written(cls, Shape::Atom),
+                            written(cls, Shape::List)
+                        ),
+                        &mut out,
+                    );
+                }
+            }
+        }
+        // The stop, over the representative classes. The stepping verb is a
+        // sum with the stop beside it, and the argument is THREE items long
+        // rather than two: a fold over two items takes one step, and one
+        // step cannot tell a stop that ends the fold from one that leaves a
+        // single result out of it.
+        for u in STOP_U {
+            for control in STOP_CONTROL {
+                for test in STOP_TEST {
+                    for cls in LIST_CLASSES {
+                        if !monad_ok(u, cls) || !dyad_ok("+", cls, cls) {
+                            continue;
+                        }
+                        let v = spelling(cls);
+                        push(
+                            format!(
+                                "({u} {conj} (+ [ ({control} Z: {test}))) (({v}) , ({v}) , ({v}))"
+                            ),
+                            &mut out,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// The DYADIC MODIFIER GRID
+// ---------------------------------------------------------------------
+//
+// The modifier table's dyadic half is two broadcast ranks and a commute;
+// everything else in it applies a modifier to ONE argument. The forms a
+// left argument changes outright — the outer product, the infix and the
+// outfix, the key, the cut — are not in it at all, and the second table's
+// residue left exactly one such row (`(_. 1 2) <./ (1 2 3x)`).
+//
+// A left argument here is a WIDTH, a KEY, a FRET or a RECTANGLE rather
+// than a value to compute with, so the value classes go on the right and
+// the left is crossed over the widths and shapes the form takes. The outer
+// product is the exception: both of its arguments are values.
+
+/// The widths an infix and an outfix are measured at: overlapping and
+/// non-overlapping, forward and backward, the zero width and the infinite
+/// one.
+const INFIX_X: [&str; 8] = ["_3", "_2", "_1", "0", "1", "2", "3", "_"];
+
+/// The cut's interval forms, which take a list of frets, and its rectangle
+/// forms, which take an origin and a size.
+const CUT_INTERVAL: [&str; 4] = ["1", "_1", "2", "_2"];
+const CUT_RECT: [&str; 2] = ["0", "3"];
+
+/// Every sentence of the dyadic modifier grid, in a fixed order, each one
+/// written once.
+pub fn dyadic_sentences() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut push = |s: String, out: &mut Vec<String>| {
+        if seen.insert(s.clone()) {
+            out.push(s);
+        }
+    };
+    let verbs = mod_verbs();
+
+    // The outer product `x u/ y`: every item of x meets every item of y
+    // under the verb's DYAD, so the dyad's hazard rules apply to the pair
+    // in that order.
+    for verb in &verbs {
+        for left in LIST_CLASSES {
+            for right in LIST_CLASSES {
+                if !dyad_ok(verb, left, right) || !modifier_ok(verb, left, "insert") {
+                    continue;
+                }
+                if !modifier_ok(verb, right, "insert") {
+                    continue;
+                }
+                push(
+                    format!(
+                        "{} {verb}/ {}",
+                        written(left, Shape::List),
+                        written(right, Shape::List)
+                    ),
+                    &mut out,
+                );
+            }
+        }
+    }
+
+    // The infix and the outfix, which apply the verb's MONAD to each
+    // window. `_` and `0` are widths in their own right: one window of the
+    // whole and one window per item.
+    for verb in &verbs {
+        for cls in CLASSES.iter() {
+            if !monad_ok(verb, cls.name) || !modifier_ok(verb, cls.name, "rank") {
+                continue;
+            }
+            let y = written(cls.name, Shape::List);
+            for x in INFIX_X {
+                push(format!("({x}) {verb}\\ {y}"), &mut out);
+                push(format!("({x}) {verb}\\. {y}"), &mut out);
+            }
+        }
+    }
+
+    // The key `x u/. y`, which applies the monad to the items of y that
+    // share a key. Both sides are read: the class in the KEY, where what is
+    // measured is how two special values are told apart, and the class in
+    // the VALUE, where it is what the monad makes of a group.
+    for verb in &verbs {
+        for cls in CLASSES.iter() {
+            if !modifier_ok(verb, cls.name, "oblique") {
+                continue;
+            }
+            if monad_ok(verb, "two") {
+                push(
+                    format!(
+                        "{} {verb}/. ((1) , (2))",
+                        written(cls.name, Shape::List)
+                    ),
+                    &mut out,
+                );
+            }
+            if monad_ok(verb, cls.name) {
+                push(
+                    format!(
+                        "((0) , (1)) {verb}/. {}",
+                        written(cls.name, Shape::List)
+                    ),
+                    &mut out,
+                );
+            }
+        }
+    }
+
+    // The cut. The interval forms take a list of frets and read a list;
+    // the rectangle forms take an origin and a size and read a table.
+    for verb in &verbs {
+        for cls in CLASSES.iter() {
+            if !monad_ok(verb, cls.name) || !modifier_ok(verb, cls.name, "rank") {
+                continue;
+            }
+            let list = written(cls.name, Shape::List);
+            let table = written(cls.name, Shape::Table);
+            for n in CUT_INTERVAL {
+                push(format!("((1) , (0)) {verb};.{n} {list}"), &mut out);
+            }
+            for n in CUT_RECT {
+                let x = if n == "0" { "(((0) , (0)) ,: ((2) , (2)))" } else { "((2) , (2))" };
+                push(format!("{x} {verb};.{n} {table}"), &mut out);
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// The COMPOSITION GRID
+// ---------------------------------------------------------------------
+//
+// Seven of the second table's twenty unexplained rows were COMPOSED forms,
+// which is the second-largest kind left. A composition is two or three
+// verbs joined so that one of them decides what the others see: `u@v` and
+// `u@:v` differ only in the rank they join at, `u&v` and `u&:v` differ from
+// them only in what a dyad does with its two arguments, `u&.v` closes v's
+// obverse around the answer, and a hook, a fork and a capped fork are the
+// same joins written as a train.
+
+/// The verbs on the OUTSIDE of a composition: the one that reports.
+const COMP_U: [&str; 6] = ["+", "-", "*", "%", "<.", ">:"];
+
+/// The verbs on the INSIDE: the one that prepares. One doubling, one
+/// square, one reciprocal, one logarithm, one imaginary unit and one
+/// magnitude, so an under is measured over an exact obverse, an inexact
+/// one, a complex one and one that has none at all.
+const COMP_V: [&str; 6] = ["+:", "*:", "%", "^.", "j.", "|"];
+
+/// The two-verb joins: four compositions, two unders, a hook and a capped
+/// fork.
+const COMP_FORMS: [&str; 8] = ["@", "@:", "&", "&:", "&.", "&.:", "hook", "cap"];
+
+/// The fork's three places, kept smaller than the pair sets so that the
+/// three-verb half stays the size of the two-verb one.
+const FORK_UW: [&str; 4] = ["+", "-", "*", "%"];
+const FORK_V: [&str; 4] = ["+", "*", "<.", "%"];
+
+fn composed(u: &str, form: &str, v: &str) -> String {
+    match form {
+        "hook" => format!("({u} {v})"),
+        "cap" => format!("([: {u} {v})"),
+        _ => format!("({u} {form} {v})"),
+    }
+}
+
+/// Every sentence of the composition grid, in a fixed order, each one
+/// written once.
+pub fn composition_sentences() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut push = |s: String, out: &mut Vec<String>| {
+        if seen.insert(s.clone()) {
+            out.push(s);
+        }
+    };
+    for u in COMP_U {
+        for v in COMP_V {
+            for form in COMP_FORMS {
+                let f = composed(u, form, v);
+                for cls in CLASSES.iter() {
+                    if !monad_ok(u, cls.name) || !monad_ok(v, cls.name) {
+                        continue;
+                    }
+                    for shape in [Shape::Atom, Shape::List] {
+                        push(format!("{f} {}", written(cls.name, shape)), &mut out);
+                    }
+                    if dyad_ok(u, cls.name, cls.name) && dyad_ok(v, cls.name, cls.name) {
+                        push(
+                            format!(
+                                "{} {f} {}",
+                                written(cls.name, Shape::Atom),
+                                written(cls.name, Shape::Atom)
+                            ),
+                            &mut out,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    for u in FORK_UW {
+        for v in FORK_V {
+            for w in FORK_UW {
+                let f = format!("({u} {v} {w})");
+                for cls in CLASSES.iter() {
+                    if !monad_ok(u, cls.name) || !monad_ok(w, cls.name) {
+                        continue;
+                    }
+                    for shape in [Shape::Atom, Shape::List] {
+                        push(format!("{f} {}", written(cls.name, shape)), &mut out);
+                    }
+                    if dyad_ok(u, cls.name, cls.name) && dyad_ok(w, cls.name, cls.name) {
+                        push(
+                            format!(
+                                "{} {f} {}",
+                                written(cls.name, Shape::Atom),
+                                written(cls.name, Shape::Atom)
+                            ),
+                            &mut out,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod grid_c_tests {
+    use super::*;
+
+    #[test]
+    fn the_fold_grid_is_whole_and_stops() {
+        let all = fold_sentences();
+        let unique: std::collections::HashSet<&String> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+        // The two folds that run until something stops them hang the
+        // reference on every spelling that does not error at once.
+        assert!(!all.iter().any(|s| s.contains("F. ") || s.contains("F: ")));
+        // The binomial and the factorisations are out of the operand sets
+        // altogether.
+        assert!(!all.iter().any(|s| s.contains('!') || s.contains("p:") || s.contains("q:")));
+        assert!(all.contains(&"(+ F.. *) ((_.) , (_.))".to_string()));
+        assert!(all.contains(&"(+: F.. %.) ((_2) , (_2))".to_string()));
+        assert!(all.contains(&"(2) (+ F:. *) ((2) , (2))".to_string()));
+        assert!(all.iter().any(|s| s.contains("Z:")));
+    }
+
+    #[test]
+    fn the_dyadic_grid_is_whole_and_nothing_hazardous() {
+        let all = dyadic_sentences();
+        let unique: std::collections::HashSet<&String> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+        // An outer product whose left item reshapes by a magnitude no array
+        // can hold is the `__ $ 1` of the hazard list under an insert.
+        assert!(!all.iter().any(|s| s.contains("(__) , (__)) $/")));
+        assert!(!all.iter().any(|s| s.contains("!") && s.contains("(_)")));
+        assert!(all.contains(&"((_.) , (_.)) </ ((2) , (2))".to_string()));
+        assert!(all.contains(&"(2) +\\ ((_.) , (_.))".to_string()));
+        assert!(all.contains(&"(_) +\\. ((_.) , (_.))".to_string()));
+        assert!(all.contains(&"((0) , (1)) +/. ((_.) , (_.))".to_string()));
+        assert!(all.contains(&"((1) , (0)) +;.1 ((_.) , (_.))".to_string()));
+        assert!(all.contains(&"((2) , (2)) +;.3 (2 2 $ (_.))".to_string()));
+    }
+
+    #[test]
+    fn the_composition_grid_is_whole() {
+        let all = composition_sentences();
+        let unique: std::collections::HashSet<&String> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+        assert!(all.contains(&"(+ @ +:) (_.)".to_string()));
+        assert!(all.contains(&"(+ &. %) ((_.) , (_.))".to_string()));
+        assert!(all.contains(&"([: + *:) (_.)".to_string()));
+        assert!(all.contains(&"(+ *:) (_.)".to_string()));
+        assert!(all.contains(&"(+ + -) (_.)".to_string()));
+        assert!(all.contains(&"(_.) (+ @ +:) (_.)".to_string()));
+    }
+}

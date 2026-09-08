@@ -311,6 +311,26 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   47,632 sentences, deterministic, with the first grid's hazard filter plus
   two rules of its own. The agreeing rows are `corpus/j/modifiers-*.txt`.
 
+- THE FOLD'S STOP, `n Z: v`. Written inside a fold's stepping verb, it runs
+  v on the step's own arguments and, where v says so, leaves a control
+  behind for the fold to read: `1` keeps the step's result and ends the
+  fold, `0` keeps the result as the running value but leaves it out of the
+  answer, `_1` throws the step away and carries on from the value before
+  it, and `_2` throws it away and ends the fold. Every other control is
+  refused when the stop is applied, and a fold every one of whose steps was
+  left out has no answer to give. `(] F:. (+ [ (1 Z: 3 = [))) (1 2 3 4)` is
+  `3 6` and its `_1` is `3 7`.
+
+- THREE MORE EXHAUSTIVE GRIDS, on the same subcommand: `jay-corpus grid j
+  --folds` crosses the four fold conjunctions with 56 operand pairs, the
+  28 value classes and both valences, and adds a slice of `Z:` stops
+  (16,352 sentences); `--dyadic` reads the modifier forms a LEFT argument
+  changes outright — an outer product, an infix and an outfix at eight
+  widths, a key and six cuts (24,016); `--compositions` crosses `u@v`,
+  `u@:v`, `u&v`, `u&:v`, `u&.v`, `u&.:v`, a hook, a capped fork and a fork
+  over the same classes (29,568). The agreeing rows are
+  `corpus/j/{folds,dyadic,compositions}-*.txt`.
+
 ### Changed
 
 - AN `answers=` CLAUSE IN A FAMILY RULE NO LONGER EXCLUDES A REFUSAL. It is
@@ -433,6 +453,32 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- `x %. y` OVER AN ATOM DIVISOR follows the reference in three cases. A
+  left argument with no items answers a zero (`(i. 0) %. (_.)` is 0, not
+  `_.`); complex data on either side is `x * (% y)` (`(_j_) %. (0x)` is
+  `_j_` where the division refuses); and real data is the division itself,
+  with a float zero wherever the division has no value at all — `_ %. _`,
+  `__ %. __` and `0j_ %. 0j_` are 0, since a least-squares solve reports
+  the absence of a constraint as no constraint. A SYSTEM WITH NO ROWS is
+  answered before its left argument is read, so `(_j_) %. (i. 0)` is 0
+  rather than a refusal about complex data.
+
+- A LEAST-SQUARES SYSTEM WHOSE COEFFICIENTS HOLD A NaN ANSWERS A NaN rather
+  than reporting a singularity: `(2 2 $ _.) %. (2 2 $ _.)` is a table of
+  `_.`, and a COLUMN system answers the complex `_.j_.` the reference reads
+  the same absence as — `((1) , (1)) %. ((_.) , (2))` — while a system with
+  no NaN in it keeps the plain `_.`.
+
+- AN INFINITE OUTFIX WIDTH IS REFUSED for every operand but the sum-insert.
+  `_ u\. y` and `__ u\. y` are limit errors there for `+`, `<`, `#`, `|.`,
+  `]` and for `*/`, `<./`, `-/` and `,/` alike, where the INFIX takes both:
+  an outfix leaves a run OUT, and no run has an infinite length. `+/` keeps
+  answering, as it does there.
+
+- THE STITCH HAS NO IDENTITY ELEMENT. `,./ (i. 0)`, `,./ (i. 0 3)` and
+  `,./ (0 $ 'a')` are domain errors, as they are there, where every one of
+  `,/` is still the empty it was.
 
 - THE COMPLEX FOLD, SCAN AND WINDOW NOW REFUSE THE NaN THEY MAKE, as the
   float ones already did and as the dyad does: `-/ ((_j0) , (_j0))` is a

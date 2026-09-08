@@ -262,3 +262,143 @@ fn explain_names_an_explicit_modifier() {
     let text = p.explain(Some(&[]));
     assert!(text.contains("adverb definition twice = 1 : '...'"), "{text}");
 }
+
+// ------------------------------------------------------- the fold's stop
+
+/// `n Z: v` inside a fold's stepping verb. Each control is a rule of its
+/// own, and the four of them are what the reference was measured doing:
+/// `1` keeps the step's result and ends the fold, `0` keeps the result as
+/// the running value but leaves it out, `_1` throws the step away and
+/// carries on from the value before it, `_2` throws it away and ends the
+/// fold.
+#[rstest]
+#[case("(] F:. +) (1 2 3 4)", vec![3, 6, 10])]
+#[case("(] F:. (+ [ (1 Z: (3 = [)))) (1 2 3 4)", vec![3, 6])]
+#[case("(] F:. (+ [ (0 Z: (3 = [)))) (1 2 3 4)", vec![3, 10])]
+#[case("(] F:. (+ [ (_1 Z: (3 = [)))) (1 2 3 4)", vec![3, 7])]
+#[case("(] F:. (+ [ (_2 Z: (3 = [)))) (1 2 3 4)", vec![3])]
+#[case("(] F.. (+ [ (1 Z: (3 = [)))) (1 2 3 4)", vec![6])]
+#[case("(] F.. (+ [ (_1 Z: (3 = [)))) (1 2 3 4)", vec![7])]
+#[case("(] F:: (+ [ (_1 Z: (3 = [)))) (1 2 3 4)", vec![6, 7])]
+#[case("5 (] F:. (+ [ (1 Z: (3 = [)))) (1 2 3 4)", vec![6, 8, 11])]
+#[case("(] F:. (+ [ (0 Z: 0:))) (1 2 3 4)", vec![3, 6, 10])]
+fn a_fold_stop_carries_its_control(#[case] src: &str, #[case] want: Vec<i64>) {
+    assert_eq!(j(src), want);
+}
+
+/// The stop's own refusals: a control outside `_2 _1 0 1`, a test that is
+/// not one boolean atom, a fold left with nothing to answer, and a stop
+/// with no fold around it.
+#[rstest]
+#[case("(] F:. (+ [ (2 Z: 0:))) (1 2 3 4)")]
+#[case("(] F:. (+ [ (_3 Z: 0:))) (1 2 3 4)")]
+#[case("(] F:. (+ [ (1 Z: 2:))) (1 2 3 4)")]
+#[case("(] F:. (+ [ (1 Z: (0.5\"_)))) (1 2 3 4)")]
+#[case("(] F:. (+ [ (1 Z: ((0 0)\"_)))) (1 2 3 4)")]
+#[case("(] F.: (+ [ (0 Z: 1:))) (1 2 3 4)")]
+#[case("(0 Z: 0:) 1")]
+fn a_fold_stop_refuses_what_it_cannot_mean(#[case] src: &str) {
+    assert_eq!(fails(src).kind, ErrorKind::Domain);
+}
+
+// ------------------------------- the outfix, the stitch and the divide
+
+/// An outfix leaves a run of items OUT, so an infinite width names no run:
+/// the reference refuses `_ u\. y` and `__ u\. y` whatever the argument,
+/// where the INFIX takes both.
+#[rstest]
+#[case("_ +\\. (1 2 3)")]
+#[case("__ +\\. (1 2 3)")]
+#[case("_ <\\. (1 2 3)")]
+#[case("_ +\\. (i. 0)")]
+#[case("_ */\\. (1 2 3)")]
+#[case("_ <./\\. (1 2 3)")]
+#[case("__ -/\\. (1 2 3)")]
+fn an_infinite_outfix_width_is_refused(#[case] src: &str) {
+    assert_eq!(fails(src).kind, ErrorKind::Length);
+}
+
+/// The sum-insert is the reference's one exception, and it is its own
+/// special code rather than a rule its neighbours share.
+#[test]
+fn the_sum_insert_keeps_an_infinite_outfix_width() {
+    assert_eq!(j("$ (_ +/\\. (1 2 3))"), vec![0]);
+    assert_eq!(j("__ +/\\. (1 2 3)"), vec![0]);
+}
+
+/// The infix keeps both infinities: `_ u\ y` is the one window of the
+/// whole and `__ u\ y` the argument itself.
+#[rstest]
+#[case("$ (_ +\\ (1 2 3))", vec![0, 4])]
+#[case("__ +\\ (1 2 3)", vec![1, 2, 3])]
+fn an_infinite_infix_width_is_not(#[case] src: &str, #[case] want: Vec<i64>) {
+    assert_eq!(j(src), want);
+}
+
+/// Catenation has an identity element and the STITCH has none.
+#[test]
+fn the_stitch_has_no_identity_element() {
+    assert_eq!(j("$ (,/ (i. 0 3))"), vec![0]);
+    assert_eq!(fails(",./ (i. 0)").kind, ErrorKind::Domain);
+    assert_eq!(fails(",./ (i. 0 3)").kind, ErrorKind::Domain);
+}
+
+/// A one-unknown system over REAL data is the division wherever the
+/// division has a value, and ZERO where it has none: a least-squares solve
+/// reports the absence of a constraint as no constraint rather than as a
+/// refusal.
+#[rstest]
+#[case("_ %. _", 0.0)]
+#[case("__ %. __", 0.0)]
+#[case("_ %. __", 0.0)]
+#[case("0 %. 0", 0.0)]
+#[case("2 %. 0", f64::INFINITY)]
+#[case("_ %. 0", f64::INFINITY)]
+#[case("2 %. 4", 0.5)]
+#[case("(1 2) %. 4", 0.75)]
+fn a_one_unknown_system_is_zero_where_the_division_has_no_value(
+    #[case] src: &str,
+    #[case] want: f64,
+) {
+    assert_eq!(floats(src), vec![want]);
+}
+
+/// And it is the division itself, NaN and all, wherever the division does
+/// have a value.
+#[rstest]
+#[case("_. %. _")]
+#[case("_. %. __")]
+#[case("0 %. _.")]
+#[case("_. %. _.")]
+fn a_one_unknown_system_keeps_the_nan_the_division_makes(#[case] src: &str) {
+    assert!(floats(src)[0].is_nan());
+}
+
+/// COMPLEX data on either side goes through the reciprocal instead, and a
+/// left argument with no items — or a system with no rows — is a zero
+/// whatever the other side is made of.
+#[rstest]
+#[case("0j_ %. 0j_", 0.0)]
+#[case("(i. 0) %. (_.)", 0.0)]
+#[case("(_j_) %. (i. 0)", 0.0)]
+fn a_complex_or_empty_one_unknown_system(#[case] src: &str, #[case] want: f64) {
+    assert_eq!(floats(src)[0], want);
+}
+
+/// `_j_ %. 0x` is `_j_` there, which the division refuses: the reciprocal
+/// carries the complex infinity through where the division has no value.
+#[test]
+fn a_complex_one_unknown_system_goes_through_the_reciprocal() {
+    assert_eq!(text("\": (_j_ %. 0x)"), "_j_");
+}
+
+/// A system whose coefficients hold a NaN has no pivot to find, and the
+/// answer is a NaN rather than a refusal. A COLUMN system answers the
+/// complex NaN and a system with no NaN in it keeps the plain one.
+#[test]
+fn a_system_that_holds_a_nan_answers_one() {
+    assert!(floats("(2 2 $ _.) %. (2 2 $ _.)").iter().all(|v| v.is_nan()));
+    assert!(floats("((_.) , (_.)) %. ((2) , (2))")[0].is_nan());
+    let column = run("((1) , (1)) %. ((_.) , (2))").expect("a value");
+    assert_eq!(column.dtype(), jay::DType::Complex);
+}

@@ -66,6 +66,12 @@ jay-corpus — record what the reference interpreters answer to the corpus.
       --modifiers  the modifier grid instead: the same values under an
                    insert, a scan, an infix, a rank, a power, an obverse,
                    an under, an oblique, an adverse and a gerund
+      --folds      the fold grid: `u F.. v` and its three siblings over the
+                   same values, with and without a `Z:` stop
+      --dyadic     the dyadic-modifier grid: an outer product, an infix, an
+                   outfix, a key and a cut, all with a left argument
+      --compositions  the composition grid: `u@v`, `u@:v`, `u&v`, `u&:v`,
+                   `u&.v`, `u&.:v`, a hook, a fork and a capped fork
   jay-corpus coverage <j|apl>           which primitive × operand cells the
                                         recorded corpus exercises, and which
                                         are empty
@@ -439,15 +445,17 @@ fn grid_command(args: &[String]) -> Result<(), String> {
     if lang != Lang::J {
         return Err("the special-value grid is J's; APL has no table of its own yet".to_string());
     }
-    let modifiers = match args.get(1).map(String::as_str) {
-        None => false,
-        Some("--modifiers") => true,
+    let sentences = match args.get(1).map(String::as_str) {
+        None => grid::sentences(),
+        Some("--modifiers") => grid::modifier_sentences(),
+        Some("--folds") => grid::fold_sentences(),
+        Some("--dyadic") => grid::dyadic_sentences(),
+        Some("--compositions") => grid::composition_sentences(),
         Some(extra) => return Err(format!("unknown option {extra:?}")),
     };
     if let Some(extra) = args.get(2) {
         return Err(format!("unknown option {extra:?}"));
     }
-    let sentences = if modifiers { grid::modifier_sentences() } else { grid::sentences() };
     let mut text = String::new();
     for sentence in sentences {
         text.push_str(&corpus::escape(&sentence));

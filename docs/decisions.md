@@ -5902,3 +5902,98 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   and an `answers=` class (the `(_.) ^ (0.5)` complex-power family), so one
   rule widens and it is the broken one. It covered 156 of the modifier
   grid's refusals at once.
+
+- 2026-09-08 — THE FOLD'S STOP `n Z: v` is implemented, and its four
+  controls are what the reference was measured doing rather than what any
+  document says. The exhaustive fold grid put a `Z:` under each of `F..`,
+  `F.:`, `F:.` and `F::`; every cell of it was "noun-operand conjunctions
+  is not supported yet", which is one mechanism and a feature-sized one.
+  Thirty black-box sentences settled the semantics and every one of them is
+  accounted for by four rules: control `1` keeps the step's result and ends
+  the fold, `0` keeps the result as the running value but leaves it out of
+  the answer, `_1` throws the STEP away and carries on from the value
+  before it, `_2` throws it away and ends the fold. `(] F:. (+ [ (1 Z: 3 =
+  [))) (1 2 3 4)` is `3 6`, its `0` is `3 10`, its `_1` is `3 7` and its
+  `_2` is `3`. Anything outside `_2 _1 0 1` is refused when the stop is
+  APPLIED and not when it is written (`(2 Z: 0:)` inside a fold over an
+  EMPTY is the empty fold's own error there, not the control's), the test
+  must answer one boolean ATOM (a list is a rank error, `2:` and `0.5` are
+  domain errors), the stop itself answers the empty so that the verbs
+  around it see nothing, and a fold every one of whose steps was left out
+  has no answer at all — `(] F.: (+ [ (0 Z: 1:))) (1 2 3 4)` is refused
+  there, which is what tells a fold that never stepped from one that
+  stepped and kept nothing.
+
+  `F.` AND `F:` STAY OUT OF THE LANGUAGE AND OUT OF THE GRID. They fold
+  until something stops them, and jconsole hangs on every spelling of them
+  that does not error at once — `(+ F. *) 1 2 3`, `1 (+ F. *) 1 2 3`,
+  `(+ F. -) 2`, `(>: F. (] [ (0 Z: 4 < ]))) 1` were each measured hanging
+  under a timeout. There is no oracle for them, so there is nothing to
+  follow.
+
+- 2026-09-08 — `x %. y` OVER AN ATOM DIVISOR, IN THREE CASES (reversing
+  the special-value grid's reading, which had this family down as the
+  reference answering nonsense: "its answers solve nothing — `(_) %. (_)`
+  is 0 and its own `(_) * 0` is 0 rather than the `_` a solution needs").
+  It is not nonsense: a least-squares solve reports the ABSENCE of a
+  constraint as no constraint rather than as a refusal. THE WHOLE 28-BY-28
+  TABLE OF CLASSES was read to separate the three cases, since two
+  successive one-rule readings each fitted most of it and failed on a
+  handful. (1) A LEFT ARGUMENT WITH NO ITEMS answers a zero:
+  `(i. 0) %. (_.)` is 0 there where `0 % (_.)` is `_.`. (2) COMPLEX DATA
+  on either side is `x * (% y)`, cell for cell and no cell the division:
+  `(_.) %. (_j0)` is 0 there where `(_.) % (_j0)` is `_.j_.`,
+  `(_j_) %. (0x)` is `_j_` where the division refuses, and
+  `(0j_) %. (_.)` is `0j_.`. (3) REAL DATA is the DIVISION — `_. %. _` is
+  `_.`, `2 %. 0` is `_`, `0 %. 2` is 0 — and a FLOAT ZERO wherever the
+  division has no value at all: `_ %. _`, `__ %. __`, `_ %. __`,
+  `__ %. _`, `0j_ %. 0j_` and `_j_ %. _j_` are all 0, and
+  `3!:0 (_ %. _)` is 8. A SYSTEM WITH NO ROWS is answered before its left
+  argument is read at all, which is what makes `(_j_) %. (i. 0)` the 0 it
+  is there rather than a refusal about complex data. The exact types are
+  untouched and still open: the reference converts them to doubles for
+  `%.` and libjay keeps its rational elimination, so `(1r3) %. 2` is
+  0.166667 there and `1r6` here.
+
+- 2026-09-08 — A LEAST-SQUARES SYSTEM WHOSE COEFFICIENTS HOLD A NaN ANSWERS
+  A NaN, and a COLUMN system answers the COMPLEX NaN. Six measurements:
+  `(2 2 $ _.) %. (2 2 $ _.)` is a real `_.` table there, and every vector
+  system holding a NaN — `((_.) , (_.)) %. ((_.) , (_.))`,
+  `((2) , (2)) %. ((_.) , (_.))`, `((1) , (1)) %. ((_.) , (2))` — is
+  `_.j_.`, while `((_.) , (_.)) %. ((2) , (2))`, whose SYSTEM is finite, is
+  the plain `_.`. It is where the NaN sits that decides, not how many.
+
+- 2026-09-08 — AN INFINITE OUTFIX WIDTH IS REFUSED FOR EVERY OPERAND BUT
+  THE SUM-INSERT, where the infix takes one for all of them. `_ u\. y` and
+  `__ u\. y` are limit errors there for `+`, `<`, `#`, `|.` and `]`, and
+  for `*/`, `<./`, `-/`, `,/` and `+./` too, while `_ u\ y` is the window
+  of the whole and `__ u\ y` the argument itself. `+/` alone answers —
+  `_ +/\. (1 2 3)` is the empty and `__ +/\. (1 2 3)` is 0 — which is the
+  reference's own special code for the running sum and not a rule the
+  neighbouring folds share; two recorded corpus rows caught the difference
+  when the first reading refused all of them. The reference refuses a large
+  enough FINITE width the same way — `2147483648 +\. 1 2 3` answers and
+  `9007199254740993 +\. 1 2 3` does not — and where that limit lies is in
+  no documentation and is not followed; no grid reaches it.
+
+- 2026-09-08 — THE STITCH HAS NO IDENTITY ELEMENT. `,` and `,.` are one
+  dyad in libjay's table, separated by their ranks, and the identity the
+  catenation gets was reaching both. `,./ (i. 0)`, `,./ (i. 0 3)`,
+  `,./ (i. 0 3 4)` and `,./ (0 $ 'a')` are all domain errors there where
+  every `,/` of them answers, so the identity is `,`'s alone.
+
+- 2026-09-08 — FOUR MECHANISMS PINNED off the third grid wave, three on the
+  reference's own contradiction and one proven wrong. (1) THE OUTER PRODUCT
+  AGAINST THE DYAD IT IS MADE OF: every cell of `x u/ y` is a sentence the
+  two engines agree on — `(0.5) <. (_.)` is `_.` in both and
+  `(_.) <. (0.5)` is 0.5 in both — and the reference's outer product of the
+  pair answers the OTHER one, for the minimum, the maximum and the four
+  comparisons alike. (2) A FLOOR COMPOSED ON A LOGARITHM over an exact
+  zero: `<. (^. (0x))` is `__` there and `(<. @ ^.) (0)` is `__`, but
+  `(<. @ ^.) (0x)` is the least integer a double holds. (3) A WEIGHED SUM
+  whose base is a NaN and whose digits are zero: the value is
+  `(_. * 0) + 0` and the reference's own `(_.) * (0)` is 0, but
+  `((_.) , (_.)) #. ((0) , (0))` is `_.`. (4) PROVEN WRONG: a least-squares
+  system whose normal equations overflow. Scaling a system by a constant
+  does not change its solution; `((1e150) , (1e150)) %. ((1e150) , (1e150))`
+  is 1 there and the same system at 1e160 is refused.

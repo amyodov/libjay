@@ -601,7 +601,7 @@ _10 10 #: 1234
 // spellings: their monads were followed in round 9A.
 (_.) ^ (0.5)
 ? the reference widens a one-item NaN power to the complex type, as it does the root; reason: self-contradiction
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S: answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,<:,>:,+:,*:,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S: answers=numeric
 _. ^ _.
 ? the reference refuses the NaN power of a NaN where the same pair at three items answers; reason: self-contradiction
 2 %: (_.)
@@ -957,6 +957,8 @@ _1e16 ! _1
 ? `(_j_) % (2)` is `_j_` there and `((_j_) , 2) % (2 , 2)` is `_j_ 1`; reason: self-contradiction
 ((_j_) , (_j_)) %"0 _ ((2) , (2))
 ? the same division under a rank frame, which makes that atom-against-list cell; reason: self-contradiction
+((_j_) , (_j_)) %/ ((2) , (2))
+? the same division through an outer product, which makes the same cell; reason: self-contradiction
 
 // THE SIGN OF A ZERO THROUGH AN UNDER. `% (__)` is a zero in both engines
 // and the display does not say which one; `&.%` asks, because the obverse
@@ -994,6 +996,10 @@ o.&.% ((__) , (__))
 ? the same silence under a rank frame; reason: abort
 ((_.) , (_.)) ^."0 _ ((<2) , (<2))
 ? the same silence over boxes under a rank frame; reason: abort
+((_.) , (_.)) ^./ (('a') , ('a'))
+? the same silence through an outer product; reason: abort
+((_.) , (_.)) ^./ ((<2) , (<2))
+? the same silence over boxes through an outer product; reason: abort
 
 // A NaN COMPARED WITH AN EXACT OPERAND ANSWERS BY WHICH SIDE IS THE ARRAY.
 // `(_.) = (0x)` is 1 there and `((0x) , 2) = (_.)` is `1 1` — the
@@ -1027,3 +1033,53 @@ o.&.% ((__) , (__))
 ? the same over a complex infinity with no real part; reason: self-contradiction
 -/\\. (2 2 $ (_j_))
 ? the same over the complex infinity in both parts; reason: self-contradiction
+
+// THE OUTER PRODUCT AGAINST THE DYAD IT IS MADE OF. `x u/ y` puts every
+// item of x against every item of y under u, so every cell of it is a
+// sentence the two engines already agree on: `(0.5) <. (_.)` is `_.` in
+// both and `(_.) <. (0.5)` is 0.5 in both. Fold the same pair through an
+// outer product and the reference answers the OTHER one, cell for cell,
+// for the minimum, the maximum and the four comparisons. libjay's outer
+// product answers what its own dyad answers.
+((0.5) , (0.5)) <./ ((_.) , (_.))
+? `(0.5) <. (_.)` is `_.` there and this outer product of the pair is 0.5; reason: self-contradiction
+~ cause=differ:val:table/num|differ:val:vector/num|differ:val:atom/num verb=<.,>.,<:,>:,=,> with=/ also=,,_.,+,-,*,%,x:,0x
+((_.) , (_.)) >./ ((0.5) , (0.5))
+? `(_.) >. (0.5)` is 0.5 there and this outer product of the pair is `_.`; reason: self-contradiction
+((_.) , (_.)) =/ ((0.5) , (0.5))
+? `(_.) = (0.5)` is 0 there and this outer product of the pair is 1; reason: self-contradiction
+
+// A FLOOR COMPOSED ON A LOGARITHM, over an exact zero. `^. (0x)` is `__`
+// there and `<. (__)` is `__`, and `(<. @ ^.) (0)` — the same composition
+// over the ordinary zero — is `__` too; only the EXACT zero through the
+// composition answers the least integer a double holds, which is the
+// reference's own fused form converting a value it has no integer for.
+(<. @ ^.) (0x)
+? `<. (^. (0x))` is `__` there and the composition of the two is `_9223372036854775808`; reason: self-contradiction
+~ cause=differ:val:atom/num|differ:val:vector/num verb=<. with=^. also=@,@:,[:,x:,r.,0x,0r1
+(<. @: ^.) (0x)
+? the same at the composition that joins the two whole; reason: self-contradiction
+(<. @ ^.) (0r1)
+? the same over the rational zero; reason: self-contradiction
+
+// A WEIGHED SUM WHOSE BASE IS A NaN AND WHOSE DIGITS ARE ZERO. `x #. y`
+// weighs each digit by the running product of the bases after it, so the
+// value here is `(_. * 0) + 0`, and the reference's own `(_.) * (0)` is 0.
+// It answers `_.` all the same, where the same base against a digit of 1 —
+// which really does carry the NaN — is `_.` in both.
+((_.) , (_.)) #. ((0) , (0))
+? `(_.) * (0)` is 0 there and this weighed sum of that product is `_.`; reason: self-contradiction
+~ cause=differ:val:atom/num verb=#. also=/,,,x:,*,+,_.,0x
+((_.) , (_.)) #. ((0x) , (0x))
+? the same over the exact zero; reason: self-contradiction
+
+// A LEAST-SQUARES SYSTEM WHOSE NORMAL EQUATIONS OVERFLOW. Scaling a system
+// by a constant does not change its solution, and the reference answers 1
+// for `((1e150) , (1e150)) %. ((1e150) , (1e150))`; the same system at
+// 1e160, where the sum of the squared coefficients passes what a double
+// holds, is refused there. The solution exists and libjay finds it.
+((1e300) , (1e300)) %. ((1e300) , (1e300))
+? the same system at 1e150 is 1 there, and scaling one does not change its solution; reason: proven-wrong
+~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%. also=F..,F.:,F:.,F::,+,-,*,%,<.,>.,+:,-.,,,,.,],[,p.,$,1e300
+((1e160) , (1e160)) %. ((1e160) , (1e160))
+? the smallest scale measured at which the reference's own method overflows; reason: proven-wrong

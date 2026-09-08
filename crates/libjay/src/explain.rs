@@ -558,6 +558,10 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
             verb_lines(u, depth + 1, p, tr, out);
             verb_lines(w, depth + 1, p, tr, out);
         }
+        Verb::FoldStop { control, cond } => {
+            head(out, &format!("fold stop Z: (control {control})"));
+            verb_lines(cond, depth + 1, p, tr, out);
+        }
         Verb::Fold { u, v, multiple, reverse } => {
             head(
                 out,

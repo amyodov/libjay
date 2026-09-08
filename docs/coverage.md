@@ -2593,7 +2593,32 @@ neither followed nor pinned.
   documentation; following it would mean reproducing the reference's own
   numeric limits rather than a rule of the language, and `_` is what a
   binomial that large overflows to. Three cells, all of them the same
-  product under a rank frame or a commute.
+  product under a rank frame or a commute — and one more since, reached
+  through an outer product
+  (`((9223372036854775807) , (9223372036854775807)) !/ ((1e300) , (1e300))`),
+  which is the one row the fold, dyadic and composition grids left
+  unexplained.
+
+### What the fold, dyadic and composition grids left open
+
+The three tables of docs/testing.md's "the fold grid, the dyadic grid and
+the composition grid" read 69,936 sentences once. Everything they found is
+either followed or pinned but two things.
+
+- **`F.` AND `F:`, THE FOLDS THAT RUN UNTIL SOMETHING STOPS THEM**, are not
+  in the language and are not in any grid. jconsole hangs on every spelling
+  of them that does not error out at once — `(+ F. *) 1 2 3`,
+  `1 (+ F. *) 1 2 3`, `(+ F. -) 2`, `(+ F: -) 2`,
+  `(>: F. (] [ (0 Z: 4 < ]))) 1` were each measured hanging under a timeout
+  — so there is no oracle for them and nothing to follow. The four fold
+  conjunctions that always stop, and the `Z:` all six of them share, are
+  implemented.
+
+- **AN OUTFIX WIDTH LARGER THAN THE REFERENCE WILL TAKE.**
+  `2147483648 +\. 1 2 3` answers there and `9007199254740993 +\. 1 2 3` is
+  a limit error; the boundary is somewhere between 2^31 and 2^53 and is in
+  no documentation. The INFINITE widths, which are a rule rather than a
+  limit, are followed. No grid reaches the finite ones.
 
 ### What the special-value grid left open
 
@@ -2609,13 +2634,14 @@ each one work rather than a puzzle.
   interpreter, though — `(_j_) ! (0j_)` never returns — so the corpus can
   hold only the half that answers. Thirty-eight cells.
 
-- **MATRIX DIVIDE OVER THE EXACT TYPES AND THE INFINITIES.** `(1r3) %. 2`
-  is 0.166667 there and `1r6` here: the reference converts to doubles
-  before the solve where libjay keeps the rational elimination it gained
-  for the exact types. Over infinities the reference answers where libjay
-  refuses, and its answers solve nothing — `(_) %. (_)` is 0 and its own
-  `(_) * 0` is 0 rather than the `_` a solution needs. Seventy-three
-  cells, two mechanisms in one verb.
+- **MATRIX DIVIDE OVER THE EXACT TYPES.** `(1r3) %. 2` is 0.166667 there
+  and `1r6` here: the reference converts to doubles before the solve where
+  libjay keeps the rational elimination it gained for the exact types. The
+  other half of what this entry once held — the infinities, where the
+  reference answered and libjay refused — is CLOSED: `(_) %. (_)` is 0
+  because a one-unknown system multiplies by the reciprocal rather than
+  dividing, and `_ * (% _)` is 0 where `_ % _` has no value. See the
+  2026-09-08 entries in docs/decisions.md.
 
 - **A NEGATIVE FIELD WIDTH IN `x ": y`** asks for the exponential form in
   that many columns and writes asterisks when it will not fit: `_5 ": 5` is
