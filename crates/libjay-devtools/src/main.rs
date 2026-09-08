@@ -17,6 +17,7 @@ mod coverage;
 mod dyalog;
 mod fuzz;
 mod generate;
+mod grid;
 mod inventory;
 mod journal;
 mod oracle;
@@ -57,6 +58,11 @@ jay-corpus — record what the reference interpreters answer to the corpus.
       --no-supervise  with --compare, measure in this process instead of a
                    worker. Faster to start, and one sentence that kills the
                    runner takes the whole sweep with it
+  jay-corpus grid j                     print the special-value grid: every
+                                        primitive verb crossed with every
+                                        special-value class, at atom, list
+                                        and table shape, hazards filtered.
+                                        Feed it to `fuzz j --compare --exprs`
   jay-corpus coverage <j|apl>           which primitive × operand cells the
                                         recorded corpus exercises, and which
                                         are empty
@@ -93,6 +99,7 @@ fn run(args: &[String]) -> Result<(), String> {
         "record" => record(rest),
         "gen" => generate_corpus(rest),
         "fuzz" => fuzz_command(rest),
+        "grid" => grid_command(rest),
         "coverage" => coverage_command(rest),
         "stats" => stats(rest),
         "-h" | "--help" | "help" => {
@@ -421,6 +428,26 @@ fn generate_corpus(args: &[String]) -> Result<(), String> {
 
 /// Composed expressions, printed or compared. Nothing is written to the
 /// corpus: a line worth keeping is moved into `fuzz_found.txt` by hand.
+/// The special-value grid, written as corpus lines on stdout. Splitting it
+/// into chunks and running them is the caller's business; the workflow is in
+/// docs/testing.md.
+fn grid_command(args: &[String]) -> Result<(), String> {
+    let lang = parse_lang(args.first())?;
+    if lang != Lang::J {
+        return Err("the special-value grid is J's; APL has no table of its own yet".to_string());
+    }
+    if let Some(extra) = args.get(1) {
+        return Err(format!("unknown option {extra:?}"));
+    }
+    let mut text = String::new();
+    for sentence in grid::sentences() {
+        text.push_str(&corpus::escape(&sentence));
+        text.push('\n');
+    }
+    print!("{text}");
+    Ok(())
+}
+
 fn fuzz_command(args: &[String]) -> Result<(), String> {
     let mut positional: Vec<&String> = Vec::new();
     let mut count = 200usize;

@@ -20,173 +20,173 @@
 # whitespace-insensitive within a line, but the number of lines is not.
 
 = u: 'é'
-? a widened literal writes its bytes here and its characters there
+? a widened literal writes its bytes here and its characters there; reason: model
 < é
 > j: Ã©
 = u: 233
-? a character between 128 and 255 writes as its byte here
+? a character between 128 and 255 writes as its byte here; reason: model
 < �
 > j: é
 = 10 u: 233
-? a character between 128 and 255 writes as its byte here
+? a character between 128 and 255 writes as its byte here; reason: model
 < �
 > j: é
 = 3!:0 u: 'é'
-? libjay has one character type, so widening does not change it
+? libjay has one character type, so widening does not change it; reason: model
 < 2
 > j: 131072
 = 3!:0 (u: (0 $ 0))
-? the widened type is what `u:` ALWAYS reports there, empty or not
+? the widened type is what `u:` ALWAYS reports there, empty or not; reason: model
 < 2
 > j: 131072
 = 3!:0 (u: 'abc')
-? the same over a literal that needed no widening at all
+? the same over a literal that needed no widening at all; reason: model
 < 2
 > j: 131072
 = 3!:0 (u: 97)
-? the same over a code point below 128
+? the same over a code point below 128; reason: model
 < 2
 > j: 131072
 = 3!:0 (10 u: (0 $ 0))
-? `10 u:` reports the FOUR-byte type there, which libjay has no more than the two
+? `10 u:` reports the FOUR-byte type there, which libjay has no more than the two; reason: model
 < 2
 > j: 262144
 = 2 u: 8 u: u: 955
-? widening bytes to characters changes only how they are written out
+? widening bytes to characters changes only how they are written out; reason: model
 < λ
 > j: Î»
 = 9 u: 200 200
-? a character between 128 and 255 writes as its byte here
+? a character between 128 and 255 writes as its byte here; reason: model
 < ��
 > j: ÈÈ
 = (9007199254740992) *. (9007199254740993)
-? jconsole holds both in one double and libjay keeps them exact
+? jconsole holds both in one double and libjay keeps them exact; reason: proven-wrong
 < 8.11296e31
 > j: 9.0072e15
 = _1 + ((100000000) ! (100000000.00000001))
-? both sides lose this one; the reference's answer is not the value either
+? both sides lose this one; the reference's answer is not the value either; reason: proven-wrong
 < 2.4702e_7
 > j: 2.83907e_7
 = _1 + ((1e8) ! (1e8 + 1e_4))
-? both sides lose this one; the reference's answer is not the value either
+? both sides lose this one; the reference's answer is not the value either; reason: proven-wrong
 < 0.00190154
 > j: 0.00190162
 = 2 p: (3j4 1j_1)
-? the reference answers a factorisation of a complex number with nothing at all
+? the reference answers a factorisation of a complex number with nothing at all; reason: abort
 < <error>
 > j:
 = %. (i. 4 3)
-? the reference answers a rank-deficient system with NaNs and refuses others
+? the reference answers a rank-deficient system with NaNs and refuses others; reason: self-contradiction
 < <error>
 > j: _. _. _. _.
 > j: _. _. _. _.
 > j: _. _. _. _.
 = $ %. (i. 4 3)
-? the reference answers a rank-deficient system with NaNs and refuses others
+? the reference answers a rank-deficient system with NaNs and refuses others; reason: self-contradiction
 < <error>
 > j: 3 4
 = %. (3 3 $ 1 2 3 4 5 6 7 8 9)
-? the reference answers a rank-deficient system with NaNs and refuses others
+? the reference answers a rank-deficient system with NaNs and refuses others; reason: self-contradiction
 < <error>
 > j: _. _. _.
 > j: _. _. _.
 > j: _. _. _.
 = %. (1 1 $ _.)
-? the reference widens a one-item NaN table to complex where a wider one stays real
+? the reference widens a one-item NaN table to complex where a wider one stays real; reason: self-contradiction
 < _.
 > j: _.j_.
 = 4 p: (_ 1 2)
-? an infinity makes the reference answer 2 for cells whose own answer is 3
+? an infinity makes the reference answer 2 for cells whose own answer is 3; reason: self-contradiction
 < 2 2 3
 > j: 2 2 2
 = ((1) ! (0.9999999999999999)) ": 5
-? the near-equal binomial parts by one bit and the format downstream refuses
+? the near-equal binomial parts by one bit and the format downstream refuses; reason: proven-wrong
 < <error>
 > j: 5
 = (_2 0 2) C. 'hello'
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 < <error>
 > j: eolhl
 = (_3) C. (1;2;3)
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 < <error>
 > j: +-+-+-+
 > j: |2|3|1|
 > j: +-+-+-+
 = (_1 _2) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 < <error>
 > j: 0 1 3 2
 = (_2 _1) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 < <error>
 > j: 0 1 2 3
 = (_1) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 < <error>
 > j: 0 1 2 3
 = C. (_2 0 2)
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 < <error>
 > j: +---+-+
 > j: |1 0|2|
 > j: +---+-+
 = (_3) ^. (<1)
-? jconsole answers this one with no output at all and refuses 2 ^. (<1)
+? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 < <error>
 > j:
 = (_3) ^. (<'abc')
-? jconsole answers this one with no output at all and refuses 2 ^. (<1)
+? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 < <error>
 > j:
 = (_3) ^. (1;2)
-? jconsole answers this one with no output at all and refuses 2 ^. (<1)
+? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 < <error>
 > j:
 = (<'') I. (1;2;3)
-? the reference's box comparison here tells apart only equal from unequal
+? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 < 0 0 0
 > j: 1 1 1
 = (<'a') I. (1;2;3)
-? the reference's box comparison here tells apart only equal from unequal
+? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 < 0 0 0
 > j: 1 1 1
 = (<5) I. (1;2;3)
-? the reference's box comparison here tells apart only equal from unequal
+? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 < 0 0 0
 > j: 1 1 1
 = (<2) I. (1;2;3)
-? the reference's box comparison here tells apart only equal from unequal
+? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 < 0 0 1
 > j: 1 0 1
 = p. (_ 1 2 3)
-? jconsole's root finder aborts on this one with a stack error
+? jconsole's root finder aborts on this one with a stack error; reason: abort
 < +-+-----------------+
 < |3|_.j_. _.j_. _.j_.|
 < +-+-----------------+
 > j: <error>
 = p. (1 2 3 __)
-? jconsole's root finder aborts on this one with a stack error
+? jconsole's root finder aborts on this one with a stack error; reason: abort
 < +--+-----------------+
 < |__|_.j_. _.j_. _.j_.|
 < +--+-----------------+
 > j: <error>
 = p. (0 1 1 _)
-? jconsole's root finder aborts on this one with a stack error
+? jconsole's root finder aborts on this one with a stack error; reason: abort
 < +-+-----+
 < |_|0 0 0|
 < +-+-----+
 > j: <error>
 = (9223372036854775806) *. (,5)
-? the reference's own GCD of 1 contradicts the LCM it answers
+? the reference's own GCD of 1 contradicts the LCM it answers; reason: self-contradiction
 < 4.61169e19
 > j: 9.22337e18
 = (_9223372036854775806) *. "1 _ 0 (i. 5)
-? the same boundary, one radix per cell
+? the same boundary, one radix per cell; reason: self-contradiction
 < 0 _9.22337e18 _9.22337e18 _9.22337e18 _1.84467e19
 > j: 0 _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
 = (_9223372036854775806) *."_2 (i. 3 4)
-? the same boundary over a table
+? the same boundary over a table; reason: self-contradiction
 <           0 _9.22337e18 _9.22337e18 _9.22337e18
 < _1.84467e19 _4.61169e19 _9.22337e18 _6.45636e19
 < _3.68935e19 _2.76701e19 _4.61169e19 _1.01457e20
@@ -194,451 +194,451 @@
 > j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
 > j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
 = (2 7 1 8) *. (_9223372036854775806)
-? the same boundary, the huge number on the right
+? the same boundary, the huge number on the right; reason: self-contradiction
 < _9.22337e18 _6.45636e19 _9.22337e18 _3.68935e19
 > j: _9.22337e18 _9.22337e18 _9.22337e18 _9.22337e18
 = (1.5 2.5 _0.5) ^. (a:)
-? the reference neither answers nor refuses; the sign of an unrelated atom decides
+? the reference neither answers nor refuses; the sign of an unrelated atom decides; reason: abort
 < <error>
 > j:
 = (1.5 _0.5) ^. (<1 2)
-? the same silence over a plain box
+? the same silence over a plain box; reason: abort
 < <error>
 > j:
 = (_0.5) ^. 'a'
-? the same silence over characters
+? the same silence over characters; reason: abort
 < <error>
 > j:
 = (1.5 2.5 _0.5) ^. ('hello')
-? the same silence over a longer character list
+? the same silence over a longer character list; reason: abort
 < <error>
 > j:
 = (_ __ 0) ^. (1;2 3)
-? the same silence with the infinities for the negative atom
+? the same silence with the infinities for the negative atom; reason: abort
 < <error>
 > j:
 = (1x) I. 2
-? the reference's own two-bound answer contradicts this one
+? the reference's own two-bound answer contradicts this one; reason: self-contradiction
 < 1
 > j: 0
 = (_5x) I. 2
-? the same, with a negative bound
+? the same, with a negative bound; reason: self-contradiction
 < 1
 > j: 0
 = (1r2) I. 2
-? the same, with a rational bound
+? the same, with a rational bound; reason: self-contradiction
 < 1
 > j: 0
 = (0 0 $ 0) i: (0 $ 0)
-? the reference's own `i.` answers 0 for the same arguments
+? the reference's own `i.` answers 0 for the same arguments; reason: self-contradiction
 < 0
 > j: _1
 = (0 0 $ '') i: (0 $ a:)
-? the same over characters and boxes
+? the same over characters and boxes; reason: self-contradiction
 < 0
 > j: _1
 = _3 ^. _3
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 < 1
 > j: 1j_2.09983e_18
 = _3x ^. _3x
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 < 1
 > j: 1j9.81297e_18
 = _3 ^. _3x
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 < 1
 > j: 1j5.34113e_17
 = _2 ^. _2
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 < 1
 > j: 1j3.88619e_17
 = _1r2 ^. _1r2
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 < 1
 > j: 1j_3.88619e_17
 = (o. 1) *. 1
-? the two float Euclids cut the same residue chain at different steps
+? the two float Euclids cut the same residue chain at different steps; reason: proven-wrong
 < 1.04033e13
 > j: 5.14116e12
 = 1e12 * ((o. 1) +. 1)
-? the two float Euclids cut the same residue chain at different steps
+? the two float Euclids cut the same residue chain at different steps; reason: proven-wrong
 < 0.301981
 > j: 0.611067
 = (o. 1) *. 3
-? the two float Euclids cut the same residue chain at different steps
+? the two float Euclids cut the same residue chain at different steps; reason: proven-wrong
 < 3.19619e13
 > j: 1.34321e12
 = (,: < j.) &.^. ((1) +. (1.0000000000000002))
-? the two float Euclids part by one bit and the ordering downstream refuses
+? the two float Euclids part by one bit and the ordering downstream refuses; reason: proven-wrong
 < <error>
 > j: 1
 = !^:_1 ] 1.1
-? two arguments have this factorial and the two engines pick different ones
+? two arguments have this factorial and the two engines pick different ones; reason: undefined
 < 1.19699
 > j: _0.136587
 = !^:_1 ] 1.0000001
-? two arguments have this factorial and the two engines pick different ones
+? two arguments have this factorial and the two engines pick different ones; reason: undefined
 < 1
 > j: _1.73245e_7
 = !^:_1 ] 0.8
-? no argument at or above zero has this factorial; the reference goes below
+? no argument at or above zero has this factorial; the reference goes below; reason: undefined
 < <error>
 > j: _4.17518
 = %/;._1 (2 7 1 8)
-? the reference copies the integer answer's bits into a float cell
+? the reference copies the integer answer's bits into a float cell; reason: proven-wrong
 < 56
 > j: 2.76677e_322
 = %/;._1 (2 7 1 4)
-? the reference copies the integer answer's bits into a float cell
+? the reference copies the integer answer's bits into a float cell; reason: proven-wrong
 < 28
 > j: 1.38338e_322
 = !^:_1 (_5)
-? the reference searches into the complex plane; libjay has no real answer
+? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 < <error>
 > j: 4.55654j_5.33834
 = ! ^:(_1 0 1) (_5x)
-? the reference searches into the complex plane; libjay has no real answer
+? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 < <error>
 > j: 4.55654j_5.33834 _5 _
 = ! ^:_1 (3j4 1j_1)
-? the reference searches the complex plane; libjay's obverse reads reals
+? the reference searches the complex plane; libjay's obverse reads reals; reason: proven-wrong
 < <error>
 > j: 2.91824j0.747611 1.80245j_0.907562
 = (3 1 4 1 5) *. (9223372036854775806)
-? jconsole holds the left and the right in one double and libjay keeps them exact
+? jconsole holds the left and the right in one double and libjay keeps them exact; reason: self-contradiction
 < 9.22337e18 9.22337e18 1.84467e19 9.22337e18 4.61169e19
 > j: 9.22337e18 9.22337e18 9.22337e18 9.22337e18 9.22337e18
 = !^:_1 (-. ^:(<2) 2)
-? the reference searches into the complex plane; libjay has no real answer
+? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 < <error>
 > j: 2 8.91115j18.2226
 = ! ^:(_1 0 1) (_9223372036854775806)
-? the reference searches into the complex plane; libjay has no real answer
+? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 < <error>
 > j: __j_6.02345e41 _9.22337e18 _
 = 4 +/\\. (0 3 $ (3 $ a:))
-? the same function spelled `[: +/ ]` answers the empty there
+? the same function spelled `[: +/ ]` answers the empty there; reason: self-contradiction
 <
 > j: <error>
 = 2 +/\\. (0 3 $ (3 $ a:))
-? the same, with the smallest left argument that refuses
+? the same, with the smallest left argument that refuses; reason: self-contradiction
 <
 > j: <error>
 = 2 +/\\. (0 3 $ 'a')
-? the same over characters
+? the same over characters; reason: self-contradiction
 <
 > j: <error>
 = 2 +/\\. (0 3 $ s: 'a')
-? the same over symbols
+? the same over symbols; reason: self-contradiction
 <
 > j: <error>
 = 2 +/\\. (0 2 3 $ (6 $ a:))
-? the same where the cells are of higher rank
+? the same where the cells are of higher rank; reason: self-contradiction
 <
 > j: <error>
 = (<1 2) I. (<2)
-? the reference's own answers over boxes are not monotone
+? the reference's own answers over boxes are not monotone; reason: self-contradiction
 < 0
 > j: 1
 = (a:) I. (<1)
-? the same, with the empty box as the bound
+? the same, with the empty box as the bound; reason: self-contradiction
 < 0
 > j: 1
 = (<'a') I. (<1)
-? the same, comparing a character box with a numeric one
+? the same, comparing a character box with a numeric one; reason: self-contradiction
 < 0
 > j: 1
 = $ 2 +/\\. (<1 2)
-? the same argument under `<\.` and `,/\.` agrees
+? the same argument under `<\.` and `,/\.` agrees; reason: self-contradiction
 < 0
 > j: 0 0
 = $ 2 +/\\. (<<1 2)
-? the same, one box deeper
+? the same, one box deeper; reason: self-contradiction
 < 0
 > j: 0 0
 = $ 2 +/\\. (,<1 2)
-? the same, written as a one-item list
+? the same, written as a one-item list; reason: self-contradiction
 < 0
 > j: 0 0
 = $ 2 +/\\. ('a')
-? the same over a character, so the family is not about boxes
+? the same over a character, so the family is not about boxes; reason: self-contradiction
 < 0
 > j: 0 0
 = $ 2 +/\\. (0 $ <0)
-? the same where the argument has no item at all
+? the same where the argument has no item at all; reason: self-contradiction
 < 0
 > j: 0 0
 = $ 2 +/\\. (0 $ a:)
-? the same with the empty box for the item
+? the same with the empty box for the item; reason: self-contradiction
 < 0
 > j: 0 0
 = $ 8 +/\\. (0 $ a:)
-? the same, with a wider left argument
+? the same, with a wider left argument; reason: self-contradiction
 < 0
 > j: 0 0
 = $ 2 +/\\. (0 $ s: 'a')
-? the same over symbols
+? the same over symbols; reason: self-contradiction
 < 0
 > j: 0 0
 = (i. 0 0) i: (0 $ 0)
-? the reference's own `i.` answers 0 for the same arguments
+? the reference's own `i.` answers 0 for the same arguments; reason: self-contradiction
 < 0
 > j: _1
 = (i. 0 0) i: (0 $ 3j4)
-? the same, with a complex empty
+? the same, with a complex empty; reason: self-contradiction
 < 0
 > j: _1
 = <./ ;._2 (,5)
-? the same fold spelled `[: <./ ]` answers `_` there
+? the same fold spelled `[: <./ ]` answers `_` there; reason: self-contradiction
 < _
 > j: <error>
 = >./ ;._2 (,5)
-? the same, the maximum's identity
+? the same, the maximum's identity; reason: self-contradiction
 < __
 > j: <error>
 = <./ ;._1 (,5)
-? the same under the other end's cut
+? the same under the other end's cut; reason: self-contradiction
 < _
 > j: <error>
 = <./ ;._2 (5 3 5)
-? the same where only ONE of the two pieces is empty
+? the same where only ONE of the two pieces is empty; reason: self-contradiction
 < _ 3
 > j: <error>
 = <./ ;._2 (,1j2)
-? the same over a complex piece, where a float one answers
+? the same over a complex piece, where a float one answers; reason: self-contradiction
 < _
 > j: <error>
 = <./ ;._2 (,1x)
-? an extended piece answers 1, which is no minimum of anything
+? an extended piece answers 1, which is no minimum of anything; reason: self-contradiction
 < _
 > j: 1
 = >./ ;._2 (,1x)
-? the same, answering _1 for the maximum
+? the same, answering _1 for the maximum; reason: self-contradiction
 < __
 > j: _1
 = %/\\ (1 0 0)
-? the reference's own `%/` on the same prefix answers `_`
+? the reference's own `%/` on the same prefix answers `_`; reason: self-contradiction
 < 1 _ _
 > j: 1 _ 0
 = %/\\ (1 0 0 0)
-? the same, one item longer
+? the same, one item longer; reason: self-contradiction
 < 1 _ _ _
 > j: 1 _ 0 0
 = p. (_ _ _ _)
-? degree 2 with the same infinities answers the same NaN roots there
+? degree 2 with the same infinities answers the same NaN roots there; reason: self-contradiction
 < +-+-----------------+
 < |_|_.j_. _.j_. _.j_.|
 < +-+-----------------+
 > j: <error>
 = p. (1 1 1 _)
-? one infinity is enough, wherever it stands
+? one infinity is enough, wherever it stands; reason: self-contradiction
 < +-+-----------------+
 < |_|_.j_. _.j_. _.j_.|
 < +-+-----------------+
 > j: <error>
 = p. (_ _ _ _ _)
-? the same at degree 4, where `p. (0 0 1 1 _)` answers
+? the same at degree 4, where `p. (0 0 1 1 _)` answers; reason: self-contradiction
 < +-+-----------------------+
 < |_|_.j_. _.j_. _.j_. _.j_.|
 < +-+-----------------------+
 > j: <error>
 = (0 2 $ 'a') #. (0 $ 0)
-? the reference drops the left frame and answers the atom 0
+? the reference drops the left frame and answers the atom 0; reason: self-contradiction
 <
 > j: 0
 = (0 2 $ 'a') #. (2 0 $ 0)
-? the same two shapes with a numeric left are a length error there
+? the same two shapes with a numeric left are a length error there; reason: self-contradiction
 < <error>
 > j: 0 0
 = (0 2 $ <0) #. (i. 3 0)
-? the same, with a boxed left
+? the same, with a boxed left; reason: self-contradiction
 < <error>
 > j: 0 0 0
 = $ (2 0 3 $ 'a') #. (0 $ 0)
-? the reference's shape here is `2`, which no rank rule gives
+? the reference's shape here is `2`, which no rank rule gives; reason: self-contradiction
 < 2 0
 > j: 2
 = 0.5 ! __
-? the limit is unbounded and the reference answers _1
+? the limit is unbounded and the reference answers _1; reason: proven-wrong
 < <error>
 > j: _1
 = _0.5 ! __
-? the limit is zero and the reference answers _1
+? the limit is zero and the reference answers _1; reason: proven-wrong
 < <error>
 > j: _1
 = 1.5 ! __
-? the reference's limit does not alternate where its finite answers do
+? the reference's limit does not alternate where its finite answers do; reason: self-contradiction
 < <error>
 > j: __
 = _2 2 #: 5
-? the reference's two-radix integer path reads a negative leading radix as a zero one
+? the reference's two-radix integer path reads a negative leading radix as a zero one; reason: self-contradiction
 < 0 1
 > j: 2 1
 = _1 2 #: 7
-? the reference's two-radix integer path reads a negative leading radix as a zero one
+? the reference's two-radix integer path reads a negative leading radix as a zero one; reason: self-contradiction
 < 0 1
 > j: 3 1
 = _2 3 #: 11
-? the reference's two-radix integer path reads a negative leading radix as a zero one
+? the reference's two-radix integer path reads a negative leading radix as a zero one; reason: self-contradiction
 < _1 2
 > j: 3 2
 = _10 10 #: 1234
-? the reference's two-radix integer path reads a negative leading radix as a zero one
+? the reference's two-radix integer path reads a negative leading radix as a zero one; reason: self-contradiction
 < _7 4
 > j: 123 4
 = (_.) ^ (0.5)
-? the reference widens a one-item NaN power to the complex type, as it does the root
+? the reference widens a one-item NaN power to the complex type, as it does the root; reason: self-contradiction
 < _.
 > j: _.j_.
 = _. ^ _.
-? the reference refuses the NaN power of a NaN where the same pair at three items answers
+? the reference refuses the NaN power of a NaN where the same pair at three items answers; reason: self-contradiction
 < _.
 > j: <error>
 = 2 %: (_.)
-? the reference refuses a one-item NaN root by a real where its own monadic root answers
+? the reference refuses a one-item NaN root by a real where its own monadic root answers; reason: self-contradiction
 < _.
 > j: <error>
 = 0 ^ _.
-? a zero base takes no NaN exponent there: the answer is a plain 0
+? a zero base takes no NaN exponent there: the answer is a plain 0; reason: self-contradiction
 < _.
 > j: 0
 = (1.5 2.5 _0.5) ^. (0)
-? every cell of this answers on its own there and the list of them does not
+? every cell of this answers on its own there and the list of them does not; reason: self-contradiction
 < __ __ _j_
 > j: <error>
 = (_0.5 _0.5) ^. 0
-? every cell of this answers on its own there and the list of them does not
+? every cell of this answers on its own there and the list of them does not; reason: self-contradiction
 < _j_ _j_
 > j: <error>
 = (1.5 _0.5) ^. 0
-? every cell of this answers on its own there and the list of them does not
+? every cell of this answers on its own there and the list of them does not; reason: self-contradiction
 < __ _j_
 > j: <error>
 = x: 2 ^ 0.5
-? libjay answers the simplest rational within the comparison tolerance
+? libjay answers the simplest rational within the comparison tolerance; reason: undefined
 < 3880899r2744210
 > j: 431273813145r304956637823
 = 2 x: 2 ^ 0.5
-? the same conversion, written as a numerator and a denominator
+? the same conversion, written as a numerator and a denominator; reason: undefined
 < 3880899 2744210
 > j: 431273813145 304956637823
 = x: 1e_15
-? one convergent earlier than the reference's, and equally inside the tolerance
+? one convergent earlier than the reference's, and equally inside the tolerance; reason: undefined
 < 1r999999999999999
 > j: 1r1000000000000000
 = x: 3.14159265358979
-? the same, on a value with no short exact rational either
+? the same, on a value with no short exact rational either; reason: undefined
 < 5419351r1725033
 > j: 6686425096436r2128355211423
 = (s: <'a') I. (s: <'b')
-? the reference's own `<` puts these the other way round
+? the reference's own `<` puts these the other way round; reason: self-contradiction
 < 1
 > j: 0
 = (s: <'a') I. (s: <'a')
-? the same pair, equal
+? the same pair, equal; reason: self-contradiction
 < 0
 > j: 1
 = 2 +/\\. (_. 1 2)
-? the same function spelled `[: +/ ]` answers the pieces there
+? the same function spelled `[: +/ ]` answers the pieces there; reason: self-contradiction
 < 2 _.
 > j: _. _.
 = _2 +/\\. (_.)
-? the same where the piece is empty, so the sum should be the fold's zero
+? the same where the piece is empty, so the sum should be the fold's zero; reason: self-contradiction
 < 0
 > j: _.
 = 10 u: _2
-? a four-byte code is a value there and a codepoint here
+? a four-byte code is a value there and a codepoint here; reason: model
 < <error>
 > j: ￿�
 = 9 u: _3
-? the same over the other form that answers the four-byte type
+? the same over the other form that answers the four-byte type; reason: model
 < <error>
 > j: ￿�
 = 128!:3 (u: 2)
-? the reference refuses the widened type, not the bytes in it
+? the reference refuses the widened type, not the bytes in it; reason: model
 < 1007455905
 > j: <error>
 = (+: F.. ,:) (2 3 $ i. 6)
-? the reference's own `$` of this is `1 6` in a fresh process and `2 3` in a used one
+? the reference's own `$` of this is `1 6` in a fresh process and `2 3` in a used one; reason: self-contradiction
 < 6 8 10
 < 0 2  4
 > j: 6 8 10 0 2 4
 = 2 I. (1 2 3x)
-? the reference's own `2 I. 3` is 1 where its `2 I. (3x)` is 0
+? the reference's own `2 I. 3` is 1 where its `2 I. (3x)` is 0; reason: self-contradiction
 < 0 0 1
 > j: 0 1 0
 = (1p1) ! (9223372036854775806)
-? the reference's log-gamma difference loses every digit at this size
+? the reference's log-gamma difference loses every digit at this size; reason: proven-wrong
 < 5.28865e58
 > j: 0
 = (1e_9 1 1e9) ! (_9223372036854775806)
-? the reference's log-gamma difference loses every digit at this size
+? the reference's log-gamma difference loses every digit at this size; reason: proven-wrong
 < _ _9.22337e18 _
 > j: _1 _9.22337e18 _
 = (1r2 1r3) #. (1 0 1 $ 5)
-? the reference checks the radix count for integers and not for rationals
+? the reference checks the radix count for integers and not for rationals; reason: self-contradiction
 < <error>
 > j:
 = p. &.< (1ad45)
-? the reference's own `p. (< 2 3j4)` answers where this one is an index error
+? the reference's own `p. (< 2 3j4)` answers where this one is an index error; reason: self-contradiction
 < _0.707107j_0.707107 1
 > j: <error>
 = p. &.< (0j1)
-? the same with the imaginary unit for the root
+? the same with the imaginary unit for the root; reason: self-contradiction
 < 0j_1 1
 > j: <error>
 = p.. &.< (1ad45)
-? the same under the polynomial derivative
+? the same under the polynomial derivative; reason: self-contradiction
 < 1
 > j: <error>
 = -/\\. (2 2 $ _ 1 _ 2)
-? the reference's own `-/` of this is a NaN error, which contradicts it
+? the reference's own `-/` of this is a NaN error, which contradicts it; reason: self-contradiction
 < <error>
 > j: _. _1
 > j:  _  2
 = _1e17 ! _1
-? the reference rounds 1e17-1 to an even double and loses the sign
+? the reference rounds 1e17-1 to an even double and loses the sign; reason: self-contradiction
 < _1
 > j: 1
 = _1e16 ! _1
-? the same one exponent down, the first size a double cannot tell apart
+? the same one exponent down, the first size a double cannot tell apart; reason: self-contradiction
 < _1
 > j: 1
 = 5 p: (_ 1 2)
-? the reference's own `5 p: _` and `5 p: 1` contradict this vector
+? the reference's own `5 p: _` and `5 p: 1` contradict this vector; reason: self-contradiction
 < <error>
 > j: 1 0 1
 = /: (2 3 $ _. 1 2)
-? the reference's own ascending and descending grades of these rows agree, which contradicts it
+? the reference's own ascending and descending grades of these rows agree, which contradicts it; reason: self-contradiction
 < 0 1
 > j: 1 0
 = \\: (2 3 $ _. 1 2)
-? the same argument graded downwards, which answers the same permutation
+? the same argument graded downwards, which answers the same permutation; reason: self-contradiction
 < 0 1
 > j: 1 0
 = /: (3 3 $ _. 1 2)
-? three identical rows reversed outright
+? three identical rows reversed outright; reason: self-contradiction
 < 0 1 2
 > j: 2 1 0
 = \\: (_.j1 1 2)
-? the complex grade, whose ascending answer puts the NaN at the other end
+? the complex grade, whose ascending answer puts the NaN at the other end; reason: self-contradiction
 < 0 2 1
 > j: 2 1 0
 = /: (1 2 _.j1)
-? the same three complex values written in another order, and the NaN moves ends
+? the same three complex values written in another order, and the NaN moves ends; reason: self-contradiction
 < 0 1 2
 > j: 2 0 1
 = \\: (_. ; 1)
-? the boxed grade, where the reference's own ascending answer is the identity
+? the boxed grade, where the reference's own ascending answer is the identity; reason: self-contradiction
 < 0 1
 > j: 1 0
 = \\: (2 ; _. ; 1)
-? three boxes whose two grades are not each other's reverse
+? three boxes whose two grades are not each other's reverse; reason: self-contradiction
 < 0 1 2
 > j: 1 0 2
 = (_. ; 1) \\: (_. ; 1)
-? the grade-select built on the same comparison
+? the grade-select built on the same comparison; reason: self-contradiction
 < +--+-+
 < |_.|1|
 < +--+-+
@@ -646,10 +646,26 @@
 > j: |1|_.|
 > j: +-+--+
 = (_.) I. (1j2)
-? the reference puts each of the pair above the other
+? the reference puts each of the pair above the other; reason: self-contradiction
 < 0
 > j: 1
 = (_9223372036854775806) +. (3j4)
-? neither answer divides both arguments; two float Euclids at 9e18
+? neither answer divides both arguments; two float Euclids at 9e18; reason: self-contradiction
 < 3j4
 > j: 3
+= (0.5) ^ (0j_)
+? the reference's own `% ((_.) ^ (0.5))` contradicts its refusal of `(_.) ^ (_0.5)`; reason: self-contradiction
+< _.j_.
+> j: <error>
+= (2) %: (_j_)
+? the reference's own `(_j_) ^ (% 2)` is `_.j_.` where this is `_j_`; reason: self-contradiction
+< _.j_.
+> j: _j_
+= (0) o. (_.)
+? the reference's own `%: (1 - ((_.) ^ 2))` is `_.j_.` where this is refused; reason: self-contradiction
+< 0
+> j: <error>
+= (0.5) % (0r1)
+? the reference's own `(0.5) % (0x)` is `_` where this is `__`; reason: self-contradiction
+< _
+> j: __

@@ -16,31 +16,31 @@
 // at 256 or above — every one that needs the wide type to exist — displays
 // alike too.
 u: 'é'
-? a widened literal writes its bytes here and its characters there
+? a widened literal writes its bytes here and its characters there; reason: model
 ~ cause=differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text|differ:val:empty/text|differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=u: also=^:,&.,&.:,M.,f.,::,:,!:,F..,F.:,F::,p.,p:,q:,;.,*:,+:,-:,+,-,*,%,^,^.,<.,>.,=,~:,<:,>:,|,e.,i.,x:,b.,#.,#:,j.,r.,o.,!.,H.,=.,=:
 u: 233
-? a character between 128 and 255 writes as its byte here
+? a character between 128 and 255 writes as its byte here; reason: model
 10 u: 233
-? a character between 128 and 255 writes as its byte here
+? a character between 128 and 255 writes as its byte here; reason: model
 3!:0 u: 'é'
-? libjay has one character type, so widening does not change it
+? libjay has one character type, so widening does not change it; reason: model
 3!:0 (u: (0 $ 0))
-? the widened type is what `u:` ALWAYS reports there, empty or not
+? the widened type is what `u:` ALWAYS reports there, empty or not; reason: model
 3!:0 (u: 'abc')
-? the same over a literal that needed no widening at all
+? the same over a literal that needed no widening at all; reason: model
 3!:0 (u: 97)
-? the same over a code point below 128
+? the same over a code point below 128; reason: model
 3!:0 (10 u: (0 $ 0))
-? `10 u:` reports the FOUR-byte type there, which libjay has no more than the two
+? `10 u:` reports the FOUR-byte type there, which libjay has no more than the two; reason: model
 
 // The same one-character-type reading over the byte conversions: `2 u:`
 // widens bytes into characters in J, which is where the two writings part,
 // and a codepoint between 128 and 255 that `9 u:` answers with writes as
 // its byte here and as its character there.
 2 u: 8 u: u: 955
-? widening bytes to characters changes only how they are written out
+? widening bytes to characters changes only how they are written out; reason: model
 9 u: 200 200
-? a character between 128 and 255 writes as its byte here
+? a character between 128 and 255 writes as its byte here; reason: model
 
 // Two whole numbers a double cannot tell apart. jconsole holds every
 // number in a double once the verb is not one of the integer special
@@ -50,7 +50,7 @@ u: 233
 // not what parts the two — the numbers are equal in the reference's
 // arithmetic before any tolerance is consulted.
 (9007199254740992) *. (9007199254740993)
-? jconsole holds both in one double and libjay keeps them exact
+? jconsole holds both in one double and libjay keeps them exact; reason: proven-wrong
 
 // Two large arguments to `!` a double cannot tell apart. jconsole answers
 // `1e10 ! (1e10 + 1e_4)` with 1.00234; the value is 1.0023631, which the
@@ -68,10 +68,10 @@ u: 233
 // is subtracted off because the difference is in digits the printer would
 // otherwise round away.
 _1 + ((100000000) ! (100000000.00000001))
-? both sides lose this one; the reference's answer is not the value either
+? both sides lose this one; the reference's answer is not the value either; reason: proven-wrong
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/text|differ:val:vector/text verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,&.,&.: answers=inexact,near
 _1 + ((1e8) ! (1e8 + 1e_4))
-? both sides lose this one; the reference's answer is not the value either
+? both sides lose this one; the reference's answer is not the value either; reason: proven-wrong
 
 // FACTORISING SOMETHING THAT IS NOT A WHOLE NUMBER: THE REFERENCE ANSWERS
 // NOTHING AT ALL. `2 p: (3j4 1j_1)` prints no value there — and neither
@@ -87,7 +87,7 @@ _1 + ((1e8) ! (1e8 + 1e_4))
 // holding one would take the recording down with it. The rule below
 // matches them by cause instead.
 2 p: (3j4 1j_1)
-? the reference answers a factorisation of a complex number with nothing at all
+? the reference answers a factorisation of a complex number with nothing at all; reason: abort
 ~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer verb=p:,q: also=j.,r.,#:,#.,o.,F..,F.:,F::,M.,^,^.,%:,+,-,*,%,^:,L:,S:,-.,>,e.,~:,=,<:,>:,<.,>.,|.,{.,}.
 
 // A SINGULAR MATRIX UNDER `%.`, WHERE THE REFERENCE HAS NO RULE — ONLY THE
@@ -106,11 +106,11 @@ _1 + ((1e8) ! (1e8 + 1e_4))
 // singular system consistently and says so, which is the answer the
 // reference gives to half of these.
 %. (i. 4 3)
-? the reference answers a rank-deficient system with NaNs and refuses others
+? the reference answers a rank-deficient system with NaNs and refuses others; reason: self-contradiction
 $ %. (i. 4 3)
-? the reference answers a rank-deficient system with NaNs and refuses others
+? the reference answers a rank-deficient system with NaNs and refuses others; reason: self-contradiction
 %. (3 3 $ 1 2 3 4 5 6 7 8 9)
-? the reference answers a rank-deficient system with NaNs and refuses others
+? the reference answers a rank-deficient system with NaNs and refuses others; reason: self-contradiction
 
 // THE INVERSE OF A NaN, IN A TABLE OF ONE ITEM. The reference widens a
 // VECTOR holding a NaN to the complex type — `%. (, _.)` and `%. (_. 1 2)`
@@ -120,7 +120,7 @@ $ %. (i. 4 3)
 // the item count deciding a type again, with no rule behind it, so the
 // table is left as it stands.
 %. (1 1 $ _.)
-? the reference widens a one-item NaN table to complex where a wider one stays real
+? the reference widens a one-item NaN table to complex where a wider one stays real; reason: self-contradiction
 
 // AN INFINITY AMONG THE PRIMES, WHERE THE REFERENCE CONTRADICTS ITSELF
 // BETWEEN ONE ITEM AND SEVERAL. `4 p: (_ 1 2)` is `2 2 2` there, although
@@ -135,7 +135,7 @@ $ %. (i. 4 3)
 // alone and reads as one below every prime in company. The two forms that
 // ask whether a value IS prime were followed in round 9B.
 4 p: (_ 1 2)
-? an infinity makes the reference answer 2 for cells whose own answer is 3
+? an infinity makes the reference answer 2 for cells whose own answer is 3; reason: self-contradiction
 
 // THE NEAR-EQUAL BINOMIAL REACHING A REFUSAL rather than a value, which is
 // to the rule above what the GCD's refusal row is to the GCD's. `1 ! y` IS
@@ -147,7 +147,7 @@ $ %. (i. 4 3)
 // refusal and the other is text — so this needs a rule of its own rather
 // than the `answers=` clause above.
 ((1) ! (0.9999999999999999)) ": 5
-? the near-equal binomial parts by one bit and the format downstream refuses
+? the near-equal binomial parts by one bit and the format downstream refuses; reason: proven-wrong
 ~ cause=we-refuse:err:domain_error:_a_format_specification_is_whole_numbers|we-refuse:err:domain_error:_format_by_specification_takes_numbers verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,":,&.,&.:
 
 // `x C. y` over a left argument that is no permutation of y's items. The
@@ -161,17 +161,17 @@ $ %. (i. 4 3)
 // diagnostic that says which value makes it no permutation, rather than
 // with a number fabricated to match behaviour nobody has specified.
 (_2 0 2) C. 'hello'
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 (_3) C. (1;2;3)
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 (_1 _2) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 (_2 _1) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 (_1) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 C. (_2 0 2)
-? the reference's answer for a non-permutation is undefined; libjay refuses
+? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
 
 // `x ^. y` over a boxed y and a NEGATIVE x, which sends the logarithm into
 // the complex domain. jconsole answers this one with NOTHING AT ALL — no
@@ -180,11 +180,11 @@ C. (_2 0 2)
 // the logarithm on numbers, so a box is undefined either way; libjay
 // refuses both alike rather than following the silence.
 (_3) ^. (<1)
-? jconsole answers this one with no output at all and refuses 2 ^. (<1)
+? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 (_3) ^. (<'abc')
-? jconsole answers this one with no output at all and refuses 2 ^. (<1)
+? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 (_3) ^. (1;2)
-? jconsole answers this one with no output at all and refuses 2 ^. (<1)
+? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 
 // `x I. y` over BOXES. The Dictionary defines the interval index for a
 // sorted numeric list; libjay extends it to every element type that has an
@@ -195,13 +195,13 @@ C. (_2 0 2)
 // `(<5) I. (1;2;3)` is `1 1 1` although `/: ((<5);1;2;3)` puts the 5 last
 // in both. libjay answers by the order it grades with.
 (<'') I. (1;2;3)
-? the reference's box comparison here tells apart only equal from unequal
+? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 (<'a') I. (1;2;3)
-? the reference's box comparison here tells apart only equal from unequal
+? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 (<5) I. (1;2;3)
-? the reference's box comparison here tells apart only equal from unequal
+? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 (<2) I. (1;2;3)
-? the reference's box comparison here tells apart only equal from unequal
+? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 
 // A polynomial of the THIRD degree or higher with an infinite coefficient
 // aborts jconsole's own root finder — `p. (_ 1 2 3)` and `p. (1 2 3 __)`
@@ -212,11 +212,11 @@ C. (_2 0 2)
 // non-zero constant term leaves no root, and the roots come back as
 // `_.j_.`.
 p. (_ 1 2 3)
-? jconsole's root finder aborts on this one with a stack error
+? jconsole's root finder aborts on this one with a stack error; reason: abort
 p. (1 2 3 __)
-? jconsole's root finder aborts on this one with a stack error
+? jconsole's root finder aborts on this one with a stack error; reason: abort
 p. (0 1 1 _)
-? jconsole's root finder aborts on this one with a stack error
+? jconsole's root finder aborts on this one with a stack error; reason: abort
 // An LCM of a whole number a double cannot hold. The reference contradicts
 // ITSELF here rather than merely rounding: `9223372036854775806 +. 5` is 1
 // there, so `x *. y` — `(x % (x +. y)) * y` by the Dictionary's own
@@ -225,14 +225,14 @@ p. (0 1 1 _)
 // own float arithmetic loses. libjay keeps the value exact and answers the
 // LCM the reference's own GCD asks for.
 (9223372036854775806) *. (,5)
-? the reference's own GCD of 1 contradicts the LCM it answers
+? the reference's own GCD of 1 contradicts the LCM it answers; reason: self-contradiction
 ~ cause=differ:val:atom/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
 (_9223372036854775806) *. "1 _ 0 (i. 5)
-? the same boundary, one radix per cell
+? the same boundary, one radix per cell; reason: self-contradiction
 (_9223372036854775806) *."_2 (i. 3 4)
-? the same boundary over a table
+? the same boundary over a table; reason: self-contradiction
 (2 7 1 8) *. (_9223372036854775806)
-? the same boundary, the huge number on the right
+? the same boundary, the huge number on the right; reason: self-contradiction
 ~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
 
 // A LOGARITHM whose left argument holds a NEGATIVE number and whose right
@@ -244,15 +244,15 @@ p. (0 1 1 _)
 // SIGN decides whether a box is in the domain. libjay refuses on the type,
 // which is what it answers everywhere else on this path.
 (1.5 2.5 _0.5) ^. (a:)
-? the reference neither answers nor refuses; the sign of an unrelated atom decides
+? the reference neither answers nor refuses; the sign of an unrelated atom decides; reason: abort
 (1.5 _0.5) ^. (<1 2)
-? the same silence over a plain box
+? the same silence over a plain box; reason: abort
 (_0.5) ^. 'a'
-? the same silence over characters
+? the same silence over characters; reason: abort
 (1.5 2.5 _0.5) ^. ('hello')
-? the same silence over a longer character list
+? the same silence over a longer character list; reason: abort
 (_ __ 0) ^. (1;2 3)
-? the same silence with the infinities for the negative atom
+? the same silence with the infinities for the negative atom; reason: abort
 
 // INTERVAL INDEX against a SINGLE EXACT bound. The reference answers
 // `(1x) I. 2` with 0 and `(1x 2x) I. 2` with 1: adding a bound that is NOT
@@ -260,11 +260,11 @@ p. (0 1 1 _)
 // bound written as a float — `(,1) I. 2` — is 1 there. libjay counts the
 // bounds below the value whatever type holds them.
 (1x) I. 2
-? the reference's own two-bound answer contradicts this one
+? the reference's own two-bound answer contradicts this one; reason: self-contradiction
 (_5x) I. 2
-? the same, with a negative bound
+? the same, with a negative bound; reason: self-contradiction
 (1r2) I. 2
-? the same, with a rational bound
+? the same, with a rational bound; reason: self-contradiction
 
 // INDEX OF LAST over cells with NO ATOM. `x i: y` answers an index into x
 // where the cell is found and `#x` where it is not, and the reference
@@ -272,9 +272,9 @@ p. (0 1 1 _)
 // `(0 0$0) i: (0$0)` is `_1` there while its own `i.` on the same
 // arguments is 0, and `(0$0) i: 5` is 0. libjay answers `#x`, which is 0.
 (0 0 $ 0) i: (0 $ 0)
-? the reference's own `i.` answers 0 for the same arguments
+? the reference's own `i.` answers 0 for the same arguments; reason: self-contradiction
 (0 0 $ '') i: (0 $ a:)
-? the same over characters and boxes
+? the same over characters and boxes; reason: self-contradiction
 
 // A LOGARITHM TO ITS OWN NEGATIVE BASE. `x ^. x` is 1 for every x, and
 // libjay answers 1. jconsole answers a complex number a rounding away from
@@ -285,15 +285,15 @@ p. (0 1 1 _)
 // question is the reference contradicting itself, so there is nothing to
 // follow; libjay gives the value the algebra gives.
 _3 ^. _3
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 _3x ^. _3x
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 _3 ^. _3x
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 _2 ^. _2
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 _1r2 ^. _1r2
-? the reference answers a rounding away from 1, differently per spelling
+? the reference answers a rounding away from 1, differently per spelling; reason: self-contradiction
 
 // A GCD OR LCM OF TWO VALUES WITH NO COMMON MEASURE. Neither engine can
 // answer `(o. 1) +. 1` — pi and 1 have no common divisor — and both run a
@@ -309,9 +309,9 @@ _1r2 ^. _1r2
 // a rule that can be stated; the reference's could not be recovered from
 // forty-four measured pairs.
 (o. 1) *. 1
-? the two float Euclids cut the same residue chain at different steps
+? the two float Euclids cut the same residue chain at different steps; reason: proven-wrong
 1e12 * ((o. 1) +. 1)
-? the two float Euclids cut the same residue chain at different steps
+? the two float Euclids cut the same residue chain at different steps; reason: proven-wrong
 
 // THE WHOLE `+.`/`*.` FLOAT BOUNDARY, AS ONE FAMILY. A sweep draws a fresh
 // spelling of it every few thousand sentences and never the same one twice,
@@ -352,7 +352,7 @@ _1r2 ^. _1r2
 // throughout; if this rule is ever the only thing matching a mismatch,
 // re-measure them before trusting it.
 (o. 1) *. 3
-? the two float Euclids cut the same residue chain at different steps
+? the two float Euclids cut the same residue chain at different steps; reason: proven-wrong
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=+.,*. also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,<:,>:,=,~:,|,j.,r.,!.,&.,&.:,#.,#:,^:,%.,L:,S:,f.,|:,# answers=inexact
 
 // The same family REACHING A REFUSAL rather than a value. Where the two
@@ -363,7 +363,7 @@ _1r2 ^. _1r2
 // and an ordering of it carries no order. It is the divergence above,
 // shown through one more verb.
 (,: < j.) &.^. ((1) +. (1.0000000000000002))
-? the two float Euclids part by one bit and the ordering downstream refuses
+? the two float Euclids part by one bit and the ordering downstream refuses; reason: proven-wrong
 ~ cause=we-refuse:err:domain_error:_complex_numbers_have_no_order;_only_equality_(=,_~:)_appli verb=+.,*. also=o.,%,%:,^.,^,*,+,-,<.,>.,|,j.,!.,&.,&.:
 
 // THE OBVERSE OF THE FACTORIAL, WHERE THE EQUATION HAS MORE THAN ONE
@@ -377,12 +377,12 @@ _1r2 ^. _1r2
 // minimum 0.885603194410888 never returns at all. There is no consistent
 // rule to follow, so libjay keeps its own.
 !^:_1 ] 1.1
-? two arguments have this factorial and the two engines pick different ones
+? two arguments have this factorial and the two engines pick different ones; reason: undefined
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/text|differ:val:vector/text verb=! with=^: also=%,%:,-,+,*,&.,&.: answers=numeric
 !^:_1 ] 1.0000001
-? two arguments have this factorial and the two engines pick different ones
+? two arguments have this factorial and the two engines pick different ones; reason: undefined
 !^:_1 ] 0.8
-? no argument at or above zero has this factorial; the reference goes below
+? no argument at or above zero has this factorial; the reference goes below; reason: undefined
 
 // A REDUCTION INSIDE A CUT WHOSE ANSWER IS WHOLE. `%/ 7 1 8` is 56 and
 // `<;._1 (2 7 1 8)` is the one piece `7 1 8`, but `%/;._1 (2 7 1 8)` is
@@ -393,20 +393,20 @@ _1r2 ^. _1r2
 // integer cell into a float frame without converting it; libjay answers
 // the value.
 %/;._1 (2 7 1 8)
-? the reference copies the integer answer's bits into a float cell
+? the reference copies the integer answer's bits into a float cell; reason: proven-wrong
 %/;._1 (2 7 1 4)
-? the reference copies the integer answer's bits into a float cell
+? the reference copies the integer answer's bits into a float cell; reason: proven-wrong
 
 // The obverse of the factorial BELOW ZERO. `!^:_1 (_5)` is
 // `4.55654j_5.33834` there — a complex argument for a real y, and one
 // whose factorial jconsole itself does not return `_5` for. libjay has no
 // argument at or above zero whose factorial is negative and says so.
 !^:_1 (_5)
-? the reference searches into the complex plane; libjay has no real answer
+? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 ! ^:(_1 0 1) (_5x)
-? the reference searches into the complex plane; libjay has no real answer
+? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 ! ^:_1 (3j4 1j_1)
-? the reference searches the complex plane; libjay's obverse reads reals
+? the reference searches the complex plane; libjay's obverse reads reals; reason: proven-wrong
 ~ cause=we-refuse:err:NaN_error:_this_factorial_has_no_argument|we-refuse:err:domain_error:_the_obverse_of_!_needs_numeric_data verb=! with=^: also=%,%:,-,+,*,j.,&.,&.:,r.,;.,o.,^.
 
 // The same two whole numbers a double cannot tell apart, reached through a
@@ -415,11 +415,11 @@ _1r2 ^. _1r2
 // `4 *. (9223372036854775806)` is twice that and `5 *.` five times it, and
 // its own `3 *. (9223372036854775806)` is the integer.
 (3 1 4 1 5) *. (9223372036854775806)
-? jconsole holds the left and the right in one double and libjay keeps them exact
+? jconsole holds the left and the right in one double and libjay keeps them exact; reason: self-contradiction
 !^:_1 (-. ^:(<2) 2)
-? the reference searches into the complex plane; libjay has no real answer
+? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 ! ^:(_1 0 1) (_9223372036854775806)
-? the reference searches into the complex plane; libjay has no real answer
+? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 // The DYADIC OUTFIX `x u\.` over an empty frame of BOXED, CHARACTER or
 // SYMBOL cells, where u is exactly `+/` and x is 2 or more. jconsole
 // answers a LENGTH ERROR; libjay answers the empty frame the definition
@@ -432,15 +432,15 @@ _1r2 ^. _1r2
 // `+/` refuses, so the refusal is the reference's own special code for
 // `+/\.` disagreeing with the reference's ordinary path.
 4 +/\\. (0 3 $ (3 $ a:))
-? the same function spelled `[: +/ ]` answers the empty there
+? the same function spelled `[: +/ ]` answers the empty there; reason: self-contradiction
 2 +/\\. (0 3 $ (3 $ a:))
-? the same, with the smallest left argument that refuses
+? the same, with the smallest left argument that refuses; reason: self-contradiction
 2 +/\\. (0 3 $ 'a')
-? the same over characters
+? the same over characters; reason: self-contradiction
 2 +/\\. (0 3 $ s: 'a')
-? the same over symbols
+? the same over symbols; reason: self-contradiction
 2 +/\\. (0 2 3 $ (6 $ a:))
-? the same where the cells are of higher rank
+? the same where the cells are of higher rank; reason: self-contradiction
 
 // INTERVAL INDEX over BOXES. `x I. y` counts the bounds of a sorted x that
 // lie below y, and boxes have no such order: the reference's own answers
@@ -451,11 +451,11 @@ _1r2 ^. _1r2
 // Dictionary's, which asks for a left argument in ascending order and says
 // nothing about what ordering boxes have.
 (<1 2) I. (<2)
-? the reference's own answers over boxes are not monotone
+? the reference's own answers over boxes are not monotone; reason: self-contradiction
 (a:) I. (<1)
-? the same, with the empty box as the bound
+? the same, with the empty box as the bound; reason: self-contradiction
 (<'a') I. (<1)
-? the same, comparing a character box with a numeric one
+? the same, comparing a character box with a numeric one; reason: self-contradiction
 
 // The dyadic OUTFIX over an ATOM, with u exactly `+/`. `2 +/\. (<1 2)` has
 // shape `0 0` in jconsole and `0` here: an atom is one item, `1 + 1 - 2` is
@@ -465,27 +465,27 @@ _1r2 ^. _1r2
 // special code for `+/\.` again — the family the boxed empty frame above
 // belongs to.
 $ 2 +/\\. (<1 2)
-? the same argument under `<\.` and `,/\.` agrees
+? the same argument under `<\.` and `,/\.` agrees; reason: self-contradiction
 $ 2 +/\\. (<<1 2)
-? the same, one box deeper
+? the same, one box deeper; reason: self-contradiction
 $ 2 +/\\. (,<1 2)
-? the same, written as a one-item list
+? the same, written as a one-item list; reason: self-contradiction
 $ 2 +/\\. ('a')
-? the same over a character, so the family is not about boxes
+? the same over a character, so the family is not about boxes; reason: self-contradiction
 $ 2 +/\\. (0 $ <0)
-? the same where the argument has no item at all
+? the same where the argument has no item at all; reason: self-contradiction
 $ 2 +/\\. (0 $ a:)
-? the same with the empty box for the item
+? the same with the empty box for the item; reason: self-contradiction
 $ 8 +/\\. (0 $ a:)
-? the same, with a wider left argument
+? the same, with a wider left argument; reason: self-contradiction
 $ 2 +/\\. (0 $ s: 'a')
-? the same over symbols
+? the same over symbols; reason: self-contradiction
 
 // The same INDEX OF LAST divergence pinned above, written with `i.`.
 (i. 0 0) i: (0 $ 0)
-? the reference's own `i.` answers 0 for the same arguments
+? the reference's own `i.` answers 0 for the same arguments; reason: self-contradiction
 (i. 0 0) i: (0 $ 3j4)
-? the same, with a complex empty
+? the same, with a complex empty; reason: self-contradiction
 
 // A CUT whose piece is EMPTY, folded by an EXTREMUM. `<./;._2 (,5)` is a
 // domain error in jconsole; libjay answers the identity `_` the same fold
@@ -499,19 +499,19 @@ $ 2 +/\\. (0 $ s: 'a')
 // is no identity of either — the reference's own special code for `u/;.n`,
 // not a rule.
 <./ ;._2 (,5)
-? the same fold spelled `[: <./ ]` answers `_` there
+? the same fold spelled `[: <./ ]` answers `_` there; reason: self-contradiction
 >./ ;._2 (,5)
-? the same, the maximum's identity
+? the same, the maximum's identity; reason: self-contradiction
 <./ ;._1 (,5)
-? the same under the other end's cut
+? the same under the other end's cut; reason: self-contradiction
 <./ ;._2 (5 3 5)
-? the same where only ONE of the two pieces is empty
+? the same where only ONE of the two pieces is empty; reason: self-contradiction
 <./ ;._2 (,1j2)
-? the same over a complex piece, where a float one answers
+? the same over a complex piece, where a float one answers; reason: self-contradiction
 <./ ;._2 (,1x)
-? an extended piece answers 1, which is no minimum of anything
+? an extended piece answers 1, which is no minimum of anything; reason: self-contradiction
 >./ ;._2 (,1x)
-? the same, answering _1 for the maximum
+? the same, answering _1 for the maximum; reason: self-contradiction
 
 // The PREFIX SCAN of a DIVISION insert against the insert itself. The last
 // item of `%/\ (1 0 0)` is `%/ (1 0 0)` by the scan's own definition, and
@@ -520,9 +520,9 @@ $ 2 +/\\. (0 $ s: 'a')
 // where the fold `1 % (0 % 0)` is `1 % 0`. libjay scans by folding each
 // prefix, so its answer is the reference's own `%/`.
 %/\\ (1 0 0)
-? the reference's own `%/` on the same prefix answers `_`
+? the reference's own `%/` on the same prefix answers `_`; reason: self-contradiction
 %/\\ (1 0 0 0)
-? the same, one item longer
+? the same, one item longer; reason: self-contradiction
 
 // The ROOTS of a polynomial of degree 3 or more with an INFINITE
 // coefficient. jconsole refuses `p. (_ _ _ _)`; libjay answers the NaN
@@ -532,11 +532,11 @@ $ 2 +/\\. (0 $ s: 'a')
 // with the same infinity — it is the reference's own root finder giving
 // up on the numbers in front of it, not a statement about the domain.
 p. (_ _ _ _)
-? degree 2 with the same infinities answers the same NaN roots there
+? degree 2 with the same infinities answers the same NaN roots there; reason: self-contradiction
 p. (1 1 1 _)
-? one infinity is enough, wherever it stands
+? one infinity is enough, wherever it stands; reason: self-contradiction
 p. (_ _ _ _ _)
-? the same at degree 4, where `p. (0 0 1 1 _)` answers
+? the same at degree 4, where `p. (0 0 1 1 _)` answers; reason: self-contradiction
 
 // DECODE where the LEFT argument's frame has no cell. `(0 2 $ 'a') #.
 // (2 0 $ 0)` is `0 0` in jconsole, shaped by the RIGHT frame alone, where
@@ -546,13 +546,13 @@ p. (_ _ _ _ _)
 // frame of a rank-1 verb gives. libjay agrees the frames the ordinary way
 // and answers, or refuses, as those frames say.
 (0 2 $ 'a') #. (0 $ 0)
-? the reference drops the left frame and answers the atom 0
+? the reference drops the left frame and answers the atom 0; reason: self-contradiction
 (0 2 $ 'a') #. (2 0 $ 0)
-? the same two shapes with a numeric left are a length error there
+? the same two shapes with a numeric left are a length error there; reason: self-contradiction
 (0 2 $ <0) #. (i. 3 0)
-? the same, with a boxed left
+? the same, with a boxed left; reason: self-contradiction
 $ (2 0 3 $ 'a') #. (0 $ 0)
-? the reference's shape here is `2`, which no rank rule gives
+? the reference's shape here is `2`, which no rank rule gives; reason: self-contradiction
 
 // THE BINOMIAL AT NEGATIVE INFINITY UNDER A FRACTIONAL LEFT ARGUMENT.
 // `x ! y` off the whole numbers is a ratio of gammas whose magnitude grows
@@ -565,11 +565,11 @@ $ (2 0 3 $ 'a') #. (0 $ 0)
 // infinities for a fractional x, which is what the reference does at one of
 // them.
 0.5 ! __
-? the limit is unbounded and the reference answers _1
+? the limit is unbounded and the reference answers _1; reason: proven-wrong
 _0.5 ! __
-? the limit is zero and the reference answers _1
+? the limit is zero and the reference answers _1; reason: proven-wrong
 1.5 ! __
-? the reference's limit does not alternate where its finite answers do
+? the reference's limit does not alternate where its finite answers do; reason: self-contradiction
 
 // A NEGATIVE LEADING RADIX in `x #: y` where the left argument has exactly
 // TWO radices and both sides are integers. Everywhere else — one radix,
@@ -582,13 +582,13 @@ _0.5 ! __
 // `_2 2 #: 11x` is `_1 1`: the same question of the same numbers, answered
 // two ways by the type they were written in.
 _2 2 #: 5
-? the reference's two-radix integer path reads a negative leading radix as a zero one
+? the reference's two-radix integer path reads a negative leading radix as a zero one; reason: self-contradiction
 _1 2 #: 7
-? the reference's two-radix integer path reads a negative leading radix as a zero one
+? the reference's two-radix integer path reads a negative leading radix as a zero one; reason: self-contradiction
 _2 3 #: 11
-? the reference's two-radix integer path reads a negative leading radix as a zero one
+? the reference's two-radix integer path reads a negative leading radix as a zero one; reason: self-contradiction
 _10 10 #: 1234
-? the reference's two-radix integer path reads a negative leading radix as a zero one
+? the reference's two-radix integer path reads a negative leading radix as a zero one; reason: self-contradiction
 
 // THE POWER OF A NaN goes three ways, and round 8 measured them:
 // `(_.) ^ 0.5` is the complex `_.j_.` there (the one-item widening the root
@@ -600,14 +600,14 @@ _10 10 #: 1234
 // all of it, and the root and the logarithm it also names are the DYADIC
 // spellings: their monads were followed in round 9A.
 (_.) ^ (0.5)
-? the reference widens a one-item NaN power to the complex type, as it does the root
+? the reference widens a one-item NaN power to the complex type, as it does the root; reason: self-contradiction
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S: answers=numeric
 _. ^ _.
-? the reference refuses the NaN power of a NaN where the same pair at three items answers
+? the reference refuses the NaN power of a NaN where the same pair at three items answers; reason: self-contradiction
 2 %: (_.)
-? the reference refuses a one-item NaN root by a real where its own monadic root answers
+? the reference refuses a one-item NaN root by a real where its own monadic root answers; reason: self-contradiction
 0 ^ _.
-? a zero base takes no NaN exponent there: the answer is a plain 0
+? a zero base takes no NaN exponent there: the answer is a plain 0; reason: self-contradiction
 
 // A LOGARITHM OF ZERO TO A LIST OF BASES. Every cell of it answers on its
 // own there — `2 ^. 0` is `__`, `_0.5 ^. 0` is `_j_`, `_1 ^. 0` is `0j_`
@@ -617,12 +617,12 @@ _. ^ _.
 // two cells are the value the reference itself gives one at a time. libjay
 // answers the cells.
 (1.5 2.5 _0.5) ^. (0)
-? every cell of this answers on its own there and the list of them does not
+? every cell of this answers on its own there and the list of them does not; reason: self-contradiction
 ~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=^. also=%,*,+,-,+:,-:,*:,=,~:,<:,>:,|,j.,&.,&.:
 (_0.5 _0.5) ^. 0
-? every cell of this answers on its own there and the list of them does not
+? every cell of this answers on its own there and the list of them does not; reason: self-contradiction
 (1.5 _0.5) ^. 0
-? every cell of this answers on its own there and the list of them does not
+? every cell of this answers on its own there and the list of them does not; reason: self-contradiction
 // `x:` OF A FLOAT THAT HAS NO SHORT EXACT RATIONAL. Both sides answer a
 // rational within the default comparison tolerance and the Dictionary names
 // neither: libjay answers the simplest one inside that tolerance — the
@@ -631,13 +631,13 @@ _. ^ _.
 // no rule black-box probing could reconstruct. The exact cases (`x: 0.1`,
 // `x: 1r3 + 0.0`, `x: 123.456`) agree on both sides.
 x: 2 ^ 0.5
-? libjay answers the simplest rational within the comparison tolerance
+? libjay answers the simplest rational within the comparison tolerance; reason: undefined
 2 x: 2 ^ 0.5
-? the same conversion, written as a numerator and a denominator
+? the same conversion, written as a numerator and a denominator; reason: undefined
 x: 1e_15
-? one convergent earlier than the reference's, and equally inside the tolerance
+? one convergent earlier than the reference's, and equally inside the tolerance; reason: undefined
 x: 3.14159265358979
-? the same, on a value with no short exact rational either
+? the same, on a value with no short exact rational either; reason: undefined
 // A sweep draws this family fresh every time and never the same spelling
 // twice — `x: &.%: 2`, `x:&:o. 2`, `x: &.:j. (1 -/\. 2)` — because any verb
 // that makes an irrational float feeds it. The rule below is what matches
@@ -656,9 +656,9 @@ x: 3.14159265358979
 // libjay reads the bounds by the total array ordering, as it does for
 // every other type.
 (s: <'a') I. (s: <'b')
-? the reference's own `<` puts these the other way round
+? the reference's own `<` puts these the other way round; reason: self-contradiction
 (s: <'a') I. (s: <'a')
-? the same pair, equal
+? the same pair, equal; reason: self-contradiction
 
 // The dyadic OUTFIX over an argument holding a NaN, with u exactly `+/`.
 // The reference totals the whole argument once and takes each outfix sum
@@ -671,10 +671,10 @@ x: 3.14159265358979
 // `+/`. This is the reference's special code for `+/\.` disagreeing with
 // its own ordinary path, the third spelling of the family pinned above.
 2 +/\\. (_. 1 2)
-? the same function spelled `[: +/ ]` answers the pieces there
+? the same function spelled `[: +/ ]` answers the pieces there; reason: self-contradiction
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=+,/,\. also=_.,-,*,%,^,%:,^.,+:,-:,*:,<:,>:,|,j.,&.,&.:,$,<,> answers=numeric
 _2 +/\\. (_.)
-? the same where the piece is empty, so the sum should be the fold's zero
+? the same where the piece is empty, so the sum should be the fold's zero; reason: self-contradiction
 
 // A FOUR-BYTE CODE THAT NAMES NO CHARACTER. `9 u:` and `10 u:` answer J's
 // four-byte character type, whose element is thirty-two bits of anything:
@@ -686,9 +686,9 @@ _2 +/\\. (_.)
 // difference as the two-byte type itself: libjay has one character type
 // where the reference has three.
 10 u: _2
-? a four-byte code is a value there and a codepoint here
+? a four-byte code is a value there and a codepoint here; reason: model
 9 u: _3
-? the same over the other form that answers the four-byte type
+? the same over the other form that answers the four-byte type; reason: model
 ~ cause=we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint|we-refuse:err:domain_error:_-#_is_not_a_Unicode_codepoint verb=u: also=x:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,~.,^:,&,@,:,f.,::,M.,S:,L:,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,/,\,\.,+.,*.,;.,{::,{,e.,~.,<,>,=:,=.,;:,s:,":,@.,`:,%.,A.,I.,-.,/.
 
 // THE CRC OF A WIDE CHARACTER. `128!:3` reads a byte string, and the
@@ -697,7 +697,7 @@ _2 +/\\. (_.)
 // `u:` widened the type. libjay has one character type and reads the codes,
 // so it answers the CRC of those bytes.
 128!:3 (u: 2)
-? the reference refuses the widened type, not the bytes in it
+? the reference refuses the widened type, not the bytes in it; reason: model
 ~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num verb=u: with=!: also=^:,&.,f.,::,M.,:
 
 // THE FOLD CONJUNCTION ANSWERS TWO SHAPES TO ONE SENTENCE. In a fresh
@@ -713,7 +713,7 @@ _2 +/\\. (_.)
 // so the rule leans on the neutral set for it and keeps `also=` to the
 // arithmetic that cannot make an infinity of its own.
 (+: F.. ,:) (2 3 $ i. 6)
-? the reference's own `$` of this is `1 6` in a fresh process and `2 3` in a used one
+? the reference's own `$` of this is `1 6` in a fresh process and `2 3` in a used one; reason: self-contradiction
 ~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/num verb=F..,F.:,F:.,F:: also=+:,-:,*:,+,-,*,<.,>.,=,~:,<:,>:,e.,x:,!.,*.,+.,%,%:,^,^.,|,o.,j.,r.,&.,&.:,L:,S: answers=numeric
 
 // INTERVAL INDEX OVER THE EXACT TYPES, WHERE THE REFERENCE CONTRADICTS THE
@@ -724,7 +724,7 @@ _2 +/\\. (_.)
 // correctly, so the fault is in the one-bound search and not in the type.
 // libjay answers the intervals: `0 0 1`.
 2 I. (1 2 3x)
-? the reference's own `2 I. 3` is 1 where its `2 I. (3x)` is 0
+? the reference's own `2 I. 3` is 1 where its `2 I. (3x)` is 0; reason: self-contradiction
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=I. also=x:,o.,_.,+,-,*,%,^,%:,|,<.,>.,j.,r.,!.,&.,&.:
 
 // TWO ARGUMENTS TO `!` A DOUBLE CANNOT TELL APART, at the far end of the
@@ -735,9 +735,9 @@ _2 +/\\. (_.)
 // same reason, where the limit as the upper argument falls to zero is 1.
 // libjay takes the ratio directly and answers the mathematics.
 (1p1) ! (9223372036854775806)
-? the reference's log-gamma difference loses every digit at this size
+? the reference's log-gamma difference loses every digit at this size; reason: proven-wrong
 (1e_9 1 1e9) ! (_9223372036854775806)
-? the reference's log-gamma difference loses every digit at this size
+? the reference's log-gamma difference loses every digit at this size; reason: proven-wrong
 
 // THE RADIX COUNT OF AN EMPTY, WHERE THE REFERENCE CONTRADICTS ITSELF BY
 // TYPE. `(1 2) #. (1 0 1 $ 5)` is a length error there — two radices for a
@@ -745,7 +745,7 @@ _2 +/\\. (_.)
 // shape `1 0`: the same two radices against the same shape, written in the
 // rational type instead. libjay applies the one check to both.
 (1r2 1r3) #. (1 0 1 $ 5)
-? the reference checks the radix count for integers and not for rationals
+? the reference checks the radix count for integers and not for rationals; reason: self-contradiction
 ~ cause=we-refuse:err:length_error:_#_radices_for_#_digits verb=#.,#: also=$,x:,%,r.,j.,+,-,*,^,%:,^.,|,<.,>.,L:,S:,&.,&.:
 
 // A BOXED ROOT FORM WHOSE ROOT IS ONE COMPLEX NUMBER, where the reference
@@ -757,12 +757,12 @@ _2 +/\\. (_.)
 // that is refused but the pairing of one root with the complex type. `p..`
 // answers the same way. libjay reads the box the same at every length.
 p. &.< (1ad45)
-? the reference's own `p. (< 2 3j4)` answers where this one is an index error
+? the reference's own `p. (< 2 3j4)` answers where this one is an index error; reason: self-contradiction
 ~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=p.,p.. also=j.,r.,o.,^,^.,%:,+,-,*,%,+.,*.,<.,>.,|,&.,&.:,^:,L:,S:,x:,!.,f.,::,M.,:
 p. &.< (0j1)
-? the same with the imaginary unit for the root
+? the same with the imaginary unit for the root; reason: self-contradiction
 p.. &.< (1ad45)
-? the same under the polynomial derivative
+? the same under the polynomial derivative; reason: self-contradiction
 
 // THE NaN THE ARITHMETIC MADE, SEEN THROUGH A SCAN, where the reference
 // contradicts itself. `-/ (2 2 $ _ 1 _ 2)` is a NaN error there — `_ - _`
@@ -773,7 +773,7 @@ p.. &.< (1ad45)
 // are all NaN errors. The same two arguments cannot have two answers, so
 // libjay refuses on every path.
 -/\\. (2 2 $ _ 1 _ 2)
-? the reference's own `-/` of this is a NaN error, which contradicts it
+? the reference's own `-/` of this is a NaN error, which contradicts it; reason: self-contradiction
 ~ cause=we-refuse:err:NaN_error:_`__-__`_has_no_value|we-refuse:err:NaN_error:_`__+___`_has_no_value|we-refuse:err:NaN_error:_a_residue_of_an_infinity_has_no_value|we-refuse:err:NaN_error:_`___`_has_no_value verb=/,\,\. also=-,+,*,%,|,^,^.,%:,<.,>.,*.,+.,o.,j.,r.,!,!.,&.,&.:,",@,@:,:,L:,S:,x:,F..,F.:,F::,^:,;.,M.,f.,::,#:,#.
 
 // THE SIGN OF A BINOMIAL OF TWO NEGATIVE WHOLE NUMBERS, where the
@@ -787,10 +787,10 @@ p.. &.< (1ad45)
 // holds the pair as the integers they are written as — `3!:0 (_1e17)` is
 // the integer type on both sides — and answers the parity.
 _1e17 ! _1
-? the reference rounds 1e17-1 to an even double and loses the sign
+? the reference rounds 1e17-1 to an even double and loses the sign; reason: self-contradiction
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,&.,&.:,^,^:,|,<.,>.,x:,!.,",/,L:,S:
 _1e16 ! _1
-? the same one exponent down, the first size a double cannot tell apart
+? the same one exponent down, the first size a double cannot tell apart; reason: self-contradiction
 
 // EULER'S TOTIENT OF A VECTOR HOLDING AN INFINITY — ORACLE
 // SELF-CONTRADICTION. `5 p: _` is a domain error in the reference and so is
@@ -799,7 +799,7 @@ _1e16 ! _1
 // three answers cannot both be the totient, so libjay refuses the vector as
 // the reference refuses the atom.
 5 p: (_ 1 2)
-? the reference's own `5 p: _` and `5 p: 1` contradict this vector
+? the reference's own `5 p: _` and `5 p: 1` contradict this vector; reason: self-contradiction
 ~ cause=we-refuse:err:domain_error:_the_totient_needs_a_whole_number_that_is_not_negative verb=p: also=%,*,+,-,^,|,<.,>.,x:,",/,\,\.,L:,S:,&.,&.:,@,@:,^:,!.
 
 // THE GRADE OF A VALUE CARRYING A NaN, WHEREVER THE COMPARISON IS
@@ -826,22 +826,22 @@ _1e16 ! _1
 // not a comparison. libjay orders a NaN above every number in every one
 // of them, which is the reference's own flat answer.
 /: (2 3 $ _. 1 2)
-? the reference's own ascending and descending grades of these rows agree, which contradicts it
+? the reference's own ascending and descending grades of these rows agree, which contradicts it; reason: self-contradiction
 ~ cause=differ:val:vector/num|differ:val:table/num|differ:val:table/text|differ:val:atom/num|differ:val:planes/num verb=/:,\\: also=$,;,<,>,j.,r.,o.,+,-,*,%,^,%:,^.,|,<.,>.,+.,*.,x:,!.,&.,&.:,",@,@:,^:,L:,S:,f.,::,M.,/,\\,\\.,#,{,},:
 \\: (2 3 $ _. 1 2)
-? the same argument graded downwards, which answers the same permutation
+? the same argument graded downwards, which answers the same permutation; reason: self-contradiction
 /: (3 3 $ _. 1 2)
-? three identical rows reversed outright
+? three identical rows reversed outright; reason: self-contradiction
 \\: (_.j1 1 2)
-? the complex grade, whose ascending answer puts the NaN at the other end
+? the complex grade, whose ascending answer puts the NaN at the other end; reason: self-contradiction
 /: (1 2 _.j1)
-? the same three complex values written in another order, and the NaN moves ends
+? the same three complex values written in another order, and the NaN moves ends; reason: self-contradiction
 \\: (_. ; 1)
-? the boxed grade, where the reference's own ascending answer is the identity
+? the boxed grade, where the reference's own ascending answer is the identity; reason: self-contradiction
 \\: (2 ; _. ; 1)
-? three boxes whose two grades are not each other's reverse
+? three boxes whose two grades are not each other's reverse; reason: self-contradiction
 (_. ; 1) \\: (_. ; 1)
-? the grade-select built on the same comparison
+? the grade-select built on the same comparison; reason: self-contradiction
 
 // THE INTERVAL INDEX OVER A COMPLEX BOUND CARRYING A NaN, which is the
 // same cell-by-cell order one verb along: `(_.) I. (1j2)` is 1 there and
@@ -849,7 +849,7 @@ _1e16 ! _1
 // bound above the value. libjay reads a NaN as above every number, as its
 // grade does.
 (_.) I. (1j2)
-? the reference puts each of the pair above the other
+? the reference puts each of the pair above the other; reason: self-contradiction
 ~ cause=differ:val:atom/num|differ:val:vector/num verb=I. also=j.,r.,o.,+,-,*,%,^,%:,^.,|,<.,>.,+.,*.,x:,!.,&.,&.:,",@,@:,^:,L:,S:,f.,::,M.,$,<,>,;
 
 // THE COMPLEX GCD OF A VALUE PAST THE DOUBLE'S WHOLE-NUMBER RANGE, where
@@ -861,5 +861,44 @@ _1e16 ! _1
 // digits left to cut at 9e18, stopping at different steps. The true
 // divisor is 1.
 (_9223372036854775806) +. (3j4)
-? neither answer divides both arguments; two float Euclids at 9e18
+? neither answer divides both arguments; two float Euclids at 9e18; reason: self-contradiction
 ~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=+.,*. also=j.,r.,",@,@:,^:,&.,&.:,L:,S:,f.,::,M.,/,\\,\\.,x:,!.,$,<,>,;,o. answers=numeric
+
+// THE POWER AND THE ROOT THAT REACH INTO THE COMPLEX PLANE, WHERE THE
+// REFERENCE REFUSES AN ANSWER IT HAS ALREADY WRITTEN DOWN — ORACLE
+// SELF-CONTRADICTION. `(_.) ^ (0.5)` is `_.j_.` there and
+// `% ((_.) ^ (0.5))` is `_.j_.` as well, so the negated exponent —
+// `x ^ _y` being `% (x ^ y)` — has an answer the reference itself gives;
+// `(_.) ^ (_0.5)` is a limit error all the same. The ROOT parts the same
+// way: `x %: y` is `y ^ % x` by the Dictionary, and `(_j_) ^ (% 2)` is
+// `_.j_.` there where its own `2 %: (_j_)` is `_j_`. Neither pair can both
+// be right, so there is no rule to follow, and libjay answers the value
+// IEEE complex arithmetic gives at every shape. The whole family is one
+// mechanism: the reference composes `^ y * ^. x` in doubles and reports a
+// LIMIT ERROR wherever that composition loses its direction, which is not
+// a statement about the domain but about its own floating point.
+(0.5) ^ (0j_)
+? the reference's own `% ((_.) ^ (0.5))` contradicts its refusal of `(_.) ^ (_0.5)`; reason: self-contradiction
+~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num|they-refuse:val:planes/num|differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=^,%: also=%,-,+,*,<.,>.,|,o.,+.,*.,j.,r.,x:,!.,&.,&.:,",/,L:,S:,$,<,>,;
+(2) %: (_j_)
+? the reference's own `(_j_) ^ (% 2)` is `_.j_.` where this is `_j_`; reason: self-contradiction
+
+// THE CIRCLE FUNCTION THAT REFUSES ITS OWN COMPOSITION — ORACLE
+// SELF-CONTRADICTION. `0 o. y` IS `%: 1 - y ^ 2` by the Dictionary, and the
+// reference writes that composition out for the very argument it refuses:
+// `%: (1 - ((_.) ^ 2))` is `_.j_.` there — `(_.) ^ 2` is `_.` and
+// `1 - (_.)` is `_.` — while `0 o. (_.)` is a NaN error. `0 o. (0j_)` and
+// the negative forms part the same way. libjay answers the composition.
+(0) o. (_.)
+? the reference's own `%: (1 - ((_.) ^ 2))` is `_.j_.` where this is refused; reason: self-contradiction
+~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num|they-refuse:val:planes/num|differ:val:atom/num verb=o. also=%:,^,-,+,*,%,|,<.,>.,j.,r.,x:,!.,&.,&.:,",/,L:,S:,$,<,>,;
+
+// DIVIDING BY A ZERO WRITTEN AS A RATIONAL, WHERE THE REFERENCE ANSWERS THE
+// OTHER INFINITY — ORACLE SELF-CONTRADICTION. `(0.5) % 0` is `_` there and
+// `(0.5) % (0x)` is `_`, but `(0.5) % (0r1)` — the same zero in the
+// rational type — is `__`, and `(__) % (0r1)` is `_` where `(__) % 0` is
+// `__`. One zero, three spellings, and the rational one reverses the sign.
+// libjay divides by the value.
+(0.5) % (0r1)
+? the reference's own `(0.5) % (0x)` is `_` where this is `__`; reason: self-contradiction
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=% also=x:,+,-,*,<.,>.,|,j.,r.,!.,&.,&.:,",/,L:,S:,$,<,>,;

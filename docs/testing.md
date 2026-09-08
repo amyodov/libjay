@@ -216,6 +216,29 @@ accepted divergences matched (…/corpus/j/divergences.txt):
 agreement. Nothing but a line of the divergence file is ever excused, and
 each of those is reasoned in docs/coverage.md.
 
+### What may be pinned, and the reason it carries
+
+A pinned row is a difference libjay keeps ON PURPOSE, and only four things
+justify one. Every `? ` note in `corpus/j/divergences.txt` ends with the one
+it stands on, so the list can be audited by grepping rather than by reading:
+
+- `reason: self-contradiction` — the reference answers the same question two
+  ways. The note names the two sentences.
+- `reason: abort` — the reference dies, hangs, or answers with no output at
+  all (no value, no error, exit 0).
+- `reason: undefined` — the Dictionary does not define the case, and probing
+  found no rule the reference keeps.
+- `reason: proven-wrong` — the reference's answer is demonstrably not the
+  value. The note carries the one-line proof.
+
+A row that fits none of them is a libjay bug wearing a pin, and the way to
+close it is to fix the mechanism and record the agreeing answer. There is
+one standing exception, marked `reason: model` and counted apart: J has
+three character types where libjay has one, so `u:` and `3!:0` of a widened
+literal part on the type rather than on any answer. Closing those needs a
+character-width tag through the whole array type, which is a feature and not
+a fix; docs/coverage.md carries it.
+
 ### Family rules
 
 Some divergences are a FAMILY rather than a sentence. A GCD of two values
@@ -271,6 +294,48 @@ converges that row stops diverging and the check says so. A rule that does
 not cover its OWN row is refused when the list is read, which is what keeps
 a rule from quietly covering something else. What each family rule excuses
 is visible in the report, in its own column and in the matched-row list.
+
+### The special-value grid
+
+A sweep DRAWS sentences, so it samples a table — primitive × valence ×
+value class × shape — a few cells at a time, and every sweep finds cells no
+earlier sweep happened to draw. `jay-corpus grid j` writes that table out
+whole instead: every primitive verb the J frontend's own table knows,
+crossed with every value class the residue was ever made of (a NaN, the two
+infinities, the four complex infinities and the complex NaN, the integers
+either side of 2^63 and of 2^53, the exact and rational types, a huge and a
+tiny exponent, and the ordinary values a verb is asked to refuse beside
+them — a character, a box, the ace, an empty), at atom, list and table
+shape; dyads at atom against atom throughout, and the scalar verbs also at
+atom-against-list, list-against-atom and list-against-list. That is some
+sixty thousand sentences, and it is deterministic: the same table every
+time.
+
+The hazard filter lives in the generator rather than in a list beside it.
+A verb that sizes its answer BY the value — `i.`, `i:`, `I.`, `A.`, `C.`,
+`#:` monadically, and `$`, `#`, `{.`, `":`, `$.` by their left argument —
+is never handed a magnitude that would ask for an array of 2^31 items;
+`p:`, `q:`, `?` and `?.` are not in the table at all, the first two because
+the reference dies silently on a factorisation of anything that is not a
+whole number and the last two because they draw random numbers.
+
+To regenerate and run it:
+
+```
+jay-corpus grid j > grid.txt
+split -l 2000 grid.txt chunk-
+for f in chunk-*; do
+  jay-corpus fuzz j --compare --quiet --no-accepted \
+      --journal "$f.jnl" --exprs "$f"
+done
+```
+
+The journal is what is read afterwards, not the printed report: it holds
+EVERY measurement, agreements included, so the agreeing rows can be lifted
+into `corpus/j/specials-*.txt` and the parting ones grouped by mechanism.
+`--quiet` keeps the report to its summary and `--no-accepted` skips
+re-measuring the divergence list once per chunk, which at thirty chunks is
+an hour of interpreter time for nothing.
 
 ### Surviving the sentence that kills the runner
 

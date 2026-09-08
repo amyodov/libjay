@@ -25,9 +25,11 @@ fn corpus(#[files("tests/corpus/j/*.txt")] path: PathBuf) {
     replay::corpus_file(Lang::J, &path);
 }
 
-/// The glob above is expanded when this binary is compiled. This one reads
-/// the corpus directory as it is now, so a file added since the last build
-/// is still held to having a recording.
+/// The glob above is expanded when this binary is compiled, and cargo does
+/// not rebuild this file when a corpus file appears beside the old ones —
+/// adding a theme means touching this source too, or the new file is never
+/// replayed. This test reads the corpus directory as it is NOW, so a file
+/// added since the last build is still held to having a recording.
 #[test]
 fn every_corpus_file_is_recorded() {
     replay::every_file_is_recorded(Lang::J);
