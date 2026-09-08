@@ -435,6 +435,63 @@ reads as `;.(1 1 2 3)` and is a rank error about the operand rather than
 the cut it looks like. Every argument all three tables write is
 parenthesised, which is what keeps the cut rows a measurement of the cut.
 
+### The obverse grid, the explicit grid and the representation grid
+
+The five tables above ask what a verb ANSWERS. The next three ask three
+questions none of them reaches.
+
+`jay-corpus grid j --obverses` writes the first. An inverse is derived from
+a verb's SPELLING rather than computed from its answer, so a derived verb
+has one exactly where the reference knows how to take that spelling apart —
+and grid C's residue was three such rows. The table is therefore the
+derived FORMS: `u@v`, `u@:v`, `u&v`, `u&:v`, `u&.v`, `u&.:v`, a hook, a
+capped fork, a declared obverse `u :. v` over ten outer verbs and six inner
+ones, a fork over twenty-seven triples, and for each outer verb a commute
+`u~`, the three ranks and the two bonds — every one of them under `^:_1`
+and under `^:(_1 0 1)`, at atom and list shape over eight classes. 20,064
+sentences. `o.` is not among the operands: `(o.@:~:)^:(_1 0 1) 2` is on the
+hazard list for hanging the reference, and the obverse of the circle
+functions is where it hangs.
+
+`jay-corpus grid j --explicit` writes the second. An explicit definition is
+a verb whose body is a string, and the two engines reach it by different
+roads: `13 :` translates the body into a tacit train at definition time,
+`3 :` and `4 :` keep it and run it a sentence at a time, and `1 :` and
+`2 :` make an adverb and a conjunction whose bodies name `u` and `v`. Eight
+verbs — a tacit translation, three monads, a monad with an `if.`, a monad
+with a `try.`, and two dyads — over the twenty-eight classes at three
+shapes, dyadically over the representative twelve, under eight modifiers,
+and three explicit adverbs and three explicit conjunctions over six
+primitive operands. 4,416 sentences.
+
+`jay-corpus grid j --representations` writes the third: what a value IS
+rather than what a verb makes of it. `3!:3`, `3!:0`, `# 3!:1` and
+`3!:0 (3!:1 y)` over every class at every shape; the format specification
+`x ": y` at sixteen widths — whole and fractional, positive, negative and
+complex — over every class and shape, and at four per-column
+specifications; the gerund `@.` over four gerunds, three indices and four
+argument ranks; and the symbol table's own forms. 2,100 sentences.
+
+Their hazard rules are two. Nothing above a width of twelve: `1e9 ": 2`
+really does write a billion characters, and `1e20 ": 2` is a domain error
+where `1e9` is an hour. And a rank-three LEFT argument is kept out of the
+gerund half: `$`, `{.` and `#` size their answer by the left argument and
+frame over a rank-1 left, so `(i. 2 3 4) $ 2` asks for `2 3 20 21 22 23` —
+a million and a quarter atoms, which the reference does not print but
+abbreviates with `...`. AN ANSWER THE REFERENCE ABBREVIATES IS NO
+MEASUREMENT OF ANYTHING: the print limit the preamble sets (`9!:37 ]
+0 4096 0 4096`) elides the middle of a large display, and a sentence that
+reaches it parts the two engines over nothing.
+
+```
+jay-corpus grid j --obverses > obv.txt
+split -l 2000 obv.txt chunk-
+for f in chunk-??; do
+  jay-corpus fuzz j --compare --quiet --no-accepted \
+      --journal "$f.jnl" --exprs "$f"
+done
+```
+
 ### Surviving the sentence that kills the runner
 
 A sweep MEASURES in a worker process and REPORTS from a journal the worker

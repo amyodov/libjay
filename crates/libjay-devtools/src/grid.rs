@@ -861,3 +861,384 @@ mod grid_c_tests {
         assert!(all.contains(&"(_.) (+ @ +:) (_.)".to_string()));
     }
 }
+
+// ---------------------------------------------------------------------
+// The OBVERSE GRID
+// ---------------------------------------------------------------------
+//
+// The five tables before this one ask what a verb ANSWERS. This one asks
+// what its inverse is, which is a different question: `u^:_1` is derived
+// from u's spelling rather than computed from its answer, so a composition
+// has an inverse exactly where the reference knows how to take one apart.
+// Grid C's residue said so — `(j.~)^:_1`, `([: o. >.)^:(_1 0 1)` and
+// `,: :. p..` were three of its rows, and every one of them is a DERIVED
+// verb whose obverse libjay does not derive.
+//
+// The table is therefore the derived FORMS rather than the verbs: each of
+// the eight compositions, the hook, the capped fork, the fork, the
+// commute, the three ranks, the two bonds and the declared obverse `u :. v`,
+// under `^:_1` and under `^:(_1 0 1)` — the second because a power list
+// asks for the forward verb and the inverse in the one sentence, and the
+// two need not agree about whether the inverse exists.
+
+/// The verbs on the OUTSIDE of a derived verb here. `o.` is NOT among them:
+/// its obverse is the one the hazard list names, `(o.@:~:)^:(_1 0 1) 2`
+/// having been measured hanging the reference.
+const OBV_U: [&str; 10] = ["+", "-", "*", "%", "^", "^.", "+:", "*:", ">:", "j."];
+
+/// The verbs on the INSIDE: one doubling, one square, one reciprocal, one
+/// logarithm, one imaginary unit and one successor, so that an inverse is
+/// asked for over an exact obverse, an inexact one and a complex one.
+const OBV_V: [&str; 6] = ["+:", "*:", "%", "^.", "j.", ">:"];
+
+/// The classes the obverse table is read at. An inverse is a question about
+/// a SPELLING, so the values are there to make the answer visible rather
+/// than to vary it: one of each kind is enough.
+const OBV_CLASSES: [&str; 8] =
+    ["two", "half", "one", "zero", "ntwo", "nan", "inf", "empty"];
+
+/// The fork's three places, kept small so the three-verb half does not
+/// outgrow the two-verb one.
+const OBV_FORK_UW: [&str; 3] = ["+", "-", "*"];
+const OBV_FORK_V: [&str; 3] = ["+", "*", "%"];
+
+/// Every derived verb the obverse table takes an inverse of, written once.
+fn obverse_verbs() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for u in OBV_U {
+        for v in OBV_V {
+            for form in ["@", "@:", "&", "&:", "&.", "&.:"] {
+                out.push(format!("({u} {form} {v})"));
+            }
+            out.push(format!("({u} {v})"));
+            out.push(format!("([: {u} {v})"));
+            out.push(format!("({u} :. {v})"));
+        }
+        out.push(format!("({u}~)"));
+        for rank in ["0", "1", "_1"] {
+            out.push(format!("({u}\"{rank})"));
+        }
+        out.push(format!("({u}&2)"));
+        out.push(format!("(2&{u})"));
+    }
+    for u in OBV_FORK_UW {
+        for v in OBV_FORK_V {
+            for w in OBV_FORK_UW {
+                out.push(format!("({u} {v} {w})"));
+            }
+        }
+    }
+    out
+}
+
+/// Every sentence of the obverse grid, in a fixed order, each one written
+/// once.
+pub fn obverse_sentences() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut push = |s: String, out: &mut Vec<String>| {
+        if seen.insert(s.clone()) {
+            out.push(s);
+        }
+    };
+    for verb in obverse_verbs() {
+        for cls in OBV_CLASSES {
+            for shape in [Shape::Atom, Shape::List] {
+                let y = written(cls, shape);
+                push(format!("{verb}^:_1 {y}"), &mut out);
+                push(format!("{verb}^:(_1 0 1) {y}"), &mut out);
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// The EXPLICIT GRID
+// ---------------------------------------------------------------------
+//
+// Every table before this one is written in primitives. An EXPLICIT
+// definition is a verb whose body is a string — `3 : 'y + 1'` — and the
+// two engines reach it by different roads: `13 :` translates the body into
+// a tacit train at definition time, `3 :` and `4 :` keep it and run it a
+// sentence at a time, and `1 :` and `2 :` make an adverb and a conjunction
+// whose bodies name `u` and `v`. Grid C's residue named four of them, and
+// its closing note said the shape of the next table was "explicit adverbs
+// and conjunctions over the same value classes".
+
+/// The explicit VERBS: a tacit translation, two monads, a monad with a
+/// control structure, a monad with a guard, and two dyads.
+const EXPLICIT_VERBS: [&str; 8] = [
+    "(13 : 'y + 1')",
+    "(13 : 'x , y')",
+    "(3 : '*: y')",
+    "(3 : 'y + 1')",
+    "(3 : 'if. 0 = # y do. 0 else. {. y end.')",
+    "(3 : 'try. %: y catch. _1 end.')",
+    "(4 : 'x , y')",
+    "(4 : 'try. x { y catch. _1 end.')",
+];
+
+/// The ones with a dyad, which are the only ones the dyadic half writes.
+const EXPLICIT_DYADS: [&str; 4] = [
+    "(13 : 'x , y')",
+    "(4 : 'x , y')",
+    "(4 : 'try. x { y catch. _1 end.')",
+    "(13 : 'x + y')",
+];
+
+/// The explicit ADVERBS, whose bodies name `u`.
+const EXPLICIT_ADVERBS: [&str; 3] = ["(1 : 'u/ y')", "(1 : 'u u y')", "(1 : '< u y')"];
+
+/// The explicit CONJUNCTIONS, whose bodies name `u` and `v`.
+const EXPLICIT_CONJUNCTIONS: [&str; 3] =
+    ["(2 : 'u v y')", "(2 : '< u v y')", "(2 : 'u@v y')"];
+
+/// The modifiers an explicit verb is put under. Its rank is 0 where the
+/// body is tacit and `_` where it is not, so a frame is what most of these
+/// measure.
+const EXPLICIT_MODIFIERS: [&str; 8] =
+    ["/", "/\\", "/\\.", "\"0", "\"1", "^:2", "&.>", "/."];
+
+/// The primitives the explicit modifiers are handed as operands.
+const EXPLICIT_OPERANDS: [&str; 6] = ["+", "-", "*", "%", "<.", "*:"];
+
+/// Every sentence of the explicit grid, in a fixed order, each one written
+/// once.
+pub fn explicit_sentences() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut push = |s: String, out: &mut Vec<String>| {
+        if seen.insert(s.clone()) {
+            out.push(s);
+        }
+    };
+
+    // The verb on its own, at every class and shape.
+    for verb in EXPLICIT_VERBS {
+        for cls in CLASSES.iter() {
+            for shape in [Shape::Atom, Shape::List, Shape::Table] {
+                push(format!("{verb} {}", written(cls.name, shape)), &mut out);
+            }
+        }
+    }
+
+    // The dyad, over the representative classes both ways.
+    for verb in EXPLICIT_DYADS {
+        for left in LIST_CLASSES {
+            for right in LIST_CLASSES {
+                push(
+                    format!(
+                        "{} {verb} {}",
+                        written(left, Shape::Atom),
+                        written(right, Shape::List)
+                    ),
+                    &mut out,
+                );
+            }
+        }
+    }
+
+    // The verb under a modifier, which is where its RANK becomes visible.
+    for verb in EXPLICIT_VERBS {
+        for form in EXPLICIT_MODIFIERS {
+            for cls in LIST_CLASSES {
+                for shape in [Shape::List, Shape::Table] {
+                    let y = if form == "&.>" {
+                        boxed(cls, shape)
+                    } else {
+                        written(cls, shape)
+                    };
+                    push(format!("{verb}{form} {y}"), &mut out);
+                }
+            }
+        }
+    }
+
+    // The explicit adverb over a primitive, and the explicit conjunction
+    // over a pair of them.
+    for adverb in EXPLICIT_ADVERBS {
+        for u in EXPLICIT_OPERANDS {
+            for cls in LIST_CLASSES {
+                for shape in [Shape::List, Shape::Table] {
+                    push(
+                        format!("(({u}) {adverb}) {}", written(cls, shape)),
+                        &mut out,
+                    );
+                }
+            }
+        }
+    }
+    for conj in EXPLICIT_CONJUNCTIONS {
+        for u in EXPLICIT_OPERANDS {
+            for v in EXPLICIT_OPERANDS {
+                for cls in LIST_CLASSES {
+                    push(
+                        format!(
+                            "(({u}) {conj} ({v})) {}",
+                            written(cls, Shape::List)
+                        ),
+                        &mut out,
+                    );
+                }
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------
+// The REPRESENTATION GRID
+// ---------------------------------------------------------------------
+//
+// What a value IS, rather than what a verb makes of it: the internal
+// representation `3!:3` writes out as hexadecimal and `3!:1` as bytes, the
+// type `3!:0` names, and the format specification `x ": y` reads as a
+// width. All three are about the value's shape and type rather than its
+// arithmetic, so no earlier table reaches them: grid A crosses `":` with a
+// value on the RIGHT only, and `3!:` is not a primitive verb at all.
+//
+// The gerund `@.` is here for the same reason. Its residue rows —
+// ``(i. 2 3 4) ((#`,`{.) @. 2) 2`` and ``(($`>.) @. 0)`` — are not about
+// the gerund: they are about what `$`, `{.` and `#` do with a rank-3 LEFT
+// argument, which is a frame over their rank-1 left, and the gerund is the
+// spelling that put them there.
+
+/// The format specifications. A width is a real part and a decimal count
+/// an imaginary one, so a complex specification is an ordinary one; the
+/// non-whole, the negative and the infinite are here because the reference
+/// tells them apart. Nothing above twelve: `1e9 ": 2` really does write a
+/// billion characters.
+const FORMATS: [&str; 16] = [
+    "0", "1", "2", "6", "12", "_6", "_12", "0j2", "6j2", "2j1", "_4j1", "3j_1", "6j0",
+    "2.5", "6j2.5", "_",
+];
+
+/// The gerunds `@.` selects from, and the indices it selects with.
+const GERUNDS: [&str; 4] = ["(#`,`{.)", "($`>.)", "(#`$`{.`,)", "(+:`*:)"];
+const GERUND_INDEX: [&str; 3] = ["0", "1", "2"];
+
+/// The arguments the gerund half is read over: an atom, a list, a table and
+/// a rank-three array, since the frame over a rank-1 left argument is what
+/// it measures.
+const GERUND_Y: [&str; 4] = ["(2)", "(2 3)", "(i. 2 3)", "(i. 2 3 4)"];
+
+/// The LEFT arguments, which stop one short of the right ones. `$`, `{.`
+/// and `#` size their answer by the left argument, and a rank-three left
+/// is a FRAME over that: `(i. 2 3 4) $ 2` asks for `2 3 20 21 22 23`, a
+/// million and a quarter atoms, which the reference does not print but
+/// abbreviates with `...`. An answer neither engine writes out whole is no
+/// measurement of anything.
+const GERUND_X: [&str; 3] = ["(2)", "(2 3)", "(i. 2 3)"];
+
+/// Every sentence of the representation grid, in a fixed order, each one
+/// written once.
+pub fn representation_sentences() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut push = |s: String, out: &mut Vec<String>| {
+        if seen.insert(s.clone()) {
+            out.push(s);
+        }
+    };
+
+    // The representation of every class at every shape. `3!:1` is bytes
+    // rather than text, so it is read through its length and its type
+    // rather than written out: a byte a terminal cannot show is no
+    // measurement of anything.
+    for cls in CLASSES.iter() {
+        for shape in [Shape::Atom, Shape::List, Shape::Table] {
+            let y = written(cls.name, shape);
+            push(format!("3!:3 {y}"), &mut out);
+            push(format!("3!:0 {y}"), &mut out);
+            push(format!("# 3!:1 {y}"), &mut out);
+            push(format!("3!:0 (3!:1 {y})"), &mut out);
+            push(format!("$ 3!:3 {y}"), &mut out);
+        }
+    }
+
+    // The format specification. The value classes go on the right, the
+    // specifications on the left, and both shapes of the right argument
+    // are read since a width applies per COLUMN.
+    for spec in FORMATS {
+        for cls in CLASSES.iter() {
+            for shape in [Shape::Atom, Shape::List, Shape::Table] {
+                push(format!("({spec}) \": {}", written(cls.name, shape)), &mut out);
+            }
+        }
+    }
+    // A specification per column, which is the form a list of widths takes.
+    for spec in ["(6j2 8j3)", "(6 0)", "(_6 6)", "(0j2 0j3)"] {
+        for cls in LIST_CLASSES {
+            push(format!("{spec} \": {}", written(cls, Shape::List)), &mut out);
+        }
+    }
+
+    // The gerund, monadic and dyadic, over the four ranks of argument.
+    for gerund in GERUNDS {
+        for index in GERUND_INDEX {
+            for y in GERUND_Y {
+                push(format!("({gerund} @. {index}) {y}"), &mut out);
+                for x in GERUND_X {
+                    push(format!("{x} ({gerund} @. {index}) {y}"), &mut out);
+                }
+            }
+        }
+    }
+
+    // The symbol table's own forms, which the sweeps keep naming: `s:` over
+    // a number, and the `n s:` queries.
+    for y in ["(2)", "(0)", "(0 $ 0)", "(a:)", "(<'a')", "('abc')"] {
+        push(format!("s: {y}"), &mut out);
+        push(format!("# s: {y}"), &mut out);
+        for n in ["0", "1", "2", "3", "4", "5"] {
+            push(format!("{n} s: {y}"), &mut out);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod grid_d_tests {
+    use super::*;
+
+    #[test]
+    fn the_obverse_grid_is_whole_and_nothing_hazardous() {
+        let all = obverse_sentences();
+        let unique: std::collections::HashSet<&String> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+        // The obverse of the circle functions is where the reference hangs.
+        assert!(!all.iter().any(|s| s.contains("o.")));
+        // So is the obverse of the binomial and of the base value.
+        assert!(!all.iter().any(|s| s.contains('!') || s.contains("#.")));
+        assert!(all.contains(&"(+ @ +:)^:_1 (2)".to_string()));
+        assert!(all.contains(&"(+~)^:(_1 0 1) (2)".to_string()));
+        assert!(all.contains(&"([: + +:)^:_1 (2)".to_string()));
+        assert!(all.contains(&"(+ :. +:)^:_1 (2)".to_string()));
+        assert!(all.contains(&"(+ + *)^:_1 (2)".to_string()));
+    }
+
+    #[test]
+    fn the_explicit_grid_is_whole() {
+        let all = explicit_sentences();
+        let unique: std::collections::HashSet<&String> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+        assert!(all.contains(&"(3 : '*: y') (_.)".to_string()));
+        assert!(all.contains(&"((+) (1 : 'u/ y')) ((2) , (2))".to_string()));
+        assert!(all.iter().any(|s| s.contains("2 : 'u v y'")));
+        assert!(all.iter().any(|s| s.contains("try.")));
+    }
+
+    #[test]
+    fn the_representation_grid_is_whole_and_nothing_hazardous() {
+        let all = representation_sentences();
+        let unique: std::collections::HashSet<&String> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+        // A width no smaller than a billion writes a billion characters.
+        assert!(!all.iter().any(|s| s.contains("1e") || s.contains("922337")));
+        assert!(all.contains(&"3!:3 (_.)".to_string()));
+        assert!(all.contains(&"(6j2) \": (2)".to_string()));
+        assert!(all.iter().any(|s| s.contains("@. 2)")));
+        assert!(all.contains(&"# s: (2)".to_string()));
+    }
+}

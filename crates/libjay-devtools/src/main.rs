@@ -72,6 +72,14 @@ jay-corpus — record what the reference interpreters answer to the corpus.
                    outfix, a key and a cut, all with a left argument
       --compositions  the composition grid: `u@v`, `u@:v`, `u&v`, `u&:v`,
                    `u&.v`, `u&.:v`, a hook, a fork and a capped fork
+      --obverses   the obverse grid: `u^:_1` and `u^:(_1 0 1)` over every
+                   derived verb — the compositions, the trains, the
+                   commute, the ranks, the bonds and `u :. v`
+      --explicit   the explicit grid: `13 :`, `3 :`, `4 :`, `1 :` and
+                   `2 :` bodies as verbs and as operands to modifiers
+      --representations  the representation grid: `3!:3`, `3!:1` and
+                   `3!:0` over every class and shape, the format
+                   specification `x \": y`, and the gerund `@.`
   jay-corpus coverage <j|apl>           which primitive × operand cells the
                                         recorded corpus exercises, and which
                                         are empty
@@ -451,6 +459,9 @@ fn grid_command(args: &[String]) -> Result<(), String> {
         Some("--folds") => grid::fold_sentences(),
         Some("--dyadic") => grid::dyadic_sentences(),
         Some("--compositions") => grid::composition_sentences(),
+        Some("--obverses") => grid::obverse_sentences(),
+        Some("--explicit") => grid::explicit_sentences(),
+        Some("--representations") => grid::representation_sentences(),
         Some(extra) => return Err(format!("unknown option {extra:?}")),
     };
     if let Some(extra) = args.get(2) {
