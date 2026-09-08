@@ -302,7 +302,23 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   rediscovered a few cells at a time by every sweep. docs/testing.md says
   how to regenerate and run it.
 
+- THE MODIFIER GRID, `jay-corpus grid j --modifiers`: the same
+  twenty-eight value classes read under the MODIFIERS rather than under a
+  bare verb. Thirty verbs — eighteen arithmetic and twelve structural —
+  under twenty-two forms: an insert, its two scans, an infix, an oblique, a
+  reflexive, the three ranks, the two broadcast dyads, a power, an obverse,
+  five unders, `&.>`, `L:0`, `S:0`, an adverse, a gerund and a commute.
+  47,632 sentences, deterministic, with the first grid's hazard filter plus
+  two rules of its own. The agreeing rows are `corpus/j/modifiers-*.txt`.
+
 ### Changed
+
+- AN `answers=` CLAUSE IN A FAMILY RULE NO LONGER EXCLUDES A REFUSAL. It is
+  about the ANSWERS, and a refusal is not one, so it is now read over the
+  side that answered instead of failing outright; only `near`, a relation
+  between two numbers, still needs both. One rule of the twenty-nine names
+  both a refusal cause and an `answers=` class, and it is the one the
+  clause was silently emptying.
 
 - Round 9C's divergence bookkeeping: `_1 |/\\. (_ 1 2)` and
   `_99999999999999999 ! _1` converged and their notes went, while
@@ -417,6 +433,24 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- THE COMPLEX FOLD, SCAN AND WINDOW NOW REFUSE THE NaN THEY MAKE, as the
+  float ones already did and as the dyad does: `-/ ((_j0) , (_j0))` is a
+  NaN error rather than `_.`, and so are its scans, its infix and its
+  `"1` frame. The line the reference draws is its ASSOCIATIVE SPECIAL FORM
+  — `+/` and `*/` over items that are ATOMS ask nothing — so
+  `*/ ((_j_) , (_j_))` is still `_.j_` while `*/ (2 2 $ (_j_))`, whose
+  items are rows, is refused.
+
+- THE COMPLEX WEIGHTED SUM REFUSES A NaN ITS OWN WEIGHING MADE, which the
+  real path already did: `((_j_) , (_j_)) #. ((_j_) , (_j_))` is a NaN
+  error where `(_j_) #. (_j_)`, whose weighing makes none, is `_j_`.
+
+- THE SELF-CLASSIFY OF AN ATOM IS `1 1`, with no search at all. A complex
+  NaN matches nothing and not even itself, so the search left it in no
+  class and `= (_.j_.)` had no rows; the reference answers `1 1` for every
+  atom there is. The one-item LIST `= (,(_.j_.))` has no rows in either
+  engine, and still has none.
 
 - AN APOSTROPHE IN A COMMENT NO LONGER QUOTES THE INTERPOLATION HOLES AFTER
   IT. The pre-pass that splits `{name}` holes out of a source string

@@ -337,6 +337,45 @@ into `corpus/j/specials-*.txt` and the parting ones grouped by mechanism.
 re-measuring the divergence list once per chunk, which at thirty chunks is
 an hour of interpreter time for nothing.
 
+### The modifier grid
+
+The table above crosses a BARE VERB with a value, and its residue said what
+the next table had to be: a NaN through an infix, a value through a scan —
+a MODIFIER with a value, which no crossing of verbs with values reaches.
+`jay-corpus grid j --modifiers` writes that one out: thirty verbs (the
+eighteen arithmetic ones a frame and an identity element are visible
+through, and twelve structural ones a rank or an under reshapes around)
+under twenty-two modifier forms —
+
+  an insert `u/`, its two scans `u/\` and `u/\.`, an infix `2 u/\`, an
+  oblique `u/.`, a reflexive `u~`;
+  the three ranks `u"0`, `u"1`, `u"_1`, and the two broadcast dyads
+  `x u"0 _ y` and `x u"_ 0 y`;
+  a power `u^:2` and an obverse `u^:_1`;
+  an under `u&.v` for each of `>:`, `-`, `%`, `^.` and `j.`, and `u&.>`,
+  `u L:0` and `u S:0` over the boxed value;
+  an adverse `u :: _1:`, a gerund `` (u`])@.0 ``, and a commute `x u~ y`
+
+— over the same twenty-eight value classes, at atom, list and table shape
+where the form takes them. 47,632 sentences, run the same way and in the
+same twenty-four chunks.
+
+Its hazard filter is the table's plus two rules of its own. The binomial
+hangs the reference at an infinity — the first grid left ten unfinished
+rows there — and it hangs the same way under every modifier, so `!` never
+meets a value with no finite magnitude here; and `!^:_1` searches for a
+root of the gamma function without always stopping, while `#.^:_1` is the
+encode, which sizes an array by its argument.
+
+```
+jay-corpus grid j --modifiers > mods.txt
+split -l 2000 mods.txt chunk-
+for f in chunk-??; do
+  jay-corpus fuzz j --compare --quiet --no-accepted \
+      --journal "$f.jnl" --exprs "$f"
+done
+```
+
 ### Surviving the sentence that kills the runner
 
 A sweep MEASURES in a worker process and REPORTS from a journal the worker

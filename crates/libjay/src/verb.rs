@@ -10847,6 +10847,14 @@ fn decode_complex(x: Option<&Array>, y: &Array, span: Span) -> Result<Array> {
     for (d, b) in digits.iter().zip(&radix) {
         acc = cx::add(cx::mul(acc, *b), *d);
     }
+    // A NaN the weighing itself made has no value, as it has on the real
+    // path: `((_j_) , (_j_)) #. ((_j_) , (_j_))` is refused there, where
+    // `(_j_) #. (_j_)` — whose weighing makes none — is `_j_`.
+    if (acc[0].is_nan() || acc[1].is_nan())
+        && !digits.iter().chain(&radix).any(|v| v[0].is_nan() || v[1].is_nan())
+    {
+        return Err(Error::nan("this weighted sum has no value", span));
+    }
     Ok(complex_shaped(Vec::new(), vec![acc]))
 }
 
@@ -13670,6 +13678,30 @@ fn block_f64(r: f64) -> (f64, bool) {
     (r, r.is_nan())
 }
 
+/// One step of a blockwise COMPLEX fold, scan or window, and whether the
+/// step must be abandoned.
+///
+/// The reference's insert has an ASSOCIATIVE SPECIAL FORM — `+/` and `*/`
+/// over items that are ATOMS — which computes the fold without ever asking
+/// whether the arithmetic made a NaN, and everything else is the dyad
+/// applied item by item, refusals and all. `*/ ((_j_) , (_j_))` is `_.j_`
+/// there although its own `(_j_) * (_j_)` is refused, while
+/// `*/ (2 2 $ (_j_))` — whose items are ROWS — is refused like the dyad,
+/// and `-/ ((_j0) , (_j0))`, a difference having no associative form at
+/// all, is refused at every shape. So the complex block carries the guard
+/// wherever that special form does not reach, and the general path then
+/// answers exactly as the dyad does.
+#[inline(always)]
+fn block_cx(r: Cx) -> (Cx, bool) {
+    (r, r[0].is_nan() || r[1].is_nan())
+}
+
+/// A complex step under [`block_cx`] when `guard`, and unguarded when not.
+#[inline(always)]
+fn step_cx(r: Cx, guard: bool) -> (Cx, bool) {
+    if guard { block_cx(r) } else { (r, false) }
+}
+
 /// The integer fold, over any buffer whose elements are integers once read:
 /// an `i64` one, or a boolean one promoted where it is read.
 fn fold_i64<S: Widen<i64>>(op: ScalarDyad, v: &[S], n: usize, m: usize) -> Option<Vec<i64>> {
@@ -13688,10 +13720,13 @@ fn fold_i64<S: Widen<i64>>(op: ScalarDyad, v: &[S], n: usize, m: usize) -> Optio
 fn fold_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize) -> Option<Vec<Cx>> {
     use ScalarDyad::*;
     let assoc = is_associative(op);
+    // `m` is the size of a cell, so `m > 1` is an item that is not an atom
+    // and the associative special form does not reach it.
+    let guard = !assoc || m > 1;
     match op {
-        Add => fold_items(v, n, m, assoc, |a: Cx, b: Cx| (cx::add(a, b), false)),
-        Sub => fold_items(v, n, m, assoc, |a: Cx, b: Cx| (cx::sub(a, b), false)),
-        Mul => fold_items(v, n, m, assoc, |a: Cx, b: Cx| (cx::mul(a, b), false)),
+        Add => fold_items(v, n, m, assoc, move |a: Cx, b: Cx| step_cx(cx::add(a, b), guard)),
+        Sub => fold_items(v, n, m, assoc, move |a: Cx, b: Cx| step_cx(cx::sub(a, b), guard)),
+        Mul => fold_items(v, n, m, assoc, move |a: Cx, b: Cx| step_cx(cx::mul(a, b), guard)),
         // Min and Max have no complex meaning; the general path reports it.
         _ => None,
     }
@@ -13824,15 +13859,20 @@ fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> 
         )),
         Data::I64(v) => Some(Data::I64(fold_runs_i64(op, v.as_slice(), n, m)?.into())),
         // Min and Max have no complex meaning; the general path reports it.
-        Data::Complex(v) => Some(Data::Complex(
-            match op {
-                Add => fold_runs(v, n, m, |a: Cx, b: Cx| (cx::add(a, b), false)),
-                Sub => fold_runs(v, n, m, |a: Cx, b: Cx| (cx::sub(a, b), false)),
-                Mul => fold_runs(v, n, m, |a: Cx, b: Cx| (cx::mul(a, b), false)),
-                _ => None,
-            }?
-            .into(),
-        )),
+        // Every cell here is a vector of ATOMS, so the associative special
+        // form reaches it and only the difference carries the guard.
+        Data::Complex(v) => {
+            let guard = !is_associative(op);
+            Some(Data::Complex(
+                match op {
+                    Add => fold_runs(v, n, m, move |a: Cx, b: Cx| step_cx(cx::add(a, b), guard)),
+                    Sub => fold_runs(v, n, m, move |a: Cx, b: Cx| step_cx(cx::sub(a, b), guard)),
+                    Mul => fold_runs(v, n, m, move |a: Cx, b: Cx| step_cx(cx::mul(a, b), guard)),
+                    _ => None,
+                }?
+                .into(),
+            ))
+        }
         // Booleans reduce as integers, and are promoted where they are
         // read; a product or an extremum narrows back to boolean.
         Data::Bool(v) => Some(bool_fold(op, fold_runs_i64(op, v.as_slice(), n, m)?)),
@@ -13961,12 +14001,16 @@ fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Optio
             if !matches!(op, Add | Sub | Mul) {
                 return None;
             }
+            // A run per element of the cell: more than one of them is an
+            // item that is not an atom, which the associative special form
+            // does not reach.
+            let guard = !assoc || runs > 1;
             Some(Data::Complex(
                 by!(
                     v,
-                    |a: Cx, b: Cx| (cx::add(a, b), false),
-                    |a: Cx, b: Cx| (cx::sub(a, b), false),
-                    |a: Cx, b: Cx| (cx::mul(a, b), false),
+                    move |a: Cx, b: Cx| step_cx(cx::add(a, b), guard),
+                    move |a: Cx, b: Cx| step_cx(cx::sub(a, b), guard),
+                    move |a: Cx, b: Cx| step_cx(cx::mul(a, b), guard),
                     |_: Cx, _: Cx| unreachable!("refused above"),
                     |_: Cx, _: Cx| unreachable!("refused above")
                 )
@@ -14090,12 +14134,15 @@ fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Optio
             if !matches!(op, Add | Sub | Mul) {
                 return None;
             }
+            // The items of a row are atoms, so only the difference — which
+            // has no associative special form — carries the guard.
+            let guard = !is_associative(op);
             Some(Data::Complex(
                 by!(
                     v,
-                    |a: Cx, b: Cx| (cx::add(a, b), false),
-                    |a: Cx, b: Cx| (cx::sub(a, b), false),
-                    |a: Cx, b: Cx| (cx::mul(a, b), false),
+                    move |a: Cx, b: Cx| step_cx(cx::add(a, b), guard),
+                    move |a: Cx, b: Cx| step_cx(cx::sub(a, b), guard),
+                    move |a: Cx, b: Cx| step_cx(cx::mul(a, b), guard),
                     |_: Cx, _: Cx| unreachable!("refused above"),
                     |_: Cx, _: Cx| unreachable!("refused above")
                 )
@@ -14454,10 +14501,14 @@ fn scan_i64<S: Widen<i64>>(
 
 fn scan_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize, back: bool) -> Option<Vec<Cx>> {
     use ScalarDyad::*;
+    // The same rule the fold carries: the associative special form is over
+    // items that are ATOMS, and everything else refuses where the dyad
+    // refuses. See [`block_cx`].
+    let guard = !is_associative(op) || m > 1;
     match op {
-        Add => scan_flat(v, n, m, back, |a: Cx, b: Cx| (cx::add(a, b), false)),
-        Sub => scan_flat(v, n, m, back, |a: Cx, b: Cx| (cx::sub(a, b), false)),
-        Mul => scan_flat(v, n, m, back, |a: Cx, b: Cx| (cx::mul(a, b), false)),
+        Add => scan_flat(v, n, m, back, move |a: Cx, b: Cx| step_cx(cx::add(a, b), guard)),
+        Sub => scan_flat(v, n, m, back, move |a: Cx, b: Cx| step_cx(cx::sub(a, b), guard)),
+        Mul => scan_flat(v, n, m, back, move |a: Cx, b: Cx| step_cx(cx::mul(a, b), guard)),
         _ => None,
     }
 }
@@ -14848,9 +14899,12 @@ fn window_i64<S: Widen<i64>>(
 
 fn window_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize, w: usize) -> Option<Vec<Cx>> {
     use ScalarDyad::*;
+    // As the fold and the scan: an item that is not an atom refuses where
+    // the dyad refuses. See [`block_cx`].
+    let guard = !is_associative(op) || m > 1;
     match op {
-        Add => window_fold(v, n, m, w, |a: Cx, b: Cx| (cx::add(a, b), false)),
-        Mul => window_fold(v, n, m, w, |a: Cx, b: Cx| (cx::mul(a, b), false)),
+        Add => window_fold(v, n, m, w, move |a: Cx, b: Cx| step_cx(cx::add(a, b), guard)),
+        Mul => window_fold(v, n, m, w, move |a: Cx, b: Cx| step_cx(cx::mul(a, b), guard)),
         _ => None,
     }
 }
@@ -22722,6 +22776,15 @@ fn structural_bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
 /// `= y`: one row per distinct item, marking where that item stands. A
 /// scalar has one item, so it answers a 1×1 table.
 fn self_classify(y: &Array, tol: Tol) -> Array {
+    // An atom has one item and nothing to compare it with, and the
+    // reference answers `1 1` for every atom there is — a complex NaN,
+    // which matches nothing at all and not even itself, included. The
+    // search below would leave that atom in no class and answer no rows:
+    // `= (_.j_.)` is `1 1` there where `= (,(_.j_.))`, the same value as a
+    // one-item LIST, has no rows in either engine.
+    if y.rank() == 0 {
+        return Array::new(vec![1, 1], Data::Bool(vec![1u8].into()));
+    }
     let ys = as_list(y);
     let items = ys.items();
     if tol.is_j() && holds_nan(&ys) {

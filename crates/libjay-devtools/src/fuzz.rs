@@ -1528,6 +1528,12 @@ fn near(ours: &str, theirs: &str) -> bool {
     })
 }
 
+/// Whether a printed answer is no answer at all: a refusal, a panic, or a
+/// sentence that yielded nothing.
+fn refusal(text: &str) -> bool {
+    text.starts_with("<error>") || text == "<panic>" || text == "<no value>"
+}
+
 impl Trait {
     fn parse(name: &str) -> Result<Trait, String> {
         match name {
@@ -1543,6 +1549,12 @@ impl Trait {
         }
     }
 
+    /// An `answers=` clause is about the ANSWERS, and a refusal is not one.
+    /// Where a side refused — which is every `they-refuse` and `we-refuse`
+    /// row — the clause is read over the side that answered instead of
+    /// failing outright, so that a rule may name a refusal cause and an
+    /// answer class at once. Only [`Trait::Near`], which is a relation
+    /// between two numbers, needs both.
     fn holds(self, ours: &str, theirs: &str) -> bool {
         let (ours, theirs) = (unframe(ours), unframe(theirs));
         let (ours, theirs) = (ours.as_str(), theirs.as_str());
@@ -1550,18 +1562,19 @@ impl Trait {
             !text.trim().is_empty() && text.chars().all(|c| NUMERIC_OUTPUT.contains(c))
         };
         let float = |text: &str| text.contains('.') || text.contains('e');
-        if !(numeric(ours) && numeric(theirs)) {
+        let answered: Vec<&str> = [ours, theirs].into_iter().filter(|t| !refusal(t)).collect();
+        if answered.is_empty() || !answered.iter().all(|t| numeric(t)) {
             return false;
         }
         match self {
             Trait::Numeric => true,
-            Trait::Inexact => float(ours) || float(theirs),
-            Trait::Exact => !float(ours) && !float(theirs),
-            Trait::Huge => [ours, theirs].iter().any(|t| magnitude(t) >= Some(DOUBLE_STEP)),
-            Trait::Small => [ours, theirs]
+            Trait::Inexact => answered.iter().any(|t| float(t)),
+            Trait::Exact => !answered.iter().any(|t| float(t)),
+            Trait::Huge => answered.iter().any(|t| magnitude(t) >= Some(DOUBLE_STEP)),
+            Trait::Small => answered
                 .iter()
                 .all(|t| magnitude(t).is_some_and(|m| m < DOUBLE_STEP)),
-            Trait::Near => near(ours, theirs),
+            Trait::Near => answered.len() == 2 && near(ours, theirs),
         }
     }
 }

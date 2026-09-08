@@ -249,3 +249,222 @@ mod tests {
         assert!(all.contains(&"((_.) , (_.)) + (2)".to_string()));
     }
 }
+
+// ---------------------------------------------------------------------
+// The MODIFIER GRID
+// ---------------------------------------------------------------------
+//
+// The table above crosses a bare verb with a value. This one puts the same
+// values under the modifiers: what an insert makes of an identity element,
+// what a rank frame does to a NaN, what a scan carries between its steps,
+// which obverses exist at all, and what `&.` opens and closes around.
+//
+// The residue the first grid left was of that kind — a NaN through an
+// infix, a value through a scan — so the second table is the modifiers
+// with the verbs in the operand's place.
+
+/// The verbs the modifier grid puts under a modifier: the arithmetic ones
+/// the frame and the identity element are visible through, and the
+/// structural ones a rank or an under reshapes around. Both valences of
+/// every one of them exist, which the reflexive and commute forms need.
+const MOD_ARITH: [&str; 18] = [
+    "+", "-", "*", "%", "^", "%:", "^.", "|", "<.", ">.", "=", "<:", ">:", "+:", "*:", "!",
+    "o.", "j.",
+];
+
+const MOD_STRUCT: [&str; 12] =
+    ["<", ">", "#", ",", ",.", ",:", "$", "|.", "|:", "{.", "}.", "#."];
+
+fn mod_verbs() -> Vec<&'static str> {
+    MOD_ARITH.iter().chain(MOD_STRUCT.iter()).copied().collect()
+}
+
+/// The verbs `&.` closes with: a successor, a negation, a reciprocal, a
+/// logarithm and the imaginary unit — one obverse of each kind, so that an
+/// under is measured over an exact inverse, an inexact one and a complex
+/// one.
+const UNDER: [&str; 5] = [">:", "-", "%", "^.", "j."];
+
+/// A value written boxed, which is what `&.>`, `L:` and `S:` are asked
+/// about.
+fn boxed(name: &str, shape: Shape) -> String {
+    let v = spelling(name);
+    match shape {
+        Shape::Atom => format!("(<({v}))"),
+        _ => format!("((<({v})) , (<({v})))"),
+    }
+}
+
+/// The modifier grid's own hazard rules, on top of the table's.
+///
+/// The binomial at an infinity is where the reference hangs — the first
+/// grid left ten unfinished rows there — and it hangs the same way under
+/// every modifier, so `!` never meets a value with no finite magnitude
+/// here. Its obverse searches for a root of the gamma function and does
+/// not always stop; the obverse of the base-value is the encode, which
+/// sizes an array by its argument.
+fn modifier_ok(verb: &str, cls: &str, form: &str) -> bool {
+    if verb == "!" && NONFINITE.contains(&cls) {
+        return false;
+    }
+    if form == "obverse" && matches!(verb, "!" | "#.") {
+        return false;
+    }
+    true
+}
+
+/// Every sentence of the modifier grid, in a fixed order, each one written
+/// once.
+pub fn modifier_sentences() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut push = |s: String, out: &mut Vec<String>| {
+        if seen.insert(s.clone()) {
+            out.push(s);
+        }
+    };
+    let verbs = mod_verbs();
+
+    // The combining forms: an insert, its two scans, an infix, and the
+    // reflexive. Each of them hands the verb two items of the class, so
+    // the dyad's hazard rules are the ones that apply.
+    for verb in &verbs {
+        for cls in CLASSES.iter() {
+            if !dyad_ok(verb, cls.name, cls.name) || !modifier_ok(verb, cls.name, "insert") {
+                continue;
+            }
+            for shape in [Shape::List, Shape::Table] {
+                let y = written(cls.name, shape);
+                push(format!("{verb}/ {y}"), &mut out);
+                push(format!("{verb}/\\ {y}"), &mut out);
+                push(format!("{verb}/\\. {y}"), &mut out);
+                push(format!("2 {verb}/\\ {y}"), &mut out);
+            }
+            for shape in [Shape::Atom, Shape::List] {
+                push(format!("{verb}~ {}", written(cls.name, shape)), &mut out);
+            }
+        }
+    }
+
+    // The oblique, the three ranks, the power and the obverse, the adverse
+    // and the gerund: every one of them applies the verb's MONAD.
+    for verb in &verbs {
+        for cls in CLASSES.iter() {
+            if !monad_ok(verb, cls.name) {
+                continue;
+            }
+            for shape in [Shape::List, Shape::Table] {
+                if modifier_ok(verb, cls.name, "oblique") {
+                    push(format!("{verb}/. {}", written(cls.name, shape)), &mut out);
+                }
+            }
+            for shape in [Shape::Atom, Shape::List, Shape::Table] {
+                let y = written(cls.name, shape);
+                if modifier_ok(verb, cls.name, "rank") {
+                    push(format!("{verb}\"0 {y}"), &mut out);
+                    push(format!("{verb}\"1 {y}"), &mut out);
+                    push(format!("{verb}\"_1 {y}"), &mut out);
+                }
+                if modifier_ok(verb, cls.name, "power") {
+                    push(format!("{verb}^:2 {y}"), &mut out);
+                }
+                if modifier_ok(verb, cls.name, "obverse") {
+                    push(format!("{verb}^:_1 {y}"), &mut out);
+                }
+            }
+            for shape in [Shape::Atom, Shape::List] {
+                let y = written(cls.name, shape);
+                if modifier_ok(verb, cls.name, "under") {
+                    for v in UNDER {
+                        push(format!("{verb}&.{v} {y}"), &mut out);
+                    }
+                }
+                if modifier_ok(verb, cls.name, "adverse") {
+                    push(format!("(({verb}) :: (_1:)) {y}"), &mut out);
+                    push(format!("(({verb})`(]))@.(0) {y}"), &mut out);
+                }
+                if modifier_ok(verb, cls.name, "boxed") {
+                    let b = boxed(cls.name, shape);
+                    push(format!("{verb}&.> {b}"), &mut out);
+                    push(format!("{verb} L:0 {b}"), &mut out);
+                    push(format!("{verb} S:0 {b}"), &mut out);
+                }
+            }
+        }
+    }
+
+    // The dyadic forms: the two broadcast ranks over the arithmetic verbs,
+    // and the commute over all of them. Both are crossed over the twelve
+    // representative classes rather than the whole twenty-eight, which is
+    // what keeps the table the size of the first one.
+    for verb in MOD_ARITH {
+        for left in LIST_CLASSES {
+            for right in LIST_CLASSES {
+                if !dyad_ok(verb, left, right)
+                    || !modifier_ok(verb, left, "rank")
+                    || !modifier_ok(verb, right, "rank")
+                {
+                    continue;
+                }
+                let (x, y) = (written(left, Shape::List), written(right, Shape::List));
+                push(format!("{x} {verb}\"0 _ {y}"), &mut out);
+                push(format!("{x} {verb}\"_ 0 {y}"), &mut out);
+            }
+        }
+    }
+    for verb in &verbs {
+        for left in LIST_CLASSES {
+            for right in LIST_CLASSES {
+                // A commute SWAPS its arguments, so the hazard rules — all
+                // of which are about a left argument that sizes the answer
+                // — are asked about the swapped pair: `(0x) $~ (__)` is the
+                // `__ $ 1` of the hazard list read backwards.
+                if !dyad_ok(verb, right, left)
+                    || !modifier_ok(verb, left, "commute")
+                    || !modifier_ok(verb, right, "commute")
+                {
+                    continue;
+                }
+                push(
+                    format!(
+                        "{} {verb}~ {}",
+                        written(left, Shape::Atom),
+                        written(right, Shape::Atom)
+                    ),
+                    &mut out,
+                );
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod modifier_tests {
+    use super::*;
+
+    #[test]
+    fn the_modifier_grid_is_whole_and_nothing_hazardous() {
+        let all = modifier_sentences();
+        let unique: std::collections::HashSet<&String> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+        // The binomial never meets a value with no finite magnitude: that
+        // is where the reference hangs.
+        assert!(!all.iter().any(|s| s.contains("!") && s.contains("_.")));
+        assert!(!all.iter().any(|s| s.starts_with("!^:_1")));
+        // Nor does an insert reshape by a magnitude no array can hold.
+        assert!(!all.iter().any(|s| s.starts_with("$/ ((1e300)")));
+        // Nor does a COMMUTE, whose swap puts the magnitude on the left.
+        assert!(!all.iter().any(|s| s.contains("$~ (__)")));
+        assert!(!all.iter().any(|s| s.contains("{.~ (9223372036854775807)")));
+        // The ordinary cells are there.
+        assert!(all.contains(&"+/ ((_.) , (_.))".to_string()));
+        assert!(all.contains(&"+/\\. ((_) , (_))".to_string()));
+        assert!(all.contains(&"2 +/\\ ((_.) , (_.))".to_string()));
+        assert!(all.contains(&"+&.^. (2)".to_string()));
+        assert!(all.contains(&"+ S:0 ((<(2)) , (<(2)))".to_string()));
+        assert!(all.contains(&"((+)`(]))@.(0) (_.)".to_string()));
+        assert!(all.contains(&"((_.) , (_.)) +\"0 _ ((2) , (2))".to_string()));
+        assert!(all.contains(&"(_.) +~ (2)".to_string()));
+    }
+}

@@ -63,6 +63,9 @@ jay-corpus — record what the reference interpreters answer to the corpus.
                                         special-value class, at atom, list
                                         and table shape, hazards filtered.
                                         Feed it to `fuzz j --compare --exprs`
+      --modifiers  the modifier grid instead: the same values under an
+                   insert, a scan, an infix, a rank, a power, an obverse,
+                   an under, an oblique, an adverse and a gerund
   jay-corpus coverage <j|apl>           which primitive × operand cells the
                                         recorded corpus exercises, and which
                                         are empty
@@ -436,11 +439,17 @@ fn grid_command(args: &[String]) -> Result<(), String> {
     if lang != Lang::J {
         return Err("the special-value grid is J's; APL has no table of its own yet".to_string());
     }
-    if let Some(extra) = args.get(1) {
+    let modifiers = match args.get(1).map(String::as_str) {
+        None => false,
+        Some("--modifiers") => true,
+        Some(extra) => return Err(format!("unknown option {extra:?}")),
+    };
+    if let Some(extra) = args.get(2) {
         return Err(format!("unknown option {extra:?}"));
     }
+    let sentences = if modifiers { grid::modifier_sentences() } else { grid::sentences() };
     let mut text = String::new();
-    for sentence in grid::sentences() {
+    for sentence in sentences {
         text.push_str(&corpus::escape(&sentence));
         text.push('\n');
     }

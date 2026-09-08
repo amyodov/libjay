@@ -5851,3 +5851,54 @@ limit error — and `(_j_) ^ (% 2)` is `_.j_.` where its own `2 %: (_j_)` is
 writes that composition out for the argument it refuses. Division by a zero
 written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
 `(0.5) % (0r1)` is `__`.
+
+- 2026-09-08 — THE MODIFIER GRID, and what it changed. The special-value
+  grid crossed a bare verb with a value; its residue said the next table
+  was the MODIFIERS over those values, so `jay-corpus grid j --modifiers`
+  writes 47,632 sentences: thirty verbs under twenty-two forms — insert,
+  the two scans, an infix, an oblique, a reflexive, three ranks, two
+  broadcast dyads, a power, an obverse, five unders, `&.>`, `L:0`, `S:0`,
+  an adverse, a gerund and a commute — over the same twenty-eight value
+  classes.
+
+  FOUR MECHANISMS FOLLOWED. (1) THE COMPLEX FOLD'S NaN GUARD. The float
+  block abandons itself on a NaN and lets the general path answer, which is
+  where the dialect's refusals live; the complex block never did, so
+  `-/ ((_j0) , (_j0))` answered `_.` where its own dyad refuses. The
+  reference draws the line at its ASSOCIATIVE SPECIAL FORM: `+/` and `*/`
+  over items that are ATOMS compute without asking, and everything else is
+  the dyad, refusals and all — `*/ ((_j_) , (_j_))` is `_.j_` there and
+  `*/ (2 2 $ (_j_))`, whose items are rows, is refused. The fold, the two
+  scans and the window now carry that guard. (2) THE COMPLEX WEIGHTED SUM.
+  `#.` refuses a NaN its own weighing made on the real path and did not on
+  the complex one. (3) THE SELF-CLASSIFY OF AN ATOM is `1 1` with no search
+  at all: `= (_.j_.)` is `1 1` there although `= (,(_.j_.))`, the same value
+  as a one-item list, has no rows in either engine. (4) A COMMUTE SWAPS ITS
+  ARGUMENTS, so the grid's hazard rules — all of them about a left argument
+  that sizes the answer — are asked about the swapped pair; `(0x) $~ (__)`
+  is the `__ $ 1` of the hazard list read backwards.
+
+  NINE MECHANISMS PINNED, seven on the reference's own contradiction, one
+  proven wrong and one on silence. The min-insert and max-insert fold from
+  their identity, which a NaN never displaces, though the SCAN of the same
+  list answers `_.`; the suffix scan makes the NaN its own insert refuses;
+  the quotient of a complex NaN is refused under an insert and answered as
+  a dyad; a complex infinity divided by a LIST is refused where atom against
+  atom and list against list answer; `+: _0` and `o. _0` lose the sign of a
+  zero that the reference's own `2 * _0` keeps; a NaN compared with an exact
+  operand answers by which SIDE is the array. `| _0` is a NEGATIVE zero
+  there, which no magnitude is: proven wrong. And `(_.) ^. ('a')` answers
+  nothing at all — no value, no error, and the session survives it — which
+  is silence, so there is nothing to be held to.
+
+- 2026-09-08 — `answers=` no longer excludes a refusal (reversing nothing;
+  closing the defect grid A recorded and left). `Trait::holds` returned
+  false unless BOTH printed answers were numeric, so a family rule naming a
+  `they-refuse` cause AND an `answers=` class covered nothing of that cause.
+  An `answers=` clause is about the ANSWERS, and a refusal is not one: it is
+  now read over the side that answered, and only `near` — a relation between
+  two numbers — still needs both. The measurement the decision rests on:
+  of the twenty-nine family rules, exactly ONE names both a refusal cause
+  and an `answers=` class (the `(_.) ^ (0.5)` complex-power family), so one
+  rule widens and it is the broken one. It covered 156 of the modifier
+  grid's refusals at once.

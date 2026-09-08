@@ -14,6 +14,9 @@
 //!
 //! One test case per corpus file, so a failure names the theme; every
 //! mismatch inside the file is reported at once.
+//!
+//! (Touched when the `modifiers-*` themes were added, so that the glob
+//! below is expanded again — see `every_corpus_file_is_recorded`.)
 
 use std::path::PathBuf;
 

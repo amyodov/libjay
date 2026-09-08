@@ -2579,6 +2579,22 @@ reads its count list as the plain rotate always did) and dissolved rounds
   continued-fraction convergents at all. The four reference answers are
   written down in the round 9E section above.
 
+### What the modifier grid left open
+
+The modifier grid (docs/testing.md, "The modifier grid") read the whole
+verb × modifier × class × shape table once. One mechanism came out of it
+neither followed nor pinned.
+
+- **THE BINOMIAL'S LIMIT AT A SIZE THE REFERENCE WILL NOT TAKE.**
+  `(9223372036854775807) ! (1e300)` and `(1e200) ! (1e300)` are limit
+  errors there, where libjay answers `_` — but `(1000) ! (1e300)` and
+  `(1e10) ! (1e300)` are `_` in both, and `(1e300) ! (1e300)` is 1 in both.
+  The boundary sits somewhere between 1e10 and 1e200 and is in no
+  documentation; following it would mean reproducing the reference's own
+  numeric limits rather than a rule of the language, and `_` is what a
+  binomial that large overflows to. Three cells, all of them the same
+  product under a rank frame or a commute.
+
 ### What the special-value grid left open
 
 The exhaustive grid (docs/testing.md, "The special-value grid") read the
