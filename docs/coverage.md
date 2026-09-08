@@ -2579,6 +2579,55 @@ reads its count list as the plain rotate always did) and dissolved rounds
   continued-fraction convergents at all. The four reference answers are
   written down in the round 9E section above.
 
+### What the special-value grid left open
+
+The exhaustive grid (docs/testing.md, "The special-value grid") read the
+whole primitive × class × shape table once. These are the mechanisms it
+found that are neither followed nor pinned — each one a statable rule, and
+each one work rather than a puzzle.
+
+- **THE COMPLEX BINOMIAL AT AN INFINITY.** `(0j0) ! (_)` is 1 in the
+  reference, `(_) ! (0j0)` is 0 and `2 ! (_j0)` is `_`, where libjay
+  refuses with "the complex binomial has no limit at an infinity". The
+  limits are there to be computed; part of the same family kills the
+  interpreter, though — `(_j_) ! (0j_)` never returns — so the corpus can
+  hold only the half that answers. Thirty-eight cells.
+
+- **MATRIX DIVIDE OVER THE EXACT TYPES AND THE INFINITIES.** `(1r3) %. 2`
+  is 0.166667 there and `1r6` here: the reference converts to doubles
+  before the solve where libjay keeps the rational elimination it gained
+  for the exact types. Over infinities the reference answers where libjay
+  refuses, and its answers solve nothing — `(_) %. (_)` is 0 and its own
+  `(_) * 0` is 0 rather than the `_` a solution needs. Seventy-three
+  cells, two mechanisms in one verb.
+
+- **A NEGATIVE FIELD WIDTH IN `x ": y`** asks for the exponential form in
+  that many columns and writes asterisks when it will not fit: `_5 ": 5` is
+  ` 5e0 ` there and `_2 ": 5` is `**`, where libjay writes the plain value.
+  Six cells; it is a formatting form libjay does not have.
+
+- **A COMPLEX OPERAND WITH A ZERO IMAGINARY PART STILL ORDERS BY THE EXACT
+  LOOP.** `(0j0) <: (_.)` and `(0j0) >: (_.)` are 1 there — the non-strict
+  tests being the negation of the strict ones — where libjay answers 0.
+  Eight cells: `=`, `~:`, `<` and `>` already agree, so it is the two
+  non-strict tests of the complex path alone.
+
+- **`i:` OVER A FRACTIONAL STEP THE REFERENCE WILL NOT TAKE.** `i: 0.5` is
+  `_0.5 0.5` there and `i: 2.5` six values, but `i: (1r3)` and
+  `i: (1e_300)` are domain errors, which no rule separates from the two
+  that answer. Six cells.
+
+- **A CHECK THAT RUNS BEFORE THE FRAME.** `(i. 0) r. (1e300)` is refused
+  there for an angle of too many turns although the empty frame has no cell
+  to turn; libjay checks per cell and answers the empty. Twelve cells.
+
+- **THE MONADIC ENCODE OF A NaN** is a domain error at one item and the NaN
+  itself at two: `#: (_.)` is refused there and `#: (_. , _.)` answers
+  `_. _.`. Four cells, and the split is the item count again.
+
+- **`0 s:` AND `1 s:`**, the symbol-table forms, are still "not supported
+  yet". Nine cells.
+
 ## Known divergences (deliberate, revisit later)
 
 Every entry below is a place libjay's answer differs from a reference
@@ -2596,6 +2645,18 @@ language and reference each entry compares against is named inline;
 "Differences from GNU APL" below is the subset checked against that
 oracle directly, one entry per line of
 `crates/libjay/tests/corpus/apl/divergences.txt`.
+
+EVERY PINNED ROW SAYS WHAT IT STANDS ON. The `? ` note of each line of the
+J divergence list ends with one of four reasons — `self-contradiction`
+(the reference answers one question two ways, and the note names the two
+sentences), `abort` (it dies, hangs, or answers with no output at all),
+`undefined` (the Dictionary does not define the case and probing found no
+rule) or `proven-wrong` (its answer is demonstrably not the value, with the
+one-line proof in the note). A row fitting none of them is a libjay bug
+wearing a pin. There is one standing exception, marked `reason: model` and
+counted apart: the thirteen rows where J's three character types meet
+libjay's one, which needs a character-width tag through the array type —
+a feature, not a fix.
 
 - J's NaN error — the refusal of a value the arithmetic MADE — is skipped
   by the reference's own SCAN loop wherever its cells hold more than one

@@ -5478,7 +5478,18 @@ fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
                 a.powf(b)
             }
         }
-        Residue => tol.residue(a, b),
+        Residue => {
+            // AN INFINITE DIVIDEND HAS NO RESIDUE, AND A NaN MODULUS DOES
+            // NOT EXCUSE IT. The reference refuses `_. | _` as it refuses
+            // `2 | _`, where libjay's general rule — a NaN the arithmetic
+            // MADE, out of arguments that carried none — would have let the
+            // NaN modulus carry its own NaN through. A zero modulus never
+            // divides, so it answers the dividend as it always does.
+            if tol.is_j() && b.is_infinite() && a != 0.0 {
+                return Err(nan_error(op, a, b, span));
+            }
+            tol.residue(a, b)
+        }
         Log => {
             if a < 0.0 || b < 0.0 {
                 return Err(Error::not_yet("complex numbers", span));
@@ -5791,8 +5802,21 @@ fn cx_op(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx> {
     // It is the four steps of the ARITHMETIC that refuse. The transcendental
     // ones answer a NaN of their own where the reference does — `(_j_) ^ 2`
     // is `_.j_` there and `_j_ ^ 0.5` is `_.j_.`.
+    // `j.` AND `r.` ARE THOSE FOUR STEPS SPELLED SHORT — `x j. y` is
+    // `x + 0j1 * y` and `x r. y` is `x * ^ 0j1 * y` — and the reference
+    // refuses them where it refuses the spelling: `(_) + ((0j1) * (0j_))`
+    // and `(_) j. (0j_)` are both NaN errors there, and so are
+    // `(_j_) * (^ ((0j1) * 2))` and `(_j_) r. 2`.
     if tol.is_j()
-        && matches!(op, ScalarDyad::Add | ScalarDyad::Sub | ScalarDyad::Mul | ScalarDyad::DivJ)
+        && matches!(
+            op,
+            ScalarDyad::Add
+                | ScalarDyad::Sub
+                | ScalarDyad::Mul
+                | ScalarDyad::DivJ
+                | ScalarDyad::MakeComplex
+                | ScalarDyad::PolarBy
+        )
         && !a.iter().chain(b.iter()).any(|v| v.is_nan())
         && a.iter().chain(b.iter()).any(|v| v.is_infinite())
         && let Some(k) = (0..2).find(|&k| r[k].is_nan())
@@ -5841,29 +5865,7 @@ fn cx_op_value(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx>
             }
             cx::root(a, b)
         }
-        Residue => {
-            // An INFINITE part leaves no residue to name, and the reference
-            // refuses rather than answering a NaN — on either side, even
-            // where the same infinity over the reals answers (`_ | 5` is 5
-            // there, `_ | 1j2` a refusal).
-            // An INFINITE MODULUS with nothing imaginary beside it, over a
-            // real-valued dividend, is the real residue: `(_j0) | 2` is 2
-            // there, as `_ | 2` is. The modulus leaves a value of its own
-            // sign alone and sends every other one to itself.
-            if a[0].is_infinite() && a[1] == 0.0 && b[1] == 0.0 {
-                let kept =
-                    b[0] == 0.0 || (a[0] > 0.0 && b[0] > 0.0) || (a[0] < 0.0 && b[0] < 0.0);
-                return Ok([if kept { b[0] } else { a[0] }, 0.0]);
-            }
-            if [a[0], a[1], b[0], b[1]].iter().any(|v| v.is_infinite()) {
-                return Err(Error::new(
-                    ErrorKind::Nan,
-                    "a residue of an infinity has no value",
-                    Some(span),
-                ));
-            }
-            cx::residue(a, b, tol)
-        }
+        Residue => return cx_residue(a, b, tol, span),
         Lcm | Gcd => {
             // An INFINITE part leaves no Gaussian integer to divide by, and
             // the reference refuses rather than answering a NaN — as it
@@ -6809,6 +6811,36 @@ fn nan_reads_equal(dx: DType, dy: DType, n: usize, tol: Tol) -> bool {
     nan_reads_equal_by(dx, dy, n, tol, true)
 }
 
+/// `x | y` over complex values, with the guards the reference keeps.
+///
+/// A ZERO MODULUS NEVER DIVIDES, so it answers the dividend whatever that
+/// is: `0 | (0j_)` is `0j_` there where an infinite part anywhere else is
+/// refused. An INFINITE MODULUS with nothing imaginary beside it, over a
+/// FINITE real dividend, is the real residue — `(_j0) | 2` is 2, as
+/// `_ | 2` is — and leaves a value of its own sign alone while sending
+/// every other one to itself. Anything else with an infinite part leaves no
+/// residue to name, and the reference refuses rather than answering a NaN.
+///
+/// The dyadic ENCODE takes its digits through this, since `x #: y` is
+/// residues of y in the radices x and refuses exactly where they do.
+fn cx_residue(a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx> {
+    if a[0] == 0.0 && a[1] == 0.0 {
+        return Ok(b);
+    }
+    if a[0].is_infinite() && a[1] == 0.0 && !b[0].is_infinite() && b[1] == 0.0 {
+        let kept = b[0] == 0.0 || (a[0] > 0.0 && b[0] > 0.0) || (a[0] < 0.0 && b[0] < 0.0);
+        return Ok([if kept { b[0] } else { a[0] }, 0.0]);
+    }
+    if [a[0], a[1], b[0], b[1]].iter().any(|v| v.is_infinite()) {
+        return Err(Error::new(
+            ErrorKind::Nan,
+            "a residue of an infinity has no value",
+            Some(span),
+        ));
+    }
+    Ok(cx::residue(a, b, tol))
+}
+
 pub(crate) fn tol_cmp(op: ScalarDyad, a: f64, b: f64, tol: Tol) -> bool {
     use ScalarDyad::*;
     match op {
@@ -7209,6 +7241,23 @@ fn exact_pow(a: &Rat, b: &Rat, span: Span) -> Result<Option<Rat>> {
     let Some(e) = b.to_int().as_ref().and_then(exact::ext_to_i64) else {
         return Ok(None);
     };
+    // A BASE OF 0, 1 OR _1 HAS A TRIVIAL POWER AT EVERY EXPONENT, and no
+    // number of bits is needed to write it: `(0x) ^ (9007199254740993)` is
+    // 0 in the reference and `(1x) ^ (123456789012345678901234567890x)` is
+    // 1, where a general exact power that size is refused.
+    if e > 0 {
+        let one = Rat::one();
+        let minus_one = Rat::zero().sub(&one).expect("0 - 1 is exact");
+        if a.is_zero() {
+            return Ok(Some(Rat::zero()));
+        }
+        if *a == one {
+            return Ok(Some(one));
+        }
+        if *a == minus_one {
+            return Ok(Some(if e % 2 == 1 { minus_one } else { one }));
+        }
+    }
     if let Some(v) = a.pow(e) {
         return Ok(Some(v));
     }
@@ -10817,7 +10866,7 @@ fn encode_complex(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
                 out[i * n + j] = rem;
                 rem = cx::ZERO;
             } else {
-                let r = cx::residue(b, rem, tol);
+                let r = cx_residue(b, rem, tol, span)?;
                 out[i * n + j] = r;
                 rem = cx::div(cx::sub(rem, r), b);
             }
@@ -11054,8 +11103,14 @@ fn encode(x: &Array, y: &Array, tol: Tol, span: Span) -> Result<Array> {
         // either side is not that — it is a residue the reference takes
         // and answers with, `2 #: _.` and `_. #: 2` both being `_.` and
         // `(_. 1 2) #: 2` being `_. 0 0`.
+        // An INFINITE VALUE HAS NO DIGITS, AND A NaN RADIX DOES NOT EXCUSE
+        // IT: the residue underneath refuses `_. | _` as it refuses
+        // `2 | _`, so `(_.) #: (_)` is refused there although the NaN came
+        // in with the radix. A zero radix never divides and hands the whole
+        // value back, which is the one case that answers.
         let nan_given = v.is_nan() || radix.iter().any(|b| b.is_nan());
-        if !nan_given && cell.iter().any(|&d| tol.made_nan(d, v, 0.0)) {
+        let past = v.is_infinite() && radix.iter().any(|&b| b != 0.0);
+        if past || (!nan_given && cell.iter().any(|&d| tol.made_nan(d, v, 0.0))) {
             return Err(Error::nan(
                 format!("`{}` has no digits in this base", j_number(v)),
                 span,
@@ -12733,14 +12788,23 @@ fn axis_counts_reaching(
         Ok(v) => Ok(v),
         Err(e) => {
             let Some(v) = x.to_f64_vec() else { return Err(e) };
-            if x.rank() > 1 || !v.iter().any(|f| f.is_infinite()) {
+            // AN EXTENDED count PAST THE MACHINE WORD is a count all the
+            // same: it asks for every item there is, which is what an
+            // infinity asks for, and
+            // `(123456789012345678901234567890x) }. 2` is the empty in the
+            // reference rather than a refusal. A FLOAT that wide is not —
+            // `(1e300) }. 2` is a domain error there — so the saturation
+            // is the exact types' alone.
+            let exact = matches!(x.dtype(), DType::Ext | DType::Rat);
+            let past = |f: f64| exact && (f >= 9.3e18 || f <= -9.3e18);
+            if x.rank() > 1 || !v.iter().any(|&f| f.is_infinite() || past(f)) {
                 return Err(e);
             }
             let mut out = Vec::with_capacity(v.len());
             for f in v {
                 out.push(match f {
-                    f if f == f64::INFINITY => i64::MAX,
-                    f if f == f64::NEG_INFINITY => i64::MIN,
+                    f if f == f64::INFINITY || f >= 9.3e18 => i64::MAX,
+                    f if f == f64::NEG_INFINITY || f <= -9.3e18 => i64::MIN,
                     f => near.round(f).ok_or_else(|| {
                         Error::domain(format!("{what} needs integer lengths"), span)
                     })?,
@@ -23685,7 +23749,10 @@ fn item_ranks(y: &Array, rules: Rules, span: Span) -> Result<Vec<usize>> {
     // An EMPTY holds no item of the wrong type, whatever type it was
     // written at: `A. ''`, `A. 0$'a'` and `A. 0$<1` are each 0 in jconsole
     // where `A. 'cab'` is a domain error.
-    if y.count() != 0 && !y.dtype().is_numeric() {
+    // A BOX can be no permutation, and the reference ranks it rather than
+    // refusing it: `A. ((<2),(<2))` is 0 there where `A. 'ab'` is a domain
+    // error. Everything else that is not a number is refused.
+    if y.count() != 0 && !y.dtype().is_numeric() && y.dtype() != crate::dtype::DType::Box {
         return Err(Error::domain("an anagram index needs numbers", span));
     }
     let order = grade_order(&as_list(y), false, Grading::of(rules, rules.tol()));
@@ -23699,6 +23766,26 @@ fn item_ranks(y: &Array, rules: Rules, span: Span) -> Result<Vec<usize>> {
 /// `A. y`: where the permutation y's items rank as stands in the
 /// lexicographic list of the permutations of that length.
 fn anagram_index(y: &Array, rules: Rules, span: Span) -> Result<Array> {
+    // A NUMERIC ARGUMENT IS A PERMUTATION, SO NO PLACE IN IT IS REPEATED.
+    // `A. (0 0)`, `A. (1 1)` and `A. (2 2 $ 2)` are index errors in the
+    // reference and `A. 0.5` a domain error, where libjay had RANKED any
+    // list at all; `A. (,2)` is 0 there, so a value past the end is not
+    // what it refuses. A BOXED argument can be no permutation and keeps
+    // the ranking: `A. ((<2),(<2))` is 0 there.
+    if y.count() != 0 && y.dtype().is_numeric() {
+        let Some(items) = as_list(y).to_i64_vec() else {
+            return Err(Error::domain("an anagram index needs whole numbers", span));
+        };
+        let mut seen = std::collections::HashSet::new();
+        for &i in &items {
+            if !seen.insert(i) {
+                return Err(Error::domain(
+                    format!("a permutation has one place {i}, not two"),
+                    span,
+                ));
+            }
+        }
+    }
     let ranks = item_ranks(y, rules, span)?;
     let n = ranks.len();
     let mut index: i128 = 0;

@@ -289,6 +289,19 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `2 -.!.0 (1.5)` is 2 in the reference where libjay refused the fit by
   name.
 
+- THE SPECIAL-VALUE GRID, READ WHOLE INSTEAD OF SAMPLED. `jay-corpus grid j`
+  writes out every primitive verb of the J frontend's own table crossed
+  with every value class the sweeps' residue was ever made of — a NaN, the
+  two infinities, the four complex infinities and the complex NaN, the
+  integers either side of 2^63 and of 2^53, the exact and rational types, a
+  huge and a tiny exponent, and the ordinary values a verb is asked to
+  refuse beside them — at atom, list and table shape, with the hazard
+  filter built in. That is 59,860 sentences and it is the same table every
+  time. The rows both engines answer alike are now corpus files of their
+  own, `corpus/j/specials-*.txt`, so the table is kept rather than
+  rediscovered a few cells at a time by every sweep. docs/testing.md says
+  how to regenerate and run it.
+
 ### Changed
 
 - Round 9C's divergence bookkeeping: `_1 |/\\. (_ 1 2)` and
@@ -530,6 +543,39 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   real part as the negative axis and answers π, which sent
   `r. ^:_2 (1e_9 1 1e9)` — whose middle value is a zero the arithmetic
   signed — to `3.14159j_` where the reference answers `0j_`.
+
+- AN INFINITE DIVIDEND HAS NO RESIDUE THOUGH THE MODULUS IS A NaN. libjay's
+  standing rule is that a NaN the arithmetic MADE is refused and a NaN an
+  operand carried travels on; the residue is the exception, and the
+  reference refuses `_. | _` exactly as it refuses `2 | _`. A ZERO MODULUS
+  never divides and now answers the dividend before any of that, whatever
+  the dividend is: `0 | (0j_)` is `0j_`. The complex residue reads the
+  whole magnitude, so an infinity written `_j0` is the infinity it is.
+
+- THE DYADIC ENCODE TAKES ITS DIGITS THROUGH THAT RESIDUE, which is what
+  `x #: y` is defined as, so it refuses and answers exactly where the
+  residue does: `(0j_) #: 2` and `(_.) #: (_)` are refused, and a radix of
+  zero still hands the whole value back.
+
+- A COUNT PAST THE MACHINE WORD IS A COUNT. `(123456789012345678901234567890x) }. 2`
+  is the empty in the reference rather than a refusal; an extended count
+  beyond i64 now saturates as an infinite one already did, since no drop or
+  take can tell the two apart.
+
+- THE ANAGRAM INDEX NEEDS THE PERMUTATION ITSELF. `A. (0 0)` and `A. (2 2)`
+  are index errors in the reference and `A. 0.5` a domain error, where
+  libjay had ranked any list at all; a BOXED argument, which can be no
+  permutation, keeps the ranking, `A. ((<2),(<2))` being 0 there.
+
+- AN EXACT BASE OF 0, 1 OR _1 HAS A TRIVIAL POWER AT EVERY EXPONENT:
+  `(0x) ^ (9007199254740993)` is 0 and `(1x) ^ (123456789012345678901234567890x)`
+  is 1, where the general exact power that size is refused for its size.
+
+- `j.` AND `r.` REFUSE THE NaN THEIR OWN ARITHMETIC MAKES. `x j. y` is
+  `x + 0j1 * y` and `x r. y` is `x * ^ 0j1 * y`, and the reference refuses
+  the short spelling wherever it refuses the long one: `(_) j. (0j_)` and
+  `(_) + ((0j1) * (0j_))` are both NaN errors there, as are `(_j_) r. 2`
+  and `(_j_) * (^ ((0j1) * 2))`.
 
 ## 0.4.9 — 2026-09-04
 

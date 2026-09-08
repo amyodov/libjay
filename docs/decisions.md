@@ -5792,3 +5792,62 @@ estimator in BOTH implementations — were invisible to a differential test.
 The second was caught only because a series built to have positive
 autocorrelation must give a variance ratio above 1 and did not. Every
 example therefore ends with a case whose answer is known in advance.
+
+## 2026-09-08 — The special-value grid, and what a pin has to stand on
+
+Seven 100k sweeps on successive mains plateaued at twenty to twenty-five
+unexplained rows per fifty thousand, and the residue was always the same
+kinds of value: an infinity, a complex number, a NaN, a huge integer or
+exponent literal, an exact type. A sweep DRAWS sentences, so it samples a
+table — primitive × valence × value class × shape — a few cells at a time,
+and each sweep finds cells the earlier ones happened not to draw. The
+answer is to read the table rather than sample it.
+
+`jay-corpus grid j` writes it out: every primitive verb of the J frontend's
+own table, crossed with twenty-eight value classes at atom, list and table
+shape, dyads at atom against atom throughout and the scalar verbs also
+across the list shapes. 59,860 sentences, the same ones every time, with
+the hazard filter inside the generator rather than in a list beside it — a
+verb that sizes its answer by the value is never handed a magnitude that
+would ask for an array of 2^31 items, and `p:`, `q:`, `?` and `?.` are not
+in the table at all. The rows both engines answer alike became
+`corpus/j/specials-*.txt`, so what the grid settled stays settled.
+
+THE GRID IS READ THROUGH THE JOURNAL, NOT THE PRINTED REPORT. `--journal`
+writes every measurement down as it is made, agreements included, which is
+what lets the agreeing rows be lifted into the corpus and the parting ones
+be laid out as a class-by-class matrix per verb. That matrix is the whole
+method: the reference's rule for a verb is READ OFF the table of which
+pairs part, instead of guessed at from three probes. The residue's rule
+came out of one such matrix in a minute, and the encode's turned out to be
+the residue's again.
+
+WHAT A PIN HAS TO STAND ON. Every `? ` note in `corpus/j/divergences.txt`
+now ends with the reason it stands on — `self-contradiction`, `abort`,
+`undefined` or `proven-wrong` — so the list can be audited by grepping.
+Of the 151 rows there before this round, 94 are the reference answering one
+question two ways, 19 are an answer that is provably not the value, 13 are
+a case the Dictionary does not define, and 12 are the reference dying,
+hanging or answering with no output at all. THIRTEEN FIT NONE OF THE FOUR
+and are marked `reason: model`: J has three character types and libjay has
+one, so `u:` and `3!:0` of a widened literal part on the type rather than
+on any answer. That is a feature to build — a character-width tag carried
+through the array type — and not a fix; it is counted apart rather than
+dressed up as one of the four.
+
+EIGHT MECHANISMS WERE FOLLOWED, NOT PINNED. The residue refuses an infinite
+dividend though the modulus is a NaN, and answers the dividend outright
+when the modulus is zero; the dyadic encode goes through that residue,
+being defined as it; a count past the machine word is a count; the anagram
+index needs the permutation itself, except over boxes, which can be none;
+an exact base of 0, 1 or _1 has a trivial power at any exponent; `j.` and
+`r.` refuse the NaN their own defining arithmetic makes.
+
+FOUR MECHANISMS WERE PINNED, EACH ON THE REFERENCE'S OWN CONTRADICTION. The
+complex power and root: `% ((_.) ^ (0.5))` is `_.j_.` there, so `x ^ _y`
+has an answer the reference has written down, yet `(_.) ^ (_0.5)` is a
+limit error — and `(_j_) ^ (% 2)` is `_.j_.` where its own `2 %: (_j_)` is
+`_j_`. The circle function: `0 o. y` IS `%: 1 - y ^ 2`, and the reference
+writes that composition out for the argument it refuses. Division by a zero
+written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
+`(0.5) % (0r1)` is `__`.
