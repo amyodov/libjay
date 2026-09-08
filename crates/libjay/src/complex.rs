@@ -239,6 +239,14 @@ pub fn sqrt(z: Cx) -> Cx {
     // where one infinite part alone still has a root. A NaN in either part
     // names no direction either, and takes the whole answer with it:
     // `%: (_j_.)` is `_.j_.` there.
+    // A MAGNITUDE OF ZERO HAS A ZERO ROOT, whatever the parts hold. The
+    // reference's own `| (0j_.)` is 0 — a NaN beside a zero real part names
+    // no distance — and the root it computes from that distance is the 0
+    // the distance has: `%: (0j_.)` is the float 0 there, where
+    // `%: (1j_.)`, `%: (_.j0)` and `%: (_.j_.)` are all `_.j_.`.
+    if abs(z) == 0.0 {
+        return ZERO;
+    }
     if (z[0].is_infinite() && z[1].is_infinite()) || z[0].is_nan() || z[1].is_nan() {
         return [f64::NAN, f64::NAN];
     }

@@ -16618,11 +16618,26 @@ fn index_of_last(x: &Array, y: &Array, origin: i64, tol: Tol) -> Array {
     let mut out = Vec::with_capacity(nf);
     for i in 0..nf {
         let cell = y.cell_at(frame_rank, i);
-        let at = (0..items)
+        let found = (0..items)
             .rev()
-            .find(|&j| arrays_match_rule(&cell, &item_or_self(x, j), tol, NanRule::Search))
-            .unwrap_or(items);
-        out.push(origin + at as i64);
+            .find(|&j| arrays_match_rule(&cell, &item_or_self(x, j), tol, NanRule::Search));
+        // AN ITEM WITH NO ATOMS MATCHES WHATEVER IS COMPARED WITH IT, and
+        // the reference reads that as a match at every position of x —
+        // including the positions an x with no items does not have.
+        // `(2 0 $ 0) i: (i. 0)` is 1 there, the last item's index, and
+        // `(i. 0 0) i: (i. 0)` is `_1`, which is the same arithmetic over
+        // no items at all. The index-of answers 0 to both: the FIRST
+        // match's index is where its not-found answer lies too.
+        let vacuous = items == 0
+            && cell.count() == 0
+            && x.rank() > 0
+            && cell.shape[..] == x.shape[1..];
+        let at: i64 = match found {
+            Some(j) => j as i64,
+            None if vacuous => -1,
+            None => items as i64,
+        };
+        out.push(origin + at);
     }
     Array::new(frame, Data::I64(out.into()))
 }
@@ -21810,7 +21825,7 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
     // handing the product to an allocator.
     for &[w, d] in &fields {
         crate::limits::count(w.abs() as u128, span)?;
-        crate::limits::count(d.max(0.0) as u128, span)?;
+        crate::limits::count(d.abs() as u128, span)?;
     }
     // A field of NO width and no digits asks for no field at all: an
     // EXACTLY held value is written the way it is ordinarily written, so
@@ -21822,14 +21837,14 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
     let rows_of = y.to_row_major();
     let text = |r: usize, c: usize| {
         let [w, d] = fields[c];
-        if held_exactly && w == 0.0 && d <= 0.0 {
+        if held_exactly && w == 0.0 && d == 0.0 {
             return crate::fmt::format_atom(&rows_of.data, r * cols + c, fmt);
         }
         // Only a column of automatic width renders every digit asked for.
         // Where the width is given, a digit count that reaches it already
         // overflows the field — the point and the digits alone are wider —
         // so rendering past that point cannot change the answer.
-        let digits = if w == 0.0 { d.max(0.0) } else { d.max(0.0).min(w.abs()) };
+        let digits = if w == 0.0 { d.abs() } else { d.abs().min(w.abs()) };
         let mut v = values[r * cols + c];
         // A value written EXACTLY breaks a tie the other way from a double:
         // `2 ": (1r2 1r3)` is `1 0` in the reference where `2 ": 0.5` is
@@ -21844,7 +21859,53 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
                 v = (scaled.floor() + 1.0) / scale;
             }
         }
-        format_field(v, digits as usize, w < 0.0, fmt.neg)
+        format_field(v, digits as usize, w < 0.0 || d < 0.0, fmt.neg)
+    };
+    // WHICH FIELDS ARE SCALED. The reference reads a negative WIDTH and a
+    // negative DIGIT COUNT the same way — `_6 ": 2` is ` 2e0  ` and
+    // `0j_1 ": 2` is `2.0e0` — so both spellings ask for the exponential
+    // form, the width saying how wide the field is and the digit count how
+    // many decimals the mantissa carries.
+    let scaled = |c: usize| fields[c][0] < 0.0 || fields[c][1] < 0.0;
+    // HOW ONE VALUE SITS IN ITS FIELD: what stands before it and what
+    // stands in the field itself. The scaled form is written from the LEFT
+    // after one column of SIGN, which a field of a given width reserves and
+    // a field of automatic width does not; the fixed one is
+    // right-justified with nothing in front. A SCALED FIELD HAS NO MANTISSA
+    // FOR AN INFINITY OR A NaN — the reference writes the word itself after
+    // one column of indent and one of sign, `0j_1 ": _.` being `  _.` and
+    // `0j_1 ": __` ` __` — so the special takes both columns wherever the
+    // width came from.
+    let laid = |r: usize, c: usize| -> (String, String) {
+        let s = text(r, c);
+        if !scaled(c) {
+            return (String::new(), s);
+        }
+        // The word an infinity or a NaN is written as begins with the
+        // NEGATIVE SIGN in one case only — `__` — and `_.` and `_` merely
+        // start with the same character, so the sign column is decided by
+        // the VALUE rather than by its first letter.
+        let v = values.get(r * cols + c).copied();
+        if v.is_some_and(|v| !v.is_finite()) {
+            return match v {
+                Some(v) if v < 0.0 => (
+                    format!(" {}", fmt.neg),
+                    s.strip_prefix(fmt.neg).unwrap_or(&s).to_string(),
+                ),
+                _ => ("  ".to_string(), s),
+            };
+        }
+        match s.strip_prefix(fmt.neg) {
+            Some(rest) => (fmt.neg.to_string(), rest.to_string()),
+            // A column of automatic width reserves no sign column, so
+            // the blank that separates it from the column before it goes
+            // in FRONT of the value rather than after: `0j_1 ": (_. , 2)`
+            // is `  _. 2.0e0`.
+            None if fields[c][0] == 0.0 => {
+                (if c > 0 { " ".to_string() } else { String::new() }, s)
+            }
+            None => (" ".to_string(), s),
+        }
     };
     // A width of zero is the widest value in the column, and a blank
     // between it and whatever stands to its left.
@@ -21854,34 +21915,33 @@ fn format_spec_j(x: &Array, y: &Array, fmt: &FmtOpts, span: Span) -> Result<Arra
             if w != 0.0 {
                 return w.abs() as usize;
             }
-            let wide = (0..rows).map(|r| text(r, c).chars().count()).max().unwrap_or(0);
-            wide + usize::from(c > 0)
+            let wide = (0..rows)
+                .map(|r| {
+                    let (lead, body) = laid(r, c);
+                    lead.chars().count() + body.chars().count()
+                })
+                .max()
+                .unwrap_or(0);
+            wide + usize::from(c > 0 && !scaled(c))
         })
         .collect();
     let line = crate::limits::count(widths.iter().map(|&w| w as u128).sum(), span)?;
     let total = crate::limits::count(rows as u128 * line as u128, span)?;
     let mut out: Vec<char> = Vec::with_capacity(total);
     for r in 0..rows {
-        for c in 0..cols {
-            let s = text(r, c);
-            // The exponential form is written from the LEFT, one column of
-            // sign in front of it; the fixed one is right-justified.
-            let (lead, body) = match (fields[c][0] < 0.0, s.strip_prefix(fmt.neg)) {
-                (false, _) => (String::new(), s.as_str()),
-                (true, Some(rest)) => (fmt.neg.to_string(), rest),
-                (true, None) => (" ".to_string(), s.as_str()),
-            };
+        for (c, &width) in widths.iter().enumerate() {
+            let (lead, body) = laid(r, c);
             let len = lead.chars().count() + body.chars().count();
-            if len > widths[c] {
-                out.extend(std::iter::repeat_n('*', widths[c]));
+            if len > width {
+                out.extend(std::iter::repeat_n('*', width));
                 continue;
             }
-            if fields[c][0] < 0.0 {
+            if scaled(c) {
                 out.extend(lead.chars());
                 out.extend(body.chars());
-                out.extend(std::iter::repeat_n(' ', widths[c] - len));
+                out.extend(std::iter::repeat_n(' ', width - len));
             } else {
-                out.extend(std::iter::repeat_n(' ', widths[c] - len));
+                out.extend(std::iter::repeat_n(' ', width - len));
                 out.extend(body.chars());
             }
         }
@@ -22436,6 +22496,17 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
 /// small while `&.`, `&.:` and the negative powers reach a long way past
 /// it. A verb that is not here has no obverse, and the diagnostic says so
 /// by name.
+/// The two operands of an UNDER, where the verb is one: `u&.:v` and
+/// `u&.v` are both built as `v^:_1 @: (u&:v)`, so an atop whose left is
+/// exactly the obverse of the composition's right is an under and nothing
+/// else. The same reading writes `&.:` back out in an atomic
+/// representation, and it is what tells the two spellings' obverses apart.
+fn under_parts<'a>(f: &'a Verb, g: &'a Verb) -> Option<(&'a Verb, &'a Verb)> {
+    let Verb::Compose(inner, under) = g else { return None };
+    let back = crate::frontend::j::obverse_of(under, crate::error::Span::new(0, 0)).ok()?;
+    (back.name() == f.name()).then_some((&**inner, &**under))
+}
+
 pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
     Some(match v {
         Verb::Prim(p) => prim_obverse(v, p)?,
@@ -22444,6 +22515,14 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
         // A composition inverts by inverting its parts, in the other order.
         // Whichever way round the atop was WRITTEN, what comes back is a
         // verb nobody wrote, so it takes the plain spelling.
+        // `u&.:v` IS AN ATOP — `v^:_1 @: (u&:v)` — AND HAS NO OBVERSE
+        // THERE. `(+&.:^.)^:_1 2` is a domain error in the reference where
+        // `(+&.^.)^:_1 2` is 2, and so is every other pair measured:
+        // `(]&.:|.)^:_1`, `(>:&.:>:)^:_1`, `(<&.:>)^:_1`. What has the
+        // obverse is the under AT V'S RANK, which is the same atop with a
+        // rank round it, so the refusal is written here and the rank arm
+        // below reaches past it.
+        Verb::Atop(f, g, _) if under_parts(f, g).is_some() => return None,
         Verb::Atop(f, g, _) => {
             Verb::Atop(Box::new(obverse(g)?), Box::new(obverse(f)?), AtopForm::At)
         }
@@ -22458,7 +22537,16 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
         // the square root's rank 0 answers `1 4 9`. A rank somebody WROTE
         // stands, which is what the two rank tests tell apart.
         Verb::Rank(f, r) => {
-            let inner = obverse(f)?;
+            // `u&.v` is the under above at v's rank, and THAT one the
+            // reference inverts: the refusal is the whole-argument
+            // spelling's alone, so the atop inside a rank is turned round
+            // here rather than asked.
+            let inner = match &**f {
+                Verb::Atop(a, b, _) if under_parts(a, b).is_some() => {
+                    Verb::Atop(Box::new(obverse(b)?), Box::new(obverse(a)?), AtopForm::At)
+                }
+                _ => obverse(f)?,
+            };
             let built = match &**f {
                 Verb::Atop(_, g, AtopForm::At) => r.triple() == g.ranks(),
                 Verb::Compose(_, g) | Verb::Beside(_, g) => {
@@ -22543,6 +22631,13 @@ pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
                 ),
                 ",:" => named("{.")?,
                 ";" => atop(named(">")?, named("{.")?),
+                // `j.~ y` is `y + 0j1 * y`, which is y times `1j1`, so
+                // dividing by that one number takes it back:
+                // `(j.~)^:_1 3` is `1.5j_1.5` there.
+                "j." => Verb::BondRight(
+                    Box::new(named("%")?),
+                    Array::new(Vec::new(), Data::Complex(vec![[1.0, 1.0]].into())),
+                ),
                 _ => return None,
             }
         }
@@ -22867,6 +22962,24 @@ fn bond_obverse(n: &Array, f: &Verb, left: bool) -> Option<Verb> {
     };
     use ScalarDyad as SD;
     let DyadOp::Scalar(op) = p.dyad else { return None };
+    // `x j. y` IS `x + 0j1 * y`, WHICH IS INVERTIBLE IN EITHER ARGUMENT.
+    // Bonded on the right, `y j. n` adds a fixed imaginary part, so
+    // subtracting it takes the answer back: `(j.&2)^:_1 5` is `5j_2`.
+    // Bonded on the left, `n j. y` puts y on the imaginary axis above a
+    // fixed real part, so the way back takes n off and turns the plane:
+    // `(2&j.)^:_1 (2j7)` is 7.
+    if op == SD::MakeComplex {
+        let i = Array::new(Vec::new(), Data::Complex(vec![[0.0, 1.0]].into()));
+        return Some(if left {
+            Verb::Atop(
+                Box::new(Verb::BondRight(Box::new(named("%")?), i)),
+                Box::new(Verb::BondRight(Box::new(named("-")?), n.clone())),
+                AtopForm::At,
+            )
+        } else {
+            Verb::BondRight(Box::new(named("-")?), turned(n)?)
+        });
+    }
     if matches!(op, SD::Circle) {
         // `n o. y` is undone by `(-n) o. y`: the circle functions are
         // numbered so that the negative index is the inverse.
@@ -22924,6 +23037,14 @@ fn negated(n: &Array) -> Option<Array> {
     let v = n.to_f64_vec()?;
     let out: Vec<f64> = v.iter().map(|&k| -k).collect();
     Some(Array::new(n.shape.clone(), Data::F64(out.into())))
+}
+
+/// The noun turned a quarter turn — every value multiplied by `0j1` — for
+/// the complex bond whose obverse takes a fixed imaginary part off.
+fn turned(n: &Array) -> Option<Array> {
+    let v = n.to_complex_vec()?;
+    let out: Vec<[f64; 2]> = v.iter().map(|&[re, im]| [-im, re]).collect();
+    Some(Array::new(n.shape.clone(), Data::Complex(out.into())))
 }
 
 /// The one number a bond's noun holds, for the bonds whose obverse needs

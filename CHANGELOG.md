@@ -7,6 +7,20 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- THREE MORE EXHAUSTIVE TABLES over the same value classes, written by
+  `jay-corpus grid j`. `--obverses` (20,064 sentences) takes `^:_1` and
+  `^:(_1 0 1)` of every DERIVED verb — the six compositions, a hook, a
+  capped fork, a fork, a commute, three ranks, two bonds and a declared
+  obverse `u :. v` — since an inverse is derived from a spelling rather
+  than computed from an answer. `--explicit` (4,416) puts `13 :`, `3 :`,
+  `4 :`, `1 :` and `2 :` bodies where the tables before it had only
+  primitives, as verbs and as operands to eight modifiers.
+  `--representations` (2,100) asks what a value IS rather than what a verb
+  makes of it: `3!:3`, `3!:0` and `3!:1` at every class and shape, the
+  format specification `x ": y` at sixteen widths, the gerund `@.` over
+  four argument ranks, and the symbol table's own forms. docs/testing.md
+  carries the workflow and the two hazard rules they add.
+
 - SIX NUMBER-CRUNCHING ALGORITHMS WRITTEN IN J, in `examples/algos`:
   Kaufman's adaptive moving average, the Lo-MacKinlay variance-ratio test,
   the Hurst exponent by rescaled range, an extreme learning machine, a
@@ -453,6 +467,30 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- THE OBVERSE OF THE WHOLE-ARGUMENT UNDER IS REFUSED, as the reference
+  refuses it: `(+&.:^.)^:_1 2` is a domain error there where `(+&.^.)^:_1 2`
+  is 2. The under at v's rank keeps the obverse it had; only `u&.:v` — and
+  APL's `⍢`, which is the same construction — loses one.
+
+- `x j. y` INVERTS IN EITHER ARGUMENT: `(j.&2)^:_1 5` is `5j_2`,
+  `(2&j.)^:_1 (2j7)` is 7, and the reflexive `(j.~)^:_1 3` is `1.5j_1.5`.
+
+- A NEGATIVE DIGIT COUNT IN A FORMAT SPECIFICATION IS THE SCALED FORM, as a
+  negative width is: `0j_1 ": 2` is `2.0e0`, `6j_1 ": 2` is ` 2.0e0` and
+  `5j_1 ": 2` is `*****`, the exponential form taking one column of sign
+  that a field of automatic width does not reserve.
+
+- A COMPLEX ROOT WHOSE MAGNITUDE IS ZERO IS ZERO, whatever the parts hold:
+  `%: (0j_.)` is the float 0, as the reference has it, since `| (0j_.)` is
+  0 in both engines and the root is computed from that distance. A NaN
+  beside anything else still takes the answer with it — `%: (1j_.)`,
+  `%: (_.j0)` and `%: (_.j_.)` are all `_.j_.`.
+
+- INDEX-OF-LAST OVER CELLS WITH NO ATOMS answers the last position rather
+  than the not-found one: `(i. 0 0) i: (i. 0)` is `_1`, which is `#x - 1`
+  where `(2 0 $ 0) i: (i. 0)` is 1. Four rows round 4B had pinned as an
+  oracle self-contradiction are ordinary corpus rows now.
 
 - `x %. y` OVER AN ATOM DIVISOR follows the reference in three cases. A
   left argument with no items answers a zero (`(i. 0) %. (_.)` is 0, not

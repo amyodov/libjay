@@ -266,16 +266,6 @@ p. (0 1 1 _)
 (1r2) I. 2
 ? the same, with a rational bound; reason: self-contradiction
 
-// INDEX OF LAST over cells with NO ATOM. `x i: y` answers an index into x
-// where the cell is found and `#x` where it is not, and the reference
-// answers `_1` — neither — as soon as x has no item and the cell is empty:
-// `(0 0$0) i: (0$0)` is `_1` there while its own `i.` on the same
-// arguments is 0, and `(0$0) i: 5` is 0. libjay answers `#x`, which is 0.
-(0 0 $ 0) i: (0 $ 0)
-? the reference's own `i.` answers 0 for the same arguments; reason: self-contradiction
-(0 0 $ '') i: (0 $ a:)
-? the same over characters and boxes; reason: self-contradiction
-
 // A LOGARITHM TO ITS OWN NEGATIVE BASE. `x ^. x` is 1 for every x, and
 // libjay answers 1. jconsole answers a complex number a rounding away from
 // it, and a DIFFERENT one for every spelling of the same value: `_3 ^. _3`
@@ -481,12 +471,6 @@ $ 8 +/\\. (0 $ a:)
 $ 2 +/\\. (0 $ s: 'a')
 ? the same over symbols; reason: self-contradiction
 
-// The same INDEX OF LAST divergence pinned above, written with `i.`.
-(i. 0 0) i: (0 $ 0)
-? the reference's own `i.` answers 0 for the same arguments; reason: self-contradiction
-(i. 0 0) i: (0 $ 3j4)
-? the same, with a complex empty; reason: self-contradiction
-
 // A CUT whose piece is EMPTY, folded by an EXTREMUM. `<./;._2 (,5)` is a
 // domain error in jconsole; libjay answers the identity `_` the same fold
 // gives outside a cut, `<./ (0 $ 0)` being `_` there too. The reference
@@ -601,7 +585,7 @@ _10 10 #: 1234
 // spellings: their monads were followed in round 9A.
 (_.) ^ (0.5)
 ? the reference widens a one-item NaN power to the complex type, as it does the root; reason: self-contradiction
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,<:,>:,+:,*:,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S: answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,<:,>:,+:,*:,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,^:,:. answers=numeric
 _. ^ _.
 ? the reference refuses the NaN power of a NaN where the same pair at three items answers; reason: self-contradiction
 2 %: (_.)
@@ -918,6 +902,10 @@ _1e16 ! _1
 ? `(_.) <. (_.)` is `_.` there and `<./\ ((_.) , (_.))` is `_. _.`, whose last item is this insert; reason: self-contradiction
 >./ ((_.) , (_.))
 ? `(_.) >. (_.)` is `_.` there and `>./\ ((_.) , (_.))` is `_. _.`, whose last item is this insert; reason: self-contradiction
+((<.) (1 : 'u/ y')) ((_.) , (_.))
+? the same insert written inside an explicit adverb; reason: self-contradiction
+((>.) (1 : 'u/ y')) ((_.) , (_.))
+? the same, for the maximum; reason: self-contradiction
 
 // The SUFFIX SCAN makes the NaN its own insert refuses. Every row below
 // folds a pair the reference will not fold on its own: `-/ ((__) , (__))`
@@ -1083,3 +1071,22 @@ o.&.% ((__) , (__))
 ~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%. also=F..,F.:,F:.,F::,+,-,*,%,<.,>.,+:,-.,,,,.,],[,p.,$,1e300
 ((1e160) , (1e160)) %. ((1e160) , (1e160))
 ? the smallest scale measured at which the reference's own method overflows; reason: proven-wrong
+
+// THE SYMBOL TABLE'S OWN FORMS, WHICH ARE THE INTERPRETER'S DATA STRUCTURE
+// AND NOT A VALUE THE LANGUAGE DEFINES. `0 s: y` and `1 s: y` DUMP a
+// symbol table: `$ 0 s: 2` is `2000 11` there, a table of slot counters
+// with one machine address in it (`3080238136`) and one
+// `_9223372036854775808`, and `6 s:`, `7 s:`, `_1 s:` and `_2 s:` number a
+// symbol within it — how many slots it holds, which are in use, how it
+// hashes them. Matching any of that would mean reproducing an
+// implementation's hash table rather than J, so libjay answers "not
+// implemented yet" and docs/coverage.md names them as gaps. The NAME forms
+// `2 s:` to `5 s:` are implemented and agree.
+0 s: (2)
+? the reference answers with its own symbol table, which is no value the language defines; reason: undefined
+~ cause=gap:err:not_supported_yet:_the_symbol-table_form_(#_s:)_is_not_supported_yet verb=s: also=x:,u:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,^:,&,@,:,f.,::,M.,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,+.,*.,;.,{::,e.,=:,=.,;:,":,@.,`:,%.,A.,I.,-.,/.,p..,E.,L.,$.,".,3!:,!,a:,%:,^.
+0 s: (0)
+? the same, where the table it dumps holds one row for the argument; reason: undefined
+1 s: (0 $ 0)
+? the second dumping form, over an argument with no items; reason: undefined
+

@@ -5997,3 +5997,52 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   system whose normal equations overflow. Scaling a system by a constant
   does not change its solution; `((1e150) , (1e150)) %. ((1e150) , (1e150))`
   is 1 there and the same system at 1e160 is refused.
+
+- 2026-09-08 — THE WHOLE-ARGUMENT UNDER HAS NO OBVERSE. `u&.:v` is built as
+  `v^:_1 @: (u&:v)` and libjay was inverting it the way it inverts any
+  atop, which the reference does not do: `(+&.:^.)^:_1 2` is a domain error
+  there where `(+&.^.)^:_1 2` is 2, and so is every other pair measured —
+  `(]&.:|.)^:_1`, `(>:&.:>:)^:_1`, `(<&.:>)^:_1`, `(+:&.:(+:@+:))^:_1`.
+  What HAS an obverse is the under at v's rank, `u&.v`, which is the same
+  atop with a rank round it, so the refusal is written into the atop arm
+  and the rank arm reaches past it. An under is recognised by its shape —
+  an atop whose left is exactly the obverse of the composition's right —
+  which is the reading that already writes `&.:` back out in an atomic
+  representation. APL's `⍢` is built the same way and is refused with it,
+  its published definition being J's `&.:` over the same obverse table.
+
+- 2026-09-08 — `x j. y` IS INVERTIBLE IN EITHER ARGUMENT, and so is its
+  reflexive. `y j. n` adds a fixed imaginary part, so `(j.&2)^:_1 5` is
+  `5j_2`; `n j. y` puts y on the imaginary axis above a fixed real part, so
+  `(2&j.)^:_1 (2j7)` is 7, the answer being `(y - n) % 0j1`; and `j.~ y` is
+  y times `1j1`, so `(j.~)^:_1 3` is `1.5j_1.5`. All three were measured
+  against the reference at real and complex arguments, types included.
+
+- 2026-09-08 — A NEGATIVE DIGIT COUNT IN A FORMAT SPECIFICATION IS THE
+  SCALED FORM, as a negative width is. `0j_1 ": 2` is `2.0e0` there,
+  `6j_1 ": 2` is ` 2.0e0` and `5j_1 ": 2` is `*****` — the exponential form
+  is written after one column of SIGN, which a field of a given width
+  reserves and a field of automatic width does not. libjay was clamping the
+  digit count at zero and formatting fixed, which made every `wj_d` field
+  the reference fills with asterisks a number instead.
+
+- 2026-09-08 — AN ITEM WITH NO ATOMS MATCHES EVERYWHERE, WHICH REVERSES
+  ROUND 4B's `i:` PIN. That round recorded `(0 0 $ 0) i: (0 $ 0)` as an
+  oracle self-contradiction: the reference answers `_1`, which is neither
+  an index into x nor `#x`, where its own `i.` answers 0. It is neither a
+  contradiction nor an exception. A cell with no atoms matches every item
+  of x, so the FIRST match is at 0 and the LAST at `#x - 1`, which for an x
+  with no items is `_1`; the reference's own `(2 0 $ 0) i: (i. 0)` is 1 and
+  `(2 0 $ 0) i. (i. 0)` is 0, the same arithmetic where the items exist.
+  The four pinned rows are ordinary corpus rows now.
+
+- 2026-09-08 — AN ANSWER THE REFERENCE ABBREVIATES IS NO MEASUREMENT. The
+  session's print limit (`9!:37 ] 0 4096 0 4096`, which the oracle's
+  preamble sets) elides the middle of a large display and writes `...` in
+  its place, and libjay has no such limit, so a sentence whose answer
+  passes it parts the two engines over nothing. `(i. 2 3 4) $ 2` is one:
+  `$` frames over its rank-1 left argument, so the answer has shape
+  `2 3 20 21 22 23`. The generator keeps a rank-three left argument out of
+  the representation grid's gerund half for it; the sweep, which draws its
+  sentences, can still write one, and two such rows are what the tenth
+  pair's residue named.

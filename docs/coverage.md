@@ -497,12 +497,28 @@ shape is in hand while the sentence runs, so `u&., y` is u over the ravel
 reshaped to y's own shape. Like the reference, it has one valence only, and
 `,^:_1`, `, b. _1` and `u&.:,` stay refusals.
 
-Two rows the reference has and libjay does not, and they say so by name:
+Three rows the reference has and libjay does not, and they say so by name:
 `!^:_1`, whose Newton iteration the reference runs in the COMPLEX plane
 (`!^:_1 _1` is `8.91115j18.2226` there) and which waits on a complex gamma
-function — the same gap as `! 3j4`; and `|.!.f`, whose obverse the
+function — the same gap as `! 3j4`; `|.!.f`, whose obverse the
 reference answers with `]`, an identity that does not undo the shift it is
-the obverse of.
+the obverse of; and `^~`, where the reference solves `z ^ z = y` for z —
+`(^~)^:_1 2` is 1.55961 and `(^~)^:_1 0.5` the complex
+`0.262893j0.499669` — which is the Lambert W function on whichever branch
+the argument falls, and libjay has neither it nor a numerical search to
+stand in for it.
+
+`u&.:v` — the under on the arguments WHOLE — has no obverse in either
+engine, where `u&.v` at v's rank has one. That is measured, not assumed:
+`(+&.:^.)^:_1 2` is a domain error in the reference where `(+&.^.)^:_1 2`
+is 2, and so is every other operand pair the obverse grid writes.
+APL's `⍢` is the same construction and is refused with it.
+
+`0 s:` and `1 s:` — the symbol table dumps — and `6 s:`, `7 s:`, `_1 s:`
+and `_2 s:` — which number a symbol within one — are gaps by decision
+rather than by omission: what the reference answers there is its own hash
+table, and `tests/corpus/j/divergences.txt` pins three of them as
+`reason: undefined`.
 
 A verb the table does not reach says so by name — "the obverse of (+/ % #)
 is not supported yet" — rather than guessing at a numerical inverse.
