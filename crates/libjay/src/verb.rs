@@ -15200,7 +15200,13 @@ fn stitched(v: &Verb, x: &Array, y: &Array) -> Option<Array> {
     if n == 0 {
         return None;
     }
+    // Two cells with no atoms between them join into a cell with none, and
+    // what its SHAPE is is the empty frame's own business: the general road
+    // answers that, as it answers the frame with no cell above.
     let (ca, cb) = (x.item_size(), y.item_size());
+    if ca + cb == 0 {
+        return None;
+    }
     let shape = vec![n, ca + cb];
     let (a, b) = (x.row_major_data(), y.row_major_data());
     let data = match (a, b) {
