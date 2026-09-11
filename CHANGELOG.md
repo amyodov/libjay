@@ -7,6 +7,17 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- FOUR CORPUS THEMES OFF THE EMPTY-FRAME RESIDUE, one per mechanism.
+  `residue-empty-inverse` (207 rows) is `%.` over twelve kinds of empty
+  under eighteen frame makers; `residue-empty-product` (293) is the table
+  `x u/ y` and the inner product `x u . v y` over an empty frame;
+  `residue-empty-run` (1,514) is the fill run's type and shape across the
+  scans, the cuts, the oblique and the rank frame; `residue-empty-fold`
+  (354) is a fold whose ITEMS have no atoms, the gerund cycle's identity and
+  the tessellation with no block. Both grids they were drawn from are
+  recorded whole: 4,608 sentences, every one asking `(3!:0 , $)` so that
+  type and shape are one measurement.
+
 - A BINARY REPRESENTATION READ BELOW THE PRINTED TOLERANCE IS EXCUSED AS
   `binary-ulp`. `3!:3` writes a value's bytes, and the whole corpus compares
   numbers at the six significant digits both engines print. Where their
@@ -564,6 +575,54 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- THE EMPTY FRAME'S FILL RUN CARRIES ITS OWN TYPE. The run had always given
+  the answer's SHAPE; its TYPE was being overruled by the argument's
+  wherever the operand was an insert and wherever the run came back boolean.
+  Only a SCALAR DYAD'S insert gives its type up that way — the identity
+  stands for a run that was never made — so `3!:0 ({/\ (0 $ 'a'))` is the
+  integer `{/ (0 $ 'a')` answers, `3!:0 (%./\ (0 $ 1x))` the boolean of the
+  order-one identity matrix, and `3!:0 (+\ (''))` the boolean `+ ''` really
+  is. Where the run REFUSES, the prefixes, the oblique and the interval cuts
+  leave `i. 0` — one axis of no items in the INTEGER type, whatever the
+  argument held — and the suffixes, the moving cut and the rank frame leave
+  nothing at all, the frame standing alone in the boolean type.
+
+- THE TABLE AND THE INNER PRODUCT ASK THAT FILL RUN TOO. `x u/ y` had one
+  for scalar dyads only and `x u . v y` had none, so both answered the frame
+  alone over an empty one: `(3!:0 , $) ((0 0 $ 0) (":/) (0 0 $ 0))` is a
+  character table per cell and `((0 0 $ 0) (+ . +) (0 0 $ 0))` the fold's
+  own table, where a cell that refuses — `(0 3 $ '') (+ . +) (0 3 $ '')` —
+  is still the frame alone.
+
+- `%.` OVER AN ARGUMENT WITH NO ATOMS KEEPS THE TYPE IT WAS HANDED. Nothing
+  is computed, so no type the arithmetic would have made ever arises:
+  `%. ('')` is an empty character list, `%. (0 0 $ <0)` a boxed table,
+  `%. (0 $ s: '')` a symbol list, the rank-2 answer carrying the transposed
+  shape. libjay answered a float empty, and every frame maker asks that
+  inverse — which is what put zeros where the reference puts spaces in
+  `_1 2 {. (%.;.2 (''))` and made `2 ": (%. (0 $ 'a'))` a format rather than
+  the domain error a dyadic format of characters is. The dyad's system with
+  no rows answers INTEGER zeros where the left argument has no atoms and
+  float ones where it has.
+
+- A FOLD WHOSE ITEMS HAVE NO ATOMS TYPES ITS ANSWER BY A FILL RUN OVER A
+  PAIR THAT NAMES NO TYPE. `3!:0 (+/ (2 0 $ 0.5))` is the integer 4 exactly
+  as `3!:0 (+/ (2 0 $ 0))` is; the SCAN of the same argument leaves the
+  argument's own type standing; and only `j.`, `r.` and `%:` — the three
+  whose fill run carries a type of its own — read the argument, being
+  complex, complex and the quotient's over numeric data.
+
+- A GERUND CYCLE'S EMPTY FOLD TAKES THE FIRST VERB'S IDENTITY instead of
+  being refused for want of one: ``((*`{.`}.)/) (0 $ a:)`` is 1,
+  ``((+`*)/) (0 $ 0)`` is 0 and ``((,`*`{.)/) (0 $ a:)`` the empty that
+  catenation folds to.
+
+- A TESSELLATION WITH NO BLOCK RUNS ITS VERB ON THE WHOLE ARGUMENT. `;.3`
+  and `;._3` with a size no axis can fit read the blocks' shape off `u y`
+  rather than off an empty block, so `$ (3 ];._3 (i. 2))` is `0 2`,
+  `$ (3 ];._3 (i. 2 4))` is `0 2 4` and `$ (2 3 ];._3 (i. 5 2))` is
+  `4 0 5 2`.
 
 - A NEGATIVE ATOM IN `C.` COUNTS BACK FROM THE END, which reverses round 8's
   pin of six rows as undefined. `(_2 0 2) C. (i. 3)` is `1 0 2` and

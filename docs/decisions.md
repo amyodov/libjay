@@ -6199,3 +6199,89 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   back — little-endian, as `3!:3` writes it — as two NORMAL doubles of the
   same sign inside the band. A type header decodes to a subnormal, so a
   difference of TYPE or of SHAPE can never be excused this way.
+
+- 2026-09-11 — THE EMPTY FRAME'S FILL RUN CARRIES ITS OWN TYPE, AND WHAT A
+  MAKER LEAVES WHERE THE RUN REFUSES IS THE MAKER'S OWN. Two grids settled
+  it — 1,728 sentences of twelve kinds of empty against eight verbs under
+  eighteen frame makers, and 2,880 of thirty verbs under eight scan, insert
+  and oblique spellings — every one of them asking `(3!:0 , $)` so that the
+  type and the shape are one measurement. Raw agreement over the two was
+  84%; it is 99.6% now.
+
+  The run's answer had always given the SHAPE. What it did not give was the
+  TYPE: libjay took the ARGUMENT's wherever the operand was an insert, and
+  wherever the run came back boolean. Neither is the rule. Only a SCALAR
+  DYAD'S insert gives its type up that way — the identity stands for a run
+  that was never made — and an insert of anything else, like every other
+  verb, carries the run's own: `3!:0 ({/\ (0 $ 'a'))` is the integer a
+  `{/ (0 $ 'a')` is, `3!:0 (%./\ (0 $ 1x))` the boolean of the order-one
+  identity matrix `%./` answers, and `3!:0 (+\ (''))` the boolean `+ ''`
+  really is.
+
+  WHERE THE RUN REFUSES the makers part, and they part consistently. The
+  prefixes `u\`, the oblique `u/.` and the interval cuts `;.1` and `;.2`
+  leave `i. 0` — one axis of no items in the INTEGER type, whatever the
+  argument held: `(3!:0 , $) (s: ;.1 (0 $ 'a'))` and
+  `(3!:0 , $) ((":/)\ (0 $ <0))` are both `4 0 0`. The suffixes `u\.`, the
+  moving cut `;._3` and the rank frame `u"n` leave nothing at all and the
+  frame stands on its own in the BOOLEAN type. That is one parameter of
+  `empty_frame` now (`Refused`), not a rule per maker.
+
+  THE TABLE `x u/ y` AND THE INNER PRODUCT `x u . v y` HAD NO FILL RUN AT
+  ALL over an empty frame — the table had one for scalar dyads only, and the
+  inner product none — so both answered the frame alone. They ask the same
+  function as everything else now: `(3!:0 , $) ((0 0 $ 0) (":/) (0 0 $ 0))`
+  is a character table per cell and `((0 0 $ 0) (+ . +) (0 0 $ 0))` the
+  fold's own, while `((0 3 $ '') (+ . +) (0 3 $ ''))`, whose cell is a
+  length error, is the frame alone.
+
+- 2026-09-11 — `%.` OVER AN ARGUMENT WITH NO ATOMS IS INVERTED BY ITS SHAPE
+  ALONE AND KEEPS THE TYPE IT WAS HANDED. Nothing is computed, so no type
+  the arithmetic would have made ever arises: `%. ('')` is an empty
+  CHARACTER list there, `%. (0 0 $ <0)` a boxed table, `%. (0 $ s: '')` a
+  symbol list and `%. (0 0 $ 1x)` an extended one, the rank-2 answer
+  carrying the transposed shape and the width check standing at any size.
+  libjay answered a float empty throughout, which is one bug and 135 of the
+  first grid's 228 parting cells: every frame maker asks that inverse, so
+  the cut, the scans, the oblique, the rank frame, the power and the each
+  all carried it. It is what put zeros where the reference puts spaces in
+  `_1 2 {. (%.;.2 (''))`, and what made `2 ": (%. (0 $ 'a'))` a format
+  rather than the domain error a dyadic format of characters is.
+
+  The DYAD follows the same reading at the one place it was wrong: a system
+  with no rows answers zeros, and those zeros are INTEGERS where the left
+  argument has no atoms and floats where it has —
+  `3!:0 ((0 $ 0) %. (0 $ 0))` is 4 and `3!:0 (2 %. (0 $ 0))` is 8.
+
+- 2026-09-11 — A FOLD WHOSE ITEMS HAVE NO ATOMS COMPUTES NOTHING, and the
+  type it answers in is the fill run's over a pair of arguments that name no
+  type at all. Measured over 224 cells — eight types against fifteen scalar
+  dyads, as an insert and as a scan. The REDUCE reads both sides as BOOLEAN
+  whatever the argument was: `3!:0 (+/ (2 0 $ 0.5))` is the integer 4
+  exactly as `3!:0 (+/ (2 0 $ 0))` is, where the float pair's own sum is the
+  float type. The SCAN leaves the ARGUMENT's type standing, as an insert's
+  identity always does. Only the three verbs whose fill run carries a type
+  of its own read the argument in either place — `j.` and `r.` are complex
+  over any numeric type and `%:` is the quotient's, `3!:0 (%:/ (2 0 $ 1x))`
+  being 64 — and over data that is not numeric those three answer the
+  integer, the boolean and the boolean. One cell of the 224 fits no reading
+  of this: `3!:0 (j./\ (2 0 $ 'a'))` is the integer 4 there where `r.` and
+  `%:` over the same characters answer the argument's own type; it is left
+  measured and unfollowed rather than special-cased.
+
+- 2026-09-11 — A GERUND CYCLE'S EMPTY FOLD TAKES THE FIRST VERB'S IDENTITY.
+  The verbs are handed out one per step and an empty fold takes none of
+  them, so there is nothing to choose between them but the order they are
+  written in: ``((*`{.`}.)/) (0 $ a:)`` is 1 in the reference, ``((+`*)/)``
+  is 0, ``((*`+)/)`` is 1 and ``((,`*`{.)/)`` the empty that catenation
+  folds to. libjay refused the lot with "no identity".
+
+- 2026-09-11 — THE ONE RUN A TESSELLATION WITH NO BLOCK HAS IS THE WHOLE
+  ARGUMENT. `x u;.3 y` and `x u;._3 y` with a size no axis can fit have no
+  block to compute, and the shape the blocks WOULD have had is read off the
+  verb applied to y itself — not to a block of the size that did not fit,
+  and not to an empty one: `$ (3 ];._3 (i. 2))` is `0 2` in the reference,
+  `$ (3 ];._3 (i. 2 4))` is `0 2 4` and `$ (2 3 ];._3 (i. 5 2))` is
+  `4 0 5 2`, every one of them y's own shape behind the frame. libjay ran an
+  empty block, which made every such answer `0` where the argument had
+  items.

@@ -3456,7 +3456,7 @@ impl Verb {
                 self.scalar_dyad_op(),
                 Some(ScalarDyad::Log | ScalarDyad::Root)
             );
-            let framed = empty_frame(&p.frame, joining.unwrap_or_else(|| y.dtype()), cell, conform, keep_any, agreeing, indexing, conform && retries, &[], ctx, |left, numeric, c| {
+            let framed = empty_frame(&p.frame, joining.unwrap_or_else(|| y.dtype()), cell, conform, keep_any, agreeing, indexing, conform && retries, Refused::NOTHING, ctx, |left, numeric, c| {
                 let left = match &numeric_left {
                     Some(l) if numeric => l,
                     _ => left,
@@ -3806,6 +3806,29 @@ fn shape_refusal(e: &Error, agreeing: bool, indexing: bool) -> bool {
         || (indexing && index_refusal(e))
 }
 
+/// WHAT A FRAME MAKER LEAVES WHERE ITS FILL RUN HAS NOTHING TO SAY: the
+/// axes a cell would have added, and the type they carry.
+///
+/// The makers that write an empty of their own where the run refuses — the
+/// prefixes `u\`, the oblique `u/.` and the interval cuts `;.1` and `;.2` —
+/// leave `i. 0`, an INTEGER list of no items, whatever the argument held:
+/// `3!:0 (s: ;.1 (0 $ 'a'))` and `3!:0 ((":/)\ (0 $ <0))` are both 4 in the
+/// reference. The rest — the suffixes `u\.`, the rank frame `u"n`, the
+/// moving cut `;._3` — leave nothing at all, and the frame stands on its
+/// own in the BOOLEAN type.
+#[derive(Clone, Copy)]
+struct Refused<'a> {
+    shape: &'a [usize],
+    dtype: DType,
+}
+
+impl Refused<'_> {
+    /// The frame alone, in the boolean type.
+    const NOTHING: Refused<'static> = Refused { shape: &[], dtype: DType::Bool };
+    /// `i. 0`: one axis of no items, in the integer type.
+    const I0: Refused<'static> = Refused { shape: &[0], dtype: DType::I64 };
+}
+
 #[allow(clippy::too_many_arguments)]
 fn empty_frame(
     frame: &[usize],
@@ -3816,12 +3839,12 @@ fn empty_frame(
     agreeing: bool,
     indexing: bool,
     probe: bool,
-    refused: &[usize],
+    refused: Refused<'_>,
     ctx: &mut Ctx<'_>,
     mut run: impl FnMut(&Array, bool, &mut Ctx<'_>) -> Result<Array>,
 ) -> Result<Array> {
     let mut shape = frame.to_vec();
-    let mut learnt = true;
+    let mut dtype = dtype;
     if let Some(cell) = cell {
         match run(&cell, false, ctx) {
             Ok(answer) => {
@@ -3855,22 +3878,21 @@ fn empty_frame(
                 match run(&numeric_like(&cell), true, ctx) {
                     Ok(answer) => shape.extend_from_slice(&answer.shape),
                     Err(_) => {
-                        shape.extend_from_slice(refused);
-                        learnt = !refused.is_empty();
+                        shape.extend_from_slice(refused.shape);
+                        dtype = refused.dtype;
                     }
                 }
             }
             Err(_) => {
-                shape.extend_from_slice(refused);
-                learnt = !refused.is_empty();
+                shape.extend_from_slice(refused.shape);
+                dtype = refused.dtype;
             }
         }
     }
-    // A frame whose cells' shape could not be learnt at all is the empty
-    // the frame alone spells, in the BOOLEAN type rather than in the
-    // argument's: `3!:0 p. (0 2 $ <0)` is 1 there where the argument is
-    // boxed.
-    Ok(Array::new(shape, Data::empty(if learnt { dtype } else { DType::Bool })))
+    // The fill run had nothing to say, so the answer is what the maker
+    // leaves in its place — see [`Refused`]: `3!:0 p. (0 2 $ <0)` is 1
+    // there where the argument is boxed.
+    Ok(Array::new(shape, Data::empty(dtype)))
 }
 
 /// The same shape, holding zeros: a stand-in whose type no verb objects to.
@@ -4085,7 +4107,7 @@ fn prim_monad_frame(
         let cell = fill_cell(y, frame_rank, pure);
         let conform = ctx.cfg.rules.lang == crate::Lang::J;
         let probe = conform && !matches!(p.monad, MonadOp::PolyRoots | MonadOp::PolyDeriv);
-        let out = empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, &[], ctx, |cell, _numeric, c| {
+        let out = empty_frame(&frame, y.dtype(), cell, conform, false, false, true, probe, Refused::NOTHING, ctx, |cell, _numeric, c| {
             monad_op(p, cell, c, span)
         })?;
         // The frame learnt a SHAPE from a cell of fills; what the answer's
@@ -4167,7 +4189,7 @@ fn rank_monad(
         // and the frame stands alone in the boolean type: `$ #:"0 (0 $ <0)`
         // is `0` in the reference where `$ #: (0 $ <0)` — the same verb
         // with no frame around it — is `0 0`.
-        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, false, &[], ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, false, Refused::NOTHING, ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
     }
@@ -11608,7 +11630,21 @@ fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
             let t = empty_scalar_dtype(op, &fill_stand_in(x), &fill_stand_in(y), ctx.cfg, span);
             return Ok(Array::new(frame, Data::empty(t)));
         }
-        return assemble(&frame, Vec::new(), span);
+        // ANY OTHER VERB IS RUN ON A PAIR OF FILL CELLS, as every frame
+        // maker runs one: the frame says how many cells there would have
+        // been and the run says what shape and type one would have had.
+        // `(3!:0 , $) ((0 0 $ 0) (":/) (0 0 $ 0))` is `2 0 0 0` in the
+        // reference — a character table per cell — where the frame alone
+        // would be `0`, and `((0 0 $ 0) ({./) (0 0 $ 0))`, whose cell is
+        // refused, is the frame alone in the boolean type.
+        let pure = u.is_pure();
+        let right = fill_cell(y, fyl, pure);
+        let cell = fill_cell(x, fxl, pure).filter(|_| right.is_some());
+        return empty_frame(
+            &frame, x.dtype(), cell, false, false, false, true, false,
+            Refused::NOTHING, ctx,
+            |left, _n, c| u.dyad(left, right.as_ref().expect("paired with a right fill"), c, span),
+        );
     }
     if frame.is_empty() {
         return u.dyad(x, y, ctx, span);
@@ -11809,11 +11845,25 @@ fn inner_cells(
     }
     let frame = x.shape[..frame_rank].to_vec();
     let n: usize = frame.iter().product();
+    let pure = u.is_pure() && v.is_pure();
     if n == 0 {
-        return assemble(&frame, Vec::new(), span);
+        // The inner product's own fill run: one cell of x against the
+        // whole of y, folded as any cell would be.
+        // `(3!:0 , $) ((0 0 $ 0) (+ . +) (0 0 $ 0))` is `4 0 0 0` in the
+        // reference, the fold's own table per cell, and
+        // `((0 3 $ '') (+ . +) (0 3 $ ''))` — whose cell is a length error
+        // — is the frame alone in the boolean type.
+        let cell = fill_cell(x, frame_rank, pure);
+        return empty_frame(
+            &frame, x.dtype(), cell, false, false, false, true, false,
+            Refused::NOTHING, ctx,
+            |cell, _n, c| {
+                let inner = v.dyad(cell, y, c, span)?;
+                inner_fold(u, apl, &inner, c, span)
+            },
+        );
     }
     let work = x.count().max(y.count());
-    let pure = u.is_pure() && v.is_pure();
     let items = apl && !each_on_fold(ctx);
     let cells = each_cell(n, work, pure, ctx, |i, c| {
         let inner = v.dyad(&x.cell_at(frame_rank, i), y, c, span)?;
@@ -13425,6 +13475,11 @@ fn reduce_identity(v: &Verb, n: usize, lang: crate::Lang) -> Option<Data> {
         Verb::Memo(inner, _) | Verb::Reduce(inner) => {
             return reduce_identity(inner, n, lang);
         }
+        // A GERUND CYCLE hands its verbs out one per step and an empty fold
+        // takes none of them, so the identity is the FIRST verb's:
+        // ``((*`{.`}.)/) (0 $ a:)`` is 1 in the reference, ``((+`*)/)`` is 0
+        // and ``((,`*`{.)/)`` the empty that catenation folds to.
+        Verb::Cycle(vs) if !vs.is_empty() => return reduce_identity(&vs[0], n, lang),
         // DECLARING AN OBVERSE leaves what the verb does between two values
         // alone, so it keeps its identity: `((+ :. ^.)/) (0 $ 0)` is 0.
         Verb::WithObverse(inner, _) => return reduce_identity(inner, n, lang),
@@ -14329,6 +14384,28 @@ fn reduce_vector_cells(u: &Verb, y: &Array, frame_rank: usize) -> Option<Array> 
     Some(Array::new(frame, data))
 }
 
+/// THE TYPE A FOLD ANSWERS IN WHERE ITS ITEMS HAVE NO ATOMS.
+///
+/// No pair of elements is ever formed, so the arguments name no type at all
+/// and the fill run is asked about a pair of BOOLEAN empties whatever the
+/// argument held: `3!:0 (+/ (2 0 $ 0.5))` is the integer 4 in the reference
+/// exactly as `3!:0 (+/ (2 0 $ 0))` is, where the float pair's own sum is
+/// the float type. Only the three verbs whose fill run carries a type of
+/// its own read the argument — `j.` and `r.` are complex over any numeric
+/// type and `%:` is the quotient's, `3!:0 (%:/ (2 0 $ 1x))` being 64 — and
+/// over data that is not numeric those three answer what their own rule for
+/// a non-numeric side gives: the integer, the boolean and the boolean.
+fn empty_cell_fold_dtype(op: ScalarDyad, t: DType, cfg: EvalCfg, span: Span) -> DType {
+    let named =
+        matches!(op, ScalarDyad::Root | ScalarDyad::MakeComplex | ScalarDyad::PolarBy);
+    if named && !t.is_numeric() {
+        return if op == ScalarDyad::MakeComplex { DType::I64 } else { DType::Bool };
+    }
+    let read = if named { t } else { DType::Bool };
+    let cell = Array::new(vec![0], Data::empty(read));
+    empty_scalar_dtype(op, &cell, &cell, cfg, span)
+}
+
 /// Insert `v` between the items of `y`, folding right to left.
 fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     if y.rank() == 0 {
@@ -14388,6 +14465,16 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
                 span,
             )),
         };
+    }
+    // ITEMS WITH NO ATOMS FOLD TO NOTHING, and what type that nothing
+    // carries is the fill run's — see [`empty_cell_fold_dtype`].
+    if m == 0
+        && ctx.cfg.rules.lang == crate::Lang::J
+        && let Verb::Prim(p) = v
+        && let DyadOp::Scalar(op) = p.dyad
+    {
+        let t = empty_cell_fold_dtype(op, y.dtype(), ctx.cfg, span);
+        return Ok(Array::new(cell_shape, Data::empty(t)));
     }
     if y.dtype().is_numeric() && let Verb::Prim(p) = v && let DyadOp::Scalar(op) = p.dyad {
         // The typed fold covers the arithmetic reductions and runs
@@ -15495,10 +15582,11 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         let cell = u.is_pure().then(|| base.clone());
         let j = ctx.cfg.rules.lang == crate::Lang::J;
         // Where the verb has nothing to say about that run at all, the
-        // prefixes leave a list of empty lists and the suffixes an empty
-        // list: `$ (4&{)\\ (0 3 $ 0)` is `0 0` and `$ (4&{)\\. (0 3 $ 0)`
-        // is `0`.
-        let refused: &[usize] = if j && !back { &[0] } else { &[] };
+        // prefixes leave `i. 0` — a list of empty INTEGER lists, whatever
+        // the argument held — and the suffixes leave nothing at all:
+        // `(3!:0 , $) ((4&{)\\ (0 3 $ 'a'))` is `4 0 0` in the reference and
+        // `(3!:0 , $) ((4&{)\\. (0 3 $ 0))` is `1 0`.
+        let refused = if j && !back { Refused::I0 } else { Refused::NOTHING };
         let framed =
             empty_frame(&[0], base.dtype(), cell, false, false, false, true, j, refused, ctx, |cell, _n, c| {
                 u.monad(cell, c, span)
@@ -15520,6 +15608,13 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         // eight types — answers the argument's own. They are the same three
         // the empty scalar dyad's fill run treats apart, `%:` typing itself
         // from `%` and the other two from their right argument alone.
+        // ONLY A SCALAR DYAD'S INSERT gives its type up that way. An insert
+        // of anything else carries the run's own type, as every other verb
+        // does: `3!:0 ({/\ (0 $ 'a'))` is the integer 4 that `{/ (0 $ 'a')`
+        // is, `3!:0 (%./\ (0 $ 1x))` the boolean 1 of the order-one
+        // identity matrix `%./` answers, and a run that genuinely came back
+        // BOOLEAN stays boolean — `3!:0 (+\ (''))` and `3!:0 (=\ (''))` are
+        // 1 in the reference where the argument's type would make them 2.
         let inner_op = match u {
             Verb::Reduce(v) => v.scalar_dyad_op(),
             _ => None,
@@ -15528,15 +15623,34 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
             inner_op,
             Some(ScalarDyad::Root | ScalarDyad::MakeComplex | ScalarDyad::PolarBy)
         );
-        let identity = matches!(u, Verb::Reduce(_)) && !boolean_run;
         let dt = if boolean_run {
             DType::Bool
-        } else if identity || framed.dtype() == DType::Bool {
+        } else if inner_op.is_some() {
             base.dtype()
         } else {
             framed.dtype()
         };
         return Ok(Array::new(framed.shape, Data::empty(dt)));
+    }
+    // EVERY RUN FOLDS ITEMS WITH NO ATOMS, so no run computes anything and
+    // the answer is the argument's own shape. The type is the ARGUMENT'S,
+    // as an insert's identity always leaves it — except for the three verbs
+    // whose fill run carries a type of its own over numeric data:
+    // `3!:0 (+/\ (2 0 $ 0))` is 1 in the reference where its own
+    // `3!:0 (+/ (2 0 $ 0))` is 4, and `3!:0 (j./\ (2 0 $ 0))` is 16.
+    if m == 0
+        && ctx.cfg.rules.lang == crate::Lang::J
+        && let Verb::Reduce(inner) = u
+        && let Some(op) = inner.scalar_dyad_op()
+    {
+        let named =
+            matches!(op, ScalarDyad::Root | ScalarDyad::MakeComplex | ScalarDyad::PolarBy);
+        let t = if named && base.dtype().is_numeric() {
+            empty_cell_fold_dtype(op, base.dtype(), ctx.cfg, span)
+        } else {
+            base.dtype()
+        };
+        return Ok(Array::new(base.shape.clone(), Data::empty(t)));
     }
     if n > 0 && base.dtype().is_numeric() && let Some(op) = folded_op(u) {
         // Folding from the right is the insert's own order, so it holds
@@ -17816,6 +17930,15 @@ fn exact_matrix_divide(x: &Array, y: &Array) -> Option<Array> {
 /// `%. y` / `⌹ y`: the inverse of a square matrix, or the least-squares
 /// pseudo-inverse of a taller one. A wider one is refused, as both
 /// references refuse it.
+/// A matrix with more columns than rows has no inverse, at any size.
+fn wider_than_tall(m: usize, n: usize, span: Span) -> Error {
+    Error::new(
+        ErrorKind::Length,
+        format!("cannot invert a {m} by {n} matrix: it has more columns than rows"),
+        Some(span),
+    )
+}
+
 fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     // A SCALAR is not a one-by-one matrix here: it is a reciprocal, and it
     // answers wherever a reciprocal does — a COMPLEX scalar with it, so
@@ -17824,6 +17947,27 @@ fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     // types as `1r123`.
     if y.rank() == 0 {
         return scalar_monad(ScalarMonad::Recip, y, cfg, span);
+    }
+    // AN ARGUMENT WITH NO ATOMS IS INVERTED BY ITS SHAPE ALONE, and keeps
+    // THE TYPE IT WAS HANDED. Nothing is computed, so no type the
+    // arithmetic would have made ever arises: `%. ('')` is an empty
+    // CHARACTER list there, `%. (0 0 $ <0)` a boxed table, `%. (0 $ s: '')`
+    // a symbol list and `%. (0 0 $ 1x)` an extended one. That is what puts
+    // a space rather than a zero in `_1 2 {. (%.;.2 (''))`, and what makes
+    // `2 ": (%. (0 $ 'a'))` the domain error a dyadic format of characters
+    // is. The width check stands at any size — a matrix with more columns
+    // than rows has no inverse whether or not it holds anything.
+    if y.count() == 0 && y.rank() <= 2 {
+        let shape = if y.rank() == 2 {
+            let (m, n) = (y.shape[0], y.shape[1]);
+            if m < n {
+                return Err(wider_than_tall(m, n, span));
+            }
+            vec![n, m]
+        } else {
+            y.shape.clone()
+        };
+        return Ok(Array::new(shape, Data::empty(y.dtype())));
     }
     // ANYTHING HOLDING A NaN INVERTS TO NaNs OF ITS OWN SHAPE rather than
     // being refused as a singular matrix: `%. (2 2 $ _. _. 1 0)` is four
@@ -17887,28 +18031,12 @@ fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
         return Ok(Array::new(y.shape.clone(), Data::F64(out.into())));
     }
     let (a, m, n) = as_matrix(y, span)?;
-    // A vector with no elements is a column of no rows, and the reference
-    // answers it with an empty rather than reading it as a wider matrix
-    // than it is tall.
-    if a.is_empty() && y.rank() < 2 {
-        return Ok(Array::new(y.shape.clone(), Data::empty(DType::F64)));
-    }
     if m < n {
-        return Err(Error::new(
-            ErrorKind::Length,
-            format!("cannot invert a {m} by {n} matrix: it has more columns than rows"),
-            Some(span),
-        ));
+        return Err(wider_than_tall(m, n, span));
     }
     // A rank-2 argument gives the n by m pseudo-inverse; a vector or scalar
     // keeps its own shape, which is what J prints for them.
     let shape = if y.rank() == 2 { vec![n, m] } else { y.shape.clone() };
-    // Nothing to invert: the answer is the empty of the shape the inverse
-    // would have had. The width check above still runs first, so a wider
-    // empty is the length error it would be at any size.
-    if a.is_empty() {
-        return Ok(Array::new(shape, Data::empty(DType::F64)));
-    }
     let mut eye = vec![0.0f64; m * m];
     for i in 0..m {
         eye[i * m + i] = 1.0;
@@ -18022,7 +18150,14 @@ fn matrix_divide(
         } else {
             vec![n]
         };
+        // THOSE ZEROS ARE INTEGERS WHERE THE LEFT ARGUMENT HAS NO ATOMS and
+        // floats where it has: `3!:0 ((0 $ 0) %. (0 $ 0))` is 4 in the
+        // reference and `3!:0 (2 %. (0 $ 0))` is 8, over every type either
+        // side can be written in.
         let count: usize = shape.iter().product();
+        if x.count() == 0 {
+            return Ok(Array::new(shape, Data::I64(vec![0i64; count].into())));
+        }
         return Ok(Array::new(shape, Data::F64(vec![0.0; count].into())));
     }
     // `%.` takes its right-hand side WHOLE — its left rank is infinite —
@@ -18860,8 +18995,9 @@ fn key(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
 /// the shape of the answer: `,//. i. 0 3` is a 0 by 0 table where
 /// `+//. i. 0 3` is an empty list, because `,/` of no items is a list and
 /// `+/` of no items is an atom. A `u` that refuses the empty cell — `]/`
-/// and `#/` have no identity element to answer with — leaves one zero axis
-/// standing, which is what the reference answers for `]//. i. 0 0`.
+/// and `#/` have no identity element to answer with — leaves `i. 0`: one
+/// zero axis in the INTEGER type, whatever the argument held, which is what
+/// the reference answers for `]//. i. 0 0` and for `s:/. (0 $ 'a')`.
 fn no_cells(
     u: &Verb,
     item_shape: &[usize],
@@ -18879,7 +19015,7 @@ fn no_cells(
         shape.extend_from_slice(&answer.shape);
         return Array::new(shape, Data::empty(answer.dtype()));
     }
-    Array::new(vec![0, 0], Data::empty(dtype))
+    Array::new(vec![0, 0], Data::empty(DType::I64))
 }
 
 /// `u/. y` (J): `u` over each anti-diagonal of a table, starting at the
@@ -19088,9 +19224,10 @@ fn cut(
     if ranges.is_empty() {
         let cell = u.is_pure().then(|| section(&items, 0, 0));
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        // A verb with nothing to say about that piece leaves a list of
-        // empty lists, as the prefixes do.
-        let refused: &[usize] = if j { &[0] } else { &[] };
+        // A verb with nothing to say about that piece leaves `i. 0`, as the
+        // prefixes do: `(3!:0 , $) (s: ;.1 (0 $ 'a'))` is `4 0 0` in the
+        // reference whatever type the argument held.
+        let refused = if j { Refused::I0 } else { Refused::NOTHING };
         let out = empty_frame(&[0], items.dtype(), cell, false, false, false, true, j, refused, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         })?;
@@ -19222,7 +19359,7 @@ fn per_axis_cut(
         let size = vec![0i64; frame.len()];
         let cell = u.is_pure().then(|| subarray(y, &origin, &size, span)).transpose()?;
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        let out = empty_frame(&frame, y.dtype(), cell, false, false, false, true, j, &[], ctx, |cell, _n, c| {
+        let out = empty_frame(&frame, y.dtype(), cell, false, false, false, true, j, Refused::NOTHING, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         })?;
         return Ok(retype_empty_cut(out, u, y, ctx.cfg, span));
@@ -19459,15 +19596,17 @@ fn tessellate(
         frame.push(count as usize);
     }
     let total: usize = frame.iter().product();
-    // No block fits on some axis, so there is no block at all: the verb run
-    // on an EMPTY block says what shape the blocks would have had, the axes
-    // no size named staying whole. `$ 2 2 ];.3 (i. 0 0 5)` is `0 0 0 0 5`.
+    // No block fits on some axis, so there is no block at all, and THE ONE
+    // RUN A TESSELLATION WITH NO BLOCK HAS IS THE WHOLE ARGUMENT — not a
+    // block of the size that did not fit, and not an empty one:
+    // `$ (3 ];._3 (i. 2))` is `0 2` in the reference, `$ (3 ];._3 (i. 2 4))`
+    // is `0 2 4` and `$ (2 3 ];._3 (i. 5 2))` is `4 0 5 2`, every one of
+    // them the argument's own shape behind the frame. `$ 2 2 ];.3 (i. 0 0 5)`
+    // is `0 0 0 0 5` by the same reading.
     if total == 0 {
-        let origin = vec![0i64; frame.len()];
-        let block = vec![0i64; frame.len()];
-        let cell = u.is_pure().then(|| subarray(y, &origin, &block, span)).transpose()?;
+        let cell = u.is_pure().then(|| y.clone());
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&frame, y.dtype(), cell, false, false, false, true, j, &[], ctx, |cell, _n, c| {
+        return empty_frame(&frame, y.dtype(), cell, false, false, false, true, j, Refused::NOTHING, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
@@ -23239,7 +23378,7 @@ fn outfix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resu
     if starts.is_empty() {
         let cell = u.is_pure().then(|| select_items(&list, &[]));
         let j = ctx.cfg.rules.lang == crate::Lang::J;
-        return empty_frame(&[0], list.dtype(), cell, false, false, false, true, j, &[], ctx, |cell, _n, c| {
+        return empty_frame(&[0], list.dtype(), cell, false, false, false, true, j, Refused::NOTHING, ctx, |cell, _n, c| {
             u.monad(cell, c, span)
         });
     }
