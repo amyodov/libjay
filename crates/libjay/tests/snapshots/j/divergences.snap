@@ -694,6 +694,50 @@
 < _j_ _j_
 < _j_ _j_
 > j: <error>
+= (_) % (3j4 1j_1)
+? `_ % (4 $ 3j4)` is four `_j__` there and `_ % (3 $ 3j4)` is a NaN error, which is the same division at two lengths; reason: self-contradiction
+< _j__ _j_
+> j: <error>
+= (_ __ 0) % "0 2 (3j4 1j_1)
+? the same atom-against-list cell under a rank frame; reason: self-contradiction
+< _j__   _j_
+< __j_ __j__
+<    0     0
+> j: <error>
+= (_ __ 0) %/ (3j4 1j_1)
+? the same cell through an outer product; reason: self-contradiction
+< _j__   _j_
+< __j_ __j__
+<    0     0
+> j: <error>
+= (3!:0 , $) ((#\\) (0 $ 1x))
+? `3!:0 (# (0 $ 1x))` is 64 there and the scan's one run IS that tally; reason: self-contradiction
+< 64 0
+> j: 4 0
+= (3!:0 , $) ((#\\.) (0 $ 1x))
+? the same tally under the suffixes; reason: self-contradiction
+< 64 0
+> j: 4 0
+= (3!:0 , $) ((#/.) (0 $ 1x))
+? the same tally under the oblique; reason: self-contradiction
+< 64 0
+> j: 4 0
+= (3!:0 , $) (($/.) (0 $ 1x))
+? `3!:0 ($ (0 $ 1x))` is 64 there and the oblique's one run IS that shape; reason: self-contradiction
+< 64 0 1
+> j: 4 0 1
+= (3!:0 , $) ($ ;.1 (0 $ 1x))
+? the same shape under an interval cut; reason: self-contradiction
+< 64 0 1
+> j: 4 0 1
+= (3!:0 , $) ($ ;.2 (0 $ 1x))
+? the same shape under the other interval cut; reason: self-contradiction
+< 64 0 1
+> j: 4 0 1
+= (3!:0 , $) (# ;.1 (0 $ 1x))
+? the same tally under an interval cut; reason: self-contradiction
+< 64 0
+> j: 4 0
 = +:&.% (__)
 ? `% (2 * (% (__)))` is `__` there and `% (+: (% (__)))` is `_`, though `+: y` is `2 * y`; reason: self-contradiction
 < __

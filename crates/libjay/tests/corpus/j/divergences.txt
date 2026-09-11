@@ -67,7 +67,7 @@ u: 233
 // matches them by cause instead.
 2 p: (3j4 1j_1)
 ? the reference answers a factorisation of a complex number with nothing at all; reason: abort
-~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer|we-refuse:err:domain_error:_prime_exponents_need_an_integer verb=p:,q: also=j.,r.,#:,#.,o.,F..,F.:,F::,M.,^,^.,%:,+,-,*,%,^:,L:,S:,-.,>,e.,~:,=,<:,>:,<.,>.,|.,{.,}.,|,.,!.,x:,u:,b.,f.,::,p.,p..,+.,*.,i:,":,A.,I.,/.,E.,s:,%.,+:,-:,*:,a.
+~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer|we-refuse:err:domain_error:_prime_exponents_need_an_integer verb=p:,q: also=j.,r.,#:,#.,o.,F..,F.:,F::,M.,^,^.,%:,+,-,*,%,^:,L:,S:,-.,>,e.,~:,=,<:,>:,<.,>.,|.,{.,}.,|,.,!.,x:,u:,b.,f.,::,p.,p..,+.,*.,i:,":,A.,I.,/.,E.,s:,%.,+:,-:,*:,a.,:
 
 // A SINGULAR MATRIX UNDER `%.`, WHERE THE REFERENCE HAS NO RULE — ONLY THE
 // LUCK OF ITS OWN FACTORISATION. Four rank-deficient arguments, measured:
@@ -904,6 +904,38 @@ _1e16 ! _1
 ? the same division under a rank frame, which makes that atom-against-list cell; reason: self-contradiction
 ((_j_) , (_j_)) %/ ((2) , (2))
 ? the same division through an outer product, which makes the same cell; reason: self-contradiction
+
+// A REAL INFINITY DIVIDED BY A COMPLEX LIST IS REFUSED BY THE LENGTH OF THE
+// LIST. `_ % (n $ 3j4)` answers `_j__` where n is 1 or a multiple of four
+// and is a NaN error at every other length — measured at 1, 2, 3, 4, 5, 6,
+// 7, 8, 9, 10, 12, 16, 17 and 32 — so the same division, cell for cell,
+// has an answer four times over and none three times over. The rank
+// conjunction and the outer product both make that cell.
+(_) % (3j4 1j_1)
+? `_ % (4 $ 3j4)` is four `_j__` there and `_ % (3 $ 3j4)` is a NaN error, which is the same division at two lengths; reason: self-contradiction
+(_ __ 0) % "0 2 (3j4 1j_1)
+? the same atom-against-list cell under a rank frame; reason: self-contradiction
+(_ __ 0) %/ (3j4 1j_1)
+? the same cell through an outer product; reason: self-contradiction
+
+// THE TALLY AND THE SHAPE OF AN EXTENDED EMPTY, RUN AS A FRAME MAKER'S ONE
+// FILL RUN. `3!:0 (# (0 $ 1x))` and `3!:0 ($ (0 $ 1x))` are 64 — the
+// extended type — in the reference, and the scans, the oblique and the
+// interval cuts all report the integer type for that very run.
+(3!:0 , $) ((#\\) (0 $ 1x))
+? `3!:0 (# (0 $ 1x))` is 64 there and the scan's one run IS that tally; reason: self-contradiction
+(3!:0 , $) ((#\\.) (0 $ 1x))
+? the same tally under the suffixes; reason: self-contradiction
+(3!:0 , $) ((#/.) (0 $ 1x))
+? the same tally under the oblique; reason: self-contradiction
+(3!:0 , $) (($/.) (0 $ 1x))
+? `3!:0 ($ (0 $ 1x))` is 64 there and the oblique's one run IS that shape; reason: self-contradiction
+(3!:0 , $) ($ ;.1 (0 $ 1x))
+? the same shape under an interval cut; reason: self-contradiction
+(3!:0 , $) ($ ;.2 (0 $ 1x))
+? the same shape under the other interval cut; reason: self-contradiction
+(3!:0 , $) (# ;.1 (0 $ 1x))
+? the same tally under an interval cut; reason: self-contradiction
 
 // THE SIGN OF A ZERO THROUGH AN UNDER. `% (__)` is a zero in both engines
 // and the display does not say which one; `&.%` asks, because the obverse
