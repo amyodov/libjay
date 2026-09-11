@@ -6046,3 +6046,54 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   the representation grid's gerund half for it; the sweep, which draws its
   sentences, can still write one, and two such rows are what the tenth
   pair's residue named.
+
+- 2026-09-11 — THE N-WISE INSERT FOLDS EVERY WINDOW DIRECTLY WHERE THE
+  OPERATION DOES NOT REGROUP. The typed window path covered the associative
+  arithmetic only — `+`, `*`, `<.`, `>.` — because it regroups the windows
+  into blocks and shares the work between them, and everything else built
+  an array per window and interpreted the verb over it: `2 -/\ y` over a
+  million doubles cost 481 ms where `2 +/\ y` cost 2.9. A fold of ONE
+  window needs nothing shared, so where the operation cannot regroup the
+  windows are folded one at a time inside the same typed loop — `w` steps
+  per result instead of two, and no array built at all. `u~` travels as a
+  flag on the step rather than as a path of its own, which is what makes
+  the reflexive difference the same speed as the difference.
+
+- 2026-09-11 — A WINDOWED REDUCE OF A CONSTANT COMBINATION IS A
+  CORRELATION, and is recognised as one. `w (u/@(c&v))\ y` — and `@:`, the
+  bond the other way round, and the same dot product written as an inner
+  product `w (c u/ . v ])\ y` — is one pass over the argument's own buffer
+  with the weights in registers, where reading it as a verb is one
+  interpretation per window. It is the shape of every FIR filter, every
+  weighted moving average and every Savitzky-Golay smoother. The
+  recognition is narrow on purpose: a VECTOR argument, real weights, one
+  per item of the window, every one of them finite, both sides reading as
+  floats, and a step that meets a NaN abandons the whole pass and leaves
+  the general road to say what J makes of it.
+
+- 2026-09-11 — A FOLD WHOSE STEP IS ONE SCALAR PRIMITIVE IS A TYPED LOOP.
+  `x (] F:. +) y` over a numeric vector has nothing to interpret: no verb
+  stands between the step and what is kept, and no step can take the fold's
+  control, which only an explicit definition writes. The loop answers where
+  every value in reach is an ordinary finite number and no step leaves the
+  element type; an overflow, an infinity or a NaN abandons the pass for the
+  interpreted road, whose rules for those are the dialect's own. A fold
+  whose step is a DEFINED verb keeps the interpreted road — that is the
+  point of the construct — and what it pays there is per-call allocation,
+  which is measured in docs/algorithms.md.
+
+- 2026-09-11 — A SENTENCE HAS A WALL CLOCK OF ITS OWN IN A SWEEP. The stall
+  rule watches the journal, so a worker of several threads that keeps
+  writing while one sentence spins was never cut: `(% F:. $) (1e_9 1 1e9)`
+  sat two verification runs on the floor. The supervisor now reads the
+  journal forward, keeps what has been announced and not yet answered, and
+  kills the worker when the oldest of those has been in flight longer than
+  `LIBJAY_SWEEP_SENTENCE` seconds (60 by default). The row is recorded the
+  way a fatal signal is recorded — named, unmeasured, stepped past.
+
+- 2026-09-11 — AN ABBREVIATED REFERENCE ANSWER IS EXCUSED BY CAUSE, NOT BY
+  A PIN. The instrument rule of 2026-09-08 is now the instrument's own:
+  where every line the reference gave is libjay's line, cut where it says
+  it cut (`...`), the row is accepted as `print-limit` before the pinned
+  rows are consulted. There is nothing there to pin — the two engines were
+  never compared on the part that is missing.

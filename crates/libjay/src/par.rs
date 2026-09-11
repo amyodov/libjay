@@ -154,6 +154,24 @@ where
     fill_chunks(n, n.div_ceil(threads), parallel, f)
 }
 
+/// [`fill_rows`] where a block may fail, as [`fill`] may: false from any
+/// block abandons the whole fill. A fold that can leave its element type —
+/// an integer window, which overflows — needs both the row boundary and the
+/// way out.
+pub fn try_fill_rows<U, F>(rows: usize, width: usize, work: usize, f: F) -> (Vec<U>, bool)
+where
+    U: Copy + Default + Send,
+    F: Fn(usize, &mut [U]) -> bool + Sync + Send,
+{
+    if rows == 0 || width == 0 {
+        return (Vec::new(), true);
+    }
+    let threads = parallelism();
+    let parallel = rows >= threads && worth_it(work);
+    let per = if parallel { rows.div_ceil(threads) } else { rows };
+    fill_chunks(rows * width, per * width, parallel, move |lo, part| f(lo / width, part))
+}
+
 /// Fill `rows` rows of `width` outputs each, split by WHOLE rows: `f` is
 /// handed the index of the first row of its block and that block's outputs.
 /// A kernel that walks a row at a time — the matrix product's inner pass —

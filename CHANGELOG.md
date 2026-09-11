@@ -7,6 +7,24 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A SENTENCE'S OWN WALL CLOCK IN A SWEEP. The stall rule watches the
+  journal, so a worker that keeps writing while ONE of its sentences spins
+  was never cut: `(% F:. $) (1e_9 1 1e9)` — a fold whose stepping verb
+  reshapes by a billion — sat a verification run on the floor twice. The
+  supervisor now reads the journal forward, holds the sentences announced
+  and not yet answered, and kills the worker when the oldest has been in
+  flight past `LIBJAY_SWEEP_SENTENCE` seconds (60 by default, 0 to wait for
+  ever). The row is recorded the way a fatal signal is recorded: named,
+  unmeasured, stepped past.
+
+- AN ABBREVIATED REFERENCE ANSWER IS EXCUSED AS `print-limit`. jconsole
+  elides a display past its output control and marks every cut with `...`,
+  and a swept sentence can ask for an answer of any size. Where every line
+  the reference gave is libjay's own line — cut where it says it cut, whole
+  where it does not — the sweep accepts the row as print-limited rather
+  than matching it against a pinned row: there is nothing to pin, only half
+  of an answer. The count is reported beside the other excuses.
+
 - THREE MORE EXHAUSTIVE TABLES over the same value classes, written by
   `jay-corpus grid j`. `--obverses` (20,064 sentences) takes `^:_1` and
   `^:(_1 0 1)` of every DERIVED verb — the six compositions, a hook, a
@@ -346,6 +364,48 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `corpus/j/{folds,dyadic,compositions}-*.txt`.
 
 ### Changed
+
+- THE N-WISE INFIX REDUCE IS FUSED FOR EVERY SCALAR OPERATION, not only the
+  associative ones. The typed window path regroups windows into blocks,
+  which only `+`, `*`, `<.` and `>.` allow; everything else built an array
+  per window and interpreted the verb over it. A window folded on its own
+  shares nothing with its neighbour, so where the operation cannot be
+  blocked each window is folded directly in the same typed loop. Over a
+  million doubles, `2 -/\ y` goes from 481 ms to 1.6 and `2 -~/\ y` from
+  584 to 1.4, which is what `(1 }. y) - _1 }. y` costs and what the two
+  spellings mean; a wide window (`10 -/\ y`, 4.1 ms) is 36 times faster
+  than the reference. The commute travels as a flag on the step, so `u~`
+  costs what `u` costs at every width and type.
+
+- A WINDOWED REDUCE OF A CONSTANT COMBINATION IS RECOGNISED AS A
+  CORRELATION AND FUSED. `w (u/@(c&v))\ y` — with `@:`, with the bond
+  written `v&c`, and the same dot product spelled as the inner product
+  `w (c u/ . v ])\ y` — is one pass over the argument's buffer with the
+  weights in registers. `17 (+/ @ (c & *))\ y` over a million samples goes
+  from 1686 ms to 21.5, where the reference takes 473 and numpy's BLAS path
+  12.3. It is the shape of every FIR filter, weighted moving average and
+  convolution kernel, and a Savitzky-Golay filter of a million samples is
+  now 25 ms rather than 1577. The recognition takes a vector argument, real
+  weights one per window item and all of them finite, and abandons the
+  whole pass to the general road where a step makes a NaN.
+
+- A FOLD WHOSE STEP IS A SCALAR PRIMITIVE IS A TYPED LOOP:
+  `0 (] F:. +) y` over a million items goes from 619 ms to 4.4, against the
+  reference's 137. A fold whose step is a DEFINED verb is still
+  interpreted — that is what the construct is — but pays less for it: its
+  items are read where the step needs them rather than all at once, its
+  results are kept in a flat buffer where every step answers one float, the
+  call's frame is reused rather than built again, `x ,. y` over two like
+  columns is one pass, and a name with no underscore in it skips the three
+  scans a locative needs. The KAMA recursion over a million bars goes from
+  3877 ms to 2884; the reference's 460 is six times better still, and
+  docs/algorithms.md measures what the remainder is made of.
+
+- A THIRD REFUSAL WORDING IN THE `p:` FAMILY RULE, and the `+/\.`-empty
+  pins gained a family rule of their own: the reshape spelling
+  (`4 $ (8 +/\. (0 $ a:))`), `p:` over a composed argument, and `q:` over
+  one — `prime exponents need an integer`, which the rule's cause list did
+  not hold — are all covered now. Nothing new is pinned.
 
 - AN `answers=` CLAUSE IN A FAMILY RULE NO LONGER EXCLUDES A REFUSAL. It is
   about the ANSWERS, and a refusal is not one, so it is now read over the

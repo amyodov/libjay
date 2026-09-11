@@ -353,27 +353,38 @@ those bars actually pose: predict the next return from the last sixteen.
 The correctness tests do use `bench/data.py`'s own series — see above.
 
 Machine: macOS 13.7.8, x86-64, 8 logical threads, `LIBJAY_THREADS=4`,
-Python 3.12 with numpy 2.0.2 and numba 0.61.2. Best of three after a warmup,
-in milliseconds. numba appears only where numpy is a Python loop rather than
-an array expression, which is the KAMA recursion and nothing else.
+Python 3.12.9 with numpy 2.2.6 and numba 0.61.2. Best of three after a
+warmup, in milliseconds. numba appears only where numpy is a Python loop
+rather than an array expression, which is the KAMA recursion and nothing
+else.
 
 | algorithm | size | J | libjay | numpy | numba | jconsole |
 |---|---|---|---:|---:|---:|---:|
-| KAMA | 1,000,000 bars | `10 2 30 KAMA {close}` | 7131 | 534 | 27 | 589 |
-| variance ratio | 1,000,000 bars, q=8 | `8 VR {p}` | 805 | 49 | — | 28 |
-| Hurst R/S | 1,000,000 returns, 9 block sizes | `{lens} HURST {x}` | 383 | 146 | — | 104 |
-| Savitzky-Golay | 1,000,000 samples, 17-tap cubic | `(SGCOEF 8 3 0) SGFILT {sig}` | 1577 | 14 | — | 532 |
-| extreme learning machine | 100,000 by 16, 64 hidden | `({w} ; {b} ; 0.1) ELMFIT {x} ; {t}` | 639 | 346 | — | 468 |
-| Hopfield recall | 1024 units, 256 probes, 10 sweeps | `({w} ; 10) RECALL {probe}` | 224 | 80 | — | 742 |
+| KAMA | 1,000,000 bars | `10 2 30 KAMA {close}` | 2800 | 483 | 21 | 497 |
+| variance ratio | 1,000,000 bars, q=8 | `8 VR {p}` | 37 | 26 | — | 21 |
+| Hurst R/S | 1,000,000 returns, 9 block sizes | `{lens} HURST {x}` | 320 | 119 | — | 94 |
+| Savitzky-Golay | 1,000,000 samples, 17-tap cubic | `(SGCOEF 8 3 0) SGFILT {sig}` | 25 | 13 | — | 477 |
+| extreme learning machine | 100,000 by 16, 64 hidden | `({w} ; {b} ; 0.1) ELMFIT {x} ; {t}` | 521 | 302 | — | 306 |
+| Hopfield recall | 1024 units, 256 probes, 10 sweeps | `({w} ; 10) RECALL {probe}` | 186 | 63 | — | 654 |
 
-libjay wins one of the six and loses five, and the losses are not spread
-evenly over the work: they concentrate in three constructs, which the
-findings below name and measure one at a time. The Hopfield row is what the
-rest could look like — it is nothing but matrix products, every one of them
-on a fused path, and libjay is 3.3 times faster than jconsole there. The
-extreme learning machine, which is matrix products plus one small solve, is
-within 1.4 times of jconsole. Everything else is paying for one of the
-three.
+libjay wins two of the six and loses four. The first reading of this table
+lost five, and the losses concentrated in three constructs; two of the
+three have fused paths now and the third has not. The Savitzky-Golay row
+moved from 1577 ms to 25 — nineteen times faster than jconsole, and within
+twice of numpy's BLAS — and the variance ratio from 805 to 37, both of them
+by the same two fusions. What is left is the FOLD: KAMA is a fold over a
+million rows with an explicit dyad and nothing else, and 2800 of its 2800
+milliseconds are that fold. The Hurst exponent, the extreme learning
+machine and the variance ratio are within 1.7 to 3.4 times of jconsole on
+work that is neither — rank, sorting and one matrix solve — and the
+Hopfield row, which is nothing but matrix products on a fused path, is 3.5
+times faster than jconsole.
+
+(The three measurements this table is compared against were taken on the
+same machine a week earlier, and the numpy column moved by 10 to 20 per
+cent between the two readings; the libjay column's movements below are
+larger than that by one to two orders of magnitude, and the jconsole
+column is measured beside each of them.)
 
 ## Findings
 
@@ -431,67 +442,101 @@ was never the problem; only the pre-pass was. No string literal of either
 language crosses a line, so an apostrophe still open at a newline never
 opened one — clearing the flag there is the whole fix.
 
-### The n-wise infix reduce has a fused path for `+` and `*` and none for `-`
+### The n-wise infix reduce folds every window, whatever the operation
 
-This is the largest gap of the three and the easiest to fix. Over a million
-doubles, best of three, `LIBJAY_THREADS=4`:
+The typed window path regrouped the windows into blocks, which is what
+makes a moving sum cost two operations per result instead of `n` — and only
+an ASSOCIATIVE operation can be regrouped, so `+`, `*`, `<.` and `>.` had
+the path and the difference did not. `2 -/\ y` built an array for every
+window and interpreted the verb over it.
 
-| kernel | libjay | jconsole |
-|---|---:|---:|
-| `2 +/\ y` | 2.9 ms | 1.2 ms |
-| `2 */\ y` | 3.4 ms | 1.7 ms |
-| `2 -/\ y` | 481 ms | 1.6 ms |
-| `2 -~/\ y` | 584 ms | 1.2 ms |
-| `(1 }. y) - _1 }. y` | 1.6 ms | 1.2 ms |
-| `10 +/\ y` | 1.9 ms | 1.9 ms |
+A window folded on its own shares nothing with the window beside it, so it
+needs no regrouping at all: where the operation cannot be blocked, each
+window is folded directly inside the same typed loop — `n` steps per result
+and no array built. Over a million doubles, best of three,
+`LIBJAY_THREADS=4`:
 
-Sum and product over an infix are fused and run at memory speed; subtraction
-over the same infix is 160 to 200 times slower than either, and 300 times
-slower than jconsole, which suggests the window is being materialised and
-reduced one at a time. The commute makes no difference — `-~` costs what `-`
-costs — so it is the verb and not the modifier that falls off the path.
+| kernel | libjay before | libjay | jconsole |
+|---|---:|---:|---:|
+| `2 +/\ y` | 2.9 ms | 3.0 ms | 1.1 ms |
+| `2 */\ y` | 3.4 ms | 2.2 ms | 1.2 ms |
+| `2 -/\ y` | 481 ms | 1.6 ms | 1.0 ms |
+| `2 -~/\ y` | 584 ms | 1.4 ms | 1.0 ms |
+| `2 <./\ y` | — | 2.3 ms | 0.9 ms |
+| `(1 }. y) - _1 }. y` | 1.6 ms | 1.3 ms | 0.9 ms |
+| `10 +/\ y` | 1.9 ms | 2.2 ms | 1.6 ms |
+| `10 -/\ y` | — | 4.1 ms | 148 ms |
 
-`2 -~/\ y` is the bar-to-bar difference, which is the first line of almost
-every time-series program. It is what KAMA's path length and the variance
-ratio's returns are built on, and it is most of the variance ratio's 805 ms:
-the same series written `(1 }. y) - _1 }. y` costs 1.6 ms. The two spellings
-mean the same thing and the fused one is 300 times faster, so this looks
-like a missing case rather than a missing capability.
+The difference over an infix now costs what the sum does, which is what the
+two spellings mean: `2 -~/\ y` and `(1 }. y) - _1 }. y` are within noise of
+each other. A WIDE window shows the shape of the two roads — `10 -/\ y` is
+ten operations per result on both engines, and libjay's stays in one typed
+loop where the reference's does not.
 
-### A windowed reduce with a composed verb is interpreted per window
+`2 -~/\ y` is the bar-to-bar difference, the first line of almost every
+time-series program: it is KAMA's path length and the variance ratio's
+returns, and it is most of what moved the variance ratio from 805 ms to 37.
+
+### A windowed reduce of a constant combination is a correlation
 
 `SGFILT` is `(# x) (+/ @ (x & *))\ y` — the weighted sum of every window,
-which is what makes the Savitzky-Golay filter one sentence.
+which is what makes the Savitzky-Golay filter one sentence. Read as a verb
+it is a composition applied once per window; read as arithmetic it is a
+correlation, and it is now recognised as one and run in a single pass with
+the weights in registers.
 
-| kernel, 1e6 samples, 17-tap | libjay | jconsole | numpy |
-|---|---:|---:|---:|
-| `17 (+/ @ (c & *))\ y` | 1686 ms | 518 ms | 14 ms |
+| kernel, 1e6 samples, 17-tap | libjay before | libjay | jconsole | numpy |
+|---|---:|---:|---:|---:|
+| `17 (+/ @ (c & *))\ y` | 1686 ms | 21.5 ms | 473 ms | 12.3 ms |
+| `17 (+/ @: (c & *))\ y` | — | 22.8 ms | 480 ms | — |
+| `17 (c +/ . * ])\ y` | — | 23.0 ms | 401 ms | — |
 
-Both interpreters walk the windows; libjay is 3.3 times slower per window
-than jconsole, and numpy is two orders of magnitude faster than either
-because `sliding_window_view` plus a matrix product turns the whole filter
-into one BLAS call. A windowed dot product against a constant vector is a
-correlation, and it is worth a fused path of its own: it is the shape of
-every FIR filter, every moving average with weights, and every convolution
-kernel a signal-processing corpus contains.
+The three spellings are one arithmetic and are recognised together, along
+with `u&c` for the bond written the other way round and any scalar fold and
+any scalar combination — `>./@(c&+)` is a dilation, not a filter, and takes
+the same pass. numpy's number is `sliding_window_view` into one matrix
+product, which is the bound a BLAS call sets; libjay is within a factor of
+two of it and twenty-two times faster than the reference.
 
-### The fold is interpreted, and libjay's interpretation is the slower one
+The recognition is narrow where narrowness is cheap: a vector argument,
+real weights one per window item, all of them finite, an answer that is a
+float either way, and a step that makes a NaN abandons the whole pass to
+the general road, whose rules for the infinities and the signed zeroes are
+the dialect's own.
 
-The KAMA recursion is a fold over a two-column matrix with an explicit dyad.
-Over a million items:
+### The fold is interpreted, and a defined step is what it costs
 
-| kernel | libjay | jconsole |
-|---|---:|---:|
-| `0 (] F:. f) m`, `f` a defined dyad | 3877 ms | 482 ms |
-| `0 (] F:. +) y`, a primitive | 619 ms | 147 ms |
+Where the step is a scalar PRIMITIVE there is nothing to interpret — `]`
+keeps what the step made, and a primitive cannot take the fold's control —
+and the whole fold is one typed loop over the argument's buffer. Where the
+step is a DEFINED verb, no such thing is possible: the point of the
+construct is that step i+1 needs step i, and what runs at every step is an
+explicit definition.
 
-Neither engine fuses a fold and neither can in general — the whole point of
-the construct is that step i+1 needs step i — but libjay pays 8 times what
-jconsole does with a defined verb and 4 times with a primitive, so the
-per-item overhead of calling a verb is where the difference lives rather
-than the fold itself. numba does the same recursion in 27 ms, which is the
-bound a compiled inner loop sets; a fold whose verb is a small arithmetic
-expression is the natural candidate for one.
+| kernel, 1e6 items | libjay before | libjay | jconsole | numba |
+|---|---:|---:|---:|---:|
+| `0 (] F:. f) m`, `f` a defined dyad | 3877 ms | 2884 ms | 460 ms | 3.6 ms |
+| `0 (] F:. +) y`, a primitive | 619 ms | 4.4 ms | 137 ms | — |
+| `0 (] F.. +) y`, its single form | — | 4.5 ms | 45 ms | — |
+
+The defined-dyad fold is a quarter faster than it was — the items are read
+where the step needs them instead of all at once, the results are kept in a
+flat buffer, the call's frame is reused, the stitch `sc ,. q` that builds
+the argument is one pass, and a name with no underscore in it skips the
+three scans a locative needs — and it is still six times slower than the
+reference. A profile of it says where the rest is, at a million steps of
+`y + ({. x) * ({: x) - y`: a quarter of the time is in `malloc` and `free`,
+a sixth in the interpreter's own dispatch, and the rest spread over the
+frame's hash table, the argument arrays each primitive makes and the
+rank machinery each one walks. Every one of those is per-STEP work that a
+compiled inner loop does not do at all, which is what numba's 3.6 ms is:
+the same recursion as machine code over two float buffers.
+
+What would close it is not another fusion but a different shape of
+interpreter for the inside of a small explicit definition — a resolved
+local slot instead of a hash lookup, an unboxed scalar instead of an array
+per intermediate. That is a round of its own, and it is what the KAMA row
+of the table above is waiting for.
 
 The closed form is not a way out: the recursion unrolls into a cumulative
 product of `1 - sc`, which underflows to zero within a few hundred bars.

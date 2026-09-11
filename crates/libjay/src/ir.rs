@@ -1192,7 +1192,7 @@ pub(crate) fn call_explicit(
             Some(span),
         ));
     }
-    let mut frame: HashMap<String, Array> = HashMap::new();
+    let mut frame: HashMap<String, Array> = ctx.env.take_frame();
     // An axis written at the call site belongs to THIS call, whether or
     // not the definition has a name to put it under: it is TAKEN rather
     // than read, so nothing the body goes on to apply sees it. The
@@ -1231,7 +1231,9 @@ pub(crate) fn call_explicit(
     // An APL `∇`-definition names its result; the body's own value is not
     // it, and a definition that never assigned the name has no result.
     if let Some(name) = &def.result {
-        return frame.get(name).cloned().ok_or_else(|| {
+        let answer = frame.get(name).cloned();
+        ctx.env.recycle_frame(frame);
+        return answer.ok_or_else(|| {
             Error::new(
                 ErrorKind::Value,
                 format!("{} did not set its result {name}", def.name),
@@ -1239,6 +1241,7 @@ pub(crate) fn call_explicit(
             )
         });
     }
+    ctx.env.recycle_frame(frame);
     match value {
         Some(v) => {
             ctx.shy = body_shy;
@@ -1493,6 +1496,16 @@ fn eval_node(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Arr
         Expr::Const(a, _) | Expr::Entity(a, _) => Ok(a.clone()),
         Expr::Param(i, _) => ctx.env.arg(*i),
         Expr::Name(n, span) => {
+            // A name with no underscore in it is no locative of any kind:
+            // neither `V__n`, nor `V_n_`, nor a name in a numbered locale.
+            // Every one of the three tests below scans the name for one, and
+            // a definition's body reads its parameters once per item of a
+            // fold, where that scan is the whole cost of the read.
+            if !n.as_bytes().contains(&b'_') {
+                return ctx.env.get(n).ok_or_else(|| {
+                    Error::new(ErrorKind::Value, format!("undefined name: {n}"), Some(*span))
+                });
+            }
             // `V__n` names V in the locale n holds. The locale is a value,
             // so the name is resolved here rather than while the program is
             // read, and the frame is not searched: it is a locative.

@@ -580,6 +580,10 @@ impl EvalCfg {
 /// evaluator's frames, up as they shrink and down as they grow.
 pub const RECURSION_LIMIT: usize = 48;
 
+/// How many finished frames are kept to be filled again. One per level of
+/// nesting a program actually reaches is all a call can ever want back.
+const RECYCLED_FRAMES: usize = 8;
+
 
 /// The names a running program can reach: the values it has assigned, the
 /// verbs it has named, and the arguments bound to its parameters.
@@ -600,6 +604,11 @@ pub struct Env {
     /// out in order and never reused while one is alive.
     next_numbered: u64,
     frames: Vec<HashMap<String, Array>>,
+    /// Frames a call has finished with, emptied and kept to be filled
+    /// again. A definition applied once per item of a fold builds the same
+    /// small table a million times, and the table itself is the part worth
+    /// not allocating again.
+    spare: Vec<HashMap<String, Array>>,
     /// The definitions currently running, innermost last; J's `$:` and
     /// APL's `∇` name the last of them.
     running: Vec<std::sync::Arc<crate::ir::ExplicitDef>>,
@@ -737,6 +746,7 @@ impl Env {
             current: BASE_LOCALE.to_string(),
             next_numbered: 0,
             frames: Vec::new(),
+            spare: Vec::new(),
             running: Vec::new(),
             verbs: HashMap::new(),
             mods: HashMap::new(),
@@ -1095,6 +1105,20 @@ impl Env {
             .get(i)
             .cloned()
             .ok_or_else(|| Error::internal("a parameter was read where none is bound"))
+    }
+
+    /// An empty frame to fill, reusing one a finished call left.
+    pub fn take_frame(&mut self) -> HashMap<String, Array> {
+        self.spare.pop().unwrap_or_default()
+    }
+
+    /// Keep a finished call's frame for the next one. Only a few are kept:
+    /// what this saves is one allocation per call, not memory.
+    pub fn recycle_frame(&mut self, mut frame: HashMap<String, Array>) {
+        if self.spare.len() < RECYCLED_FRAMES {
+            frame.clear();
+            self.spare.push(frame);
+        }
     }
 
     /// Start a definition's frame. Fails rather than overflowing the stack.
@@ -3115,6 +3139,9 @@ impl Verb {
     /// arguments whose layout the verb above has established it is
     /// indifferent to.
     fn dyad_rows(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
+        if let Some(a) = stitched(self, x, y) {
+            return Ok(a);
+        }
         match self {
             Verb::Constant(m) => Ok(m.clone()),
             Verb::Prim(_) | Verb::Rank(_, _) | Verb::Each(..) => {
@@ -14383,16 +14410,36 @@ fn item_fold(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array
 
 // ------------------------------------------------- windows, scans, power
 
-/// The elementwise operation a windowed verb folds with, when the verb is
-/// exactly a reduction by a scalar primitive. The fast paths below apply
-/// only then: they fold whole items at full rank, which is what `u/` does
-/// and what any other spelling (a rank wrapper, a train) does not.
-fn folded_op(u: &Verb) -> Option<ScalarDyad> {
+/// The elementwise operation a windowed verb folds with, and whether the
+/// operands meet it the other way round.
+///
+/// The verb has to be exactly a reduction by a scalar primitive, or by one
+/// under a commute: the fast paths below fold whole items at full rank,
+/// which is what `u/` does and what any other spelling (a rank wrapper, a
+/// train) does not. `u~` folds `a u~ b` as `b u a`, which is the same value
+/// for every commutative operation and a different one for the difference —
+/// so the flag travels to the step rather than deciding whether there is a
+/// fast path at all.
+fn folded_step(u: &Verb) -> Option<(ScalarDyad, bool)> {
     let Verb::Reduce(inner) = u else { return None };
-    let Verb::Prim(p) = &**inner else { return None };
+    let (inner, swap) = match &**inner {
+        Verb::Commute(g) => (&**g, true),
+        g => (g, false),
+    };
+    let Verb::Prim(p) = inner else { return None };
     match p.dyad {
-        DyadOp::Scalar(op) => Some(op),
+        DyadOp::Scalar(op) => Some((op, swap)),
         _ => None,
+    }
+}
+
+/// [`folded_step`] where the operands meet the operation as written. The
+/// scan's fast path has no way to swap them, so a commuted operand goes the
+/// general way there.
+fn folded_op(u: &Verb) -> Option<ScalarDyad> {
+    match folded_step(u)? {
+        (op, false) => Some(op),
+        (_, true) => None,
     }
 }
 
@@ -14793,6 +14840,64 @@ where
     (!over).then_some(out)
 }
 
+/// Fold every window of `w` consecutive items into one item, each window on
+/// its own.
+///
+/// The fold is the insert's own — right to left over the window's items,
+/// with nothing shared with the window beside it — so any step at all is
+/// safe here, which is what the difference and the commuted operations need.
+/// It costs `w` steps per result where [`window_fold`] pays two; what buys
+/// that back is that the whole pass stays inside one typed loop instead of
+/// building an array per window and interpreting a verb over it. Windows are
+/// independent, so the output splits across threads with nothing shared.
+/// None when a step left the element type.
+fn window_direct<S, T, F>(v: &[S], n: usize, m: usize, w: usize, step: F) -> Option<Vec<T>>
+where
+    S: Widen<T>,
+    T: Copy + Default + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    debug_assert!(w >= 1 && n >= w);
+    let count = n - w + 1;
+    if m == 1 {
+        let (out, ok) = par::fill(count, |lo, part: &mut [T]| {
+            let mut over = false;
+            for (i, slot) in part.iter_mut().enumerate() {
+                let run = &v[lo + i..lo + i + w];
+                let mut acc = run[w - 1].widen();
+                for &x in run[..w - 1].iter().rev() {
+                    let (r, o) = step(x.widen(), acc);
+                    acc = r;
+                    over |= o;
+                }
+                *slot = acc;
+            }
+            !over
+        });
+        return ok.then_some(out);
+    }
+    let work = count.saturating_mul(w).saturating_mul(m);
+    let (out, ok) = par::try_fill_rows(count, m, work, |lo, part: &mut [T]| {
+        let mut over = false;
+        for (i, row) in part.chunks_mut(m).enumerate() {
+            let last = (lo + i + w - 1) * m;
+            for (j, slot) in row.iter_mut().enumerate() {
+                *slot = v[last + j].widen();
+            }
+            for k in (0..w - 1).rev() {
+                let at = (lo + i + k) * m;
+                for (j, slot) in row.iter_mut().enumerate() {
+                    let (r, o) = step(v[at + j].widen(), *slot);
+                    *slot = r;
+                    over |= o;
+                }
+            }
+        }
+        !over
+    });
+    ok.then_some(out)
+}
+
 /// [`window_fold`] for one element per item — a plain time series, and the
 /// shape worth writing the loops out for: each of the three runs over a
 /// block is a walk over one slice, so the accumulator stays in a register
@@ -14909,85 +15014,395 @@ where
     window_fold_range(v, v.len(), w, lo, out, step)
 }
 
+/// Fold the windows by the road the operation allows: the associative ones
+/// regroup into blocks, everything else folds each window on its own.
+///
+/// Every associative operation the typed window covers is also commutative,
+/// so the block road is safe under a commute too and `swap` reaches no
+/// further than the step itself.
+fn window_by<S, T, F>(
+    assoc: bool,
+    v: &[S],
+    n: usize,
+    m: usize,
+    w: usize,
+    step: F,
+) -> Option<Vec<T>>
+where
+    S: Widen<T>,
+    T: Copy + Default + Send + Sync,
+    F: Fn(T, T) -> (T, bool) + Sync + Send,
+{
+    if assoc {
+        window_fold(v, n, m, w, step)
+    } else {
+        window_direct(v, n, m, w, step)
+    }
+}
+
+/// One typed window fold, with the step the operation and the commute name.
+macro_rules! windowed {
+    ($assoc:expr, $swap:expr, $v:expr, $n:expr, $m:expr, $w:expr, $f:expr) => {{
+        let f = $f;
+        if $swap {
+            window_by($assoc, $v, $n, $m, $w, move |a, b| f(b, a))
+        } else {
+            window_by($assoc, $v, $n, $m, $w, f)
+        }
+    }};
+}
+
 fn window_i64<S: Widen<i64>>(
     op: ScalarDyad,
+    swap: bool,
     v: &[S],
     n: usize,
     m: usize,
     w: usize,
 ) -> Option<Vec<i64>> {
     use ScalarDyad::*;
+    let assoc = is_associative(op);
     match op {
-        Add => window_fold(v, n, m, w, i64::overflowing_add),
-        Mul => window_fold(v, n, m, w, i64::overflowing_mul),
-        Min => window_fold(v, n, m, w, |a: i64, b: i64| (a.min(b), false)),
-        Max => window_fold(v, n, m, w, |a: i64, b: i64| (a.max(b), false)),
+        Add => windowed!(assoc, swap, v, n, m, w, i64::overflowing_add),
+        Sub => windowed!(assoc, swap, v, n, m, w, i64::overflowing_sub),
+        Mul => windowed!(assoc, swap, v, n, m, w, i64::overflowing_mul),
+        Min => windowed!(assoc, swap, v, n, m, w, |a: i64, b: i64| (a.min(b), false)),
+        Max => windowed!(assoc, swap, v, n, m, w, |a: i64, b: i64| (a.max(b), false)),
         _ => None,
     }
 }
 
-fn window_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize, w: usize) -> Option<Vec<Cx>> {
+fn window_cx(
+    op: ScalarDyad,
+    swap: bool,
+    v: &[Cx],
+    n: usize,
+    m: usize,
+    w: usize,
+) -> Option<Vec<Cx>> {
     use ScalarDyad::*;
+    let assoc = is_associative(op);
     // As the fold and the scan: an item that is not an atom refuses where
     // the dyad refuses. See [`block_cx`].
-    let guard = !is_associative(op) || m > 1;
+    let guard = !assoc || m > 1;
     match op {
-        Add => window_fold(v, n, m, w, move |a: Cx, b: Cx| step_cx(cx::add(a, b), guard)),
-        Mul => window_fold(v, n, m, w, move |a: Cx, b: Cx| step_cx(cx::mul(a, b), guard)),
+        Add => windowed!(assoc, swap, v, n, m, w, move |a: Cx, b: Cx| step_cx(cx::add(a, b), guard)),
+        Sub => windowed!(assoc, swap, v, n, m, w, move |a: Cx, b: Cx| step_cx(cx::sub(a, b), guard)),
+        Mul => windowed!(assoc, swap, v, n, m, w, move |a: Cx, b: Cx| step_cx(cx::mul(a, b), guard)),
         _ => None,
     }
 }
 
 fn window_f64<S: Widen<f64>>(
     op: ScalarDyad,
+    swap: bool,
     v: &[S],
     n: usize,
     m: usize,
     w: usize,
 ) -> Option<Vec<f64>> {
     use ScalarDyad::*;
+    let assoc = is_associative(op);
     match op {
-        Add => window_fold(v, n, m, w, |a: f64, b: f64| block_f64(a + b)),
-        Mul => window_fold(v, n, m, w, |a: f64, b: f64| block_f64(a * b)),
-        Min => window_fold(v, n, m, w, |a: f64, b: f64| (a.min(b), false)),
-        Max => window_fold(v, n, m, w, |a: f64, b: f64| (a.max(b), false)),
+        Add => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| block_f64(a + b)),
+        Sub => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| block_f64(a - b)),
+        Mul => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| block_f64(a * b)),
+        Min => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| (a.min(b), false)),
+        Max => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| (a.max(b), false)),
         _ => None,
     }
 }
 
-/// Moving windows over a numeric buffer in two passes. None means this path
-/// does not apply: only the associative arithmetic can be regrouped into
-/// blocks, so subtraction and every non-scalar verb go the general way.
-fn window_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, w: usize) -> Option<Data> {
+/// Moving windows over a numeric buffer, without an array per window. None
+/// means this path does not apply: the arithmetic it covers is the
+/// arithmetic [`reduce_typed`] covers, and every other operation, every
+/// non-scalar verb and the exact types go the general way.
+fn window_typed(op: ScalarDyad, swap: bool, d: &Data, n: usize, m: usize, w: usize) -> Option<Data> {
     use ScalarDyad::*;
-    if !matches!(op, Add | Mul | Min | Max) {
+    if !matches!(op, Add | Sub | Mul | Min | Max) {
         return None;
     }
     // As in the scan: integers and booleans window as integers, each read in
     // its own type, and the float retry rereads the same buffer.
     fn ints<S: Widen<i64> + Widen<f64>>(
         op: ScalarDyad,
+        swap: bool,
         v: &[S],
         n: usize,
         m: usize,
         w: usize,
     ) -> Data {
-        match window_i64(op, v, n, m, w) {
+        match window_i64(op, swap, v, n, m, w) {
             Some(out) => Data::I64(out.into()),
-            None => {
-                Data::F64(window_f64(op, v, n, m, w).expect("the float fold cannot overflow").into())
-            }
+            None => Data::F64(
+                window_f64(op, swap, v, n, m, w).expect("the float fold cannot overflow").into(),
+            ),
         }
     }
     match d {
-        Data::F64(v) => Some(Data::F64(window_f64(op, v.as_slice(), n, m, w)?.into())),
-        Data::Complex(v) => Some(Data::Complex(window_cx(op, v, n, m, w)?.into())),
-        Data::I64(v) => Some(ints(op, v.as_slice(), n, m, w)),
-        Data::Bool(v) => Some(ints(op, v.as_slice(), n, m, w)),
+        Data::F64(v) => Some(Data::F64(window_f64(op, swap, v.as_slice(), n, m, w)?.into())),
+        Data::Complex(v) => Some(Data::Complex(window_cx(op, swap, v, n, m, w)?.into())),
+        Data::I64(v) => Some(ints(op, swap, v.as_slice(), n, m, w)),
+        Data::Bool(v) => Some(ints(op, swap, v.as_slice(), n, m, w)),
         // A bignum has no blockwise form: the exact types fold, scan and
         // window through the general path, one step at a time.
         Data::Ext(_) | Data::Rat(_) | Data::Char(_) | Data::Symbol(_) | Data::Box(_) => None,
     }
+}
+
+/// Two buffers laid side by side, `ca` elements of one and then `cb` of the
+/// other, `n` times.
+fn interleaved<T: Copy + Default>(a: &[T], ca: usize, b: &[T], cb: usize, n: usize) -> Vec<T> {
+    let w = ca + cb;
+    let mut out = vec![T::default(); n * w];
+    for (i, row) in out.chunks_mut(w).enumerate() {
+        row[..ca].copy_from_slice(&a[i * ca..(i + 1) * ca]);
+        row[ca..].copy_from_slice(&b[i * cb..(i + 1) * cb]);
+    }
+    out
+}
+
+/// `x ,. y` over two arrays of one element type that stand on the same
+/// leading axis: their cells laid side by side, in one pass over each
+/// buffer.
+///
+/// The stitch is the catenation applied at rank `_1`, so the general road
+/// builds an array for every pair of cells and frames a million of them
+/// again — which is the shape of `sc ,. q`, the pair a fold over a series
+/// walks. This answers exactly what that road answers wherever no fill and
+/// no promotion is needed, which is what the conditions here come to; every
+/// other stitch takes the road it took.
+fn stitched(v: &Verb, x: &Array, y: &Array) -> Option<Array> {
+    let Verb::Prim(p) = v else { return None };
+    // The stitch, and only it: the catenation joining the leading axis at
+    // rank `_1` on both sides. Every other spelling of the same operation
+    // reads its arguments whole.
+    if p.dyad != DyadOp::AppendLeading || p.ranks[1] != -1 || p.ranks[2] != -1 {
+        return None;
+    }
+    if x.dtype() != y.dtype() || !x.is_row_major() || !y.is_row_major() {
+        return None;
+    }
+    // A sparse array's buffer holds the cells it stores and not the ones it
+    // stands for: the stored form is read by the verbs that know it.
+    if x.is_sparse() || y.is_sparse() {
+        return None;
+    }
+    // Rank 1 and rank 2 only: their cells are an atom and a row, which
+    // catenate along their one axis whatever their lengths. A rank-3 cell
+    // is a table, and two tables join only where their columns agree.
+    if !(1..=2).contains(&x.rank()) || !(1..=2).contains(&y.rank()) || x.shape[0] != y.shape[0] {
+        return None;
+    }
+    // No cell, so the answer's shape is decided by what the verb says about
+    // the cell it never made, which is the empty frame's own business.
+    let n = x.shape[0];
+    if n == 0 {
+        return None;
+    }
+    let (ca, cb) = (x.item_size(), y.item_size());
+    let shape = vec![n, ca + cb];
+    let (a, b) = (x.row_major_data(), y.row_major_data());
+    let data = match (a, b) {
+        (Data::F64(a), Data::F64(b)) => {
+            Data::F64(interleaved(a.as_slice(), ca, b.as_slice(), cb, n).into())
+        }
+        (Data::I64(a), Data::I64(b)) => {
+            Data::I64(interleaved(a.as_slice(), ca, b.as_slice(), cb, n).into())
+        }
+        (Data::Bool(a), Data::Bool(b)) => {
+            Data::Bool(interleaved(a.as_slice(), ca, b.as_slice(), cb, n).into())
+        }
+        (Data::Complex(a), Data::Complex(b)) => {
+            Data::Complex(interleaved(a.as_slice(), ca, b.as_slice(), cb, n).into())
+        }
+        (Data::Char(a), Data::Char(b)) => {
+            Data::Char(interleaved(a.as_slice(), ca, b.as_slice(), cb, n).into())
+        }
+        _ => return None,
+    };
+    Some(Array::new(shape, data))
+}
+
+/// A windowed CORRELATION: the fold of every window of the argument after
+/// the window has been combined, item by item, with a constant of its own
+/// length.
+///
+/// `w (u/@(c&v))\ y` is the whole of it — a weighted moving average, a FIR
+/// filter, a convolution kernel, every Savitzky-Golay smoother — and so is
+/// `w (c u/ . v ])\ y`, which spells the same dot product as an inner
+/// product. Read as a verb it is a composition the general path interprets
+/// once per window; read as arithmetic it is one pass with nothing built at
+/// all.
+struct Correlation {
+    /// The fold `u/` performs.
+    fold: ScalarDyad,
+    /// Whether the fold's operands meet it the other way round (`u~`).
+    fold_swap: bool,
+    /// The elementwise operation the window meets the constant under.
+    combine: ScalarDyad,
+    /// Whether the constant stands on the LEFT of that operation: `c&v`
+    /// puts it there and `v&c` does not.
+    left: bool,
+    /// The constant, one number per item of the window.
+    weights: Vec<f64>,
+}
+
+/// The real step of a scalar dyad, where it is total: no operand makes it
+/// raise, so the pass may run it without a span to report one against. A
+/// NaN out of it is still abandoned by the caller, because that is where
+/// the dialect's own rules for infinities and zeroes live.
+fn real_step(op: ScalarDyad) -> Option<fn(f64, f64) -> f64> {
+    use ScalarDyad::*;
+    Some(match op {
+        Add => |a: f64, b: f64| a + b,
+        Sub => |a: f64, b: f64| a - b,
+        Mul => |a: f64, b: f64| a * b,
+        Min => f64::min,
+        Max => f64::max,
+        _ => return None,
+    })
+}
+
+/// A numeric type the correlation reads as a float: the real ones, and no
+/// other. The exact types and the complex ones keep their own arithmetic.
+fn reads_as_f64(d: DType) -> bool {
+    matches!(d, DType::Bool | DType::I64 | DType::F64)
+}
+
+/// The derived verb a deferral stands for, its operand read now.
+///
+/// A derivation over a NAME waits until it is applied (see [`Deferred`]),
+/// and the general path therefore reads the name again for every window it
+/// makes. Nothing inside the composition this recognises can assign — it is
+/// scalar arithmetic under a fold — so the value is the same one every
+/// time, and reading it once is what the sentence means either way. Only an
+/// operand that is a name, a parameter or a literal is read here: those are
+/// the ones a second reading cannot tell from the first, which matters
+/// because the recognition may still decline and leave the general path to
+/// read the operand its own way.
+fn resolved(v: &Verb, ctx: &mut Ctx<'_>, span: Span) -> Option<Verb> {
+    let Verb::Deferred(d) = v else { return None };
+    if !d.choices.is_empty()
+        || !matches!(d.operand, crate::ir::Expr::Const(..) | crate::ir::Expr::Param(..) | crate::ir::Expr::Name(..))
+    {
+        return None;
+    }
+    let value = crate::ir::eval_operand(&d.operand, ctx).ok()?;
+    (d.build)(&d.template, &value, span, ctx.cfg.rules).ok()
+}
+
+/// The bond the derived verb is, and which side its constant stands on.
+fn bonded_constant(g: &Verb, ctx: &mut Ctx<'_>, span: Span) -> Option<(Array, ScalarDyad, bool)> {
+    let built = resolved(g, ctx, span);
+    match built.as_ref().unwrap_or(g) {
+        Verb::BondLeft(c, v) => Some((c.clone(), scalar_dyad_of(v)?, true)),
+        Verb::BondRight(v, c) => Some((c.clone(), scalar_dyad_of(v)?, false)),
+        _ => None,
+    }
+}
+
+/// The correlation a windowed operand spells, if it spells one over windows
+/// of `w` items of an argument of type `dt`.
+fn correlation(
+    u: &Verb,
+    w: usize,
+    dt: DType,
+    ctx: &mut Ctx<'_>,
+    span: Span,
+) -> Option<Correlation> {
+    let built = resolved(u, ctx, span);
+    let u = built.as_ref().unwrap_or(u);
+    // A rank wrapper of 1 or more leaves the whole window to the verb,
+    // which is the only shape this reads; `u@v` wears one of v's own rank.
+    let u = match u {
+        Verb::Rank(inner, r) if r[0] >= 1 => &**inner,
+        other => other,
+    };
+    let (fold, fold_swap, c, combine, left) = match u {
+        Verb::Atop(f, g, _) => {
+            let (fold, swap) = folded_step(f)?;
+            let (c, combine, left) = bonded_constant(g, ctx, span)?;
+            (fold, swap, c, combine, left)
+        }
+        // `(c u/ . v ])` is the same dot product written as an inner
+        // product against a constant: the fork hands the whole window to
+        // `]` and the constant to the left of `u/ . v`.
+        Verb::NounFork(c, g, h) => {
+            let Verb::InnerProduct { u: f, v, apl: false } = &**g else { return None };
+            if !matches!(&**h, Verb::Prim(p) if p.monad == MonadOp::Same) {
+                return None;
+            }
+            let (fold, swap) = folded_step(f)?;
+            (fold, swap, c.clone(), scalar_dyad_of(v)?, true)
+        }
+        _ => return None,
+    };
+    real_step(fold)?;
+    real_step(combine)?;
+    // One weight per item of the window, every one of them an ordinary
+    // number: an infinity or a NaN among them puts the arithmetic where the
+    // dialect's own rules decide it, and those live on the general path.
+    if !reads_as_f64(c.dtype()) || c.rank() > 1 || c.count() != w {
+        return None;
+    }
+    // Both sides read as floats, and at least one of them IS one, so the
+    // answer is a float whatever the fold does: an integer answer would
+    // have to carry the overflow rules the typed integer fold carries.
+    if !reads_as_f64(dt) || (dt != DType::F64 && c.dtype() != DType::F64) {
+        return None;
+    }
+    let weights = c.to_f64_vec()?;
+    if !weights.iter().all(|x| x.is_finite()) {
+        return None;
+    }
+    Some(Correlation { fold, fold_swap, combine, left, weights })
+}
+
+/// Every window of `w` items combined with the weights and folded, one
+/// result per window. None where a step made a NaN: J's rules for the
+/// infinities and the signed zeroes live in the general dyad, so a pass
+/// that meets one abandons the whole answer and the windows are made the
+/// long way instead.
+fn correlate<S>(k: &Correlation, v: &[S], n: usize, w: usize) -> Option<Vec<f64>>
+where
+    S: Widen<f64> + Sync,
+{
+    let comb = real_step(k.combine)?;
+    let fold = real_step(k.fold)?;
+    let c = &k.weights[..w];
+    let (left, swap) = (k.left, k.fold_swap);
+    let (out, ok) = par::fill(n - w + 1, |lo, part: &mut [f64]| {
+        let mut bad = false;
+        for (i, slot) in part.iter_mut().enumerate() {
+            let at = lo + i;
+            let one = |j: usize| {
+                let y = v[at + j].widen();
+                if left { comb(c[j], y) } else { comb(y, c[j]) }
+            };
+            let mut acc = one(w - 1);
+            bad |= acc.is_nan();
+            for j in (0..w - 1).rev() {
+                let t = one(j);
+                acc = if swap { fold(acc, t) } else { fold(t, acc) };
+                bad |= acc.is_nan() | t.is_nan();
+            }
+            *slot = acc;
+        }
+        !bad
+    });
+    ok.then_some(out)
+}
+
+/// The correlation over a real buffer, whatever real type it is stored in.
+fn correlate_typed(k: &Correlation, d: &Data, n: usize, w: usize) -> Option<Data> {
+    let out = match d {
+        Data::F64(v) => correlate(k, v.as_slice(), n, w)?,
+        Data::I64(v) => correlate(k, v.as_slice(), n, w)?,
+        Data::Bool(v) => correlate(k, v.as_slice(), n, w)?,
+        _ => return None,
+    };
+    Some(Data::F64(out.into()))
 }
 
 /// `u\ y` and `u\. y`: the verb applied to every prefix, or to every suffix.
@@ -15230,11 +15645,26 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     }
     let count = n - w + 1;
     if w > 0 && base.dtype().is_numeric()
-        && let Some(op) = folded_op(u) && let Some(d) = window_typed(op, &base.data, n, m, w)
+        && let Some((op, swap)) = folded_step(u)
+        && let Some(d) = window_typed(op, swap, &base.data, n, m, w)
     {
         let mut shape = base.shape.clone();
         shape[0] = count;
         return Ok(Array::new(shape, d));
+    }
+    // The weighted sum of every window and its relatives: one pass, where
+    // the composition read as a verb is one interpretation per window. Only
+    // over a VECTOR, whose windows are vectors and whose items are single
+    // numbers — the weights are one per item there, which is what makes the
+    // whole thing arithmetic.
+    if w > 0
+        && base.rank() == 1
+        && !base.is_sparse()
+        && !matches!(u, Verb::Cycle(_))
+        && let Some(k) = correlation(u, w, base.dtype(), ctx, span)
+        && let Some(d) = correlate_typed(&k, base.row_major_data(), n, w)
+    {
+        return Ok(Array::new(vec![count], d));
     }
     let work = count.saturating_mul(w).saturating_mul(m);
     let cells = each_cell(count, work, u.is_pure(), ctx, |i, c| {
@@ -15290,14 +15720,22 @@ fn nwise(f: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     if count == 0 {
         return Ok(empty_windows(&fold, base, w, false, ctx, span));
     }
-    // The blockwise fold the infix already has. It runs over whole items at
-    // full rank, which is what folding the elements along the axis comes to
-    // for the arithmetic operands it covers, and those are all commutative,
-    // so a reversed window folds to the same value.
+    // The typed fold the infix already has. It runs over whole items at full
+    // rank, which is what folding the elements along the axis comes to for
+    // the arithmetic operands it covers. A NEGATIVE left argument reverses
+    // each window, which the typed fold has no way to do — for a
+    // commutative operation it makes no difference, and for the difference
+    // it makes all of it, so the reversed windows go the general way.
+    let commuted = matches!(f, Verb::Commute(_));
+    let inner = match f {
+        Verb::Commute(g) => &**g,
+        g => g,
+    };
     if w > 0
         && base.dtype().is_numeric()
-        && let Some(op) = scalar_dyad_of(f)
-        && let Some(d) = window_typed(op, base.row_major_data(), n, m, w)
+        && let Some(op) = scalar_dyad_of(inner)
+        && (k > 0 || is_associative(op))
+        && let Some(d) = window_typed(op, commuted, base.row_major_data(), n, m, w)
     {
         let mut shape = base.shape.clone();
         shape[0] = count;
@@ -15414,6 +15852,185 @@ impl Drop for FoldFrame {
 }
 
 #[inline(never)]
+/// A fold whose every step is one scalar operation over one number, as a
+/// typed loop.
+///
+/// `x (] F:. v) y` over a numeric VECTOR carries a running value through an
+/// arithmetic operation and keeps every value or the last one. Nothing in
+/// that needs interpreting once the operation is known: no verb stands
+/// between the step and what is kept, and no step can take the fold's
+/// control, which only an explicit definition writes. The loop is therefore
+/// the whole fold, where the interpreted road builds an array for the item,
+/// one for the step's answer and one for what it keeps, at every one of a
+/// million steps.
+///
+/// None leaves the fold to that road, and the conditions are strict on
+/// purpose: every value in reach is an ordinary finite number, and a step
+/// that leaves the element type — an integer window that overflows, a float
+/// that reaches an infinity — abandons the pass rather than deciding for
+/// itself what J makes of it.
+fn fold_typed(
+    u: &Verb,
+    v: &Verb,
+    kind: FoldKind,
+    x: Option<&Array>,
+    y: &Array,
+) -> Option<Array> {
+    use ScalarDyad::*;
+    // `]` and `[` answer what they are handed; any other keeper runs at
+    // every step and is the interpreter's business.
+    if !matches!(u, Verb::Prim(p) if p.monad == MonadOp::Same) {
+        return None;
+    }
+    // `v~` folds `a v~ b` as `b v a`: the same value for the commutative
+    // operations and a different one for the difference, so the flag
+    // travels to the step rather than deciding whether there is a path.
+    let (inner, swap) = match v {
+        Verb::Commute(g) => (&**g, true),
+        g => (g, false),
+    };
+    let op = scalar_dyad_of(inner)?;
+    if !matches!(op, Add | Sub | Mul | Min | Max) {
+        return None;
+    }
+    if y.rank() != 1 || y.is_sparse() || !y.is_row_major() {
+        return None;
+    }
+    // An argument with no items, and one whose only value is the running
+    // value itself, take no step at all: what they answer is about the
+    // operation's identity element and the verb applied to a lone value,
+    // which the general road already says.
+    let from = usize::from(x.is_none());
+    if y.items() <= from {
+        return None;
+    }
+    let seed = match x {
+        None => None,
+        // The running value starts at an ATOM or nowhere: a fold seeded
+        // with a list steps over cells, which is not this loop.
+        Some(a) if a.rank() == 0 && !a.is_sparse() => Some(a),
+        Some(_) => return None,
+    };
+    let FoldKind { multiple, reverse } = kind;
+    match (&y.data, seed.map(|a| &a.data)) {
+        (Data::F64(v), None) => fold_pass_f64(v, None, op, swap, multiple, reverse),
+        (Data::F64(v), Some(Data::F64(s))) => {
+            fold_pass_f64(v, Some(s[0]), op, swap, multiple, reverse)
+        }
+        // An integer or boolean seed over a float argument is the float the
+        // first step promotes it to, and the promotion is the one the
+        // general dyad makes of the same pair.
+        (Data::F64(v), Some(Data::I64(s))) => {
+            fold_pass_f64(v, Some(s[0] as f64), op, swap, multiple, reverse)
+        }
+        (Data::F64(v), Some(Data::Bool(s))) => {
+            fold_pass_f64(v, Some(f64::from(s[0])), op, swap, multiple, reverse)
+        }
+        (Data::I64(v), None) => fold_pass_i64(v, None, op, swap, multiple, reverse),
+        (Data::I64(v), Some(Data::I64(s))) => {
+            fold_pass_i64(v, Some(s[0]), op, swap, multiple, reverse)
+        }
+        (Data::I64(v), Some(Data::Bool(s))) => {
+            fold_pass_i64(v, Some(i64::from(s[0])), op, swap, multiple, reverse)
+        }
+        // A boolean argument answers in whatever type the arithmetic lands
+        // in, which the general dyad decides; the exact types, the complex
+        // ones and the boxes have no typed loop at all.
+        _ => None,
+    }
+}
+
+/// [`fold_typed`] over a float buffer. None where any value in reach is not
+/// an ordinary number: an infinity and a NaN carry the dialect's own rules,
+/// and those live in the general dyad.
+fn fold_pass_f64(
+    v: &[f64],
+    seed: Option<f64>,
+    op: ScalarDyad,
+    swap: bool,
+    multiple: bool,
+    reverse: bool,
+) -> Option<Array> {
+    use ScalarDyad::*;
+    if !v.iter().all(|x| x.is_finite()) || seed.is_some_and(|s| !s.is_finite()) {
+        return None;
+    }
+    let n = v.len();
+    let at = |i: usize| v[if reverse { n - 1 - i } else { i }];
+    let (mut acc, from) = match seed {
+        Some(s) => (s, 0),
+        None => (at(0), 1),
+    };
+    let mut out = Vec::with_capacity(if multiple { n - from } else { 0 });
+    for i in from..n {
+        let (a, b) = match swap {
+            false => (at(i), acc),
+            true => (acc, at(i)),
+        };
+        acc = match op {
+            Add => a + b,
+            Sub => a - b,
+            Mul => a * b,
+            Min => a.min(b),
+            _ => a.max(b),
+        };
+        // The operands were finite, so only an overflow lands here — and
+        // where the arithmetic leaves the ordinary numbers the general dyad
+        // says what J makes of it.
+        if !acc.is_finite() {
+            return None;
+        }
+        if multiple {
+            out.push(acc);
+        }
+    }
+    Some(match multiple {
+        true => Array::new(vec![out.len()], Data::F64(out.into())),
+        false => Array::scalar_f64(acc),
+    })
+}
+
+/// [`fold_typed`] over an integer buffer. None where a step overflows: the
+/// general road answers that in floats, and the width of the answer is its
+/// decision to make.
+fn fold_pass_i64(
+    v: &[i64],
+    seed: Option<i64>,
+    op: ScalarDyad,
+    swap: bool,
+    multiple: bool,
+    reverse: bool,
+) -> Option<Array> {
+    use ScalarDyad::*;
+    let n = v.len();
+    let at = |i: usize| v[if reverse { n - 1 - i } else { i }];
+    let (mut acc, from) = match seed {
+        Some(s) => (s, 0),
+        None => (at(0), 1),
+    };
+    let mut out = Vec::with_capacity(if multiple { n - from } else { 0 });
+    for i in from..n {
+        let (a, b) = match swap {
+            false => (at(i), acc),
+            true => (acc, at(i)),
+        };
+        acc = match op {
+            Add => a.checked_add(b)?,
+            Sub => a.checked_sub(b)?,
+            Mul => a.checked_mul(b)?,
+            Min => a.min(b),
+            _ => a.max(b),
+        };
+        if multiple {
+            out.push(acc);
+        }
+    }
+    Some(match multiple {
+        true => Array::new(vec![out.len()], Data::I64(out.into())),
+        false => Array::scalar_i64(acc),
+    })
+}
+
 fn fold_family(
     u: &Verb,
     v: &Verb,
@@ -15424,14 +16041,22 @@ fn fold_family(
     span: Span,
 ) -> Result<Array> {
     let FoldKind { multiple, reverse } = kind;
-    let mut items = if y.rank() == 0 { vec![y.clone()] } else { y.cells(1) };
-    if reverse {
-        items.reverse();
+    // The items are read where the step needs them rather than all at once:
+    // a fold over a million rows would otherwise build a million arrays
+    // before it took its first step, and hold every one of them until its
+    // last.
+    let n = if y.rank() == 0 { 1 } else { y.items() };
+    let item_at = |i: usize| match y.rank() {
+        0 => y.clone(),
+        _ => y.cell_at(1, if reverse { n - 1 - i } else { i }),
+    };
+    if let Some(answer) = fold_typed(u, v, kind, x, y) {
+        return Ok(answer);
     }
-    let (mut acc, rest) = match (x, items.split_first()) {
-        (Some(x), _) => (x.clone(), &items[..]),
-        (None, Some((first, rest))) => (first.clone(), rest),
-        (None, None) => {
+    let (mut acc, from) = match (x, n) {
+        (Some(x), _) => (x.clone(), 0),
+        (None, 1..) => (item_at(0), 1),
+        (None, 0) => {
             if multiple {
                 return Err(Error::domain(
                     "a fold of every result over no items has no item to start from",
@@ -15442,24 +16067,39 @@ fn fold_family(
             return u.monad(&seed, ctx, span);
         }
     };
-    let mut out: Vec<Array> = Vec::with_capacity(rest.len());
+    // Every result where the fold keeps every result, and only the last
+    // where it keeps one: `u` still runs at every step either way, because
+    // a refusal it makes at any of them is the fold's refusal.
+    let mut out = Kept::new(multiple, n - from);
     // Three of the four controls keep a step out of the answer, and a fold
     // that stepped and kept every one of them out has no answer to give —
     // which is not the same thing as a fold that never stepped at all, and
     // is why the two are told apart here.
     let mut left_out = false;
+    // `]` is the fold's commonest keeper, and it answers what it was
+    // handed: the step's own value, with no verb applied between.
+    let keeps = matches!(u, Verb::Prim(p) if p.monad == MonadOp::Same);
     let frame = FoldFrame::open();
-    for item in rest {
-        let stepped = v.dyad(item, &acc, ctx, span)?;
+    for i in from..n {
+        let item = item_at(i);
+        let stepped = v.dyad(&item, &acc, ctx, span)?;
         match frame.taken() {
             None => {
                 acc = stepped;
-                out.push(u.monad(&acc, ctx, span)?);
+                let kept = match keeps {
+                    true => acc.clone(),
+                    false => u.monad(&acc, ctx, span)?,
+                };
+                out.push(kept);
             }
             // Keep the step's result and end the fold.
             Some(1) => {
                 acc = stepped;
-                out.push(u.monad(&acc, ctx, span)?);
+                let kept = match keeps {
+                    true => acc.clone(),
+                    false => u.monad(&acc, ctx, span)?,
+                };
+                out.push(kept);
                 break;
             }
             // Carry the result on as the running value, but leave it out.
@@ -15493,11 +16133,80 @@ fn fold_family(
             shape.extend_from_slice(&cell.shape);
             return Ok(Array::new(shape, Data::empty(cell.dtype())));
         }
-        return assemble(&[out.len()], out, span);
+        return out.framed(span);
     }
-    match out.pop() {
+    match out.last() {
         Some(last) => Ok(last),
         None => u.monad(&acc, ctx, span),
+    }
+}
+
+/// What a fold keeps of the results its steps make.
+///
+/// A fold that keeps EVERY result and whose every step answers one float —
+/// which is what a recursion over a series answers — writes them into one
+/// buffer as it goes, rather than holding an array per step and framing a
+/// million of them at the end. The first step that answers anything else
+/// spills what was collected back into arrays and the general road takes
+/// over. A fold that keeps ONE result keeps the last it was handed.
+enum Kept {
+    Last(Option<Array>),
+    Flat(Vec<f64>),
+    Cells(Vec<Array>),
+}
+
+impl Kept {
+    fn new(multiple: bool, steps: usize) -> Kept {
+        match multiple {
+            false => Kept::Last(None),
+            true => Kept::Flat(Vec::with_capacity(steps)),
+        }
+    }
+
+    fn push(&mut self, a: Array) {
+        match self {
+            Kept::Last(slot) => *slot = Some(a),
+            Kept::Cells(cells) => cells.push(a),
+            Kept::Flat(vals) => {
+                if a.rank() == 0
+                    && let Data::F64(b) = &a.data
+                    && let [x] = b.as_slice()
+                {
+                    vals.push(*x);
+                    return;
+                }
+                let mut cells: Vec<Array> =
+                    vals.iter().map(|&x| Array::scalar_f64(x)).collect();
+                cells.push(a);
+                *self = Kept::Cells(cells);
+            }
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Kept::Last(slot) => slot.is_none(),
+            Kept::Flat(vals) => vals.is_empty(),
+            Kept::Cells(cells) => cells.is_empty(),
+        }
+    }
+
+    fn last(self) -> Option<Array> {
+        match self {
+            Kept::Last(slot) => slot,
+            Kept::Flat(vals) => vals.last().map(|&x| Array::scalar_f64(x)),
+            Kept::Cells(mut cells) => cells.pop(),
+        }
+    }
+
+    /// The results as one array, framed by the step they were made at.
+    fn framed(self, span: Span) -> Result<Array> {
+        match self {
+            // The single form never frames what it kept.
+            Kept::Last(slot) => Ok(slot.unwrap_or_else(|| Array::new(vec![0], Data::empty(DType::F64)))),
+            Kept::Flat(vals) => Ok(Array::new(vec![vals.len()], Data::F64(vals.into()))),
+            Kept::Cells(cells) => assemble(&[cells.len()], cells, span),
+        }
     }
 }
 
