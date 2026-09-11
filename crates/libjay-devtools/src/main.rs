@@ -598,13 +598,22 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         // answers and a reason. It keeps its own class rather than the
         // verdict's, and stays out of the signature ranking, which is the
         // list of causes still to explain.
-        let row = accepted.row_for(lang, &finding.expr, &sig, seen);
+        // A reference answer the reference itself abbreviated is not a
+        // second answer: the two engines were never compared on the part
+        // that is missing. It is excused before the pinned rows, because
+        // there is nothing about it to pin.
+        let row = match print_limited(lang, &seen.ours_text, &seen.theirs_text) {
+            true => Some((PRINT_LIMIT_ROW.to_string(), Excuse::PrintLimit)),
+            false => accepted
+                .row_for(lang, &finding.expr, &sig, seen)
+                .map(|(row, how)| (row.clone(), how)),
+        };
         match &row {
             Some((row, how)) => {
                 accepted_count += 1;
                 *by_excuse.entry(*how).or_default() += 1;
                 *counts.entry("accepted").or_default() += 1;
-                *matched_rows.entry((*how, (*row).clone())).or_default() += 1;
+                *matched_rows.entry((*how, row.clone())).or_default() += 1;
             }
             None => {
                 *counts.entry(finding.drawn.label()).or_default() += 1;
@@ -652,10 +661,12 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     // signature each match something measured, a FAMILY matches a class,
     // and the reader of a sweep is owed the difference.
     println!(
-        "    accepted by sentence {:>5}, by signature {:>5}, by family {:>5}",
+        "    accepted by sentence {:>5}, by signature {:>5}, by family {:>5}, \
+         by print-limit {:>5}",
         by_excuse.get(&Excuse::Sentence).copied().unwrap_or(0),
         by_excuse.get(&Excuse::Signature).copied().unwrap_or(0),
         by_excuse.get(&Excuse::Family).copied().unwrap_or(0),
+        by_excuse.get(&Excuse::PrintLimit).copied().unwrap_or(0),
     );
     for (label, n) in counts {
         // A class that was never compared is not a share of the compared
@@ -753,6 +764,50 @@ enum Excuse {
     Sentence,
     Signature,
     Family,
+    PrintLimit,
+}
+
+/// What an abbreviated reference answer is excused as, in place of a pinned
+/// row: there is no pair of answers to record, only half of one.
+const PRINT_LIMIT_ROW: &str = "the reference abbreviated its answer (9!:37)";
+
+/// Whether the reference's answer is an ABBREVIATION of libjay's rather
+/// than a different answer.
+///
+/// jconsole cuts a result that runs past its output control and marks every
+/// cut with `...`: a row too wide ends in one, and a result too tall ends in
+/// a line that is one. The recorder's preamble widens the page as far as
+/// `9!:37` goes, but a swept sentence can ask for an answer of any size, and
+/// what comes back then is the beginning of the right answer with the rest
+/// missing — which parts the two engines over nothing.
+///
+/// The test is strict: every line the reference gave has to be libjay's own
+/// line, exactly where it was cut and exactly as it stands where it was not,
+/// and at least one of them has to have been cut. Only J abbreviates; GNU
+/// APL's page width is set outright.
+fn print_limited(lang: libjay_testkit::Lang, ours: &str, theirs: &str) -> bool {
+    if lang != libjay_testkit::Lang::J || ours.len() <= theirs.len() {
+        return false;
+    }
+    let theirs: Vec<&str> = theirs.trim_end().lines().map(str::trim_end).collect();
+    let ours: Vec<&str> = ours.trim_end().lines().map(str::trim_end).collect();
+    if theirs.is_empty() || ours.len() < theirs.len() {
+        return false;
+    }
+    let mut cut = false;
+    for (theirs, ours) in theirs.iter().zip(&ours) {
+        match theirs.strip_suffix("...") {
+            Some(head) => {
+                cut = true;
+                if !ours.starts_with(head) {
+                    return false;
+                }
+            }
+            None if theirs == ours => {}
+            None => return false,
+        }
+    }
+    cut
 }
 
 impl Excuse {
@@ -761,6 +816,7 @@ impl Excuse {
             Excuse::Sentence => "sentence",
             Excuse::Signature => "signature",
             Excuse::Family => "family",
+            Excuse::PrintLimit => "print-limit",
         }
     }
 }

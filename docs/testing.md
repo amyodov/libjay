@@ -509,9 +509,37 @@ had in flight, marks those sentences `runner-died`, and starts another
 worker on what is left. They are reported in a section of their own and are
 in no denominator: nothing about them was measured.
 
+The stall rule watches the JOURNAL, and a worker of several threads keeps
+the journal growing while ONE of its sentences spins: `(% F:. $) (1e_9 1
+1e9)` is a fold whose stepping verb reshapes by a billion, and a worker
+holding it is neither quiet nor finished. So the supervisor also reads the
+journal forward as the sweep writes it, keeps the sentences announced and
+not yet answered, and kills the worker when the oldest of them has been in
+flight for longer than `LIBJAY_SWEEP_SENTENCE` seconds — 60 by default, and
+0 to wait for ever. The sentence is named on the way past and recorded as
+`runner-died`, which is what a fatal signal records, and the sweep goes on
+with the next worker.
+
 `--journal FILE` keeps the journal, so an interrupted sweep resumes instead
 of starting again. `--no-supervise` measures in the one process, which is
 faster to start and has no such protection.
+
+### An answer the reference abbreviated is no measurement
+
+The recorder's preamble widens jconsole's page as far as `9!:37` goes, but
+a swept sentence can ask for an answer of any size, and what comes back
+then is the beginning of the right answer with the rest elided — every cut
+marked `...`, a row too wide ending in one and a result too tall ending in
+a line that is one. The two engines are parted over nothing there: libjay
+wrote the whole of an answer whose beginning the reference agrees with.
+
+A sweep therefore tests for it before it tests anything else, and excuses
+such a row as `print-limit` rather than matching it against a pinned row —
+there is no pair of answers to pin, only half of one. The test is strict:
+every line the reference gave has to be libjay's own line, exactly where it
+was cut and exactly as it stands where it was not, and at least one of them
+has to have been cut. The count is reported beside the other excuses, and
+only J abbreviates: GNU APL's page width is set outright.
 
 ### How long an interpreter is waited on
 

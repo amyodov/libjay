@@ -88,7 +88,7 @@ _1 + ((1e8) ! (1e8 + 1e_4))
 // matches them by cause instead.
 2 p: (3j4 1j_1)
 ? the reference answers a factorisation of a complex number with nothing at all; reason: abort
-~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer verb=p:,q: also=j.,r.,#:,#.,o.,F..,F.:,F::,M.,^,^.,%:,+,-,*,%,^:,L:,S:,-.,>,e.,~:,=,<:,>:,<.,>.,|.,{.,}.
+~ cause=we-refuse:err:domain_error:_a_prime_query_needs_an_integer|we-refuse:err:domain_error:_prime_factors_need_an_integer|we-refuse:err:domain_error:_prime_exponents_need_an_integer verb=p:,q: also=j.,r.,#:,#.,o.,F..,F.:,F::,M.,^,^.,%:,+,-,*,%,^:,L:,S:,-.,>,e.,~:,=,<:,>:,<.,>.,|.,{.,}.,|,.,!.,x:,u:,b.,f.,::,p.,p..,+.,*.,i:,":,A.,I.,/.,E.,s:,%.,+:,-:,*:,a.
 
 // A SINGULAR MATRIX UNDER `%.`, WHERE THE REFERENCE HAS NO RULE — ONLY THE
 // LUCK OF ITS OWN FACTORISATION. Four rank-deficient arguments, measured:
@@ -468,6 +468,7 @@ $ 2 +/\\. (0 $ a:)
 ? the same with the empty box for the item; reason: self-contradiction
 $ 8 +/\\. (0 $ a:)
 ? the same, with a wider left argument; reason: self-contradiction
+~ cause=differ:val:atom/num|differ:val:vector/num|we-refuse:err:length_error:_reshape_of_an_empty_array verb=+ with=\. also=s:,u:,x:,!.,f.,::,M.,^:,&.,&.:,p:,q:,e.,-.,+.,*.,=,~:,<:,>:,<.,>.,-,*,%,^,%:,^.,|,j.,r.,o.,+:,-:,*:
 $ 2 +/\\. (0 $ s: 'a')
 ? the same over symbols; reason: self-contradiction
 

@@ -49,12 +49,88 @@ const PROGRESS: &str = "  ";
 /// interpreter runs on one mismatch, and a false kill costs a measurement.
 const STALL: u64 = 600;
 
-fn stall() -> Option<std::time::Duration> {
-    let secs: u64 = std::env::var("LIBJAY_SWEEP_STALL")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(STALL);
+/// How long ONE sentence may be in flight before the supervisor takes it
+/// for stuck, in seconds. `LIBJAY_SWEEP_SENTENCE` overrides it; 0 waits for
+/// ever.
+///
+/// [`STALL`] watches the journal, and a worker of several threads keeps the
+/// journal growing while ONE of its threads spins: `(% F:. $) (1e_9 1 1e9)`
+/// is a fold reshaping by a billion, and it is neither quiet nor finished.
+/// The sentence a worker has held longest is the one to blame for that, and
+/// killing the worker records it the way a fatal signal is recorded — named,
+/// unmeasured, and stepped past.
+const SENTENCE: u64 = 60;
+
+fn seconds(name: &str, fallback: u64) -> Option<std::time::Duration> {
+    let secs: u64 =
+        std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(fallback);
     (secs > 0).then(|| std::time::Duration::from_secs(secs))
+}
+
+fn stall() -> Option<std::time::Duration> {
+    seconds("LIBJAY_SWEEP_STALL", STALL)
+}
+
+fn sentence_cap() -> Option<std::time::Duration> {
+    seconds("LIBJAY_SWEEP_SENTENCE", SENTENCE)
+}
+
+/// The sentences a worker has announced and not yet answered for, each with
+/// the moment the supervisor first saw it announced.
+///
+/// The journal is read FORWARD from where the last look left off, so
+/// watching a sweep costs one pass over what the sweep wrote rather than one
+/// pass per look.
+#[derive(Default)]
+struct Flight {
+    at: u64,
+    open: Vec<(Key, std::time::Instant)>,
+}
+
+impl Flight {
+    /// Take in whatever the journal has gained since the last look.
+    fn advance(&mut self, path: &std::path::Path) {
+        use std::io::{Read, Seek, SeekFrom};
+        let Ok(mut file) = std::fs::File::open(path) else { return };
+        if file.seek(SeekFrom::Start(self.at)).is_err() {
+            return;
+        }
+        let mut text = String::new();
+        if file.read_to_string(&mut text).is_err() {
+            return;
+        }
+        // A line the worker is still writing is not a record yet: the read
+        // stops at the last newline and starts there again next time.
+        let Some(end) = text.rfind('\n').map(|i| i + 1) else { return };
+        self.at += end as u64;
+        let now = std::time::Instant::now();
+        for line in text[..end].lines() {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let key = |expr: &str, io: &str| {
+                Some((corpus::try_unescape(expr).ok()?, io.parse::<u8>().ok()?))
+            };
+            match fields.first() {
+                Some(&"?") if fields.len() == 3 => {
+                    if let Some(k) = key(fields[2], fields[1]) {
+                        self.open.push((k, now));
+                    }
+                }
+                Some(&"=") if fields.len() == 7 => {
+                    if let Some(k) = key(fields[3], fields[2])
+                        && let Some(i) = self.open.iter().position(|(open, _)| *open == k)
+                    {
+                        self.open.remove(i);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// The sentence in flight longest, and how long that is.
+    fn oldest(&self) -> Option<(&Key, std::time::Duration)> {
+        self.open.iter().min_by_key(|(_, at)| *at).map(|(k, at)| (k, at.elapsed()))
+    }
 }
 
 /// Measure `probes` under a worker process, restarting it past any sentence
@@ -168,12 +244,27 @@ fn run_worker(command: &mut std::process::Command, path: &std::path::Path) -> Re
     let mut child =
         oracle::own_group(command).spawn().map_err(|e| format!("starting the sweep worker: {e}"))?;
     let limit = stall();
+    let cap = sentence_cap();
+    let mut flight = Flight::default();
     let mut last = (written(path), std::time::Instant::now());
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return Ok(status.success()),
             Err(e) => return Err(format!("waiting for the sweep worker: {e}")),
             Ok(None) => {}
+        }
+        flight.advance(path);
+        if let Some(cap) = cap
+            && let Some(((expr, io), waited)) = flight.oldest()
+            && waited >= cap
+        {
+            let origin = if *io == 1 { String::new() } else { format!(" [io={io}]") };
+            println!(
+                "{PROGRESS}one sentence has run for {waited:?}{origin}; killing the worker: {expr}"
+            );
+            oracle::kill_group(&mut child);
+            let _ = child.wait();
+            return Ok(false);
         }
         let now = written(path);
         if now != last.0 {
