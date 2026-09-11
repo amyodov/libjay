@@ -31,7 +31,7 @@ jobs:
   supply-chain:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # RustSec advisories, pinned bans (the 2026-08-20 arrayref attack),
       # license allowlist, and registry-source checks. deny.toml is the config.
       - uses: EmbarkStudios/cargo-deny-action@v2
