@@ -698,7 +698,6 @@ fn newly_spelled_words_name_what_they_still_lack() {
     let cases = [
         (Lang::J, "$. 'abc'", "sparse array of character"),
         (Lang::J, "6 s: s: <'a'", "symbol-table form"),
-        (Lang::J, "+ &. (+/ % #) 1 2", "obverse"),
         (Lang::Apl, "(⍳3)∘×2", "∘ with a value operand"),
     ];
     for (lang, src, what) in cases {
@@ -706,4 +705,9 @@ fn newly_spelled_words_name_what_they_still_lack() {
         assert_eq!(e.kind, ErrorKind::NotYet, "{src}");
         assert!(e.msg.contains(what), "{src}: {}", e.msg);
     }
+    // An obverse J's own table does not name is the LANGUAGE's absence, and
+    // reads as one.
+    let e = err(Lang::J, "+ &. (+/ % #) 1 2");
+    assert_eq!(e.kind, ErrorKind::Language);
+    assert!(e.msg.contains("obverse"), "{}", e.msg);
 }

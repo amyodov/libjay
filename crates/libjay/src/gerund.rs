@@ -527,14 +527,31 @@ fn spell(ar: &Ar) -> Option<(String, Shape)> {
         }
         Ar::Train(_) => {
             let parts = tines(ar);
-            let mut out = String::new();
-            for (i, t) in parts.iter().enumerate() {
-                if i > 0 {
-                    out.push(' ');
-                }
-                out.push_str(&left(t)?);
+            let mut raw: Vec<String> = Vec::with_capacity(parts.len());
+            let mut out: Vec<String> = Vec::with_capacity(parts.len());
+            for t in &parts {
+                let (text, shape) = spell(t)?;
+                raw.push(text.clone());
+                out.push(if shape == Shape::Train { format!("({text})") } else { text });
             }
-            Some((out, Shape::Train))
+            // A TINE IS BRACKETED BEFORE A TINE THAT STARTS WITH A NUMBER
+            // where its own spelling ends in `.` or in a DIGIT. Two
+            // numbers with a space between them are ONE list, so
+            // `3!:3 3!:3` would read back as `3 !: (3 3) !: 3`; and the
+            // reference holds a `.` off a digit the same way. `(".) 3!:3`,
+            // `(<.) _3:`, `(+.) 2 b.`, `(3!:3) (2 2 2 $ j."1 1 2)` and
+            // `(i.) (2 + *)` are all written that way, where `x: 3!:3`,
+            // `q: 2 b.`, `+ 3!:3` and `<. (+ *)` are not: a tine ending in
+            // `:` needs nothing, and neither does a following tine that
+            // starts with a primitive.
+            for i in 0..out.len().saturating_sub(1) {
+                let numeric = raw[i + 1].starts_with(|c: char| c.is_ascii_digit() || c == '_');
+                let holds = out[i].ends_with(|c: char| c == '.' || c.is_ascii_digit());
+                if numeric && holds {
+                    out[i] = format!("({})", out[i]);
+                }
+            }
+            Some((out.join(" "), Shape::Train))
         }
     }
 }
@@ -575,10 +592,19 @@ fn left(ar: &Ar) -> Option<String> {
 fn right(ar: &Ar) -> Option<String> {
     let (text, shape) = spell(ar)?;
     // `{` carries a space of its own, and the reference brackets it here
-    // rather than letting the space end the phrase. `{::` and a constant
-    // verb of a NEGATIVE atom are bracketed too — the reference will not
-    // let either stand against the conjunction that took it.
-    let held_off = text == "{::" || (text.starts_with('_') && text.ends_with(':') && text != "_:");
+    // rather than letting the space end the phrase. A WORD SPELLED WITH
+    // TWO TRAILING INFLECTIONS is bracketed too — `{::` and `p..`, which
+    // are the two J has — so `x:@:(p..)` and `> ::(p..)` are written with
+    // the bracket where `x:@:p.` is written without it. So is a constant
+    // verb of a NEGATIVE atom: the reference will not let it stand against
+    // the conjunction that took it.
+    let inflection = |c: char| c == '.' || c == ':';
+    let two_marks = {
+        let mut tail = text.chars().rev();
+        tail.next().is_some_and(inflection) && tail.next().is_some_and(inflection)
+    };
+    let held_off =
+        two_marks || (text.starts_with('_') && text.ends_with(':') && text != "_:");
     let bare = shape == Shape::Word && !text.ends_with(' ') && !held_off;
     Some(if bare { text } else { format!("({text})") })
 }

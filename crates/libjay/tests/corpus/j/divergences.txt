@@ -52,27 +52,6 @@ u: 233
 (9007199254740992) *. (9007199254740993)
 ? jconsole holds both in one double and libjay keeps them exact; reason: proven-wrong
 
-// Two large arguments to `!` a double cannot tell apart. jconsole answers
-// `1e10 ! (1e10 + 1e_4)` with 1.00234; the value is 1.0023631, which the
-// digamma series gives independently, and the reference's difference of two
-// log-gammas cancels catastrophically at that size. libjay's own quotient
-// lands on 1.00238, no closer, and matching the reference here would mean
-// matching its arithmetic rather than the mathematics. Where the difference
-// of the two arguments is a small WHOLE number both sides are exact and
-// agree, which is the ordinary case and is recorded in fuzz_found.txt.
-//
-// The rows below are the same divergence at a size the REFERENCE can
-// answer quickly: `1e10 ! (1e10 + 1e_4)` costs jconsole twenty seconds on
-// its own, which is most of a sweep's patience, and a row the interpreter
-// does not finish measuring is a row that silently excuses nothing. The 1
-// is subtracted off because the difference is in digits the printer would
-// otherwise round away.
-_1 + ((100000000) ! (100000000.00000001))
-? both sides lose this one; the reference's answer is not the value either; reason: proven-wrong
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/text|differ:val:vector/text verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,&.,&.: answers=inexact,near
-_1 + ((1e8) ! (1e8 + 1e_4))
-? both sides lose this one; the reference's answer is not the value either; reason: proven-wrong
-
 // FACTORISING SOMETHING THAT IS NOT A WHOLE NUMBER: THE REFERENCE ANSWERS
 // NOTHING AT ALL. `2 p: (3j4 1j_1)` prints no value there — and neither
 // does `$` of it, nor `3!:0` of it, so there is no shape and no type to
@@ -150,29 +129,6 @@ $ %. (i. 4 3)
 ? the near-equal binomial parts by one bit and the format downstream refuses; reason: proven-wrong
 ~ cause=we-refuse:err:domain_error:_a_format_specification_is_whole_numbers|we-refuse:err:domain_error:_format_by_specification_takes_numbers verb=! also=%,*,+,-,+:,-:,*:,<:,>:,j.,":,&.,&.:
 
-// `x C. y` over a left argument that is no permutation of y's items. The
-// Dictionary defines the dyad for a permutation — a direct one or a boxed
-// list of cycles — and says nothing about anything else. Thirty probes did
-// not find a rule in what the reference does with one: `(_2 0 2) C. 'hello'`
-// is `eolhl` there, `(_1 _2) C. i.4` is `0 1 3 2` and `(_2 _1) C. i.4` is
-// `0 1 2 3`, which is neither the direct reading nor the flat cycle form
-// `C. y` writes, and `(_1) C. i.4` and `(_3) C. (1;2;3)` disagree with both
-// again. libjay refuses instead: an undefined argument is answered with a
-// diagnostic that says which value makes it no permutation, rather than
-// with a number fabricated to match behaviour nobody has specified.
-(_2 0 2) C. 'hello'
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-(_3) C. (1;2;3)
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-(_1 _2) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-(_2 _1) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-(_1) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-C. (_2 0 2)
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-
 // `x ^. y` over a boxed y and a NEGATIVE x, which sends the logarithm into
 // the complex domain. jconsole answers this one with NOTHING AT ALL — no
 // value, no error, no output line — while `2 ^. (<1)`, the same sentence
@@ -226,14 +182,14 @@ p. (0 1 1 _)
 // LCM the reference's own GCD asks for.
 (9223372036854775806) *. (,5)
 ? the reference's own GCD of 1 contradicts the LCM it answers; reason: self-contradiction
-~ cause=differ:val:atom/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
+~ cause=differ:val:atom/num verb=*.,+. also=%:,&.,&.:,#.,i.,$ answers=inexact,huge
 (_9223372036854775806) *. "1 _ 0 (i. 5)
 ? the same boundary, one radix per cell; reason: self-contradiction
 (_9223372036854775806) *."_2 (i. 3 4)
 ? the same boundary over a table; reason: self-contradiction
 (2 7 1 8) *. (_9223372036854775806)
 ? the same boundary, the huge number on the right; reason: self-contradiction
-~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=*.,+. also=%:,&.,&.: answers=inexact,huge
+~ cause=differ:val:vector/num|differ:val:table/num|differ:val:planes/num verb=*.,+. also=%:,&.,&.:,#.,i.,$ answers=inexact,huge
 
 // A LOGARITHM whose left argument holds a NEGATIVE number and whose right
 // is not numeric. The reference neither answers it nor refuses it: the
@@ -586,7 +542,7 @@ _10 10 #: 1234
 // spellings: their monads were followed in round 9A.
 (_.) ^ (0.5)
 ? the reference widens a one-item NaN power to the complex type, as it does the root; reason: self-contradiction
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,<:,>:,+:,*:,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,^:,:. answers=numeric
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:table/num verb=%:,^.,^ also=%,-,+,*,<.,>.,<:,>:,+:,*:,|,o.,+.,*.,j.,!.,&.,&.:,",/,L:,S:,^:,:.,".,":,H. answers=numeric
 _. ^ _.
 ? the reference refuses the NaN power of a NaN where the same pair at three items answers; reason: self-contradiction
 2 %: (_.)
@@ -674,7 +630,7 @@ _2 +/\\. (_.)
 ? a four-byte code is a value there and a codepoint here; reason: model
 9 u: _3
 ? the same over the other form that answers the four-byte type; reason: model
-~ cause=we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint|we-refuse:err:domain_error:_-#_is_not_a_Unicode_codepoint verb=u: also=x:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,~.,^:,&,@,:,f.,::,M.,S:,L:,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,/,\,\.,+.,*.,;.,{::,{,e.,~.,<,>,=:,=.,;:,s:,":,@.,`:,%.,A.,I.,-.,/.
+~ cause=we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint|we-refuse:err:domain_error:_-#_is_not_a_Unicode_codepoint verb=u: also=x:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,~.,^:,&,@,:,f.,::,M.,S:,L:,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,/,\,\.,+.,*.,;.,{::,{,e.,~.,<,>,=:,=.,;:,s:,":,@.,`:,%.,A.,I.,-.,/.,$,.,0x
 
 // THE CRC OF A WIDE CHARACTER. `128!:3` reads a byte string, and the
 // reference refuses one whose type is not the one-byte one: `128!:3 (u: 2)`
@@ -1032,7 +988,11 @@ o.&.% ((__) , (__))
 // product answers what its own dyad answers.
 ((0.5) , (0.5)) <./ ((_.) , (_.))
 ? `(0.5) <. (_.)` is `_.` there and this outer product of the pair is 0.5; reason: self-contradiction
-~ cause=differ:val:table/num|differ:val:vector/num|differ:val:atom/num verb=<.,>.,<:,>:,=,> with=/ also=,,_.,+,-,*,%,x:,0x
+~ cause=differ:val:table/num|differ:val:vector/num|differ:val:atom/num verb=<.,>.,<:,>:,=,> with=/ also=,,_.,+,-,*,%,x:,0x,:
+2 >./ (_. 2 3)
+? `2 >. (_.)` is `_.` there and this outer product answers 2; reason: self-contradiction
+2 <./ (_. 2 3)
+? the same pair through the minimum; reason: self-contradiction
 ((_.) , (_.)) >./ ((0.5) , (0.5))
 ? `(_.) >. (0.5)` is 0.5 there and this outer product of the pair is `_.`; reason: self-contradiction
 ((_.) , (_.)) =/ ((0.5) , (0.5))

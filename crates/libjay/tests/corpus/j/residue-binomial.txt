@@ -1,0 +1,37 @@
+// A WHOLE x ANSWERS STRUCTURALLY AT ANY MAGNITUDE, past the machine word
+// as well as inside it, and the two gammas of a pair that stand CLOSE
+// TOGETHER have to be taken as one ratio: at 2^31 each logarithm is 4.4e10
+// and they stand 4e_6 apart, which is smaller than the last bit either of
+// them holds, so subtracting them leaves nothing and the answer reads as 1.
+(_9223372036854775806) ! (_28976077832308490000)
+9.3e18 ! 2
+_9.3e18 ! 2
+_9.3e18 ! _9.3e18
+1e300 ! 0
+1e300 ! 5
+_1e300 ! 5
+_1e300 ! 0
+_1e300 ! _1e300
+_1e19 ! _1e20
+1e100 ! 1e100
+1e100 ! 1e99
+1e16 ! 9999999999999999.5
+2147483648 ! 2147483647.9999998
+1e10 ! 9999999999.9
+1e10 ! 1e10
+100 ! 99.9999999
+100 ! 100.0000001
+1000000 ! 999999.5
+1e8 ! 99999999.75
+4096 ! 4095.5
+5000 ! 2.5
+1e10 ! 2.5
+>./\\.&.> (_2 {. ((2147483648) ! (2147483647.9999998)))
+(! o.) L:0 (|. (_9223372036854775806))
+// THE TWO ROWS ROUND 6 PINNED AS PROVEN-WRONG ARE THIS RATIO. The
+// reference's answer was read as a catastrophic cancellation of two
+// log-gammas; it is the value, and libjay's own quotient was the one that
+// had lost it.
+_1 + ((100000000) ! (100000000.00000001))
+_1 + ((1e8) ! (1e8 + 1e_4))
+(1e8) ! (1e8 + 1e_4)

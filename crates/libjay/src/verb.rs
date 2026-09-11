@@ -5245,9 +5245,15 @@ fn binomial(x: f64, y: f64) -> f64 {
     // bound used to be 1e17, which left every larger one to the gamma
     // quotient and so to a NaN: `_1e17 ! 0` is 0 and `_1e17 ! _1` is 1, and
     // neither needs any gamma at all.
-    if x.fract() == 0.0 && x.abs() <= 9e18 {
-        let xi = x as i64;
-        if xi < 0 {
+    // The block is about a WHOLE x, and every branch in it that needs the
+    // value in a machine word carries its own bound: the reference answers
+    // structurally past 2⁶³ too — `9.3e18 ! 2` is 0, `1e300 ! 5` is 0 and
+    // `(_9223372036854775806) ! (_28976077832308490000)` is 0 — where
+    // holding the whole block to the word left every one of them to the
+    // gamma quotient and so to no value at all.
+    if x.fract() == 0.0 {
+        let in_word = x.abs() <= 9e18;
+        if x < 0.0 {
             // C(y, x) is 0 for a negative x unless y is negative too and no
             // greater, where the upper-negation identity turns it into a
             // product of `_y-1` factors. That product is worth walking only
@@ -5268,8 +5274,17 @@ fn binomial(x: f64, y: f64) -> f64 {
                 let sign = if (y - x) % 2.0 == 0.0 { 1.0 } else { -1.0 };
                 return sign * binomial_product(-y as i64 - 1, -x - 1.0);
             }
-        } else if xi <= BINOMIAL_PRODUCT_LIMIT {
-            return binomial_product(xi, y);
+        } else if x <= BINOMIAL_PRODUCT_LIMIT as f64 {
+            // The product is abandoned where it OVERFLOWS on the way to a
+            // finite answer: `4096 ! 4095.5` is 0.00881519 there, and the
+            // falling factorial reaches it through 4096 factors whose
+            // running product leaves the double long before the division
+            // brings it back. The logarithms take it in one piece.
+            let p = binomial_product(x as i64, y);
+            if p.is_finite() || y.is_infinite() {
+                return p;
+            }
+            return binomial_by_logs(x, y);
         }
         // Past the product limit the gamma quotient stands in, and it reads
         // a pole over a pole as a NaN where the product would have found a
@@ -5291,9 +5306,9 @@ fn binomial(x: f64, y: f64) -> f64 {
         // so the upper negation moves the question onto two whole numbers
         // that do: `x ! _k` is `(_1^x) * (k-1) ! x+k-1`, which is a product
         // of k−1 factors and is exact wherever the answer is.
-        if y.fract() == 0.0 && y < 0.0 {
+        if y.fract() == 0.0 && y < 0.0 && in_word {
             let k = -y - 1.0;
-            let sign = if xi % 2 == 0 { 1.0 } else { -1.0 };
+            let sign = if (x as i64) % 2 == 0 { 1.0 } else { -1.0 };
             if k <= BINOMIAL_PRODUCT_LIMIT as f64 {
                 return sign * binomial_product(k as i64, x - y - 1.0);
             }
@@ -5402,6 +5417,16 @@ fn binomial_by_logs(x: f64, y: f64) -> f64 {
         return sx * (log_gamma_ratio(z, x) - lx).exp();
     }
     let (lz, sz) = log_gamma(z);
+    // AND Γ(y+1) BESIDE Γ(x+1) IS THE PAIR WHERE THE DIFFERENCE IS SMALL:
+    // at x = 2³¹ the two logarithms are 4.4e10 apiece and stand 4e_6
+    // apart, which is smaller than the last bit either of them holds, so
+    // subtracting them leaves zero and the answer reads as 1.
+    // `2147483648 ! 2147483647.9999998` is 0.999995 there and
+    // `1e10 ! 9999999999.9` is 0.093577; both are the ratio, taken in one
+    // Stirling expansion the way the branch above takes its own pair.
+    if x + 1.0 >= STIRLING_RATIO_FLOOR && y + 1.0 >= STIRLING_RATIO_FLOOR {
+        return sz * (log_gamma_ratio(x + 1.0, y - x) - lz).exp();
+    }
     sy * sx * sz * (ly - lx - lz).exp()
 }
 
@@ -7112,6 +7137,29 @@ fn real_lcm_gcd(
         // `1 *. _.` are both `_.` in the reference, where an INFINITY on
         // either side is refused. What the arithmetic itself makes is what
         // it is judged on.
+        //
+        // WHICH OF THE TWO WINS WHEN BOTH ARE PRESENT IS THE OPERATION'S
+        // OWN: the GCD keeps the NaN — `_. +. _` and `_. +. __` are both
+        // `_.` there — and the LCM refuses, `_. *. _` and `__ *. _.`
+        // alike, where `_. *. 2` is `_.` and `0 *. _` is refused.
+        if op == ScalarDyad::Gcd && (a.is_nan() || b.is_nan()) {
+            *slot = f64::NAN;
+            return true;
+        }
+        if a.is_infinite() || b.is_infinite() {
+            ok = false;
+            return false;
+        }
+        // A MULTIPLE OF A ZERO IS A ZERO WITH NO SIGN, and it beats a NaN:
+        // the quotient road carried the other operand's sign into it —
+        // `0 *. _0.5` came out `_0`, whose reciprocal is `__` where the
+        // reference's is `_` — and `_. *. 0` and `0 *. _.` are both 0
+        // there, as `_. *. _0` is, where `_. *. 1` is `_.` and
+        // `_. +. 0` is `_.`.
+        if op == ScalarDyad::Lcm && (a == 0.0 || b == 0.0) {
+            *slot = 0.0;
+            return true;
+        }
         if a.is_nan() || b.is_nan() {
             *slot = f64::NAN;
             return true;
@@ -16318,9 +16366,7 @@ fn inverse_of(u: &Verb, x: Option<&Array>, span: Span) -> Result<Verb> {
         Some(x) => Verb::BondLeft(x.clone(), Box::new(u.clone())),
         None => u.clone(),
     };
-    obverse(&target).ok_or_else(|| {
-        Error::not_yet(format!("the obverse of {} (no inverse is known)", target.name()), span)
-    })
+    obverse(&target).ok_or_else(|| no_obverse(&target.name(), span))
 }
 
 /// `u^:v y` and `x u^:v y` (J): the verb `v` says how many times to apply
@@ -21504,7 +21550,17 @@ fn poly_deriv(y: &Array, span: Span) -> Result<Array> {
     }
     let out: Vec<Cx> =
         c.iter().enumerate().skip(1).map(|(k, &v)| cx::mul(v, cx::from_real(k as f64))).collect();
-    Ok(narrow_numbers(complex_or_real(out)))
+    // THE DERIVATIVE KEEPS THE TYPE IT DIFFERENTIATED. Every step is a
+    // multiplication by a whole number, so a float coefficient answers in
+    // floats whatever the product turned out to be: `3!:0 (p.. (1 2 3))`
+    // is the integer type there and `3!:0 (p.. (2.0 4.0))` is the float
+    // one, where narrowing on the VALUE wrote `p.. (1e_9 1 1e9)` as
+    // `1 2000000000` instead of `1 2e9`.
+    let widened = complex_or_real(out);
+    if y.dtype() == DType::F64 {
+        return Ok(widened);
+    }
+    Ok(narrow_numbers(widened))
 }
 
 /// `x p.. y`: the integral of y's coefficients, with x as the constant term.
@@ -21721,10 +21777,7 @@ fn characteristics(u: &Verb, y: &Array, span: Span) -> Result<Array> {
         // reduction over no items.
         Some(-1) => match obverse(u) {
             Some(v) => chars(v.name()),
-            None => Err(Error::not_yet(
-                format!("the obverse of {} (no inverse is known)", u.name()),
-                span,
-            )),
+            None => Err(no_obverse(&u.name(), span)),
         },
         // `b.` is J's conjunction and has no APL spelling, so the identity
         // asked for here is always J's.
@@ -23220,6 +23273,18 @@ fn under_parts<'a>(f: &'a Verb, g: &'a Verb) -> Option<(&'a Verb, &'a Verb)> {
     let Verb::Compose(inner, under) = g else { return None };
     let back = crate::frontend::j::obverse_of(under, crate::error::Span::new(0, 0)).ok()?;
     (back.name() == f.name()).then_some((&**inner, &**under))
+}
+
+/// The diagnostic a verb with no obverse earns.
+///
+/// J'S OBVERSE TABLE IS A PROPERTY OF THE LANGUAGE, NOT A QUEUE POSITION.
+/// A verb the table does not name is refused permanently there — `$^:_1`,
+/// `,^:_1`, `(n [ ])^:_1`, `~.^:_1` and the thirty-odd others measured are
+/// domain errors in the reference, which is why `::` and `try.` catch
+/// them and answer. Reporting the absence as a gap made the adverse pass
+/// it through instead, since a gap is deliberately not catchable.
+pub(crate) fn no_obverse(name: &str, span: Span) -> Error {
+    Error::language(format!("the obverse of {name} is not defined"), span)
 }
 
 pub(crate) fn obverse(v: &Verb) -> Option<Verb> {
@@ -25059,6 +25124,12 @@ fn cycle_form(y: &Array, near: NearInt, span: Span) -> Result<Array> {
 /// tail. `3 4 2` over five items is `0 1 3 4 2`; `2` over five is the same
 /// permutation again, and `2 3` over four is the identity.
 ///
+/// A NEGATIVE ATOM COUNTS BACK FROM THE END, as it does in a cycle: `_1`
+/// is the last item of the n, `_n` the first. `(_2 0 2) C. (i. 3)` is
+/// `1 0 2` in the reference and `(_1 0) C. (i. 2)` is `1 0`; the same
+/// reading applies where the context supplies n and where `C. y` works it
+/// out, since `C. (_2 0 2)` answers the cycles of `1 0 2`.
+///
 /// `n` is the count the context supplies — the length of the argument being
 /// permuted, or for `C. y` one past the largest index the list names.
 fn direct_permutation_of(y: &Array, n: usize, near: NearInt, span: Span) -> Result<Vec<usize>> {
@@ -25068,9 +25139,16 @@ fn direct_permutation_of(y: &Array, n: usize, near: NearInt, span: Span) -> Resu
     let mut seen = vec![false; n];
     let mut tail = Vec::with_capacity(v.len());
     for &i in &v {
-        let k = usize::try_from(i).ok().filter(|&k| k < n && !seen[k]).ok_or_else(|| {
-            Error::domain(format!("{i} does not belong to a permutation of {n} items"), span)
-        })?;
+        let from_end = if i < 0 { (n as i64).checked_add(i) } else { Some(i) };
+        let k = from_end
+            .and_then(|k| usize::try_from(k).ok())
+            .filter(|&k| k < n && !seen[k])
+            .ok_or_else(|| {
+                Error::domain(
+                    format!("{i} does not belong to a permutation of {n} items"),
+                    span,
+                )
+            })?;
         seen[k] = true;
         tail.push(k);
     }
@@ -25085,8 +25163,12 @@ fn permutation_span(y: &Array, near: NearInt, span: Span) -> Result<usize> {
     let v = y
         .to_i64_vec_near(near)
         .ok_or_else(|| Error::domain("a permutation is a list of integers", span))?;
+    // The floor counts only the indices that name a place from the front:
+    // a negative one counts back from n and cannot raise it, which is why
+    // `C. (_1)` and `C. (_1 _2)` are index errors in the reference where
+    // `C. (_2 0 2)` is the cycles of `1 0 2`.
     let top = v.iter().copied().max().unwrap_or(-1).saturating_add(1).max(0) as u128;
-    Ok(crate::limits::count(top, span)?.max(v.len()))
+    Ok(crate::limits::count(top, span)?.max(v.iter().filter(|&&i| i >= 0).count()))
 }
 
 /// The direct permutation a boxed list of cycles stands for. Its length is

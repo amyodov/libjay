@@ -1,0 +1,59 @@
+// A DIRECT PERMUTATION IN `C.` IS INDICES INTO y, AND A NEGATIVE ONE
+// COUNTS BACK FROM THE END. The list may name fewer places than y has;
+// the ones it does not name come first, in ascending order, and the list
+// is the tail. `C. y` works n out for itself as one past the largest index
+// the list names, which a negative index cannot raise.
+(_2 0 2) C. (i. 3)
+(_2 0 2) C. 'abc'
+(_1 0) C. (i. 2)
+(_1) C. (i. 2)
+(0 _1) C. (i. 2)
+(_3 _2 _1) C. (i. 3)
+(_1 _2) C. (i. 2)
+(_1 _2 _3) C. (i. 3)
+(2 1 0) C. (i. 3)
+(i. 3) C. (i. 3)
+(0 0) C. (i. 2)
+(1 1) C. (i. 3)
+(3) C. (i. 3)
+(_4) C. (i. 3)
+(<0 1) C. (i. 3)
+(<_1 _2) C. (i. 3)
+(_2 0 2) C. (i. 2)
+(_2 0 2) C. (i. 4)
+(_2 0 2) C. (i. 5)
+(_2 0 2) C. (i. 6)
+(3 0 2) C. (i. 5)
+(<3 0 2) C. (i. 5)
+(4 0 2) C. (i. 6)
+(<4 0 2) C. (i. 6)
+(0 1) C. (i. 5)
+(1 0) C. (i. 5)
+(<0 1) C. (i. 5)
+(2 0) C. (i. 5)
+(4) C. (i. 5)
+(0) C. (i. 5)
+(4 3) C. (i. 5)
+(0 2 1) C. (i. 5)
+(3 0 2) C. (i. 3)
+_2 C. 'abcd'
+_2 C. (i. 4)
+2 C. (i. 4)
+(_1) C. 'abcd'
+C. (_2 0 2)
+C. (_1)
+C. (_1 _2)
+C. (3 0 2)
+C. (<3 0 2)
+(+ (_2 0 2)) C. (r. (2.0 4.0 6.0))
+((3 : (< 'try. {. y catch. ''no'' end.')) (_2 0 2)) C. ((8 2) ": (3j4 1j_1))
+// THE SIX ROWS ROUND 8 PINNED AS UNDEFINED ARE THIS READING. They were
+// recorded as a non-permutation the reference answered by no rule anyone
+// had found; every one of them is the negative index counting back from
+// the end, over the abbreviated permutation whose unnamed places come
+// first.
+(_2 0 2) C. 'hello'
+(_3) C. (1;2;3)
+(_1 _2) C. i.4
+(_2 _1) C. i.4
+(_1) C. i.4

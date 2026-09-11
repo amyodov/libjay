@@ -602,11 +602,14 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
         // second answer: the two engines were never compared on the part
         // that is missing. It is excused before the pinned rows, because
         // there is nothing about it to pin.
-        let row = match print_limited(lang, &seen.ours_text, &seen.theirs_text) {
-            true => Some((PRINT_LIMIT_ROW.to_string(), Excuse::PrintLimit)),
-            false => accepted
+        let row = if print_limited(lang, &seen.ours_text, &seen.theirs_text) {
+            Some((PRINT_LIMIT_ROW.to_string(), Excuse::PrintLimit))
+        } else if binary_ulp(lang, &seen.ours_text, &seen.theirs_text) {
+            Some((BINARY_ULP_ROW.to_string(), Excuse::BinaryUlp))
+        } else {
+            accepted
                 .row_for(lang, &finding.expr, &sig, seen)
-                .map(|(row, how)| (row.clone(), how)),
+                .map(|(row, how)| (row.clone(), how))
         };
         match &row {
             Some((row, how)) => {
@@ -662,11 +665,12 @@ fn fuzz_command(args: &[String]) -> Result<(), String> {
     // and the reader of a sweep is owed the difference.
     println!(
         "    accepted by sentence {:>5}, by signature {:>5}, by family {:>5}, \
-         by print-limit {:>5}",
+         by print-limit {:>5}, by binary-ulp {:>5}",
         by_excuse.get(&Excuse::Sentence).copied().unwrap_or(0),
         by_excuse.get(&Excuse::Signature).copied().unwrap_or(0),
         by_excuse.get(&Excuse::Family).copied().unwrap_or(0),
         by_excuse.get(&Excuse::PrintLimit).copied().unwrap_or(0),
+        by_excuse.get(&Excuse::BinaryUlp).copied().unwrap_or(0),
     );
     for (label, n) in counts {
         // A class that was never compared is not a share of the compared
@@ -765,11 +769,17 @@ enum Excuse {
     Signature,
     Family,
     PrintLimit,
+    BinaryUlp,
 }
 
 /// What an abbreviated reference answer is excused as, in place of a pinned
 /// row: there is no pair of answers to record, only half of one.
 const PRINT_LIMIT_ROW: &str = "the reference abbreviated its answer (9!:37)";
+
+/// What a binary representation that differs below the printer's tolerance
+/// is excused as: the same value, read at a precision the comparison the
+/// whole corpus is built on was never able to see.
+const BINARY_ULP_ROW: &str = "3!:3 read the bits below the printed tolerance";
 
 /// Whether the reference's answer is an ABBREVIATION of libjay's rather
 /// than a different answer.
@@ -810,6 +820,57 @@ fn print_limited(lang: libjay_testkit::Lang, ours: &str, theirs: &str) -> bool {
     cut
 }
 
+/// A BINARY REPRESENTATION READ BELOW THE PRINTED TOLERANCE is one answer,
+/// not two. `3!:3` writes a value's bytes, and the whole corpus compares
+/// numbers at the six significant digits both engines print — a 1e_5
+/// relative band. Where the two engines' arithmetic parts in the last bit
+/// of a double, everything above that band agrees and the hexadecimal
+/// spelling still differs: `3!:3 ((1) o. (0.9999999999999999))`,
+/// `3!:3 (%.^:_1 (0 1 1 0))` and `3!:3 ((1e_15) (,/ . *.) (i. 5))` are
+/// each one word apart out of five or ten.
+///
+/// The test is strict. Both answers are a column of the SAME number of
+/// sixteen-digit hexadecimal words, every word that agrees stands exactly
+/// as it was, and every word that differs reads back — little-endian, as
+/// `3!:3` writes it — as two NORMAL doubles of the same sign within the
+/// printer's band. A type header decodes to a subnormal and so can never
+/// be excused, which is what keeps a difference of TYPE or of SHAPE a
+/// difference.
+fn binary_ulp(lang: libjay_testkit::Lang, ours: &str, theirs: &str) -> bool {
+    if lang != libjay_testkit::Lang::J {
+        return false;
+    }
+    let ours: Vec<&str> = ours.trim_end().lines().map(str::trim_end).collect();
+    let theirs: Vec<&str> = theirs.trim_end().lines().map(str::trim_end).collect();
+    if ours.is_empty() || ours.len() != theirs.len() {
+        return false;
+    }
+    let word = |w: &str| {
+        (w.len() == 16 && w.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
+            .then(|| u64::from_str_radix(w, 16).ok())
+            .flatten()
+    };
+    let mut differed = false;
+    for (a, b) in ours.iter().zip(&theirs) {
+        let (Some(a), Some(b)) = (word(a), word(b)) else { return false };
+        if a == b {
+            continue;
+        }
+        differed = true;
+        // `3!:3` writes the bytes in the machine's order, least significant
+        // first, so the word reads back as a double once its bytes are
+        // turned round.
+        let (x, y) = (f64::from_bits(a.swap_bytes()), f64::from_bits(b.swap_bytes()));
+        if !x.is_normal() || !y.is_normal() || x.signum() != y.signum() {
+            return false;
+        }
+        if (x - y).abs() > 1e-5 * x.abs().max(y.abs()) {
+            return false;
+        }
+    }
+    differed
+}
+
 impl Excuse {
     fn label(self) -> &'static str {
         match self {
@@ -817,6 +878,7 @@ impl Excuse {
             Excuse::Signature => "signature",
             Excuse::Family => "family",
             Excuse::PrintLimit => "print-limit",
+            Excuse::BinaryUlp => "binary-ulp",
         }
     }
 }

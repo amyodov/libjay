@@ -193,7 +193,7 @@ fn j_name_and_valence_errors_name_the_word() {
 
 const J_PROMISES: &[Case] = &[
     j("<;.4 i. 5", ErrorKind::NotYet, "<;.4", &["cut (u;.4)"]),
-    j("* b. _1", ErrorKind::NotYet, "* b. _1", &["obverse"]),
+    j("* b. _1", ErrorKind::Language, "* b. _1", &["obverse"]),
     j("$. 'abc'", ErrorKind::NotYet, "$. 'abc'", &["sparse"]),
     j("+/ . * i. 17 17", ErrorKind::NotYet, "+/ . * i. 17 17", &["determinant"]),
     j("9!:1 ] 5", ErrorKind::NotYet, "9!:1", &["foreign 9!:1"]),
@@ -209,7 +209,7 @@ const J_PROMISES: &[Case] = &[
     // Which obverse `^:_1` needs is settled by the arguments — monadically
     // u's own, dyadically the bond's — so the missing one is named when the
     // sentence runs, and a run points at the sentence.
-    j("(+/ % #) ^: _1 [ 1 2 3", ErrorKind::NotYet, "(+/ % #) ^: _1 [ 1 2 3", &["obverse"]),
+    j("(+/ % #) ^: _1 [ 1 2 3", ErrorKind::Language, "(+/ % #) ^: _1 [ 1 2 3", &["obverse"]),
 ];
 
 #[test]

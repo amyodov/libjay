@@ -200,9 +200,10 @@ fn verb_characteristics_answer_with_a_spelling() {
     assert_eq!(j("+ b. 1"), chars("0 $~ }.@$"));
     assert_eq!(j("* b. 1"), chars("1 $~ }.@$"));
     assert_eq!(j("<. b. 1"), chars("_ $~ }.@$"));
-    // A verb with no known inverse says so rather than guessing.
+    // A verb J's obverse table does not name says so rather than guessing,
+    // and says the absence is the language's.
     let e = err(Lang::J, "* b. _1");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("obverse"), "{}", e.msg);
 }
 
@@ -259,7 +260,7 @@ fn under_runs_a_function_and_undoes_the_preparation() {
     // The obverse table is the same one J's `&.` uses, and a verb outside
     // it says so by name.
     let e = err(Lang::Apl, "1+⍢⌊2.5");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("obverse"), "{}", e.msg);
 }
 

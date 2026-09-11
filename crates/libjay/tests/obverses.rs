@@ -59,16 +59,19 @@ fn expect_near(lang: Lang, cases: &[(&str, &[f64])]) {
     }
 }
 
-/// The sentences the table does not reach: each must name the gap rather
-/// than answer, and the name must say whose obverse is missing.
+/// The sentences the table does not reach: each must name the absence
+/// rather than answer, and the name must say whose obverse is missing.
+/// The absence is the LANGUAGE's — J's own table does not name these
+/// verbs either, and refuses them permanently, which is why `::` and
+/// `try.` catch them there — so the refusal must not read as a promise.
 fn expect_gap(lang: Lang, cases: &[&str]) {
     for &src in cases {
-        let msg = match run(lang, src) {
-            Err(e) => e.msg,
+        let e = match run(lang, src) {
+            Err(e) => e,
             Ok(v) => panic!("{src:?} was expected to name a gap; it answered {v:?}"),
         };
-        assert!(msg.contains("obverse"), "{src:?} complained {msg:?}");
-        assert!(msg.contains("not supported yet"), "{src:?} complained {msg:?}");
+        assert!(e.msg.contains("obverse"), "{src:?} complained {:?}", e.msg);
+        assert_eq!(e.kind, jay::ErrorKind::Language, "{src:?} complained {:?}", e.msg);
     }
 }
 

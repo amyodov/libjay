@@ -6097,3 +6097,105 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   it cut (`...`), the row is accepted as `print-limit` before the pinned
   rows are consulted. There is nothing there to pin — the two engines were
   never compared on the part that is missing.
+
+- 2026-09-11 — AN OBVERSE J DOES NOT DEFINE IS A PROPERTY OF THE LANGUAGE,
+  not a queue position. The whole obverse table was measured cell by cell,
+  every primitive's `u^:_1` under an adverse that answers where the obverse
+  is missing: ninety-six cells, and libjay's table and the reference's name
+  exactly the same verbs. What parted them was the DIAGNOSTIC. libjay
+  reported the absence with `NotYet`, which the adverse deliberately does
+  not catch, so `(($^:(_1:)) :: >@#) 2` and `((_9:^:(_2:)) :: 2);.0 …`
+  stopped where the reference answers 1 and 2; `$^:_1` there is a domain
+  error and `::` and `try.` reach past it. The refusal is `Language` now,
+  and the message says the obverse is not in the language. The one verb
+  whose obverse the reference has and libjay does not is `^~`: the inverse
+  of `x^x`, which is a Lambert W, and `(^~)^:_1 (0.5)` is
+  `0.262893j0.499669` there. It is left undone rather than guessed at: the
+  Dictionary's own obverse table under `^:` names neither `^~` nor the
+  Lambert W it would need — it lists the self-inverses, the pairs and the
+  foreigns and stops — and NuVoc's inverse page answered 403, so there is
+  no published obverse to implement against. An inverse read off the
+  reference's answers alone would be behaviour copied rather than a rule
+  followed.
+
+- 2026-09-11 — A NEGATIVE ATOM IN `C.` COUNTS BACK FROM THE END, WHICH
+  REVERSES ROUND 8'S PIN OF SIX ROWS AS UNDEFINED. That round recorded
+  `(_2 0 2) C. 'hello'`, `(_1 _2) C. i.4`, `(_2 _1) C. i.4`, `(_1) C. i.4`,
+  `(_3) C. (1;2;3)` and `C. (_2 0 2)` as behaviour no rule explained.
+  There is a rule and it is the ordinary one: `x C. y` with an unboxed x is
+  a DIRECT permutation whose atoms are indices into y, a negative one
+  counting back from the end exactly as it does inside a cycle, and a list
+  naming fewer places than y has is the abbreviated permutation whose
+  unnamed places come first in ascending order. Eleven cells confirm it —
+  `(_2 0 2) C. (i. 5)` is `1 4 3 0 2`, which is `3 0 2` with 1 and 4 put in
+  front, and `(0) C. (i. 5)` is `1 2 3 4 0` by the same arithmetic. `C. y`
+  alone works its n out as one past the largest index the list NAMES, which
+  a negative index cannot raise, so `C. (_1)` and `C. (_1 _2)` are index
+  errors where `C. (_2 0 2)` is the cycles of `1 0 2`.
+
+- 2026-09-11 — THE TWO GAMMAS OF A CLOSE PAIR ARE ONE RATIO, WHICH REVERSES
+  ROUND 6'S PIN OF TWO `!` ROWS AS PROVEN-WRONG. Γ(y+1) and Γ(x+1) where x
+  and y stand a hair apart have logarithms of 4.4e10 apiece at x = 2³¹ and
+  differ by 4e_6, which is a tenth of the last bit either of them holds;
+  subtracting them leaves zero and the answer reads as 1.
+  `2147483648 ! 2147483647.9999998` is 0.999995 in the reference and
+  `1e10 ! 9999999999.9` is 0.093577, and one Stirling expansion of the
+  ratio reaches both. The same expansion answers `1e8 ! (1e8 + 1e_4)`
+  exactly as the reference does, so the round-6 note — that the reference's
+  answer was a catastrophic cancellation and not the value — was about
+  libjay's own quotient. Beside it: a WHOLE x answers structurally at any
+  magnitude, past 2⁶³ as well as inside it (`9.3e18 ! 2`, `1e300 ! 5` and
+  `(_9223372036854775806) ! (_28976077832308490000)` are all 0, where
+  holding the block to the machine word left every one of them to the gamma
+  quotient and so to no value), and the falling-factorial road is abandoned
+  where its running product overflows on the way to a finite answer, which
+  is `4096 ! 4095.5`.
+
+- 2026-09-11 — THE LCM'S ZERO HAS NO SIGN AND BEATS A NAN; AN INFINITY IS
+  REFUSED BY WHICHEVER OF THE TWO LOOKS FIRST. `x *. y` through the
+  quotient `x % (x +. y) * y` carries the other operand's sign into a zero,
+  so `0 *. _0.5` came out `_0` and its reciprocal `__` where the
+  reference's is `_`. Every zero the reference answers there is positive,
+  and it answers one wherever either operand is zero whatever the other is:
+  `_. *. 0` and `0 *. _.` are both 0 where `_. *. 1` is `_.`. An INFINITY
+  on either side has no divisors and both engines refuse it. Which of an
+  infinity and a NaN wins when both are present is the operation's own —
+  the GCD keeps the NaN (`_. +. _` and `_. +. __` are `_.`) and the LCM
+  refuses (`_. *. _` and `__ *. _.` alike) — which is the order the two
+  checks are now written in.
+
+- 2026-09-11 — A TINE IS BRACKETED BEFORE A NUMBER WHERE ITS OWN SPELLING
+  ENDS IN `.` OR IN A DIGIT, and a word with two trailing inflections is
+  bracketed after a conjunction. Two numbers with a space between them are
+  ONE list, so `3!:3 3!:3` written flat reads back as `3 !: (3 3) !: 3`;
+  the reference writes `(3!:3) 3!:3`, and it holds a `.` off a following
+  digit the same way — `(".) 3!:3`, `(<.) _3:`, `(+.) 2 b.`,
+  `(3!:3) (2 2 2 $ j."1 1 2)`, `(i.) (2 + *)`. A tine ending in `:` needs
+  nothing (`x: 3!:3`, `q: 2 b.`) and neither does a following tine that
+  starts with a primitive (`3!:3 (+ + *)`, `<. (+ *)`). The two words J
+  spells with two inflections are `{::` and `p..`, and both are bracketed
+  where a conjunction took them: `x:@:(p..)` and `> ::(p..)`, against
+  `x:@:p.` and `> ::p.` which are not.
+
+- 2026-09-11 — THE DERIVATIVE KEEPS THE TYPE IT DIFFERENTIATED. Every step
+  of `p..` is a multiplication by a whole number, and libjay narrowed the
+  answer on the VALUE, which wrote `p.. (1e_9 1 1e9)` as `1 2000000000`
+  where the reference writes `1 2e9`. The type follows the coefficients:
+  `3!:0 (p.. (1 2 3))` is the integer type there and
+  `3!:0 (p.. (2.0 4.0))` is the float one, on an answer whose values are
+  whole.
+
+- 2026-09-11 — A BINARY REPRESENTATION READ BELOW THE PRINTED TOLERANCE IS
+  ONE ANSWER, NOT TWO, and the sweep excuses it by cause the way it excuses
+  an abbreviated one. `3!:3` writes a value's bytes; the whole corpus
+  compares numbers at the six significant digits both engines print, a 1e_5
+  relative band. Where the two engines' arithmetic parts in the last bit of
+  a double — `3!:3 ((1) o. (0.9999999999999999))` is one word of five,
+  `3!:3 (%.^:_1 (0 1 1 0))` and `3!:3 ((1e_15) (,/ . *.) (i. 5))` one of
+  ten — there is nothing to pin: the two engines were never compared at
+  that precision anywhere else. The test is strict. Both answers are a
+  column of the SAME number of sixteen-digit hexadecimal words, every word
+  that agrees stands exactly as it was, and every word that differs reads
+  back — little-endian, as `3!:3` writes it — as two NORMAL doubles of the
+  same sign inside the band. A type header decodes to a subnormal, so a
+  difference of TYPE or of SHAPE can never be excused this way.

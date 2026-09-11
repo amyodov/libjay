@@ -132,9 +132,10 @@ fn a_list_of_power_counts_may_run_either_way() {
 #[test]
 fn a_missing_obverse_is_named_when_the_power_runs() {
     // Which obverse `^:_1` needs depends on the arguments, so the verb with
-    // none is named at run time rather than at compile time.
+    // none is named at run time rather than at compile time. The absence is
+    // the language's and the refusal is permanent.
     let e = err(Lang::J, "(+/ % #) ^: _1 [ 1 2 3");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("obverse of"), "{}", e.msg);
 }
 

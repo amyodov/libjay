@@ -4548,9 +4548,7 @@ fn power_spec(arr: &Array, span: Span) -> Result<Power> {
 
 /// The obverse of a verb, or the diagnostic naming the verb that has none.
 pub(crate) fn obverse_of(v: &Verb, span: Span) -> Result<Verb> {
-    crate::verb::obverse(v).ok_or_else(|| {
-        Error::not_yet(format!("the obverse of {} (no inverse is known)", v.name()), span)
-    })
+    crate::verb::obverse(v).ok_or_else(|| crate::verb::no_obverse(&v.name(), span))
 }
 
 /// One side of `` u`v ``: a verb becomes the box holding its atomic
@@ -5499,12 +5497,6 @@ mod tests {
     }
 
     #[rstest]
-    // `u^:_1` names its obverse when it runs and not when it compiles:
-    // which obverse it needs depends on whether it is applied monadically
-    // or dyadically, and that is not known here. tests/wildhunt.rs pins it.
-    // `&.,` needs no obverse — the shape is put back instead — so the
-    // verb whose obverse is missing has to be the one on the RIGHT.
-    #[case("+: &. (+/ % #) y", "the obverse of")]
     // A cut's kind chooses which function the glyph stands for, so it stays
     // a literal whole number and an unsupported one is a named gap.
     #[case("+/ ;. (1.5) y", "cut")]
@@ -5512,6 +5504,17 @@ mod tests {
         let e = err(src);
         assert_eq!(e.kind, ErrorKind::NotYet);
         assert!(e.msg.contains(msg), "{}", e.msg);
+    }
+
+    /// An obverse J's table does not name is absent from the language, not
+    /// queued: the adverse and `try.` catch it and answer. `&.,` needs no
+    /// obverse — the shape is put back instead — so the verb whose obverse
+    /// is missing has to be the one on the RIGHT.
+    #[test]
+    fn a_missing_obverse_is_not_in_the_language() {
+        let e = err("+: &. (+/ % #) y");
+        assert_eq!(e.kind, ErrorKind::Language);
+        assert!(e.msg.contains("the obverse of"), "{}", e.msg);
     }
 
     /// A bond whose noun the program computes is deferred, not refused: the

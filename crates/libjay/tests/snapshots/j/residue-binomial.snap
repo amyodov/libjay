@@ -1,0 +1,79 @@
+# libjay reference snapshot: J — corpus/j/residue-binomial.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= (_9223372036854775806) ! (_28976077832308490000)
+> j: 0
+= 9.3e18 ! 2
+> j: 0
+= _9.3e18 ! 2
+> j: 0
+= _9.3e18 ! _9.3e18
+> j: 1
+= 1e300 ! 0
+> j: 0
+= 1e300 ! 5
+> j: 0
+= _1e300 ! 5
+> j: 0
+= _1e300 ! 0
+> j: 0
+= _1e300 ! _1e300
+> j: 1
+= _1e19 ! _1e20
+> j: 0
+= 1e100 ! 1e100
+> j: 1
+= 1e100 ! 1e99
+> j: 0
+= 1e16 ! 9999999999999999.5
+> j: 1
+= 2147483648 ! 2147483647.9999998
+> j: 0.999995
+= 1e10 ! 9999999999.9
+> j: 0.093577
+= 1e10 ! 1e10
+> j: 1
+= 100 ! 99.9999999
+> j: 0.999999
+= 100 ! 100.0000001
+> j: 1
+= 1000000 ! 999999.5
+> j: 0.00056419
+= 1e8 ! 99999999.75
+> j: 0.00816049
+= 4096 ! 4095.5
+> j: 0.00881519
+= 5000 ! 2.5
+> j: _1.19787e_13
+= 1e10 ! 2.5
+> j: _1.05786e_35
+= >./\\.&.> (_2 {. ((2147483648) ! (2147483647.9999998)))
+> j: +-+--------+
+> j: |0|0.999995|
+> j: +-+--------+
+= (! o.) L:0 (|. (_9223372036854775806))
+> j: 0
+= _1 + ((100000000) ! (100000000.00000001))
+> j: 2.83907e_7
+= _1 + ((1e8) ! (1e8 + 1e_4))
+> j: 0.00190162
+= (1e8) ! (1e8 + 1e_4)
+> j: 1.0019

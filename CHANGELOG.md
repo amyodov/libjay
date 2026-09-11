@@ -7,6 +7,29 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A BINARY REPRESENTATION READ BELOW THE PRINTED TOLERANCE IS EXCUSED AS
+  `binary-ulp`. `3!:3` writes a value's bytes, and the whole corpus compares
+  numbers at the six significant digits both engines print. Where their
+  arithmetic parts in the last bit of a double — a sine, a matrix divide, a
+  float Euclid — everything above that band agrees and the hexadecimal
+  spelling still differs. The sweep now accepts such a row when both answers
+  are a column of the same number of sixteen-digit words, every word that
+  agrees stands exactly as it was, and every word that differs reads back as
+  two NORMAL doubles of the same sign inside the band. A type header decodes
+  to a subnormal and so can never be excused, which keeps a difference of
+  type or of shape a difference. The count is reported beside the other
+  excuses.
+
+- FIVE CORPUS THEMES OFF THE SWEEP RESIDUE, one per mechanism:
+  `residue-obverses` (96 rows) is J's whole obverse table read through an
+  adverse, so the verbs that invert and the verbs whose absence the adverse
+  reaches are recorded together; `residue-cycles` (49) is `C.` over direct,
+  abbreviated, negative, duplicate and boxed left arguments;
+  `residue-multiples` (54) is GCD and LCM over zeros, signed zeros, NaNs and
+  infinities; `residue-binomial` (28) is `!` past the machine word and at
+  arguments a double can barely tell apart; `residue-spelling` (54) is how a
+  train and a conjunction's operand are written back out.
+
 - A SENTENCE'S OWN WALL CLOCK IN A SWEEP. The stall rule watches the
   journal, so a worker that keeps writing while ONE of its sentences spins
   was never cut: `(% F:. $) (1e_9 1 1e9)` — a fold whose stepping verb
@@ -365,6 +388,20 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- AN OBVERSE J DOES NOT DEFINE IS A DOMAIN ERROR, NOT A GAP. J's obverse
+  table is a property of the language: `$^:_1`, `,^:_1`, `~.^:_1`,
+  `(n [ ])^:_1` and the thirty-odd others measured are refused permanently
+  there, which is why `::` and `try.` catch them and answer past. libjay
+  reported the absence as "not supported yet", which the adverse
+  deliberately does not catch, so `(($^:(_1:)) :: >@#) 2` — 1 in the
+  reference — stopped. All ninety-six cells of the table now agree; libjay's
+  table and J's name exactly the same verbs, `^~` aside.
+
+- THE DERIVATIVE KEEPS THE TYPE IT DIFFERENTIATED. `p..` narrowed on the
+  VALUE, so `p.. (1e_9 1 1e9)` was written `1 2000000000`; the reference
+  answers `1 2e9`, and `3!:0 (p.. (2.0 4.0))` is the float type where
+  `3!:0 (p.. (1 2 3))` is the integer one.
+
 - THE N-WISE INFIX REDUCE IS FUSED FOR EVERY SCALAR OPERATION, not only the
   associative ones. The typed window path regroups windows into blocks,
   which only `+`, `*`, `<.` and `>.` allow; everything else built an array
@@ -527,6 +564,42 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- A NEGATIVE ATOM IN `C.` COUNTS BACK FROM THE END, which reverses round 8's
+  pin of six rows as undefined. `(_2 0 2) C. (i. 3)` is `1 0 2` and
+  `(_1 0) C. (i. 2)` is `1 0`; the same reading works `C. y` out, where the
+  n is one past the largest index the list names and a negative one cannot
+  raise it, so `C. (_1)` is an index error and `C. (_2 0 2)` is the cycles
+  of `1 0 2`. Nothing there was unspecified: the six pinned rows are
+  ordinary corpus rows now.
+
+- THE TWO GAMMAS OF A CLOSE PAIR ARE ONE RATIO, which reverses round 6's pin
+  of two `!` rows as proven-wrong. `2147483648 ! 2147483647.9999998` is
+  0.999995 and `1e10 ! 9999999999.9` is 0.093577; taking the difference of
+  two logarithms of 4.4e10 apiece loses the answer entirely, and libjay read
+  1. The reference's `1e8 ! (1e8 + 1e_4)` was recorded as a catastrophic
+  cancellation and is the value; libjay's own quotient was the one that had
+  lost it. A WHOLE x now also answers structurally past 2⁶³ —
+  `9.3e18 ! 2` and `1e300 ! 5` are 0 — and the falling-factorial road is
+  abandoned where it overflows on the way to a finite answer, which is
+  `4096 ! 4095.5`.
+
+- A MULTIPLE OF A ZERO IS A POSITIVE ZERO, AND IT BEATS A NAN. The quotient
+  road carried the other operand's sign into it, so `0 *. _0.5` came out
+  `_0` and `% (0 *. _0.5)` was `__` where the reference's is `_`; and
+  `_. *. 0` is 0 there, where `_. *. 1` is `_.`. An INFINITY on either side
+  is refused by both engines, and which of it and a NaN wins when both are
+  present is the operation's own: the GCD keeps the NaN — `_. +. _` is `_.`
+  — and the LCM refuses, `_. *. _` and `__ *. _.` alike.
+
+- HOW A TRAIN AND A CONJUNCTION'S OPERAND ARE WRITTEN BACK OUT. A tine
+  whose spelling ends in `.` or in a digit is bracketed before a tine that
+  starts with a number — two numbers with a space between them are one list,
+  so `3!:3 3!:3` would read back as `3 !: (3 3) !: 3` — and a word spelled
+  with two trailing inflections, `p..` and `{::`, is bracketed where a
+  conjunction took it. `(".) 3!:3`, `(3!:3) (2 2 2 $ j."1 1 2)`,
+  `x:@:(p..)` and `> ::(p..)` are the reference's spellings; `x: 3!:3` and
+  `x:@:p.` are not bracketed and now are not.
 
 - THE OBVERSE OF THE WHOLE-ARGUMENT UNDER IS REFUSED, as the reference
   refuses it: `(+&.:^.)^:_1 2` is a domain error there where `(+&.^.)^:_1 2`

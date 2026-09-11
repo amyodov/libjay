@@ -248,9 +248,10 @@ fn under_prepares_applies_and_puts_back() {
     assert_eq!(val(Lang::J, "+/&.:*: 3 4"), Array::scalar_f64(5.0));
     assert_eq!(val(Lang::J, "|.&.|. 1 2 3"), i64s(&[3], &[3, 2, 1]));
     assert_eq!(val(Lang::J, "'ab' ,&.|. 'cd'"), text(&[4], "cdab"));
-    // A right operand with no known obverse names itself.
+    // A right operand whose obverse J's table does not name says so, and
+    // says it permanently.
     let e = err(Lang::J, "+ &. (+/ % #) 1 2");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("obverse of"), "{}", e.msg);
 }
 
@@ -263,7 +264,7 @@ fn a_negative_power_runs_the_obverse() {
     // The root that undoes a square is always float, as `%:` is.
     assert_eq!(val(Lang::J, "(*:@:>:)^:_1 ] 9"), Array::scalar_f64(2.0));
     let e = err(Lang::J, "(+/ % #) ^:_1 ] 3");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("obverse of"), "{}", e.msg);
 }
 
@@ -484,6 +485,6 @@ fn apl_inverse_powers_run_the_obverse() {
     // the quotient it computes rather than the integer it prints as.
     assert_eq!(val(Lang::Apl, "(2∘×)⍣¯1⊢8").to_f64_vec(), Some(vec![4.0]));
     let e = err(Lang::Apl, "⍴⍣¯1⊢5");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("obverse"), "{}", e.msg);
 }

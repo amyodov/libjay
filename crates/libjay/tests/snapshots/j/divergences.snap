@@ -63,14 +63,6 @@
 ? jconsole holds both in one double and libjay keeps them exact; reason: proven-wrong
 < 8.11296e31
 > j: 9.0072e15
-= _1 + ((100000000) ! (100000000.00000001))
-? both sides lose this one; the reference's answer is not the value either; reason: proven-wrong
-< 2.4702e_7
-> j: 2.83907e_7
-= _1 + ((1e8) ! (1e8 + 1e_4))
-? both sides lose this one; the reference's answer is not the value either; reason: proven-wrong
-< 0.00190154
-> j: 0.00190162
 = 2 p: (3j4 1j_1)
 ? the reference answers a factorisation of a complex number with nothing at all; reason: abort
 < <error>
@@ -103,34 +95,6 @@
 ? the near-equal binomial parts by one bit and the format downstream refuses; reason: proven-wrong
 < <error>
 > j: 5
-= (_2 0 2) C. 'hello'
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-< <error>
-> j: eolhl
-= (_3) C. (1;2;3)
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-< <error>
-> j: +-+-+-+
-> j: |2|3|1|
-> j: +-+-+-+
-= (_1 _2) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-< <error>
-> j: 0 1 3 2
-= (_2 _1) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-< <error>
-> j: 0 1 2 3
-= (_1) C. i.4
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-< <error>
-> j: 0 1 2 3
-= C. (_2 0 2)
-? the reference's answer for a non-permutation is undefined; libjay refuses; reason: undefined
-< <error>
-> j: +---+-+
-> j: |1 0|2|
-> j: +---+-+
 = (_3) ^. (<1)
 ? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 < <error>
@@ -849,6 +813,14 @@
 < _. _.
 > j: 0.5 0.5
 > j: 0.5 0.5
+= 2 >./ (_. 2 3)
+? `2 >. (_.)` is `_.` there and this outer product answers 2; reason: self-contradiction
+< _. 2 3
+> j: 2 2 3
+= 2 <./ (_. 2 3)
+? the same pair through the minimum; reason: self-contradiction
+< _. 2 2
+> j: 2 2 2
 = ((_.) , (_.)) >./ ((0.5) , (0.5))
 ? `(_.) >. (0.5)` is 0.5 there and this outer product of the pair is `_.`; reason: self-contradiction
 < 0.5 0.5

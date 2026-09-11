@@ -2029,12 +2029,8 @@ fn fold_operators(toks: Vec<Token>, d: Rules) -> Result<Vec<Token>> {
                 // `g⍣¯1 ⊢ (g x) f (g y)`, on the arguments whole, so it is
                 // J's `&.:` over the same obverse table.
                 OpGlyph::Under => {
-                    let back = crate::verb::obverse(&g).ok_or_else(|| {
-                        Error::not_yet(
-                            format!("the obverse of {} (no inverse is known)", g.name()),
-                            gspan,
-                        )
-                    })?;
+                    let back = crate::verb::obverse(&g)
+                        .ok_or_else(|| crate::verb::no_obverse(&g.name(), gspan))?;
                     let composed = Verb::Compose(Box::new(f), Box::new(g));
                     Verb::Atop(Box::new(back), Box::new(composed), AtopForm::At)
                 }

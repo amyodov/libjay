@@ -335,8 +335,11 @@ fn the_derivative_and_the_integral_are_coefficient_vectors() {
     // 8 for `3!:0 (1 p.. 1 2 3)` where the derivative's is 4.
     close(&floats(&val(Lang::J, "_1 p.. 1 2 3")), &[-1.0, 1.0, 1.0, 1.0], "integral");
     close(&floats(&val(Lang::J, "0 p.. 0 1")), &[0.0, 0.0, 0.5], "integral");
-    // Differentiating the integral gives the coefficients back.
-    assert_eq!(val(Lang::J, "p.. 0 p.. 1 2 3"), i64s(&[3], &[1, 2, 3]));
+    // Differentiating the integral gives the coefficients back — as
+    // FLOATS, since the derivative keeps the type it differentiated and
+    // the integral it was handed is a float one: jconsole reports 8 for
+    // `3!:0 (p.. 0 p.. 1 2 3)`.
+    close(&floats(&val(Lang::J, "p.. 0 p.. 1 2 3")), &[1.0, 2.0, 3.0], "derivative");
 }
 
 // --- J: the boolean functions ---------------------------------------------

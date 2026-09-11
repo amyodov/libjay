@@ -1,0 +1,59 @@
+// HOW A VERB IS WRITTEN BACK OUT. A tine of a train whose spelling ends in
+// `.` is bracketed before a tine that starts with a NUMBER, and a word
+// spelled with two trailing inflections — `p..` and `{::`, the two J has —
+// is bracketed where a conjunction took it. A tine ending in `:` needs
+// neither.
+> :: p..
+> :: p.
+> :: +
+x:@:p.. L:0 2
+x:@:p. L:0 2
+3!:3 (2 2 2 $ j."1 1 2)
+3!:3 (2 $ +)
+3!:3 (2 + *)
+3!:3 (+ + *)
+3!:3 ]
+3!:3 +
+3!:3 (+ *)
+3!:3@]
+". 3!:3
+". (2 + *)
+". (+ *)
+". +
+". ]
+". ".
+". i.
+". <.
+". x:
+". o.
+". q:
+". +.
+". p.
+". ":
+". (". ".)
+(". ".) ".
++ 1!:1
+<. 3!:3
++ 3!:3
+i. 3!:3
+o. 3!:3
+x: 3!:3
+(3!:3) 3!:3
+<. (_3 + *)
+<. _3:
+<. 3:
+<. (+ *)
+<. ]
+i. 2 + *
+". (_2 + *)
+". (2 3 $ +)
++ p..
+p.. p.. p..
+p..@+
+p.@:p..
+p..@:p..
+p..&2
+{:: p..
++/ p..
+3!:3 + 3!:3
+x:@:p.. L:0 2

@@ -196,9 +196,11 @@ fn j_each_opens_applies_and_boxes_again() {
     // right operand's obverse: `+&.- y` is `- (+ (- y))`, so it negates.
     assert_eq!(val(Lang::J, "+ &. - 1"), Array::scalar_i64(1));
     assert_eq!(val(Lang::J, "- &. - 5"), Array::scalar_i64(-5));
-    // A verb with no known inverse says so by name.
+    // A verb whose obverse J's table does not name says so by name, and
+    // says it permanently: the absence is the language's, not a queue
+    // position, which is why `::` and `try.` catch it there.
     let e = err(Lang::J, "+ &. (+/ % #) 1 2");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("obverse"), "{}", e.msg);
 }
 
