@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `jay::Shape`, THE TYPE AN ARRAY'S AXIS LENGTHS NOW HAVE. It derefs to
+  `[usize]`, converts from and to `Vec<usize>` and from a slice or an array
+  literal, and carries the forms that change a rank — `push`, `pop`,
+  `insert`, `remove`, `truncate`, `extend_from_slice`. `Array::shape` has
+  this type and `Array::new`, `Array::col_major` and `Array::sparse` take
+  anything that converts into one, so a caller that passes a `Vec` is
+  unchanged.
+
 - FOUR CORPUS THEMES OFF THE RESIDUE ROUND (pairs 15 and 16).
   `residue2-exact` (77 rows) is where the exact types survive a verb and
   where they do not: `%.` taking its exactness from the system it inverts,
@@ -422,6 +430,40 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `corpus/j/{folds,dyadic,compositions}-*.txt`.
 
 ### Changed
+
+- A SHAPE OF RANK 0, 1 OR 2 LIVES IN THE ARRAY HEADER. An array's shape was
+  a `Vec`, so every array of rank one or more allocated when it was made,
+  allocated again when it was cloned, and freed when it died — and a profile
+  of a fold with an explicit step, with the allocation behind every atom
+  already gone, found `malloc` and `free` back at a sixth of its time and
+  every call of either one to be exactly that vector. No axis, one axis and
+  two now live in the header itself; rank three and above owns a boxed
+  slice. A shape still reads as `[usize]` wherever one is read.
+
+- THE ARRAY HEADER IS EIGHTY BYTES RATHER THAN A HUNDRED AND FOUR. The value
+  is moved across every edge of an expression, so its width is a cost every
+  program pays. Three things were making it wide and none of them is on an
+  ordinary value's road: a joined table's four-field description, which now
+  lives behind a pointer; a borrowed buffer's release guard, which is a
+  handle to an unsized type and is now SHARED behind one rather than held as
+  itself; and the two pointers for a sparse description and a nested
+  prototype, which are now one.
+
+- AN AGREEMENT'S FRAME IS A SHAPE. `agree` answered the frame two arguments
+  pair over as a `Vec`, which allocated once per dyadic application with a
+  frame and was then copied into the answer's shape. It is a shape from the
+  start, so the frame of a rank-1 or rank-2 pairing costs nothing.
+
+- THE NESTING GUARD DOES NOT COMPUTE THE SPAN IT WILL NOT USE. The
+  expression walk claims a nesting level at every node and handed it that
+  node's source span, which is a match over the node. The span now arrives
+  as a closure, and only the diagnostic that reports a program nested too
+  deeply calls it.
+
+- A FOLD THAT KEEPS EVERY RESULT READS THE STEP'S VALUE RATHER THAN COPYING
+  IT. Where the results are single numbers they are collected in a flat
+  buffer, which takes the number out of the value and keeps nothing else;
+  the fold was handing it a copy to do that with.
 
 - AN ATOM'S BUFFER HOLDS ITS ELEMENT, AND AN EMPTY ONE HOLDS NOTHING. A
   buffer of one element was a refcounted vector — two allocations for one

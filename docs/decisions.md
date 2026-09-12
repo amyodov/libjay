@@ -6568,3 +6568,84 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   name is undefined and libjay reads it as a sentence whose value is not a
   noun; and `10 u:` of a code past the last codepoint, which is the
   standing one-character-type model difference.
+
+- 2026-09-12 — A SHAPE OF RANK 0, 1 OR 2 LIVES IN THE ARRAY HEADER, AND
+  RANK THREE AND ABOVE OWNS A BOXED SLICE. Round 2 took the allocation out
+  from behind every atom and a profile of the same fold, a million steps of
+  `y + ({. x) * ({: x) - y`, put `malloc` and `free` straight back at a
+  sixth of the time — and every call of either one, at six distinct call
+  sites, was `Array::shape`, a `Vec<usize>`. A `Vec` allocates for one
+  number as readily as for a hundred, and an array of rank one or more
+  allocated when it was made, again when it was cloned, and freed when it
+  died; a fold over a two-column table paid four of those per step. `Shape`
+  is now its own type with the three ordinary ranks held inline, and it
+  derefs to `[usize]` so that indexing, iteration, slicing and comparison
+  are unchanged wherever a shape is read. Rank three and above is a
+  `Box<[usize]>` rather than a `Vec` so that the variant is no wider than a
+  table's, which keeps `Shape` at the twenty-four bytes the `Vec` occupied.
+
+- 2026-09-12 — THE ARRAY HEADER IS EIGHTY BYTES, AND WHAT MADE IT WIDE WAS
+  NEVER ON AN ORDINARY VALUE'S ROAD. A header is as wide as the widest
+  thing it can carry, and it is moved across every edge of an expression.
+  Three fields set the width and none of them belongs to a value a program
+  computes: the description of a table of borrowed columns (four fields,
+  now behind a pointer), a borrowed buffer's release guard (a handle to an
+  unsized type, two words, now SHARED behind one — the public `Owner` type
+  and both its signatures are unchanged, and the extra allocation is one
+  per import), and the pair of pointers for a sparse description and a
+  nested array's prototype, which are now one pointer to a record holding
+  both. A hundred and four bytes became eighty, and `Result<Array>` a
+  hundred and four became eighty-eight.
+
+- 2026-09-12 — WHAT PERF ROUND 3 MOVED, MEASURED AGAINST A REBUILD OF ROUND
+  2. Both builds were made on the machine that measured them and run
+  alternately, best of three in each of three passes. The fold with a
+  defined scalar step went from 1850 ms to 1432 over a million steps
+  against jconsole's 442; a fold whose step is a defined dyad over
+  TWO-ITEM ROWS, which is where the shape allocation fell hardest, from
+  1547 ms to 936; a bare call to `4 : 'y'` from 471 ns to 371. KAMA moved
+  from 1983 ms to 1529 and the Hurst exponent from 404 to 296 — the two
+  algorithms that run an interpreted expression per item. The fused and
+  typed kernels are unchanged within their own scatter, which at a
+  millisecond over a million doubles on four threads is a third in either
+  direction.
+
+- 2026-09-12 — THE AGREEMENT'S FRAME IS A SHAPE AND THE FOLD'S KEEPER READS
+  RATHER THAN COPIES. Two smaller mechanisms of the same round, neither of
+  which moves the scalar-step fold at all — its dyads are atom pairs, which
+  allocated nothing before either — and both kept because each takes away
+  work that was there. `agree` answered a `Vec` that was then copied into
+  the answer's shape, so every dyadic application with a non-empty frame
+  allocated one; it answers a `Shape`. And a fold that keeps every result
+  collects single numbers in a flat buffer, taking the number out of the
+  value and keeping nothing else, where it was being handed a copy of the
+  value to do that with. The vector-step fold, which exercises both, is
+  where the pair shows: it is the row that moved by two fifths.
+
+- 2026-09-12 — ONE CODE GENERATION UNIT PER CRATE WAS TRIED AND REVERTED.
+  The release profile takes the default sixteen units, which stops the
+  runtime's small functions — the name read, the frame write, the nesting
+  guard — from inlining into each other; `codegen-units = 1` took the bare
+  call from 400 ns to 352 and doubled the release build from three minutes
+  to six. It also made the FUSED correlation kernels thirty per cent
+  SLOWER, consistently and in interleaved readings: `17 (+/ @ (c & *))\ y`
+  went from 15.9 ms to 21.7, and the other two spellings with it. The
+  kernels are where libjay's wins are and the vectoriser's decisions are
+  what it wins with, so the setting is not taken. Thin LTO was not tried:
+  the whole hot path is inside one crate, so there is nothing for it to
+  reach that a single unit did not already reach.
+
+- 2026-09-12 — WHAT PERF ROUND 3 DID NOT CLOSE. The walk itself. With the
+  allocations gone and the value a quarter narrower, `jay::ir::eval` — the
+  recursive match over the expression tree — is thirty per cent of the
+  fold's time and none of it is an allocation: it is the match, the nesting
+  guard, and an eighty-byte value moved at every edge. Round 2 named an
+  unboxed scalar carried in a register as the way past it; measuring it
+  here says the value is only part of the answer, because shrinking it by a
+  quarter bought a fifth and the rest is the walking. What is left is a
+  different SHAPE of evaluator — an explicit definition's body compiled once
+  into a flat instruction list, with its primitives resolved and its names
+  already placed in the frame, rather than a tree walked again at every one
+  of a million applications. That is a round of its own, and it is a change
+  to how a body is represented rather than another cost removed from the
+  representation there is.

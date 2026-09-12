@@ -6,7 +6,7 @@
 //! boundary zero-copy.
 
 use std::any::Any;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 
@@ -17,6 +17,251 @@ use crate::exact::{Ext, Rat};
 /// Anything that keeps a foreign buffer's memory alive: the importing side
 /// stores its release guards here and the buffer outlives nothing else.
 pub type Owner = Arc<dyn Any + Send + Sync>;
+
+/// An array's axis lengths: one number per axis, the leading one first.
+///
+/// A shape of rank 0, 1 or 2 lives in the array header itself and a higher
+/// rank owns a boxed slice. Almost every value a program computes is an
+/// atom, a list or a table, so a shape is COPIED where a `Vec` would have
+/// been allocated — which is once per array made and once per array
+/// cloned, and an explicit definition's body makes and clones several per
+/// application.
+///
+/// It reads as `[usize]` throughout: indexing, iteration, slicing and
+/// comparison are the slice's own, and the forms that change the rank
+/// ([`Shape::push`] and the rest) are written out here.
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+pub struct Shape(Dims);
+
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+enum Dims {
+    /// A scalar: no axis at all.
+    #[default]
+    R0,
+    /// A list.
+    R1(usize),
+    /// A table. The two lengths are an ARRAY so that the pair is one
+    /// contiguous slice, which is what lets the shape be read as `[usize]`
+    /// without copying it out.
+    R2([usize; 2]),
+    /// Rank three and above, on the heap. A boxed slice rather than a
+    /// `Vec`, so the variant is no wider than a table's.
+    Many(Box<[usize]>),
+}
+
+impl Shape {
+    /// The empty shape: a scalar's.
+    pub fn scalar() -> Shape {
+        Shape(Dims::R0)
+    }
+
+    pub fn as_slice(&self) -> &[usize] {
+        match &self.0 {
+            Dims::R0 => &[],
+            Dims::R1(n) => std::slice::from_ref(n),
+            Dims::R2(ns) => ns,
+            Dims::Many(ns) => ns,
+        }
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [usize] {
+        match &mut self.0 {
+            Dims::R0 => &mut [],
+            Dims::R1(n) => std::slice::from_mut(n),
+            Dims::R2(ns) => ns,
+            Dims::Many(ns) => ns,
+        }
+    }
+
+    /// Append an axis.
+    pub fn push(&mut self, n: usize) {
+        self.0 = match std::mem::take(&mut self.0) {
+            Dims::R0 => Dims::R1(n),
+            Dims::R1(a) => Dims::R2([a, n]),
+            Dims::R2([a, b]) => Dims::Many(Box::new([a, b, n])),
+            Dims::Many(ns) => {
+                let mut v = ns.into_vec();
+                v.push(n);
+                Dims::Many(v.into_boxed_slice())
+            }
+        };
+    }
+
+    /// Drop the last axis, answering its length.
+    pub fn pop(&mut self) -> Option<usize> {
+        let (next, out) = match std::mem::take(&mut self.0) {
+            Dims::R0 => (Dims::R0, None),
+            Dims::R1(a) => (Dims::R0, Some(a)),
+            Dims::R2([a, b]) => (Dims::R1(a), Some(b)),
+            Dims::Many(ns) => {
+                let mut v = ns.into_vec();
+                let last = v.pop();
+                (Dims::from_vec(v), last)
+            }
+        };
+        self.0 = next;
+        out
+    }
+
+    /// Put an axis at `at`, moving the rest along.
+    pub fn insert(&mut self, at: usize, n: usize) {
+        let mut v = self.to_vec();
+        v.insert(at, n);
+        self.0 = Dims::from_vec(v);
+    }
+
+    /// Take the axis at `at` away, answering its length.
+    pub fn remove(&mut self, at: usize) -> usize {
+        let mut v = self.to_vec();
+        let out = v.remove(at);
+        self.0 = Dims::from_vec(v);
+        out
+    }
+
+    /// Keep the leading `len` axes.
+    pub fn truncate(&mut self, len: usize) {
+        if len >= self.len() {
+            return;
+        }
+        let mut v = self.to_vec();
+        v.truncate(len);
+        self.0 = Dims::from_vec(v);
+    }
+
+    pub fn extend_from_slice(&mut self, more: &[usize]) {
+        if more.is_empty() {
+            return;
+        }
+        let mut v = self.to_vec();
+        v.extend_from_slice(more);
+        self.0 = Dims::from_vec(v);
+    }
+}
+
+impl Dims {
+    fn from_vec(v: Vec<usize>) -> Dims {
+        match v.as_slice() {
+            [] => Dims::R0,
+            [a] => Dims::R1(*a),
+            [a, b] => Dims::R2([*a, *b]),
+            _ => Dims::Many(v.into_boxed_slice()),
+        }
+    }
+}
+
+impl Deref for Shape {
+    type Target = [usize];
+
+    fn deref(&self) -> &[usize] {
+        self.as_slice()
+    }
+}
+
+impl DerefMut for Shape {
+    fn deref_mut(&mut self) -> &mut [usize] {
+        self.as_mut_slice()
+    }
+}
+
+impl std::fmt::Debug for Shape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.as_slice(), f)
+    }
+}
+
+impl From<Vec<usize>> for Shape {
+    fn from(v: Vec<usize>) -> Shape {
+        Shape(Dims::from_vec(v))
+    }
+}
+
+impl From<&[usize]> for Shape {
+    fn from(s: &[usize]) -> Shape {
+        match s {
+            [] => Shape(Dims::R0),
+            [a] => Shape(Dims::R1(*a)),
+            [a, b] => Shape(Dims::R2([*a, *b])),
+            _ => Shape(Dims::Many(s.to_vec().into_boxed_slice())),
+        }
+    }
+}
+
+impl<const N: usize> From<[usize; N]> for Shape {
+    fn from(s: [usize; N]) -> Shape {
+        Shape::from(&s[..])
+    }
+}
+
+impl From<&Vec<usize>> for Shape {
+    fn from(v: &Vec<usize>) -> Shape {
+        Shape::from(v.as_slice())
+    }
+}
+
+impl From<Shape> for Vec<usize> {
+    fn from(s: Shape) -> Vec<usize> {
+        match s.0 {
+            Dims::Many(ns) => ns.into_vec(),
+            other => Shape(other).to_vec(),
+        }
+    }
+}
+
+impl FromIterator<usize> for Shape {
+    fn from_iter<I: IntoIterator<Item = usize>>(it: I) -> Shape {
+        Shape(Dims::from_vec(Vec::from_iter(it)))
+    }
+}
+
+impl Extend<usize> for Shape {
+    fn extend<I: IntoIterator<Item = usize>>(&mut self, it: I) {
+        let mut v = self.to_vec();
+        v.extend(it);
+        self.0 = Dims::from_vec(v);
+    }
+}
+
+impl<'a> IntoIterator for &'a Shape {
+    type Item = &'a usize;
+    type IntoIter = std::slice::Iter<'a, usize>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
+    }
+}
+
+impl IntoIterator for Shape {
+    type Item = usize;
+    type IntoIter = std::vec::IntoIter<usize>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Vec::<usize>::from(self).into_iter()
+    }
+}
+
+impl PartialEq<[usize]> for Shape {
+    fn eq(&self, other: &[usize]) -> bool {
+        self.as_slice() == other
+    }
+}
+
+impl PartialEq<&[usize]> for Shape {
+    fn eq(&self, other: &&[usize]) -> bool {
+        self.as_slice() == *other
+    }
+}
+
+impl PartialEq<Vec<usize>> for Shape {
+    fn eq(&self, other: &Vec<usize>) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl PartialEq<Shape> for Vec<usize> {
+    fn eq(&self, other: &Shape) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
 
 /// How many joined buffers have been joined — that is, how many times a set
 /// of columns that crossed the boundary without a copy has since had to be
@@ -74,22 +319,35 @@ enum Repr<T> {
     /// the same allocation, never a copy. Writing to one copies first, as
     /// writing to a shared whole does.
     Slice { buf: Arc<Vec<T>>, off: usize, len: usize },
-    Foreign { ptr: *const T, len: usize, owner: Owner },
+    /// Memory someone else owns. The release guard is held behind an
+    /// `Arc` OF THE HANDLE rather than as the handle itself, because a
+    /// handle to an unsized type is two words and every other variant is
+    /// at most three: sharing it thins the buffer — and so the array
+    /// header — by one word, and costs one allocation per import.
+    Foreign { ptr: *const T, len: usize, owner: Arc<Owner> },
     /// Several buffers end to end, joined only if someone asks for the flat
     /// slice. This is how a table of columns arrives: each column keeps
     /// borrowing its own memory, and a reader that wants the columns takes
     /// them ([`Buf::parts`]) rather than the join. The join, once made, is
     /// kept and shared with every clone, so no buffer is ever built twice.
     ///
-    /// `join` is how to make it. A plain element type takes the parallel
-    /// copy, which is what keeps the join from costing more than the weave
-    /// it replaced; a heap-backed one takes the sequential clone.
-    Cols {
-        parts: Vec<Buf<T>>,
-        len: usize,
-        flat: Arc<OnceLock<Arc<Vec<T>>>>,
-        join: fn(&[Buf<T>], usize) -> Vec<T>,
-    },
+    /// The description lives BEHIND A POINTER because it is four fields
+    /// wide and every other buffer is at most three: the buffer — and so
+    /// the array header carrying it — is as wide as the widest variant,
+    /// and this is the one variant a table of borrowed columns makes and
+    /// nothing else does.
+    Cols(Box<Cols<T>>),
+}
+
+/// Several buffers end to end. `join` is how the flat form is made: a plain
+/// element type takes the parallel copy, which is what keeps the join from
+/// costing more than the weave it replaced; a heap-backed one takes the
+/// sequential clone.
+struct Cols<T> {
+    parts: Vec<Buf<T>>,
+    len: usize,
+    flat: Arc<OnceLock<Arc<Vec<T>>>>,
+    join: fn(&[Buf<T>], usize) -> Vec<T>,
 }
 
 /// Whether one element of `T` is held in the buffer itself rather than on
@@ -197,6 +455,15 @@ impl<T> Buf<T> {
     /// that stay valid, and are not mutated by anyone, for as long as `owner`
     /// is alive. `len == 0` accepts a dangling `ptr`.
     pub unsafe fn foreign(ptr: *const T, len: usize, owner: Owner) -> Buf<T> {
+        Buf { repr: Repr::Foreign { ptr, len, owner: Arc::new(owner) } }
+    }
+
+    /// [`Buf::foreign`] over a guard already shared with another buffer.
+    ///
+    /// # Safety
+    ///
+    /// As [`Buf::foreign`].
+    unsafe fn foreign_sharing(ptr: *const T, len: usize, owner: Arc<Owner>) -> Buf<T> {
         Buf { repr: Repr::Foreign { ptr, len, owner } }
     }
 
@@ -206,8 +473,8 @@ impl<T> Buf<T> {
     pub fn is_foreign(&self) -> bool {
         match &self.repr {
             Repr::Foreign { .. } => true,
-            Repr::Cols { parts, flat, .. } => {
-                flat.get().is_none() && parts.iter().any(Buf::is_foreign)
+            Repr::Cols(c) => {
+                c.flat.get().is_none() && c.parts.iter().any(Buf::is_foreign)
             }
             _ => false,
         }
@@ -219,7 +486,8 @@ impl<T> Buf<T> {
             Repr::Empty => 0,
             Repr::One(_) => 1,
             Repr::Owned(v) => v.len(),
-            Repr::Slice { len, .. } | Repr::Foreign { len, .. } | Repr::Cols { len, .. } => *len,
+            Repr::Slice { len, .. } | Repr::Foreign { len, .. } => *len,
+            Repr::Cols(c) => c.len,
         }
     }
 
@@ -230,7 +498,7 @@ impl<T> Buf<T> {
     /// True once a joined buffer has had its join made: the copy the
     /// boundary avoided has since been paid for.
     pub fn is_joined(&self) -> bool {
-        matches!(&self.repr, Repr::Cols { flat, .. } if flat.get().is_some())
+        matches!(&self.repr, Repr::Cols(c) if c.flat.get().is_some())
     }
 
     /// The parts of a buffer that was made by joining several, in order —
@@ -238,7 +506,7 @@ impl<T> Buf<T> {
     /// (a column at a time) takes this and never makes the join.
     pub fn parts(&self) -> Option<&[Buf<T>]> {
         match &self.repr {
-            Repr::Cols { parts, .. } => Some(parts),
+            Repr::Cols(c) => Some(&c.parts),
             _ => None,
         }
     }
@@ -302,7 +570,8 @@ impl<T: Clone> Buf<T> {
 
     fn joined(parts: Vec<Buf<T>>, join: fn(&[Buf<T>], usize) -> Vec<T>) -> Buf<T> {
         let len = parts.iter().map(Buf::len).sum();
-        Buf { repr: Repr::Cols { parts, len, flat: Arc::new(OnceLock::new()), join } }
+        let cols = Cols { parts, len, flat: Arc::new(OnceLock::new()), join };
+        Buf { repr: Repr::Cols(Box::new(cols)) }
     }
 
     pub fn as_slice(&self) -> &[T] {
@@ -324,9 +593,9 @@ impl<T: Clone> Buf<T> {
             // The join a set of parts was put off making. It is made once
             // and kept, so a buffer asked for its flat form twice pays for
             // it once.
-            Repr::Cols { parts, len, flat, join } => flat.get_or_init(|| {
+            Repr::Cols(c) => c.flat.get_or_init(|| {
                 JOINS.fetch_add(1, Ordering::Relaxed);
-                Arc::new(join(parts, *len))
+                Arc::new((c.join)(&c.parts, c.len))
             }),
         }
     }
@@ -354,7 +623,7 @@ impl<T: Clone> Buf<T> {
             Repr::Empty => Vec::new(),
             Repr::Owned(v) => Arc::try_unwrap(v).unwrap_or_else(|v| v.as_slice().to_vec()),
             Repr::Slice { ref buf, off, len } => buf[off..off + len].to_vec(),
-            Repr::One(_) | Repr::Foreign { .. } | Repr::Cols { .. } => self.as_slice().to_vec(),
+            Repr::One(_) | Repr::Foreign { .. } | Repr::Cols(_) => self.as_slice().to_vec(),
         }
     }
 
@@ -397,16 +666,16 @@ impl<T: Clone> Buf<T> {
                 assert!(start <= end && end <= *len, "slice out of range");
                 // SAFETY: `start <= len` keeps the offset inside the same
                 // allocation; the new buffer holds a clone of the owner.
-                unsafe { Buf::foreign(ptr.add(start), end - start, owner.clone()) }
+                unsafe { Buf::foreign_sharing(ptr.add(start), end - start, Arc::clone(owner)) }
             }
             // A range inside one part is that part's own slice, so taking a
             // column out of a joined table copies nothing. Anything else
             // crosses a seam and has to read the join.
-            Repr::Cols { parts, len, flat, .. } => {
-                assert!(start <= end && end <= *len, "slice out of range");
-                if flat.get().is_none() {
+            Repr::Cols(c) => {
+                assert!(start <= end && end <= c.len, "slice out of range");
+                if c.flat.get().is_none() {
                     let mut at = 0;
-                    for part in parts {
+                    for part in &c.parts {
                         let stop = at + part.len();
                         if start >= at && end <= stop {
                             return part.slice(start - at, end - at);
@@ -427,7 +696,7 @@ impl<T: Clone> Buf<T> {
     fn flat_arc(&self) -> &Arc<Vec<T>> {
         self.as_slice();
         match &self.repr {
-            Repr::Cols { flat, .. } => flat.get().expect("just initialised"),
+            Repr::Cols(c) => c.flat.get().expect("just initialised"),
             _ => unreachable!("only a joined buffer is asked for its join"),
         }
     }
@@ -463,18 +732,18 @@ impl<T: Clone> Clone for Buf<T> {
             }
             Repr::Foreign { ptr, len, owner } => {
                 // SAFETY: same pointer, same owner, same guarantees.
-                unsafe { Buf::foreign(*ptr, *len, owner.clone()) }
+                unsafe { Buf::foreign_sharing(*ptr, *len, Arc::clone(owner)) }
             }
             // The parts are refcount bumps, and the join is shared with
             // every other holder: made at most once however many clones ask
             // for it.
-            Repr::Cols { parts, len, flat, join } => Buf {
-                repr: Repr::Cols {
-                    parts: parts.clone(),
-                    len: *len,
-                    flat: Arc::clone(flat),
-                    join: *join,
-                },
+            Repr::Cols(c) => Buf {
+                repr: Repr::Cols(Box::new(Cols {
+                    parts: c.parts.clone(),
+                    len: c.len,
+                    flat: Arc::clone(&c.flat),
+                    join: c.join,
+                })),
             },
         }
     }
@@ -899,11 +1168,22 @@ pub enum Layout {
 /// [`Array::densified`] first.
 #[derive(Clone, Debug)]
 pub struct Array {
-    pub shape: Vec<usize>,
+    pub shape: Shape,
     pub data: Data,
     layout: Layout,
-    sparse: Option<crate::sparse::Handle>,
-    proto: Option<std::sync::Arc<Array>>,
+    /// What almost no array carries. Both of these are absent from every
+    /// ordinary value, and the header is moved across every edge of an
+    /// expression, so the two live behind ONE shared pointer rather than
+    /// two of their own.
+    extra: Option<std::sync::Arc<Extra>>,
+}
+
+/// The two things an array may remember beyond its elements: how it is
+/// stored sparsely, and the item an empty nested array would have held.
+#[derive(Debug)]
+struct Extra {
+    sparse: Option<crate::sparse::Sparse>,
+    proto: Option<Array>,
 }
 
 /// Two arrays are equal when they hold the same elements at the same
@@ -913,7 +1193,7 @@ impl PartialEq for Array {
         if self.shape != other.shape {
             return false;
         }
-        if self.sparse.is_some() || other.sparse.is_some() {
+        if self.is_sparse() || other.is_sparse() {
             let (a, b) = (self.densified(), other.densified());
             return a.to_row_major().data == b.to_row_major().data;
         }
@@ -925,22 +1205,29 @@ impl PartialEq for Array {
 }
 
 impl Array {
-    pub fn new(shape: Vec<usize>, data: Data) -> Array {
+    pub fn new(shape: impl Into<Shape>, data: Data) -> Array {
+        let shape = shape.into();
         debug_assert_eq!(shape.iter().product::<usize>(), data.len());
-        Array { shape, data, layout: Layout::RowMajor, sparse: None, proto: None }
+        Array { shape, data, layout: Layout::RowMajor, extra: None }
     }
 
     /// A sparse array: the logical `shape`, the stored cells, and the
     /// description of where they sit. `data` holds `entries` cells and not
     /// one element per position, so this is the only constructor that does
     /// not tie the buffer's length to the shape.
-    pub fn sparse(shape: Vec<usize>, data: Data, sparse: crate::sparse::Sparse) -> Array {
-        Array { shape, data, layout: Layout::RowMajor, sparse: Some(std::sync::Arc::new(sparse)), proto: None }
+    pub fn sparse(shape: impl Into<Shape>, data: Data, sparse: crate::sparse::Sparse) -> Array {
+        let extra = Extra { sparse: Some(sparse), proto: None };
+        Array {
+            shape: shape.into(),
+            data,
+            layout: Layout::RowMajor,
+            extra: Some(std::sync::Arc::new(extra)),
+        }
     }
 
     /// True while the array holds only its stored cells.
     pub fn is_sparse(&self) -> bool {
-        self.sparse.is_some()
+        self.extra.as_ref().is_some_and(|e| e.sparse.is_some())
     }
 
     /// The item an array with no items would have held — APL's prototype.
@@ -952,24 +1239,25 @@ impl Array {
     /// 2 by 3 table of zeros this holds. Only the operations that make an
     /// empty out of a nested array set it, and only APL reads it.
     pub fn proto(&self) -> Option<&Array> {
-        self.proto.as_deref()
+        self.extra.as_ref().and_then(|e| e.proto.as_ref())
     }
 
     /// The same array, remembering what its items looked like.
     pub fn with_proto(mut self, proto: Array) -> Array {
-        self.proto = Some(std::sync::Arc::new(proto));
+        let sparse = self.sparse_parts().cloned();
+        self.extra = Some(std::sync::Arc::new(Extra { sparse, proto: Some(proto) }));
         self
     }
 
     /// How this array is stored sparsely, or None for a dense one.
     pub fn sparse_parts(&self) -> Option<&crate::sparse::Sparse> {
-        self.sparse.as_deref()
+        self.extra.as_ref().and_then(|e| e.sparse.as_ref())
     }
 
     /// This array with every position materialised. A dense array is a
     /// refcount bump; a sparse one is expanded here and nowhere else.
     pub fn densified(&self) -> Array {
-        match &self.sparse {
+        match self.sparse_parts() {
             None => self.clone(),
             Some(s) => crate::sparse::densify(self, s),
         }
@@ -977,10 +1265,11 @@ impl Array {
 
     /// An array whose buffer holds its first axis fastest — the columns of
     /// a matrix, end to end. Rank 0 and 1 have only one layout and take it.
-    pub fn col_major(shape: Vec<usize>, data: Data) -> Array {
+    pub fn col_major(shape: impl Into<Shape>, data: Data) -> Array {
+        let shape = shape.into();
         debug_assert_eq!(shape.iter().product::<usize>(), data.len());
         let layout = if shape.len() < 2 { Layout::RowMajor } else { Layout::ColMajor };
-        Array { shape, data, layout, sparse: None, proto: None }
+        Array { shape, data, layout, extra: None }
     }
 
     /// The same buffer read the other way round. The caller is asserting
@@ -1128,8 +1417,7 @@ impl Array {
             shape: self.shape.clone(),
             data: self.data.cast(to)?,
             layout: self.layout,
-            sparse: None,
-            proto: self.proto.clone(),
+            extra: self.extra.clone(),
         })
     }
 
@@ -1138,7 +1426,7 @@ impl Array {
     pub fn cells(&self, frame_rank: usize) -> Vec<Array> {
         debug_assert!(frame_rank <= self.rank());
         debug_assert!(self.is_row_major(), "cells of a column-major buffer");
-        let cell_shape: Vec<usize> = self.shape[frame_rank..].to_vec();
+        let cell_shape = Shape::from(&self.shape[frame_rank..]);
         let cell_size: usize = cell_shape.iter().product();
         let n: usize = self.shape[..frame_rank].iter().product();
         (0..n)
@@ -1151,7 +1439,7 @@ impl Array {
     /// One cell without materialising all of them.
     pub fn cell_at(&self, frame_rank: usize, index: usize) -> Array {
         debug_assert!(self.is_row_major(), "a cell of a column-major buffer");
-        let cell_shape: Vec<usize> = self.shape[frame_rank..].to_vec();
+        let cell_shape = Shape::from(&self.shape[frame_rank..]);
         let cell_size: usize = cell_shape.iter().product();
         Array::new(cell_shape, self.data.slice(index * cell_size, (index + 1) * cell_size))
     }

@@ -795,7 +795,7 @@ fn eval_stmt(
         t.insert(
             key(e),
             Note {
-                shape: v.shape.clone(),
+                shape: v.shape.to_vec(),
                 dtype: v.dtype(),
                 layout: v.layout(),
                 kernel_ran: None,
@@ -1376,7 +1376,7 @@ pub(crate) fn eval_operand(e: &Expr, ctx: &mut Ctx<'_>) -> Result<Array> {
 fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
     // The walk is recursive, so a deeply nested sentence would run out of
     // stack; the ceiling turns that into a diagnostic.
-    let _depth = crate::verb::Nesting::enter(e.span())?;
+    let _depth = crate::verb::Nesting::enter(|| e.span())?;
     let v = eval_node(e, ctx, rec)?;
     if let Some(t) = rec.as_mut() {
         // A fused node has already left what it knows about its kernel.
@@ -1387,7 +1387,7 @@ fn eval(e: &Expr, ctx: &mut Ctx<'_>, rec: &mut Option<Trace>) -> Result<Array> {
         t.insert(
             key(e),
             Note {
-                shape: v.shape.clone(),
+                shape: v.shape.to_vec(),
                 dtype: v.dtype(),
                 layout: v.layout(),
                 kernel_ran,

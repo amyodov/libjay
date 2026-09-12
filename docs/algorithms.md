@@ -360,32 +360,46 @@ else.
 
 | algorithm | size | J | libjay | numpy | numba | jconsole |
 |---|---|---|---:|---:|---:|---:|
-| KAMA | 1,000,000 bars | `10 2 30 KAMA {close}` | 1924 | 441 | 25 | 484 |
-| variance ratio | 1,000,000 bars, q=8 | `8 VR {p}` | 22 | 21 | — | 21 |
-| Hurst R/S | 1,000,000 returns, 9 block sizes | `{lens} HURST {x}` | 308 | 110 | — | 83 |
-| Savitzky-Golay | 1,000,000 samples, 17-tap cubic | `(SGCOEF 8 3 0) SGFILT {sig}` | 19 | 14 | — | 472 |
-| extreme learning machine | 100,000 by 16, 64 hidden | `({w} ; {b} ; 0.1) ELMFIT {x} ; {t}` | 446 | 300 | — | 322 |
-| Hopfield recall | 1024 units, 256 probes, 10 sweeps | `({w} ; 10) RECALL {probe}` | 177 | 70 | — | 653 |
+| KAMA | 1,000,000 bars | `10 2 30 KAMA {close}` | 1529 | 453 | 21 | 478 |
+| variance ratio | 1,000,000 bars, q=8 | `8 VR {p}` | 26 | 18 | — | 19 |
+| Hurst R/S | 1,000,000 returns, 9 block sizes | `{lens} HURST {x}` | 296 | 111 | — | 99 |
+| Savitzky-Golay | 1,000,000 samples, 17-tap cubic | `(SGCOEF 8 3 0) SGFILT {sig}` | 18 | 13 | — | 486 |
+| extreme learning machine | 100,000 by 16, 64 hidden | `({w} ; {b} ; 0.1) ELMFIT {x} ; {t}` | 473 | 308 | — | 341 |
+| Hopfield recall | 1024 units, 256 probes, 10 sweeps | `({w} ; 10) RECALL {probe}` | 174 | 60 | — | 681 |
 
-libjay wins two of the six, draws one and loses three. The first reading of
-this table lost five, and the losses concentrated in three constructs; two
-of the three were closed by fusing them, and the third — the FOLD with an
-explicit step — has no fusion to be had and was closed on instead, by
-making the interpreter itself cheaper. The Savitzky-Golay row moved from
-1577 ms to 19 — twenty-five times faster than jconsole, and a third more
-than numpy's BLAS — the variance ratio from 805 to 22, which is jconsole's
-own 21 and numpy's own 21, and KAMA from 2800 to 1924. Every row of this
-table moved in the second round, because what that round removed — the
-allocation behind every atom, the hash table behind every local name, the
-rank machinery in front of every scalar pair — is spent by every program
-and not by the fold alone.
+The round before this one is in the same table, measured on the same machine
+in the same session from a build of its own commit: KAMA 1983, the variance
+ratio 34, the Hurst exponent 404, Savitzky-Golay 18, the learning machine 482
+and the Hopfield recall 174.
+
+libjay wins two of the six and loses four, one of them — the variance
+ratio, at 26 against 19 — by less than the reading's own scatter. The first
+reading of this table lost five, and the losses concentrated in three
+constructs; two of the three were closed by fusing them, and the third —
+the FOLD with an explicit step — has no fusion to be had and was closed on
+instead, by making the interpreter itself cheaper. The Savitzky-Golay row
+moved from 1577 ms to 18 — twenty-seven times faster than jconsole, and a
+third more than numpy's BLAS — the variance ratio from 805 to 26, beside
+jconsole's 19 and numpy's 18, and KAMA from 2800 to 1529.
+
+Every row moved in the second round and two of them moved again in the
+third, because what each round removed is spent by every program and not by
+the fold alone: the second took away the allocation behind every atom, the
+hash table behind every local name and the rank machinery in front of every
+scalar pair, and the third took away the allocation behind every SHAPE and
+a quarter of the bytes of the value that crosses every edge of an
+expression. The two that moved are the two that run an interpreted
+expression per item — KAMA by a fifth and the Hurst exponent by a
+quarter — and the other four are fused or BLAS-shaped and spend their time
+in one pass rather than in a walk.
 
 KAMA is still the row that loses worst: it is a fold over a million rows
-with an explicit dyad and nothing else, and it is four times jconsole where
-it was six. The Hurst exponent and the extreme learning machine are within
-1.4 to 3.7 times of jconsole on work that is neither fold nor fusion —
-rank, sorting and one matrix solve — and the Hopfield row, which is nothing
-but matrix products on a fused path, is 3.7 times faster than jconsole.
+with an explicit dyad and nothing else, and it is three times jconsole where
+it was four and six before that. The Hurst exponent and the extreme learning
+machine are within 1.4 to 3 times of jconsole on work that is neither fold
+nor fusion — rank, sorting and one matrix solve — and the Hopfield row,
+which is nothing but matrix products on a fused path, is 3.9 times faster
+than jconsole.
 
 (Every column is remeasured whenever the table is. Between readings the
 numpy column has moved by 10 to 20 per cent and the jconsole column by
@@ -463,20 +477,24 @@ window is folded directly inside the same typed loop — `n` steps per result
 and no array built. Over a million doubles, best of three,
 `LIBJAY_THREADS=4`:
 
-| kernel | libjay before | round 1 | round 2 | jconsole |
-|---|---:|---:|---:|---:|
-| `2 +/\ y` | 2.9 ms | 3.0 ms | 2.3 ms | 0.9 ms |
-| `2 */\ y` | 3.4 ms | 2.2 ms | 2.5 ms | 0.9 ms |
-| `2 -/\ y` | 481 ms | 1.6 ms | 1.2 ms | 1.1 ms |
-| `2 -~/\ y` | 584 ms | 1.4 ms | 1.4 ms | 0.9 ms |
-| `2 <./\ y` | — | 2.3 ms | 2.7 ms | 1.0 ms |
-| `(1 }. y) - _1 }. y` | 1.6 ms | 1.3 ms | 1.6 ms | 0.9 ms |
-| `10 +/\ y` | 1.9 ms | 2.2 ms | 2.0 ms | 1.3 ms |
-| `10 -/\ y` | — | 4.1 ms | 3.2 ms | 149 ms |
+| kernel | libjay before | round 1 | round 2 | round 3 | jconsole |
+|---|---:|---:|---:|---:|---:|
+| `2 +/\ y` | 2.9 ms | 3.0 ms | 1.8 ms | 1.7 ms | 0.8 ms |
+| `2 */\ y` | 3.4 ms | 2.2 ms | 1.7 ms | 1.8 ms | 0.8 ms |
+| `2 -/\ y` | 481 ms | 1.6 ms | 1.0 ms | 1.0 ms | 1.0 ms |
+| `2 -~/\ y` | 584 ms | 1.4 ms | 1.0 ms | 1.1 ms | 1.2 ms |
+| `2 <./\ y` | — | 2.3 ms | 2.0 ms | 1.6 ms | 1.0 ms |
+| `(1 }. y) - _1 }. y` | 1.6 ms | 1.3 ms | 1.0 ms | 1.0 ms | 0.9 ms |
+| `10 +/\ y` | 1.9 ms | 2.2 ms | 1.2 ms | 1.3 ms | 1.6 ms |
+| `10 -/\ y` | — | 4.1 ms | 2.0 ms | 2.6 ms | 152 ms |
 
-The round-2 column is the same typed loop as the round-1 one, remeasured:
-the two differ by less than the readings scatter, which at a millisecond
-over a million doubles is most of the number.
+The round-2 column is the same typed loop as the round-1 one and the round-3
+column is the same loop again: nothing any of the three rounds did touches
+it. The three were measured beside each other — round 2's build was rebuilt
+from its own commit and run alternately with round 3's, best of three in each
+of three passes — and the columns differ by up to a third in both directions,
+which at a millisecond over a million doubles is what four threads scatter by
+and is most of the number.
 
 The difference over an infix now costs what the sum does, which is what the
 two spellings mean: `2 -~/\ y` and `(1 }. y) - _1 }. y` are within noise of
@@ -496,11 +514,11 @@ it is a composition applied once per window; read as arithmetic it is a
 correlation, and it is now recognised as one and run in a single pass with
 the weights in registers.
 
-| kernel, 1e6 samples, 17-tap | libjay before | round 1 | round 2 | jconsole | numpy |
-|---|---:|---:|---:|---:|---:|
-| `17 (+/ @ (c & *))\ y` | 1686 ms | 21.5 ms | 18.0 ms | 465 ms | 12.9 ms |
-| `17 (+/ @: (c & *))\ y` | — | 22.8 ms | 16.3 ms | 469 ms | — |
-| `17 (c +/ . * ])\ y` | — | 23.0 ms | 16.3 ms | 393 ms | — |
+| kernel, 1e6 samples, 17-tap | libjay before | round 1 | round 2 | round 3 | jconsole | numpy |
+|---|---:|---:|---:|---:|---:|---:|
+| `17 (+/ @ (c & *))\ y` | 1686 ms | 21.5 ms | 16.7 ms | 15.9 ms | 481 ms | 12.9 ms |
+| `17 (+/ @: (c & *))\ y` | — | 22.8 ms | 16.8 ms | 16.0 ms | 484 ms | — |
+| `17 (c +/ . * ])\ y` | — | 23.0 ms | 16.6 ms | 16.1 ms | 406 ms | — |
 
 The three spellings are one arithmetic and are recognised together, along
 with `u&c` for the bond written the other way round and any scalar fold and
@@ -536,11 +554,13 @@ step is a DEFINED verb, no such thing is possible: the point of the
 construct is that step i+1 needs step i, and what runs at every step is an
 explicit definition.
 
-| kernel, 1e6 items | libjay before | round 1 | round 2 | jconsole | numba |
-|---|---:|---:|---:|---:|---:|
-| `0 (] F:. f) m`, `f` a defined dyad | 3877 ms | 2884 ms | 1852 ms | 430 ms | 3.6 ms |
-| `0 (] F:. +) y`, a primitive | 619 ms | 4.4 ms | 3.7 ms | 111 ms | — |
-| `0 (] F.. +) y`, its single form | — | 4.5 ms | 3.7 ms | 43 ms | — |
+| kernel, 1e6 items | libjay before | round 1 | round 2 | round 3 | jconsole | numba |
+|---|---:|---:|---:|---:|---:|---:|
+| `0 (] F:. f) m`, `f` a defined dyad | 3877 ms | 2884 ms | 1850 ms | 1432 ms | 442 ms | 3.6 ms |
+| `0 (] F:. g) m`, `g` a defined VECTOR step | — | — | 1547 ms | 936 ms | 514 ms | — |
+| `0.5 (] F:. (4 : 'y')) y`, a bare call | — | — | 471 ms | 371 ms | — | — |
+| `0 (] F:. +) y`, a primitive | 619 ms | 4.4 ms | 3.4 ms | 4.1 ms | 116 ms | — |
+| `0 (] F.. +) y`, its single form | — | 4.5 ms | 3.3 ms | 3.4 ms | 47 ms | — |
 
 Round 1 read the items where the step needs them instead of all at once,
 kept the results in a flat buffer and built the argument `sc ,. q` in one
@@ -571,18 +591,48 @@ mechanisms came out of it, none of them about the fold:
   exactly that call, and the fill of one element would go through the
   parallel splitter and the CPU-level dispatcher to compute it.
 
-The step is now 1852 ns rather than 2884, and the same measurement taken
-apart says what is left: a bare call — `0.5 (] F:. (4 : 'y')) y`, which
-binds two names, runs one sentence and answers — is 485 ns of it, and each
-of the five primitive applications in `KSTEP` is about 275 ns more. Neither
-number is an allocation any more; they are the interpreter walking a tree,
+The step was then 1852 ns rather than 2884, and the same measurement taken
+apart said what was left: a bare call — `0.5 (] F:. (4 : 'y')) y`, which
+binds two names, runs one sentence and answers — was 485 ns of it, and each
+of the five primitive applications in `KSTEP` about 275 ns more. Neither
+number was an allocation any more; they were the interpreter walking a tree,
 moving a 104-byte array value at every edge of it, and bumping a refcount
-whenever a name is read. Closing the remaining four-fold would mean a
-different value representation inside a small definition — an unboxed
-scalar carried in a register between the nodes of one expression — rather
-than another cost removed from the one there is. numba's 3.6 ms is the
-bound that sets: the same recursion as machine code over two float buffers,
-with no value representation at all.
+whenever a name is read.
+
+Round 3 went after that value. A profile of the same million steps, with the
+allocation behind every atom already gone, found `malloc` and `free` back at
+a sixth of the time and EVERY call of either one to be the same thing: an
+array's shape was a `Vec`, so an array of rank one or more allocated when it
+was made, allocated again when it was cloned, and freed when it died. A
+shape of rank 0, 1 or 2 now lives in the array header itself, and the header
+lost a quarter of its bytes besides — the three widest things it could carry
+(a joined table's parts, a borrowed buffer's release guard, and the pair of
+pointers for a sparse description and a nested prototype) are each one
+pointer now. So:
+
+| what one step costs | round 2 | round 3 |
+|---|---:|---:|
+| a fold step of `y + ({. x) * ({: x) - y` | 1850 ns | 1432 ns |
+| a fold step of `x + y` over two-item rows | 1547 ns | 936 ns |
+| a bare call to `4 : 'y'` | 471 ns | 371 ns |
+| the array header moved across an edge | 104 bytes | 80 bytes |
+| allocations per step | 4 | 0 |
+
+The step with a VECTOR body moved most, because a rank-1 argument was where
+the shape allocation fell hardest: its four allocations a step were the
+item read out of the fold's argument, the copy bound to the argument name,
+and the two copies the body's two name reads made.
+
+What is left is the walk itself. `jay::ir::eval` — the recursive match over
+the expression tree — is thirty per cent of the fold's time in the profile
+and none of it is an allocation: it is the match, the nesting guard, and an
+eighty-byte value moved at every edge. Closing the remaining three-fold
+would mean not a smaller value but a different SHAPE of evaluator — the body
+compiled once into a flat instruction list with its primitives resolved and
+its names already placed, rather than a tree walked again at every one of a
+million applications. That is a round of its own. numba's 3.6 ms is the
+bound it would be working towards: the same recursion as machine code over
+two float buffers, with no value representation at all.
 
 The closed form is not a way out: the recursion unrolls into a cumulative
 product of `1 - sc`, which underflows to zero within a few hundred bars.

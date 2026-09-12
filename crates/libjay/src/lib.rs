@@ -27,7 +27,7 @@ pub mod symbol;
 pub mod sysvar;
 pub mod verb;
 
-pub use array::{joins_made, layouts_made, Array, Buf, Data, Layout, NearInt, Owner};
+pub use array::{joins_made, layouts_made, Array, Buf, Data, Layout, NearInt, Owner, Shape};
 pub use complex::Cx;
 pub use device::{Device, Precision};
 pub use dtype::DType;

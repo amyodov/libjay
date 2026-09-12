@@ -20,8 +20,6 @@
 //! nothing about how fast it is; the caveat is written down in
 //! docs/status.md.
 
-use std::sync::Arc;
-
 use crate::array::{Array, Data};
 use crate::complex::Cx;
 use crate::dtype::DType;
@@ -519,7 +517,3 @@ pub fn attributes(a: &Array, s: &Sparse) -> Array {
 pub fn fill_of(s: &Sparse) -> Array {
     Array::new(vec![], s.fill.clone())
 }
-
-/// A sparse array carried behind an `Arc`, which is what the array itself
-/// holds so that cloning a sparse value stays a refcount bump.
-pub(crate) type Handle = Arc<Sparse>;

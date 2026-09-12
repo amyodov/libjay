@@ -2497,7 +2497,7 @@ fn sources<'a, T>(
 /// The shape every element of the result has: identical for all non-scalar
 /// inputs, since anything else needs the agreement machinery.
 pub(crate) fn common_shape(inputs: &[Array]) -> Option<Option<Vec<usize>>> {
-    let mut shape: Option<&Vec<usize>> = None;
+    let mut shape: Option<&crate::array::Shape> = None;
     for a in inputs {
         if a.rank() == 0 {
             continue;
@@ -2508,7 +2508,7 @@ pub(crate) fn common_shape(inputs: &[Array]) -> Option<Option<Vec<usize>>> {
             Some(_) => return None,
         }
     }
-    Some(shape.cloned())
+    Some(shape.map(|s| s.to_vec()))
 }
 
 /// The axes a kernel's inputs stand on: the shape of its result, and the

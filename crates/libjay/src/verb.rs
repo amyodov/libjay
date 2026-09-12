@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::array::{Array, Buf, Data, Layout, NearInt};
+use crate::array::{Array, Buf, Data, Layout, NearInt, Shape};
 use crate::complex::{self as cx, Cx};
 use crate::dtype::DType;
 use crate::error::{Error, ErrorKind, Result, Span};
@@ -1360,7 +1360,11 @@ pub(crate) struct Nesting;
 
 impl Nesting {
     /// Claim a level, or report that the program nests too deeply.
-    pub(crate) fn enter(span: Span) -> Result<Nesting> {
+    ///
+    /// The span arrives as a CLOSURE because the only thing that reads it
+    /// is the diagnostic: an expression node's span is a match over the
+    /// node, and the walk claims a level at every one of them.
+    pub(crate) fn enter(span: impl FnOnce() -> Span) -> Result<Nesting> {
         let depth = NESTING.with(|c| {
             let d = c.get() + 1;
             c.set(d);
@@ -1371,7 +1375,7 @@ impl Nesting {
             return Err(Error::new(
                 ErrorKind::Limit,
                 format!("this program nests more than {MAX_NESTING} applications deep"),
-                Some(span),
+                Some(span()),
             ));
         }
         Ok(Nesting)
@@ -2955,7 +2959,7 @@ impl Verb {
     /// the verbs that read one natively get it as it lies, and every other
     /// verb gets the rows it assumes, materialised once here.
     pub fn monad(&self, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
-        let _depth = Nesting::enter(span)?;
+        let _depth = Nesting::enter(|| span)?;
         if let Verb::Deferred(d) = self {
             return apply_deferred(d, None, y, ctx, span);
         }
@@ -3207,7 +3211,7 @@ impl Verb {
     /// elementwise verb over arguments that agree exactly reads the buffers
     /// as they lie and keeps the layout, and everything else is given rows.
     pub fn dyad(&self, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
-        let _depth = Nesting::enter(span)?;
+        let _depth = Nesting::enter(|| span)?;
         if let Verb::Deferred(d) = self {
             return apply_deferred(d, Some(x), y, ctx, span);
         }
@@ -4059,7 +4063,7 @@ fn numeric_like(a: &Array) -> Array {
 /// How result cells map back to argument cells: result cell `i` uses left
 /// cell `i / x_div` and right cell `i / y_div`.
 struct Pairing {
-    frame: Vec<usize>,
+    frame: Shape,
     n: usize,
     x_div: usize,
     y_div: usize,
@@ -4120,12 +4124,12 @@ fn agree(
             let surplus: usize = long[short.len()..].iter().product();
             let (x_div, y_div) =
                 if fx.len() >= fy.len() { (1, surplus.max(1)) } else { (surplus.max(1), 1) };
-            Ok(Pairing { frame: long.to_vec(), n, x_div, y_div })
+            Ok(Pairing { frame: Shape::from(long), n, x_div, y_div })
         }
         Agreement::ExactOrScalar => {
             if fx == fy {
                 let n: usize = fx.iter().product();
-                return Ok(Pairing { frame: fx.to_vec(), n, x_div: 1, y_div: 1 });
+                return Ok(Pairing { frame: Shape::from(fx), n, x_div: 1, y_div: 1 });
             }
             // APL extends any frame of ONE cell, whatever its rank, not
             // only a scalar one: `(1 1⍴5)+1 2 3` is `6 7 8`. A rank-0 frame
@@ -4136,11 +4140,11 @@ fn agree(
             let one = |f: &[usize]| f.iter().product::<usize>() == 1;
             if fx.is_empty() || (one(fx) && !fy.is_empty()) {
                 let n: usize = fy.iter().product();
-                return Ok(Pairing { frame: fy.to_vec(), n, x_div: n.max(1), y_div: 1 });
+                return Ok(Pairing { frame: Shape::from(fy), n, x_div: n.max(1), y_div: 1 });
             }
             if fy.is_empty() || one(fy) {
                 let n: usize = fx.iter().product();
-                return Ok(Pairing { frame: fx.to_vec(), n, x_div: 1, y_div: n.max(1) });
+                return Ok(Pairing { frame: Shape::from(fx), n, x_div: 1, y_div: n.max(1) });
             }
             let axis = (0..common).find(|&i| fx[i] != fy[i]).unwrap_or(common);
             Err(frame_mismatch(xs, ys, fx, fy, axis, span))
@@ -8141,7 +8145,7 @@ fn pervade_dyad(
                 slots.resize(first + p.n, None);
                 // The frame is pushed first so that it is taken last, when
                 // every cell under it has an answer.
-                work.push(Pervade::Frame { frame: p.frame, first, n: p.n, out });
+                work.push(Pervade::Frame { frame: p.frame.to_vec(), first, n: p.n, out });
                 for i in 0..p.n {
                     let a = open_cell(&atom(&xr, i / p.x_div));
                     let b = open_cell(&atom(&yr, i / p.y_div));
@@ -8182,7 +8186,7 @@ fn pervade_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result
                 let yr = y.to_row_major();
                 let first = slots.len();
                 slots.resize(first + n, None);
-                work.push(Job::Frame { frame: y.shape.clone(), first, n, out });
+                work.push(Job::Frame { frame: y.shape.to_vec(), first, n, out });
                 for i in 0..n {
                     work.push(Job::Cell { y: open_cell(&atom(&yr, i)), out: first + i });
                 }
@@ -8295,7 +8299,7 @@ fn scalar_dyad(
     // agreement rules say exactly that, and this is the commonest pair
     // there is.
     let p = match x.rank() == 0 && y.rank() == 0 {
-        true => Pairing { frame: Vec::new(), n: 1, x_div: 1, y_div: 1 },
+        true => Pairing { frame: Shape::scalar(), n: 1, x_div: 1, y_div: 1 },
         false => agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?,
     };
     // Nothing to apply the verb to: `'a' + ''` is an empty, not a type
@@ -9809,7 +9813,7 @@ fn collate_grade(x: &Array, y: &Array, down: bool, origin: i64, span: Span) -> R
         }
     };
     let (xs, ys) = (chars_of(x)?, chars_of(y)?);
-    let xshape = if x.rank() == 0 { vec![1] } else { x.shape.clone() };
+    let xshape = if x.rank() == 0 { Shape::from([1usize]) } else { x.shape.clone() };
     let width = xshape.len();
     // The key of a character: its first coordinate in x, reversed so the
     // last axis decides first. A character x does not hold sorts after
@@ -10362,8 +10366,11 @@ fn cat_promote(
         return Ok(a.clone());
     }
     if a.rank() == 0 {
-        let mut shape =
-            if other.rank() == rank { other.shape.clone() } else { vec![1usize; rank] };
+        let mut shape = if other.rank() == rank {
+            other.shape.clone()
+        } else {
+            Shape::from_iter(std::iter::repeat_n(1usize, rank))
+        };
         shape[axis] = 1;
         let n: usize = shape.iter().product();
         let mut data = Data::empty(a.dtype());
@@ -10800,7 +10807,7 @@ fn copy_items(
     }
     // A scalar argument has one item, so replicating it yields a vector; an
     // extended one-item argument keeps the shape it already had.
-    let mut shape = if y.rank() == 0 { vec![1] } else { y.shape.clone() };
+    let mut shape = if y.rank() == 0 { Shape::from([1usize]) } else { y.shape.clone() };
     shape[0] = total;
     Ok(keep_proto(Array::new(shape, data), y, apl))
 }
@@ -10905,7 +10912,7 @@ fn has_imaginary(a: &Array) -> bool {
 
 /// A finished complex buffer as an array of that shape, real where every
 /// imaginary part is zero.
-fn complex_shaped(shape: Vec<usize>, values: Vec<Cx>) -> Array {
+fn complex_shaped(shape: impl Into<Shape>, values: Vec<Cx>) -> Array {
     if values.iter().all(|z| z[1] == 0.0) {
         let reals: Vec<f64> = values.iter().map(|z| z[0]).collect();
         let integral = reals.iter().all(|v| v.fract() == 0.0 && fits_i64(*v));
@@ -11757,7 +11764,7 @@ fn laminate(x: &Array, y: &Array, filled: Option<FillAtom>, span: Span) -> Resul
         if a.rank() != 0 {
             return a.clone();
         }
-        let shape = if other.rank() == 0 { vec![1] } else { other.shape.clone() };
+        let shape = if other.rank() == 0 { Shape::from([1usize]) } else { other.shape.clone() };
         let n: usize = shape.iter().product();
         let mut data = Data::empty(a.dtype());
         for _ in 0..n {
@@ -16501,20 +16508,18 @@ fn fold_family(
         match frame.taken() {
             None => {
                 acc = stepped;
-                let kept = match keeps {
-                    true => acc.clone(),
-                    false => u.monad(&acc, ctx, span)?,
-                };
-                out.push(kept);
+                match keeps {
+                    true => out.push_ref(&acc),
+                    false => out.push(u.monad(&acc, ctx, span)?),
+                }
             }
             // Keep the step's result and end the fold.
             Some(1) => {
                 acc = stepped;
-                let kept = match keeps {
-                    true => acc.clone(),
-                    false => u.monad(&acc, ctx, span)?,
-                };
-                out.push(kept);
+                match keeps {
+                    true => out.push_ref(&acc),
+                    false => out.push(u.monad(&acc, ctx, span)?),
+                }
                 break;
             }
             // Carry the result on as the running value, but leave it out.
@@ -16576,6 +16581,22 @@ impl Kept {
             false => Kept::Last(None),
             true => Kept::Flat(Vec::with_capacity(steps)),
         }
+    }
+
+    /// Keep a result the fold still holds. A flat buffer takes the number
+    /// out of it and keeps nothing else, so the value the step made is
+    /// READ here rather than copied — which is every step of a fold whose
+    /// keeper is `]` and whose results are single numbers.
+    fn push_ref(&mut self, a: &Array) {
+        if let Kept::Flat(vals) = self
+            && a.rank() == 0
+            && let Data::F64(b) = &a.data
+            && let [x] = b.as_slice()
+        {
+            vals.push(*x);
+            return;
+        }
+        self.push(a.clone());
     }
 
     fn push(&mut self, a: Array) {
@@ -17116,7 +17137,7 @@ fn axis_counts_at(
 }
 
 /// The same elements under a new shape of the same size.
-fn reshaped(y: &Array, shape: Vec<usize>) -> Array {
+fn reshaped(y: &Array, shape: impl Into<Shape>) -> Array {
     let y = y.to_row_major();
     Array::new(shape, y.data)
 }
@@ -18210,7 +18231,7 @@ fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
             if m < n {
                 return Err(wider_than_tall(m, n, span));
             }
-            vec![n, m]
+            Shape::from([n, m])
         } else {
             y.shape.clone()
         };
@@ -18229,8 +18250,11 @@ fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
         && let Some(zs) = y.to_complex_vec()
         && zs.iter().any(|z| z[0].is_nan() || z[1].is_nan())
     {
-        let shape =
-            if y.rank() == 2 { vec![y.shape[1], y.shape[0]] } else { y.shape.clone() };
+        let shape = if y.rank() == 2 {
+            Shape::from([y.shape[1], y.shape[0]])
+        } else {
+            y.shape.clone()
+        };
         let n = shape.iter().product();
         return Ok(if y.dtype() == DType::Complex {
             Array::new(shape, Data::Complex(vec![[f64::NAN, f64::NAN]; n].into()))
@@ -18283,7 +18307,7 @@ fn matrix_inverse(y: &Array, cfg: EvalCfg, span: Span) -> Result<Array> {
     }
     // A rank-2 argument gives the n by m pseudo-inverse; a vector or scalar
     // keeps its own shape, which is what J prints for them.
-    let shape = if y.rank() == 2 { vec![n, m] } else { y.shape.clone() };
+    let shape = if y.rank() == 2 { Shape::from([n, m]) } else { y.shape.clone() };
     let mut eye = vec![0.0f64; m * m];
     for i in 0..m {
         eye[i * m + i] = 1.0;
@@ -18600,7 +18624,7 @@ fn complex_matrix_inverse(y: &Array, span: Span) -> Result<Array> {
     let br = complex_stack(&eye, m, m);
     let sol = lstsq(&ar, 2 * m, 2 * n, &br, m)
         .ok_or_else(|| Error::domain("the matrix is singular", span))?;
-    let shape = if y.rank() == 2 { vec![n, m] } else { y.shape.clone() };
+    let shape = if y.rank() == 2 { Shape::from([n, m]) } else { y.shape.clone() };
     Ok(complex_or_real_shaped(complex_unstack(&sol, n, m), shape))
 }
 
@@ -18659,15 +18683,15 @@ fn complex_matrix_divide(x: &Array, y: &Array, planes: bool, span: Span) -> Resu
     let sol = lstsq(&ar, 2 * m, 2 * n, &br, k)
         .ok_or_else(|| Error::domain("the system is singular", span))?;
     let shape = if x.rank() >= 2 {
-        let mut s = vec![n];
+        let mut s = Shape::from([n]);
         s.extend_from_slice(&x.shape[1..]);
         s
     } else if y.rank() < 2 {
         // A VECTOR system is a COLUMN and its unknown is one number, not a
         // list of one — the same rule the reals follow.
-        Vec::new()
+        Shape::scalar()
     } else {
-        vec![n]
+        Shape::from([n])
     };
     Ok(complex_or_real_shaped(complex_unstack(&sol, n, k), shape))
 }
@@ -18680,7 +18704,7 @@ fn cx_fill(shape: Vec<usize>, z: Cx) -> Array {
 
 /// A complex result at the shape it belongs at, narrowed to the reals where
 /// every value has lost its imaginary part.
-fn complex_or_real_shaped(v: Vec<Cx>, shape: Vec<usize>) -> Array {
+fn complex_or_real_shaped(v: Vec<Cx>, shape: Shape) -> Array {
     let mut a = complex_or_real(v);
     a.shape = shape;
     a
@@ -18765,7 +18789,7 @@ fn squad(
             }
         }
         shape.extend_from_slice(&spec.shape);
-        specs.push((spec.shape.clone(), idx));
+        specs.push((spec.shape.to_vec(), idx));
     }
     let y = y.to_row_major();
     let st = strides(&y.shape);
@@ -20230,7 +20254,7 @@ fn merge_specs(specs: &[Spec], m: &Array, span: Span) -> Result<Spec> {
             Some(span),
         ));
     }
-    let mut shape = m.shape.clone();
+    let mut shape = m.shape.to_vec();
     shape.extend_from_slice(&first.shape);
     let cells = specs.iter().flat_map(|s| s.cells.iter().cloned()).collect();
     Ok(Spec { width: first.width, cells, shape })
@@ -20681,7 +20705,7 @@ fn level_pairs(
             Some(LevelPairs {
                 left: bx.to_vec(),
                 right: vec![y.clone(); n],
-                shape: x.shape.clone(),
+                shape: x.shape.to_vec(),
             })
         }
         (None, Some(by)) => {
@@ -20689,7 +20713,7 @@ fn level_pairs(
             Some(LevelPairs {
                 left: vec![x.clone(); n],
                 right: by.to_vec(),
-                shape: y.shape.clone(),
+                shape: y.shape.to_vec(),
             })
         }
         (Some(bx), Some(by)) => {
@@ -20697,9 +20721,9 @@ fn level_pairs(
             // scalar dyad's does: `(2;4) * L:0 (<a:)` is two boxes there.
             if x.rank() == 0 || y.rank() == 0 {
                 let (n, shape) = if x.rank() == 0 {
-                    (by.len(), y.shape.clone())
+                    (by.len(), y.shape.to_vec())
                 } else {
-                    (bx.len(), x.shape.clone())
+                    (bx.len(), x.shape.to_vec())
                 };
                 let left =
                     if x.rank() == 0 { vec![bx[0].clone(); n] } else { bx.to_vec() };
@@ -20715,7 +20739,7 @@ fn level_pairs(
             let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, Agreement::LeadingPrefix, span)?;
             let left: Vec<Array> = (0..p.n).map(|i| bx[i / p.x_div].clone()).collect();
             let right: Vec<Array> = (0..p.n).map(|i| by[i / p.y_div].clone()).collect();
-            Some(LevelPairs { left, right, shape: p.frame })
+            Some(LevelPairs { left, right, shape: p.frame.to_vec() })
         }
     })
 }
@@ -24457,7 +24481,7 @@ fn nub_sieve(y: &Array, tol: Tol, by_element: bool) -> Array {
         }
         out.push(fresh as u8);
     }
-    let shape = if by_element { y.shape.clone() } else { vec![n] };
+    let shape = if by_element { y.shape.clone() } else { Shape::from([n]) };
     Array::new(shape, Data::Bool(out.into()))
 }
 
@@ -25100,7 +25124,7 @@ fn char_rep_dyad(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Arra
                     if which == 5 { format!("{b:02X}") } else { format!("{b:02x}") };
                 cs.extend(text.chars());
             }
-            let mut shape = if y.rank() == 0 { vec![1] } else { y.shape.clone() };
+            let mut shape = if y.rank() == 0 { Shape::from([1usize]) } else { y.shape.clone() };
             if let Some(last) = shape.last_mut() {
                 *last *= 2;
             }
@@ -25292,7 +25316,7 @@ fn choose(mask: &Array, x: &Array, y: &Array, span: Span) -> Result<Array> {
         .to_i64_vec()
         .filter(|v| v.iter().all(|&b| b == 0 || b == 1))
         .ok_or_else(|| Error::domain("⊢[m] selects with a mask of 0s and 1s", span))?;
-    let mut shape: Option<&Vec<usize>> = None;
+    let mut shape: Option<&Shape> = None;
     for a in [mask, x, y] {
         if a.rank() == 0 {
             continue;
@@ -25778,8 +25802,8 @@ fn chars_of(y: &Array) -> Option<Vec<char>> {
 
 /// The shape a byte conversion answers with: the argument's own where the
 /// count did not change, and a list otherwise.
-fn recoded_shape(y: &Array, len: usize) -> Vec<usize> {
-    if len == y.count() { y.shape.clone() } else { vec![len] }
+fn recoded_shape(y: &Array, len: usize) -> Shape {
+    if len == y.count() { y.shape.clone() } else { Shape::from([len]) }
 }
 
 /// `x u: y`: J's numbered character conversions.
@@ -25949,7 +25973,8 @@ fn unicode_form(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array
 
 /// The UTF-8 bytes of `chars`, one byte per element, shaped `shape` where
 /// the count came out the same and as a list otherwise.
-fn utf8_bytes(chars: &[char], shape: Vec<usize>, count: usize) -> Array {
+fn utf8_bytes(chars: &[char], shape: impl Into<Shape>, count: usize) -> Array {
+    let shape = shape.into();
     let mut out: Vec<char> = Vec::with_capacity(chars.len());
     let mut buf = [0u8; 4];
     for &c in chars {
@@ -25957,7 +25982,7 @@ fn utf8_bytes(chars: &[char], shape: Vec<usize>, count: usize) -> Array {
             out.push(b as char);
         }
     }
-    let shape = if out.len() == count { shape } else { vec![out.len()] };
+    let shape = if out.len() == count { shape } else { Shape::from([out.len()]) };
     Array::new(shape, Data::Char(out.into()))
 }
 
