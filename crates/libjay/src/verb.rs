@@ -3149,7 +3149,19 @@ impl Verb {
             }
             // `x (m H. n) y` reads both arguments an element at a time, so
             // the frame machinery pairs the term count with the argument.
-            Verb::Hypergeometric { .. } => self.dyad_ranked(x, y, ctx, span),
+            // A count of NO TERMS answers before the argument is read at
+            // all, which is what keeps `0 (2 H. 2) ('')` the integer zeros
+            // it is; anything else over an argument the series cannot read
+            // leaves the boolean empty of [`series_reads_nothing`].
+            Verb::Hypergeometric { .. } => {
+                let no_terms = x
+                    .to_i64_vec()
+                    .is_some_and(|v| !v.is_empty() && v.iter().all(|&n| n == 0));
+                match series_reads_nothing(y) {
+                    Some(a) if !no_terms => Ok(a),
+                    _ => self.dyad_ranked(x, y, ctx, span),
+                }
+            }
             // `x u\ y` and `x u\. y` need the frame machinery: their left
             // cell is an atom. So does the cut, whose left cell is one
             // rectangle or one list of frets.
@@ -7573,6 +7585,12 @@ fn to_exact(y: &Array, span: Span) -> Result<Array> {
         Data::Ext(_) | Data::Rat(_) => return Ok(y.clone()),
         Data::Bool(v) => Data::Ext(v.iter().map(|&b| Ext::from(b)).collect()),
         Data::I64(v) => Data::Ext(v.iter().map(|&x| Ext::from(x)).collect()),
+        // A FLOAT CONVERTS TO THE RATIONAL TYPE WHATEVER ITS VALUES ARE.
+        // Every double is a fraction whose denominator is a power of two,
+        // and the reference keeps the type the conversion made rather than
+        // narrowing on the values it happened to hold: `3!:0 (x: 2.0)` is
+        // 128 there where `3!:0 (x: 2)` is 64, and the whole answer still
+        // displays as `2`.
         Data::F64(v) => {
             let mut out = Vec::with_capacity(v.len());
             for &x in v.iter() {
@@ -7580,7 +7598,7 @@ fn to_exact(y: &Array, span: Span) -> Result<Array> {
                     Error::domain("a NaN has no exact value", span)
                 })?);
             }
-            exact_data(DType::Ext, out)
+            Data::Rat(out.into())
         }
         // A COMPLEX VALUE WITH NO IMAGINARY PART IS THE REAL IT DISPLAYS
         // AS, as it is for the gamma function: `x: (3j0)` is 3 and
@@ -8441,13 +8459,13 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
 /// over no elements comes to the same thing for every op not named here.
 /// A NON-NUMERIC argument is read as a boolean one before the lookup: a
 /// fill the verb never sees says nothing about the answer.
-fn empty_scalar_type(op: ScalarMonad, seen: DType) -> Option<DType> {
+fn empty_scalar_type(op: ScalarMonad, seen: DType, numeric: bool) -> Option<DType> {
     use DType::*;
     use ScalarMonad::*;
     // bool, integer, float, complex, extended, rational — in that order.
     let row: [DType; 6] = match op {
         Halve => [F64, F64, F64, Complex, Ext, Rat],
-        Double | Inc | Dec | Neg | OneMinus => [I64, I64, F64, Complex, Ext, Rat],
+        Double | Inc | Dec | Neg => [I64, I64, F64, Complex, Ext, Rat],
         Square => [Bool, I64, F64, Complex, Ext, Rat],
         Sqrt | Factorial => [Bool, F64, F64, Complex, Ext, Rat],
         Conj | Abs if seen == Complex => return Some(if op == Abs { F64 } else { Complex }),
@@ -8457,6 +8475,15 @@ fn empty_scalar_type(op: ScalarMonad, seen: DType) -> Option<DType> {
         Recip => [F64, F64, F64, Complex, Ext, Rat],
         Pi => [F64, F64, F64, Complex, F64, F64],
         Imaginary | Polar => return Some(Complex),
+        // `-. y` KEEPS THE TYPE IT SUBTRACTED FROM where the other four
+        // one-step verbs widen it: `3!:0 (-. (0 3 $ 0))` is the boolean
+        // type in the reference where `3!:0 (- (0 3 $ 0))`,
+        // `3!:0 (>: (0 3 $ 0))`, `3!:0 (<: (0 3 $ 0))` and
+        // `3!:0 (+: (0 3 $ 0))` are all the integer one. A NON-NUMERIC
+        // argument reads as the integer the refused fill leaves, which is
+        // what the boolean coercion and the widening row come to together.
+        OneMinus if numeric => [Bool, I64, F64, Complex, Ext, Rat],
+        OneMinus => [I64, I64, F64, Complex, Ext, Rat],
         Not | Floor | Ceil => return None,
     };
     let i = match seen {
@@ -8486,8 +8513,9 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
     // type there, `3!:0 -: (0 $ a:)` the float that halving a boolean
     // makes, `3!:0 j. (0 $ a:)` the complex one.
     if y.count() == 0 && cfg.rules.lang == crate::Lang::J {
-        let seen = if d.dtype().is_numeric() { d.dtype() } else { DType::Bool };
-        if let Some(t) = empty_scalar_type(op, seen) {
+        let numeric = d.dtype().is_numeric();
+        let seen = if numeric { d.dtype() } else { DType::Bool };
+        if let Some(t) = empty_scalar_type(op, seen, numeric) {
             return Ok(Array::new(y.shape.clone(), Data::empty(t)));
         }
     }
@@ -12306,8 +12334,9 @@ fn empty_monad_type(op: &MonadOp, seen: DType) -> Option<DType> {
     // does over an empty argument, and a non-numeric type is read as the
     // boolean one there too: `3!:0 (*"_2 (0 $ <0))` is the boolean type.
     if let MonadOp::Scalar(op) = op {
-        let seen = if seen.is_numeric() { seen } else { Bool };
-        return empty_scalar_type(*op, seen);
+        let numeric = seen.is_numeric();
+        let seen = if numeric { seen } else { Bool };
+        return empty_scalar_type(*op, seen, numeric);
     }
     Some(match op {
         // Base-2 digits of nothing keep the type the numbers were written
@@ -20800,6 +20829,9 @@ fn cx_list(v: &[Cx]) -> String {
 /// so the pairs are cancelled first: that is what makes `0 H. 0` the
 /// exponential rather than a term of `0÷0`.
 fn hypergeometric(num: &[Cx], den: &[Cx], y: &Array, span: Span) -> Result<Array> {
+    if let Some(a) = series_reads_nothing(y) {
+        return Ok(a);
+    }
     let (num, den) = cancel_parameters(num, den);
     let at = poly_coeffs(y, span)?;
     let mut out = Vec::with_capacity(at.len());
@@ -20809,6 +20841,30 @@ fn hypergeometric(num: &[Cx], den: &[Cx], y: &Array, span: Span) -> Result<Array
     let mut a = complex_or_real(out);
     a.shape = y.shape.clone();
     Ok(a)
+}
+
+/// The answer a series has where there is NOTHING TO SUM and the running
+/// total's own float is not what the reference leaves.
+///
+/// A series reads NUMBERS, and an argument of another kind with nothing in
+/// it gives it nothing to read and nothing to refuse: the answer is the
+/// BOOLEAN empty a refused fill leaves, in the argument's own shape —
+/// `3!:0 ((2 H. 2) (0 3 $ 'a'))` and `3!:0 (1 (2 H. 2) (''))` are 1 in the
+/// reference. An argument that DOES hold characters or boxes is refused by
+/// the reading itself. A COMPLEX empty keeps the arithmetic it named,
+/// `3!:0 ((2 H. 2) (0 $ 0j1))` being 16; every other numeric empty leaves
+/// the float the total is kept in, which is what the summing answers
+/// anyway.
+fn series_reads_nothing(y: &Array) -> Option<Array> {
+    if y.count() != 0 {
+        return None;
+    }
+    let t = match y.dtype() {
+        DType::Complex => DType::Complex,
+        t if !t.is_numeric() => DType::Bool,
+        _ => return None,
+    };
+    Some(Array::new(y.shape.clone(), Data::empty(t)))
 }
 
 /// `x (m H. n) y`: the same series stopped after its first `x` terms, so
@@ -23659,8 +23715,15 @@ fn prim_obverse(v: &Verb, p: &Prim) -> Option<Verb> {
     }
     let built = match p.monad {
         // `j. y` turns y a quarter turn about the origin; turning it back
-        // is a quarter turn the other way, which is `-@j.`.
-        MonadOp::Scalar(SM::Imaginary) => atop(named("-")?, named("j.")?),
+        // is a quarter turn the other way. The turn back is subtracted FROM
+        // ZERO rather than negated, so that neither part of the answer ever
+        // carries a negative zero the argument did not have: `3!:3 (o. &.j. 2)`
+        // and `3!:3 (j.^:_1 (6.28j0))` both hold a positive zero in the
+        // reference, where a plain negation writes `_0` into one of them.
+        MonadOp::Scalar(SM::Imaginary) => atop(
+            Verb::BondLeft(Array::scalar_i64(0), Box::new(named("-")?)),
+            named("j.")?,
+        ),
         // `r. y` is `^ 0j1 * y`, so the angle comes back as the logarithm
         // turned the same quarter turn back.
         MonadOp::Scalar(SM::Polar) => {

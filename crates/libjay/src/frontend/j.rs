@@ -3125,8 +3125,13 @@ fn lower_sentence(frag: Option<Frag>, whole: Span, char_bytes: bool) -> Result<E
                 span,
             )),
         },
+        // `[:` STANDING ALONE IS A VERB, as every other modifier-shaped
+        // word that reaches the end of a sentence is: the reference writes
+        // it back out as `[:` and `". '[:'` answers the empty a sentence
+        // with no noun value answers. It caps a fork wherever a fork is
+        // being made; on its own there is nothing to cap and nothing to do.
         Some(Frag::Verb(VerbFrag::Cap, span)) => {
-            Err(Error::parse("`[:` caps a fork; it has no verb of its own", span))
+            Ok(Expr::Entity(literal_text("[:", char_bytes), span))
         }
         _ => Err(Error::parse("syntax error", whole)),
     }
@@ -3597,9 +3602,22 @@ fn apply_conj(u: Frag, c: Frag, v: Frag, scope: &Names) -> Result<Frag> {
             // kept beside them: it settles the ranks and then plays no
             // part in what the verb does, but the reference writes the
             // verb back out as `u"v` rather than as the ranks it stood for.
+            //
+            // The ranks it lends are the ones `b. 0` REPORTS, not the ones
+            // it was written with: a negative rank leaves a fixed number of
+            // frame axes and is reported as infinite, so `,"(0"_1)` takes
+            // the whole argument where `,"_1` takes its rows —
+            // `$ ,"(0"_1) (i. 2 3)` is 6 in the reference and
+            // `$ ,"_1 (i. 2 3)` is `2 3`.
             let ranks = if v.is_verb() {
                 let w = verb_operand(v.clone(), span)?;
-                crate::verb::Ranks::from_verb(w.ranks(), w)
+                let mut r = w.ranks();
+                for place in &mut r {
+                    if *place < 0 {
+                        *place = crate::verb::RANK_INF;
+                    }
+                }
+                crate::verb::Ranks::from_verb(r, w)
             } else {
                 rank_spec(&v, span)?
             };
