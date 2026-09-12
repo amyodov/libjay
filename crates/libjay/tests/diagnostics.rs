@@ -199,7 +199,7 @@ const J_PROMISES: &[Case] = &[
     j("9!:1 ] 5", ErrorKind::NotYet, "9!:1", &["foreign 9!:1"]),
     j("128!:0 i. 2 2", ErrorKind::NotYet, "128!:0", &["foreign 128!:0"]),
     j("3!:6 ] 1 2 3", ErrorKind::NotYet, "3!:6", &["foreign 3!:6"]),
-    j("0 s: s: <'a'", ErrorKind::NotYet, "0 s: s: <'a'", &["symbol-table form"]),
+    j("0 s: s: <'a'", ErrorKind::Language, "0 s: s: <'a'", &["symbol table"]),
     j(
         "(0;(2 2 2 $ 0 0 1 4 0 1 1 0);(' ' = a.)) ;: 'a b'",
         ErrorKind::NotYet,

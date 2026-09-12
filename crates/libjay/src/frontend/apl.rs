@@ -2671,6 +2671,7 @@ fn const_cfg(d: Rules) -> crate::verb::EvalCfg {
         tol: d.tol(),
         fill: None,
         rules: d,
+        pass: None,
     }
 }
 

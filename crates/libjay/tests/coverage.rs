@@ -697,7 +697,6 @@ fn apl_table_makes_a_matrix() {
 fn newly_spelled_words_name_what_they_still_lack() {
     let cases = [
         (Lang::J, "$. 'abc'", "sparse array of character"),
-        (Lang::J, "6 s: s: <'a'", "symbol-table form"),
         (Lang::Apl, "(⍳3)∘×2", "∘ with a value operand"),
     ];
     for (lang, src, what) in cases {
@@ -710,4 +709,12 @@ fn newly_spelled_words_name_what_they_still_lack() {
     let e = err(Lang::J, "+ &. (+/ % #) 1 2");
     assert_eq!(e.kind, ErrorKind::Language);
     assert!(e.msg.contains("obverse"), "{}", e.msg);
+    // So is a symbol form whose answer is the interpreter's own table: the
+    // slot a name was interned into is no value of the language, and no
+    // amount of implementing would make libjay's slots J's.
+    for src in ["6 s: s: <'a'", "0 s: 0", "7 s: s: <'a'", "_6 s: 1"] {
+        let e = err(Lang::J, src);
+        assert_eq!(e.kind, ErrorKind::Language, "{src}");
+        assert!(e.msg.contains("symbol table"), "{src}: {}", e.msg);
+    }
 }

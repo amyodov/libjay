@@ -636,6 +636,7 @@ impl Program {
             tol: self.rules.tol(),
             fill: None,
             rules: self.rules,
+            pass: None,
         };
         let mut env = Env::new(args.to_vec());
         // A run's random link belongs to that run: `⎕RL` starts a stream

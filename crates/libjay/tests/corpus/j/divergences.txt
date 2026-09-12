@@ -856,21 +856,6 @@ _1e16 ! _1
 // reference answers one way under a modifier and another way as the bare
 // dyad, and the two answers are its own.
 
-// The min-insert and the max-insert fold from the operation's IDENTITY —
-// `_` for the minimum, `__` for the maximum — and a NaN, which loses every
-// comparison, never displaces it. The insert of two NaNs IS `_. <. _.`,
-// which the reference's own `<.` answers with a NaN, and the SCAN of the
-// same list — whose last item is that very insert — answers `_.` there
-// too. Only the standalone insert takes the identity.
-<./ ((_.) , (_.))
-? `(_.) <. (_.)` is `_.` there and `<./\ ((_.) , (_.))` is `_. _.`, whose last item is this insert; reason: self-contradiction
->./ ((_.) , (_.))
-? `(_.) >. (_.)` is `_.` there and `>./\ ((_.) , (_.))` is `_. _.`, whose last item is this insert; reason: self-contradiction
-((<.) (1 : 'u/ y')) ((_.) , (_.))
-? the same insert written inside an explicit adverb; reason: self-contradiction
-((>.) (1 : 'u/ y')) ((_.) , (_.))
-? the same, for the maximum; reason: self-contradiction
-
 // The SUFFIX SCAN makes the NaN its own insert refuses. Every row below
 // folds a pair the reference will not fold on its own: `-/ ((__) , (__))`
 // and `%/ ((_) , (_))` are NaN errors there, and the suffix scan of a table
@@ -1018,25 +1003,6 @@ o.&.% ((__) , (__))
 -/\\. (2 2 $ (_j_))
 ? the same over the complex infinity in both parts; reason: self-contradiction
 
-// THE OUTER PRODUCT AGAINST THE DYAD IT IS MADE OF. `x u/ y` puts every
-// item of x against every item of y under u, so every cell of it is a
-// sentence the two engines already agree on: `(0.5) <. (_.)` is `_.` in
-// both and `(_.) <. (0.5)` is 0.5 in both. Fold the same pair through an
-// outer product and the reference answers the OTHER one, cell for cell,
-// for the minimum, the maximum and the four comparisons. libjay's outer
-// product answers what its own dyad answers.
-((0.5) , (0.5)) <./ ((_.) , (_.))
-? `(0.5) <. (_.)` is `_.` there and this outer product of the pair is 0.5; reason: self-contradiction
-~ cause=differ:val:table/num|differ:val:vector/num|differ:val:atom/num verb=<.,>.,<:,>:,=,> with=/ also=,,_.,+,-,*,%,x:,0x,:
-2 >./ (_. 2 3)
-? `2 >. (_.)` is `_.` there and this outer product answers 2; reason: self-contradiction
-2 <./ (_. 2 3)
-? the same pair through the minimum; reason: self-contradiction
-((_.) , (_.)) >./ ((0.5) , (0.5))
-? `(_.) >. (0.5)` is 0.5 there and this outer product of the pair is `_.`; reason: self-contradiction
-((_.) , (_.)) =/ ((0.5) , (0.5))
-? `(_.) = (0.5)` is 0 there and this outer product of the pair is 1; reason: self-contradiction
-
 // A FLOOR COMPOSED ON A LOGARITHM, over an exact zero. `^. (0x)` is `__`
 // there and `<. (__)` is `__`, and `(<. @ ^.) (0)` — the same composition
 // over the ordinary zero — is `__` too; only the EXACT zero through the
@@ -1072,23 +1038,31 @@ o.&.% ((__) , (__))
 ((1e160) , (1e160)) %. ((1e160) , (1e160))
 ? the smallest scale measured at which the reference's own method overflows; reason: proven-wrong
 
-// THE SYMBOL TABLE'S OWN FORMS, WHICH ARE THE INTERPRETER'S DATA STRUCTURE
-// AND NOT A VALUE THE LANGUAGE DEFINES. `0 s: y` and `1 s: y` DUMP a
-// symbol table: `$ 0 s: 2` is `2000 11` there, a table of slot counters
-// with one machine address in it (`3080238136`) and one
-// `_9223372036854775808`, and `6 s:`, `7 s:`, `_1 s:` and `_2 s:` number a
-// symbol within it — how many slots it holds, which are in use, how it
-// hashes them. Matching any of that would mean reproducing an
-// implementation's hash table rather than J, so libjay answers "not
-// implemented yet" and docs/coverage.md names them as gaps. The NAME forms
-// `2 s:` to `5 s:` are implemented and agree.
+// THE SYMBOL FORMS THAT REPORT THE INTERPRETER'S OWN TABLE. `n s:` falls
+// in two halves. The forward forms 1 to 5 write an array of symbols out as
+// text and the negative ones `_1` to `_5` read the same text back, and
+// every one of them is a function of the argument alone: libjay answers
+// them, and residue3-symbols.txt records a hundred and twenty-six cells
+// of it agreeing.
+// The other four — `0` with its dozen numbered queries, `6` and `_6` for
+// the SLOT a symbol was interned into, and `7` for the ORDER it was
+// interned in — answer about the table itself. `0 s: (2)` is a table of
+// machine addresses (`3080238136` among them, and one
+// `_9223372036854775808`); `0 s: (0)` is how many distinct names the
+// session has made; `6 s: (s: '`abc')` is 1 and `7 s:` of it 1024, both of
+// them positions inside J's own tree. libjay has a symbol table too and
+// its slots are its own, so following these would answer a different
+// number rather than the same one, and answering would make a corpus row
+// that depends on how many symbols the run had made before it.
 0 s: (2)
 ? the reference answers with its own symbol table, which is no value the language defines; reason: undefined
-~ cause=gap:err:not_supported_yet:_the_symbol-table_form_(#_s:)_is_not_supported_yet verb=s: also=x:,u:,b.,|,/:,F.:,F..,F::,-,+,*,%,^,<.,>.,#.,#:,i:,i.,^:,&,@,:,f.,::,M.,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,+.,*.,;.,{::,e.,=:,=.,;:,":,@.,`:,%.,A.,I.,-.,/.,p..,E.,L.,$.,".,3!:,!,a:,%:,^.
+~ cause=gap:err:not_in_the_language:_#_s:_reports_an_interpreter's_own_symbol_table,_not verb=s: also=x:,u:,b.,|,/:,F.:,F..,F::,F:.,.,:.,&.>,-,+,*,%,^,<.,>.,#.,#:,i:,i.,^:,&,&.,&.:,@,:,f.,::,M.,p:,q:,!.,j.,r.,o.,+:,-:,*:,>:,<:,=,~:,|.,{.,}.,+.,*.,;.,;,{::,e.,=:,=.,;:,":,@.,`:,%.,A.,I.,-.,/.,p..,E.,L.,$.,".,3!:,!,a:,%:,^.,$,<,>,],[,~,{,#,n,C.,{:,}:,/:,\:,a.,_:,]:,[:
 0 s: (0)
 ? the same, where the table it dumps holds one row for the argument; reason: undefined
-1 s: (0 $ 0)
-? the second dumping form, over an argument with no items; reason: undefined
+6 s: (s: '`abc')
+? a symbol's slot number is where THIS interpreter interned it; reason: undefined
+7 s: (s: '`abc')
+? a symbol's order number is a position in THIS interpreter's tree; reason: undefined
 
 
 // THE BINARY REPRESENTATION OF A SYMBOL IS THE INTERPRETER'S OWN TABLE
@@ -1238,3 +1212,53 @@ $ (('') A. (i. 3 4))
 // rows above stand on.
 10 u: (128!:3 ('a'))
 ? a code past the last codepoint is a character there and no character here; reason: model
+
+// `%:` OVER AN ARGUMENT WITH NO ATOMS, where the exponent decides whether
+// the kind is read at all. `2 %: (0 $ 'a')` is the empty in the reference
+// and `2 %: (0 $ a:)` a domain error, although neither argument holds a
+// value for the root to object to; `1.5 %: (0 $ a:)` answers the empty
+// again where `2 %: (0 $ a:)` and `0 %: (0 $ a:)` refuse, so the same
+// boxed empty is refused under one exponent and answered under another.
+// The direction reverses with the atoms: a box that DOES hold one is
+// refused under a whole exponent (`2 %: (<1 2)`) and answered under an
+// empty one (`(0 $ 5) %: (<1 2)`). What is showing through is which
+// shortcut `%x` took — the square root at 2, the limit at 0, the general
+// power at 1.5 — and not a rule about the argument. libjay reads the
+// exponent's type before the frame where the argument HOLDS something, as
+// the reference does, and answers the frame where it holds nothing.
+2 %: (0 $ a:)
+? a boxed empty is refused under a whole exponent and answered under a fractional one; reason: self-contradiction
+~ cause=they-refuse:val:empty/num verb=%: also=$,a:,<,s:,^,%,:,},",@,@:,&,&.,&.:,^:,f.,{.,}.,#,i.,,.
+2 %: (0 $ s: 'a')
+? a symbol empty, refused the same way and with the same contradiction beside it; reason: self-contradiction
+
+// `#.` WITH A BOOLEAN BASE OVER AN ARGUMENT WITH NO ATOMS. `2 #. ('')` is
+// 0 in the reference and `(0) #. ('')` a domain error — the same decode of
+// the same empty, refused where the base is a BIT and answered where it is
+// an integer. `1 #. ('')` refuses too, and `(2) #. (0 $ 'a')` answers, so
+// it is the base's type and nothing else. The reference's boolean base
+// takes a bit-buffer path that reads the argument's kind before the frame;
+// its integer base does not. The empty-frame corners of `#.` were already
+// pinned in round 9's residue for the same reason, and this is the same
+// mechanism one argument along.
+(0) #. ('')
+? a bit base refuses the empty an integer base decodes; reason: self-contradiction
+~ cause=they-refuse:val:atom/num|they-refuse:val:vector/num|they-refuse:val:empty/num verb=#. also=$,",@,@:,&,&.,&.:,^:,f.,{.,}.,#,i.,,.,{,~,:
+
+// `%.` OVER A MATRIX THAT IS NOT OF FULL COLUMN RANK. A tall matrix is
+// inverted by least squares, and where its columns are dependent there is
+// no least-squares solution to pick out: the normal equations are singular
+// and every generalised inverse is as good as every other. The reference
+// does not look for the deficiency, so what it answers is whatever its own
+// elimination's rounding leaves, and two matrices of the SAME SHAPE and the
+// SAME RANK get different kinds of answer: `%. (i. 4 3)` is twelve `_.`
+// and `%. (|: i. 3 4)` — also 4 by 3, also of rank 2 — is twelve finite
+// numbers, which satisfy `A X A = A` only to the five digits the printer
+// shows and are not the Moore-Penrose inverse (that one's first row is
+// `_0.3375 _0.133333 0.070833 0.275`, not `_0.422178 _0.120767 0.174042
+// 0.508466`). libjay reports the singularity instead of dividing by it.
+%. (|: i. 3 4)
+? a rank-deficient least squares has no value, and the reference answers two ways for two matrices of one shape and one rank; reason: self-contradiction
+~ cause=we-refuse:err:domain_error:_the_matrix_is_singular verb=%. also=|:,i.,$,",@,@:,&,&.,&.:,^:,f.,{.,}.,#,{,~,:,+,-,*,%,,.
+%. (i. 4 3)
+? the same shape and the same rank, answered with NaNs rather than with numbers; reason: self-contradiction

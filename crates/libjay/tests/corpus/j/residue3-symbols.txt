@@ -1,0 +1,157 @@
+// `s:` in full: the forward forms that write an array of symbols out as
+// text, the negative ones that read the same text back, and what each of
+// them does to a shape, a type and an argument of the wrong kind. The four
+// forms that report the interpreter's own table — `0`, `6`, `7` and `_6` —
+// are in divergences.txt instead, with the reason they cannot agree.
+//
+// A symbol ATOM's format is damaged in the reference (see decisions.md,
+// 2026-09-12), so every display here is of a LIST, of the boxes `5 s:`
+// makes, or of a shape.
+
+// The monad, which is the three negative forms chosen by what it is handed.
+$ (s: 'abc')
+5 s: (s: 'abc')
+5 s: (s: '`ab`cde')
+5 s: (s: '/ab/cde')
+5 s: (s: 'aa')
+$ (s: 'aa')
+5 s: (s: (2 3 $ 'ab cde'))
+$ (s: (2 3 $ 'ab cde'))
+5 s: (s: (2 3 $ 'a  b  '))
+5 s: (s: ('ab';'cde'))
+$ (s: ('ab';'cde'))
+$ (s: (<'ab'))
+3!:0 (s: ('ab';'cde'))
+$ (s: (0 3 $ 'a'))
+3!:0 (s: (0 3 $ 'a'))
+$ (s: '')
+s: 1 2 3
+s: (<<'a')
+s: (2 2 3 $ 'abcdefghijkl')
+$ (s: (2 2 3 $ 'abcdefghijkl'))
+
+// `1 s:` and `2 s:`: the raze with a separator before each name and after
+// each name. `a. i.` reads the characters back as codes, a null included.
+a. i. (1 s: (s: '`abc`def'))
+$ (1 s: (s: '`abc`def'))
+a. i. (2 s: (s: '`abc`def'))
+$ (2 s: (s: '`abc`def'))
+a. i. (1 s: (s: '`a`bcd'))
+a. i. (2 s: (s: '`a`bcd'))
+3!:0 (1 s: (s: '`abc`def'))
+$ (1 s: (0 $ s: 'x'))
+$ (2 s: (0 $ s: 'x'))
+$ (1 s: (0 3 $ s: 'x'))
+$ (2 s: (0 3 $ s: 'x'))
+
+// `3 s:` and `4 s:`: one row per symbol, padded to the longest with a null
+// and with a blank. The two forms differ in the pad and in nothing else.
+a. i. (3 s: (s: '`a`bcd'))
+$ (3 s: (s: '`a`bcd'))
+a. i. (4 s: (s: '`a`bcd'))
+$ (4 s: (s: '`a`bcd'))
+a. i. (3 s: (s: '`abc`def'))
+a. i. (4 s: (s: '`abc`def'))
+3!:0 (3 s: (s: '`a`bcd'))
+$ (3 s: (0 $ s: 'x'))
+$ (4 s: (0 $ s: 'x'))
+$ (3 s: (0 3 $ s: 'x'))
+$ (4 s: (s: (2 2 3 $ 'abcdefghijkl')))
+a. i. (4 s: (s: (2 2 3 $ 'abcdefghijkl')))
+
+// `5 s:`: one box per symbol, the argument's own shape.
+5 s: (s: '`a`bcd')
+$ (5 s: (s: '`a`bcd'))
+3!:0 (5 s: (s: '`a`bcd'))
+$ (5 s: (0 $ s: 'x'))
+$ (5 s: (0 3 $ s: 'x'))
+$ (5 s: (s: (2 2 3 $ 'abcdefghijkl')))
+
+// A forward form reads SYMBOLS and nothing else, except that an argument
+// with no atoms holds no value to object to.
+3 s: 'abc'
+3 s: (<'abc')
+3 s: 1 2 3
+5 s: 1 2 3
+$ (5 s: (i. 0))
+$ (3 s: (i. 0))
+8 s: (s: 'abc')
+_7 s: (s: 'abc')
+
+// The NEGATIVE forms, each the inverse of the one it is written against.
+5 s: (_1 s: (1 s: (s: '`abc`def')))
+5 s: (_2 s: (2 s: (s: '`abc`def')))
+5 s: (_3 s: (3 s: (s: '`a`bcd')))
+5 s: (_4 s: (4 s: (s: '`a`bcd')))
+5 s: (_5 s: (5 s: (s: '`a`bcd')))
+5 s: (_1 s: '`abc`de')
+$ (_1 s: '`abc`de')
+5 s: (_1 s: 'abc')
+5 s: (_1 s: '`')
+$ (_1 s: '`')
+5 s: (_1 s: '``')
+5 s: (_1 s: '`a`')
+$ (_1 s: '')
+5 s: (_2 s: 'abc')
+5 s: (_2 s: ('ab',(0{a.),'cd',(0{a.)))
+$ (_2 s: ('ab',(0{a.),'cd',(0{a.)))
+5 s: (_2 s: (,0{a.))
+$ (_2 s: '')
+5 s: (_3 s: (2 4 $ 'ab',(0{a.),(0{a.),'cdef'))
+5 s: (_3 s: (2 4 $ 'abcdefgh'))
+$ (_3 s: (2 4 $ 'abcdefgh'))
+$ (_3 s: 'abc')
+5 s: (_4 s: (2 3 $ '   abc'))
+5 s: (_4 s: (2 3 $ 'a  b  '))
+$ (_4 s: (2 3 $ 'a  b  '))
+$ (_4 s: 'abc')
+$ (_4 s: (0 0 $ 'a'))
+$ (_3 s: (0 3 $ 'a'))
+5 s: (_5 s: ('ab';'cde'))
+$ (_5 s: ('ab';'cde'))
+$ (_5 s: (<'ab'))
+$ (_5 s: (0 $ a:))
+$ (_5 s: (2 0 $ a:))
+5 s: (_5 s: (2 2 $ 'a';'b';'c';'d'))
+$ (_5 s: (2 2 $ 'a';'b';'c';'d'))
+_5 s: (1;2)
+_5 s: (<<'a')
+_1 s: (<'abc')
+_1 s: (2 3 $ 'abcdef')
+_2 s: (2 3 $ 'abcdef')
+
+// Two symbols made from the same text are the same atom, whichever form
+// made them.
+(s: '`abc') = (_5 s: (<'abc'))
+(s: '`abc') = (_4 s: 'abc')
+(s: '`abc') = (_3 s: 'abc')
+(s: '`ab`cd') -: (_2 s: ('ab',(0{a.),'cd',(0{a.)))
+
+// A NEGATIVE form over an argument with NO ATOMS is answered by its own
+// shape rule alone: no text to read, so no kind to object to and no rank to
+// insist on. The MONAD names the kind whatever the size.
+$ (_1 s: (i. 0))
+3!:0 (_1 s: (i. 0))
+$ (_2 s: (i. 0))
+$ (_3 s: (i. 0))
+$ (_3 s: (i. 0 0))
+$ (_4 s: (i. 0 0))
+$ (_4 s: (i. 0))
+3!:0 (_4 s: (i. 0))
+5 s: (_4 s: (i. 0))
+5 s: (_3 s: (0 $ 0.5))
+$ (_5 s: (i. 0))
+3!:0 (_5 s: (i. 0))
+$ (_5 s: (0 3 $ 0))
+$ (_1 s: (0 $ a:))
+$ (_1 s: (0 $ 0j1))
+$ (_1 s: (i. 0 0))
+$ (_1 s: (i. 0 0 3))
+$ (_4 s: (i. 0 0 3))
+$ (_2 s: (i. 0 0))
+$ (_3 s: (0 $ 0.5))
+$ (s: (i. 0))
+_1 s: (i. 3)
+_1 s: 5
+_5 s: (i. 3)
+_3 s: (i. 3)

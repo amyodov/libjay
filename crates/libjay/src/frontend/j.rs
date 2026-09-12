@@ -3381,6 +3381,7 @@ fn noun_value(f: &Frag) -> Option<Array> {
         tol: crate::verb::Tol::J,
         fill: None,
         rules: crate::frontend::Rules::default(),
+        pass: None,
     };
     crate::ir::fold_const(e, cfg)
 }

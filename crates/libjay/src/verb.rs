@@ -148,12 +148,49 @@ pub struct Tol {
     /// the split is by the operands' type and count and not by their
     /// values.
     pub nan_wins: bool,
+    /// How the comparisons in this pass read a pair holding a NaN, or
+    /// `None` where nobody has settled it and the comparison works it out
+    /// from the buffers in front of it.
+    ///
+    /// The reference settles it ONCE FOR A PASS — see
+    /// `nan_reads_equal_by` — so a frame maker that cut one pass into
+    /// cells has to carry the answer down to them; a cell that asked the
+    /// atom pair in front of it would read a one-pair pass where the
+    /// reference read a long one.
+    pub nan_equal: Option<NanReading>,
+}
+
+/// What a comparison makes of a pair holding a NaN.
+///
+/// The reference has two comparison loops. The EXACT one is machine
+/// comparison, where a NaN fails everything, `>:` included. The TOLERANT
+/// one asks whether the difference EXCEEDS the tolerance and builds the
+/// rest by negation — `x <: y` is `x < y` or equal, `x >: y` is not
+/// `x < y`, and `x > y` is not `x <: y` — so a NaN, which exceeds nothing,
+/// is EQUAL to whatever it is set against and satisfies `=`, `<:` and `>:`.
+/// A BROADCAST ZERO is the third reading: it has no magnitude for the
+/// tolerance to scale, so the equality inside that same tolerant loop is
+/// exact and a NaN fails `=` and `<:` while still satisfying `>:` and `>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NanReading {
+    /// Machine comparison: the NaN fails every test.
+    Exact,
+    /// The tolerant loop: the NaN is equal to whatever it meets.
+    Equal,
+    /// The tolerant loop against a zero: the NaN is unequal, and the
+    /// non-strict tests are still the negations of the strict ones.
+    Unequal,
 }
 
 impl Tol {
     /// No tolerance at all — J's `u!.0`.
-    pub const EXACT: Tol =
-        Tol { ct: 0.0, by_smaller: true, floor_rule: FloorRule::Shift, nan_wins: false };
+    pub const EXACT: Tol = Tol {
+        ct: 0.0,
+        by_smaller: true,
+        floor_rule: FloorRule::Shift,
+        nan_wins: false,
+        nan_equal: None,
+    };
     /// J's default comparison tolerance, 2^-44.
     pub const J: Tol =
         Tol {
@@ -161,10 +198,16 @@ impl Tol {
             by_smaller: true,
             floor_rule: FloorRule::Shift,
             nan_wins: false,
+            nan_equal: None,
         };
     /// GNU APL's default `⎕CT`.
-    pub const APL: Tol =
-        Tol { ct: 1e-13, by_smaller: false, floor_rule: FloorRule::Shift, nan_wins: false };
+    pub const APL: Tol = Tol {
+        ct: 1e-13,
+        by_smaller: false,
+        floor_rule: FloorRule::Shift,
+        nan_wins: false,
+        nan_equal: None,
+    };
 
     /// Tolerant equality.
     #[inline(always)]
@@ -534,6 +577,33 @@ pub struct EvalCfg {
     /// The dialect's settings, resolved once at compile time. A rule that
     /// only bites at run time reads it from here rather than deducing it.
     pub rules: Rules,
+    /// THE WHOLE PASS a scalar primitive is part of, where a FRAME MAKER
+    /// has cut it into cells. `None` wherever the arguments in front of the
+    /// primitive are the pass.
+    pub pass: Option<ScalarPass>,
+}
+
+/// What a scalar primitive's CELL cannot see about the pass it is part of.
+///
+/// The reference settles two things once for a pass and not once per cell:
+/// whether a comparison reads a NaN as equal, which the count of PAIRS
+/// decides (`nan_reads_equal_by`), and which operand a failed extremum
+/// leaves standing, which the BROADCAST decides
+/// (`extremum_base_is_left`). A frame maker that cuts one pass into cells
+/// hands down whichever of them the cell has lost: a rank frame keeps every
+/// cell's own broadcast and only the count is the whole pass's, while a
+/// TABLE pairs atom with atom and has to carry the broadcast too.
+/// `(2.5 3.5) >:"0 1 (,_.)` is `1 1` in the reference — two pairs, and so
+/// the tolerant loop — where one cell alone has one pair and is exact; and
+/// `(1.5 2.5) <./ (_. _.)` is `1.5 1.5 / 2.5 2.5`, the left standing
+/// because the table spreads each of its atoms across a row.
+#[derive(Clone, Copy, Debug)]
+pub struct ScalarPass {
+    /// Atom pairs the whole pass makes.
+    pub pairs: usize,
+    /// Which operand a failed extremum leaves standing, where the cell has
+    /// nothing to read it from. `None` keeps the cell's own answer.
+    pub base_is_left: Option<bool>,
 }
 
 impl EvalCfg {
@@ -3657,10 +3727,25 @@ impl Verb {
             });
         }
         let work = x.count().max(y.count());
+        // A SCALAR PRIMITIVE UNDER A RANK IS STILL ONE PASS. The rank moves
+        // which cells pair with which; it does not make each pair a pass of
+        // its own, and the reference settles the extremum's base and the
+        // NaN's reading from the whole arguments either way. See
+        // [`ScalarPass`].
+        let pass = self.scalar_dyad_op().map(|_| {
+            let cell: usize = x.shape[fxl..]
+                .iter()
+                .product::<usize>()
+                .max(y.shape[fyl..].iter().product::<usize>());
+            ScalarPass { pairs: p.n * cell, base_is_left: None }
+        });
         let cells = each_cell(p.n, work, self.is_pure(), ctx, |i, c| {
             let xc = x.cell_at(fxl, i / p.x_div);
             let yc = y.cell_at(fyl, i / p.y_div);
-            self.dyad_cell(&xc, &yc, c, span)
+            let saved = std::mem::replace(&mut c.cfg.pass, pass);
+            let out = self.dyad_cell(&xc, &yc, c, span);
+            c.cfg.pass = saved;
+            out
         })?;
         if matches!(self, Verb::Each(..)) {
             return assemble_each(&p.frame, cells, span);
@@ -7017,7 +7102,7 @@ fn compare_data(
     // `=`, `<:` and `>:` answer 1 against it and `<`, `>` and `~:` answer
     // 0. Its EXACT pass is machine equality, where a NaN equals nothing,
     // not even itself. See [`nan_reads_equal`] for which pass runs.
-    let nan_equal = nan_reads_equal(dx, dy, n, tol);
+    let nan_reading = tol.nan_equal.unwrap_or_else(|| nan_reads_equal(dx, dy, n, tol, false));
     // Floats compare with the dialect's tolerance; integers are exact
     // whatever it is, so the integer pass below is untouched by it.
     let out = if DType::promote(dx, dy) == Some(DType::F64) {
@@ -7027,10 +7112,19 @@ fn compare_data(
                 par::fill(n, |start, part: &mut [u8]| {
                     zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, part, |a, b, slot| {
                         let (a, b): (f64, f64) = (a.widen(), b.widen());
-                        *slot = if nan_equal && (a.is_nan() || b.is_nan()) {
-                            cmp_result(op, Some(std::cmp::Ordering::Equal)) as u8
-                        } else {
-                            tol_cmp(op, a, b, tol) as u8
+                        *slot = match nan_reading {
+                            _ if !(a.is_nan() || b.is_nan()) => tol_cmp(op, a, b, tol) as u8,
+                            NanReading::Exact => tol_cmp(op, a, b, tol) as u8,
+                            NanReading::Equal => {
+                                cmp_result(op, Some(std::cmp::Ordering::Equal)) as u8
+                            }
+                            // Unequal, and the strict tests still fail, so
+                            // `<` and `<:` are false and `>:` and `>` are
+                            // their negations.
+                            NanReading::Unequal => u8::from(matches!(
+                                op,
+                                ScalarDyad::Ne | ScalarDyad::Ge | ScalarDyad::Gt
+                            )),
                         };
                         true
                     })
@@ -7088,6 +7182,13 @@ fn compare_data(
 /// which the caller gets for free: it asks this only to decide the NaN,
 /// and `Tol::eq` at zero separates the pair anyway.
 ///
+/// A BROADCAST ZERO is the exact loop whatever the length, because a zero
+/// has no relative neighbourhood for a tolerance to scale: `(0.5 - 0.5) <:
+/// (_. _. _.)` is `0 0 0` there and `((0.5 - 0.5) , 1.5 , 2.5) <: (_. _.
+/// _.)` — the same zero, written as an ITEM rather than as the atom the
+/// pass spreads — is `1 1 1`. Only the atom carries it; a zero among a
+/// vector's items is read by the tolerant loop like any other number.
+///
 /// `exact_side_counts` is the third clause above. The COMPARISONS have it;
 /// the SIEVE `-.` does not, and answers to the length alone —
 /// `(,_.) -. (,1x)` keeps its NaN where `(,_.) = 1x` is 1 — because the
@@ -7108,9 +7209,29 @@ fn nan_reads_equal_by(
     loose(dx) && loose(dy) && (exact_side || n > 1)
 }
 
-/// [`nan_reads_equal_by`] as the comparison verbs ask it.
-fn nan_reads_equal(dx: DType, dy: DType, n: usize, tol: Tol) -> bool {
-    nan_reads_equal_by(dx, dy, n, tol, true)
+/// [`nan_reads_equal_by`] as the comparison verbs ask it, with the
+/// broadcast zero's own reading beside the other two.
+fn nan_reads_equal(
+    dx: DType,
+    dy: DType,
+    n: usize,
+    tol: Tol,
+    zero_broadcast: bool,
+) -> NanReading {
+    if !nan_reads_equal_by(dx, dy, n, tol, true) {
+        NanReading::Exact
+    } else if zero_broadcast {
+        NanReading::Unequal
+    } else {
+        NanReading::Equal
+    }
+}
+
+/// A FLOAT ATOM whose value is zero — the operand a comparison spreads over
+/// every cell of the other, and the one case where the tolerant loop has no
+/// neighbourhood to work in. See [`nan_reads_equal_by`].
+fn zero_atom(a: &Array) -> bool {
+    a.rank() == 0 && matches!(&a.data, Data::F64(b) if b.as_slice().first() == Some(&0.0))
 }
 
 /// `x | y` over complex values, with the guards the reference keeps.
@@ -7791,21 +7912,30 @@ fn to_exact(y: &Array, span: Span) -> Result<Array> {
             }
             Data::Rat(out.into())
         }
-        // A COMPLEX VALUE WITH NO IMAGINARY PART IS THE REAL IT DISPLAYS
-        // AS, as it is for the gamma function: `x: (3j0)` is 3 and
-        // `2 x: (3j0)` is `3 1` in the reference, where `x: (3j4)` is a
-        // domain error. An empty complex has no part to be imaginary, so
-        // it converts as well.
+        // A COMPLEX VALUE THAT IS TOLERANTLY REAL IS THE REAL IT DISPLAYS
+        // AS, as it is for the gamma function and for every ordering: `x:
+        // (3j0)` is 3 and `2 x: (3j0)` is `3 1` in the reference, where
+        // `x: (3j4)` is a domain error. The test is the COMPARISON's, not
+        // a bit-for-bit zero — `x: (1j5e_14)` is 1 there and
+        // `x: (1j6e_14)` a domain error, either side of `2^_44` — and a
+        // finite imaginary part is negligible beside an INFINITE real one,
+        // which is what makes `x: (^. __)` the `_` that `^. __` orders as.
+        // An empty complex has no part to be imaginary, so it converts as
+        // well.
         Data::Complex(_) if y.count() == 0 => Data::empty(DType::Ext),
-        Data::Complex(_) => match as_real(y) {
-            Some(r) => return to_exact(&r, span),
-            None => {
-                return Err(Error::domain(
-                    format!("x: needs real numbers, not {} data", y.dtype().name()),
-                    span,
-                ));
-            }
-        },
+        Data::Complex(v) if tolerantly_real(&Data::Complex(v.clone()), Tol::J) => {
+            let real: Vec<f64> = v.iter().map(|z| z[0]).collect();
+            return to_exact(
+                &Array::new(y.shape.clone(), Data::F64(real.into())),
+                span,
+            );
+        }
+        Data::Complex(_) => {
+            return Err(Error::domain(
+                format!("x: needs real numbers, not {} data", y.dtype().name()),
+                span,
+            ));
+        }
         Data::Char(_) | Data::Symbol(_) | Data::Box(_) => {
             return Err(Error::domain(
                 format!("x: needs real numbers, not {} data", y.dtype().name()),
@@ -8251,22 +8381,44 @@ fn as_real(a: &Array) -> Option<Array> {
 ///   and `(_.) <. (1.0 1.0)` is `_. _.`.
 /// - Otherwise the right: `(1.0 1.0) <. (_. _.)` is `_. _.`.
 ///
+/// A TABLE spreads both of its arguments and reads the broadcast its own
+/// way; [`table_base_is_left`] is that reading.
+///
 /// It is answered as a FLAG rather than by writing the base operand on the
 /// right, because the two extrema are symmetric away from a NaN in every
 /// way but one: `f64::min` hands back whichever ±0 it was given first, and
 /// swapping the pair would part the fused pipeline from the plain one on
 /// the sign of a zero.
-fn extremum_base_is_left(x: &Array, y: &Array) -> bool {
-    let (xc, yc) = (x.count(), y.count());
+fn extremum_base_is_left(dx: DType, xc: usize, dy: DType, yc: usize) -> bool {
     let int = |t: DType| matches!(t, DType::I64 | DType::Bool);
     if xc.max(yc) <= 1 {
+        false
+    } else if int(dx) && dy == DType::F64 {
+        true
+    } else if int(dy) && dx == DType::F64 {
+        false
+    } else {
+        xc < yc
+    }
+}
+
+/// [`extremum_base_is_left`] as the TABLE reads it. `x u/ y` spreads each
+/// atom of x across a whole row of the answer, so the LEFT is the broadcast
+/// side wherever there is a row to spread across — `(1.5 2.5) <./ (_. _.)`
+/// is `1.5 1.5 / 2.5 2.5` where `(1.5 2.5) <. (_. _.)`, the same atoms with
+/// no table under them, is `_. _.` — and the right is wherever there is
+/// not, `(1.5 2.5) <./ (_.)` being `_. _.` again.
+fn table_base_is_left(x: &Array, y: &Array) -> bool {
+    let (xc, yc) = (x.count(), y.count());
+    let int = |t: DType| matches!(t, DType::I64 | DType::Bool);
+    if xc * yc <= 1 {
         false
     } else if int(x.dtype()) && y.dtype() == DType::F64 {
         true
     } else if int(y.dtype()) && x.dtype() == DType::F64 {
         false
     } else {
-        xc < yc
+        yc > 1
     }
 }
 
@@ -8337,6 +8489,11 @@ fn scalar_dyad(
     // types never keep them; and the rest keep them only where the
     // multiply has a single pair to make. The power and the root drop them
     // at every length.
+    // THE PASS IS THE ONE THE REFERENCE RAN, not the cell a frame maker cut
+    // out of it: a rank or a table hands down in [`EvalCfg::pass`] whatever
+    // the cell has lost, and only where nobody did is the pair in front of
+    // the primitive the whole pass.
+    let pairs = cfg.pass.map_or(p.n, |q| q.pairs);
     let exact_side = matches!(x.dtype(), DType::Ext | DType::Rat)
         || matches!(y.dtype(), DType::Ext | DType::Rat);
     let boolean_side = x.dtype() == DType::Bool || y.dtype() == DType::Bool;
@@ -8345,13 +8502,26 @@ fn scalar_dyad(
             // For the two EXTREMA the flag carries something else: which
             // operand a failed comparison leaves standing. See
             // [`extremum_base_is_left`].
-            ScalarDyad::Min | ScalarDyad::Max => extremum_base_is_left(x, y),
+            ScalarDyad::Min | ScalarDyad::Max => cfg
+                .pass
+                .and_then(|q| q.base_is_left)
+                .unwrap_or_else(|| extremum_base_is_left(x.dtype(), x.count(), y.dtype(), y.count())),
             _ if boolean_side => false,
             ScalarDyad::Mul => p.n > 1 || exact_side,
             ScalarDyad::Pow | ScalarDyad::Root => true,
             _ => false,
         };
-    let tol = Tol { nan_wins, ..cfg.tol };
+    let tol = Tol {
+        nan_wins,
+        nan_equal: Some(nan_reads_equal(
+            x.dtype(),
+            y.dtype(),
+            pairs,
+            cfg.tol,
+            zero_atom(x) || zero_atom(y),
+        )),
+        ..cfg.tol
+    };
     let data = scalar_dyad_data(
         op,
         &x.data,
@@ -8408,7 +8578,23 @@ fn empty_scalar_dtype(
         // A ROOT types its empty exactly as the division it is written
         // from does.
         let probe = if op == ScalarDyad::Root { ScalarDyad::DivJ } else { op };
-        if let (Some(a), Some(b)) = (empty_of_type(xt, 1), empty_of_type(yt, 1))
+        // THE POWER'S FILL RUN READS THE EXPONENT ITSELF. `y ^ 0.5` with
+        // the ATOM 0.5 is the exact square root and not a power at all, so
+        // the fill run has to be handed that atom rather than a zero of its
+        // type: `3!:0 ((0 $ 0) ^ 0.5)` is 1 in the reference — the square
+        // root of a bit is the bit — where `3!:0 ((0 $ 0) ^ 0.0)` is 8 and
+        // `3!:0 ((0 $ 0) ^ (0 $ 0.5))`, the same type with no value behind
+        // it, is 8 again. Every other dyad reads a pair of FILL CELLS and
+        // nothing of the values: `3!:0 (2 % (0 $ 1x))` is the extended type
+        // there, what `0 % 0x` makes, and not the rational `2 % 0x` is.
+        let exponent = |a: &Array, t: DType| {
+            if op == ScalarDyad::Pow && a.count() > 0 && a.dtype() == t {
+                Some(a.row_major_data().slice(0, 1))
+            } else {
+                empty_of_type(t, 1)
+            }
+        };
+        if let (Some(a), Some(b)) = (empty_of_type(xt, 1), exponent(y, yt))
             && let Ok(one) =
                 scalar_dyad_data(probe, &a, 0, 1, &b, 0, 1, 1, cfg.tol, cfg.rules, span)
         {
@@ -11897,8 +12083,20 @@ fn table(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
         return u.dyad(x, y, ctx, span);
     }
     let work = x.count().max(y.count()).max(n);
+    // A SCALAR PRIMITIVE MAKES THE TABLE IN ONE PASS, the same way it makes
+    // a rank frame in one: `(i. 2 3 4) <./ (_.)` is the left argument in the
+    // reference, the integer side beside a float, where a cell reading its
+    // own atom pair would leave the right standing. See [`ScalarPass`].
+    let pass = u.scalar_dyad_op().map(|_| {
+        let cell: usize = x.shape[fxl..].iter().product::<usize>()
+            * y.shape[fyl..].iter().product::<usize>();
+        ScalarPass { pairs: n * cell, base_is_left: Some(table_base_is_left(x, y)) }
+    });
     let cells = each_cell(n, work, u.is_pure(), ctx, |i, c| {
-        u.dyad(&x.cell_at(fxl, i / ny), &y.cell_at(fyl, i % ny), c, span)
+        let saved = std::mem::replace(&mut c.cfg.pass, pass);
+        let out = u.dyad(&x.cell_at(fxl, i / ny), &y.cell_at(fyl, i % ny), c, span);
+        c.cfg.pass = saved;
+        out
     })?;
     assemble(&frame, cells, span)
 }
@@ -14148,9 +14346,50 @@ fn fold_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize) -> Option<Vec<f64>> {
         Add => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a + b)),
         Sub => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a - b)),
         Mul => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a * b)),
-        Min => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.min(b), false)),
-        Max => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.max(b), false)),
+        Min => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.min(b), false))
+            .map(|out| extremum_run_identity(out, m, f64::INFINITY)),
+        Max => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.max(b), false))
+            .map(|out| extremum_run_identity(out, m, f64::NEG_INFINITY)),
         _ => None,
+    }
+}
+
+/// A RUN OF ATOMS THAT HOLDS NOTHING BUT NaNs REDUCES TO THE EXTREMUM'S OWN
+/// IDENTITY.
+///
+/// A NaN never wins an extremum, so a reduction over a run of atoms is a
+/// loop that starts at the identity and keeps whichever value beats it:
+/// `<./ (_. _.)` is `_` in the reference, `>./ (_. _. _.)` is `__`, and one
+/// NUMBER anywhere in the run is the answer whatever else is there. It is
+/// the run of ATOMS that reads this way, and only there: `<./ (,_.)` is
+/// `_.`, the item a one-item insert answers without applying the verb at
+/// all, `<./ (2 3 $ _.)` is three `_.` — cells folded pair by pair, where
+/// the base operand stands — and `<./\ (_. _. _.)` three more, a scan
+/// being a sequence of pairs. Only an all-NaN run can come out of the loop
+/// as a NaN, so the reading is the same as the seed.
+fn extremum_run_identity(mut out: Vec<f64>, m: usize, identity: f64) -> Vec<f64> {
+    if m == 1 {
+        for slot in out.iter_mut().filter(|s| s.is_nan()) {
+            *slot = identity;
+        }
+    }
+    out
+}
+
+/// [`extremum_run_identity`] over a whole answer whose every value came
+/// from a run of ATOMS, which is what the two folds that read runs out of a
+/// buffer directly both produce.
+fn extremum_runs_of_atoms(op: ScalarDyad, d: Data) -> Data {
+    let seed = match op {
+        ScalarDyad::Min => f64::INFINITY,
+        ScalarDyad::Max => f64::NEG_INFINITY,
+        _ => return d,
+    };
+    match d {
+        Data::F64(v) => {
+            Data::F64(extremum_run_identity(v.as_slice().to_vec(), 1, seed).into())
+        }
+        other => other,
     }
 }
 
@@ -14468,7 +14707,7 @@ fn reduce_columns(v: &Verb, y: &Array) -> Option<Array> {
     if n == 1 {
         return Some(Array::col_major(shape, y.data.clone()));
     }
-    let data = fold_columns_data(op, &y.data, m, n)?;
+    let data = extremum_runs_of_atoms(op, fold_columns_data(op, &y.data, m, n)?);
     Some(Array::col_major(shape, data))
 }
 
@@ -14634,7 +14873,7 @@ fn reduce_vector_cells(u: &Verb, y: &Array, frame_rank: usize) -> Option<Array> 
         return Some(Array::new(frame, y.data.clone()));
     }
     let n: usize = frame.iter().product();
-    let data = fold_runs_data(op, &y.data, n, m)?;
+    let data = extremum_runs_of_atoms(op, fold_runs_data(op, &y.data, n, m)?);
     Some(Array::new(frame, data))
 }
 
@@ -24625,7 +24864,7 @@ fn find_seq(x: &Array, y: &Array, tol: Tol, apl: bool, span: Span) -> Result<Arr
     // `(_. 1) E. (_. 1 2 _. 1)` is `1 0 1 1 0`, where `(_.) E. (1.5)` —
     // one atom against one — is 0. The count that decides is the
     // argument's, which is how many comparisons the whole search can make.
-    let rule = if nan_reads_equal(x.dtype(), y.dtype(), y.count(), tol) {
+    let rule = if nan_reads_equal(x.dtype(), y.dtype(), y.count(), tol, false) == NanReading::Equal {
         NanRule::Search
     } else {
         NanRule::Distinct
@@ -25988,63 +26227,233 @@ fn utf8_bytes(chars: &[char], shape: impl Into<Shape>, count: usize) -> Array {
 
 /// `s: y`: the argument's text, interned.
 ///
-/// A character list carries its own delimiter in its first position, so
-/// the two names of a list that begins with a backtick are what stands
-/// between the backticks, and `s: 'a b'` is the one name `" b"`; the empty
-/// list has no delimiter and no names. A character table gives one name per
-/// row, trailing blanks trimmed, and its leading axes are the result's
-/// shape. A boxed argument gives one name per box, the characters taken
-/// exactly as they stand — a box is where a name with a trailing blank
-/// comes from.
+/// The monad is the three NEGATIVE forms chosen by what it was handed, and
+/// runs through the same code they do: a boxed argument is `_5 s:`, one
+/// name per box with the characters exactly as they stand; a character
+/// array of rank 2 or more is `_4 s:`, one name per row with the trailing
+/// blanks trimmed and the leading axes the result's shape; and a character
+/// list is `_1 s:`, which carries its own delimiter in its first position,
+/// so the two names of a list that begins with a backtick are what stands
+/// between the backticks and `s: 'a b'` is the one name `" b"`.
 fn to_symbols(y: &Array, span: Span) -> Result<Array> {
-    if let Some(boxes) = y.as_boxes() {
-        let mut ids = Vec::with_capacity(boxes.len());
-        for b in boxes {
-            if b.rank() > 1 {
-                return Err(Error::new(
-                    ErrorKind::Rank,
-                    "a boxed symbol name is a character list",
-                    Some(span),
-                ));
-            }
-            let row_major = b.to_row_major();
-            let Data::Char(v) = &row_major.data else {
-                if b.count() == 0 {
-                    ids.push(crate::symbol::EMPTY);
-                    continue;
-                }
-                return Err(Error::domain("a symbol is made from characters", span));
-            };
-            ids.push(crate::symbol::intern(&v.as_slice().iter().collect::<String>()));
-        }
-        return Ok(Array::new(y.shape.clone(), Data::Symbol(ids.into())));
-    }
-    let row_major = y.to_row_major();
-    let Data::Char(v) = &row_major.data else {
+    // The MONAD names the kind it reads whatever the argument's size, where
+    // a NEGATIVE form answers the empty rather than objecting: `s: (i. 0)`
+    // is a domain error in the reference and `_1 s: (i. 0)` the symbol
+    // empty.
+    let boxed = y.as_boxes().is_some();
+    if !boxed && y.dtype() != DType::Char {
         return Err(Error::domain(
             format!("s: makes symbols from characters, not {} data", y.dtype().name()),
             span,
         ));
-    };
-    let chars = v.as_slice();
-    if y.rank() >= 2 {
-        let width = y.shape[y.rank() - 1];
-        let rows: usize = y.shape[..y.rank() - 1].iter().product();
-        let mut ids = Vec::with_capacity(rows);
-        if width == 0 {
-            // A row of no characters is the empty name, and there is no
-            // chunk to cut the buffer into.
-            ids.resize(rows, crate::symbol::EMPTY);
-        } else {
-            for row in chars.chunks(width) {
-                let name: String = row.iter().collect();
-                ids.push(crate::symbol::intern(name.trim_end_matches(' ')));
-            }
-        }
-        return Ok(Array::new(y.shape[..y.rank() - 1].to_vec(), Data::Symbol(ids.into())));
     }
-    let Some((&delim, rest)) = chars.split_first() else {
-        return Ok(Array::new(vec![0], Data::empty(DType::Symbol)));
+    let form = if boxed {
+        -5
+    } else if y.rank() >= 2 {
+        -4
+    } else {
+        -1
+    };
+    read_symbols(form, y, span)
+}
+
+/// `x s: y`: the numbered symbol forms.
+///
+/// They fall in two halves. The FORWARD forms write an array of symbols out
+/// as text, and the NEGATIVE ones read the same text back: 1 and `_1` raze
+/// the names with a separator written BEFORE each, 2 and `_2` with one
+/// AFTER each, 3 and `_3` lay them out as a character table padded to the
+/// longest with nulls, 4 and `_4` the same padded with blanks, and 5 and
+/// `_5` box them one apiece. Each pair is the other's inverse, and every
+/// one of them is a function of the argument alone.
+///
+/// The REST report on the interpreter's own table — 0 answers a dozen
+/// numbered queries about its size and contents, 6 and `_6` trade a symbol
+/// for the slot it was interned into, and 7 for the order it was interned
+/// in. A slot number is a fact about the run rather than about the
+/// language: J hands out 1 and 4 for the first two symbols a fresh session
+/// makes, libjay's own table would hand out its own, and neither is the
+/// value. Those four forms are refused as belonging to no language.
+///
+/// An argument with NO ITEMS is answered whatever its type, since no value
+/// of it is read: `5 s: (i. 0)` is the boxed empty in the reference where
+/// `5 s: 5` is a domain error.
+fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
+    let form = x
+        .to_i64_vec()
+        .ok_or_else(|| Error::domain("a symbol form is an integer", span))?
+        .first()
+        .copied()
+        .unwrap_or(0);
+    if !(-6..=7).contains(&form) {
+        return Err(Error::domain(format!("{form} s: names no symbol form"), span));
+    }
+    // THE INTERPRETER'S OWN TABLE. Nothing about the argument settles what
+    // these answer, so there is nothing for libjay to compute — except
+    // where there is nothing to number at all, and the answer is the empty
+    // whatever the table holds: `$ (6 s: (0 0 $ 0))` and `$ (7 s: (0 0 $
+    // 0))` are `0 0` in the reference and `3!:0 (7 s: (0 0 $ 0))` the
+    // integer type, one number per symbol in the argument's own shape.
+    // `0 s:` numbers nothing per element, so it has no such case.
+    if matches!(form, 0 | 6 | 7 | -6) {
+        if form == 0 || y.count() > 0 {
+            return Err(Error::language(
+                format!("{form} s: reports an interpreter's own symbol table, not a value"),
+                span,
+            ));
+        }
+        return Ok(match form {
+            -6 => Array::new(y.shape.clone(), Data::empty(DType::Symbol)),
+            _ => Array::new(y.shape.clone(), Data::empty(DType::I64)),
+        });
+    }
+    if form < 0 {
+        return read_symbols(form, y, span);
+    }
+    let row_major = y.to_row_major();
+    let empty: [crate::symbol::Id; 0] = [];
+    let ids: &[crate::symbol::Id] = match &row_major.data {
+        Data::Symbol(ids) => ids.as_slice(),
+        // Nothing to read is no error: an argument with no elements holds
+        // no value the form could object to, whatever type it was written
+        // in. Each form then answers its OWN empty below — a raze of no
+        // names is a list of shape `0` and a name table one with a width
+        // axis of 0 — which is why this cannot be settled here for every
+        // form at once.
+        _ if y.count() == 0 => &empty,
+        _ => {
+            return Err(Error::domain(
+                format!("{form} s: reads symbols, not {} data", y.dtype().name()),
+                span,
+            ))
+        }
+    };
+    let names = crate::symbol::names(ids);
+    if form == 5 {
+        let boxes: Vec<Array> =
+            names.iter().map(|n| Array::from_chars(n.chars().collect())).collect();
+        return Ok(Array::new(y.shape.clone(), Data::Box(boxes.into())));
+    }
+    // THE RAZE: every name run together, whatever the argument's shape,
+    // with a separator of its own. `2 s:` writes one AFTER each name, which
+    // is what keeps two names apart where one of them may be empty —
+    // `2 s: (s: ;:'a b')` is four characters there, `a`, a null, `b`, a
+    // null, and the one symbol with no name at all is a single null — and
+    // `1 s:` writes a backquote BEFORE each, which is how a symbol reads
+    // in source.
+    if matches!(form, 1 | 2) {
+        let out: Vec<char> = names
+            .iter()
+            .flat_map(|n| match form {
+                1 => std::iter::once('`').chain(n.chars()).collect::<Vec<char>>(),
+                _ => n.chars().chain(std::iter::once('\0')).collect(),
+            })
+            .collect();
+        return Ok(Array::new(vec![out.len()], Data::Char(out.into())));
+    }
+    // THE TABLE: one row per symbol, padded to the longest name. `3 s:`
+    // pads with nulls and `4 s:` with blanks, which is the only difference
+    // between them and what makes `_3` and `_4` two forms rather than one.
+    let pad = if form == 3 { '\0' } else { ' ' };
+    let width = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
+    let mut out: Vec<char> = Vec::with_capacity(names.len() * width);
+    for n in &names {
+        out.extend(n.chars());
+        out.resize(out.len() + width - n.chars().count(), pad);
+    }
+    let mut shape = y.shape.clone();
+    shape.push(width);
+    Ok(Array::new(shape, Data::Char(out.into())))
+}
+
+/// The NEGATIVE symbol forms: text read back as the symbols it names.
+///
+/// `_1` and `_2` cut a character LIST at a separator the list itself
+/// carries — the FIRST character for `_1`, the LAST for `_2` — so
+/// `_1 s: '`ab`cd'` and `_2 s: 'ab',(nul),'cd',(nul)` are both the two
+/// names, and a list with nothing in it is no name at all. `_3` and `_4`
+/// read the LAST AXIS of a character array as one name apiece, stripping
+/// the padding each writes — nulls for `_3`, blanks for `_4` — so a
+/// character list is one symbol and a table is a list of them. `_5` reads
+/// each box as a name and keeps the box array's shape.
+fn read_symbols(form: i64, y: &Array, span: Span) -> Result<Array> {
+    // AN ARGUMENT WITH NO ATOMS IS ANSWERED BY THE FORM'S SHAPE RULE ALONE:
+    // there is no text to read, so there is no kind to object to and no
+    // rank to insist on. `$ (_1 s: (i. 0))` is `0` in the reference,
+    // `$ (_1 s: (i. 0 0))` is `0` as well although a rank-2 argument is a
+    // rank error where it holds anything, `$ (_3 s: (i. 0))` is the scalar
+    // the last axis leaves and `$ (_5 s: (0 3 $ 0))` is `0 3`.
+    if y.count() == 0 {
+        let shape: Shape = match form {
+            -1 | -2 => Shape::from([0usize]),
+            -3 | -4 => y.shape[..y.rank().saturating_sub(1)].iter().copied().collect(),
+            _ => y.shape.clone(),
+        };
+        // A row of no characters is the EMPTY NAME, not no name at all, so
+        // the table forms over a LIST leave one symbol rather than none:
+        // `$ (_4 s: (i. 0))` is the scalar the last axis leaves.
+        let count: usize = shape.iter().product();
+        let ids = vec![crate::symbol::EMPTY; count];
+        return Ok(Array::new(shape, Data::Symbol(ids.into())));
+    }
+    if form == -5 {
+        let Some(boxes) = y.as_boxes() else {
+            return Err(Error::domain(
+                format!("{form} s: reads boxed names, not {} data", y.dtype().name()),
+                span,
+            ));
+        };
+        let mut ids = Vec::with_capacity(boxes.len());
+        for b in boxes {
+            ids.push(one_name(b, form, span)?);
+        }
+        return Ok(Array::new(y.shape.clone(), Data::Symbol(ids.into())));
+    }
+    // A NEGATIVE form READS text, so a kind that is not text is refused
+    // whether or not it holds any: `s: (0 $ 0)` is a domain error in the
+    // reference where `5 s: (0 $ 0)` — a FORWARD form, which has nothing to
+    // read — is the boxed empty.
+    let row_major = y.to_row_major();
+    let chars: &[char] = match &row_major.data {
+        Data::Char(v) => v.as_slice(),
+        _ => {
+            return Err(Error::domain(
+                format!("{form} s: reads names written in characters, not {} data", y.dtype().name()),
+                span,
+            ))
+        }
+    };
+    if matches!(form, -3 | -4) {
+        let pad = if form == -3 { '\0' } else { ' ' };
+        let width = y.shape.last().copied().unwrap_or(0);
+        let rows: Shape = y.shape[..y.rank().saturating_sub(1)].iter().copied().collect();
+        let count: usize = rows.iter().product();
+        let mut ids = Vec::with_capacity(count);
+        for i in 0..count {
+            let row = &chars[i * width..(i + 1) * width];
+            let mut name: String = row.iter().collect();
+            while name.ends_with(pad) {
+                name.pop();
+            }
+            ids.push(crate::symbol::intern(&name));
+        }
+        return Ok(Array::new(rows, Data::Symbol(ids.into())));
+    }
+    if y.rank() > 1 {
+        return Err(Error::new(
+            ErrorKind::Rank,
+            format!("{form} s: reads a character list, not an array of rank {}", y.rank()),
+            Some(span),
+        ));
+    }
+    // The separator is the list's own: the first character for `_1`, the
+    // last for `_2`. What is left after it is taken out is cut at every
+    // occurrence, and an EMPTY list names nothing.
+    let (delim, rest) = match (form, chars.split_first(), chars.split_last()) {
+        (_, None, _) => return Ok(Array::new(vec![0], Data::empty(DType::Symbol))),
+        (-1, Some((&d, rest)), _) => (d, rest),
+        (_, _, Some((&d, rest))) => (d, rest),
+        _ => unreachable!("a non-empty list splits at both ends"),
     };
     let mut ids = Vec::new();
     let mut name = String::new();
@@ -26060,93 +26469,20 @@ fn to_symbols(y: &Array, span: Span) -> Result<Array> {
     Ok(Array::new(vec![ids.len()], Data::Symbol(ids.into())))
 }
 
-/// `x s: y`: the numbered symbol forms. 2 razes the names into one list,
-/// a null after each, 3
-/// and 4 lay them out as a character table blank-padded to the longest, and
-/// 5 boxes them one apiece. The remaining numbers J defines report on its
-/// own symbol table — its index for each symbol, how many slots it holds,
-/// which are in use — and describe an interpreter's internals rather than
-/// the language, so libjay answers only where there is nothing to report.
-///
-/// An argument with NO ITEMS is answered whatever its type, since no value
-/// of it is read: `5 s: (i. 0)` is the boxed empty in the reference where
-/// `5 s: 5` is a domain error.
-fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let form = x
-        .to_i64_vec()
-        .ok_or_else(|| Error::domain("a symbol form is an integer", span))?
-        .first()
-        .copied()
-        .unwrap_or(0);
-    if !(-2..=7).contains(&form) {
-        return Err(Error::domain(format!("{form} s: names no symbol form"), span));
+/// One boxed name, for `_5 s:` and for the monadic `s:` that shares its
+/// reading.
+fn one_name(b: &Array, form: i64, span: Span) -> Result<crate::symbol::Id> {
+    if b.rank() > 1 {
+        return Err(Error::new(ErrorKind::Rank, "a boxed symbol name is a character list", Some(span)));
     }
-    // 0 and 1 DUMP the interpreter's own table, which libjay has no answer
-    // for at any size.
-    if matches!(form, 0 | 1) {
-        return Err(Error::not_yet(format!("the symbol-table form ({form} s:)"), span));
-    }
-    let row_major = y.to_row_major();
-    let empty: [crate::symbol::Id; 0] = [];
-    let ids: &[crate::symbol::Id] = match &row_major.data {
-        Data::Symbol(ids) => ids.as_slice(),
-        // Nothing to read is no error: an argument with no elements holds
-        // no value the form could object to, whatever type it was written
-        // in. Each form then answers its OWN empty below — a raze of no
-        // names is a list of shape `0`, a name table one with a width axis
-        // of 0, and a table query an empty of the kind it numbers — which
-        // is why this cannot be settled here for every form at once.
-        _ if y.count() == 0 => &empty,
-        _ => {
-            return Err(Error::domain(
-                format!("{form} s: reads symbols, not {} data", y.dtype().name()),
-                span,
-            ))
+    let row_major = b.to_row_major();
+    let Data::Char(v) = &row_major.data else {
+        if b.count() == 0 {
+            return Ok(crate::symbol::EMPTY);
         }
+        return Err(Error::domain(format!("{form} s: makes a name out of characters"), span));
     };
-    // The three forms that report an interpreter's own table: its index for
-    // a symbol is a fact about the table and not about the language, so
-    // only a request with nothing to number is answered.
-    if matches!(form, -2 | -1 | 6 | 7) {
-        if !ids.is_empty() {
-            return Err(Error::not_yet(
-                format!("the symbol-table form ({form} s:) over symbols"),
-                span,
-            ));
-        }
-        return Ok(match form {
-            -2 | -1 => Array::new(vec![0], Data::Symbol(Vec::new().into())),
-            // 6 and 7 both number a symbol, one number per symbol, so each
-            // answers in the argument's own shape: `$ (7 s: (0 0 $ 0))` is
-            // `0 0` there as `$ (6 s: (0 0 $ 0))` is.
-            _ => Array::new(y.shape.clone(), Data::I64(Vec::new().into())),
-        });
-    }
-    let names = crate::symbol::names(ids);
-    if form == 5 {
-        let boxes: Vec<Array> =
-            names.iter().map(|n| Array::from_chars(n.chars().collect())).collect();
-        return Ok(Array::new(y.shape.clone(), Data::Box(boxes.into())));
-    }
-    // The RAZE: every name run together, whatever the argument's shape,
-    // each one TERMINATED by a null, which is what keeps two names apart
-    // where one of them may be empty: `2 s: (s: ;:'a b')` is four
-    // characters there — `a`, a null, `b`, a null — and the one symbol
-    // with no name at all is a single null.
-    if form == 2 {
-        let out: Vec<char> =
-            names.iter().flat_map(|n| n.chars().chain(std::iter::once('\0'))).collect();
-        return Ok(Array::new(vec![out.len()], Data::Char(out.into())));
-    }
-    let width = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
-    let mut out: Vec<char> = Vec::with_capacity(names.len() * width);
-    for n in &names {
-        out.extend(n.chars());
-        out.resize(out.len() + width - n.chars().count(), ' ');
-    }
-    let mut shape = y.shape.clone();
-    shape.push(width);
-    Ok(Array::new(shape, Data::Char(out.into())))
+    Ok(crate::symbol::intern(&v.as_slice().iter().collect::<String>()))
 }
 
 /// `x $. y`: the numbered sparse forms.
@@ -27414,6 +27750,7 @@ mod tests {
                             crate::Lang::J
                         })
                         .expect("the shipped dialect is implemented"),
+                    pass: None,
                 },
                 out: &mut sink,
                 inp: None,
@@ -28501,6 +28838,7 @@ mod tests {
                 tol: Tol::J,
                 fill: None,
                 rules: Rules::default(),
+                pass: None,
             },
             out: &mut sink,
             inp: None,

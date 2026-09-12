@@ -1,0 +1,342 @@
+# libjay reference snapshot: J — corpus/j/residue3-symbols.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= $ (s: 'abc')
+> j: 1
+= 5 s: (s: 'abc')
+> j: +--+
+> j: |bc|
+> j: +--+
+= 5 s: (s: '`ab`cde')
+> j: +--+---+
+> j: |ab|cde|
+> j: +--+---+
+= 5 s: (s: '/ab/cde')
+> j: +--+---+
+> j: |ab|cde|
+> j: +--+---+
+= 5 s: (s: 'aa')
+> j: +++
+> j: |||
+> j: +++
+= $ (s: 'aa')
+> j: 2
+= 5 s: (s: (2 3 $ 'ab cde'))
+> j: +--+---+
+> j: |ab|cde|
+> j: +--+---+
+= $ (s: (2 3 $ 'ab cde'))
+> j: 2
+= 5 s: (s: (2 3 $ 'a  b  '))
+> j: +-+-+
+> j: |a|b|
+> j: +-+-+
+= 5 s: (s: ('ab';'cde'))
+> j: +--+---+
+> j: |ab|cde|
+> j: +--+---+
+= $ (s: ('ab';'cde'))
+> j: 2
+= $ (s: (<'ab'))
+> j:
+= 3!:0 (s: ('ab';'cde'))
+> j: 65536
+= $ (s: (0 3 $ 'a'))
+> j: 0
+= 3!:0 (s: (0 3 $ 'a'))
+> j: 65536
+= $ (s: '')
+> j: 0
+= s: 1 2 3
+> j: <error>
+= s: (<<'a')
+> j: <error>
+= s: (2 2 3 $ 'abcdefghijkl')
+> j: `abc `def
+> j: `ghi `jkl
+= $ (s: (2 2 3 $ 'abcdefghijkl'))
+> j: 2 2
+= a. i. (1 s: (s: '`abc`def'))
+> j: 96 97 98 99 96 100 101 102
+= $ (1 s: (s: '`abc`def'))
+> j: 8
+= a. i. (2 s: (s: '`abc`def'))
+> j: 97 98 99 0 100 101 102 0
+= $ (2 s: (s: '`abc`def'))
+> j: 8
+= a. i. (1 s: (s: '`a`bcd'))
+> j: 96 97 96 98 99 100
+= a. i. (2 s: (s: '`a`bcd'))
+> j: 97 0 98 99 100 0
+= 3!:0 (1 s: (s: '`abc`def'))
+> j: 2
+= $ (1 s: (0 $ s: 'x'))
+> j: 0
+= $ (2 s: (0 $ s: 'x'))
+> j: 0
+= $ (1 s: (0 3 $ s: 'x'))
+> j: 0
+= $ (2 s: (0 3 $ s: 'x'))
+> j: 0
+= a. i. (3 s: (s: '`a`bcd'))
+> j: 97  0   0
+> j: 98 99 100
+= $ (3 s: (s: '`a`bcd'))
+> j: 2 3
+= a. i. (4 s: (s: '`a`bcd'))
+> j: 97 32  32
+> j: 98 99 100
+= $ (4 s: (s: '`a`bcd'))
+> j: 2 3
+= a. i. (3 s: (s: '`abc`def'))
+> j:  97  98  99
+> j: 100 101 102
+= a. i. (4 s: (s: '`abc`def'))
+> j:  97  98  99
+> j: 100 101 102
+= 3!:0 (3 s: (s: '`a`bcd'))
+> j: 2
+= $ (3 s: (0 $ s: 'x'))
+> j: 0 0
+= $ (4 s: (0 $ s: 'x'))
+> j: 0 0
+= $ (3 s: (0 3 $ s: 'x'))
+> j: 0 3 0
+= $ (4 s: (s: (2 2 3 $ 'abcdefghijkl')))
+> j: 2 2 3
+= a. i. (4 s: (s: (2 2 3 $ 'abcdefghijkl')))
+> j:  97  98  99
+> j: 100 101 102
+> j:
+> j: 103 104 105
+> j: 106 107 108
+= 5 s: (s: '`a`bcd')
+> j: +-+---+
+> j: |a|bcd|
+> j: +-+---+
+= $ (5 s: (s: '`a`bcd'))
+> j: 2
+= 3!:0 (5 s: (s: '`a`bcd'))
+> j: 32
+= $ (5 s: (0 $ s: 'x'))
+> j: 0
+= $ (5 s: (0 3 $ s: 'x'))
+> j: 0 3
+= $ (5 s: (s: (2 2 3 $ 'abcdefghijkl')))
+> j: 2 2
+= 3 s: 'abc'
+> j: <error>
+= 3 s: (<'abc')
+> j: <error>
+= 3 s: 1 2 3
+> j: <error>
+= 5 s: 1 2 3
+> j: <error>
+= $ (5 s: (i. 0))
+> j: 0
+= $ (3 s: (i. 0))
+> j: 0 0
+= 8 s: (s: 'abc')
+> j: <error>
+= _7 s: (s: 'abc')
+> j: <error>
+= 5 s: (_1 s: (1 s: (s: '`abc`def')))
+> j: +---+---+
+> j: |abc|def|
+> j: +---+---+
+= 5 s: (_2 s: (2 s: (s: '`abc`def')))
+> j: +---+---+
+> j: |abc|def|
+> j: +---+---+
+= 5 s: (_3 s: (3 s: (s: '`a`bcd')))
+> j: +-+---+
+> j: |a|bcd|
+> j: +-+---+
+= 5 s: (_4 s: (4 s: (s: '`a`bcd')))
+> j: +-+---+
+> j: |a|bcd|
+> j: +-+---+
+= 5 s: (_5 s: (5 s: (s: '`a`bcd')))
+> j: +-+---+
+> j: |a|bcd|
+> j: +-+---+
+= 5 s: (_1 s: '`abc`de')
+> j: +---+--+
+> j: |abc|de|
+> j: +---+--+
+= $ (_1 s: '`abc`de')
+> j: 2
+= 5 s: (_1 s: 'abc')
+> j: +--+
+> j: |bc|
+> j: +--+
+= 5 s: (_1 s: '`')
+> j: ++
+> j: ||
+> j: ++
+= $ (_1 s: '`')
+> j: 1
+= 5 s: (_1 s: '``')
+> j: +++
+> j: |||
+> j: +++
+= 5 s: (_1 s: '`a`')
+> j: +-++
+> j: |a||
+> j: +-++
+= $ (_1 s: '')
+> j: 0
+= 5 s: (_2 s: 'abc')
+> j: +--+
+> j: |ab|
+> j: +--+
+= 5 s: (_2 s: ('ab',(0{a.),'cd',(0{a.)))
+> j: +--+--+
+> j: |ab|cd|
+> j: +--+--+
+= $ (_2 s: ('ab',(0{a.),'cd',(0{a.)))
+> j: 2
+= 5 s: (_2 s: (,0{a.))
+> j: ++
+> j: ||
+> j: ++
+= $ (_2 s: '')
+> j: 0
+= 5 s: (_3 s: (2 4 $ 'ab',(0{a.),(0{a.),'cdef'))
+> j: +--+----+
+> j: |ab|cdef|
+> j: +--+----+
+= 5 s: (_3 s: (2 4 $ 'abcdefgh'))
+> j: +----+----+
+> j: |abcd|efgh|
+> j: +----+----+
+= $ (_3 s: (2 4 $ 'abcdefgh'))
+> j: 2
+= $ (_3 s: 'abc')
+> j:
+= 5 s: (_4 s: (2 3 $ '   abc'))
+> j: ++---+
+> j: ||abc|
+> j: ++---+
+= 5 s: (_4 s: (2 3 $ 'a  b  '))
+> j: +-+-+
+> j: |a|b|
+> j: +-+-+
+= $ (_4 s: (2 3 $ 'a  b  '))
+> j: 2
+= $ (_4 s: 'abc')
+> j:
+= $ (_4 s: (0 0 $ 'a'))
+> j: 0
+= $ (_3 s: (0 3 $ 'a'))
+> j: 0
+= 5 s: (_5 s: ('ab';'cde'))
+> j: +--+---+
+> j: |ab|cde|
+> j: +--+---+
+= $ (_5 s: ('ab';'cde'))
+> j: 2
+= $ (_5 s: (<'ab'))
+> j:
+= $ (_5 s: (0 $ a:))
+> j: 0
+= $ (_5 s: (2 0 $ a:))
+> j: 2 0
+= 5 s: (_5 s: (2 2 $ 'a';'b';'c';'d'))
+> j: +-+-+
+> j: |a|b|
+> j: +-+-+
+> j: |c|d|
+> j: +-+-+
+= $ (_5 s: (2 2 $ 'a';'b';'c';'d'))
+> j: 2 2
+= _5 s: (1;2)
+> j: <error>
+= _5 s: (<<'a')
+> j: <error>
+= _1 s: (<'abc')
+> j: <error>
+= _1 s: (2 3 $ 'abcdef')
+> j: <error>
+= _2 s: (2 3 $ 'abcdef')
+> j: <error>
+= (s: '`abc') = (_5 s: (<'abc'))
+> j: 1
+= (s: '`abc') = (_4 s: 'abc')
+> j: 1
+= (s: '`abc') = (_3 s: 'abc')
+> j: 1
+= (s: '`ab`cd') -: (_2 s: ('ab',(0{a.),'cd',(0{a.)))
+> j: 1
+= $ (_1 s: (i. 0))
+> j: 0
+= 3!:0 (_1 s: (i. 0))
+> j: 65536
+= $ (_2 s: (i. 0))
+> j: 0
+= $ (_3 s: (i. 0))
+> j:
+= $ (_3 s: (i. 0 0))
+> j: 0
+= $ (_4 s: (i. 0 0))
+> j: 0
+= $ (_4 s: (i. 0))
+> j:
+= 3!:0 (_4 s: (i. 0))
+> j: 65536
+= 5 s: (_4 s: (i. 0))
+> j: ++
+> j: ||
+> j: ++
+= 5 s: (_3 s: (0 $ 0.5))
+> j: ++
+> j: ||
+> j: ++
+= $ (_5 s: (i. 0))
+> j: 0
+= 3!:0 (_5 s: (i. 0))
+> j: 65536
+= $ (_5 s: (0 3 $ 0))
+> j: 0 3
+= $ (_1 s: (0 $ a:))
+> j: 0
+= $ (_1 s: (0 $ 0j1))
+> j: 0
+= $ (_1 s: (i. 0 0))
+> j: 0
+= $ (_1 s: (i. 0 0 3))
+> j: 0
+= $ (_4 s: (i. 0 0 3))
+> j: 0 0
+= $ (_2 s: (i. 0 0))
+> j: 0
+= $ (_3 s: (0 $ 0.5))
+> j:
+= $ (s: (i. 0))
+> j: <error>
+= _1 s: (i. 3)
+> j: <error>
+= _1 s: 5
+> j: <error>
+= _5 s: (i. 3)
+> j: <error>
+= _3 s: (i. 3)
+> j: <error>

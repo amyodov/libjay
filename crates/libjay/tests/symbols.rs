@@ -142,16 +142,36 @@ fn ordering_a_symbol_against_a_non_symbol_is_refused() {
 }
 
 #[test]
-fn the_symbol_table_forms_are_a_named_gap_not_a_syntax_error() {
+fn the_symbol_table_forms_belong_to_no_language() {
     // The forms that report an interpreter's OWN table: its numbering of a
-    // symbol is a fact about the table, not about the language.
-    for form in ["0", "1", "6", "7", "_1"] {
+    // symbol is a fact about the table, not about the language, so no
+    // amount of implementing would make libjay's slots J's.
+    for form in ["0", "6", "7", "_6"] {
         let e = err(&format!("{form} s: s: <'a'"));
-        assert_eq!(e.kind, ErrorKind::NotYet, "{form} s:");
-        assert!(e.msg.contains("symbol-table form"), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Language, "{form} s:");
+        assert!(e.msg.contains("symbol table"), "{}", e.msg);
     }
-    // A form that names nothing at all is a domain error, not a gap.
+    // A form that names nothing at all is a domain error, not an absence.
     assert_eq!(err("8 s: s: <'a'").kind, ErrorKind::Domain);
+    assert_eq!(err("_7 s: s: <'a'").kind, ErrorKind::Domain);
+}
+
+/// The forward forms write the names out and the negative ones read them
+/// back, each pair the other's inverse.
+#[test]
+fn the_symbol_forms_are_inverses_in_pairs() {
+    let names = "s: '`ab`cde'";
+    for form in [1, 2, 3, 4, 5] {
+        let round = format!("5 s: (_{form} s: ({form} s: ({names})))");
+        assert_eq!(j(&round), j(&format!("5 s: ({names})")), "{form} s:");
+    }
+    // `3 s:` pads with a null and `4 s:` with a blank, which is the whole
+    // difference between them.
+    assert_eq!(j("a. i. 3 s: s: '`a`bcd'"), j("2 3 $ 97 0 0 98 99 100"));
+    assert_eq!(j("a. i. 4 s: s: '`a`bcd'"), j("2 3 $ 97 32 32 98 99 100"));
+    // `1 s:` writes a backquote before each name, `2 s:` a null after.
+    assert_eq!(j("a. i. 1 s: s: '`a`bc'"), j("96 97 96 98 99"));
+    assert_eq!(j("a. i. 2 s: s: '`a`bc'"), j("97 0 98 99 0"));
 }
 
 #[test]

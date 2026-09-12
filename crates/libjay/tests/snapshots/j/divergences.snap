@@ -629,22 +629,6 @@
 ? the reference's own `(0.5) % (0x)` is `_` where this is `__`; reason: self-contradiction
 < _
 > j: __
-= <./ ((_.) , (_.))
-? `(_.) <. (_.)` is `_.` there and `<./\ ((_.) , (_.))` is `_. _.`, whose last item is this insert; reason: self-contradiction
-< _.
-> j: _
-= >./ ((_.) , (_.))
-? `(_.) >. (_.)` is `_.` there and `>./\ ((_.) , (_.))` is `_. _.`, whose last item is this insert; reason: self-contradiction
-< _.
-> j: __
-= ((<.) (1 : 'u/ y')) ((_.) , (_.))
-? the same insert written inside an explicit adverb; reason: self-contradiction
-< _.
-> j: _
-= ((>.) (1 : 'u/ y')) ((_.) , (_.))
-? the same, for the maximum; reason: self-contradiction
-< _.
-> j: __
 = -/\\. (2 2 $ (__))
 ? `-/ ((__) , (__))` is refused there and this scan's first row is that insert; reason: self-contradiction
 < <error>
@@ -863,32 +847,6 @@
 < <error>
 > j: _.j_. _.j_.
 > j:   _j_   _j_
-= ((0.5) , (0.5)) <./ ((_.) , (_.))
-? `(0.5) <. (_.)` is `_.` there and this outer product of the pair is 0.5; reason: self-contradiction
-< _. _.
-< _. _.
-> j: 0.5 0.5
-> j: 0.5 0.5
-= 2 >./ (_. 2 3)
-? `2 >. (_.)` is `_.` there and this outer product answers 2; reason: self-contradiction
-< _. 2 3
-> j: 2 2 3
-= 2 <./ (_. 2 3)
-? the same pair through the minimum; reason: self-contradiction
-< _. 2 2
-> j: 2 2 2
-= ((_.) , (_.)) >./ ((0.5) , (0.5))
-? `(_.) >. (0.5)` is 0.5 there and this outer product of the pair is `_.`; reason: self-contradiction
-< 0.5 0.5
-< 0.5 0.5
-> j: _. _.
-> j: _. _.
-= ((_.) , (_.)) =/ ((0.5) , (0.5))
-? `(_.) = (0.5)` is 0 there and this outer product of the pair is 1; reason: self-contradiction
-< 0 0
-< 0 0
-> j: 1 1
-> j: 1 1
 = (<. @ ^.) (0x)
 ? `<. (^. (0x))` is `__` there and the composition of the two is `_9223372036854775808`; reason: self-contradiction
 < __
@@ -2924,10 +2882,14 @@
 ? the same, where the table it dumps holds one row for the argument; reason: undefined
 < <error>
 > j: 1
-= 1 s: (0 $ 0)
-? the second dumping form, over an argument with no items; reason: undefined
+= 6 s: (s: '`abc')
+? a symbol's slot number is where THIS interpreter interned it; reason: undefined
 < <error>
-> j:
+> j: 1
+= 7 s: (s: '`abc')
+? a symbol's order number is a position in THIS interpreter's tree; reason: undefined
+< <error>
+> j: 1024
 = 3!:3 (s: 'a')
 ? the data words are the reference's own symbol-table slots; reason: undefined
 < <error>
@@ -3027,3 +2989,27 @@
 ? a code past the last codepoint is a character there and no character here; reason: model
 < <error>
 > j: ���
+= 2 %: (0 $ a:)
+? a boxed empty is refused under a whole exponent and answered under a fractional one; reason: self-contradiction
+<
+> j: <error>
+= 2 %: (0 $ s: 'a')
+? a symbol empty, refused the same way and with the same contradiction beside it; reason: self-contradiction
+<
+> j: <error>
+= (0) #. ('')
+? a bit base refuses the empty an integer base decodes; reason: self-contradiction
+< 0
+> j: <error>
+= %. (|: i. 3 4)
+? a rank-deficient least squares has no value, and the reference answers two ways for two matrices of one shape and one rank; reason: self-contradiction
+< <error>
+> j: _0.422178  _0.120767  0.174042  0.508466
+> j: 0.0693557 _0.0584664 _0.173083 _0.366933
+> j: 0.0528221  0.0792332 0.0990415  0.158466
+= %. (i. 4 3)
+? the same shape and the same rank, answered with NaNs rather than with numbers; reason: self-contradiction
+< <error>
+> j: _. _. _. _.
+> j: _. _. _. _.
+> j: _. _. _. _.

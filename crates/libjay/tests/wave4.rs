@@ -301,8 +301,12 @@ fn the_adverse_answers_a_refusal_with_the_other_verb() {
     assert_eq!(val(Lang::J, "(+/ :: 0) 'abc'"), bits(&[], &[0]));
     assert_eq!(val(Lang::J, "(+/ :: 0) 1 2 3"), Array::scalar_i64(6));
     // A gap in libjay is a promise, not an error the program may handle.
-    let e = err(Lang::J, "(6&s: :: 0) s: ;: 'a b'");
-    assert_eq!(e.kind, ErrorKind::NotYet);
+    let e = err(Lang::J, "($. :: 0) 'ab'");
+    assert_eq!(e.kind, ErrorKind::NotYet, "{}", e.msg);
+    // An absence IS an error, so the adverse answers it with the other
+    // verb: `6 s:` reports an interpreter's own table and belongs to no
+    // language.
+    assert_eq!(val(Lang::J, "(6&s: :: 0) s: ;: 'a b'"), bits(&[], &[0]));
 }
 
 // --- execute --------------------------------------------------------------

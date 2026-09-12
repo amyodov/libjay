@@ -2145,7 +2145,16 @@ fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64], tol: Tol
         // A comparison is a number here, as it is in J: the boolean only
         // shows in the dtype of a result, which the caller narrows. Floats
         // compare with the dialect's tolerance, as they do unfused.
+        //
+        // What a NaN makes of a comparison is not the tolerance alone: it
+        // is which of the reference's two loops the PASS takes and what a
+        // broadcast zero does to that loop, and both of those rules live
+        // in the unfused verb. A block with one in it declines, as
+        // [`no_nan_block`] makes every other float block decline.
         Eq | Ne | Lt | Le | Gt | Ge => {
+            if a.iter().any(|x| x.is_nan()) || b.iter().any(|x| x.is_nan()) {
+                return false;
+            }
             zip!(a, b, dst, |x: f64, y: f64| tol_cmp(op, x, y, tol) as u8 as f64)
         }
         _ => false,

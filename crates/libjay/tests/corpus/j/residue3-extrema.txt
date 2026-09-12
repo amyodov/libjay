@@ -1,0 +1,148 @@
+// A SCALAR PRIMITIVE UNDER A FRAME IS ONE PASS, and an all-NaN run of
+// atoms reduces to the extremum's identity. Ten rows here came off the
+// divergence list when the two mechanisms were followed; the rest is the
+// table they were read from.
+
+// The insert over a run of ATOMS starts at the identity, so a run that is
+// nothing but NaNs never displaces it.
+<./ ((_.) , (_.))
+>./ ((_.) , (_.))
+<./ (_. _. _.)
+>./ (_. _. _.)
+((<.) (1 : 'u/ y')) ((_.) , (_.))
+((>.) (1 : 'u/ y')) ((_.) , (_.))
+(_.) (<./ . <.) (1.5 2.5 _0.5)
+(_.) (>./ . >.) (1.5 2.5 _0.5)
+<./ (_. _. 1)
+<./ (1 _. _.)
+>./ (_. _. 1)
+<./ ((_. _. _.) , 5)
+<./ (5 , (_. _. _.))
+3!:0 (<./ (_. _. _.))
+// A ONE-ITEM insert answers the item without applying the verb at all.
+<./ (,_.)
+>./ (,_.)
+// CELLS are folded pair by pair, where the base operand stands.
+<./ (2 3 $ _.)
+>./ (2 3 $ _.)
+<./"1 (2 3 $ _.)
+>./"1 (2 3 $ _.)
+<./ (,: (_. _. _.))
+// A SCAN is a sequence of pairs and keeps the pairwise reading.
+<./\\ (_. _. _.)
+<./\\. (_. _. _.)
+2 <./\\ (_. _. _.)
+// The ordinary arithmetic inserts are untouched.
++/ (_. _. _.)
+*/ (_. _. _.)
+
+// THE TABLE spreads both of its arguments, so the LEFT is the broadcast
+// side wherever there is a row to spread across.
+((0.5) , (0.5)) <./ ((_.) , (_.))
+((_.) , (_.)) >./ ((0.5) , (0.5))
+((_.) , (_.)) <./ ((0.5) , (0.5))
+((_.) , (_.)) =/ ((0.5) , (0.5))
+((_.) , (_.)) ~:/ ((0.5) , (0.5))
+(1.5) <./ (_. _.)
+(_. _.) <./ (1.5)
+(1.5 2.5) <./ (_. _.)
+(0x 0x) <./ (_. _.)
+(_. _.) <./ (0x 0x)
+(1.5 2.5) <./ (_.)
+(_.) <./ (1.5 2.5)
+2 >./ (_. 2 3)
+2 <./ (_. 2 3)
+(i. 2 3 4) <./ (_.)
+(i. 2 3) <./ (_.)
+(_.) <./ (i. 2 3)
+3!:0 ((i. 2 3 4) <./ (_.))
+2 <./ (_. _.)
+(_. _.) <./ 2
+
+// A RANK FRAME keeps every cell's own broadcast, and the PAIR COUNT the
+// whole pass makes is what picks the comparison's loop.
+(0x 0x) <."_ 0 (_. _.)
+(0x 0x) <."0 _ (_. _.)
+(1.5 2.5) <."0 _ (_. _.)
+(_. _.) <."0 _ (1.5 2.5)
+(1.5 2.5) <."0 0 (_. _.)
+(1.5 2.5) <."1 1 (_. _.)
+(2 2 $ 1.5) <."1 _ (_. _.)
+(1.5) <."0 _ (_. _.)
+(2.5 3.5) >:"0 1 (,_.)
+(2.5 3.5) >:"0 0 (_. _.)
+(,2.5) >: (,_.)
+(,2.5) <: (,_.)
+(,2.5) = (,_.)
+2.5 >: (,_.)
+(2 1 $ 2.5 3.5) >: (2 1 $ _. _.)
+(,: ,2.5) >: (,: ,_.)
+(>: (1 1.0000000000001)) >:"0 1 (~. (_.))
+
+// A BROADCAST ZERO has no magnitude for a relative tolerance to scale, so
+// the comparison against it is the exact one. A zero among a vector's
+// ITEMS is read tolerantly like any other number.
+(0.5 - 0.5) <: (_. _. _.)
+(0.5 - 0.5) = (_. _. _.)
+(0.5 - 0.5) >: (_. _. _.)
+(0.5 - 0.5) > (_. _. _.)
+(0.5 - 0.5) < (_. _. _.)
+(0.5 - 0.5) ~: (_. _. _.)
+(_. _. _.) <: (0.5 - 0.5)
+(_. _. _.) >: (0.5 - 0.5)
+(0.5 - 0.5) <: (_. 1 2)
+((0.5 - 0.5) , 1.5 , 2.5) <: (_. _. _.)
+((0.5 - 0.5) , 1e_300) <: (_. _.)
+(1e_320) <: (_. _. _.)
+2.5 <: (_. _. _.)
+(_ __ 0) <:"0 2 (_. 1 2)
+(_ __ 0 1 _1 2.5) <:"0 2 (_. 1 2)
+(_ __ 0 1 _1 2.5) >:"0 2 (_. 1 2)
+(_ __ 0 1 _1 2.5) <"0 2 (_. 1 2)
+(_ __ 0 1 _1 2.5) >"0 2 (_. 1 2)
+(_ __ 0 1 _1 2.5) ="0 2 (_. 1 2)
+(_ __ 0 1 _1 2.5) ~:"0 2 (_. 1 2)
+(_. 1 2) <:"2 0 (_ __ 0 1 _1 2.5)
+(_. 1 2) >:"2 0 (_ __ 0 1 _1 2.5)
+0 ="0 2 (1e_300 1e_300 1e_300)
+(0 0 0) = (1e_300 1e_300 1e_300)
+0 = 1e_300
+
+// `x:` READS A COMPLEX THE WAY AN ORDERING DOES, and the empty frame's
+// power reads the exponent itself.
+x: 1j5e_14
+x: 1j6e_14
+x: _j1
+x: __j2
+x: 1j_
+x: 0j_
+x: _j_
+x: 2j3
+x: 2j0
+x: (^. __)
+x:@^."1 0 _ (_4 >./\\. 2)
+3!:0 (((0 0 $ 0) ^ 0) ^ 0.5)
+3!:0 ((0 $ 0) ^ 0.5)
+3!:0 ((0 $ 0) ^ 0.0)
+3!:0 ((0 $ 0) ^ (0 $ 0.5))
+3!:0 ((0 $ 0) ^ 2)
+3!:0 ((0 $ 1r2) ^ 0.5)
+3!:0 ((0 $ 1x) ^ 0.5)
+3!:0 (2 % (0 $ 1x))
+3!:0 (2 %/ (0 $ 1x))
+3!:0 ((0 $ 1x) % 2)
+3!:0 ((0 $ 0) o. 0.5)
+3!:0 (0.5 ^ (0 $ 0))
+
+// A FUSED chain declines a comparison block that holds a NaN, so what the
+// chain answers is what the unfused verb answers.
+(1.0 - 0.0) = (_. _. _.)
+(1.5 + 0.0) <: (_. _. _.)
+(1.5 + 0.0) >: (_. _. _.)
+(1.5 + 0.0) > (_. _. _.)
+(0.0 + 0.0) >: (_. _. _.)
+(0.5 - 0.5) >: (_. 0.5 1.5)
+(1.0 - 0.0) < (_. _. _.)
+(1.0 - 0.0) ~: (_. _. _.)
+(_. _. _.) = (1.0 - 0.0)
+((_.) , 1.5) = (1.0 - 0.0)

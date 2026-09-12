@@ -650,6 +650,7 @@ impl Rules {
             by_smaller: self.lang == Lang::J,
             floor_rule: self.floor_rule,
             nan_wins: false,
+            nan_equal: None,
         }
     }
 

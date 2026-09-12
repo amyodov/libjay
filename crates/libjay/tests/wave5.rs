@@ -574,7 +574,6 @@ fn format_by_specification_lays_out_columns() {
 #[test]
 fn the_gaps_this_wave_leaves_name_themselves() {
     let cases: &[(Lang, &str, &str)] = &[
-        (Lang::J, "1 s: s: <'abc'", "symbol-table form"),
         (Lang::J, "$. 'ab'", "sparse"),
         (Lang::Apl, "1(=⍠('ZZ' 2))2", "variant option ZZ"),
     ];

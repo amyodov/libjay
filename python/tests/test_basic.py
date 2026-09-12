@@ -489,6 +489,13 @@ class TestErrors:
 
     def test_not_yet_wording(self):
         with pytest.raises(JayError, match="not supported yet"):
+            j("$. 'ab'")
+
+    def test_absence_wording(self):
+        # A feature the language lacks sounds different from one libjay has
+        # not written yet: `6 s:` reports an interpreter's own symbol table,
+        # which is no value of J at all.
+        with pytest.raises(JayError, match="not in the language"):
             j("6 s: s: ;: 'a b'")
 
     def test_parse_error(self):
