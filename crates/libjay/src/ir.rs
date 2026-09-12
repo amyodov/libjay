@@ -1192,36 +1192,36 @@ pub(crate) fn call_explicit(
             Some(span),
         ));
     }
-    let mut frame: HashMap<String, Array> = ctx.env.take_frame();
     // An axis written at the call site belongs to THIS call, whether or
     // not the definition has a name to put it under: it is TAKEN rather
     // than read, so nothing the body goes on to apply sees it. The
     // argument names are bound after it, so they win a collision.
     let axis = ctx.axis.take();
+    ctx.env.enter(def, span)?;
+    let frame = ctx.env.frame_mut();
     if let (Some(name), Some(axis)) = (&def.axis, axis) {
-        frame.insert(name.clone(), axis);
+        frame.insert(name, axis);
     }
-    frame.insert(def.right.clone(), y.clone());
+    frame.insert(&def.right, y.clone());
     if let (Some(name), Some(v)) = (&def.left, x) {
-        frame.insert(name.clone(), v.clone());
+        frame.insert(name, v.clone());
     }
     // A label's value is its line number, which is what `→` takes.
     for (label, line) in &def.labels {
-        frame.insert(label.clone(), Array::scalar_i64(*line as i64));
+        frame.insert(label, Array::scalar_i64(*line as i64));
     }
-    ctx.env.enter(frame, Arc::clone(def), span)?;
     // The body runs in the definition's own locale: a bare global name in
     // it is the home locale's, and `18!:5` inside it answers that name.
     // A `cocurrent` the body runs lasts only as long as the call, so the
     // locale is put back whether or not the definition named a home.
-    let outer = match &def.home {
-        Some(home) => ctx.env.set_current_locale(home),
-        None => ctx.env.current_locale().to_string(),
-    };
+    let outer = ctx.env.enter_locale(def.home.as_deref());
     let mut rec = None;
     let out = run_body(&def.body, ctx, &mut rec);
-    let frame = ctx.env.leave();
-    ctx.env.set_current_locale(&outer);
+    // An APL `∇`-definition names its result, which is a local of the call
+    // now ending: it is read before the frame is emptied.
+    let named = def.result.as_ref().and_then(|n| ctx.env.frame().get(n).cloned());
+    ctx.env.leave();
+    ctx.env.leave_locale(outer);
     let value = out?;
     // The body's shyness, which `run_body` left in the context, is the
     // call's: a definition whose answer came from an assignment answers
@@ -1231,9 +1231,7 @@ pub(crate) fn call_explicit(
     // An APL `∇`-definition names its result; the body's own value is not
     // it, and a definition that never assigned the name has no result.
     if let Some(name) = &def.result {
-        let answer = frame.get(name).cloned();
-        ctx.env.recycle_frame(frame);
-        return answer.ok_or_else(|| {
+        return named.ok_or_else(|| {
             Error::new(
                 ErrorKind::Value,
                 format!("{} did not set its result {name}", def.name),
@@ -1241,7 +1239,6 @@ pub(crate) fn call_explicit(
             )
         });
     }
-    ctx.env.recycle_frame(frame);
     match value {
         Some(v) => {
             ctx.shy = body_shy;

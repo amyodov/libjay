@@ -223,6 +223,42 @@ where
     Ok(out)
 }
 
+/// [`fill`] into a buffer instead of a vector.
+///
+/// ONE output is written without touching the heap at all: an atom's answer
+/// is a machine word, and neither a vector nor a thread is worth building
+/// for it. Every elementwise pass ends in a buffer, so this is where the
+/// atom's answer stops costing an allocation.
+pub fn fill_buf<U, F>(n: usize, f: F) -> (crate::array::Buf<U>, bool)
+where
+    U: Copy + Default + Send,
+    F: Fn(usize, &mut [U]) -> bool + Sync + Send,
+{
+    if n == 1 {
+        let mut one = [U::default()];
+        let ok = f(0, &mut one);
+        return (crate::array::Buf::one(one[0]), ok);
+    }
+    let (out, ok) = fill(n, f);
+    (crate::array::Buf::from_vec(out), ok)
+}
+
+/// [`try_fill`] into a buffer instead of a vector. One output costs no
+/// allocation, as in [`fill_buf`].
+pub fn try_fill_buf<U, E, F>(n: usize, f: F) -> Result<crate::array::Buf<U>, E>
+where
+    U: Copy + Default + Send,
+    E: Send,
+    F: Fn(usize, &mut [U]) -> Result<(), E> + Sync + Send,
+{
+    if n == 1 {
+        let mut one = [U::default()];
+        f(0, &mut one)?;
+        return Ok(crate::array::Buf::one(one[0]));
+    }
+    try_fill(n, f).map(crate::array::Buf::from_vec)
+}
+
 /// Map a slice elementwise.
 pub fn map<T, U, F>(src: &[T], f: F) -> Vec<U>
 where

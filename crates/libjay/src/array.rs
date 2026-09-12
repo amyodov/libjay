@@ -58,6 +58,15 @@ pub struct Buf<T> {
 }
 
 enum Repr<T> {
+    /// No elements at all. An empty buffer holds nothing and allocates
+    /// nothing, whatever its element type.
+    Empty,
+    /// ONE element, held in the buffer itself. An atom is the commonest
+    /// array there is — every intermediate a scalar verb makes is one —
+    /// and this is what keeps it off the heap entirely. Only an element
+    /// type that fits inline and needs no drop is held this way; see
+    /// [`fits_inline`].
+    One(Inline<T>),
     /// The whole of a refcounted `Vec`.
     Owned(Arc<Vec<T>>),
     /// The window `[off, off + len)` of a refcounted `Vec`, which is what
@@ -83,6 +92,58 @@ enum Repr<T> {
     },
 }
 
+/// Whether one element of `T` is held in the buffer itself rather than on
+/// the heap: it must fit the inline room, be no more aligned than that room
+/// is, and need no drop — which is every machine-word element type, and
+/// leaves the heap-backed ones (the boxes, the extended integers and the
+/// rationals) on the road they were already on.
+const fn fits_inline<T>() -> bool {
+    std::mem::size_of::<T>() <= INLINE_BYTES
+        && std::mem::align_of::<T>() <= INLINE_ALIGN
+        && !std::mem::needs_drop::<T>()
+}
+
+/// How much room one inline element gets. A complex number is the widest
+/// element libjay holds in a machine word pair.
+const INLINE_BYTES: usize = 16;
+const INLINE_ALIGN: usize = 8;
+
+/// One element held in the buffer itself. The bytes are an element of `T`
+/// written in place; nothing but [`fits_inline`] decides that this is
+/// allowed, and nothing else ever constructs one.
+#[repr(C, align(8))]
+pub struct Inline<T> {
+    bytes: [u8; INLINE_BYTES],
+    _elem: std::marker::PhantomData<T>,
+}
+
+impl<T> Inline<T> {
+    /// Hold `value` inline. Only ever called where [`fits_inline`] holds.
+    fn new(value: T) -> Inline<T> {
+        debug_assert!(fits_inline::<T>());
+        let mut it = Inline { bytes: [0u8; INLINE_BYTES], _elem: std::marker::PhantomData };
+        // SAFETY: the room is at least as wide and as aligned as `T`, and
+        // `T` needs no drop, so the bytes that were there hold nothing.
+        unsafe { std::ptr::write(it.bytes.as_mut_ptr().cast::<T>(), value) };
+        it
+    }
+
+    /// The element, as the one-element slice the buffer hands out.
+    fn as_slice(&self) -> &[T] {
+        // SAFETY: the bytes hold one initialised, correctly aligned `T`,
+        // written by `new` and never moved.
+        unsafe { std::slice::from_raw_parts(self.bytes.as_ptr().cast::<T>(), 1) }
+    }
+}
+
+/// Copying the bytes duplicates the element. Only a type that needs no drop
+/// is ever held inline, so there is no ownership to share out.
+impl<T> Clone for Inline<T> {
+    fn clone(&self) -> Inline<T> {
+        Inline { bytes: self.bytes, _elem: std::marker::PhantomData }
+    }
+}
+
 // SAFETY: no variant hands out aliased mutable access; a join of parts is
 // made once behind a `OnceLock` and never written again. A foreign buffer
 // is read-only for its whole life and its `owner` keeps the memory alive; an
@@ -99,10 +160,32 @@ unsafe impl<T: Send + Sync> Sync for Buf<T> {}
 
 impl<T> Buf<T> {
     pub fn new() -> Buf<T> {
-        Buf { repr: Repr::Owned(Arc::new(Vec::new())) }
+        Buf { repr: Repr::Empty }
+    }
+
+    /// A buffer of ONE element, off the heap where the element type allows
+    /// it. Every atom takes this road, which is why an array of one number
+    /// allocates nothing.
+    pub fn one(value: T) -> Buf<T> {
+        match fits_inline::<T>() {
+            true => Buf { repr: Repr::One(Inline::new(value)) },
+            false => Buf { repr: Repr::Owned(Arc::new(vec![value])) },
+        }
     }
 
     pub fn from_vec(v: Vec<T>) -> Buf<T> {
+        // A buffer of none or one element keeps no allocation: the vector
+        // is given up here rather than held for the life of the array.
+        if v.is_empty() {
+            return Buf { repr: Repr::Empty };
+        }
+        if v.len() == 1 && fits_inline::<T>() {
+            // SAFETY: the element is read out of a vector that holds
+            // exactly one, and `T` needs no drop, so the vector's own drop
+            // leaves nothing behind to release.
+            let value = unsafe { std::ptr::read(v.as_ptr()) };
+            return Buf { repr: Repr::One(Inline::new(value)) };
+        }
         Buf { repr: Repr::Owned(Arc::new(v)) }
     }
 
@@ -133,6 +216,8 @@ impl<T> Buf<T> {
     /// Elements the buffer holds, without joining a set of parts.
     pub fn len(&self) -> usize {
         match &self.repr {
+            Repr::Empty => 0,
+            Repr::One(_) => 1,
             Repr::Owned(v) => v.len(),
             Repr::Slice { len, .. } | Repr::Foreign { len, .. } | Repr::Cols { len, .. } => *len,
         }
@@ -222,6 +307,8 @@ impl<T: Clone> Buf<T> {
 
     pub fn as_slice(&self) -> &[T] {
         match &self.repr {
+            Repr::Empty => &[],
+            Repr::One(it) => it.as_slice(),
             Repr::Owned(v) => v,
             Repr::Slice { buf, off, len } => &buf[*off..*off + *len],
             Repr::Foreign { ptr, len, .. } => {
@@ -264,9 +351,10 @@ impl<T: Clone> Buf<T> {
     /// holder of a whole one and copying otherwise.
     pub fn into_vec(self) -> Vec<T> {
         match self.repr {
+            Repr::Empty => Vec::new(),
             Repr::Owned(v) => Arc::try_unwrap(v).unwrap_or_else(|v| v.as_slice().to_vec()),
             Repr::Slice { ref buf, off, len } => buf[off..off + len].to_vec(),
-            Repr::Foreign { .. } | Repr::Cols { .. } => self.as_slice().to_vec(),
+            Repr::One(_) | Repr::Foreign { .. } | Repr::Cols { .. } => self.as_slice().to_vec(),
         }
     }
 
@@ -284,6 +372,14 @@ impl<T: Clone> Buf<T> {
     /// it holds that whole allocation alive for as long as it lives.
     pub fn slice(&self, start: usize, end: usize) -> Buf<T> {
         match &self.repr {
+            Repr::Empty | Repr::One(_) => {
+                let len = self.len();
+                assert!(start <= end && end <= len, "slice out of range");
+                match end - start {
+                    0 => Buf { repr: Repr::Empty },
+                    _ => self.clone(),
+                }
+            }
             Repr::Owned(v) => {
                 assert!(start <= end && end <= v.len(), "slice out of range");
                 if start == 0 && end == v.len() {
@@ -359,6 +455,8 @@ impl<T: Clone> Deref for Buf<T> {
 impl<T: Clone> Clone for Buf<T> {
     fn clone(&self) -> Buf<T> {
         match &self.repr {
+            Repr::Empty => Buf { repr: Repr::Empty },
+            Repr::One(it) => Buf { repr: Repr::One(it.clone()) },
             Repr::Owned(v) => Buf { repr: Repr::Owned(Arc::clone(v)) },
             Repr::Slice { buf, off, len } => {
                 Buf { repr: Repr::Slice { buf: Arc::clone(buf), off: *off, len: *len } }
@@ -957,15 +1055,15 @@ impl Array {
     }
 
     pub fn scalar_i64(v: i64) -> Array {
-        Array::new(vec![], Data::I64(vec![v].into()))
+        Array::new(vec![], Data::I64(Buf::one(v)))
     }
 
     pub fn scalar_f64(v: f64) -> Array {
-        Array::new(vec![], Data::F64(vec![v].into()))
+        Array::new(vec![], Data::F64(Buf::one(v)))
     }
 
     pub fn scalar_bool(v: bool) -> Array {
-        Array::new(vec![], Data::Bool(vec![v as u8].into()))
+        Array::new(vec![], Data::Bool(Buf::one(v as u8)))
     }
 
     pub fn from_i64(values: Vec<i64>) -> Array {
@@ -1309,6 +1407,40 @@ mod tests {
         // SAFETY: zero length, so the dangling pointer is never dereferenced.
         let f = unsafe { Buf::<f64>::foreign(std::ptr::null(), 0, Arc::new(())) };
         assert_eq!(&f[..], &[] as &[f64]);
+    }
+
+    #[test]
+    fn a_one_element_buf_holds_its_element_and_behaves_as_a_buffer() {
+        let b: Buf<f64> = Buf::one(1.5);
+        assert_eq!(&b[..], &[1.5]);
+        assert_eq!(b.len(), 1);
+        assert!(!b.is_foreign());
+        assert!(b.owner().is_none());
+        assert!(b.parts().is_none());
+        // A clone is a value of its own, and writing to one leaves the
+        // other alone.
+        let mut c = b.clone();
+        c.to_mut()[0] = 2.5;
+        assert_eq!(&b[..], &[1.5]);
+        assert_eq!(&c[..], &[2.5]);
+        assert_eq!(b.clone().into_vec(), vec![1.5]);
+        assert_eq!(&b.slice(0, 1)[..], &[1.5]);
+        assert_eq!(&b.slice(1, 1)[..], &[] as &[f64]);
+        assert_eq!(b, Buf::from_vec(vec![1.5]));
+    }
+
+    #[test]
+    fn a_vector_of_one_is_the_same_buffer_however_it_was_built() {
+        // Every element type, including the heap-backed ones that cannot
+        // be held inline.
+        assert_eq!(&Buf::from_vec(vec![7i64])[..], &[7]);
+        assert_eq!(&Buf::one(7i64)[..], &[7]);
+        assert_eq!(&Buf::from_vec(vec!['q'])[..], &['q']);
+        let boxed: Buf<Array> = Buf::one(Array::scalar_i64(3));
+        assert_eq!(boxed.len(), 1);
+        assert_eq!(boxed[0], Array::scalar_i64(3));
+        assert_eq!(Buf::<i64>::new().len(), 0);
+        assert_eq!(Buf::<Array>::from_vec(Vec::new()).len(), 0);
     }
 
     #[test]

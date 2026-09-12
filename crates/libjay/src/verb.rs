@@ -580,9 +580,78 @@ impl EvalCfg {
 /// evaluator's frames, up as they shrink and down as they grow.
 pub const RECURSION_LIMIT: usize = 48;
 
-/// How many finished frames are kept to be filled again. One per level of
-/// nesting a program actually reaches is all a call can ever want back.
-const RECYCLED_FRAMES: usize = 8;
+/// How many name slots a frame may carry before it is emptied outright
+/// rather than kept for the next call. A frame kept to be filled again
+/// keeps its names, and a frame passed between unrelated definitions would
+/// otherwise collect every name any of them ever wrote.
+const MAX_KEPT_SLOTS: usize = 16;
+
+/// The local names of one call to an explicit definition.
+///
+/// A definition has a handful of them, so the names live in a vector and a
+/// read compares them rather than hashing: at three or four slots that is
+/// one length test and a few bytes of memory. The names outlive the CALL —
+/// a frame kept to be filled again drops its values and keeps its keys — so
+/// a definition applied once per item of a fold allocates no name at all,
+/// where a table rebuilt per call allocated one string per argument.
+///
+/// A slot with no value is a name that is not there: `4!:55` empties one,
+/// and a frame filled again starts with every slot empty.
+#[derive(Debug, Default)]
+pub struct Frame {
+    slots: Vec<(Box<str>, Option<Array>)>,
+}
+
+/// Whether two names are the same one. The length and the first byte part
+/// almost every pair a frame holds, and telling them apart that way is what
+/// keeps a name read down to a few instructions.
+#[inline]
+fn same_name(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    match a {
+        [] => true,
+        [c] => *c == b[0],
+        _ => a == b,
+    }
+}
+
+impl Frame {
+    /// The value a local name has now, or None where it has none.
+    pub fn get(&self, name: &str) -> Option<&Array> {
+        self.slots.iter().find(|(n, _)| same_name(n, name))?.1.as_ref()
+    }
+
+    /// Give a local name a value, reusing the slot it already has.
+    pub fn insert(&mut self, name: &str, value: Array) {
+        match self.slots.iter_mut().find(|(n, _)| same_name(n, name)) {
+            Some(slot) => slot.1 = Some(value),
+            None => self.slots.push((name.into(), Some(value))),
+        }
+    }
+
+    /// Take a local name's value away, leaving the slot behind.
+    pub fn remove(&mut self, name: &str) {
+        if let Some(slot) = self.slots.iter_mut().find(|(n, _)| same_name(n, name)) {
+            slot.1 = None;
+        }
+    }
+
+    /// Drop every value, keeping the names to be filled again. A frame that
+    /// has collected more names than a definition plausibly writes is
+    /// emptied outright instead.
+    fn recycle(&mut self) {
+        if self.slots.len() > MAX_KEPT_SLOTS {
+            self.slots.clear();
+            return;
+        }
+        for slot in &mut self.slots {
+            slot.1 = None;
+        }
+    }
+}
 
 
 /// The names a running program can reach: the values it has assigned, the
@@ -598,20 +667,26 @@ pub struct Env {
     locales: HashMap<String, Locale>,
     /// The locale a bare global name is read and written in. A definition
     /// runs in its own, which is what makes a locale a namespace rather
-    /// than a prefix.
-    current: String,
+    /// than a prefix. Shared rather than owned, so that a call can keep
+    /// hold of the one it found without copying the name.
+    current: std::sync::Arc<str>,
     /// The name the next `18!:3 ''` hands out. Numbered locales are handed
     /// out in order and never reused while one is alive.
     next_numbered: u64,
-    frames: Vec<HashMap<String, Array>>,
-    /// Frames a call has finished with, emptied and kept to be filled
-    /// again. A definition applied once per item of a fold builds the same
-    /// small table a million times, and the table itself is the part worth
-    /// not allocating again.
-    spare: Vec<HashMap<String, Array>>,
-    /// The definitions currently running, innermost last; J's `$:` and
-    /// APL's `∇` name the last of them.
+    /// The call stack: one frame and one definition per level, the
+    /// innermost at `depth - 1`. What is past `depth` is not a call — it is
+    /// the emptied frame a finished call left, waiting to be filled again,
+    /// with the names it held still in it. A definition applied once per
+    /// item of a fold therefore enters the frame it used last time and
+    /// writes its arguments into the slots that are already there.
+    frames: Vec<Frame>,
+    /// The definitions currently running, innermost at `depth - 1`; J's
+    /// `$:` and APL's `∇` name that one. A level that is entered again by
+    /// the definition that just left it keeps the handle it already holds.
     running: Vec<std::sync::Arc<crate::ir::ExplicitDef>>,
+    /// How many calls are running. The stacks above are as long as the
+    /// deepest call the program has reached, not as long as this.
+    depth: usize,
     verbs: HashMap<String, Verb>,
     /// The names given an adverb or a conjunction, and which of the two.
     /// A modifier is applied while a sentence is parsed, so the run keeps
@@ -743,11 +818,11 @@ impl Env {
         locales.insert(Z_LOCALE.to_string(), Locale::default());
         Env {
             locales,
-            current: BASE_LOCALE.to_string(),
+            current: std::sync::Arc::from(BASE_LOCALE),
             next_numbered: 0,
             frames: Vec::new(),
-            spare: Vec::new(),
             running: Vec::new(),
+            depth: 0,
             verbs: HashMap::new(),
             mods: HashMap::new(),
             mod_reps: HashMap::new(),
@@ -761,7 +836,17 @@ impl Env {
     fn place<'a>(&self, name: &'a str) -> (&'a str, String) {
         match split_locative(name) {
             Some((head, locale)) => (head, locale.to_string()),
-            None => (name, self.current.clone()),
+            None => (name, self.current.to_string()),
+        }
+    }
+
+    /// The same, without copying the locale's name. Every READER takes this
+    /// one: a bare global name is read in the locale running now, and
+    /// naming it is not worth an allocation.
+    fn place_ref<'a>(&'a self, name: &'a str) -> (&'a str, &'a str) {
+        match split_locative(name) {
+            Some((head, locale)) => (head, locale),
+            None => (name, &self.current),
         }
     }
 
@@ -812,7 +897,34 @@ impl Env {
     /// does.
     pub fn set_current_locale(&mut self, name: &str) -> String {
         self.ensure_locale(name);
-        std::mem::replace(&mut self.current, name.to_string())
+        std::mem::replace(&mut self.current, std::sync::Arc::from(name)).to_string()
+    }
+
+    /// Make a definition's home locale current for the length of a call,
+    /// and hand back the locale to put back afterwards.
+    ///
+    /// A definition with no home of its own, and one whose home is already
+    /// current, change nothing: what comes back is a share of the locale
+    /// that is current, and putting it back is free unless the BODY moved
+    /// the locale — which only `cocurrent` does.
+    pub fn enter_locale(&mut self, home: Option<&str>) -> std::sync::Arc<str> {
+        match home {
+            Some(h) if &*self.current != h => {
+                self.ensure_locale(h);
+                std::mem::replace(&mut self.current, std::sync::Arc::from(h))
+            }
+            _ => std::sync::Arc::clone(&self.current),
+        }
+    }
+
+    /// Put back the locale a call found. Nothing is done where the call
+    /// left it where it was.
+    pub fn leave_locale(&mut self, outer: std::sync::Arc<str>) {
+        if std::sync::Arc::ptr_eq(&self.current, &outer) {
+            return;
+        }
+        self.ensure_locale(&outer);
+        self.current = outer;
     }
 
     /// Create a named locale if it is not there yet. A NUMBERED one is
@@ -900,7 +1012,7 @@ impl Env {
     }
 
     pub fn get(&self, name: &str) -> Option<Array> {
-        if let Some(frame) = self.frames.last() && let Some(v) = frame.get(name) {
+        if self.depth > 0 && let Some(v) = self.frames[self.depth - 1].get(name) {
             return Some(v.clone());
         }
         // A dfn written inside another reads the names the enclosing one
@@ -908,10 +1020,11 @@ impl Env {
         // counts, so an unrelated caller's locals stay its own — the
         // frames below are searched, and only those whose definition this
         // one is written inside are read.
-        if let Some(def) = self.running.last()
+        if self.depth > 0
+            && let def = &self.running[self.depth - 1]
             && !def.enclosing.is_empty()
         {
-            for i in (0..self.frames.len().saturating_sub(1)).rev() {
+            for i in (0..self.depth - 1).rev() {
                 if def.enclosing.contains(&self.running[i].id)
                     && let Some(v) = self.frames[i].get(name)
                 {
@@ -919,8 +1032,8 @@ impl Env {
                 }
             }
         }
-        let (head, locale) = self.place(name);
-        self.in_locale(&locale, head)
+        let (head, locale) = self.place_ref(name);
+        self.in_locale(locale, head)
     }
 
     /// Whether a locative names a locale that does not exist. Reading one
@@ -952,8 +1065,8 @@ impl Env {
         // a definition puts the name in locale x, not in the frame.
         let local = matches!(scope, crate::ir::Scope::Local | crate::ir::Scope::LocalDefault)
             && split_locative(&name).is_none();
-        if local && let Some(frame) = self.frames.last_mut() {
-            frame.insert(name, value);
+        if local && self.depth > 0 {
+            self.frames[self.depth - 1].insert(&name, value);
             return;
         }
         let (head, locale) = self.place(&name);
@@ -1022,19 +1135,19 @@ impl Env {
     pub fn names_of_class(&self, classes: &[i64]) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         if classes.contains(&0)
-            && let Some(l) = self.locales.get(&self.current)
+            && let Some(l) = self.locales.get(&*self.current)
         {
             out.extend(l.values.keys().filter(|n| is_name(n)).cloned());
         }
         for (n, conj) in &self.mods {
             let class = if *conj { 2 } else { 1 };
-            if classes.contains(&class) && self.locale_of(n) == self.current {
+            if classes.contains(&class) && self.locale_of(n) == *self.current {
                 out.push(bare_name(n).to_string());
             }
         }
         if classes.contains(&3) {
             for n in self.verbs.keys() {
-                if self.locale_of(n) == self.current {
+                if self.locale_of(n) == *self.current {
                     out.push(bare_name(n).to_string());
                 }
             }
@@ -1048,7 +1161,7 @@ impl Env {
     fn locale_of(&self, name: &str) -> String {
         match split_locative(name) {
             Some((_, locale)) => locale.to_string(),
-            None => self.current.clone(),
+            None => self.current.to_string(),
         }
     }
 
@@ -1058,8 +1171,8 @@ impl Env {
         self.verbs.remove(name);
         self.mods.remove(name);
         self.mod_reps.remove(name);
-        if let Some(frame) = self.frames.last_mut() {
-            frame.remove(name);
+        if self.depth > 0 {
+            self.frames[self.depth - 1].remove(name);
         }
     }
 
@@ -1067,8 +1180,8 @@ impl Env {
     /// operand lives here for as long as its body runs, so that the body's
     /// own frame does not hide it.
     pub fn global(&self, name: &str) -> Option<Array> {
-        let (head, locale) = self.place(name);
-        self.in_locale(&locale, head)
+        let (head, locale) = self.place_ref(name);
+        self.in_locale(locale, head)
     }
 
     pub fn set_global(&mut self, name: String, value: Array) {
@@ -1107,28 +1220,18 @@ impl Env {
             .ok_or_else(|| Error::internal("a parameter was read where none is bound"))
     }
 
-    /// An empty frame to fill, reusing one a finished call left.
-    pub fn take_frame(&mut self) -> HashMap<String, Array> {
-        self.spare.pop().unwrap_or_default()
-    }
-
-    /// Keep a finished call's frame for the next one. Only a few are kept:
-    /// what this saves is one allocation per call, not memory.
-    pub fn recycle_frame(&mut self, mut frame: HashMap<String, Array>) {
-        if self.spare.len() < RECYCLED_FRAMES {
-            frame.clear();
-            self.spare.push(frame);
-        }
-    }
-
     /// Start a definition's frame. Fails rather than overflowing the stack.
+    ///
+    /// The frame is the one this level used last, emptied of its values and
+    /// still holding its names, so a call writes its arguments into slots
+    /// that are already there. The definition handle is only cloned where
+    /// the level was last used by a different definition.
     pub fn enter(
         &mut self,
-        frame: HashMap<String, Array>,
-        def: std::sync::Arc<crate::ir::ExplicitDef>,
+        def: &std::sync::Arc<crate::ir::ExplicitDef>,
         span: Span,
     ) -> Result<()> {
-        if self.frames.len() >= RECURSION_LIMIT {
+        if self.depth >= RECURSION_LIMIT {
             return Err(Error::new(
                 ErrorKind::Domain,
                 format!("explicit definitions called each other more than {RECURSION_LIMIT} deep"),
@@ -1136,27 +1239,44 @@ impl Env {
             )
             .note("a definition that recurses needs a case that stops"));
         }
-        self.frames.push(frame);
-        self.running.push(def);
+        if self.depth == self.frames.len() {
+            self.frames.push(Frame::default());
+            self.running.push(std::sync::Arc::clone(def));
+        } else if !std::sync::Arc::ptr_eq(&self.running[self.depth], def) {
+            self.running[self.depth] = std::sync::Arc::clone(def);
+        }
+        self.depth += 1;
         Ok(())
     }
 
-    /// End a definition's frame and hand back the names it assigned.
-    pub fn leave(&mut self) -> HashMap<String, Array> {
-        self.running.pop();
-        self.frames.pop().unwrap_or_default()
+    /// The frame of the call running now.
+    pub fn frame_mut(&mut self) -> &mut Frame {
+        let at = self.depth - 1;
+        &mut self.frames[at]
+    }
+
+    /// The frame of the call running now, to read.
+    pub fn frame(&self) -> &Frame {
+        &self.frames[self.depth - 1]
+    }
+
+    /// End a definition's frame, dropping the values it assigned and
+    /// leaving the names for the next call at this level.
+    pub fn leave(&mut self) {
+        self.depth -= 1;
+        self.frames[self.depth].recycle();
     }
 
     /// The innermost definition now running; `$:` and `∇` name it.
     pub fn current_def(&self) -> Option<std::sync::Arc<crate::ir::ExplicitDef>> {
-        self.running.last().cloned()
+        self.depth.checked_sub(1).map(|i| std::sync::Arc::clone(&self.running[i]))
     }
 
     /// How many explicit definitions are running, innermost included. A
     /// `throw.` is caught by a `catcht.` that is running SHALLOWER than the
     /// definition that raised it, and this is what the two compare.
     pub fn depth(&self) -> usize {
-        self.frames.len()
+        self.depth
     }
 }
 
@@ -3093,6 +3213,22 @@ impl Verb {
         }
         // As in `monad`, the application starts out not shy.
         ctx.shy = false;
+        // AN ATOM AGAINST AN ATOM under a scalar primitive: there is no
+        // frame to agree, no cell to walk and no layout to settle, and the
+        // rank machinery below would derive all three to arrive at exactly
+        // this call. It is the commonest application an explicit
+        // definition's body makes.
+        if let Verb::Prim(p) = self
+            && let DyadOp::Scalar(op) = p.dyad
+            && p.ranks[1] == 0
+            && p.ranks[2] == 0
+            && x.rank() == 0
+            && y.rank() == 0
+            && !x.is_sparse()
+            && !y.is_sparse()
+        {
+            return scalar_dyad(op, x, y, ctx.cfg, span);
+        }
         // As in `monad`: only `x $. y` reads a sparse argument as it lies,
         // and even there the left one names a form and is always dense.
         let (dense_x, dense_y);
@@ -6199,9 +6335,14 @@ fn dyad_cx<A: Widen<Cx>, B: Widen<Cx>>(
     n: usize,
     tol: Tol,
     span: Span,
-) -> Result<Vec<Cx>> {
-    par::try_fill(n, |start, part| {
-        dyad_cx_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, tol, span)
+) -> Result<Buf<Cx>> {
+    // A pass of a few elements is not a loop a vector clone widens — the
+    // rule `VECTOR_COLUMNS` carries — so it runs the body straight and pays
+    // for neither dispatch.
+    let wide = n >= VECTOR_COLUMNS;
+    par::try_fill_buf(n, |start, part| match wide {
+        true => dyad_cx_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, tol, span),
+        false => dyad_cx_chunk_body(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, tol, span),
     })
 }
 
@@ -6417,9 +6558,11 @@ fn dyad_i64<A: Widen<i64>, B: Widen<i64>>(
     yoff: usize,
     ydiv: usize,
     n: usize,
-) -> Option<Vec<i64>> {
-    let (out, ok) = par::fill(n, |start, part| {
-        dyad_i64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part)
+) -> Option<Buf<i64>> {
+    let wide = n >= VECTOR_COLUMNS;
+    let (out, ok) = par::fill_buf(n, |start, part| match wide {
+        true => dyad_i64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part),
+        false => dyad_i64_chunk_body(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part),
     });
     ok.then_some(out)
 }
@@ -6441,7 +6584,7 @@ fn int_dyad_data(
     let out = i64_source!(x, tx, xs, {
         i64_source!(y, ty, ys, dyad_i64(op, xs, xoff, xdiv, ys, yoff, ydiv, n))
     })?;
-    Some(Data::I64(out.into()))
+    Some(Data::I64(out))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6555,9 +6698,11 @@ fn dyad_f64<A: Widen<f64>, B: Widen<f64>>(
     n: usize,
     tol: Tol,
     span: Span,
-) -> Result<Vec<f64>> {
-    par::try_fill(n, |start, part| {
-        dyad_f64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, tol, span)
+) -> Result<Buf<f64>> {
+    let wide = n >= VECTOR_COLUMNS;
+    par::try_fill_buf(n, |start, part| match wide {
+        true => dyad_f64_chunk(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, tol, span),
+        false => dyad_f64_chunk_body(op, xs, xoff, xdiv, ys, yoff, ydiv, start, part, tol, span),
     })
 }
 
@@ -6579,7 +6724,7 @@ fn float_dyad_data(
     let out = f64_source!(x, tx, xs, {
         f64_source!(y, ty, ys, dyad_f64(op, xs, xoff, xdiv, ys, yoff, ydiv, n, tol, span)?)
     });
-    Ok(Data::F64(out.into()))
+    Ok(Data::F64(out))
 }
 
 /// Whether two element types have nothing in common to compare: a
@@ -8096,7 +8241,14 @@ fn scalar_dyad(
     {
         return scalar_dyad(op, &a, &b, cfg, span);
     }
-    let p = agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?;
+    // Two ATOMS pair with each other and with nothing else: the frame is
+    // empty, the pair is the one cell, and neither side spreads. Both
+    // agreement rules say exactly that, and this is the commonest pair
+    // there is.
+    let p = match x.rank() == 0 && y.rank() == 0 {
+        true => Pairing { frame: Vec::new(), n: 1, x_div: 1, y_div: 1 },
+        false => agree(&x.shape, &y.shape, &x.shape, &y.shape, cfg.agreement, span)?,
+    };
     // Nothing to apply the verb to: `'a' + ''` is an empty, not a type
     // error, because no pair of elements was ever formed. The agreement
     // above still holds — `1 2 3 + ''` is a length error either way.
