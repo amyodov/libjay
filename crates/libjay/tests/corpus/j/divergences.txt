@@ -1083,3 +1083,52 @@ o.&.% ((__) , (__))
 1 s: (0 $ 0)
 ? the second dumping form, over an argument with no items; reason: undefined
 
+
+// THE BINARY REPRESENTATION OF A SYMBOL IS THE INTERPRETER'S OWN TABLE
+// INDEX. `3!:3 (s: 'a')` writes one word an item, and that word is where
+// the symbol sits in the session's symbol table: `s: 'a'` is 0 in a fresh
+// process and `s: 'a';'bc'` is `1 2` in another, the same name numbered
+// differently by nothing but the order things were interned in. The header
+// — the magic, the type 65536, the count, the rank and the shape — is
+// reproducible and the data is not, so libjay answers "not implemented
+// yet" rather than inventing a table to agree with.
+3!:3 (s: 'a')
+? the data words are the reference's own symbol-table slots; reason: undefined
+~ cause=gap:err:not_supported_yet:_the_binary_representation_of_symbol_data_is_not_suppo verb=!: also=s:,x:,u:,":,<,>,#,$,,,],[,|.,{.,}.,~.,/:,\:,i.,e.,L.,{::,;,;:,a:,^:,@,@:,&,&:,",`,`:,@.,/,\,\.,/.,;.,}
+3!:3 (0 $ s: '')
+? the same over a symbol list with nothing in it, whose header alone agrees; reason: undefined
+
+// `(u&:v)^:_1` WHERE v HAS NO OBVERSE ANSWERS NEITHER A VALUE NOR AN ERROR.
+// `::` never lends one: `(%: :: -.)^:_1 (2)`, `(*: :: -.)^:_1 (4)` and
+// `({:: :: %:)^:_1 (2)` are all domain errors in the reference, and so is
+// the same absence reached through one `&:` — `(r.&:-.&:{::)^:_1 (2)`.
+// Reached through TWO of them the reference stops printing: the sentence
+// below writes nothing at all, no value and no error, and `$` of it and
+// `3!:0` of it write nothing either, while `^:(0)` and `^:(1)` over the
+// same verb answer normally. libjay refuses it the way the reference
+// refuses every neighbouring spelling; the same absence spelled with the
+// power outside — `(r.&:-.&:({:: :: %:))^:_1 (2)` — is the domain error both
+// engines give, so only the one spelling below parts them.
+r.&:-.&:({:: :: %:) ^:(_1 0 1) 2
+? the reference answers neither a value nor an error here, and a domain error to every neighbouring spelling; reason: self-contradiction
+
+// `#.` OVER AN EMPTY FRAME AND A NON-NUMERIC ARGUMENT. A boxed or symbol
+// argument with NO ATOMS decodes as the numeric empty it stands for
+// wherever a cell is really computed, and that rule is recorded in
+// residue-levels. Where the FRAME is empty and no cell ever runs, the
+// reference's own answers contradict each other: `(i. 0 3 4) #. (0 $ 0)`
+// is a boolean `0 3` — the frame standing alone — while
+// `(i. 0 3 4) #. (0 $ a:)`, refused the same way at the same frame, is a
+// boolean `,0`; `(i. 0 3) #. (0 $ a:)` is a scalar in the INTEGER type with
+// no frame at all, where `(i. 0 3) #. (0 $ 0)` keeps its `,0`; and
+// `(0 0 $ 0.5) #. (s: 'a')` answers where `(0 0 $ 0.5) #. (<0)` is a domain
+// error. Two hundred and sixty cells were measured as `(3!:0 , $)` and no
+// reading of them survives all four. libjay keeps the frame the rank rules
+// give it and refuses the type the cell would have refused.
+(0 0 $ '') #. (3 $ a:)
+? the reference drops a frame axis here and keeps it for the same refusal over a numeric empty; reason: self-contradiction
+~ cause=we-refuse:err:domain_error:_decode_needs_numeric_data|we-refuse:err:domain_error:_decode_reads_digits_of_a_kind_the_radices_cannot|differ:val:empty/num|differ:val:vector/num|differ:val:atom/num verb=#. also=$,i.,a:,s:,<,u:,x:,":,",@,@:,&,&:,^:,/,\,\.,/.,;.,},{,{::,L:,S:,F..,F.:,F::,3!:,!:
+(i. 0 0 3) #. (3 $ a:)
+? the same, at a frame of two axes; reason: self-contradiction
+(i. 0 3) #. (0 $ a:)
+? the reference answers a scalar here and a `,0` for the same refusal over a numeric empty; reason: self-contradiction

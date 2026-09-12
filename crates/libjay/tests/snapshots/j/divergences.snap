@@ -2916,3 +2916,36 @@
 ? the second dumping form, over an argument with no items; reason: undefined
 < <error>
 > j:
+= 3!:3 (s: 'a')
+? the data words are the reference's own symbol-table slots; reason: undefined
+< <error>
+> j: e300000000000000
+> j: 0000010000000000
+> j: 0100000000000000
+> j: 0100000000000000
+> j: 0100000000000000
+> j: 0000000000000000
+= 3!:3 (0 $ s: '')
+? the same over a symbol list with nothing in it, whose header alone agrees; reason: undefined
+< <error>
+> j: e300000000000000
+> j: 0000010000000000
+> j: 0000000000000000
+> j: 0100000000000000
+> j: 0000000000000000
+= r.&:-.&:({:: :: %:) ^:(_1 0 1) 2
+? the reference answers neither a value nor an error here, and a domain error to every neighbouring spelling; reason: self-contradiction
+< <error>
+> j:
+= (0 0 $ '') #. (3 $ a:)
+? the reference drops a frame axis here and keeps it for the same refusal over a numeric empty; reason: self-contradiction
+< <error>
+> j:
+= (i. 0 0 3) #. (3 $ a:)
+? the same, at a frame of two axes; reason: self-contradiction
+< <error>
+> j:
+= (i. 0 3) #. (0 $ a:)
+? the reference answers a scalar here and a `,0` for the same refusal over a numeric empty; reason: self-contradiction
+<
+> j: 0
