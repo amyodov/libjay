@@ -6473,3 +6473,98 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   kernel of its own. It is also the one construct here whose only reference
   is Dyalog — GNU APL rejects `⌺` — so there would be nothing in this
   corpus to check it against.
+
+- 2026-09-12 — `x %. y` TAKES ITS EXACTNESS FROM THE SYSTEM IT INVERTS,
+  AND THE ONE-UNKNOWN SYSTEM FOLLOWS THE SAME RULE. `%.` inverts the RIGHT
+  argument, so it is that argument's type which decides whether the answer
+  is exact: `2 %. (123x)` is `2r123`, `(123x) %. (2x)` is `123r2`, and
+  `(123x) %. 2` is the float 61.5 although the left side was written
+  exactly. The matrix path already read it that way; the atom path — where
+  `x %. y` is the items' sum divided by y — divided in whatever type the
+  sum came out in, so an extended or rational left argument stayed exact.
+  Twenty cells of the type grid were measured and the reading survives all
+  of them, complex and float included: the inverse is rational only where
+  y is extended or rational, and the product with x promotes from there.
+
+- 2026-09-12 — `x -. y` WIDENS ON BOTH RANKS, NOT ON THE TYPES ALONE. The
+  reference keeps a LIST's own type against an ATOM — `(1r2 1r3) -. (2.5)`
+  is rational, and so is the same pair against `0j1`, `_` and `_.` — and
+  promotes in every other pairing: `(1r2 1r3) -. (,2.5)`, the same number
+  written as a one-item list, is float, `(1r3) -. (0.5)` is float, and
+  `(2 2 $ 1r2) -. (2.5)` is rational again. So the condition is exactly
+  "the left has rank above 0 and the right has rank 0", which fourteen
+  measured cells fix and no reading by type alone reaches. libjay widened
+  wherever the promotion was wider.
+
+- 2026-09-12 — AN EMPTY OPERAND NAMES NO TYPE IN A CATENATION, AND A FIT'S
+  ATOM NAMES ONE WHERE NOTHING ELSE REACHES THE ANSWER. The first half was
+  already libjay's rule. The second is new: where BOTH sides have no
+  elements and they disagree on an axis, every atom of the answer comes
+  from the fill, and `u!.f` says what that atom is — `(i. 0 0 3) , !.0
+  (0 $ a:)` is a boolean `0 0 0` of shape `1 1 3`, `!.'z'` over the same
+  pair is `zzz`, `!.2.5` a float and `!.(<0)` a boxed row. A join that
+  places no fill keeps the order over the nine types (`('') , !.0 (0 $ a:)`
+  is the boxed empty), and so does one with elements of its own. libjay
+  reached the boxed-against-unboxed refusal instead, because the numeric
+  fill had already retyped one side.
+
+- 2026-09-12 — AN ARGUMENT WITH NOTHING IN IT NAMES NO TYPE FOR `_1 x:` OR
+  FOR A PRIME QUERY EITHER. Both leave the boolean empty a refused fill
+  leaves: `3!:0 (_1 x: (0 $ 'a'))`, the same over `(0 $ <0)`, `(0 $ 0j1)`
+  and `(0 $ 1x)`, and `3!:0 (3 p: (2 0 3 $ 0))` are all 1. The line is the
+  argument's, not the answer's — `3!:0 (q: 1x)` is the extended 64, one
+  number that happens to have no factor — so the guard sits on the prime
+  queries' own call to the exact-type carrier and not inside it, where it
+  would have taken the tally and the shape of the same empty with it.
+
+- 2026-09-12 — A COUNT, A LENGTH OR AN INDEX WRITTEN AS A COMPLEX NUMBER IS
+  THE REAL NUMBER IT SPELLS, BY THE NEAR-INTEGER ADMISSION. `1 {. (r. 1p1)`
+  is `_1j1.22465e_16` and the reference takes it as the `_1` an outfix
+  width wants, where `(2j1e_7) {. (i. 5)` is a domain error: the window is
+  relative and the same one a float near a whole number is admitted by.
+  `9!:19 (0)` — the comparison tolerance at zero — leaves it exactly where
+  it was, which is what separates the two settings. An INFINITE imaginary
+  part is no rounding: a relative window would admit `0j_` against an
+  infinite scale, and the reference refuses it everywhere a count is
+  wanted.
+
+- 2026-09-12 — THE COMPLEX BINOMIAL READS A ZERO IMAGINARY PART AS A REAL
+  NUMBER, AND REFUSES A NaN THAT IS NOT ONE. A pair whose imaginary parts
+  are both exactly zero is the REAL binomial with the real rules at the
+  infinities — `0j0 ! _` is 1, `(__j0) ! 2` is 0, `(_.j0) ! 2` is `_.`,
+  and the cell `__j0` inside `(^. &.+: (_2 0 2)) ! 2` is 0 there. It is the
+  exact zero that decides, not the tolerance. An infinitely NEGATIVE left
+  argument is 0 whatever the right one is, complex or not: `__ ! 1j1`,
+  `__ ! 0j1`, `__ ! 2j3` and `__ ! _1j_1` are all 0, which is the real
+  `__ ! y` rule carried across. A NaN anywhere else refuses — `(1ad45) !
+  (_.)` and `(_.j1) ! 2` are NaN errors — where libjay answered `_.j_.`.
+  An infinite left argument over a truly complex right one is left refused
+  and pinned: the reference answers infinities whose signs no rule among
+  ten measured cells shares, `_ ! 1j1` being `_j_` and `_ ! 2j3` `__j__`
+  with the same sign on the real part.
+
+- 2026-09-12 — A BINOMIAL'S DEGREE STOPS AT 2^63. `x ! y` with a whole
+  positive x is a polynomial in y of degree x, and its value at an infinity
+  is the leading term's — but only while that degree is a number the
+  arithmetic holds. `9.22337e18 ! _` is `_` in the reference and
+  `9223372036854775806 ! _`, `1e19 ! _`, `1e300 ! __` and `9.3e18 ! __` are
+  NaN errors. The boundary is exactly 2^63: `9223372036854775296` is half
+  an ulp below it and rounds to it as a double, and is refused, while
+  `9223372036854775000` rounds to the double below and answers. A NEGATIVE
+  left argument is the empty polynomial at any magnitude and answers 0
+  throughout. libjay answered the infinity at every magnitude, which only
+  the complex spelling `(1e300) ! (_j0)` had ever caught.
+
+- 2026-09-12 — WHAT THE RESIDUE ROUND MEASURED AND DID NOT FOLLOW. `x ^. y`
+  over a box or a character with a NEGATIVE left argument is the reference's
+  silent death, already pinned, and the round widened it to a family rule
+  and three more spellings. `_ ! z` for a truly complex z, the hook
+  `(|. <)` against the pair it stands for, an outfix wider than an empty
+  argument, `0 0 0 A. 2` and `('') A. (i. 3 4)`, and the obverse of a
+  constant verb under `@:` asked at three powers at once are pinned with
+  their reasons; each note carries the cells that showed the reference
+  contradicting itself or dying. Left unexplained: `". ": (2 ; ('hello'))`,
+  where the reference makes a syntax error of a row ending in a verb whose
+  name is undefined and libjay reads it as a sentence whose value is not a
+  noun; and `10 u:` of a code past the last codepoint, which is the
+  standing one-character-type model difference.

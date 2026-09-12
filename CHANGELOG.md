@@ -7,6 +7,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- FOUR CORPUS THEMES OFF THE RESIDUE ROUND (pairs 15 and 16).
+  `residue2-exact` (77 rows) is where the exact types survive a verb and
+  where they do not: `%.` taking its exactness from the system it inverts,
+  `-.` keeping a list's type against an atom, `_1 x:` and the prime queries
+  over an argument with nothing in it. `residue2-empty` (33) is catenation
+  with an empty operand — which brings no element and so names no type —
+  and the `!.f` fit whose atom names the type where nothing but fill reaches
+  the answer. `residue2-binomial` (70) is the binomial off the real line, at
+  the infinities, past the machine word, and the residue's own ordering at
+  the same values. `residue2-widths` (17) is a count, a length or an index
+  written as a complex number.
+
 - A CORPUS THEME FOR THE LEVELS ROUND, `residue-levels` (914 rows). The
   first half is `u L: n` and `u S: n` over a grid built before any code was
   written: seven levels (`_3 _2 _1 0 1 2 _`) crossed with twelve arguments
@@ -653,6 +665,59 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- `x %. y` TAKES ITS EXACTNESS FROM THE SYSTEM IT INVERTS, AND THE
+  ONE-UNKNOWN SYSTEM NO LESS THAN THE MATRIX ONE. It is `y` that is
+  inverted, so an exact left argument over a machine divisor is a FLOAT
+  answer — `(123x) %. 2` is 61.5 in the reference and `(1r2 1r3) %. 2` is
+  0.416667 — while `2 %. (123x)` is `2r123` and `(123x) %. (2x)` is
+  `123r2`. The matrix path already had the rule; the atom path divided in
+  whatever type the left argument was written in.
+
+- `x -. y` WIDENS ON BOTH RANKS. A LIST against an ATOM keeps the list's
+  type — `(1r2 1r3) -. (2.5)` is rational there — and every other pairing
+  promotes: `(1r2 1r3) -. (,2.5)`, the same number written as a one-item
+  list, is float, and so is `(1r3) -. (0.5)`, an atom on both sides. libjay
+  widened wherever the promotion was wider, whatever the ranks.
+
+- AN EMPTY OPERAND BRINGS NO ELEMENT TO A CATENATION AND SO NAMES NO TYPE,
+  and where the join is ragged and a `!.f` fit names the atom that stands in
+  the gaps, THAT atom's type is the answer's, because nothing but the fill
+  reaches it: `(i. 0 0 3) , !.0 (0 $ a:)` is a boolean `0 0 0` of shape
+  `1 1 3` in the reference, `!.'z'` over the same pair is `zzz`, `!.2.5` a
+  float and `!.(<0)` a boxed row. libjay refused the pair as boxed against
+  unboxed.
+
+- `_1 x:` AND THE PRIME QUERIES OVER AN ARGUMENT WITH NOTHING IN IT LEAVE
+  THE BOOLEAN EMPTY. `3!:0 (_1 x: (0 $ 'a'))`, the same over `(0 $ <0)`,
+  `(0 $ 0j1)` and `(0 $ 1x)`, and `3!:0 (3 p: (2 0 3 $ 0))` are all 1 in the
+  reference, where one number that happens to have no factor keeps the type
+  it was written in (`3!:0 (q: 1x)` is 64). libjay carried the argument's
+  own type through.
+
+- A COUNT, A LENGTH OR AN INDEX WRITTEN AS A COMPLEX NUMBER WHOSE IMAGINARY
+  PART IS NEGLIGIBLE IS THAT REAL NUMBER. `1 {. (r. 1p1)` is
+  `_1j1.22465e_16`, and the reference takes it as the `_1` an outfix width
+  wants, while `(2j1e_7) {. (i. 5)` is a domain error there. The window is
+  the near-integer admission and not the comparison tolerance, which
+  `9!:19 (0)` leaves it untouched by; an infinite imaginary part is no
+  rounding and stays refused.
+
+- THE COMPLEX BINOMIAL READS A ZERO IMAGINARY PART AS THE REAL NUMBER IT
+  SPELLS. A pair of those is the REAL binomial with the real rules at the
+  infinities — `0j0 ! _` is 1 there, `(__j0) ! 2` is 0 and `(_.j0) ! 2` is
+  `_.` — and an infinitely NEGATIVE left argument is 0 whatever the right
+  one is, `__ ! 1j1` as much as `__ ! 2`. A NaN anywhere else in the pair is
+  a refusal, where libjay used to answer `_.j_.`: `(1ad45) ! (_.)` is a NaN
+  error in the reference.
+
+- A BINOMIAL WHOSE WHOLE POSITIVE LEFT ARGUMENT IS PAST THE MACHINE WORD HAS
+  NO POLYNOMIAL TO READ AT AN INFINITY. `9.22337e18 ! _` is `_` in the
+  reference and `9223372036854775806 ! _`, `1e19 ! _`, `1e300 ! __` and
+  `9.3e18 ! __` are NaN errors; the boundary stands exactly at 2^63, which
+  is where `9223372036854775296` lands once it is a double and
+  `9223372036854775000` does not. libjay answered the leading term's
+  infinity at any magnitude.
 
 - `-.` KEEPS THE TYPE IT SUBTRACTED FROM OVER AN EMPTY, where the four
   other one-step verbs widen it. `3!:0 (-. (0 3 $ 0))` is the boolean type
