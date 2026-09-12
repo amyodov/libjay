@@ -17,7 +17,7 @@
 // alike too.
 u: 'é'
 ? a widened literal writes its bytes here and its characters there; reason: model
-~ cause=differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text|differ:val:empty/text|differ:val:atom/num|differ:val:vector/num|differ:val:table/num verb=u: also=^:,&.,&.:,M.,f.,::,:,!:,F..,F.:,F::,p.,p:,q:,;.,*:,+:,-:,+,-,*,%,^,^.,<.,>.,=,~:,<:,>:,|,e.,i.,x:,b.,#.,#:,j.,r.,o.,!.,H.,=.,=:
+~ cause=differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text|differ:val:empty/text|differ:val:atom/num|differ:val:vector/num|differ:val:table/num|we-refuse:err:domain_error:_#_is_not_a_Unicode_codepoint verb=u: also=^:,&.,&.:,M.,f.,::,:,!:,F..,F.:,F::,p.,p:,q:,;.,*:,+:,-:,+,-,*,%,^,^.,<.,>.,=,~:,<:,>:,|,e.,i.,x:,b.,#.,#:,j.,r.,o.,!.,H.,=.,=:,/.
 u: 233
 ? a character between 128 and 255 writes as its byte here; reason: model
 10 u: 233
@@ -137,10 +137,17 @@ $ %. (i. 4 3)
 // refuses both alike rather than following the silence.
 (_3) ^. (<1)
 ? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
+~ cause=we-refuse:err:type_error:_cannot_do_arithmetic_on_boxed_values;_open_them_first_(J_`>`|we-refuse:err:type_error:_cannot_mix_character_and_numeric_data verb=^. also=-.,":,p.,#:,#.,u:,x:,F..,F.:,F::,^:,@.,:
 (_3) ^. (<'abc')
 ? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 (_3) ^. (1;2)
 ? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
+(_3) ^. (2 2 $ 1;2;3;4)
+? the same silence over a TABLE of boxes; reason: abort
+(_16bff) ^. (2 2 $ 1;2;3;4)
+? the same silence with the negative left argument written in base sixteen; reason: abort
+(_3) ^. (2 ": 2)
+? the same silence where the right argument is the characters a format made; reason: abort
 
 // `x I. y` over BOXES. The Dictionary defines the interval index for a
 // sorted numeric list; libjay extends it to every element type that has an
@@ -299,7 +306,7 @@ _1r2 ^. _1r2
 // re-measure them before trusting it.
 (o. 1) *. 3
 ? the two float Euclids cut the same residue chain at different steps; reason: proven-wrong
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=+.,*. also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,<:,>:,=,~:,|,j.,r.,!.,&.,&.:,#.,#:,^:,%.,L:,S:,f.,|:,# answers=inexact
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=+.,*. also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,<:,>:,=,~:,|,j.,r.,!.,&.,&.:,#.,#:,^:,%.,L:,S:,f.,|:,#,!,x:,: answers=inexact
 
 // The same family REACHING A REFUSAL rather than a value. Where the two
 // GCDs part by one bit — `1 +. 1.0000000000000002` is exactly 1 there and
@@ -1132,3 +1139,102 @@ r.&:-.&:({:: :: %:) ^:(_1 0 1) 2
 ? the same, at a frame of two axes; reason: self-contradiction
 (i. 0 3) #. (0 $ a:)
 ? the reference answers a scalar here and a `,0` for the same refusal over a numeric empty; reason: self-contradiction
+
+// THE BINOMIAL WITH AN INFINITE LEFT ARGUMENT AND A COMPLEX RIGHT ONE. The
+// reference answers an infinity in both parts, and which way each of them
+// points follows no rule the ten cells measured share: `_ ! 1j1` is `_j_`,
+// `_ ! 2j3` is `__j__` and `_ ! 2j0.5` is `_j_` again, so neither the sign
+// of the right argument's real part nor the sign of its imaginary one
+// decides, and the two that differ — `2j3` and `2j0.5` — agree in both.
+// The Dictionary defines `x ! y` by the gamma functions, which have no
+// limit where the left argument runs off, and the REAL rule the reference
+// keeps at the same place (`_ ! 2` is 0) is not the one it follows here.
+// libjay refuses the pairing, as it refuses every other infinite part in
+// the complex binomial; the mirror image, `1ad45 ! _`, is a refusal there
+// too. An infinitely NEGATIVE left argument does keep the real rule, and
+// that one libjay follows: `__ ! 1j1` is 0 in both.
+_ ! 1ad45
+? the sign of each infinity here follows no rule ten measured cells share; reason: undefined
+~ cause=we-refuse:err:limit_error:_the_complex_binomial_has_no_limit_at_an_infinity verb=! also=:,_:,>.,<,L:,\.,`,j.,r.,o.,^.,+:,-:,&.,&.:,F..,F.:,F::
+_ ! 0j1
+? the same, at a right argument with no real part; reason: undefined
+_ ! 2j3
+? the same, where the real infinity points the other way for no reason the neighbours give; reason: undefined
+_ ! 2j0.5
+? the same right-hand sign with the real infinity back the first way; reason: undefined
+
+// A HOOK OF `|.` AND `<` CONTRADICTS THE PAIR IT IS SHORT FOR. `(u v) y` is
+// `y u (v y)` by the Dictionary, so `(|. <) (4 5)` is `4 5 |. (<4 5)`;
+// written out that way the reference answers `<4 5`, and written as the
+// hook it answers `<4 0`. The rotation itself is no rotation at all — a
+// boxed scalar has nothing to turn — so the 5 that becomes a 0 is inside a
+// box the sentence never opened. libjay answers what the pair answers.
+(|. <) (4 5)
+? the reference answers the hook and the pair it stands for differently; reason: self-contradiction
+~ cause=differ:val:table/text verb=|. with=< also=^:,>:,L:,S:,&.,&.:
+
+// AN OUTFIX WIDER THAN THE ARGUMENT, OVER AN ARGUMENT WITH NO ITEMS. There
+// is no complement to fold, so the answer has no items either and only its
+// SHAPE is in question. The reference gives one shape to `+/` and another
+// to `>./` over the very same empty: `$ (4 +/\. (''))` is `0 0` and
+// `$ (2 >./\. (''))` is `0`, where both verbs answer a scalar 0 over that
+// empty and neither is refused. A NUMERIC empty takes the second shape for
+// both (`$ (2 +/\. (0 $ 0))` is `0`), so it is the argument's TYPE that
+// moves one of the two and not the other. libjay gives the frame the rank
+// rules give it, which is the `0` both spellings share.
+$ (4 +/\\. (''))
+? the reference shapes this empty one way for `+/` and another for `>./`; reason: self-contradiction
+~ cause=differ:val:atom/num|differ:val:vector/num|we-refuse:err:length_error:_arguments_do_not_agree:_left_shape_#,_right_shape_#|we-refuse:err:length_error:_#_radices_for_#_digits verb=\. also=+,>.,#.,%:,`,@.,@,@:,:,^:,-:,j.
+$ (5 +/\\. (0 $ <0))
+? the same shape over a BOXED empty; reason: self-contradiction
+(4 +/\\. ('')) (([`<`%:) @. (#@:$)) (#."1 0 (3j4 1j_1))
+? the same shape, reached through a gerund index; reason: self-contradiction
+(5 +/\\. (0 $ <0)) #. (+:^:0 (i. 5))
+? the same shape, reached through a decode; reason: self-contradiction
+
+// THE OBVERSE OF A CONSTANT VERB UNDER `@:`, ASKED FOR AT THREE POWERS AT
+// ONCE. `r.@:3: ^:(_1) 2` is a domain error in the reference and `3: ^:(_1)
+// 2` is one too, so the obverse is not in its language either; asked as
+// `^:(_1 0 1)`, which runs that same obverse beside two powers that answer,
+// the reference prints NOTHING AT ALL — no value, no error — and `$` of it
+// and `3!:0` of it print nothing either. libjay says the obverse is not in
+// the language, which is what the reference says to every neighbouring
+// spelling.
+r.@:3: ^:(_1 0 1) 2
+? the reference prints neither a value nor an error here and refuses every neighbouring spelling; reason: abort
+
+// `x A. y` OVER A FRAME THAT MAKES NO PERMUTATION. The left argument's
+// atoms are the frame, so `0 0 A. (i. 3)` is two copies of `i. 3` and
+// `0 0 0 A. 2` should be three copies of the atom 2; the reference answers
+// the bare atom instead, dropping a frame it keeps whenever the right
+// argument is a list. An EMPTY left argument contradicts itself on the same
+// axis: `(0 $ 0) A. (i. 3 4)` has shape `0 3 4`, the frame with the whole
+// right argument under it, and `('') A. (i. 3 4)` — the same empty written
+// as characters — has shape `0 4`, one ITEM of it, although `'a' A. (i. 3
+// 4)` is a domain error and the character type is in no part of the domain.
+// libjay keeps the frame the rank rules give it in all three.
+0 0 0 A. 2
+? the reference drops a frame here that it keeps over a list; reason: self-contradiction
+~ cause=differ:val:vector/num|differ:val:planes/num|differ:val:table/num verb=A. also=b.,%,:,^:,n
+$ (('') A. (i. 3 4))
+? two empties of the same shape, two result shapes, over a type the domain excludes; reason: self-contradiction
+
+// The same float boundary where the answers both come back WHOLE. A floor,
+// a ceiling or a rounding downstream turns a last-digit difference into two
+// integers a digit apart — `<."1&.> ((_1) *. (_1.0000000000001))` is
+// 10007999171936 here and 10007999171935 there — and neither is written as
+// a float, so the family above, which asks for one, does not reach them.
+// The two answers are the same number to within a factor of two, which is
+// what a chain both engines lose in its last digits leaves.
+<."1&.> ((_1) *. (_1.0000000000001))
+? the two float Euclids part in the last digits and a floor shows it whole; reason: proven-wrong
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=+.,*. also=<.,>.,<:,>:,&.,&.:,o.,%,%:,^.,!,x:,:,#,|,+:,-: answers=near
+
+// `10 u:` OVER A CODE THAT IS NO CODEPOINT. `128!:3 'a'` is `_390611389`
+// there, a signed 32-bit hash, and `10 u:` of it is a four-byte character
+// whose code is past the last Unicode one. libjay holds one character type
+// whose elements are codepoints, so a code no codepoint can be is a
+// refusal. It is the same three-character-type model the rest of the `u:`
+// rows above stand on.
+10 u: (128!:3 ('a'))
+? a code past the last codepoint is a character there and no character here; reason: model

@@ -107,6 +107,18 @@
 ? jconsole answers this one with no output at all and refuses 2 ^. (<1); reason: abort
 < <error>
 > j:
+= (_3) ^. (2 2 $ 1;2;3;4)
+? the same silence over a TABLE of boxes; reason: abort
+< <error>
+> j:
+= (_16bff) ^. (2 2 $ 1;2;3;4)
+? the same silence with the negative left argument written in base sixteen; reason: abort
+< <error>
+> j:
+= (_3) ^. (2 ": 2)
+? the same silence where the right argument is the characters a format made; reason: abort
+< <error>
+> j:
 = (<'') I. (1;2;3)
 ? the reference's box comparison here tells apart only equal from unequal; reason: self-contradiction
 < 0 0 0
@@ -2949,3 +2961,69 @@
 ? the reference answers a scalar here and a `,0` for the same refusal over a numeric empty; reason: self-contradiction
 <
 > j: 0
+= _ ! 1ad45
+? the sign of each infinity here follows no rule ten measured cells share; reason: undefined
+< <error>
+> j: _j_
+= _ ! 0j1
+? the same, at a right argument with no real part; reason: undefined
+< <error>
+> j: _j__
+= _ ! 2j3
+? the same, where the real infinity points the other way for no reason the neighbours give; reason: undefined
+< <error>
+> j: __j__
+= _ ! 2j0.5
+? the same right-hand sign with the real infinity back the first way; reason: undefined
+< <error>
+> j: _j_
+= (|. <) (4 5)
+? the reference answers the hook and the pair it stands for differently; reason: self-contradiction
+< +---+
+< |4 5|
+< +---+
+> j: +---+
+> j: |4 0|
+> j: +---+
+= $ (4 +/\\. (''))
+? the reference shapes this empty one way for `+/` and another for `>./`; reason: self-contradiction
+< 0
+> j: 0 0
+= $ (5 +/\\. (0 $ <0))
+? the same shape over a BOXED empty; reason: self-contradiction
+< 0
+> j: 0 0
+= (4 +/\\. ('')) (([`<`%:) @. (#@:$)) (#."1 0 (3j4 1j_1))
+? the same shape, reached through a gerund index; reason: self-contradiction
+< <error>
+> j:
+= (5 +/\\. (0 $ <0)) #. (+:^:0 (i. 5))
+? the same shape, reached through a decode; reason: self-contradiction
+< <error>
+> j:
+= r.@:3: ^:(_1 0 1) 2
+? the reference prints neither a value nor an error here and refuses every neighbouring spelling; reason: abort
+< <error>
+> j:
+= 0 0 0 A. 2
+? the reference drops a frame here that it keeps over a list; reason: self-contradiction
+< 2
+< 2
+< 2
+> j: 2
+= $ (('') A. (i. 3 4))
+? two empties of the same shape, two result shapes, over a type the domain excludes; reason: self-contradiction
+< 0 3 4
+> j: 0 4
+= <."1&.> ((_1) *. (_1.0000000000001))
+? the two float Euclids part in the last digits and a floor shows it whole; reason: proven-wrong
+< +--------------+
+< |10007999171936|
+< +--------------+
+> j: +--------------+
+> j: |10007999171935|
+> j: +--------------+
+= 10 u: (128!:3 ('a'))
+? a code past the last codepoint is a character there and no character here; reason: model
+< <error>
+> j: ���
