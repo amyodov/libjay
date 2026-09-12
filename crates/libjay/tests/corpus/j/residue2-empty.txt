@@ -1,0 +1,42 @@
+// Catenating with an argument that has nothing in it.
+//
+// An empty operand brings no element to the answer and so names no type:
+// the other side's stands. Where NEITHER side has an element there is an
+// order of its own over the nine types, and where the join is ragged and a
+// `!.f` fit names the atom that stands in the gaps, that atom's type is the
+// answer's, because nothing but the fill reaches it.
+
+(i. 3) , (0 $ a:)
+3!:0 ((i. 3) , (0 $ a:))
+(0 $ a:) , (i. 3)
+3!:0 ((0 $ a:) , (i. 3))
+('abc') , (0 $ a:)
+3!:0 (('abc') , (0 $ a:))
+(1;2) , (0 $ 0)
+3!:0 ((1;2) , (0 $ 0))
+3!:0 ((1;2) , (''))
+$ ((i. 2 3) , (0 $ a:))
+3!:0 ((i. 2 3) , (0 $ a:))
+$ ((0 $ a:) , (i. 2 3))
+3!:0 ((0 $ a:) , (0 $ 0))
+3!:0 ((0 $ 0) , (0 $ a:))
+3!:0 (('') , (0 $ 0))
+3!:0 ((0 $ 0j1) , (0 $ 1x))
+3!:0 ((i. 3) , (0 $ 'a'))
+3!:0 ((i. 3) , (0 $ 0j1))
+
+// The fit's atom names the type where the answer is fill and nothing else.
+(i. 0 0 3) , !.0 (0 $ a:)
+$ ((i. 0 0 3) , !.0 (0 $ a:))
+3!:0 ((i. 0 0 3) , !.0 (0 $ a:))
+(i. 0 0 3) , !.'z' (0 $ a:)
+3!:0 ((i. 0 0 3) , !.'z' (0 $ a:))
+(i. 0 0 3) , !.2.5 (0 $ a:)
+3!:0 ((i. 0 0 3) , !.2.5 (0 $ a:))
+$ ((i. 0 2 3) , !.0 (0 $ a:))
+3!:0 ((i. 0 2 3) , !.0 (0 $ a:))
+3!:0 (('') , !.0 (0 $ a:))
+3!:0 ((0 $ 0) , !.0 (0 $ a:))
+3!:0 ((i. 3) , !.0 (0 $ a:))
+3!:0 ((1;2) , !.0 (0 $ 0))
+({{ try. {. y catch. 'no' end. }}) (_1 x: (0 $ <0))

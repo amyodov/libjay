@@ -1,0 +1,91 @@
+// The binomial where one side is complex, at the infinities and beside a
+// value with none.
+//
+// A complex value whose imaginary part is exactly zero is the real number
+// it spells, and a pair of those is the REAL binomial with the real rules
+// at the infinities. An infinitely negative left argument is 0 whatever the
+// right one is. A NaN in a part that is not that zero imaginary one is a
+// refusal, where the real binomial carries the NaN on.
+
+__ ! 1ad45
+2j1 ! 2
+2 ! 2j1
+1ad45 ! 2
+2 ! 1ad45
+(0.693147j1.5708) ! 2
+(^. &.+: (_2 0 2)) ! 2
+3!:0 ((^. &.+: (_2 0 2)) ! 2)
+0j0 ! _
+_.j0 ! 2
+2 ! _.j0
+(_. , 0j1) ! 2
+
+// The real pairs the complex path now answers alike.
+__ ! 2
+_ ! 2
+2 ! __
+2 ! _
+0 ! _
+_ ! 0
+0 ! __
+__ ! 0
+1 ! _
+_ ! 1
+_1 ! _
+_. ! 2
+2 ! _.
+_. ! _.
+2147483648 ! 2147483648
+
+// The residue at the infinities and beside a value with none, which is the
+// same ordering read the other way round: a zero left argument answers
+// first, an infinite RIGHT one is refused next, and only then do the two
+// infinite left arguments read the sign of what they are given.
+_. | 5
+5 | _.
+_. | _.
+_. | 0
+0 | _.
+_ | _.
+__ | _.
+_ | 5
+__ | 5
+_ | _5
+__ | _5
+_ | 0
+__ | 0
+0 | _
+0 | __
+2 | 3 _. 4
+(_. 1 2) | (1 2 3)
+2j1 | 5
+5 | 2j1
+_. | 2j1
+2j1 | _.
+
+// A DEGREE PAST THE MACHINE WORD. `x ! y` with a whole positive x is a
+// polynomial in y of degree x, and its value at an infinity is the leading
+// term's — but only while that degree is a number the arithmetic holds.
+// The boundary stands exactly at 2^63.
+9.22337e18 ! _
+1e18 ! _
+4e18 ! _
+9223372036854775000 ! _
+9223372036854775296 ! _
+9223372036854775806 ! _
+1e19 ! _
+1e300 ! _
+1e300 ! __
+9.3e18 ! __
+1e18 ! __
+_1e300 ! _
+_9223372036854775807 ! _
+1e300 ! 5
+1e300 ! (_.)
+(1e300) ! (_j0)
+(1e300) ! (__j0)
+2 ! _j0
+_j0 ! 2
+__j0 ! 2
+2 ! __j0
+_ ! 0j0

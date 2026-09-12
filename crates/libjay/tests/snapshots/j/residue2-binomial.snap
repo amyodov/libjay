@@ -1,0 +1,161 @@
+# libjay reference snapshot: J — corpus/j/residue2-binomial.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= __ ! 1ad45
+> j: 0
+= 2j1 ! 2
+> j: 0.735216j_2.20565
+= 2 ! 2j1
+> j: 0.5j1.5
+= 1ad45 ! 2
+> j: 2.52694j0.655552
+= 2 ! 1ad45
+> j: _0.353553j0.146447
+= (0.693147j1.5708) ! 2
+> j: 6.94477j3.72906
+= (^. &.+: (_2 0 2)) ! 2
+> j: 6.94473j3.72903 0 1.88147
+= 3!:0 ((^. &.+: (_2 0 2)) ! 2)
+> j: 16
+= 0j0 ! _
+> j: 1
+= _.j0 ! 2
+> j: _.
+= 2 ! _.j0
+> j: _.
+= (_. , 0j1) ! 2
+> j: _. 0.735216j2.20565
+= __ ! 2
+> j: 0
+= _ ! 2
+> j: 0
+= 2 ! __
+> j: _
+= 2 ! _
+> j: _
+= 0 ! _
+> j: 1
+= _ ! 0
+> j: 0
+= 0 ! __
+> j: 1
+= __ ! 0
+> j: 0
+= 1 ! _
+> j: _
+= _ ! 1
+> j: 0
+= _1 ! _
+> j: 0
+= _. ! 2
+> j: _.
+= 2 ! _.
+> j: _.
+= _. ! _.
+> j: _.
+= 2147483648 ! 2147483648
+> j: 1
+= _. | 5
+> j: _.
+= 5 | _.
+> j: _.
+= _. | _.
+> j: _.
+= _. | 0
+> j: _.
+= 0 | _.
+> j: _.
+= _ | _.
+> j: _
+= __ | _.
+> j: __
+= _ | 5
+> j: 5
+= __ | 5
+> j: __
+= _ | _5
+> j: _
+= __ | _5
+> j: _5
+= _ | 0
+> j: 0
+= __ | 0
+> j: 0
+= 0 | _
+> j: _
+= 0 | __
+> j: __
+= 2 | 3 _. 4
+> j: 1 _. 0
+= (_. 1 2) | (1 2 3)
+> j: _. 0 1
+= 2j1 | 5
+> j: 0
+= 5 | 2j1
+> j: 2j1
+= _. | 2j1
+> j: _.j_.
+= 2j1 | _.
+> j: _.j_.
+= 9.22337e18 ! _
+> j: _
+= 1e18 ! _
+> j: _
+= 4e18 ! _
+> j: _
+= 9223372036854775000 ! _
+> j: _
+= 9223372036854775296 ! _
+> j: <error>
+= 9223372036854775806 ! _
+> j: <error>
+= 1e19 ! _
+> j: <error>
+= 1e300 ! _
+> j: <error>
+= 1e300 ! __
+> j: <error>
+= 9.3e18 ! __
+> j: <error>
+= 1e18 ! __
+> j: _
+= _1e300 ! _
+> j: 0
+= _9223372036854775807 ! _
+> j: 0
+= 1e300 ! 5
+> j: 0
+= 1e300 ! (_.)
+> j: _.
+= (1e300) ! (_j0)
+> j: <error>
+= (1e300) ! (__j0)
+> j: <error>
+= 2 ! _j0
+> j: _
+= _j0 ! 2
+> j: 0
+= __j0 ! 2
+> j: 0
+= 2 ! __j0
+> j: _
+= _ ! 0j0
+> j: 0

@@ -5386,6 +5386,15 @@ fn binomial_at_infinity(x: f64, y: f64) -> Option<f64> {
     if x < 0.0 {
         return Some(0.0);
     }
+    // A DEGREE PAST THE MACHINE WORD LEAVES NO POLYNOMIAL TO READ. The
+    // reference answers `9.22337e18 ! _` with `_` and refuses
+    // `9223372036854775806 ! _`, `1e19 ! _` and `9.3e18 ! __`; the boundary
+    // stands exactly at 2^63, which is where `9223372036854775296` lands
+    // once it is a double and `9223372036854775000` does not. A NEGATIVE x
+    // is the empty polynomial at any magnitude and answers 0 above.
+    if x >= 9_223_372_036_854_775_808.0 {
+        return None;
+    }
     if y > 0.0 {
         return Some(f64::INFINITY);
     }
@@ -6201,15 +6210,48 @@ fn cx_op_value(op: ScalarDyad, a: Cx, b: Cx, tol: Tol, span: Span) -> Result<Cx>
         // `2 ! 1j_`, `2 ! _j_` and their mirrors — where the REAL binomial
         // answers at an infinity and the complex MONAD `! _j1` answers a
         // NaN. Only the dyad over the complex type is refused.
+        //
+        // A VALUE WHOSE IMAGINARY PART IS ZERO IS THE REAL NUMBER IT SPELLS,
+        // and a pair of those is the REAL binomial with the real rules at
+        // the infinities: `0j0 ! _` is 1 there, `(__j0) ! 2` is 0, and
+        // `(_.j0) ! 2` is `_.` where `(_.j1) ! 2` is a NaN error. It is the
+        // exact zero that decides and not the tolerance, so a value the
+        // complex arithmetic has left a rounding in stays complex.
+        //
+        // AN INFINITELY NEGATIVE LEFT ARGUMENT IS 0 wherever the right one
+        // is finite, complex or not — `__ ! 1j1`, `__ ! 0j1`, `__ ! 2j3`
+        // and `__ ! _1j_1` are all 0 there, as `__ ! 2` is.
         Binomial => {
-            if [a, b].iter().any(|z| z[0].is_infinite() || z[1].is_infinite()) {
-                return Err(Error::new(
-                    ErrorKind::Limit,
-                    "the complex binomial has no limit at an infinity",
-                    Some(span),
-                ));
+            let as_real = |z: Cx| (z[1] == 0.0).then_some(z[0]);
+            match (as_real(a), as_real(b)) {
+                (Some(x), Some(y)) => {
+                    let r = binomial(x, y);
+                    if tol.made_nan(r, x, y) {
+                        return Err(nan_error(op, x, y, span));
+                    }
+                    [r, 0.0]
+                }
+                (x, _) => {
+                    if [a, b].iter().flatten().any(|v| v.is_nan()) {
+                        return Err(Error::nan(
+                            "the complex binomial has no value beside a NaN".to_string(),
+                            span,
+                        ));
+                    }
+                    let finite = |z: Cx| z[0].is_finite() && z[1].is_finite();
+                    if x == Some(f64::NEG_INFINITY) && finite(b) {
+                        return Ok([0.0, 0.0]);
+                    }
+                    if !finite(a) || !finite(b) {
+                        return Err(Error::new(
+                            ErrorKind::Limit,
+                            "the complex binomial has no limit at an infinity",
+                            Some(span),
+                        ));
+                    }
+                    cx::binomial(a, b)
+                }
             }
-            cx::binomial(a, b)
         }
         Eq | Ne | Lt | Le | Gt | Ge => {
             return Err(Error::internal("a comparison in the complex arithmetic path"));
@@ -7774,6 +7816,13 @@ fn to_exact(y: &Array, span: Span) -> Result<Array> {
 /// as an integer where it fits, a rational as a float.
 fn from_exact(y: &Array) -> Array {
     let shape = y.shape.clone();
+    // AN ARGUMENT WITH NOTHING IN IT NAMES NO TYPE TO COME BACK FROM, and
+    // the answer is the boolean empty a refused fill leaves, whatever the
+    // empty was written as: `3!:0 (_1 x: (0 $ 'a'))`, `(0 $ <0)`,
+    // `(0 $ 0j1)`, `(0 $ 1x)` and `(0 $ 0)` are all 1 in the reference.
+    if y.count() == 0 {
+        return Array::new(shape, Data::Bool(Vec::new().into()));
+    }
     match &y.data {
         Data::Ext(v) => match v.iter().map(exact::ext_to_i64).collect::<Option<Vec<i64>>>() {
             Some(out) => Array::new(shape, Data::I64(out.into())).with_layout(y.layout()),
@@ -10429,7 +10478,18 @@ fn catenate_at(
     // A side with nothing in it names no type at all, not even where the
     // two types would have promoted: `3!:0 ((0) , (0 $ 1x))` is the boolean
     // type in the reference and `3!:0 ((0 $ 5) , (0))` the same.
-    let (xa, ya) = match empty_type(x, y).filter(|_| fill) {
+    // WHERE NOTHING BUT THE FILL REACHES THE ANSWER, THE FILL NAMES ITS
+    // TYPE. Two sides with no elements and an axis they disagree on make an
+    // answer of fill cells and nothing else, and `u!.f` says which atom
+    // those are: `(i. 0 0 3) , !.0 (0 $ a:)` is a BOOLEAN `0 0 0` there,
+    // `!.'z'` over the same pair is `zzz`, `!.2.5` a float and `!.(<0)` a
+    // boxed row. A join that places no fill keeps the order over the nine
+    // types — `('') , !.0 (0 $ a:)` is the boxed empty — and so does one
+    // with elements of its own.
+    let empty_pair = x.count() == 0 && y.count() == 0;
+    let uneven = (0..rank).any(|k| k != axis && xa.shape[k] != ya.shape[k]);
+    let by_fill = filled.filter(|_| fill && empty_pair && uneven).map(FillAtom::dtype);
+    let (xa, ya) = match by_fill.or_else(|| empty_type(x, y).filter(|_| fill)) {
         None => (xa, ya),
         Some(dt) => {
             let retype = |a: Array| {
@@ -13581,10 +13641,16 @@ fn dyad_op_inner(p: &Prim, x: &Array, y: &Array, cfg: EvalCfg, span: Span) -> Re
         DyadOp::UnicodeForm => unicode_form(x, y, cfg.near(), span),
         DyadOp::SymbolForm => symbol_form(x, y, span),
         DyadOp::SparseForm => sparse_form(x, y, cfg.near(), span),
-        DyadOp::PrimeMeta => prime_meta(x, y, cfg.near(), span).map(|r| carry_exact2(r, x, y)),
-        DyadOp::PrimeExponents => {
-            prime_exponents(x, y, cfg.near(), span).map(|r| carry_exact2(r, x, y))
-        }
+        // AN ARGUMENT WITH NO ELEMENTS NAMES NO TYPE FOR A PRIME QUERY TO
+        // CARRY, and the answer is the boolean empty a refused fill leaves:
+        // `3!:0 (3 p: (0 $ 1x))` is 1 in the reference where `3!:0 (q: 1x)`
+        // — one number with no factor — is the extended 64. The tally and
+        // the shape of the same empty keep the extended type, so the rule
+        // is the prime queries' own.
+        DyadOp::PrimeMeta => prime_meta(x, y, cfg.near(), span)
+            .map(|r| if y.count() == 0 { r } else { carry_exact2(r, x, y) }),
+        DyadOp::PrimeExponents => prime_exponents(x, y, cfg.near(), span)
+            .map(|r| if y.count() == 0 { r } else { carry_exact2(r, x, y) }),
         DyadOp::Pick { origin } => pick(x, y, origin, cfg.near(), span),
         DyadOp::Expand => expand(
             x,
@@ -18292,7 +18358,19 @@ fn matrix_divide(
             let recip = scalar_monad(ScalarMonad::Recip, y, cfg, span)?;
             return scalar_dyad(ScalarDyad::Mul, &total, &recip, cfg, span);
         }
-        return match scalar_dyad(ScalarDyad::DivJ, &total, y, cfg, span) {
+        // THE SYSTEM CARRIES THE EXACTNESS, and the one-unknown system no
+        // less than the matrix one: it is `y` that is inverted, so an
+        // exact left argument over a machine divisor is a FLOAT answer
+        // there — `(123x) %. 2` is 61.5 and `(1r2 1r3) %. 2` is 0.416667 —
+        // while `2 %. (123x)` is `2r123` and `(123x) %. (2x)` is `123r2`.
+        let demoted = match total.dtype() {
+            DType::Ext | DType::Rat if !matches!(y.dtype(), DType::Ext | DType::Rat) => {
+                total.cast(DType::F64)
+            }
+            _ => None,
+        };
+        let solve = demoted.as_ref().unwrap_or(&total);
+        return match scalar_dyad(ScalarDyad::DivJ, solve, y, cfg, span) {
             Err(e) if e.kind == ErrorKind::Nan => {
                 Ok(zeros(Data::F64(vec![0.0; count].into())))
             }
@@ -24431,9 +24509,24 @@ fn set_less(x: &Array, y: &Array, tol: Tol) -> Array {
     // SHARE, not in the one the left was written in: `(1r2 1r3) -. (_ __ 0)`
     // is `0.5 0.333333` in the reference, a FLOAT answer to a rational
     // question, because the float on the right is the wider of the two.
+    //
+    // A LIST AGAINST AN ATOM WIDENS NOTHING. The reference reads a single
+    // value against a list's own type and leaves it as it was:
+    // `(1r2 1r3) -. (2.5)` is rational there and `(1r2 1r3) -. (,2.5)` —
+    // the same number written as a one-item LIST — is float, and the same
+    // pair of answers comes back for `(0j1)`, `(_)` and `(_.)` and for an
+    // extended left argument. It is the RANK that decides and not the
+    // count, and it is BOTH ranks: an ATOM on the left widens as readily as
+    // a list on the right does, `(1r3) -. (0.5)` being float there where
+    // `(,1r3) -. (0.5)` is rational.
     let widened;
     let x = match DType::promote(x.dtype(), y.dtype()) {
-        Some(t) if t != x.dtype() && x.dtype().is_exact() && y.dtype().is_numeric() => {
+        Some(t)
+            if t != x.dtype()
+                && (y.rank() > 0 || x.rank() == 0)
+                && x.dtype().is_exact()
+                && y.dtype().is_numeric() =>
+        {
             match x.cast(t) {
                 Some(a) => {
                     widened = a;
@@ -26218,6 +26311,15 @@ fn prime_factor_rows(y: &Array, near: NearInt, span: Span) -> Result<Array> {
     }
     let mut shape = y.shape.clone();
     shape.push(width);
+    // AN ARGUMENT WITH NO ITEMS FACTORISES NOTHING, and the table it leaves
+    // is the boolean empty a refused fill leaves rather than the argument's
+    // own type: `3!:0 (3 p: (2 0 3 $ 0))`, `3!:0 (3 p: (0 $ 0))` and
+    // `3!:0 (3 p: (2 0 3 $ 1))` are all 1 in the reference, where
+    // `3!:0 (3 p: 1)` — one number that happens to have no factor — is the
+    // integer 4.
+    if y.count() == 0 {
+        return Ok(Array::new(shape, Data::Bool(Vec::new().into())));
+    }
     Ok(Array::new(shape, whole_data(all, y)))
 }
 

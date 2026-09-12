@@ -16,8 +16,8 @@
 //! mismatch inside the file is reported at once.
 //!
 //! (Touched when the `obverses-*`, `explicit-*`, `representations-*`,
-//! `specials-d1`, `modifiers-d1`, `residue-*`, `residue-levels` and
-//! `residue-empty-*` themes
+//! `specials-d1`, `modifiers-d1`, `residue-*`, `residue-levels`,
+//! `residue-empty-*` and `residue2-*` themes
 //! were added, so that the glob below is expanded again — see
 //! `every_corpus_file_is_recorded`.)
 

@@ -1305,12 +1305,22 @@ impl Array {
     /// relative and follows the comparison tolerance in force. Everything a
     /// full integer apart is still a refusal in all three.
     pub fn to_i64_vec_near(&self, near: NearInt) -> Option<Vec<i64>> {
-        let Data::F64(v) = &self.data else {
+        match &self.data {
+            Data::F64(v) => v.iter().map(|&x| near.round(x)).collect(),
+            // A COMPLEX VALUE WITH A NEGLIGIBLE IMAGINARY PART IS THE REAL
+            // NUMBER IT SPELLS, by the same admission. `(1 {. (r. 1p1))` is
+            // `_1j1.22465e_16`, and the reference takes it as the `_1` an
+            // outfix width wants, while `(2j1e_7) {. (i. 5)` is a domain
+            // error there: the window is the near-integer one and not the
+            // comparison tolerance, which `9!:19 (0)` leaves it untouched
+            // by.
+            Data::Complex(v) => {
+                v.iter().map(|&z| near.real_part(z).and_then(|x| near.round(x))).collect()
+            }
             // Every other type is exact or is refused outright; only a
             // float can be near a whole number without being one.
-            return self.to_i64_vec();
-        };
-        v.iter().map(|&x| near.round(x)).collect()
+            _ => self.to_i64_vec(),
+        }
     }
 }
 
@@ -1361,6 +1371,26 @@ impl NearInt {
             NearInt::Tolerant(tol) => tol.eq(x, n),
         };
         (within && n.abs() < i64::MAX as f64).then_some(n as i64)
+    }
+
+    /// The real number a complex value spells, where its imaginary part is
+    /// negligible beside it by this same admission.
+    pub fn real_part(self, z: crate::complex::Cx) -> Option<f64> {
+        if z[1] == 0.0 {
+            return Some(z[0]);
+        }
+        // An INFINITE imaginary part is no rounding: `0j_` is a count in no
+        // language, and a relative window would admit it against an
+        // infinite scale.
+        if !z[0].is_finite() || !z[1].is_finite() {
+            return None;
+        }
+        let within = match self {
+            NearInt::J => z[1].abs() <= Self::J_RELATIVE * z[0].abs().max(z[1].abs()),
+            NearInt::Apl => z[1].abs() < Self::APL_ABSOLUTE,
+            NearInt::Tolerant(tol) => tol.eq_cx(z, [z[0], 0.0]),
+        };
+        within.then_some(z[0])
     }
 }
 

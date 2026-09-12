@@ -1,0 +1,25 @@
+// A COUNT, A LENGTH OR AN INDEX WRITTEN AS A COMPLEX NUMBER.
+//
+// Wherever a whole number is wanted, a complex value whose imaginary part
+// is negligible beside its real one is that real number. The window is the
+// near-integer admission and not the comparison tolerance: `9!:19 (0)`
+// leaves it exactly where it was, and a part a full `1e_7` out is still a
+// domain error.
+
+(1 {. (r. (1p1))) +/\\. (i. 5)
+(2j0) {. (i. 5)
+(2j0.0000001) {. (i. 5)
+(2j0) # (i. 3)
+(2j0) $ 5
+(2j0) |. (i. 5)
+(2j0) { (i. 5)
+(2j0) A. (i. 3)
+(2j0) +/\\. (i. 5)
+(2j0) +/\\ (i. 5)
+(2j1) +/\\. (i. 5)
+(2.5) +/\\. (i. 5)
+(_1j0) +/\\. (i. 5)
+(2j1) {. (i. 5)
+(2j0) <\\ (i. 4)
+(2j0) |: (i. 2 3)
+(2j0) ^: 2
