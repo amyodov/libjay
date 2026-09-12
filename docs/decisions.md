@@ -6385,3 +6385,91 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   `(0 0 $ 0.5) #. (<0)` is a domain error. Two hundred and sixty cells were
   measured as `(3!:0 , $)` and no reading of them survives all four. The
   agreeing rule is recorded; the corners are pinned as a family.
+
+- 2026-09-12 — AN ATOM'S BUFFER HOLDS ITS ELEMENT, AND AN EMPTY BUFFER
+  HOLDS NOTHING. `Buf` was a refcounted vector in every shape, so an array
+  of one number cost two allocations — the vector and the refcount box —
+  and an array of no numbers cost one. Both are now representations of
+  their own: one element lives in sixteen bytes inside the buffer, an empty
+  buffer owns nothing at all. The inline form is taken only where the
+  element type fits that room, is no more aligned than it, and needs no
+  drop, which is every machine-word type and excludes exactly the
+  heap-backed ones — the boxes, the extended integers and the rationals —
+  whose elements must keep being dropped. Cloning an inline buffer copies
+  the element rather than sharing it, which is the same value with the same
+  copy-on-write behaviour the shared forms give, one step earlier. The
+  measurement behind it: a profile of a fold over a million rows with an
+  explicit step spent a quarter of its time in `malloc` and `free`, and
+  every one of those allocations was an intermediate atom.
+
+- 2026-09-12 — A CALL'S LOCALS ARE A VECTOR OF NAMED SLOTS, AND THE CALL
+  STACK IS KEPT RATHER THAN REBUILT. A definition has a handful of locals,
+  so a hash table is the wrong shape for them: hashing a name costs more
+  than comparing it, and keying the table costs a string allocation per
+  argument per call. The frame is now a vector searched by comparing names,
+  and the stack of frames is never popped — a call enters the frame its
+  LEVEL used last, emptied of its values and still holding its names, so a
+  definition applied once per item of a fold writes its arguments into
+  slots that are already there. A frame that has collected more names than
+  a definition plausibly writes (sixteen) is emptied outright rather than
+  kept, so an unrelated definition taking the level does not inherit a
+  scan. The definition handle at a level is only cloned where a different
+  definition takes it.
+
+- 2026-09-12 — A CALL THAT DOES NOT MOVE THE LOCALE DOES NOT SAVE AND
+  RESTORE IT. The locale was copied on the way into every explicit call and
+  looked up again on the way out, because a `cocurrent` the body runs must
+  last only as long as the call. The current locale's name is now shared
+  rather than owned, so keeping hold of it is free, and putting it back is
+  skipped where what is current is still the very name that was taken —
+  which is every call whose body did not run `cocurrent`.
+
+- 2026-09-12 — AN ATOM AGAINST AN ATOM UNDER A SCALAR PRIMITIVE IS ONE
+  OPERATION. The pair reached the arithmetic through the rank machinery:
+  the verb's three ranks, the effective cell rank on each side, the
+  agreement of two empty frames — which can only ever be the empty frame,
+  one pair, and no spreading on either side — and then a fill of one
+  element through the parallel splitter and the CPU feature dispatcher.
+  Every one of those derives a constant. The pair now goes straight to the
+  arithmetic the machinery would have reached, and the agreement of two
+  atoms is written down rather than computed. It is the commonest
+  application an explicit definition's body makes, and nothing about it is
+  particular to the fold.
+
+- 2026-09-12 — A PASS OF A FEW ELEMENTS TAKES THE BASELINE COMPILATION, IN
+  THE ELEMENTWISE DYADS TOO. `VECTOR_COLUMNS` already carried the rule for
+  the fold across an item's columns — a loop of a few elements spends more
+  entering a vector body than the width gives back — and the three
+  elementwise dyad passes (float, integer, complex) now follow it: below
+  sixteen elements the loop runs straight instead of through the level
+  dispatch and the multiversioned clone's own. A pass of ONE element builds
+  no vector either, which is the atom's answer and is a machine word.
+
+- 2026-09-12 — WHAT PERF ROUND 2 DID NOT CLOSE, AND WHY. The defined-step
+  fold went from 2884 ms to 1852 over a million steps against jconsole's
+  430, and the six algorithms all moved with it because the mechanisms are
+  general. What is left is not an allocation and not a dispatch layer: a
+  bare call to `4 : 'y'` is 485 ns and each scalar primitive application
+  inside a body is about 275 ns, spent walking an expression tree, moving a
+  104-byte array value across every edge of it and bumping a refcount at
+  every name read. Closing that would mean a different value representation
+  inside a small explicit definition — an unboxed scalar living in a
+  register between the nodes of one expression — which is a round of its
+  own and a much larger change than any of the five above. The alternative
+  considered and rejected was a recogniser for the scalar bodies the
+  benchmark happens to use, which would be a benchmark-shaped special case
+  rather than a cost removed.
+
+- 2026-09-12 — THE CORRELATION FUSION HAS NO APL SPELLING TO RECOGNISE.
+  `w (u/@(c&v))\ y` is a windowed reduce of a constant combination, and the
+  question was whether APL writes one. It does not: `n f/ y` inserts f
+  BETWEEN the items of each window — that is the typed window fold, which
+  APL has shared with J since round 1, the path being the IR's and not
+  either frontend's — and the only APL operator that hands a whole window
+  to a function is Dyalog's stencil `⌺`, whose windows are centred on every
+  cell and filled at the edges. A 17-wide stencil answers one value per
+  item where `17 u\ y` answers one per complete window, so the fused pass
+  as built computes a different answer and fusing the stencil would be a
+  kernel of its own. It is also the one construct here whose only reference
+  is Dyalog — GNU APL rejects `⌺` — so there would be nothing in this
+  corpus to check it against.

@@ -360,31 +360,38 @@ else.
 
 | algorithm | size | J | libjay | numpy | numba | jconsole |
 |---|---|---|---:|---:|---:|---:|
-| KAMA | 1,000,000 bars | `10 2 30 KAMA {close}` | 2800 | 483 | 21 | 497 |
-| variance ratio | 1,000,000 bars, q=8 | `8 VR {p}` | 37 | 26 | — | 21 |
-| Hurst R/S | 1,000,000 returns, 9 block sizes | `{lens} HURST {x}` | 320 | 119 | — | 94 |
-| Savitzky-Golay | 1,000,000 samples, 17-tap cubic | `(SGCOEF 8 3 0) SGFILT {sig}` | 25 | 13 | — | 477 |
-| extreme learning machine | 100,000 by 16, 64 hidden | `({w} ; {b} ; 0.1) ELMFIT {x} ; {t}` | 521 | 302 | — | 306 |
-| Hopfield recall | 1024 units, 256 probes, 10 sweeps | `({w} ; 10) RECALL {probe}` | 186 | 63 | — | 654 |
+| KAMA | 1,000,000 bars | `10 2 30 KAMA {close}` | 1924 | 441 | 25 | 484 |
+| variance ratio | 1,000,000 bars, q=8 | `8 VR {p}` | 22 | 21 | — | 21 |
+| Hurst R/S | 1,000,000 returns, 9 block sizes | `{lens} HURST {x}` | 308 | 110 | — | 83 |
+| Savitzky-Golay | 1,000,000 samples, 17-tap cubic | `(SGCOEF 8 3 0) SGFILT {sig}` | 19 | 14 | — | 472 |
+| extreme learning machine | 100,000 by 16, 64 hidden | `({w} ; {b} ; 0.1) ELMFIT {x} ; {t}` | 446 | 300 | — | 322 |
+| Hopfield recall | 1024 units, 256 probes, 10 sweeps | `({w} ; 10) RECALL {probe}` | 177 | 70 | — | 653 |
 
-libjay wins two of the six and loses four. The first reading of this table
-lost five, and the losses concentrated in three constructs; two of the
-three have fused paths now and the third has not. The Savitzky-Golay row
-moved from 1577 ms to 25 — nineteen times faster than jconsole, and within
-twice of numpy's BLAS — and the variance ratio from 805 to 37, both of them
-by the same two fusions. What is left is the FOLD: KAMA is a fold over a
-million rows with an explicit dyad and nothing else, and 2800 of its 2800
-milliseconds are that fold. The Hurst exponent, the extreme learning
-machine and the variance ratio are within 1.7 to 3.4 times of jconsole on
-work that is neither — rank, sorting and one matrix solve — and the
-Hopfield row, which is nothing but matrix products on a fused path, is 3.5
-times faster than jconsole.
+libjay wins two of the six, draws one and loses three. The first reading of
+this table lost five, and the losses concentrated in three constructs; two
+of the three were closed by fusing them, and the third — the FOLD with an
+explicit step — has no fusion to be had and was closed on instead, by
+making the interpreter itself cheaper. The Savitzky-Golay row moved from
+1577 ms to 19 — twenty-five times faster than jconsole, and a third more
+than numpy's BLAS — the variance ratio from 805 to 22, which is jconsole's
+own 21 and numpy's own 21, and KAMA from 2800 to 1924. Every row of this
+table moved in the second round, because what that round removed — the
+allocation behind every atom, the hash table behind every local name, the
+rank machinery in front of every scalar pair — is spent by every program
+and not by the fold alone.
 
-(The three measurements this table is compared against were taken on the
-same machine a week earlier, and the numpy column moved by 10 to 20 per
-cent between the two readings; the libjay column's movements below are
-larger than that by one to two orders of magnitude, and the jconsole
-column is measured beside each of them.)
+KAMA is still the row that loses worst: it is a fold over a million rows
+with an explicit dyad and nothing else, and it is four times jconsole where
+it was six. The Hurst exponent and the extreme learning machine are within
+1.4 to 3.7 times of jconsole on work that is neither fold nor fusion —
+rank, sorting and one matrix solve — and the Hopfield row, which is nothing
+but matrix products on a fused path, is 3.7 times faster than jconsole.
+
+(Every column is remeasured whenever the table is. Between readings the
+numpy column has moved by 10 to 20 per cent and the jconsole column by
+under 10, which is the scatter to read the libjay column's own movements
+against; both references are measured beside libjay each time and not
+carried forward.)
 
 ## Findings
 
@@ -456,16 +463,20 @@ window is folded directly inside the same typed loop — `n` steps per result
 and no array built. Over a million doubles, best of three,
 `LIBJAY_THREADS=4`:
 
-| kernel | libjay before | libjay | jconsole |
-|---|---:|---:|---:|
-| `2 +/\ y` | 2.9 ms | 3.0 ms | 1.1 ms |
-| `2 */\ y` | 3.4 ms | 2.2 ms | 1.2 ms |
-| `2 -/\ y` | 481 ms | 1.6 ms | 1.0 ms |
-| `2 -~/\ y` | 584 ms | 1.4 ms | 1.0 ms |
-| `2 <./\ y` | — | 2.3 ms | 0.9 ms |
-| `(1 }. y) - _1 }. y` | 1.6 ms | 1.3 ms | 0.9 ms |
-| `10 +/\ y` | 1.9 ms | 2.2 ms | 1.6 ms |
-| `10 -/\ y` | — | 4.1 ms | 148 ms |
+| kernel | libjay before | round 1 | round 2 | jconsole |
+|---|---:|---:|---:|---:|
+| `2 +/\ y` | 2.9 ms | 3.0 ms | 2.3 ms | 0.9 ms |
+| `2 */\ y` | 3.4 ms | 2.2 ms | 2.5 ms | 0.9 ms |
+| `2 -/\ y` | 481 ms | 1.6 ms | 1.2 ms | 1.1 ms |
+| `2 -~/\ y` | 584 ms | 1.4 ms | 1.4 ms | 0.9 ms |
+| `2 <./\ y` | — | 2.3 ms | 2.7 ms | 1.0 ms |
+| `(1 }. y) - _1 }. y` | 1.6 ms | 1.3 ms | 1.6 ms | 0.9 ms |
+| `10 +/\ y` | 1.9 ms | 2.2 ms | 2.0 ms | 1.3 ms |
+| `10 -/\ y` | — | 4.1 ms | 3.2 ms | 149 ms |
+
+The round-2 column is the same typed loop as the round-1 one, remeasured:
+the two differ by less than the readings scatter, which at a millisecond
+over a million doubles is most of the number.
 
 The difference over an infix now costs what the sum does, which is what the
 two spellings mean: `2 -~/\ y` and `(1 }. y) - _1 }. y` are within noise of
@@ -485,11 +496,11 @@ it is a composition applied once per window; read as arithmetic it is a
 correlation, and it is now recognised as one and run in a single pass with
 the weights in registers.
 
-| kernel, 1e6 samples, 17-tap | libjay before | libjay | jconsole | numpy |
-|---|---:|---:|---:|---:|
-| `17 (+/ @ (c & *))\ y` | 1686 ms | 21.5 ms | 473 ms | 12.3 ms |
-| `17 (+/ @: (c & *))\ y` | — | 22.8 ms | 480 ms | — |
-| `17 (c +/ . * ])\ y` | — | 23.0 ms | 401 ms | — |
+| kernel, 1e6 samples, 17-tap | libjay before | round 1 | round 2 | jconsole | numpy |
+|---|---:|---:|---:|---:|---:|
+| `17 (+/ @ (c & *))\ y` | 1686 ms | 21.5 ms | 18.0 ms | 465 ms | 12.9 ms |
+| `17 (+/ @: (c & *))\ y` | — | 22.8 ms | 16.3 ms | 469 ms | — |
+| `17 (c +/ . * ])\ y` | — | 23.0 ms | 16.3 ms | 393 ms | — |
 
 The three spellings are one arithmetic and are recognised together, along
 with `u&c` for the bond written the other way round and any scalar fold and
@@ -504,6 +515,18 @@ float either way, and a step that makes a NaN abandons the whole pass to
 the general road, whose rules for the infinities and the signed zeroes are
 the dialect's own.
 
+There is no APL spelling of it to recognise. APL's windowed reduction
+`n f/ y` INSERTS f between the items of each window rather than applying a
+function to the window, so it is the other kernel — the typed window fold —
+and it has shared that one since round 1, the path being the IR's rather
+than either frontend's. The only APL operator that hands a whole window to
+a function is Dyalog's stencil `⌺`, and its windows are not these: they are
+centred on every cell and filled at the edges, so a 17-wide stencil answers
+one value per item where `17 u\ y` answers one per complete window. Fusing
+it would be a kernel of its own, over a different set of windows, and the
+one reference that defines it is Dyalog, which is a permitted oracle but is
+not the one this corpus is recorded against.
+
 ### The fold is interpreted, and a defined step is what it costs
 
 Where the step is a scalar PRIMITIVE there is nothing to interpret — `]`
@@ -513,30 +536,53 @@ step is a DEFINED verb, no such thing is possible: the point of the
 construct is that step i+1 needs step i, and what runs at every step is an
 explicit definition.
 
-| kernel, 1e6 items | libjay before | libjay | jconsole | numba |
-|---|---:|---:|---:|---:|
-| `0 (] F:. f) m`, `f` a defined dyad | 3877 ms | 2884 ms | 460 ms | 3.6 ms |
-| `0 (] F:. +) y`, a primitive | 619 ms | 4.4 ms | 137 ms | — |
-| `0 (] F.. +) y`, its single form | — | 4.5 ms | 45 ms | — |
+| kernel, 1e6 items | libjay before | round 1 | round 2 | jconsole | numba |
+|---|---:|---:|---:|---:|---:|
+| `0 (] F:. f) m`, `f` a defined dyad | 3877 ms | 2884 ms | 1852 ms | 430 ms | 3.6 ms |
+| `0 (] F:. +) y`, a primitive | 619 ms | 4.4 ms | 3.7 ms | 111 ms | — |
+| `0 (] F.. +) y`, its single form | — | 4.5 ms | 3.7 ms | 43 ms | — |
 
-The defined-dyad fold is a quarter faster than it was — the items are read
-where the step needs them instead of all at once, the results are kept in a
-flat buffer, the call's frame is reused, the stitch `sc ,. q` that builds
-the argument is one pass, and a name with no underscore in it skips the
-three scans a locative needs — and it is still six times slower than the
-reference. A profile of it says where the rest is, at a million steps of
-`y + ({. x) * ({: x) - y`: a quarter of the time is in `malloc` and `free`,
-a sixth in the interpreter's own dispatch, and the rest spread over the
-frame's hash table, the argument arrays each primitive makes and the
-rank machinery each one walks. Every one of those is per-STEP work that a
-compiled inner loop does not do at all, which is what numba's 3.6 ms is:
-the same recursion as machine code over two float buffers.
+Round 1 read the items where the step needs them instead of all at once,
+kept the results in a flat buffer and built the argument `sc ,. q` in one
+pass. Round 2 went after what each STEP costs, and a profile is what said
+where that was, at a million steps of `y + ({. x) * ({: x) - y`: a quarter
+of the time in `malloc` and `free`, a sixth in the interpreter's own
+dispatch, and the rest spread over the frame's hash table, the argument
+arrays each primitive makes and the rank machinery each one walks. Four
+mechanisms came out of it, none of them about the fold:
 
-What would close it is not another fusion but a different shape of
-interpreter for the inside of a small explicit definition — a resolved
-local slot instead of a hash lookup, an unboxed scalar instead of an array
-per intermediate. That is a round of its own, and it is what the KAMA row
-of the table above is waiting for.
+- An atom's buffer holds its element rather than pointing at a refcounted
+  vector of one, and an empty buffer holds nothing rather than pointing at
+  a refcounted vector of none. A scalar verb's every intermediate is an
+  atom, so this is where the allocation was; the boxes and the exact
+  numbers, which are heap-backed elements, keep the road they were on.
+- A call's locals live in a small vector of named slots rather than a hash
+  table, and the stack of frames is kept rather than rebuilt: a call enters
+  the frame its level used last, which already holds that definition's
+  names, and writes its arguments into slots that are already there. No
+  name is hashed and no name is allocated.
+- A call that does not move the locale does not save and restore it. The
+  save existed so that a `cocurrent` in the body would last only as long as
+  the call; the name is now shared rather than copied, and putting it back
+  is skipped where the body left it alone.
+- An atom against an atom under a scalar primitive goes straight to the
+  arithmetic. The rank machinery would derive the verb's ranks, the cell
+  rank on each side and the agreement of two empty frames to arrive at
+  exactly that call, and the fill of one element would go through the
+  parallel splitter and the CPU-level dispatcher to compute it.
+
+The step is now 1852 ns rather than 2884, and the same measurement taken
+apart says what is left: a bare call — `0.5 (] F:. (4 : 'y')) y`, which
+binds two names, runs one sentence and answers — is 485 ns of it, and each
+of the five primitive applications in `KSTEP` is about 275 ns more. Neither
+number is an allocation any more; they are the interpreter walking a tree,
+moving a 104-byte array value at every edge of it, and bumping a refcount
+whenever a name is read. Closing the remaining four-fold would mean a
+different value representation inside a small definition — an unboxed
+scalar carried in a register between the nodes of one expression — rather
+than another cost removed from the one there is. numba's 3.6 ms is the
+bound that sets: the same recursion as machine code over two float buffers,
+with no value representation at all.
 
 The closed form is not a way out: the recursion unrolls into a cumulative
 product of `1 - sc`, which underflows to zero within a few hundred bars.

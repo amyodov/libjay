@@ -411,6 +411,50 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- AN ATOM'S BUFFER HOLDS ITS ELEMENT, AND AN EMPTY ONE HOLDS NOTHING. A
+  buffer of one element was a refcounted vector — two allocations for one
+  number — and an empty one was a refcounted vector of nothing, which is one
+  allocation for no number at all. Both are now held in the buffer itself,
+  for every element type that fits a machine word pair and needs no drop;
+  the boxes and the exact numbers keep the heap they were always on. Every
+  intermediate a scalar verb makes is an atom, so this is the allocation an
+  interpreted expression was spending most of its time on: a profile of a
+  fold over a million rows with an explicit step had a quarter of its time
+  in `malloc` and `free`, and has none of it there now.
+
+- A CALL'S FRAME IS A KEPT STACK OF NAMED SLOTS. An explicit definition's
+  locals lived in a hash table built per call, so every application hashed
+  each argument name and allocated a string to key it with. They now live in
+  a small vector searched by comparing the names, and the stack of frames is
+  kept rather than rebuilt: a call enters the frame its level used last,
+  which still holds that definition's names, and writes its arguments into
+  slots that are already there. The definition handle at a level is only
+  cloned where a different definition takes the level.
+
+- A CALL THAT DOES NOT MOVE THE LOCALE DOES NOT SAVE AND RESTORE IT. Every
+  application of an explicit definition copied the current locale's name on
+  the way in and looked it up again on the way out, so that a `cocurrent`
+  the body ran would last only as long as the call. The name is now shared
+  rather than copied, and putting it back is skipped where the body left the
+  locale where it found it — which is every call that does not run
+  `cocurrent`.
+
+- AN ATOM AGAINST AN ATOM UNDER A SCALAR PRIMITIVE IS ONE OPERATION. The
+  pair went through the rank machinery to arrive at the arithmetic: the
+  verb's ranks, the effective cell rank on each side, the agreement of two
+  empty frames, then a fill of one element through the parallel splitter and
+  the CPU-level dispatcher. There is no frame to agree, no cell to walk and
+  no thread to hand it to, and the pair now goes straight to the arithmetic
+  the rank machinery would have reached. It is the commonest application an
+  explicit definition's body makes.
+
+- A PASS OF A FEW ELEMENTS TAKES THE BASELINE COMPILATION. The rule
+  `VECTOR_COLUMNS` already carries for the fold across an item's columns —
+  a loop of a few elements spends more on entering a vector body than the
+  width gives back — and the elementwise dyad passes now follow it too,
+  running the loop straight instead of through two layers of feature
+  dispatch.
+
 - `u"v` TAKES v'S RANKS AS `b. 0` REPORTS THEM. A negative rank leaves a
   fixed number of frame axes, so what it will take of any argument has no
   bound and the reference reports it as infinite; the rank conjunction reads
