@@ -6285,3 +6285,103 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   `4 0 5 2`, every one of them y's own shape behind the frame. libjay ran an
   empty block, which made every such answer `0` where the argument had
   items.
+
+- 2026-09-12 — THE NEGATIVE LEVEL WAS ALREADY THE RULE, AND THE LEVELS
+  RESIDUE WAS NEVER ABOUT LEVELS. A grid built before any code was written
+  — seven levels (`_3 _2 _1 0 1 2 _`) against twelve arguments from depth 0
+  to depth 3, as a monad, as a dyad with the two sides at unlike depths, and
+  in the two-level spelling `u L: m n`, 2,016 sentences in all — agreed with
+  the reference in FULL. A negative level is the argument's own depth plus
+  the level held at zero, level 0 of a simple array is the whole array, and
+  both were already implemented. What the sweep had been calling a levels
+  failure was six other mechanisms wearing `L:` and `S:` as a wrapper; 914
+  of the grid's cells and the six mechanisms' own are recorded as
+  `residue-levels`.
+
+- 2026-09-12 — `u"v` TAKES v'S RANKS AS `b. 0` REPORTS THEM, NOT AS THEY
+  WERE WRITTEN. A negative rank leaves a fixed number of frame axes, so what
+  it will take of any argument has no bound and the reference reports it as
+  infinite — `(+"_1) b. 0` and `(0"_1) b. 0` are both `_ _ _`, and
+  `(+"1 _1) b. 0` is `_ 1 _`, one place at a time. The rank conjunction
+  reads that report rather than the operand's stored ranks, so
+  `$ ,"(0"_1) (i. 2 3)` is 6 — the whole argument — where `$ ,"_1 (i. 2 3)`
+  is `2 3`, and `$ +/"(0"_1) (i. 2 3)` is 3 where `+/"_1` sums the rows.
+  The verb ITSELF still applies its negative rank: `$ ('a'"_1) (i. 2 3)` is
+  2. That is what made `(="((0"_1))) L:_2 …` a `3 1 1` stack of one-cell
+  tables in libjay where the reference answers the `1 3` self-classification
+  of the whole list.
+
+- 2026-09-12 — `x:` OF A FLOAT ANSWERS THE RATIONAL TYPE WHATEVER THE
+  VALUES ARE. Every double is a fraction whose denominator is a power of
+  two; the reference keeps the type the conversion made rather than
+  narrowing on the values it happened to hold. `3!:0 (x: 2.0)` is 128 and
+  `3!:0 (x: (2 4 6))` is 64, and the rational answer still displays as
+  `2 4 6`. A complex value with no imaginary part converts through its real,
+  so `3!:0 (x: 1j0)` is 128 as well. The narrowing libjay did is what wrote
+  an extended header into `3!:3 (x:"_2 (2.0 4.0 6.0))` where the reference
+  writes a rational one.
+
+- 2026-09-12 — `-.` KEEPS THE TYPE IT SUBTRACTED FROM OVER AN EMPTY, ALONE
+  AMONG THE ONE-STEP VERBS. Measured type by type: `3!:0 (-. (0 3 $ 0))` is
+  1, the integer empty 4, the float 8, the complex 16, the extended 64 and
+  the rational 128, while `-`, `>:`, `<:` and `+:` over the same boolean
+  empty are all 4. A NON-NUMERIC argument reads as the integer a refused
+  fill leaves: `3!:0 (-. (0 3 $ 'a'))` and `3!:0 (-. (0 3 $ <0))` are both
+  4. libjay had `-.` in the widening row with the other four.
+
+- 2026-09-12 — `m H. n` READS NUMBERS, AND AN ARGUMENT OF ANOTHER KIND WITH
+  NOTHING IN IT LEAVES THE BOOLEAN EMPTY. The series refuses characters and
+  boxes outright — `1 (2 H. 2) 'a'` is a domain error — so over an empty of
+  those kinds there is nothing to read and nothing to refuse, and the
+  answer is the boolean empty a refused fill leaves in the argument's own
+  shape: `3!:0 ((2 H. 2) (0 3 $ 'a'))` and `3!:0 (1 (2 H. 2) (''))` are 1.
+  A COMPLEX empty keeps the arithmetic it named (`3!:0 ((2 H. 2) (0 $ 0j1))`
+  is 16) and every other numeric empty the float the running total is kept
+  in. A count of NO TERMS answers before the argument is read at all, which
+  is what keeps `0 (2 H. 2) ('')` the integer zeros it is.
+
+- 2026-09-12 — THE OBVERSE OF `j.` TURNS BACK BY SUBTRACTING FROM ZERO. The
+  quarter turn back is `-@j.` as arithmetic, but a plain negation carries a
+  sign into a zero: `j.^:_1 (6.28j0)` came out with `_0` for its real part
+  where the reference's is `+0`, and `o. &.j. 2` and `+ &.j. 2` the same in
+  their imaginary ones. Writing the turn as `0&-@j.` forms both parts by an
+  addition to zero, and every signed-zero cell measured — `0j6.28`,
+  `6.28j0`, `_0j2`, `2j_0`, `_2j_0`, `0j0`, `_0j_0` — then agrees. Nothing
+  but the SIGN OF A ZERO changes, which is why only `3!:3` could see it.
+
+- 2026-09-12 — `[:` STANDING ALONE IS A VERB. The cap caps a fork wherever
+  a fork is being made; on its own there is nothing to cap. The reference
+  writes it back out as `[:` and `". '[:'` answers the empty, which is what
+  every sentence whose value is an entity rather than a noun answers there.
+  libjay refused the bare cap at parse time, so the execute wrapper never
+  reached its own "no noun" rule.
+
+- 2026-09-12 — EXECUTING THE FORMAT OF A SYMBOL IS NOT A SYMBOL LITERAL,
+  AND THE REFERENCE'S OWN FORMAT IS DAMAGED. `": s: 'abc'` is three
+  characters there — `` ` ``, `b`, `c` — a backquote written over the first
+  letter of a name whose width the field kept; `": s: 'a b'` is `` ` ``,
+  space, `b` and `": s: 'a`b'` is `` ` ``, `` ` ``, `b`. A LIST of symbols
+  formats correctly (`": s: 'a';'bc'` is `` `a `bc ``), so only the atom is
+  wrong. Reading it back finds no symbol at all: `". '`abc'` is the EMPTY in
+  the reference, exactly as `". '+'`, `". 'zzz'` and `". '[:'` are — a
+  sentence whose value is not a noun. So there is no symbol literal to add
+  to the lexer, and `". ": (s: 'abc')` is the empty for the same reason
+  `". '[:'` is. libjay answers it for `[:` now; it still refuses a leading
+  tie (`". '`abc'`, `". '`+'`), where the reference leaves an unreduced
+  gerund fragment standing as the sentence's value and displays it as
+  `` `abc `` or as `(` abc `)def`. That is J showing its parse stack rather
+  than a rule to follow, and it is left measured and unfollowed.
+
+- 2026-09-12 — `#.` OVER AN ARGUMENT WITH NO ATOMS IS THE NUMERIC EMPTY IT
+  STANDS FOR; ITS EMPTY-FRAME CORNERS ARE A REFERENCE ARTIFACT. The rule
+  holds wherever a cell is really computed: `#. (0 $ a:)` is 0 in the
+  integer type, `(i. 3 0) #. (0 $ a:)` is three of them, and a boxed
+  argument that DOES hold atoms is a domain error. Where the FRAME is empty
+  and no cell ever runs, the reference's answers contradict each other.
+  `(i. 0 3 4) #. (0 $ 0)` is a boolean `0 3` — the frame standing alone —
+  while `(i. 0 3 4) #. (0 $ a:)`, refused the same way at the same frame,
+  is a boolean `,0`; `(i. 0 3) #. (0 $ a:)` is a scalar 0 in the INTEGER
+  type, no frame at all; `(0 0 $ 0.5) #. (s: 'a')` answers where
+  `(0 0 $ 0.5) #. (<0)` is a domain error. Two hundred and sixty cells were
+  measured as `(3!:0 , $)` and no reading of them survives all four. The
+  agreeing rule is recorded; the corners are pinned as a family.

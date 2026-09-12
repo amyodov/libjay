@@ -7,6 +7,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A CORPUS THEME FOR THE LEVELS ROUND, `residue-levels` (914 rows). The
+  first half is `u L: n` and `u S: n` over a grid built before any code was
+  written: seven levels (`_3 _2 _1 0 1 2 _`) crossed with twelve arguments
+  from depth 0 to depth 3 — atoms, vectors, tables, boxes of boxes, mixed
+  depths and an empty at each depth — as a monad, as a dyad with the two
+  sides at unlike depths, and in the two-level spelling `u L: m n`. The
+  2,016-cell grid it was drawn from already agreed in full, which is what
+  settled that the negative level was implemented and the residue was
+  elsewhere. The rest of the file is the six mechanisms that round found:
+  `u"v`'s ranks, `x:` over floats, `-.` over an empty, `m H. n` over an
+  argument it cannot read, the obverse of `j.`, and `[:` standing alone.
+
 - FOUR CORPUS THEMES OFF THE EMPTY-FRAME RESIDUE, one per mechanism.
   `residue-empty-inverse` (207 rows) is `%.` over twelve kinds of empty
   under eighteen frame makers; `residue-empty-product` (293) is the table
@@ -399,6 +411,28 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `u"v` TAKES v'S RANKS AS `b. 0` REPORTS THEM. A negative rank leaves a
+  fixed number of frame axes, so what it will take of any argument has no
+  bound and the reference reports it as infinite; the rank conjunction reads
+  the same report. `$ ,"(0"_1) (i. 2 3)` is 6 there — the whole argument —
+  where `$ ,"_1 (i. 2 3)` is `2 3`, and `$ +/"(0"_1) (i. 2 3)` is 3 where
+  `+/"_1` sums the rows. libjay copied the rank as it was written, which
+  made `(="((0"_1))) (0j2 0j2 0j2)` a `3 1 1` stack of tables instead of the
+  `1 3` self-classification of the whole list.
+
+- `x:` OF A FLOAT ANSWERS THE RATIONAL TYPE. Every double is a fraction
+  whose denominator is a power of two, and the reference keeps the type the
+  conversion made rather than narrowing on the values it happened to hold:
+  `3!:0 (x: 2.0)` is 128 there where `3!:0 (x: 2)` is 64, and the answer
+  still displays as `2`. libjay narrowed a whole-valued float to the
+  extended type, which is what made `3!:3 (x:"_2 (2.0 4.0 6.0))` write an
+  extended header where the reference writes a rational one.
+
+- `[:` STANDING ALONE IS A VERB. The cap caps a fork wherever a fork is
+  being made; on its own there is nothing to cap, the reference writes it
+  back out as `[:`, and `". '[:'` answers the empty every sentence with no
+  noun value answers. libjay refused the bare cap at parse time.
+
 - AN OBVERSE J DOES NOT DEFINE IS A DOMAIN ERROR, NOT A GAP. J's obverse
   table is a property of the language: `$^:_1`, `,^:_1`, `~.^:_1`,
   `(n [ ])^:_1` and the thirty-odd others measured are refused permanently
@@ -575,6 +609,30 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- `-.` KEEPS THE TYPE IT SUBTRACTED FROM OVER AN EMPTY, where the four
+  other one-step verbs widen it. `3!:0 (-. (0 3 $ 0))` is the boolean type
+  in the reference and `3!:0 (-. (0 3 $ 1r2))` the rational, while
+  `3!:0 (- (0 3 $ 0))`, `3!:0 (>: (0 3 $ 0))`, `3!:0 (<: (0 3 $ 0))` and
+  `3!:0 (+: (0 3 $ 0))` are all the integer one. libjay had `-.` in the
+  widening row, which wrote an integer header into
+  `3!:3 (-. (0 3 $ 0))` and lost the byte run a boolean array pads to.
+
+- `m H. n` READS NUMBERS, so an argument of another kind with NOTHING IN IT
+  leaves the BOOLEAN empty a refused fill leaves —
+  `3!:0 ((2 H. 2) (0 3 $ 'a'))` and `3!:0 (1 (2 H. 2) (''))` are 1 in the
+  reference — and a COMPLEX empty keeps the arithmetic it named,
+  `3!:0 ((2 H. 2) (0 $ 0j1))` being 16. libjay read the character empty as
+  numbers and answered the running total's float for both. A count of NO
+  TERMS still answers before the argument is read at all, which is what
+  keeps `0 (2 H. 2) ('')` the integer zeros it is.
+
+- THE OBVERSE OF `j.` SUBTRACTS FROM ZERO RATHER THAN NEGATING, so neither
+  part of the answer carries a negative zero the argument did not have.
+  `3!:3 (o. &.j. 2)`, `3!:3 (+ &.j. 2)` and `3!:3 (j.^:_1 (6.28j0))` all
+  hold a positive zero in the reference where the quarter turn back, written
+  as `-@j.`, wrote `_0` into one of them; the eleven signed-zero cells
+  measured — `_0j2`, `2j_0`, `_2j_0`, `_0j_0` among them — now agree.
 
 - THE EMPTY FRAME'S FILL RUN CARRIES ITS OWN TYPE. The run had always given
   the answer's SHAPE; its TYPE was being overruled by the argument's
