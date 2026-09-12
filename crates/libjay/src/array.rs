@@ -65,7 +65,7 @@ enum Repr<T> {
     /// array there is — every intermediate a scalar verb makes is one —
     /// and this is what keeps it off the heap entirely. Only an element
     /// type that fits inline and needs no drop is held this way; see
-    /// [`fits_inline`].
+    /// `fits_inline`.
     One(Inline<T>),
     /// The whole of a refcounted `Vec`.
     Owned(Arc<Vec<T>>),
@@ -109,7 +109,7 @@ const INLINE_BYTES: usize = 16;
 const INLINE_ALIGN: usize = 8;
 
 /// One element held in the buffer itself. The bytes are an element of `T`
-/// written in place; nothing but [`fits_inline`] decides that this is
+/// written in place; nothing but `fits_inline` decides that this is
 /// allowed, and nothing else ever constructs one.
 #[repr(C, align(8))]
 pub struct Inline<T> {
@@ -118,7 +118,7 @@ pub struct Inline<T> {
 }
 
 impl<T> Inline<T> {
-    /// Hold `value` inline. Only ever called where [`fits_inline`] holds.
+    /// Hold `value` inline. Only ever called where `fits_inline` holds.
     fn new(value: T) -> Inline<T> {
         debug_assert!(fits_inline::<T>());
         let mut it = Inline { bytes: [0u8; INLINE_BYTES], _elem: std::marker::PhantomData };
