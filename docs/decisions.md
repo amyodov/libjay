@@ -6649,3 +6649,111 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   of a million applications. That is a round of its own, and it is a change
   to how a body is represented rather than another cost removed from the
   representation there is.
+
+- 2026-09-12 — A SCALAR PRIMITIVE UNDER A FRAME IS STILL ONE PASS. The
+  reference settles two things once for a pass of a scalar dyad and not
+  once per cell: which operand an extremum leaves standing where the
+  comparison fails, and whether the comparison reads a NaN as equal (the
+  count of PAIRS decides, one pair being exact and more being tolerant).
+  libjay decided both from the cell in front of it, so a RANK or a TABLE
+  read a different pass from the one the reference ran. `(i. 2 3 4) <./
+  (_.)` is the left argument there — the integer side beside a float —
+  where cell by cell every pair is one integer against one float and the
+  base is the right; `(2.5 3.5) >:"0 1 (,_.)` is `1 1`, two pairs and so
+  tolerant, where each cell alone has one pair and is exact. The whole
+  arguments now travel to the cell in `EvalCfg::pass`, which the rank
+  frame and the table set and nothing else reads.
+
+- 2026-09-12 — A BROADCAST ZERO COMPARES EXACTLY. A tolerant comparison
+  asks whether a difference exceeds the tolerance SCALED BY A MAGNITUDE,
+  and a zero has no magnitude to scale, so the reference compares against a
+  zero ATOM with machine equality: `(0.5 - 0.5) <: (_. _. _.)` is `0 0 0`
+  there and `(0.5 - 0.5) = (_. _. _.)` likewise, where every other float
+  atom — `2.5`, an infinity, `1e_320` — reads the NaN as equal and answers
+  `1 1 1`. Only the ATOM carries it: `((0.5 - 0.5) , 1.5 , 2.5) <: (_. _.
+  _.)` is `1 1 1`, the zero among a vector's items being read by the
+  tolerant loop like any other number. It is the same "which loop runs is
+  settled by the operands" rule of round 9F with one more operand property
+  in it.
+
+- 2026-09-12 — A RUN OF ATOMS THAT IS NOTHING BUT NaNs REDUCES TO THE
+  EXTREMUM'S IDENTITY. A NaN never wins an extremum, so the reference's
+  reduction over a run of atoms is a loop that starts at the identity and
+  keeps whatever beats it: `<./ (_. _.)` is `_`, `>./ (_. _. _.)` is `__`,
+  and `(_.) (<./ . <.) (1.5 2.5 _0.5)` is `_` because the inner product
+  reduces three NaNs. It is the run of ATOMS that reads this way and only
+  there — `<./ (,_.)` is `_.`, the item a one-item insert answers without
+  applying the verb, `<./ (2 3 $ _.)` is three `_.`, cells folded pair by
+  pair where the base operand stands, and `<./\ (_. _. _.)` three more, a
+  scan being a sequence of pairs. Only an all-NaN run can leave the loop as
+  a NaN, so reading the seed off the answer is the same rule.
+
+- 2026-09-12 — A FUSED COMPARISON DECLINES A BLOCK WITH A NaN IN IT. The
+  fused kernel's own doctrine is that a float block holding a NaN declines
+  and the sentence is redone unfused, because J's rules for a NaN live in
+  the unfused verbs; `no_nan_block` applied it to what the block WROTE, and
+  a comparison writes nothing but zeros and ones. So `1.5 = (_. _. _.)` was
+  `1 1 1` and `(1.0 - 0.0) = (_. _. _.)` — the same comparison with an
+  arithmetic operand beside it, which is what makes the chain fusable —
+  `0 0 0`. What a NaN makes of a comparison is which loop the PASS takes
+  and what a broadcast zero does to it, neither of which the kernel knows,
+  so the comparison arm now declines on an input block rather than on an
+  output one. It was found while measuring the broadcast zero and is older
+  than that rule.
+
+- 2026-09-12 — `n s:` IS TWO FAMILIES, AND ONLY ONE OF THEM IS A VALUE. The
+  forward forms write an array of symbols out as text and the negative ones
+  read the same text back, each pair the other's inverse: 1 and `_1` raze
+  the names with a separator written BEFORE each (a backquote, the first
+  character of the list when it is read back), 2 and `_2` with one AFTER
+  each (a null, the last character of the list), 3 and `_3` lay them out as
+  a character table padded to the longest with NULLS, 4 and `_4` the same
+  padded with BLANKS, and 5 and `_5` box them one apiece. The monad is
+  three of the negative forms chosen by what it is handed — `_5` for boxes,
+  `_4` for a character array of rank 2 or more, `_1` for a character list —
+  and now runs through the same code they do. libjay had 2, 4 and 5, wrote
+  3 with the wrong pad, and called 1 a table query; a hundred and twenty-six
+  cells of the whole family now agree, in residue3-symbols.txt. The OTHER four
+  forms — `0` with its dozen numbered queries, `6` and `_6` for the SLOT a
+  name was interned into, `7` for the ORDER it was interned in — report the
+  interpreter's own table. `0 s: 0` is how many names the session has made;
+  `6 s: (s: '`abc')` is 1 and `7 s:` of it 1024, addresses inside J's tree.
+  libjay has a table too and its slots are its own, so these are refused as
+  belonging to no language rather than promised as a gap, and the rows are
+  pinned `undefined`.
+
+- 2026-09-12 — `x:` READS A COMPLEX THE WAY AN ORDERING DOES. A complex
+  value tolerantly equal to its own real part IS that real, and the test is
+  the comparison's rather than a bit-for-bit zero: `x: (1j5e_14)` is 1 in
+  the reference and `x: (1j6e_14)` a domain error, either side of `2^_44`.
+  A finite imaginary part is negligible beside an INFINITE real one, which
+  is what makes `x: (^. __)` the `_` that `^. __` already orders as.
+  libjay demanded an exactly zero imaginary part and refused the rest;
+  `tolerantly_real`, which the orderings and the gamma function already
+  ask, is the one test.
+
+- 2026-09-12 — THE EMPTY FRAME'S FILL RUN READS A SIDE'S OWN VALUE WHERE IT
+  HAS ONE. A scalar dyad takes shortcuts on particular NUMBERS, and the
+  type of the answer follows them: `0 ^ 0.5` is the exact square root and
+  stays BOOLEAN where `0 ^ 0.0` is the float 1. So the fill run the
+  reference makes over an empty frame uses the value the other side
+  actually holds, not a zero of its type — `3!:0 ((0 $ 0) ^ 0.5)` is 1
+  there, `3!:0 ((0 $ 0) ^ 0.0)` is 8, and `3!:0 ((0 $ 0) ^ (0 $ 0.5))` —
+  the same type with no value behind it — is 8 again, the fill cell
+  standing in only where there is nothing to stand in for.
+
+- 2026-09-12 — WHAT THE RESIDUE'S PAIRS 17 AND 18 LEFT PINNED. Four rows
+  join the divergence list, each with the reference answering one question
+  two ways. `2 %: (0 $ a:)` is a domain error where `2 %: (0 $ 'a')` is the
+  empty and `1.5 %: (0 $ a:)` is the empty again, and the direction
+  reverses once the box holds an atom — `2 %: (<1 2)` refuses where
+  `(0 $ 5) %: (<1 2)` answers — so what shows through is which shortcut
+  `%x` took and not a rule about the argument. `(0) #. ('')` is a domain
+  error where `2 #. ('')` is 0: the same decode of the same empty, refused
+  under a BIT base and answered under an integer one. `%.` over a matrix
+  that is not of full column rank has no value to find, and the reference
+  does not look for the deficiency: `%. (i. 4 3)` is twelve `_.` and
+  `%. (|: i. 3 4)` — also 4 by 3, also of rank 2 — twelve finite numbers
+  that satisfy `A X A = A` only to the digits the printer shows and are not
+  the Moore-Penrose inverse. libjay reports the singularity instead of
+  dividing by it.

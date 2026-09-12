@@ -869,8 +869,9 @@ What it deliberately does NOT draw is part of the design:
   Both are unbounded, and jconsole itself runs without end on them.
 - `$~`, `#~`, `{.~` and `i.~` in the reflex pool — each would hand a leaf to
   itself as an AMOUNT, which is an allocation rather than an expression.
-- the `s:` symbol-table forms and `b. 1`/`b. _1` — an interpreter's own
-  table and its own spellings, which docs/status.md names.
+- the four `s:` forms that report a table (`0`, `6`, `7`, `_6`) and
+  `b. 1`/`b. _1` — an interpreter's own table and its own spellings, which
+  docs/status.md names.
 
 ## The rest of the suite
 

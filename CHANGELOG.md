@@ -7,6 +7,17 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- TWO CORPUS THEMES OFF THE RESIDUE ROUND (pairs 17 and 18).
+  `residue3-symbols` (126 rows) is the whole of `s:`: the
+  forward forms 1 to 5, the negative forms `_1` to `_5` that read their text
+  back, the monad as the three of them it chooses between, what each does to
+  a shape and to a type, and what each refuses. `residue3-extrema` (121) is
+  the scalar primitive under a frame: the extremum's base in a table and in
+  a rank frame, the pair count that picks a comparison's loop, the
+  broadcast zero, the all-NaN run, and `x:` off the real line. Every cell of
+  both agrees, and ten rows of `residue3-extrema` came off the divergence
+  list to get there.
+
 - `jay::Shape`, THE TYPE AN ARRAY'S AXIS LENGTHS NOW HAVE. It derefs to
   `[usize]`, converts from and to `Vec<usize>` and from a slice or an array
   literal, and carries the forms that change a rank — `push`, `pop`,
@@ -431,6 +442,16 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- THE FOUR SYMBOL FORMS THAT REPORT AN INTERPRETER'S OWN TABLE ARE AN
+  ABSENCE RATHER THAN A GAP. `0 s:` with its numbered queries, `6 s:` and
+  `_6 s:` for the SLOT a name was interned into, and `7 s:` for the ORDER it
+  was interned in, answer about the table and not about the argument;
+  libjay has a table of its own and its slots are its own, so following
+  them would answer a different number rather than the same one. They read
+  as "not in the language", which a `try.` or a `::` can handle, where they
+  used to read as "not supported yet", which is a promise. An argument with
+  nothing to number is still answered: `$ (7 s: (0 0 $ 0))` is `0 0`.
+
 - A SHAPE OF RANK 0, 1 OR 2 LIVES IN THE ARRAY HEADER. An array's shape was
   a `Vec`, so every array of rank one or more allocated when it was made,
   allocated again when it was cloned, and freed when it died — and a profile
@@ -707,6 +728,51 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- `n s:` HAS ALL TEN OF ITS VALUE FORMS. `1 s:` razes the names with a
+  backquote before each and `_1 s:` reads that back; `2 s:` and `_2 s:` do
+  the same with a null AFTER each; `3 s:` and `_3 s:` lay the names out as a
+  character table padded with NULLS, which libjay used to pad with blanks
+  like `4 s:`; `4 s:` and `_4 s:` pad with blanks; `5 s:` and `_5 s:` box
+  them one apiece. The monad is `_5`, `_4` or `_1` chosen by what it was
+  handed, and now runs through the same code.
+
+- A SCALAR PRIMITIVE UNDER A RANK OR IN A TABLE MAKES ONE PASS, NOT ONE PER
+  CELL. Which operand an extremum leaves standing where the comparison
+  fails, and whether a comparison reads a NaN as equal, are settled by the
+  WHOLE arguments in the reference: `(i. 2 3 4) <./ (_.)` is the left
+  argument there, the integer side beside a float, and `(2.5 3.5) >:"0 1
+  (,_.)` is `1 1` — two pairs, and so the tolerant loop — where one cell
+  alone has one pair and is exact.
+
+- A BROADCAST ZERO COMPARES EXACTLY, having no magnitude for a relative
+  tolerance to scale: `(0.5 - 0.5) <: (_. _. _.)` is `0 0 0` and
+  `(0.5 - 0.5) = (_. _. _.)` likewise, where every other float atom reads
+  the NaN as equal. A zero among a vector's ITEMS is read tolerantly like
+  any other number.
+
+- A FUSED CHAIN DECLINES A COMPARISON BLOCK THAT HOLDS A NaN. What a NaN
+  makes of a comparison is which of the reference's two loops the pass
+  takes and what a broadcast zero does to that loop, and both of those
+  rules live in the unfused verb; the kernel compared with the tolerance
+  alone, so `(1.0 - 0.0) = (_. _. _.)` was `0 0 0` where the same
+  comparison written without an arithmetic operand beside it was `1 1 1`.
+  The block now declines, as every other float block holding a NaN does.
+
+- AN ALL-NaN RUN OF ATOMS REDUCES TO THE EXTREMUM'S IDENTITY. `<./ (_. _.)`
+  is `_`, `>./ (_. _. _.)` is `__`, and `(_.) (<./ . <.) (1.5 2.5 _0.5)` is
+  `_`. A one-item insert still answers the item, and a fold of CELLS — a
+  table's rows, a scan's pairs — still keeps the base operand.
+
+- `x:` READS A COMPLEX VALUE THE WAY AN ORDERING DOES, tolerantly rather
+  than bit for bit: `x: (1j5e_14)` is 1 and `x: (1j6e_14)` a domain error,
+  either side of `2^_44`, and a finite imaginary part beside an INFINITE
+  real one is negligible, so `x: (^. __)` is `_`.
+
+- THE POWER'S EMPTY-FRAME FILL RUN READS THE EXPONENT ITSELF. `y ^ 0.5` is
+  the exact square root and not a power, so `3!:0 ((0 $ 0) ^ 0.5)` is the
+  boolean type — the square root of a bit is the bit — where
+  `3!:0 ((0 $ 0) ^ 0.0)` is the float one.
 
 - `x %. y` TAKES ITS EXACTNESS FROM THE SYSTEM IT INVERTS, AND THE
   ONE-UNKNOWN SYSTEM NO LESS THAN THE MATRIX ONE. It is `y` that is

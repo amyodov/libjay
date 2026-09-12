@@ -2683,8 +2683,11 @@ each one work rather than a puzzle.
   itself at two: `#: (_.)` is refused there and `#: (_. , _.)` answers
   `_. _.`. Four cells, and the split is the item count again.
 
-- **`0 s:` AND `1 s:`**, the symbol-table forms, are still "not supported
-  yet". Nine cells.
+- **`0 s:`, `6 s:`, `7 s:` AND `_6 s:`**, which report an interpreter's own
+  symbol table rather than anything about the argument, are refused as
+  belonging to no language. Nine cells. The ten forms that ARE a function of
+  the argument — 1 to 5 and their inverses — agree; see
+  corpus/j/residue3-symbols.txt.
 
 ## Known divergences (deliberate, revisit later)
 
@@ -3270,8 +3273,8 @@ sections above is also collected here.
   the tables above already mark "not supported yet": a sparse array of
   CHARACTERS or of BOXES, which J has a type code for and refuses to make
   as well; sparseness surviving a verb (see the sparse arrays section
-  above); the symbol-table forms of `s:`
-  (`0 s:` … `3 s:`, `6 s:`, `7 s:`, `_1 s:`), which describe an
+  above); the four symbol forms that report a table rather than a value
+  (`0 s:`, `6 s:`, `7 s:` and `_6 s:`), which describe an
   interpreter's own table rather than the language; a determinant by minors
   of more than 16 rows (the expansion is exponential, and only `-/ . *` over machine numbers has a
   direct method); the two vector output codes of the sequential machine,
