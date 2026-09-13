@@ -6877,6 +6877,57 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   reference's own maximum comes out a NaN, above.
 
 
+- 2026-09-13 — A MAGNITUDE SELECTS A SIGN RATHER THAN CLEARING ONE. `|y` is
+  the negative of y where y is below zero and y itself everywhere else, and
+  a NEGATIVE ZERO is not below zero: the reference's `3!:3 (| (_0.0))`
+  holds the negative zero it was handed. libjay cleared the bit, both
+  unfused and in the fused kernel. The value is the same either way — a
+  signed zero IS zero — and only `3!:3`, or an obverse that divides by the
+  result, can tell them apart, which is what had `|&.% (__)` pinned as the
+  reference's own error in an earlier round. That call is reversed: the
+  sign of a zero is a representation and not a magnitude's value, the
+  reference is consistent about it, and the two rows came off the
+  divergence list.
+
+- 2026-09-13 — WHAT PAIR 20'S RESIDUE LEFT PINNED. Six mechanisms, each
+  measured out and none of them a rule libjay can follow. The obverse of
+  `!` over a COMPLEX argument: the reference iterates in the complex plane
+  and lands on one of infinitely many arguments whose factorial is y —
+  `!^:_1 (0j2)` is 2.35044j1.43963 — while the branch it picks is its
+  seed's and its search over a real argument already picks a different one
+  of the two libjay finds, so the complex rows join the real ones as
+  undefined. A POWER WHOSE LIST OF COUNTS HOLDS `_1` and whose obverse does
+  not exist: `(o.&:=)^:_1 2` is a domain error there, as libjay makes it,
+  but `(o.&:=)^:(_1 0 1) 2` prints no value and no error at all and leaves
+  an assignment undefined, where `(3&{)^:(0 1) (1 2)` reports its index
+  error — there is no answer to compare with. `%.` over a system of no
+  columns: the reference matches x's items against y's ROWS and reports the
+  mismatch for an integer, float or complex left argument, and skips the
+  check entirely for an EXACT one, so `(1 2 3) %. (0 0 $ 0)` is a length
+  error and `(2 1r2 1r3) %. (0 0 $ 0)` the empty. THE SIGN OF A ZERO `*`
+  ANSWERS, which only `3!:3` sees: measured over boolean, integer,
+  rational, complex, float and extended zeros at one, two and twelve items
+  and in both orders, the reference answers a positive zero for every zero
+  factor except a float one in a pass of two or more atoms and an extended
+  one — and contradicts itself on the count, `3!:3 ((_5.0) * 0.0)` positive
+  where `3!:3 ((_5.0) * (0.0 0.0))` is negative. `p.` over coefficients
+  holding an infinity: `p. (__ __ 0 0)` is a NaN error and
+  `p. (0 0 __ __)` — the same four the other way round — a STACK ERROR, the
+  root-finder recursing until the interpreter gives up. And the FACTORIAL
+  OF 54, which the reference computes two units in the last place below the
+  nearest double: printed to six digits nothing parts it from libjay's, and
+  `#.^:_1` writes the bits out and shows three of them differ.
+
+- 2026-09-13 — LEFT OPEN BY PAIR 20: THE SHAPE `u F:. v` FRAMES. The
+  smallest sentence that parts the two engines is
+  `$ ((] F:. ,:@/:) (1 2))` — `1 1 2` in the reference and `1 2 1` here,
+  the trailing pair the other way round — and neither shape is the step's
+  own, since `$ (2 (,:@/:) 1)` is `1 1` in both. `(] F:. [)` and
+  `(] F:. ])` say the step is `item v acc` in both engines and `(] F:. ,)`
+  agrees over three items, so what parts them is narrower than the fold's
+  order and wider than one verb. It needs the Fold definition worked out
+  cell by cell rather than a patch, and is left for a round of its own.
+
 - 2026-09-22 — 0.5.0 IS REDEFINED AS "J CODE THAT BUILDS J CODE" (owner
   decision). The sweep gate, zero unexplained disagreements over generated
   expressions, measures only what the generator can write, and the

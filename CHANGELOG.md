@@ -771,6 +771,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A MAGNITUDE SELECTS A SIGN RATHER THAN CLEARING ONE. `|y` is the negative
+  of y where y is below zero and y itself everywhere else, and a NEGATIVE
+  ZERO is not below zero, so it travels through unchanged: `3!:3 (| (_0.0))`
+  holds the negative zero it was handed where clearing the bit wrote a
+  positive one. Only `3!:3` and an obverse that divides by the result can
+  see the difference, and two rows pinned as the reference's own error —
+  `|&.% (__)` and the same over a list — came off the divergence list.
+
 - AN ALL-EMPTY FRAME TAKES ITS TYPE FROM THE ORDER A CATENATION USES.
   Nothing there has an element to widen, and the reference settles it by an
   order of its own in which a box sits above a character and a whole number

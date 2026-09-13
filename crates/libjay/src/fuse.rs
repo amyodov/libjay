@@ -2081,7 +2081,9 @@ fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64], tol: Tol) -> bool
     match op {
         Conj => each!(a, dst, |x: f64| x),
         Neg => each!(a, dst, |x: f64| -x),
-        Abs => each!(a, dst, f64::abs),
+        // The magnitude selects a sign rather than clearing one, exactly as
+        // unfused: a negative zero is not below zero and travels on.
+        Abs => each!(a, dst, |x: f64| if x < 0.0 { -x } else { x }),
         // A magnitude the dialect's tolerance reads as zero has no sign,
         // exactly as unfused.
         Signum => each!(a, dst, |x: f64| if tol.is_zero(x) {

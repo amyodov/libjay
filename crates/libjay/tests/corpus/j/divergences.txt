@@ -360,7 +360,7 @@ _1r2 ^. _1r2
 ? the reference searches into the complex plane; libjay has no real answer; reason: proven-wrong
 ! ^:_1 (3j4 1j_1)
 ? the reference searches the complex plane; libjay's obverse reads reals; reason: proven-wrong
-~ cause=we-refuse:err:NaN_error:_this_factorial_has_no_argument|we-refuse:err:domain_error:_the_obverse_of_!_needs_numeric_data verb=! with=^: also=%,%:,-,+,*,j.,&.,&.:,r.,;.,o.,^.
+~ cause=we-refuse:err:NaN_error:_this_factorial_has_no_argument|we-refuse:err:domain_error:_the_obverse_of_!_needs_numeric_data verb=! with=^: also=%,%:,-,+,*,j.,&.,&.:,r.,;.,o.,^.,:
 
 // The same two whole numbers a double cannot tell apart, reached through a
 // VECTOR left argument, where the whole pass goes to floats at once:
@@ -594,7 +594,7 @@ x: 3.14159265358979
 // No `answers=` clause: both sides answer a RATIONAL, whose `r` is not a
 // character any numeric answer class reads, so every one of them would be
 // false here. The cause, the verb and the restricted `also=` carry the rule.
-~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:,^:,=.,=:,:,`:,p.,#.,#:,F..,F.:,F:.,F::,L:,S:,;.,/.,M.,-.,@.,u:,b.,":,;:,I.,e.,A.
+~ cause=differ:val:atom/num|differ:val:vector/num|differ:val:table/num|differ:val:planes/num|differ:val:atom/text|differ:val:vector/text|differ:val:table/text|differ:val:planes/text verb=x: also=o.,%,%:,^.,^,*,+,-,+:,-:,*:,<.,>.,|,j.,r.,!.,&.,&.:,^:,=.,=:,:,`:,p.,#.,#:,F..,F.:,F:.,F::,L:,S:,;.,/.,M.,-.,@.,u:,b.,":,;:,I.,e.,A.
 
 // INTERVAL INDEX OVER SYMBOLS. The reference's own `<` and `/:` order
 // symbols by their NAME — `(s: <'a') < (s: <'b')` is 1 and
@@ -942,10 +942,6 @@ o.&.% (__)
 ? `% (o. (% (__)))` is `_` there where `% (2 * (% (__)))` is `__`: the same multiplication by a constant, and only one of them keeps the sign; reason: self-contradiction
 o.&.% ((__) , (__))
 ? the same circle function over a list; reason: self-contradiction
-|&.% (__)
-? the reference's magnitude of a negative zero is NEGATIVE — `% (| (% (__)))` is `__` there — where a magnitude is never negative and its own `| (__)` is `_`; reason: proven-wrong
-|&.% ((__) , (__))
-? the same magnitude over a list; reason: proven-wrong
 
 // A LOGARITHM WITH A NaN OR AN INFINITE BASE AND A CHARACTER OR A BOXED
 // RIGHT ARGUMENT ANSWERS NOTHING THERE: no value, no error, an empty line.
@@ -1345,3 +1341,103 @@ $ (('') A. (i. 3 4))
 ~ cause=they-refuse:val:vector/num|they-refuse:val:table/num|they-refuse:val:planes/num verb=#: also=>.,<.,_:,^:,|.,",@,@:,&.,&.:,/,\\,\\.,$,i.,+,-,*,%,_.
 (#: >: _:) ^:2 (<. ^:(0 1) (_. 1 2))
 ? the same maximum inside a fork, over a table of six values; reason: self-contradiction
+
+// THE OBVERSE OF THE FACTORIAL OVER A COMPLEX ARGUMENT. The reference's
+// search is an iteration in the complex plane, and over a complex y it
+// lands on one of the infinitely many arguments whose factorial is y:
+// `!^:_1 (0j2)` is 2.35044j1.43963 there, `!^:_1 (1j1)` is
+// 1.80245j0.907562 and `!^:_1 (1ad45)` is 1.47996j1.06736, while its own
+// `!^:_1 (6)` is the whole 3 and `!^:_1 (1)` is 0. Which branch it lands
+// on is a property of the seed its search starts from and of nothing
+// written down — over a REAL argument the same search already picks a
+// different one of the two arguments libjay finds, and over 1.5 it does
+// not finish at all. libjay's obverse reads real arguments at or above
+// zero and refuses the rest.
+!^:_1 (0j2)
+? the branch the reference's search lands on is its seed's, not the language's; reason: undefined
+!^:_2 (0j2)
+? the same search run twice over; reason: undefined
+(!^:(_1:))&.> (j. 2)
+? the same argument reached through a box and a constant verb; reason: undefined
+
+// A POWER WHOSE LIST OF COUNTS HOLDS `_1` AND WHOSE OBVERSE DOES NOT
+// EXIST. `(o.&:=)^:_1 2` is a domain error in the reference, as an
+// obverse it does not define always is, and libjay refuses it too. Written
+// with a LIST of counts around that same `_1` the reference answers
+// NOTHING AT ALL: `(o.&:=)^:(_1 0 1) 2` prints no value and no error,
+// `r =. (o.&:=)^:(_1 0 1) 2` leaves r undefined, and the session carries
+// on. `(o.&:=)^:(1 _1) 2` and `(j.&:|)^:(_1 0 1) 2` go the same way, while
+// `(3&{)^:(0 1) (1 2)` — a list of counts whose step fails for another
+// reason — reports its index error. There is no answer to compare with.
+o.&:= ^:(_1 0 1) 2
+? the reference produces no value and no error at all; reason: abort
+~ cause=gap:err:not_in_the_language:_the_obverse_of_(o.&:=)_is_not_defined|gap:err:not_in_the_language:_the_obverse_of_(j.&: verb=^: also=o.,j.,=,%,%:,+,-,*,+:,-:,*:,<.,>.,|,r.,&.,&.:
+j.&:| ^:(_1 0 1) 2
+? the same, with the residue for the tine that has no obverse; reason: abort
+
+// `%.` OVER A SYSTEM OF NO COLUMNS, WHERE THE REFERENCE CHECKS THE ROWS
+// ON ONE PATH AND NOT THE OTHER. `x %. y` matches x's items against y's
+// ROWS — `(1 2 3) %. (i. 3 2)` answers and `(1 2) %. (i. 3 2)` is a
+// length error — and libjay reports that mismatch wherever it stands.
+// The reference reports it for an INTEGER, a float or a complex left
+// argument and skips it entirely for an EXACT one: `(1 2 3) %. (0 0 $ 0)`
+// is a length error there and `(2 1r2 1r3) %. (0 0 $ 0)` — three items
+// against no rows — is the empty boolean list, as is
+// `(2 1r2 1r3) %. (2 0 $ 0)` against two. It is the COLUMNS that make the
+// difference on that path and not the rows: `(2 1r2 1r3) %. (0 2 $ 0)`
+// and `(2 1r2 1r3) %. (i. 2 2)` are length errors again.
+(2 , (1r2 1r3)) %. (5 ,/\\. 2)
+? the same solve is refused for an integer left argument and answered for a rational one; reason: self-contradiction
+~ cause=we-refuse:err:length_error:_the_system_has_#_rows_but_the_right-hand_side_has_# verb=%. also=x:,r.,%,+,-,*,^,%:,|,<.,>.,j.,!.,&.,&.:,^:,",@,@:
+(2 1r2 1r3) %. (0 0 $ 0)
+? the same pair written out, three items against no rows; reason: self-contradiction
+(2 1r2 1r3) %. (2 0 $ 0)
+? three items against two rows, refused for an integer left argument; reason: self-contradiction
+
+// THE SIGN OF A ZERO `*` ANSWERS, WHICH THE REFERENCE GIVES TWO WAYS.
+// Only `3!:3` can see it. Measured over boolean, integer, rational,
+// complex, float and extended zeros at one, two and twelve items and in
+// both orders, the reference answers a POSITIVE zero for every zero
+// factor — `(_5.0) * (0 0)`, `(0r1) * (_5.0 _5.0)`, `(0j0) * (_5.0)`, and
+// the float pass an integer multiply falls back to when it overflows —
+// except a FLOAT zero in a pass of two or more atoms and an EXTENDED zero
+// anywhere, which keep IEEE's sign. The same pair contradicts itself on
+// the count: `3!:3 ((_5.0) * 0.0)` holds a positive zero and
+// `3!:3 ((_5.0) * (0.0 0.0))` two negative ones, and `(0x) * (_5.0)` is
+// negative where `(0r1) * (_5.0 _5.0)` is positive. libjay answers the
+// sign the multiplication makes, at every count and every type.
+3!:3 ((_9223372036854775806) * (i. 3 4))
+? the reference's own zero product is positive here and negative one type over; reason: self-contradiction
+~ cause=differ:val:table/text|differ:val:vector/text|differ:val:atom/text|differ:val:planes/text|differ:val:table/num|differ:val:vector/num|differ:val:atom/num|differ:val:planes/num verb=* with=!: also=x:,j.,r.,%,+,-,^,%:,|,<.,>.,&.,&.:,^:,!.,",@,@:
+3!:3 ((_5.0) * 0.0)
+? the same product written as two atoms is positive there and negative as two lists; reason: self-contradiction
+3!:3 ((_5.0) * (0 0))
+? a float beside an integer zero, positive there at every count; reason: self-contradiction
+
+// `p.` OVER COEFFICIENTS THAT HOLD AN INFINITY, WHERE THE REFERENCE'S
+// ROOT-FINDER RUNS OUT OF STACK. `p. (0 __)` answers `__` and the root 0,
+// `p. (1 2 __)` answers with NaN roots, `p. (__ __)` and `p. (__ __ 0 0)`
+// are NaN errors — and `p. (0 0 __ __)`, the same four coefficients the
+// other way round, is a STACK ERROR: no value, no domain error, the
+// search recursing until the interpreter gives up. libjay reads the
+// coefficients as written and answers the roots its own search finds.
+p. (0 0 __ __)
+? the reference's root-finder runs out of stack and answers nothing; reason: abort
+~ cause=they-refuse:val:table/text|they-refuse:val:vector/text|they-refuse:val:atom/text verb=p. also=^.,e.,j.,r.,o.,^,%:,+,-,*,%,+.,*.,<.,>.,|,&.,&.:,^:,L:,S:,x:,!.,:
+p.@:^.@;"1 0 _ (2 # ((_2 0 2) e. 2))
+? the same coefficients reached through the logarithm of a list of booleans; reason: abort
+
+// THE FACTORIAL OF 54, TWO UNITS IN THE LAST PLACE LOW, WHICH A BASE-2
+// DECODE SHOWS. 54! is a whole number of 238 bits and the double nearest
+// it is 0.025 of a last place below it; the reference's `! 54` is 2.025
+// below, two units in the last place further down. Printed to six digits
+// both are 2.30844e71 and nothing parts them, but `#.^:_1` writes the
+// bits out and three of them differ. The reference's own round trip hides
+// it — `#.` reads the digits back in a double and loses the same last
+// bits — while its `(x: (! 54)) - (! 54x)` is _9.93e55 where the nearest
+// double is 1.23e51 away.
+! &.#. (2 7 1 8)
+? the reference's `! 54` is two units in the last place below the nearest double; reason: proven-wrong
+~ cause=differ:val:vector/num|differ:val:table/num|differ:val:atom/num verb=! with=#. also=&.,&.:,x:,^:,",@,@:,/,\\,\\.,+,-,*,%,|,<.,>.,j.,r.,!.,L:,S:
+#.^:_1 (! 54)
+? the same bits, written without the under; reason: proven-wrong

@@ -9089,7 +9089,13 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
                 Some(out) => Data::I64(out.into()),
                 None => Data::F64(par::map(v, |&x| (x as f64).abs()).into()),
             },
-            Data::F64(v) => Data::F64(par::map(v, |&x| x.abs()).into()),
+            // A MAGNITUDE SELECTS THE SIGN IT WANTS RATHER THAN CLEARING
+            // ONE: `|y` is the negative of y where y is below zero and y
+            // itself everywhere else, and a NEGATIVE ZERO is not below
+            // zero. So `3!:3 (| (_0.0))` holds the negative zero it was
+            // handed, where clearing the bit would have written a positive
+            // one. Nothing else the magnitude answers changes.
+            Data::F64(v) => Data::F64(par::map(v, |&x| if x < 0.0 { -x } else { x }).into()),
             _ => return Err(wrong_type(d.dtype(), span)),
         },
         // Zero and one are whole, so rounding leaves a BOOLEAN alone.

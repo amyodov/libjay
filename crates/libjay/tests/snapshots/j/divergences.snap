@@ -750,14 +750,6 @@
 ? the same circle function over a list; reason: self-contradiction
 < __ __
 > j: _ _
-= |&.% (__)
-? the reference's magnitude of a negative zero is NEGATIVE — `% (| (% (__)))` is `__` there — where a magnitude is never negative and its own `| (__)` is `_`; reason: proven-wrong
-< _
-> j: __
-= |&.% ((__) , (__))
-? the same magnitude over a list; reason: proven-wrong
-< _ _
-> j: __ __
 = (_.) ^. ('a')
 ? the reference prints no answer and no error at all; reason: abort
 < <error>
@@ -3091,3 +3083,123 @@
 < 0
 < 0
 > j: <error>
+= !^:_1 (0j2)
+? the branch the reference's search lands on is its seed's, not the language's; reason: undefined
+< <error>
+> j: 2.35044j1.43963
+= !^:_2 (0j2)
+? the same search run twice over; reason: undefined
+< <error>
+> j: 2.36931j0.516387
+= (!^:(_1:))&.> (j. 2)
+? the same argument reached through a box and a constant verb; reason: undefined
+< <error>
+> j: +---------------+
+> j: |2.35044j1.43963|
+> j: +---------------+
+= o.&:= ^:(_1 0 1) 2
+? the reference produces no value and no error at all; reason: abort
+< <error>
+> j:
+= j.&:| ^:(_1 0 1) 2
+? the same, with the residue for the tine that has no obverse; reason: abort
+< <error>
+> j:
+= (2 , (1r2 1r3)) %. (5 ,/\\. 2)
+? the same solve is refused for an integer left argument and answered for a rational one; reason: self-contradiction
+< <error>
+> j:
+= (2 1r2 1r3) %. (0 0 $ 0)
+? the same pair written out, three items against no rows; reason: self-contradiction
+< <error>
+> j:
+= (2 1r2 1r3) %. (2 0 $ 0)
+? three items against two rows, refused for an integer left argument; reason: self-contradiction
+< <error>
+> j:
+= 3!:3 ((_9223372036854775806) * (i. 3 4))
+? the reference's own zero product is positive here and negative one type over; reason: self-contradiction
+< e300000000000000
+< 0800000000000000
+< 0c00000000000000
+< 0200000000000000
+< 0300000000000000
+< 0400000000000000
+< 0000000000000080
+< 000000000000e0c3
+< 000000000000f0c3
+< 000000000000f8c3
+< 00000000000000c4
+< 00000000000004c4
+< 00000000000008c4
+< 0000000000000cc4
+< 00000000000010c4
+< 00000000000012c4
+< 00000000000014c4
+< 00000000000016c4
+> j: e300000000000000
+> j: 0800000000000000
+> j: 0c00000000000000
+> j: 0200000000000000
+> j: 0300000000000000
+> j: 0400000000000000
+> j: 0000000000000000
+> j: 000000000000e0c3
+> j: 000000000000f0c3
+> j: 000000000000f8c3
+> j: 00000000000000c4
+> j: 00000000000004c4
+> j: 00000000000008c4
+> j: 0000000000000cc4
+> j: 00000000000010c4
+> j: 00000000000012c4
+> j: 00000000000014c4
+> j: 00000000000016c4
+= 3!:3 ((_5.0) * 0.0)
+? the same product written as two atoms is positive there and negative as two lists; reason: self-contradiction
+< e300000000000000
+< 0800000000000000
+< 0100000000000000
+< 0000000000000000
+< 0000000000000080
+> j: e300000000000000
+> j: 0800000000000000
+> j: 0100000000000000
+> j: 0000000000000000
+> j: 0000000000000000
+= 3!:3 ((_5.0) * (0 0))
+? a float beside an integer zero, positive there at every count; reason: self-contradiction
+< e300000000000000
+< 0800000000000000
+< 0200000000000000
+< 0100000000000000
+< 0200000000000000
+< 0000000000000080
+< 0000000000000080
+> j: e300000000000000
+> j: 0800000000000000
+> j: 0200000000000000
+> j: 0100000000000000
+> j: 0200000000000000
+> j: 0000000000000000
+> j: 0000000000000000
+= p. (0 0 __ __)
+? the reference's root-finder runs out of stack and answers nothing; reason: abort
+< +--+--------------+
+< |__|0j_. 0j_. 0j_.|
+< +--+--------------+
+> j: <error>
+= p.@:^.@;"1 0 _ (2 # ((_2 0 2) e. 2))
+? the same coefficients reached through the logarithm of a list of booleans; reason: abort
+< +--+-----------------+
+< |__|_.j_. _.j_. _.j_.|
+< +--+-----------------+
+> j: <error>
+= ! &.#. (2 7 1 8)
+? the reference's `! 54` is two units in the last place below the nearest double; reason: proven-wrong
+< 1 0 0 0 0 1 0 1 1 1 0 0 1 0 0 1 1 1 0 1 1 1 1 1 1 1 0 1 1 1 0 1 1 1 1 1 1 0 0 0 0 0 0 0 0 1 0 1 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+> j: 1 0 0 0 0 1 0 1 1 1 0 0 1 0 0 1 1 1 0 1 1 1 1 1 1 1 0 1 1 1 0 1 1 1 1 1 1 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+= #.^:_1 (! 54)
+? the same bits, written without the under; reason: proven-wrong
+< 1 0 0 0 0 1 0 1 1 1 0 0 1 0 0 1 1 1 0 1 1 1 1 1 1 1 0 1 1 1 0 1 1 1 1 1 1 0 0 0 0 0 0 0 0 1 0 1 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+> j: 1 0 0 0 0 1 0 1 1 1 0 0 1 0 0 1 1 1 0 1 1 1 1 1 1 1 0 1 1 1 0 1 1 1 1 1 1 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
