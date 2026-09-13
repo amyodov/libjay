@@ -1,0 +1,122 @@
+// The type an ALL-EMPTY frame settles on, the width `#:` reads off the
+// largest magnitude, the quarter turn's positive zero, and the count a cut
+// and a key have a special form for. Round 3 of the residue.
+
+// AN EMPTY BOX BESIDE AN EMPTY OF ANOTHER TYPE. Nothing here has an
+// element to widen, so the type is settled by the join's own order — a box
+// above a character and a whole number, below a float — and that order is
+// read wherever CELLS are framed, not only where two arrays are joined.
+3!:0 (> ((0 $ <0) ; (0 $ 0)))
+3!:0 (> ((0 $ <0) ; (0 $ 'a')))
+3!:0 (> ((0 $ <0) ; (0 $ 3)))
+3!:0 (> ((0 $ <0) ; (0 $ 0.5)))
+3!:0 (> ((0 $ <0) ; (0 $ 0j0)))
+3!:0 (> ((0 $ <0) ; (0 $ 1x)))
+3!:0 (> ((0 $ <0) ; (0 $ 1r2)))
+3!:0 (> ((0 $ 0.5) ; (0 $ <0)))
+3!:0 (> ((0 $ 0j1) ; (0 $ <0)))
+3!:0 (> ((0 $ 1x) ; (0 $ <0)))
+3!:0 (> ((0 $ 's:') ; (0 $ <0)))
+3!:0 (> ((0 $ <0) ; (0 $ 0j1) ; (0 $ 0)))
+3!:0 (> ((0 $ <0) ; (,0j1)))
+3!:0 (> ((,<0) ; (0 $ 0j1)))
+3!:0 (> ((0 $ <0) ; (,0)))
+> ((0 $ <0) ; (,0))
+$ (> ((0 $ <0) ; (,0)))
+
+// THE SAME ORDER UNDER A POWER THAT COLLECTS ITS STEPS. `u^:(<n)` frames
+// the results of n applications, and an empty box step beside an empty
+// complex one is the complex the join would take.
+([: r. ,.) ^:(<2) (, (0 $ <0))
+$ ([: r. ,.) ^:(<2) (, (0 $ <0))
+3!:0 ([: r. ,.) ^:(<2) (, (0 $ <0))
+(,.) ^:(<2) (1 2)
+$ (,.) ^:(<2) (1 2)
+(j. 1:) ^:(<2) (1 2)
+3!:0 ((j. 1:) ^:(<2) (1 2))
+(0 $ ]) ^:(<2) (1 2)
+$ (0 $ ]) ^:(<2) (1 2)
+(2 2 $ ]) ^:(<2) (1 2)
+(]) ^:(<2) (1 2)
+$ ((,.) ^:(<3) (1 2))
+
+// THE WIDTH `#:` WRITES IN is the largest magnitude's, and the largest is
+// the one `>./` answers: a NaN never displaces the fold's identity, so an
+// argument of nothing but NaNs is one digit wide, and a NaN ALONE — where
+// the fold is the item itself — has no width at all.
+#: (_. 1 2)
+#: (_. _.)
+$ #: (_. _.)
+$ #: (_. _. _.)
+$ #: (2 2 $ _.)
+#: (_. 0)
+#: (_. _1)
+#: (_. 3 _1)
+#: (2 2 $ _. 1 2 3)
+#: (_. 1.5)
+#: (1r2 _. 2)
+#: (3j4 1 2)
+#: (_.j_. 1 2)
+#: (1 _.j1)
+3!:0 (#: (_. 1 2))
+$ #: (_. 1 2)
+#: _.
+#: (,_.)
+#: _
+#: (_ 1)
+#:"0 (_. 1 2)
+#:"1 1 (2 2 $ _. 1 2 3)
+
+// `j. y` TURNS y A QUARTER TURN, and the turn is a swap whose new real
+// part is taken from zero rather than negated: no part carries a negative
+// zero the argument did not have.
+3!:3 (j. _3)
+3!:3 (j. 3)
+3!:3 (j. 0)
+3!:3 (j."0 1 (_3))
+3!:3 (0 j. _3)
+3!:3 (j. (_3j0))
+3!:3 (j. (3j4))
+j. (3j4)
+3!:0 (j. 1)
+
+// `#` UNDER A CUT OR A KEY is the interval's LENGTH, an integer, where the
+// same function spelled so no special form can see it counts the exact
+// data it was handed and answers an extended count.
+3!:0 (#;._2 (_5x))
+3!:0 (#;._1 (_5x))
+3!:0 (#;._2 (1r2))
+3!:0 (#;._2 (2 3 $ 1x))
+3!:0 (#;._2 (,1x))
+3!:0 (#;._2 (1x 2x 3x))
+3!:0 ((1 0 1) #;.1 (1x 2x 3x))
+3!:0 ((#/.~) (1x 2x))
+3!:0 ((1x 2x) #/. (1x 2x))
+3!:0 (((#@])/.~) (1x 2x))
+3!:0 ((#@]);.1 (1x 2x 3x))
+3!:0 (#;.0 (1x 2x))
+3!:0 (#;.3 (1x 2x 3x 4x))
+3!:0 (#;._3 (1x 2x 3x 4x))
+3!:0 (#;._2 'ab')
+3!:0 (#;._2 (5))
+3!:0 (# (1x 2x))
+3!:0 (# (0 $ 1x))
+#;._2 (_5x)
+$ #;._2 (_5x)
+#;._2 (1x 2x 3x)
+(#);._2 (1x 2x 3x)
+(3!:0);._2 (1x 2x 3x)
+(3!:0 , #);._2 (1x 2x 3x)
+3!:3 (#;._2 (_5x))
+
+// A NOUN WHERE A MODIFIER TAKES A VERB IS NOT A FORM THE LANGUAGE HAS.
+1 @: + 2
+1 @ + 2
+1 / 2
+1 &. + 2
+1 :. + 2
+1 ;. + 2
+(1 2) ^: + 2
+(+`-) ^: 2
+(+`-) & 1
+(+`-) L: 0

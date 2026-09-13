@@ -1,0 +1,151 @@
+# libjay reference snapshot: J — corpus/j/residue3-writers.txt.
+# Generated file: `cargo run -p libjay-devtools -- record` rewrites it from
+# the live reference interpreters. Do not edit by hand; the workflow is in
+# docs/testing.md.
+#
+# One record per expression, in corpus order:
+#   `= EXPR`      the sentence. `\n` is a newline in it and `\\` a backslash.
+#   `> IMPL: TEXT`  one line of what the implementation IMPL answered.
+#   `< TEXT`      one line of libjay's answer (divergence records only).
+#   `? TEXT`      why libjay and the implementation it follows differ
+#                 (divergence records only).
+#   `@ io=N`      the index origin in force from here on (APL; 1 unless said).
+#   `# TEXT`      a comment.
+# The implementation keys: `j` is jconsole, `gnu` is GNU APL, `dyalog` is
+# Dyalog APL. libjay is held to the one its dialect follows — `j` for J,
+# `gnu` for APL; any other key gates the PRESET aimed at it, with
+# tests/expected/<key>.txt naming what may differ.
+# A side whose single line is `<error>` refused the sentence. An empty answer
+# is one empty line. Trailing spaces are not recorded: the comparison is
+# whitespace-insensitive within a line, but the number of lines is not.
+
+= (<2) + ]
+> j: (<2) + ]
+= (<<2) + ]
+> j: (<<2) + ]
+= (<1 2) + ]
+> j: (<1 2) + ]
+= (<'ab') , ]
+> j: (<'ab') , ]
+= (<a:) + ]
+> j: (<a:) + ]
+= (<(3j4)) + ]
+> j: (<3j4) + ]
+= (a:) + ]
+> j: a: + ]
+= (0 $ <0) + ]
+> j: (0$a:) + ]
+= (1;2) + ]
+> j: (1;2) + ]
+= (1;2;3) + ]
+> j: (1;2;3) + ]
+= ((<1),(<2),(<3),(<4)) + ]
+> j: (1;2;3;4) + ]
+= ((<1 2),(<3 4)) + ]
+> j: (1 2;3 4) + ]
+= ((<1),(<'a')) + ]
+> j: (1;'a') + ]
+= (1;'ab') + ]
+> j: (1;'ab') + ]
+= ('ab';1) + ]
+> j: ('ab';1) + ]
+= ((<'a'),(<'b')) + ]
+> j: ('a';'b') + ]
+= ((<'+'),(<'-')) + ]
+> j: ('+';'-') + ]
+= ((<'>'),(<']')) + ]
+> j: ('>';']') + ]
+= ((<'ab'),(<'c')) + ]
+> j: ('ab';'c') + ]
+= ((<'a'),(<'bc')) + ]
+> j: ('a';'bc') + ]
+= ((<'ab'),(<'cd')) + ]
+> j: (<;._1 ' ab cd') + ]
+= ((<'ab'),(<'cd'),(<'ef')) + ]
+> j: (<;._1 ' ab cd ef') + ]
+= ((<'a b'),(<'cd')) + ]
+> j: (<;._1 '|a b|cd') + ]
+= ((<'ab'),(<'cd'),(<'a b')) + ]
+> j: (<;._1 '|ab|cd|a b') + ]
+= ((<'ab'),(<(0 $ 'a'))) + ]
+> j: (<;._1 ' ab ') + ]
+= ((<<1),(<2)) + ]
+> j: ((<<1),<2) + ]
+= ((<1),(<<2)) + ]
+> j: ((<1),<<2) + ]
+= ((<1);(<2)) + ]
+> j: ((<<1),<2) + ]
+= ((<<'ab'),<'cd')"0
+> j: ((<<'ab'),<'cd')"0
+= (1 2 3) + ]
+> j: 1 2 3 + ]
+= ('ab') , ]
+> j: 'ab' , ]
+= (0 $ 0) + ]
+> j: (0$0) + ]
+= (0 $ 'a') + ]
+> j: '' + ]
+= (1x) + ]
+> j: 1x + ]
+= (1x 2x) + ]
+> j: 1 2x + ]
+= (2 3x) + ]
+> j: 2 3x + ]
+= (_1x) + ]
+> j: _1x + ]
+= (1r2 3r4) + ]
+> j: 1r2 3r4 + ]
+= (<(1x)) + ]
+> j: (<1x) + ]
+= (<(1x 2x)) + ]
+> j: (<1 2x) + ]
+= (s: '`ab') + ]
+> j: (s: ,<'ab') + ]
+= ((s: '`ab') , (s: '`cd')) + ]
+> j: (s: <;._1 ' ab cd') + ]
+= (4j0) + ]
+> j: 4j0 + ]
+= (4j5) + ]
+> j: 4j5 + ]
+= (4.5) + ]
+> j: 4.5 + ]
+= (4j0) >./ .*. ]
+> j: 4j0 >./ .*. ]
+= (+: &.j. 2) (>./ . *.) (%.^:2 2)
+> j: 4j0 >./ .*. %.^:2 2
+= (+:) ^:(<2)
+> j: +:^:(<2)
+= (+:) ^:(<3)
+> j: +:^:(<3)
+= (+:) ^:(<_1)
+> j: +:^:(<_1)
+= (+:) ^:2
+> j: +:^:2
+= (+:) ^:(0 1)
+> j: +:^:0 1
+= (+:) ^:(<2) ]
+> j: +:^:(<2) ]
+= (^. |.) ^:(<2) (_9:"1 1 2)
+> j: (^. |.)^:(<2) _9:"1 1 2
+= (+`-)@.(0:)
+> j: +`-@.0:
+= ($`$)/.
+> j: $`$/.
+= (+`-)\\
+> j: +`-\
+= (+`-)\\.
+> j: +`-\.
+= (+`-)/
+> j: +`-`:3
+= (+`-)`:0
+> j: +`-`:0
+= (+`-)@.]
+> j: +`-@.]
+= (+`-)"1
+> j: (;:'+-')"1
+= (>`])"1
+> j: (;:'>]')"1
+= ((+`-)`(*`%))"1
+> j: (;:'+-*%')"1
+= (C.~) + ]
+> j: C.~ + ]

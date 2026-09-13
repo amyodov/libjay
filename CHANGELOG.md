@@ -7,6 +7,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- TWO CORPUS THEMES OFF THE RESIDUE ROUND (pair 19). `residue3-framing`
+  (95 rows) is the type an ALL-EMPTY frame settles on, read wherever cells
+  are framed rather than only where two arrays are joined; the width `#:`
+  writes its digits in, which is the largest magnitude `>./` itself
+  answers; the quarter turn `j.` makes, whose real part is taken from zero
+  rather than negated; the count a cut and a key have a special form for;
+  and the noun a modifier refuses where it takes a verb.
+  `residue3-writers` (65) is how a noun is written back into source: the
+  seven spellings a box takes, the extended and symbol literals, the
+  complex number that keeps its `j0` there, the boxed power, and the
+  gerund under a rank. Every cell of both agrees.
+
 - TWO CORPUS THEMES OFF THE RESIDUE ROUND (pairs 17 and 18).
   `residue3-symbols` (126 rows) is the whole of `s:`: the
   forward forms 1 to 5, the negative forms `_1` to `_5` that read their text
@@ -442,6 +454,28 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- A NOUN WHERE A MODIFIER TAKES A VERB IS AN ABSENCE RATHER THAN A GAP.
+  `1 @: + 2`, `1 / 2`, `1 &. + 2`, `1 :. + 2`, `1 ;. + 2`, `` 1 `: 0 `` and
+  `(1 2) ^: + 2` are domain errors in the reference: the language has no
+  such form, and the modifiers that DO take a noun there — the bond, the
+  rank, the fit, the power, the agenda, the tie, the cut number, the
+  levels, the explicit definition — have taken it long before. They used to
+  read as "not supported yet", which is a promise.
+
+- A FORM NUMBER IS ONE NUMBER, IN ALL FOUR CONVERSIONS. `x:`, `u:`, `s:`
+  and `p:` each read a left argument naming WHICH answer is wanted; `s:`
+  and `p:` used to take the first atom of a list and throw the rest away,
+  where `x:` and `u:` refused it. All four now refuse, and say so the same
+  way. The reference refuses an integer list and reads the first atom of a
+  list of almost any other type; the divergence file carries that.
+
+- A SWEEP EXCUSES A REFERENCE ANSWER ABBREVIATED IN ITS MIDDLE, not only
+  one cut off at the end of a line. jconsole marks a run of omitted lines
+  with a line that is nothing but `...`, and the blocks around it are now
+  matched as blocks with a gap between — the block before the first
+  elision anchored to the start of the answer and the one after the last
+  to its end — rather than line for line from the top.
+
 - THE FOUR SYMBOL FORMS THAT REPORT AN INTERPRETER'S OWN TABLE ARE AN
   ABSENCE RATHER THAN A GAP. `0 s:` with its numbered queries, `6 s:` and
   `_6 s:` for the SLOT a name was interned into, and `7 s:` for the ORDER it
@@ -728,6 +762,47 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   than the admission — stays the domain error it is.
 
 ### Fixed
+
+- AN ALL-EMPTY FRAME TAKES ITS TYPE FROM THE ORDER A CATENATION USES.
+  Nothing there has an element to widen, and the reference settles it by an
+  order of its own in which a box sits above a character and a whole number
+  and below a float: `3!:0 (> ((0 $ <0) ; (0 $ 0j0)))` is complex and
+  `3!:0 (> ((0 $ <0) ; (0 $ 0)))` boxed, exactly as the same two pairs are
+  under `,`. Catenation already read that order; the frame a cell-by-cell
+  application makes did not, so an open and a `u^:(<n)` answered a box
+  where the reference answers the number.
+
+- `#:` READS ITS WIDTH OFF THE MAXIMUM `>./` ANSWERS. The digit count is
+  the largest magnitude's, and a NaN never displaces the fold's identity:
+  an argument of nothing but NaNs is one digit wide — `$ #: (_. _.)` is
+  `2 1` — where a NaN ALONE, which is the fold's own item, has no width and
+  is refused. libjay refused both.
+
+- `j. y` TURNS y A QUARTER TURN WITHOUT WRITING A NEGATIVE ZERO. The turn
+  is a swap whose new real part is taken FROM ZERO rather than negated, so
+  `3!:3 (j. _3)` holds a positive zero beside the `_3` as the reference
+  does, where multiplying by `0j1` wrote `_0`. The obverse already kept
+  that rule.
+
+- `#` UNDER A CUT OR A KEY IS THE INTERVAL'S LENGTH. Both have a special
+  form for the bare tally, and a length is an integer: `3!:0 (#;._2 (1x 2x
+  3x))` and `3!:0 ((#/.~) (1x 2x))` are the integer 4 in the reference
+  where libjay answered the extended count 64 that `# (1x 2x)` really is.
+  The two cuts that gather BLOCKS rather than intervals, `;.0` and `;.3`,
+  have no such form and answer the extended count in both.
+
+- A NOUN WRITTEN BACK INTO SOURCE CARRIES WHAT IT IS. No box has a
+  literal, so the reference writes an expression that BUILDS the value, and
+  libjay now writes the same ones: `<` holds an atom, `;` joins a list none
+  of whose items is a box, `<;._1` cuts a list of character LISTS out of
+  one string with a separator no word holds, a list that does hold a box is
+  joined with `,`, `a:` is the box holding the empty integer list and
+  `0$a:` an empty list of boxes. An extended number keeps the `x` that
+  makes it exact, a symbol is written as the `s:` that interns it, and a
+  COMPLEX number keeps both parts — `4j0` read back is not the `4` a
+  display shows. A boxed power is written as the box it was written as,
+  `+:^:(<2)` and not `+:^:0 1`, and a gerund under a rank as the `;:` of
+  its words, since `"` binds tighter than `` ` ``.
 
 - `n s:` HAS ALL TEN OF ITS VALUE FORMS. `1 s:` razes the names with a
   backquote before each and `_1 s:` reads that back; `2 s:` and `_2 s:` do

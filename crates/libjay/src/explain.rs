@@ -644,6 +644,7 @@ fn verb_lines(v: &Verb, depth: usize, p: &Program, tr: &Trace, out: &mut String)
                     Power::ConvergeTrace => "power (every result to convergence)".to_string(),
                     Power::Times(k) => format!("power ({k} times)"),
                     Power::Each(ks) => format!("power ({} counts, framed)", ks.len()),
+                    Power::Trace(n) => format!("power (a boxed {n}, framed)"),
                     Power::Inverse(k) => format!("power (the inverse, {k} times)"),
                 },
             );

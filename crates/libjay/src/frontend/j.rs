@@ -3567,7 +3567,7 @@ fn apply_adverb(u: Frag, a: Frag, scope: &Names) -> Result<Frag> {
         return Ok(Frag::Verb(VerbFrag::V(derived), span));
     }
     if !u.is_real_verb() {
-        return Err(Error::not_yet("noun-operand adverbs", span));
+        return Err(noun_where_a_verb_belongs(span));
     }
     let (v, _) = as_verb(u)?;
     let derived = match glyph {
@@ -4050,7 +4050,7 @@ fn compose(u: Frag, v: Frag, infinite: bool, span: Span) -> Result<Frag> {
         return verb(Verb::Rank(Box::new(composed), [monadic_rank; 3].into()));
     }
     if u.is_noun() && v.is_noun() {
-        return Err(Error::not_yet("noun-operand conjunctions", span));
+        return Err(noun_where_a_verb_belongs(span));
     }
     // A bond applies its verb dyadically to the WHOLE argument: `m&v y` is
     // `m v y`, and its rank is infinite whatever v's is — `1 2&+ b. 0`
@@ -4335,9 +4335,21 @@ fn fill_taking(f: &Verb) -> bool {
 
 fn verb_operand(f: Frag, span: Span) -> Result<Verb> {
     if f.is_noun() {
-        return Err(Error::not_yet("noun-operand conjunctions", span));
+        return Err(noun_where_a_verb_belongs(span));
     }
     Ok(as_verb(f)?.0)
+}
+
+/// A NOUN WHERE THE MODIFIER TAKES A VERB IS NOT A GAP: the language has no
+/// such form, and the reference says so. `1 @: + 2`, `1 / 2`, `1 &. + 2`,
+/// `1 :. + 2`, `1 ;. + 2`, `1 `: 0` and `(1 2) ^: + 2` are all domain
+/// errors there, so libjay refuses them as the language lacking the form
+/// rather than promising it later. The modifiers that DO take a noun in
+/// that place — the bond, the rank, the fit, the power, the agenda, the
+/// tie, the cut number, the levels, the explicit definition — have taken
+/// it before anything reaches here.
+fn noun_where_a_verb_belongs(span: Span) -> Error {
+    Error::domain("this modifier takes a verb here, and a noun is not one", span)
 }
 
 /// `u L: n` and `u S: n`: the level operand is read like a rank — 1 atom for
@@ -4529,9 +4541,10 @@ fn power_spec(arr: &Array, span: Span) -> Result<Power> {
         if n == 0.0 {
             return Err(Error::domain("a boxed power traces at least one application", span));
         }
-        // A negative n counts the same way with the obverse.
-        let sign = if n < 0.0 { -1 } else { 1 };
-        return Ok(Power::Each((0..n.abs() as i64).map(|k| sign * k).collect()));
+        // A negative n counts the same way with the obverse. The BOX is
+        // kept rather than expanded, so that the representation writes the
+        // spelling back: `+:^:(<2)`, not `+:^:0 1`.
+        return Ok(Power::Trace(n as i64));
     }
     let Some(vals) = arr.to_f64_vec() else {
         return Err(Error::parse("power must be numeric", span));
@@ -5630,17 +5643,17 @@ mod tests {
     }
 
     #[test]
-    fn noun_operand_adverbs_are_not_supported_yet() {
+    fn a_noun_where_an_adverb_takes_a_verb_is_a_domain_error() {
         let e = err("1/ 2");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("noun-operand adverbs"), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Domain);
+        assert!(e.msg.contains("takes a verb here"), "{}", e.msg);
     }
 
     #[test]
-    fn noun_operand_conjunctions_are_not_supported_yet() {
+    fn a_noun_where_a_conjunction_takes_a_verb_is_a_domain_error() {
         let e = err("1 @: + y");
-        assert_eq!(e.kind, ErrorKind::NotYet);
-        assert!(e.msg.contains("noun-operand conjunctions"), "{}", e.msg);
+        assert_eq!(e.kind, ErrorKind::Domain);
+        assert!(e.msg.contains("takes a verb here"), "{}", e.msg);
     }
 
     // --------------------------------------------------------------- trains

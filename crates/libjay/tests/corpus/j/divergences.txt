@@ -1262,3 +1262,86 @@ $ (('') A. (i. 3 4))
 ~ cause=we-refuse:err:domain_error:_the_matrix_is_singular verb=%. also=|:,i.,$,",@,@:,&,&.,&.:,^:,f.,{.,}.,#,{,~,:,+,-,*,%,,.
 %. (i. 4 3)
 ? the same shape and the same rank, answered with NaNs rather than with numbers; reason: self-contradiction
+
+// THE FORM NUMBER A CONVERSION IS ASKED FOR, READ TWO WAYS. `x:`, `u:`,
+// `s:` and `p:` each take a left argument naming WHICH answer is wanted,
+// and each refuses a list of INTEGERS as a rank error: `1 2 x: (0.5
+// 0.25)`, `1 2 u: 'ab'`, `4 2 s: (s: '`abc')` and `1 2 p: 10` are rank
+// errors in the reference. Written in almost any other type the same list
+// is read, and only its FIRST ATOM is: `1.0 2.0 x: (0.5 0.25)` is
+// `1r2 1r4`, which is form 1, where `2.0 1.0 x: (0.5 0.25)` is form 2 and
+// `1x 2x x: (0.5 0.25)` reads the 1 as well — while `1r1 2r1 x:` and
+// `1j0 2j0 x:` are rank errors again, and `1j0 x:` alone is not. Which
+// types are read and which refused says nothing about the language, and
+// the answer a read one gives throws the rest of the list away. libjay
+// asks all four for ONE number, and says so the same way each time.
+(1.0 2.0) x: (0.5 0.25)
+? the reference's own `1 2 x: (0.5 0.25)` is the rank error this is not; reason: self-contradiction
+~ cause=we-refuse:err:rank_error:_the_form_x:_converts_to_must_be_one_number|we-refuse:err:rank_error:_a_conversion_form_is_one_number|we-refuse:err:rank_error:_a_symbol_form_is_one_number|we-refuse:err:rank_error:_a_prime_query_form_is_one_number verb=x:,u:,s:,p: also=<:,H.,!,b.,-:,+:,*:,%,*,+,-,^,^.,%:,|,<.,>.,<,>,j.,r.,o.,&.,&.:,^:,$,i.,,
+(4.0 2.0) s: (s: '`abc')
+? the same form read off the first atom of a float list; reason: self-contradiction
+(1.0 2.0) u: 'ab'
+? the same, where the reference reads the 1 and leaves the 2; reason: self-contradiction
+(4.0 4.0) p: 10
+? the same under the prime query, whose fourth form is the next prime up; reason: self-contradiction
+(x: <:) (1 (2 H. 2) (2 7 1 8))
+? a hook whose left argument is the float list the reference reads one atom of; reason: self-contradiction
+(s: !) ((-:) b. 0)
+? the same hook, over the rank list a verb reports; reason: self-contradiction
+
+// A POLYNOMIAL AT ITS OWN COEFFICIENTS, WHERE THE REFERENCE ANSWERS THE
+// SAME VALUE TWO WAYS. `u~ y` is `y u y` by the Dictionary, and the pair
+// written out — `(3 $ 1ar1) p. (3 $ 1ar1)` — is ONE number three times
+// over there, as it has to be: the same polynomial at the same point.
+// Spelled as the reflexive over an argument a RESHAPE made, `p.~ (3 $
+// 1ar1)`, the reference answers three different numbers; spelled over the
+// same value written as a literal list, `p.~ (1ar1 1ar1 1ar1)`, it answers
+// the three equal ones again. libjay answers the polynomial.
+(p.~) (3 $ (1ar1))
+? the reference's own `(3 $ 1ar1) p. (3 $ 1ar1)` contradicts it; reason: self-contradiction
+~ cause=differ:val:vector/num verb=p. with=~ also=$ answers=inexact
+(p.~) (2 $ (1ar1))
+? the same at two coefficients; reason: self-contradiction
+
+// A BINOMIAL WHOSE LOWER ARGUMENT IS PAST WHAT A DOUBLE COUNTS BY ONES.
+// `x ! _3` is `(_1) ^ x` times the binomial of `x + 2` over 2, and the
+// reference has every digit of it while x is small: `1e15 ! _3` is 5e29
+// there and `(2^52) ! _3` is 1.01412e31, both right. One power of two
+// further the gamma path takes over and the answers stop being binomials
+// at all — `(2^53) ! _3` is 2.74251e62 where the value is 4.05648e31,
+// `1e16 ! _3` is 4.16667e62 where it is 5e31, and `1e17 ! _3` and
+// `9223372036854775806 ! _3` are both 1. libjay answers the ratio while
+// it has one and says it has none where the factorials overflow.
+(9223372036854775806) ! (_3)
+? the reference answers 1 where the binomial is about 4.25e37; reason: proven-wrong
+~ cause=we-refuse:err:NaN_error:_`#_!_-#`_has_no_value verb=! also=%,*,+,-,+:,-:,*:,<:,>:,^,^:,|,<.,>.,x:,!.,j.,r.,&.,&.:
+(9223372036854775806) ! (_4)
+? the same one step down the lower argument; reason: proven-wrong
+
+// THE BINOMIAL OF A COMPLEX NUMBER WITH ITSELF, AT A POLE OF THE GAMMA.
+// `x ! x` is 1 for every x, and the reference answers 1 for `3j4 ! 3j4`,
+// for `_3j1 ! _3j1` and for the real `_692.8 ! _692.8`. Where the pair is
+// a large NEGATIVE real with a vanishing imaginary part —
+// `_611.613j7.4901e_14`, which is what `>: &.^. (_16bff)` makes — it
+// answers 0 instead: the gamma of a value that near a pole has no double,
+// and the ratio of two such has no value. libjay reports the NaN its own
+// gamma made. The reference's 0 then goes through `0 ! 0`, which is 1.
+(!~) ^:2 (>: &.^. (_16bff))
+? `x ! x` is 1, and the reference's own `_3j1 ! _3j1` is 1; reason: proven-wrong
+~ cause=we-refuse:err:NaN_error:_the_complex_binomial_has_no_value_beside_a_NaN verb=! also=^:,~,&.,&.:,^.,>:,<:,j.,r.,o.,+:,-:,*:,%:,%,+,-,*,16b
+(!~) (>: &.^. (_16bff))
+? the first of those two applications on its own; reason: proven-wrong
+
+// THE WIDTH `#:` WRITES ITS DIGITS IN, WHERE THE REFERENCE'S OWN MAXIMUM
+// ANSWERS TWO WAYS. The digit count is read off the largest magnitude in
+// the whole argument, and over values holding NaNs the reference's
+// maximum depends on how MANY items it is given: `>./ (_. 1 2)` is 2 and
+// `>./ (_. 1 2 _. 1 2)` — the same values, twice over — is `_.`. So
+// `#: (_. 1 2)` is a table of digits there and `#: (_. 1 2 _. 1 2)` a
+// domain error. libjay's maximum follows the first of those at every
+// length, and writes the digits.
+#: (_. 1 2 _. 1 2)
+? the reference's own `#: (_. 1 2)` answers where this one refuses; reason: self-contradiction
+~ cause=they-refuse:val:vector/num|they-refuse:val:table/num|they-refuse:val:planes/num verb=#: also=>.,<.,_:,^:,|.,",@,@:,&.,&.:,/,\\,\\.,$,i.,+,-,*,%,_.
+(#: >: _:) ^:2 (<. ^:(0 1) (_. 1 2))
+? the same maximum inside a fork, over a table of six values; reason: self-contradiction

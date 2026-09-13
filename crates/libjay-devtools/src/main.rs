@@ -792,9 +792,15 @@ const BINARY_ULP_ROW: &str = "3!:3 read the bits below the printed tolerance";
 /// missing — which parts the two engines over nothing.
 ///
 /// The test is strict: every line the reference gave has to be libjay's own
-/// line, exactly where it was cut and exactly as it stands where it was not,
-/// and at least one of them has to have been cut. Only J abbreviates; GNU
-/// APL's page width is set outright.
+/// line, exactly as it stands where it was not cut and as far as it goes
+/// where it was, in the order it gave them, and at least one cut has to
+/// have been made. A LINE THAT IS NOTHING BUT `...` stands for a RUN of
+/// lines left out, which is how a result too tall is abbreviated — the
+/// reference writes the run it kept and one such line for the rest — so
+/// the lines around it are matched as blocks with a gap between rather
+/// than one for one. A block that follows no elision starts at the
+/// beginning and one that precedes none ends at the end. Only J
+/// abbreviates; GNU APL's page width is set outright.
 fn print_limited(lang: libjay_testkit::Lang, ours: &str, theirs: &str) -> bool {
     if lang != libjay_testkit::Lang::J || ours.len() <= theirs.len() {
         return false;
@@ -804,20 +810,61 @@ fn print_limited(lang: libjay_testkit::Lang, ours: &str, theirs: &str) -> bool {
     if theirs.is_empty() || ours.len() < theirs.len() {
         return false;
     }
-    let mut cut = false;
-    for (theirs, ours) in theirs.iter().zip(&ours) {
-        match theirs.strip_suffix("...") {
-            Some(head) => {
-                cut = true;
-                if !ours.starts_with(head) {
-                    return false;
-                }
+    // One line against one: the same text, or as much of it as the width
+    // left before the cut.
+    let same = |theirs: &str, ours: &str| match theirs.strip_suffix("...") {
+        Some(head) => ours.starts_with(head),
+        None => theirs == ours,
+    };
+    let elided = |line: &&str| *line == "...";
+    let (open, close) = (theirs.first().is_some_and(elided), theirs.last().is_some_and(elided));
+    let blocks: Vec<&[&str]> =
+        theirs.split(elided).filter(|b: &&[&str]| !b.is_empty()).collect();
+    if blocks.len() == theirs.len() {
+        // No line was a run of its own: every cut is a line's own width,
+        // and the answers line up one for one from the top.
+        let mut cut = false;
+        for (theirs, ours) in theirs.iter().zip(&ours) {
+            cut |= theirs.ends_with("...");
+            if !same(theirs, ours) {
+                return false;
             }
-            None if theirs == ours => {}
-            None => return false,
         }
+        return cut;
     }
-    cut
+    let mut at = 0usize;
+    let mut end = ours.len();
+    // The block before the FIRST elision begins where the answer does, and
+    // the block after the LAST one ends where the answer ends. Only a
+    // block with an elision on both sides is searched for, since only that
+    // one is free to stand anywhere.
+    if !close
+        && let Some(block) = blocks.last()
+    {
+        let start = ours.len().checked_sub(block.len()).filter(|s| *s >= at);
+        let Some(start) = start else { return false };
+        if !block.iter().zip(&ours[start..]).all(|(t, o)| same(t, o)) {
+            return false;
+        }
+        end = start;
+    }
+    let searched = blocks.len() - usize::from(!close);
+    for (i, block) in blocks.iter().take(searched).enumerate() {
+        let anchored = i == 0 && !open;
+        let mut found = None;
+        for start in at..=end.saturating_sub(block.len()) {
+            if block.iter().zip(&ours[start..]).all(|(t, o)| same(t, o)) {
+                found = Some(start);
+                break;
+            }
+            if anchored {
+                return false;
+            }
+        }
+        let Some(start) = found else { return false };
+        at = start + block.len();
+    }
+    at <= end
 }
 
 /// A BINARY REPRESENTATION READ BELOW THE PRINTED TOLERANCE is one answer,

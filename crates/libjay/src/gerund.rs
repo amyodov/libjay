@@ -9,6 +9,7 @@
 //! computed and displayed like any other noun.
 
 use crate::array::{Array, Data};
+use crate::dtype::DType;
 use crate::verb::{AtopForm, Enclose, Power, Verb, WindowKind, RANK_INF};
 
 /// One atomic representation.
@@ -198,6 +199,8 @@ fn power_noun(p: &Power) -> Option<Array> {
         Power::Times(n) => Array::scalar_i64(*n as i64),
         Power::Converge => Array::scalar_f64(f64::INFINITY),
         Power::Each(ns) => Array::from_i64(ns.clone()),
+        // The spelling the box was written with: `^:(<2)`.
+        Power::Trace(n) => Array::boxed(Array::scalar_i64(*n)),
         // `u^:a:` is the ace, which is what `` ` `` would have to write out.
         Power::ConvergeTrace => Array::boxed(Array::empty(crate::dtype::DType::I64)),
         Power::Inverse(n) => Array::scalar_i64(-(*n as i64)),
@@ -530,7 +533,10 @@ fn spell(ar: &Ar) -> Option<(String, Shape)> {
             let mut raw: Vec<String> = Vec::with_capacity(parts.len());
             let mut out: Vec<String> = Vec::with_capacity(parts.len());
             for t in &parts {
-                let (text, shape) = spell(t)?;
+                let (text, shape) = match t {
+                    Ar::Noun(a) => (noun_data_text(a)?, Shape::Word),
+                    _ => spell(t)?,
+                };
                 raw.push(text.clone());
                 out.push(if shape == Shape::Train { format!("({text})") } else { text });
             }
@@ -645,17 +651,6 @@ fn noun_text(a: &Array) -> Option<String> {
     if a.rank() > 1 {
         return None;
     }
-    if let Data::Char(v) = a.row_major_data() {
-        let mut out = String::from("'");
-        for c in v.as_slice() {
-            if *c == '\'' {
-                out.push('\'');
-            }
-            out.push(*c);
-        }
-        out.push('\'');
-        return Some(out);
-    }
     // A GERUND is boxed data that stands for verbs, and the tie is how it
     // is written: one spelling per box, with `` ` `` between them. TWO
     // representations or more are one, as they are where a modifier reads
@@ -663,17 +658,182 @@ fn noun_text(a: &Array) -> Option<String> {
     if let Some(items) = a.as_boxes()
         && a.rank() == 1
         && items.len() > 1
+        && let Some(parts) = items
+            .iter()
+            .map(|b| left(&Ar::from_array(b)?))
+            .collect::<Option<Vec<String>>>()
     {
-        let parts: Option<Vec<String>> =
-            items.iter().map(|b| left(&Ar::from_array(b)?)).collect();
-        return parts.map(|p| p.join("`"));
+        return Some(parts.join("`"));
     }
-    if a.count() == 0 || matches!(a.row_major_data(), Data::Box(_)) {
+    noun_data_text(a)
+}
+
+/// A noun as a TINE of a train is written: the value itself, and never the
+/// tie a gerund's boxes would spell. The reference writes
+/// `((<'>'),(<']')) + ]` as `('>';']') + ]`, where the same data standing
+/// as a MODIFIER'S OPERAND is `>`]`: a tie in a tine would be read as one
+/// train of its own.
+fn noun_data_text(a: &Array) -> Option<String> {
+    if a.rank() > 1 {
         return None;
+    }
+    // Boxed data is written as the EXPRESSION that builds it; everything
+    // else is its own literal.
+    let (text, one_word) = match boxed_text(a) {
+        Some(pair) => pair,
+        None => plain_noun_text(a)?,
+    };
+    Some(if one_word { text } else { format!("({text})") })
+}
+
+/// A BOXED NOUN as the reference writes it back into source: an expression
+/// that BUILDS the value, since no box has a literal spelling.
+///
+/// `<` holds one, `;` joins a list of items none of which is a box itself,
+/// a list of character LISTS is cut out of one string with `<;._1` and a
+/// separator no word holds, and a list that DOES hold a box is joined with
+/// `,` instead — `;` would open its last item. `a:` is the box holding the
+/// empty integer list, the one such value with a word of its own, and an
+/// empty list of boxes is `0$a:`. Every spelling but `a:` is more than one
+/// word, so each carries its own brackets: the reference writes
+/// `(<2) + ]`, `(1;2) + ]` and `((<<1),<2) + ]`.
+fn boxed_text(a: &Array) -> Option<(String, bool)> {
+    let items = a.as_boxes()?;
+    // Everything to the right of a `<` is its argument, so a spelling that
+    // follows one never needs a bracket of its own: `<<2`, `<1 2`,
+    // `<;._1 ' ab cd'`.
+    let held_text = |b: &Array| -> Option<String> {
+        match boxed_text(b) {
+            Some((text, _)) => Some(text),
+            None => Some(plain_noun_text(b)?.0),
+        }
+    };
+    if a.rank() == 0 {
+        let held = items.first()?;
+        if is_ace(held) {
+            return Some(("a:".to_string(), true));
+        }
+        return Some((format!("<{}", held_text(held)?), false));
+    }
+    if a.rank() != 1 {
+        return None;
+    }
+    let joined = match items.len() {
+        0 => Some("0$a:".to_string()),
+        1 => Some(format!(",<{}", held_text(items.first()?)?)),
+        _ => {
+            // A list holding a box of its own cannot be written with `;`,
+            // which opens whatever stands last: each item is enclosed by
+            // hand and the enclosures joined.
+            if items.iter().any(|b| b.dtype() == DType::Box) {
+                let parts: Option<Vec<String>> =
+                    items.iter().map(|b| Some(format!("<{}", held_text(b)?))).collect();
+                let parts = parts?;
+                return Some((format!("({}),{}", parts[0], parts[1..].join(",")), false));
+            }
+            // Every item a character LIST: one string holds them all, with
+            // a separator none of them uses standing before each.
+            if items.iter().all(|b| b.dtype() == DType::Char && b.rank() == 1)
+                && let Some(sep) = separator(items)
+            {
+                let mut text = String::new();
+                for b in items.iter() {
+                    text.push(sep);
+                    let Data::Char(cs) = b.row_major_data() else { return None };
+                    text.extend(cs.as_slice().iter().copied());
+                }
+                return Some((format!("<;._1 {}", quoted(&text)), false));
+            }
+            let parts: Option<Vec<String>> = items.iter().map(held_text).collect();
+            Some(parts?.join(";"))
+        }
+    }?;
+    Some((joined, false))
+}
+
+/// The box that `a:` spells: the one holding the empty integer list.
+fn is_ace(held: &Array) -> bool {
+    held.rank() == 1 && held.count() == 0 && matches!(held.dtype(), DType::I64 | DType::Bool)
+}
+
+/// The character a `<;._1` spelling marks its words off with: a blank
+/// where no word holds one, and the first of a few others that no word
+/// holds otherwise. None where every candidate is already in use.
+fn separator(items: &[Array]) -> Option<char> {
+    [' ', '|', '/', '\t'].into_iter().find(|&c| {
+        items.iter().all(|b| match b.row_major_data() {
+            Data::Char(cs) => !cs.as_slice().contains(&c),
+            _ => false,
+        })
+    })
+}
+
+/// One character list in quotes, doubling the quote it holds.
+fn quoted(text: &str) -> String {
+    let mut out = String::from("'");
+    for c in text.chars() {
+        if c == '\'' {
+            out.push('\'');
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
+}
+
+/// A noun of no boxes as its own literal: the value itself for an atom or a
+/// list, and the empty written as a reshape, which is the only spelling an
+/// empty has. A COMPLEX value keeps both of its parts here — the
+/// representation is source text, and `4j0` reads back as the complex
+/// number a bare `4` would not.
+fn plain_noun_text(a: &Array) -> Option<(String, bool)> {
+    if a.rank() > 1 {
+        return None;
+    }
+    if let Data::Char(v) = a.row_major_data() {
+        return Some((quoted(&v.as_slice().iter().collect::<String>()), true));
+    }
+    if a.count() == 0 {
+        // Measured: `(0 $ 0) + ]` is `(0$0) + ]` in the reference. Only
+        // the two types whose empty is written with a `0` are spelled
+        // here; the others have no measured spelling.
+        return matches!(a.dtype(), DType::I64 | DType::Bool)
+            .then(|| ("0$0".to_string(), false));
+    }
+    if let Data::Complex(zs) = a.row_major_data() {
+        let opts = crate::fmt::FmtOpts::J;
+        let parts: Vec<String> =
+            zs.as_slice().iter().map(|z| crate::fmt::format_complex_parts(*z, &opts)).collect();
+        return Some((parts.join(" "), true));
+    }
+    // A SYMBOL has no literal at all: the reference writes the verb that
+    // interns one over the names as text — `(s: ,<'ab')` for the atom and
+    // `(s: <;._1 ' ab cd')` for a list.
+    if let Data::Symbol(v) = a.row_major_data() {
+        let names: Vec<Array> = v
+            .as_slice()
+            .iter()
+            .map(|&s| Array::from_chars(crate::symbol::name(s).chars().collect()))
+            .collect();
+        let held = if a.rank() == 0 {
+            Array::new(vec![1], Data::Box(names.into()))
+        } else {
+            Array::new(vec![names.len()], Data::Box(names.into()))
+        };
+        return Some((format!("s: {}", boxed_text(&held)?.0), false));
     }
     let text = crate::fmt::format_array(a, &crate::fmt::FmtOpts::J);
     let text = text.trim_end_matches('\n');
-    if text.contains('\n') { None } else { Some(text.to_string()) }
+    if text.contains('\n') {
+        return None;
+    }
+    // AN EXTENDED NUMBER IS WRITTEN AS ONE: the `x` that makes the literal
+    // exact goes on the last atom, which is where it stands in the source
+    // a list was written with — `1 2x`, `_1x`, and `2 3x`.
+    if a.dtype() == DType::Ext {
+        return Some((format!("{text}x"), true));
+    }
+    Some((text.to_string(), true))
 }
 
 /// `u"n`, and the three conjunctions J spells by applying at an operand's
@@ -694,11 +854,33 @@ fn rank_ar(inner: &Verb, r: &crate::verb::Ranks, direct: bool) -> Option<Ar> {
     {
         return Some(ar);
     }
-    // `u"n` over a GERUND is written with the data itself — `(;:'+-')"0`,
-    // not the tie — which is a spelling for boxed data libjay does not
-    // have. It stays a gap rather than being written the other way.
-    if matches!(inner, Verb::Cycle(vs) if vs.len() > 1) {
-        return None;
+    // `u"n` OVER A GERUND IS WRITTEN WITH THE DATA ITSELF, not with the
+    // tie it was made from: `"` binds tighter than `` ` ``, so `+`-"1`
+    // would read the rank into the tie's LAST entity and stand for
+    // something else. The reference writes `(;:'+-')"1` wherever the
+    // words read back as the very spellings the gerund holds, and the
+    // boxed representation itself — `((<(<,'/'),<,<,'+'),<,'-')"1` —
+    // where they do not; that second spelling libjay does not have, and
+    // those stay a gap.
+    if let Verb::Cycle(vs) = inner
+        && vs.len() > 1
+    {
+        let parts: Option<Vec<String>> = vs
+            .iter()
+            .map(|w| match verb_ar_mode(w, direct)? {
+                Ar::Prim(s) => Some(s),
+                _ => None,
+            })
+            .collect();
+        let parts = parts?;
+        let joined: String = parts.concat();
+        if crate::verb::words_of(&joined)? != parts {
+            return None;
+        }
+        let items: Option<Vec<Ar>> = vs.iter().map(|w| verb_ar_mode(w, direct)).collect();
+        let data = Ar::Noun(gerund_array(&items?));
+        let text = format!("(;:{})", quoted(&joined));
+        return der("\"", vec![Ar::Direct(text, Box::new(data)), Ar::Noun(rank_noun(r))]);
     }
     match inner {
         // `m"n`: the constant verb, whose left operand is the noun itself.

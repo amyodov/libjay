@@ -1134,6 +1134,7 @@ fn power_label(p: &Power) -> String {
         Power::Times(n) => format!("count {n}"),
         Power::Converge => "converge".to_string(),
         Power::Each(_) => "a list of counts".to_string(),
+        Power::Trace(n) => format!("a boxed {n}, traced"),
         Power::ConvergeTrace => "converge, traced".to_string(),
         Power::Inverse(n) => format!("count _{n}"),
     }

@@ -2153,9 +2153,13 @@ pub enum Power {
     /// Iterate until a result matches the one before it (J `u^:_`).
     Converge,
     /// A list of counts: one answer per count, framed (`u^:(0 1 2)`), and
-    /// a negative count walks the other way. A boxed count is spelled this
-    /// way too — `u^:(<n)` is `u^:(i.n)`, downwards where n is negative.
+    /// a negative count walks the other way.
     Each(Vec<i64>),
+    /// One BOXED count, which asks for the same list: `u^:(<n)` is
+    /// `u^:(i.n)`, downwards where n is negative. It is a variant of its
+    /// own only so that the spelling survives — a representation writes it
+    /// back as the box it was written as, `+:^:(<2)` and not `+:^:0 1`.
+    Trace(i64),
     /// Every result on the way to convergence, framed (`u^:a:`).
     ConvergeTrace,
     /// `u^:_n` and `f⍣¯n`: n applications of the verb's obverse. Which
@@ -2164,6 +2168,22 @@ pub enum Power {
     /// so the sign is carried here and resolved when the arguments are in
     /// hand rather than substituted at compile time.
     Inverse(u64),
+}
+
+impl Power {
+    /// The list of counts a framing power asks for, `None` for the forms
+    /// that are not one. A boxed count `<n` names the same list `i. n`
+    /// does, walking the other way where n is negative.
+    pub fn counts(&self) -> Option<Vec<i64>> {
+        match self {
+            Power::Each(ns) => Some(ns.clone()),
+            Power::Trace(n) => {
+                let sign = if *n < 0 { -1 } else { 1 };
+                Some((0..n.abs()).map(|k| sign * k).collect())
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Iterations `Power::Converge` allows before giving up.
@@ -2679,7 +2699,7 @@ impl Verb {
             Verb::Commute(v) => format!("{}~", v.name()),
             Verb::PowerN(v, Power::Converge) => format!("{}^:_", v.name()),
             Verb::PowerN(v, Power::Times(n)) => format!("{}^:{n}", v.name()),
-            Verb::PowerN(v, Power::Each(_)) => format!("{}^:n", v.name()),
+            Verb::PowerN(v, Power::Each(_) | Power::Trace(_)) => format!("{}^:n", v.name()),
             Verb::PowerN(v, Power::Inverse(n)) => format!("{}^:_{n}", v.name()),
             Verb::PowerN(v, Power::ConvergeTrace) => format!("{}^:a:", v.name()),
             Verb::Fork(f, g, h) => format!("({} {} {})", f.name(), g.name(), h.name()),
@@ -4612,12 +4632,19 @@ fn assemble(frame: &[usize], cells: Vec<Array>, span: Span) -> Result<Array> {
             Error::new(ErrorKind::Type, what, Some(span))
         })?;
     }
+    // WHERE EVERY CELL IS EMPTY THE TYPE IS SETTLED BY THE SAME ORDER A
+    // CATENATION SETTLES IT BY. Nothing here has an element to widen, so
+    // the promotion two numbers would take says nothing; what the reference
+    // answers is the order [`empty_order`] carries, in which a box sits
+    // above a whole number and below a float. `3!:0 (> ((0 $ <0) ; (0 $
+    // 0j0)))` is complex there and `3!:0 (> ((0 $ <0) ; (0 $ 0)))` boxed,
+    // exactly as `(0 $ <0) , (0 $ 0j0)` and `(0 $ <0) , (0 $ 0)` are.
     if cells.iter().all(|c| c.count() == 0) {
         for c in &cells {
-            dt = DType::promote(dt, c.dtype()).unwrap_or(match (dt, c.dtype()) {
-                (DType::Box, _) | (_, DType::Box) => DType::Box,
-                _ => DType::Char,
-            });
+            let t = c.dtype();
+            if empty_order(t) > empty_order(dt) {
+                dt = t;
+            }
         }
     }
     let widen = |c: &Array| -> Result<Data> {
@@ -8802,7 +8829,14 @@ fn complex_monad(op: ScalarMonad, y: &Array, tol: Tol, span: Span) -> Result<Arr
                 Halve => |z| [z[0] / 2.0, z[1] / 2.0],
                 Square => |z| cx::mul(z, z),
                 Pi => |z| [std::f64::consts::PI * z[0], std::f64::consts::PI * z[1]],
-                Imaginary => |z| cx::mul(cx::I, z),
+                // `j. y` turns y a quarter turn about the origin, and the
+                // turn is a SWAP whose new real part is subtracted from
+                // zero rather than negated — the same rule the obverse
+                // already keeps, so that neither part carries a negative
+                // zero the argument did not have. `3!:3 (j. _3)` holds a
+                // POSITIVE zero beside the `_3` in the reference, where
+                // the multiply by `0j1` writes `_0` there.
+                Imaginary => |z| [0.0 - z[1], z[0]],
                 Polar => |z| cx::exp(cx::mul(cx::I, z)),
                 Abs | Not | Signum | Floor | Ceil => unreachable!("handled above"),
             };
@@ -10583,6 +10617,27 @@ fn cat_promote(
     ))
 }
 
+/// Where an array with nothing in it stands in the order the reference
+/// settles an ALL-EMPTY join by. It is not the numeric tower: a box sits
+/// above a character and a whole number and below a float, so
+/// `(0 $ <0) , (0 $ 0)` is boxed and `(0 $ <0) , (0 $ 0.5)` is a float.
+/// Every join reads it — the catenations, the frames a cell-by-cell
+/// application makes, and the open that flattens boxes into one array.
+fn empty_order(t: DType) -> u8 {
+    use DType::*;
+    match t {
+        Bool => 0,
+        Char => 1,
+        I64 => 2,
+        Box => 3,
+        Ext => 4,
+        Rat => 5,
+        F64 => 6,
+        Complex => 7,
+        Symbol => 8,
+    }
+}
+
 /// The type two arrays that share none take when at least one of them holds
 /// no elements.
 ///
@@ -10598,18 +10653,7 @@ fn cat_promote(
 /// `(0 $ 1x) , (0 $ 1.5)` is a FLOAT empty there, where `1x + 1.5` is
 /// extended.
 fn empty_type(x: &Array, y: &Array) -> Option<DType> {
-    use DType::*;
-    let order = |t: DType| match t {
-        Bool => 0,
-        Char => 1,
-        I64 => 2,
-        Box => 3,
-        Ext => 4,
-        Rat => 5,
-        F64 => 6,
-        Complex => 7,
-        Symbol => 8,
-    };
+    let order = empty_order;
     match (x.count() == 0, y.count() == 0) {
         (true, false) => Some(y.dtype()),
         (false, true) => Some(x.dtype()),
@@ -11585,7 +11629,18 @@ fn bit_width(values: &[f64], span: Span) -> Result<usize> {
         m = m.max(v.abs());
     }
     if !measured {
-        return Err(Error::domain("cannot encode a value with no digits", span));
+        // NOTHING MEASURED A WIDTH, AND THE WIDTH IS STILL THE ONE `>./`
+        // ANSWERS. The largest magnitude is a fold, and a fold of ONE item
+        // is that item — a NaN, which has no width, so `#: _.` and
+        // `#: (, _.)` are refused. Two items or more fold from the
+        // identity `__`, which a NaN never displaces, and a maximum of
+        // `__` measures nothing and leaves the ONE digit an argument of
+        // zeros gets: `$ #: (_. _.)` is `2 1` in the reference and
+        // `$ #: (2 2 $ _.)` is `2 2 1`.
+        if values.len() == 1 {
+            return Err(Error::domain("cannot encode a value with no digits", span));
+        }
+        return Ok(1);
     }
     // The width is the largest magnitude's, read off the exponent rather
     // than counted down by halving: a double holds 1e300 exactly and
@@ -16932,7 +16987,9 @@ fn power(
         // each walk is shared: the applications are counted away from 0 and
         // an answer is kept wherever a count asks for it. A negative count
         // walks the other way, over the obverse.
-        Power::Each(ref counts) => {
+        Power::Each(_) | Power::Trace(_) => {
+            let owned = p.counts().expect("a list of counts");
+            let counts = &owned;
             let mut cells: Vec<Option<Array>> = vec![None; counts.len()];
             let mut up: Vec<usize> = (0..counts.len()).filter(|&i| counts[i] >= 0).collect();
             up.sort_by_key(|&i| counts[i]);
@@ -19502,6 +19559,10 @@ fn key(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<
     if groups.is_empty() {
         return Ok(no_cells(u, &items.shape[1..], items.dtype(), ctx, span));
     }
+    if is_tally(u) {
+        let sizes: Vec<i64> = groups.iter().map(|(_, at)| at.len() as i64).collect();
+        return Ok(Array::from_i64(sizes));
+    }
     let mut cells = Vec::with_capacity(groups.len());
     for (i, (_, at)) in groups.iter().enumerate() {
         cells.push(cycled(u, i).monad(&select_items(&items, at), ctx, span)?);
@@ -19758,11 +19819,31 @@ fn cut(
         }
         return Ok(out);
     }
+    if is_tally(u) {
+        let lens: Vec<i64> = ranges.iter().map(|&(s, e)| (e - s) as i64).collect();
+        return Ok(Array::from_i64(lens));
+    }
     let mut cells = Vec::with_capacity(ranges.len());
     for (piece, (s, e)) in ranges.iter().enumerate() {
         cells.push(cycled(u, piece).monad(&section(&items, *s, *e), ctx, span)?);
     }
     assemble(&[ranges.len()], cells, span)
+}
+
+/// Whether a cut's or a key's operand is the BARE tally, which both of them
+/// have a special form for.
+///
+/// `#` under either of them is the LENGTH of the interval or the size of
+/// the group, counted while the pieces are being marked out, and a length
+/// is an integer. Applying `#` to the piece itself is not the same
+/// function over an EXACT argument, because a count of extended data is
+/// extended: `3!:0 (#;._2 (1x 2x 3x))` and `3!:0 ((#/.~) (1x 2x))` are the
+/// integer 4 in the reference where `3!:0 ((#@]);._2 (1x 2x 3x))` — the
+/// same function, spelled so that no special form can see it — is 64. The
+/// two cuts that gather BLOCKS rather than intervals, `;.0` and `;.3`,
+/// have no such form and answer the extended count there.
+fn is_tally(u: &Verb) -> bool {
+    matches!(u, Verb::Prim(p) if p.monad == MonadOp::Tally)
 }
 
 /// The type a CUT with no interval to compute answers in, where the
@@ -26279,12 +26360,7 @@ fn to_symbols(y: &Array, span: Span) -> Result<Array> {
 /// of it is read: `5 s: (i. 0)` is the boxed empty in the reference where
 /// `5 s: 5` is a domain error.
 fn symbol_form(x: &Array, y: &Array, span: Span) -> Result<Array> {
-    let form = x
-        .to_i64_vec()
-        .ok_or_else(|| Error::domain("a symbol form is an integer", span))?
-        .first()
-        .copied()
-        .unwrap_or(0);
+    let form = one_form(x, "a symbol form", None, span)?;
     if !(-6..=7).contains(&form) {
         return Err(Error::domain(format!("{form} s: names no symbol form"), span));
     }
@@ -26685,7 +26761,7 @@ fn prime_factor_rows(y: &Array, near: NearInt, span: Span) -> Result<Array> {
 }
 
 fn prime_meta(x: &Array, y: &Array, near: NearInt, span: Span) -> Result<Array> {
-    let form = one_int(x, "a prime query", near, span)?;
+    let form = one_form(x, "a prime query form", Some(near), span)?;
     // Form 3 is `q:` written the other way round, and reads the WHOLE
     // argument as `q:` does: one row per item, padded with 1s rather than
     // framed with the zero a rank-0 verb's frame would fill with.
@@ -27185,6 +27261,31 @@ fn previous_prime(n: i64, span: Span) -> Result<i64> {
 }
 
 /// One whole number from an argument that has to hold exactly that.
+/// THE FORM A CONVERSION IS ASKED FOR IS ONE NUMBER. `x:`, `u:`, `s:`,
+/// `p:` and `$.` all read their left argument as a number naming which of
+/// several answers is wanted, and a list names none of them: every one of
+/// them refuses a left argument of more than one atom, whatever its type.
+/// The reference refuses an INTEGER list the same way and reads the FIRST
+/// ATOM of a list of any other type — `1 2 x: (0.5 0.25)` is a rank error
+/// there where `1.0 2.0 x: (0.5 0.25)` is `1r2 1r4`, and `4.0 2.0 s:` and
+/// `4.0 4.0 p:` read their first atoms too — which is one question
+/// answered two ways; the divergence file carries it.
+fn one_form(a: &Array, what: &str, near: Option<NearInt>, span: Span) -> Result<i64> {
+    let read = match near {
+        Some(n) => a.to_i64_vec_near(n),
+        None => a.to_i64_vec(),
+    };
+    match read.as_deref() {
+        Some([n]) => Ok(*n),
+        Some(_) => Err(Error::new(
+            ErrorKind::Rank,
+            format!("{what} is one number"),
+            Some(span),
+        )),
+        None => Err(Error::domain(format!("{what} is an integer"), span)),
+    }
+}
+
 fn one_int(a: &Array, what: &str, near: NearInt, span: Span) -> Result<i64> {
     a.to_i64_vec_near(near)
         .and_then(|v| v.first().copied())
@@ -27634,6 +27735,15 @@ fn nested_error(e: Error, src: &str, span: Span) -> Error {
 /// `;: y`: J's own word rules over a character list, each word a box. A run
 /// of numeric literals separated by blanks is one word, which is what makes
 /// `'1 2 3'` a single number and `'i.5'` two words.
+/// The words `;:` reads a piece of source text as, or `None` where it
+/// reads none. Used where a spelling has to be checked against the way it
+/// would be read back.
+pub(crate) fn words_of(text: &str) -> Option<Vec<String>> {
+    let a = Array::from_chars(text.chars().collect());
+    let out = words(&a, Span::new(0, 0)).ok()?;
+    out.as_boxes()?.iter().map(crate::gerund::text_of).collect()
+}
+
 fn words(y: &Array, span: Span) -> Result<Array> {
     // Nothing to read is no word, whatever type the empty was going to
     // hold: `;: (0$1 2 3)` is the empty list of boxes.

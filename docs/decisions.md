@@ -6757,3 +6757,122 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   that satisfy `A X A = A` only to the digits the printer shows and are not
   the Moore-Penrose inverse. libjay reports the singularity instead of
   dividing by it.
+
+- 2026-09-13 — AN ALL-EMPTY FRAME TAKES THE TYPE THE CATENATION'S ORDER
+  GIVES IT. Two arrays joined when both hold nothing already settled their
+  type by an order measured pair by pair over the nine types — a boolean
+  loses to everything, then a character, a whole number, a BOX, an extended
+  number, a rational, a float, a complex number, a symbol — which is not
+  the promotion two numbers with elements in them would take. The frame a
+  CELL-BY-CELL application makes was settling it another way, so
+  `3!:0 (> ((0 $ <0) ; (0 $ 0j0)))` was boxed where the reference answers
+  complex, though `3!:0 ((0 $ <0) , (0 $ 0j0))` had agreed all along. One
+  order now serves both, and the open and `u^:(<n)` read it. The rest of
+  `u^:(<n)`'s framing already agreed: the item shapes are aligned at the
+  TRAILING axes and each axis takes the maximum, so an item of shape `2`
+  beside one of shape `2 1` makes a `2 2`, and a box that HOLDS something
+  beside a number is a domain error in both.
+
+- 2026-09-13 — `#:` READS ITS WIDTH OFF THE MAXIMUM `>./` ANSWERS, NOT OFF
+  THE VALUES IT SKIPS. The digit count is the largest magnitude in the whole
+  argument, and over NaNs the reference's own maximum is a fold: of ONE item
+  it is that item, so `>./ (, _.)` is `_.` and `#: (, _.)` a domain error;
+  of two or more it starts from the identity `__`, which a NaN never
+  displaces, so `>./ (_. _.)` is `__` and `#: (_. _.)` is one digit wide.
+  libjay's own extrema already answer both of those; only the width was
+  computed by a separate loop that refused wherever no value was measured.
+  It now asks the same question the fold does. Where the reference's
+  maximum comes out a NaN because of how MANY items it was handed — its
+  `>./ (_. 1 2)` is 2 and `>./ (_. 1 2 _. 1 2)` is `_.` — the two engines
+  part, and those rows are pinned.
+
+- 2026-09-13 — `j. y` IS A SWAP WHOSE NEW REAL PART IS SUBTRACTED FROM
+  ZERO. Multiplying by `0j1` writes a NEGATIVE zero into the real part of
+  every real argument, and the reference's `3!:3 (j. _3)` holds a positive
+  one. The obverse already carried this rule — `3!:3 (o. &.j. 2)` was the
+  measurement that settled it — and the forward verb now carries it too.
+
+- 2026-09-13 — `#` UNDER A CUT OR A KEY IS J'S OWN SPECIAL FORM. Both count
+  the items of an interval while they are marking the intervals out, and a
+  count made that way is an INTEGER whatever the argument held.
+  Applying `#` to the piece is not the same function over an EXACT
+  argument, because the count of extended data is extended in both engines:
+  `3!:0 (#;._2 (1x 2x 3x))` and `3!:0 ((#/.~) (1x 2x))` are 4 in the
+  reference where `3!:0 ((#@]);._2 (1x 2x 3x))` — the same function spelled
+  so that no special form can see it — is 64. The two cuts that gather
+  BLOCKS rather than intervals, `;.0` and `;.3`, have no such form and
+  answer 64 there as well.
+
+- 2026-09-13 — A NOUN WHERE A MODIFIER TAKES A VERB IS AN ABSENCE. Measured
+  over eight spellings — `1 @: + 2`, `1 @ + 2`, `1 / 2`, `1 &. + 2`,
+  `1 :. + 2`, `1 ;. + 2`, `` 1 `: 0 `` and `(1 2) ^: + 2` — the reference
+  answers a domain error to every one. libjay called them "not supported
+  yet", which is a promise; they are now refused as the language lacking
+  the form. Every modifier that DOES take a noun in that place has taken it
+  before the check is reached.
+
+- 2026-09-13 — A FORM NUMBER IS ONE NUMBER, AND THE REFERENCE READS A LIST
+  TWO WAYS. `x:`, `u:`, `s:` and `p:` each take a left argument naming
+  which answer is wanted. The reference refuses a list of INTEGERS as a
+  rank error in all four, and reads the FIRST ATOM of a list of almost any
+  other type: `1.0 2.0 x: (0.5 0.25)` is form 1 where `2.0 1.0 x:` is form
+  2, `1x 2x x:` reads the 1, and `1r1 2r1 x:` and `1j0 2j0 x:` are rank
+  errors again while the atom `1j0 x:` is not. Which types are read and
+  which refused says nothing about the language, and a read one throws the
+  rest of the list away. libjay asks all four for one number — `s:` and
+  `p:` had been taking the first atom, which agreed with the reference for
+  a float list and contradicted it for an integer one — and the rows where
+  the reference reads an atom are pinned as its own contradiction.
+
+- 2026-09-13 — HOW A NOUN IS WRITTEN BACK INTO SOURCE. A session shows a
+  verb as the text it would be written as, and a noun inside one has to be
+  written as an expression that BUILDS it, since no box has a literal.
+  Measured over thirty spellings: `<` holds an atom and takes everything to
+  its right, so `<<2` and `<;._1 '…'` need no bracket of their own; `;`
+  joins a list none of whose items is a box; a list of character LISTS is
+  cut out of one string with `<;._1` and a separator no word holds — a
+  blank, or a `|` where a word holds a blank; a list that DOES hold a box
+  is joined with `,`, because `;` would open whatever stands last; `a:` is
+  the box holding the empty integer list and `0$a:` an empty list of boxes;
+  and a one-item list is `,<x`. An extended number keeps the `x` that makes
+  it exact, on the last atom where the source put it (`1 2x`); a symbol
+  array is the `s:` that interns it over the names as text; and a COMPLEX
+  number keeps BOTH parts, since `4j0` read back is not the `4` a display
+  shows. A boxed power is written as the box it was written with —
+  `+:^:(<2)`, not the `+:^:0 1` the counts expand to — which is why the
+  power now carries the boxed spelling as a variant of its own. A GERUND is
+  the tie it was made from wherever the tie reads back as the same thing,
+  and the DATA where it would not: `"` binds tighter than `` ` ``, so
+  `(+`-)"1` is written `(;:'+-')"1` and a gerund whose parts are not single
+  words keeps a spelling libjay does not have. A noun of rank 2 or more is
+  the same gap it was: the reference writes `i.2 2` and `01+i.2 2` there,
+  searching for an expression rather than spelling the value.
+
+- 2026-09-13 — AN ANSWER THE REFERENCE ABBREVIATED IN ITS MIDDLE IS STILL
+  NO MEASUREMENT. The sweep already excused a reference answer cut off at
+  the end of a line; a result too TALL is abbreviated another way, with a
+  line that is nothing but `...` standing for a whole run of omitted lines.
+  The blocks around such a line are now matched as blocks with a gap
+  between — the block before the first elision anchored to the start of the
+  answer, the one after the last anchored to its end, and only a block with
+  an elision on both sides free to be searched for. The anchoring is what
+  makes it strict over a repetitive answer, where a block matches in many
+  places and only one of them is the end.
+
+- 2026-09-13 — WHAT PAIR 19'S RESIDUE LEFT PINNED. Five mechanisms, each
+  with the reference's own contradiction or a proof beside it. The form
+  number read off the first atom of a list, above. `p.~` over an argument a
+  RESHAPE made: `u~ y` is `y u y` by the Dictionary, and the pair written
+  out — `(3 $ 1ar1) p. (3 $ 1ar1)` — is one number three times over, as the
+  same polynomial at the same point has to be; the reflexive answers three
+  different numbers there, and over the same value written as a literal
+  list it answers the three equal ones again. The binomial whose lower
+  argument is past 2^52: `x ! _3` is right in the reference while x is
+  small — `(2^52) ! _3` is 1.01412e31 — and one power of two further the
+  gamma path takes over and writes 2.74251e62 where the value is
+  4.05648e31, 1 where it is 4.25e37. The binomial of a complex number with
+  ITSELF at a pole of the gamma: `x ! x` is 1 and the reference says so for
+  `3j4 ! 3j4` and `_3j1 ! _3j1`, but answers 0 for
+  `_611.613j7.4901e_14 ! _611.613j7.4901e_14`. And `#:` where the
+  reference's own maximum comes out a NaN, above.
+

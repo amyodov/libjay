@@ -3013,3 +3013,81 @@
 > j: _. _. _. _.
 > j: _. _. _. _.
 > j: _. _. _. _.
+= (1.0 2.0) x: (0.5 0.25)
+? the reference's own `1 2 x: (0.5 0.25)` is the rank error this is not; reason: self-contradiction
+< <error>
+> j: 1r2 1r4
+= (4.0 2.0) s: (s: '`abc')
+? the same form read off the first atom of a float list; reason: self-contradiction
+< <error>
+> j: abc
+= (1.0 2.0) u: 'ab'
+? the same, where the reference reads the 1 and leaves the 2; reason: self-contradiction
+< <error>
+> j: ab
+= (4.0 4.0) p: 10
+? the same under the prime query, whose fourth form is the next prime up; reason: self-contradiction
+< <error>
+> j: 11
+= (x: <:) (1 (2 H. 2) (2 7 1 8))
+? a hook whose left argument is the float list the reference reads one atom of; reason: self-contradiction
+< <error>
+> j: 0 0 0 0
+= (s: !) ((-:) b. 0)
+? the same hook, over the rank list a verb reports; reason: self-contradiction
+< <error>
+> j: 0
+= (p.~) (3 $ (1ar1))
+? the reference's own `(3 $ 1ar1) p. (3 $ 1ar1)` contradicts it; reason: self-contradiction
+< _0.865837j1.89189 _0.865837j1.89189 _0.865837j1.89189
+> j: _0.865837j1.89189 _2.27198j2.94231 _5.55925j1.71094
+= (p.~) (2 $ (1ar1))
+? the same at two coefficients; reason: self-contradiction
+< 0.124155j1.75077 0.124155j1.75077
+> j: 0.124155j1.75077 _0.291991j2.66007
+= (9223372036854775806) ! (_3)
+? the reference answers 1 where the binomial is about 4.25e37; reason: proven-wrong
+< <error>
+> j: 1
+= (9223372036854775806) ! (_4)
+? the same one step down the lower argument; reason: proven-wrong
+< 0
+> j: 1
+= (!~) ^:2 (>: &.^. (_16bff))
+? `x ! x` is 1, and the reference's own `_3j1 ! _3j1` is 1; reason: proven-wrong
+< <error>
+> j: 1
+= (!~) (>: &.^. (_16bff))
+? the first of those two applications on its own; reason: proven-wrong
+< _.j_.
+> j: 0
+= #: (_. 1 2 _. 1 2)
+? the reference's own `#: (_. 1 2)` answers where this one refuses; reason: self-contradiction
+< _. _.
+<  0  1
+<  1  0
+< _. _.
+<  0  1
+<  1  0
+> j: <error>
+= (#: >: _:) ^:2 (<. ^:(0 1) (_. 1 2))
+? the same maximum inside a fork, over a table of six values; reason: self-contradiction
+< 0
+< 0
+<
+< 0
+< 0
+<
+< 0
+< 0
+<
+<
+< 0
+< 0
+<
+< 0
+< 0
+<
+< 0
+< 0
+> j: <error>

@@ -673,6 +673,13 @@ fn format_complex(z: crate::complex::Cx, opts: &FmtOpts) -> String {
     if z[1] == 0.0 {
         return format_f64(z[0], opts);
     }
+    format_complex_parts(z, opts)
+}
+
+/// The same number with BOTH parts written whatever the imaginary one is.
+/// A display may leave `j0` off, since the type is not what a display
+/// shows; SOURCE TEXT may not, because `4` read back is not `4j0`.
+pub(crate) fn format_complex_parts(z: crate::complex::Cx, opts: &FmtOpts) -> String {
     format!("{}{}{}", format_f64(z[0], opts), opts.imag, format_f64(z[1], opts))
 }
 

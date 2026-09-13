@@ -1,0 +1,81 @@
+// HOW A NOUN IS WRITTEN BACK INTO SOURCE, which is what a session shows
+// for a verb that holds one. No box has a literal, so the reference writes
+// an EXPRESSION that builds the value: `<` holds one, `;` joins a list
+// none of whose items is a box, `<;._1` cuts a list of character LISTS out
+// of one string, and a list that does hold a box is joined with `,`
+// because `;` would open its last item.
+(<2) + ]
+(<<2) + ]
+(<1 2) + ]
+(<'ab') , ]
+(<a:) + ]
+(<(3j4)) + ]
+(a:) + ]
+(0 $ <0) + ]
+(1;2) + ]
+(1;2;3) + ]
+((<1),(<2),(<3),(<4)) + ]
+((<1 2),(<3 4)) + ]
+((<1),(<'a')) + ]
+(1;'ab') + ]
+('ab';1) + ]
+((<'a'),(<'b')) + ]
+((<'+'),(<'-')) + ]
+((<'>'),(<']')) + ]
+((<'ab'),(<'c')) + ]
+((<'a'),(<'bc')) + ]
+((<'ab'),(<'cd')) + ]
+((<'ab'),(<'cd'),(<'ef')) + ]
+((<'a b'),(<'cd')) + ]
+((<'ab'),(<'cd'),(<'a b')) + ]
+((<'ab'),(<(0 $ 'a'))) + ]
+((<<1),(<2)) + ]
+((<1),(<<2)) + ]
+((<1);(<2)) + ]
+((<<'ab'),<'cd')"0
+(1 2 3) + ]
+('ab') , ]
+(0 $ 0) + ]
+(0 $ 'a') + ]
+(1x) + ]
+(1x 2x) + ]
+(2 3x) + ]
+(_1x) + ]
+(1r2 3r4) + ]
+(<(1x)) + ]
+(<(1x 2x)) + ]
+(s: '`ab') + ]
+((s: '`ab') , (s: '`cd')) + ]
+
+// A COMPLEX NUMBER KEEPS BOTH PARTS in source text, where a display leaves
+// a zero imaginary part off: `4` read back is not `4j0`.
+(4j0) + ]
+(4j5) + ]
+(4.5) + ]
+(4j0) >./ .*. ]
+(+: &.j. 2) (>./ . *.) (%.^:2 2)
+
+// A BOXED POWER IS WRITTEN AS THE BOX IT WAS WRITTEN AS, not as the list
+// of counts it stands for.
+(+:) ^:(<2)
+(+:) ^:(<3)
+(+:) ^:(<_1)
+(+:) ^:2
+(+:) ^:(0 1)
+(+:) ^:(<2) ]
+(^. |.) ^:(<2) (_9:"1 1 2)
+
+// A GERUND IS THE TIE IT WAS MADE FROM wherever the tie reads back as the
+// same thing, and the DATA where it would not: `"` binds tighter than
+// `` ` ``, so a rank would be read into the tie's last entity.
+(+`-)@.(0:)
+($`$)/.
+(+`-)\\
+(+`-)\\.
+(+`-)/
+(+`-)`:0
+(+`-)@.]
+(+`-)"1
+(>`])"1
+((+`-)`(*`%))"1
+(C.~) + ]
