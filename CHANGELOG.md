@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.4.99 — 2026-09-18
+
+### Added
+
 - TWO CORPUS THEMES OFF THE RESIDUE ROUND (pair 19). `residue3-framing`
   (95 rows) is the type an ALL-EMPTY frame settles on, read wherever cells
   are framed rather than only where two arrays are joined; the width `#:`
