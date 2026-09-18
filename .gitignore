@@ -12,3 +12,6 @@ uv.lock
 /lj.png
 .apl.history
 *nogit*
+
+# Claude Code harness state
+.claude/scheduled_tasks.lock
