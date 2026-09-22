@@ -6876,3 +6876,26 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   `_611.613j7.4901e_14 ! _611.613j7.4901e_14`. And `#:` where the
   reference's own maximum comes out a NaN, above.
 
+
+- 2026-09-22 — 0.5.0 IS REDEFINED AS "J CODE THAT BUILDS J CODE" (owner
+  decision). The sweep gate, zero unexplained disagreements over generated
+  expressions, measures only what the generator can write, and the
+  generator writes every operand as a constant. A real program showed the
+  gap: the `Broadcastly` adverb of arXiv:2609.16064 (a CC-BY paper; pure J,
+  no add-on) agrees with jconsole and NumPy on six cases in the reference
+  and stops in libjay 0.4.99 at its last line, on a gerund computed at run
+  time. The inventory of "not supported yet" behind it is one mechanism,
+  not a list: libjay compiles ahead of time, and J lets a program make a
+  verb out of data while it runs — a computed rank `u"n`, fill `u!.n`,
+  agenda `u@.n`, tie and evoke `` g`:6 ``, constant verb `m"`, gerund
+  amend, fold stop, `5!:0`, `m!:n`, and a computed body `3 : y`. Tacit
+  self-reference `$:` outside an explicit definition is the second gap of
+  the same weight. 0.5.0 closes both. Its gate: `Broadcastly` runs and
+  agrees with jconsole and NumPy, the textbook `$:` idioms run, and a
+  corpus of real J programs (Rosetta Code solutions, NuVoc and Primer
+  examples, run black-box against jconsole) is measured and reported as a
+  number — not held to 100%; it is the honest distance to all of J for the
+  releases after. The generated-expression sweep stays, as a regression
+  guard rather than the definition of the release. J's own standard
+  library and addon scripts stay out of the real-code corpus: they ship as
+  part of the J system.
