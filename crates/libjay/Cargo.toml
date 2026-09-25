@@ -19,7 +19,7 @@ repository.workspace = true
 name = "jay"
 
 [dependencies]
-multiversion = "0.8"
+multiversion = "0.9"
 # Arbitrary-precision integers: the carrier for J's extended type and for
 # the two halves of a rational. The rational itself is ours — see
 # docs/decisions.md.
@@ -49,4 +49,4 @@ naga = { version = "30", features = ["wgsl-in"] }
 # The corpus/snapshot plumbing the differential suites replay, shared with
 # the `jay-corpus` recorder in libjay-devtools.
 libjay-testkit = { path = "../libjay-testkit" }
-rstest = "0.26"
+rstest = "0.27"
