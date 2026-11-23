@@ -22,12 +22,12 @@ name = "jay"
 # Native code for the scalar step of a fold (src/jit.rs). Pure Rust, built
 # into the one artifact like everything else: no system compiler, no LLVM.
 # 0.127 is the last line whose rust-version is the pinned 1.89.
-cranelift-codegen = { version = "0.127.4", default-features = false, features = ["std", "host-arch"] }
-cranelift-frontend = "0.127.4"
-cranelift-jit = "0.127.4"
-cranelift-module = "0.127.4"
-cranelift-native = "0.127.4"
-multiversion = "0.8"
+cranelift-codegen = { version = "0.137.3", default-features = false, features = ["std", "host-arch"] }
+cranelift-frontend = "0.137.3"
+cranelift-jit = "0.137.3"
+cranelift-module = "0.137.3"
+cranelift-native = "0.137.3"
+multiversion = "0.9"
 # Arbitrary-precision integers: the carrier for J's extended type and for
 # the two halves of a rational. The rational itself is ours — see
 # docs/decisions.md.
@@ -57,4 +57,4 @@ naga = { version = "30", features = ["wgsl-in"] }
 # The corpus/snapshot plumbing the differential suites replay, shared with
 # the `jay-corpus` recorder in libjay-devtools.
 libjay-testkit = { path = "../libjay-testkit" }
-rstest = "0.26"
+rstest = "0.28"
