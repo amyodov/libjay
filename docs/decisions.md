@@ -6987,3 +6987,30 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   forced, comparing bits, and asserts which cases took the compiled road.
   KAMA 1608 → 61 ms (the fold alone 1411 → 6.3); the extension grows by
   about 5 MB.
+
+- 2026-11-23 — LLVM BECOMES THE OPTIMISING TIER BESIDE CRANELIFT (owner
+  decision). A standalone experiment compiled the same kernels with
+  Cranelift 0.127 and LLVM 21 (ORC, O3, host CPU), every row bit-identical
+  to rustc: recurrences ran 0–46% faster under LLVM, independent
+  per-element maps 5–8.5× faster once the finiteness check moved out of the
+  loop (LLVM vectorises them, Cranelift never does), and LLVM compiles in
+  about 5 ms against Cranelift's 0.25. Both backends stay. The crate gets two
+  features: `cranelift` (default, pure Rust, so `cargo add libjay` and the
+  sdist stay hermetic) and `llvm` (off by default, needs LLVM at build
+  time); with neither the engine is the interpreter alone. The Python
+  binding and the C ABI bundles enable both, so every wheel ships LLVM
+  statically, with no user choice; an sdist build that finds no LLVM falls
+  back to Cranelift alone with a warning. With both present, automatic mode
+  tiers: Cranelift for small work, LLVM for large or reused work.
+  `LIBJAY_JIT` gains `cranelift` and `llvm` to force one. Tests run one
+  shared suite and the whole corpus once per backend compiled in, bit for
+  bit against the interpreter, assert the road each case took, and check
+  coverage parity between the backends; speed is measured in `bench/`, not
+  asserted. Order of work: one home for the scalar semantics of each
+  primitive (today they live in verb.rs, fuse.rs, jit.rs and the GPU
+  codegen) with min/max as an explicit compare and select; then the
+  feature split and an LLVM backend for fused element-wise kernels with a
+  deferred check; then compiled per-element bodies and explicit control
+  structures; then those scalar functions shipped as bitcode so LLVM
+  inlines them. A release after the second and third steps is a JIT
+  preview.
