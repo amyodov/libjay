@@ -22,6 +22,7 @@ pub mod jit;
 pub mod limits;
 mod par;
 mod rng;
+pub mod scalar;
 pub mod simd;
 pub mod sparse;
 pub mod symbol;

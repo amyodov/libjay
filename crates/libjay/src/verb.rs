@@ -18,6 +18,7 @@ use crate::frontend::{
     LookupLeft, NearCount, NestedGrade, OrderDomain, Rules, UniqueMask, WhereRank,
 };
 use crate::par;
+use crate::scalar;
 use crate::simd::multiversioned;
 
 /// Infinite rank (applies to the argument as a whole).
@@ -3282,14 +3283,16 @@ impl Verb {
             },
             // `u/ y` folds the leading axis, and in this layout the leading
             // axis is what each contiguous run holds.
-            Verb::Reduce(v) | Verb::NWise(v) => reduce_columns(v, y).map(Ok),
+            Verb::Reduce(v) | Verb::NWise(v) => {
+                reduce_columns(v, y, ties_left(ctx)).map(Ok)
+            }
             // `u/"1 y` folds each row across the columns, which is one
             // elementwise pass per column and no transpose at all.
             Verb::Rank(v, r) => {
                 if y.rank() != effective_rank(r[0], y.rank()) + 1 {
                     return None;
                 }
-                reduce_rows_columns(v, y).map(Ok)
+                reduce_rows_columns(v, y, ties_left(ctx)).map(Ok)
             }
             _ => None,
         }
@@ -4426,7 +4429,7 @@ fn rank_monad(
     }
     // A reduction over vector cells is every row of the buffer folded in
     // place, without an array per cell.
-    if let Some(a) = reduce_vector_cells(v, y, frame_rank) {
+    if let Some(a) = reduce_vector_cells(v, y, frame_rank, ties_left(ctx)) {
         return Ok(a);
     }
     let frame = y.shape[..frame_rank].to_vec();
@@ -5763,45 +5766,47 @@ fn i64_op(op: ScalarDyad, a: i64, b: i64) -> Option<i64> {
     })
 }
 
+/// One float `<.` or `>.` (`⌊` or `⌈`), `op` being Min or Max.
+///
+/// The two operands differ in value except on a NaN and on the two signed
+/// zeros, and on those the languages answer by POSITION.
+///
+/// - J picks the left operand only where the STRICT comparison says to, so
+///   a NaN, which fails every strict test, and a tie between `_0` and `0`
+///   both leave standing whichever operand the pass reads as its BASE.
+///   [`Tol::nan_wins`] carries which one that is for these two verbs (see
+///   [`extremum_base_is_left`]); away from the extrema it means something
+///   else. `(_0) <. 0` is `0` and `0 <. _0` is `_0` there.
+/// - Under APL a NaN loses to any number, and a tie answers the LEFT
+///   operand in every pass, as GNU APL does: `(¯0)⌊0` is `¯0` and `0⌊¯0`
+///   is `0` there.
+#[inline(always)]
+fn extremum_f64(op: ScalarDyad, a: f64, b: f64, tol: Tol) -> f64 {
+    let min = op == ScalarDyad::Min;
+    match (tol.is_j(), tol.nan_wins, min) {
+        (true, false, true) => scalar::min(a, b),
+        (true, false, false) => scalar::max(a, b),
+        (true, true, true) => scalar::min(b, a),
+        (true, true, false) => scalar::max(b, a),
+        (false, _, true) => scalar::min_num(b, a),
+        (false, _, false) => scalar::max_num(b, a),
+    }
+}
+
 /// One float step.
 #[inline]
 fn f64_op(op: ScalarDyad, a: f64, b: f64, tol: Tol, span: Span) -> Result<f64> {
     use ScalarDyad::*;
     let r = match op {
-        Add => a + b,
-        Sub => a - b,
+        Add => scalar::add(a, b),
+        Sub => scalar::sub(a, b),
         Mul => tol.mul(a, b),
-        // A NaN NEVER WINS A MIN OR A MAX. The reference picks the left
-        // operand only where the STRICT comparison says to, so a NaN —
-        // which fails every strict test — leaves standing whichever
-        // operand the pass reads as its BASE. [`Tol::nan_wins`] carries
-        // which one that is for these two verbs; away from the extrema it
-        // means something else.
-        Min | Max if tol.is_j() && (a.is_nan() || b.is_nan()) => {
-            if tol.nan_wins { a } else { b }
-        }
-        Min => a.min(b),
-        Max => a.max(b),
-        DivJ => {
-            if b == 0.0 {
-                // A NEGATIVE zero divisor turns the infinity over, which is
-                // what makes `% ^:_2 (__)` the `__` it started as: `% __`
-                // is a negative zero and dividing by it gives `__` back.
-                // A NaN DIVIDEND has no infinity to take: `_. % 0` is `_.`
-                // there, where `1 % 0` is `_`.
-                if a.is_nan() {
-                    f64::NAN
-                } else if a == 0.0 {
-                    0.0
-                } else if b.is_sign_negative() {
-                    -f64::INFINITY.copysign(a)
-                } else {
-                    f64::INFINITY.copysign(a)
-                }
-            } else {
-                a / b
-            }
-        }
+        Min | Max => extremum_f64(op, a, b, tol),
+        // A NEGATIVE zero divisor turns the infinity over, which is what
+        // makes `% ^:_2 (__)` the `__` it started as: `% __` is a negative
+        // zero and dividing by it gives `__` back. A NaN DIVIDEND has no
+        // infinity to take: `_. % 0` is `_.` there, where `1 % 0` is `_`.
+        DivJ => scalar::div(a, b),
         DivApl => {
             if b == 0.0 {
                 if a == 0.0 {
@@ -6778,32 +6783,34 @@ fn dyad_f64_chunk_body<A: Widen<f64>, B: Widen<f64>>(
             }
         }};
     }
+    // The extrema cannot fail, and [`extremum_f64`] already answers a NaN
+    // and a tie of the two zeros the way the dialect does; which operand
+    // it reads first is settled once for the pass, so the loop is one
+    // compare and select.
     macro_rules! extremum {
-        ($step:expr) => {{
-            let mut saw_nan = false;
-            zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
-                let (a, b): (f64, f64) = (a.widen(), b.widen());
-                saw_nan |= a.is_nan() || b.is_nan();
-                *slot = $step(a, b);
-                true
-            });
-            if !(tol.is_j() && saw_nan) {
-                return Ok(());
+        ($strict:path, $num:path) => {{
+            macro_rules! each_pair {
+                ($step:expr) => {
+                    zip_chunk(xs, xoff, xdiv, ys, yoff, ydiv, start, out, |a, b, slot: &mut f64| {
+                        *slot = $step(a.widen(), b.widen());
+                        true
+                    })
+                };
             }
+            match (tol.is_j(), tol.nan_wins) {
+                (true, false) => each_pair!(|a: f64, b: f64| $strict(a, b)),
+                (true, true) => each_pair!(|a: f64, b: f64| $strict(b, a)),
+                (false, _) => each_pair!(|a: f64, b: f64| $num(b, a)),
+            };
+            return Ok(());
         }};
     }
     match op {
-        Add => plain_checked!(|a: f64, b: f64| a + b),
-        Sub => plain_checked!(|a: f64, b: f64| a - b),
-        Mul => plain_checked!(|a: f64, b: f64| a * b),
-        // The extrema's fast path answers without consulting [`f64_op`],
-        // and `f64::min` keeps the number where the reference keeps
-        // whichever operand a failed strict comparison leaves standing, so
-        // a pass with a NaN anywhere in its OPERANDS goes the long way
-        // round. The answer alone does not say: `1.5 <. _.` is `_.` there
-        // and `f64::min` answers 1.5, with no NaN in it to notice.
-        Min => extremum!(f64::min),
-        Max => extremum!(f64::max),
+        Add => plain_checked!(scalar::add),
+        Sub => plain_checked!(scalar::sub),
+        Mul => plain_checked!(scalar::mul),
+        Min => extremum!(scalar::min, scalar::min_num),
+        Max => extremum!(scalar::max, scalar::max_num),
         _ => {}
     }
     let mut err = None;
@@ -8396,7 +8403,9 @@ fn as_real(a: &Array) -> Option<Array> {
 ///
 /// The two extrema pick the left operand only where the STRICT comparison
 /// says to, and a NaN fails every strict test, so the answer there is
-/// whichever operand the reference's loop reads as its BASE. A 240-cell
+/// whichever operand the reference's loop reads as its BASE. A tie of the
+/// two zeros fails it too and is settled the same way: `(_0) <. 0` is `0`,
+/// `(_0) <. (0 0)` is `_0 _0`, `(0 0) <. (_0 _0)` is `0 0`. A 240-cell
 /// grid over both verbs, three types and five shapes fixes which one that
 /// is, in this order:
 ///
@@ -8411,11 +8420,7 @@ fn as_real(a: &Array) -> Option<Array> {
 /// A TABLE spreads both of its arguments and reads the broadcast its own
 /// way; [`table_base_is_left`] is that reading.
 ///
-/// It is answered as a FLAG rather than by writing the base operand on the
-/// right, because the two extrema are symmetric away from a NaN in every
-/// way but one: `f64::min` hands back whichever ±0 it was given first, and
-/// swapping the pair would part the fused pipeline from the plain one on
-/// the sign of a zero.
+/// It is answered as a flag, which [`extremum_f64`] reads.
 fn extremum_base_is_left(dx: DType, xc: usize, dy: DType, yc: usize) -> bool {
     let int = |t: DType| matches!(t, DType::I64 | DType::Bool);
     if xc.max(yc) <= 1 {
@@ -9002,7 +9007,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
                 Some(out) => Data::I64(out.into()),
                 None => Data::F64(par::map(v, |&x| -(x as f64)).into()),
             },
-            Data::F64(v) => Data::F64(par::map(v, |&x| -x).into()),
+            Data::F64(v) => Data::F64(par::map(v, |&x| scalar::neg(x)).into()),
             _ => return Err(wrong_type(d.dtype(), span)),
         },
         // A sign is one of three whole numbers, so it is never wider than
@@ -9056,16 +9061,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
             }
             // A negative zero keeps its sign, as the dyad's divisor does:
             // `% __` is `_0` and `% _0` is `__` again.
-            Data::F64(
-                par::map(v, |&x| {
-                    if x == 0.0 {
-                        if x.is_sign_negative() { f64::NEG_INFINITY } else { f64::INFINITY }
-                    } else {
-                        1.0 / x
-                    }
-                })
-                .into(),
-            )
+            Data::F64(par::map(v, |&x| scalar::recip(x)).into())
         }
         Sqrt => {
             // Zero and one are their own square roots, so a BOOLEAN keeps
@@ -9076,12 +9072,12 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
             } else {
             // A negative value went to the complex path before this point.
             let v = as_f64(d, &mut tmp, span)?;
-            Data::F64(par::map(v, |&x| x.sqrt()).into())
+            Data::F64(par::map(v, |&x| scalar::sqrt(x)).into())
             }
         }
         Exp => {
             let v = as_f64(d, &mut tmp, span)?;
-            Data::F64(par::map(v, |&x| x.exp()).into())
+            Data::F64(par::map(v, |&x| scalar::exp(x)).into())
         }
         Abs => match d {
             Data::Bool(_) => d.clone(),
@@ -9090,12 +9086,10 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
                 None => Data::F64(par::map(v, |&x| (x as f64).abs()).into()),
             },
             // A MAGNITUDE SELECTS THE SIGN IT WANTS RATHER THAN CLEARING
-            // ONE: `|y` is the negative of y where y is below zero and y
-            // itself everywhere else, and a NEGATIVE ZERO is not below
-            // zero. So `3!:3 (| (_0.0))` holds the negative zero it was
-            // handed, where clearing the bit would have written a positive
-            // one. Nothing else the magnitude answers changes.
-            Data::F64(v) => Data::F64(par::map(v, |&x| if x < 0.0 { -x } else { x }).into()),
+            // ONE (see [`scalar::abs`]): `3!:3 (| (_0.0))` holds the
+            // negative zero it was handed, where clearing the bit would
+            // have written a positive one.
+            Data::F64(v) => Data::F64(par::map(v, |&x| scalar::abs(x)).into()),
             _ => return Err(wrong_type(d.dtype(), span)),
         },
         // Zero and one are whole, so rounding leaves a BOOLEAN alone.
@@ -9123,7 +9117,8 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
                     Some(out) => Data::I64(out.into()),
                     None => Data::F64(par::map(v, |&x| x as f64 + step as f64).into()),
                 },
-                Data::F64(v) => Data::F64(par::map(v, |&x| x + step as f64).into()),
+                Data::F64(v) if op == Inc => Data::F64(par::map(v, |&x| scalar::inc(x)).into()),
+                Data::F64(v) => Data::F64(par::map(v, |&x| scalar::dec(x)).into()),
                 _ => return Err(wrong_type(d.dtype(), span)),
             }
         }
@@ -9145,14 +9140,13 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
                     ),
                 }
             }
-            Data::F64(v) => {
-                Data::F64(par::map(v, |&x| if op == Double { x + x } else { x * x }).into())
-            }
+            Data::F64(v) if op == Double => Data::F64(par::map(v, |&x| scalar::double(x)).into()),
+            Data::F64(v) => Data::F64(par::map(v, |&x| scalar::square(x)).into()),
             _ => return Err(wrong_type(d.dtype(), span)),
         },
         Halve => {
             let v = as_f64(d, &mut tmp, span)?;
-            Data::F64(par::map(v, |&x| x / 2.0).into())
+            Data::F64(par::map(v, |&x| scalar::halve(x)).into())
         }
         Pi => {
             let v = as_f64(d, &mut tmp, span)?;
@@ -9190,7 +9184,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
             if !tol.is_j() && par::any(v, |&x| x == 0.0) {
                 return Err(Error::domain("zero has no logarithm", span));
             }
-            Data::F64(par::map(v, |&x| x.ln()).into())
+            Data::F64(par::map(v, |&x| scalar::ln(x)).into())
         }
         OneMinus => match d {
             Data::Bool(v) => Data::Bool(par::map(v, |&b| 1 - b).into()),
@@ -9198,7 +9192,7 @@ fn scalar_monad(op: ScalarMonad, y: &Array, cfg: EvalCfg, span: Span) -> Result<
                 Some(out) => Data::I64(out.into()),
                 None => Data::F64(par::map(v, |&x| 1.0 - x as f64).into()),
             },
-            Data::F64(v) => Data::F64(par::map(v, |&x| 1.0 - x).into()),
+            Data::F64(v) => Data::F64(par::map(v, |&x| scalar::one_minus(x)).into()),
             _ => return Err(wrong_type(d.dtype(), span)),
         },
         Not => {
@@ -14400,16 +14394,37 @@ fn fold_cx(op: ScalarDyad, v: &[Cx], n: usize, m: usize) -> Option<Vec<Cx>> {
     }
 }
 
-fn fold_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize) -> Option<Vec<f64>> {
+/// Whether a tie of the two zeros in a typed fold, scan or window of `<.`
+/// or `>.` answers the EARLIER of the pair: APL's left operand, where J
+/// answers the later one. See [`extremum_step`].
+fn ties_left(ctx: &Ctx<'_>) -> bool {
+    ctx.cfg.rules.lang == crate::Lang::Apl
+}
+
+/// One step of a typed float fold, scan or window of `<.` or `>.` (`op`),
+/// `a` being the earlier item of the pair and `b` the later. A NaN never
+/// wins here, as an all-NaN run reducing to the extremum's identity
+/// relies on (see [`extremum_run_identity`]). A tie of the two zeros
+/// answers the later item under J — `<./ (_0) , 0` is `0`, as `(_0) <. 0`
+/// is — and the earlier where `left` says so, as the APL dyad does. The
+/// step never abandons the block.
+#[inline(always)]
+fn extremum_step(op: ScalarDyad, left: bool, a: f64, b: f64) -> (f64, bool) {
+    let (x, y) = if left { (b, a) } else { (a, b) };
+    let r = if op == ScalarDyad::Min { scalar::min_num(x, y) } else { scalar::max_num(x, y) };
+    (r, false)
+}
+
+fn fold_f64(op: ScalarDyad, v: &[f64], n: usize, m: usize, left: bool) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     let assoc = is_associative(op);
     match op {
         Add => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a + b)),
         Sub => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a - b)),
         Mul => fold_items(v, n, m, assoc, |a: f64, b: f64| block_f64(a * b)),
-        Min => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.min(b), false))
+        Min => fold_items(v, n, m, assoc, move |a: f64, b: f64| extremum_step(Min, left, a, b))
             .map(|out| extremum_run_identity(out, m, f64::INFINITY)),
-        Max => fold_items(v, n, m, assoc, |a: f64, b: f64| (a.max(b), false))
+        Max => fold_items(v, n, m, assoc, move |a: f64, b: f64| extremum_step(Max, left, a, b))
             .map(|out| extremum_run_identity(out, m, f64::NEG_INFINITY)),
         _ => None,
     }
@@ -14471,7 +14486,7 @@ fn bool_fold(op: ScalarDyad, v: Vec<i64>) -> Data {
     }
 }
 
-fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
+fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, left: bool) -> Option<Data> {
     use ScalarDyad::*;
     // The rest — comparisons, LCM/GCD, the float-only divisions — decide
     // their result type by rules the general path already carries.
@@ -14479,7 +14494,7 @@ fn reduce_typed(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
         return None;
     }
     match d {
-        Data::F64(v) => Some(Data::F64(fold_f64(op, v, n, m)?.into())),
+        Data::F64(v) => Some(Data::F64(fold_f64(op, v, n, m, left)?.into())),
         Data::Complex(v) => Some(Data::Complex(fold_cx(op, v, n, m)?.into())),
         Data::I64(v) => Some(Data::I64(fold_i64(op, v, n, m)?.into())),
         // Booleans reduce as integers, which is what promotion says the
@@ -14552,7 +14567,7 @@ where
     ok.then_some(out)
 }
 
-fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> {
+fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize, left: bool) -> Option<Data> {
     use ScalarDyad::*;
     match d {
         Data::F64(v) => Some(Data::F64(
@@ -14560,8 +14575,8 @@ fn fold_runs_data(op: ScalarDyad, d: &Data, n: usize, m: usize) -> Option<Data> 
                 Add => fold_runs(v, n, m, |a: f64, b: f64| block_f64(a + b)),
                 Sub => fold_runs(v, n, m, |a: f64, b: f64| block_f64(a - b)),
                 Mul => fold_runs(v, n, m, |a: f64, b: f64| block_f64(a * b)),
-                Min => fold_runs(v, n, m, |a: f64, b: f64| (a.min(b), false)),
-                Max => fold_runs(v, n, m, |a: f64, b: f64| (a.max(b), false)),
+                Min => fold_runs(v, n, m, move |a: f64, b: f64| extremum_step(Min, left, a, b)),
+                Max => fold_runs(v, n, m, move |a: f64, b: f64| extremum_step(Max, left, a, b)),
                 _ => None,
             }?
             .into(),
@@ -14664,7 +14679,7 @@ where
 }
 
 /// Fold every column of a column-major buffer, one value per column.
-fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Option<Data> {
+fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize, left: bool) -> Option<Data> {
     use ScalarDyad::*;
     if !matches!(op, Add | Sub | Mul | Min | Max) {
         return None;
@@ -14690,8 +14705,8 @@ fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Optio
                 |a: f64, b: f64| block_f64(a + b),
                 |a: f64, b: f64| block_f64(a - b),
                 |a: f64, b: f64| block_f64(a * b),
-                |a: f64, b: f64| (a.min(b), false),
-                |a: f64, b: f64| (a.max(b), false)
+                move |a: f64, b: f64| extremum_step(Min, left, a, b),
+                move |a: f64, b: f64| extremum_step(Max, left, a, b)
             )
             .into(),
         )),
@@ -14749,7 +14764,7 @@ fn fold_columns_data(op: ScalarDyad, d: &Data, runs: usize, len: usize) -> Optio
 /// contiguous run holds, so every run folds where it lies and no transpose
 /// is made. None means the verb, the type or the shape is not one this
 /// covers.
-fn reduce_columns(v: &Verb, y: &Array) -> Option<Array> {
+fn reduce_columns(v: &Verb, y: &Array, left: bool) -> Option<Array> {
     let Verb::Prim(p) = v else { return None };
     let DyadOp::Scalar(op) = p.dyad else { return None };
     if !y.dtype().is_numeric() {
@@ -14768,7 +14783,7 @@ fn reduce_columns(v: &Verb, y: &Array) -> Option<Array> {
     if n == 1 {
         return Some(Array::col_major(shape, y.data.clone()));
     }
-    let data = extremum_runs_of_atoms(op, fold_columns_data(op, &y.data, m, n)?);
+    let data = extremum_runs_of_atoms(op, fold_columns_data(op, &y.data, m, n, left)?);
     Some(Array::col_major(shape, data))
 }
 
@@ -14798,7 +14813,7 @@ where
     ok.then_some(out)
 }
 
-fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Option<Data> {
+fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize, left: bool) -> Option<Data> {
     use ScalarDyad::*;
     if !matches!(op, Add | Sub | Mul | Min | Max) {
         return None;
@@ -14823,8 +14838,8 @@ fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Optio
                 |a: f64, b: f64| block_f64(a + b),
                 |a: f64, b: f64| block_f64(a - b),
                 |a: f64, b: f64| block_f64(a * b),
-                |a: f64, b: f64| (a.min(b), false),
-                |a: f64, b: f64| (a.max(b), false)
+                move |a: f64, b: f64| extremum_step(Min, left, a, b),
+                move |a: f64, b: f64| extremum_step(Max, left, a, b)
             )
             .into(),
         )),
@@ -14877,7 +14892,7 @@ fn fold_across_data(op: ScalarDyad, d: &Data, rows: usize, cols: usize) -> Optio
 
 /// `u/"1 y` over a column-major matrix: every row folded across the
 /// columns, without the transpose the row-major path would need first.
-fn reduce_rows_columns(u: &Verb, y: &Array) -> Option<Array> {
+fn reduce_rows_columns(u: &Verb, y: &Array, left: bool) -> Option<Array> {
     let Verb::Reduce(inner) = u else { return None };
     let Verb::Prim(p) = &**inner else { return None };
     let DyadOp::Scalar(op) = p.dyad else { return None };
@@ -14896,7 +14911,7 @@ fn reduce_rows_columns(u: &Verb, y: &Array) -> Option<Array> {
         // A cell of one element reduces to that element, type and all.
         return Some(Array::new(vec![rows], y.data.clone()));
     }
-    let data = fold_across_data(op, &y.data, rows, cols)?;
+    let data = fold_across_data(op, &y.data, rows, cols, left)?;
     Some(Array::new(vec![rows], data))
 }
 
@@ -14908,7 +14923,7 @@ fn reduce_rows_columns(u: &Verb, y: &Array) -> Option<Array> {
 /// exactly what that produces, and reads the buffer once. None means the
 /// shape, the verb or the type is not one this covers, and the general path
 /// runs instead.
-fn reduce_vector_cells(u: &Verb, y: &Array, frame_rank: usize) -> Option<Array> {
+fn reduce_vector_cells(u: &Verb, y: &Array, frame_rank: usize, left: bool) -> Option<Array> {
     let Verb::Reduce(inner) = u else { return None };
     let Verb::Prim(p) = &**inner else { return None };
     let DyadOp::Scalar(op) = p.dyad else { return None };
@@ -14934,7 +14949,7 @@ fn reduce_vector_cells(u: &Verb, y: &Array, frame_rank: usize) -> Option<Array> 
         return Some(Array::new(frame, y.data.clone()));
     }
     let n: usize = frame.iter().product();
-    let data = extremum_runs_of_atoms(op, fold_runs_data(op, &y.data, n, m)?);
+    let data = extremum_runs_of_atoms(op, fold_runs_data(op, &y.data, n, m, left)?);
     Some(Array::new(frame, data))
 }
 
@@ -15035,7 +15050,7 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
         // in parallel wherever the fold order allows; it declines
         // (integer overflow, an operation with its own type rules)
         // by returning None, and then the general fold below runs.
-        if let Some(d) = reduce_typed(op, y.row_major_data(), n, m) {
+        if let Some(d) = reduce_typed(op, y.row_major_data(), n, m, ties_left(ctx)) {
             return Ok(Array::new(cell_shape, d));
         }
         // Fold over the raw buffer, one whole item per step, without
@@ -15287,14 +15302,15 @@ fn scan_f64<S: Widen<f64>>(
     n: usize,
     m: usize,
     back: bool,
+    left: bool,
 ) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     match op {
         Add => scan_flat(v, n, m, back, |a: f64, b: f64| block_f64(a + b)),
         Sub => scan_flat(v, n, m, back, |a: f64, b: f64| block_f64(a - b)),
         Mul => scan_flat(v, n, m, back, |a: f64, b: f64| block_f64(a * b)),
-        Min => scan_flat(v, n, m, back, |a: f64, b: f64| (a.min(b), false)),
-        Max => scan_flat(v, n, m, back, |a: f64, b: f64| (a.max(b), false)),
+        Min => scan_flat(v, n, m, back, move |a: f64, b: f64| extremum_step(Min, left, a, b)),
+        Max => scan_flat(v, n, m, back, move |a: f64, b: f64| extremum_step(Max, left, a, b)),
         _ => None,
     }
 }
@@ -15302,7 +15318,7 @@ fn scan_f64<S: Widen<f64>>(
 /// The scan of a numeric buffer in one pass. None means this path does not
 /// apply. Integer overflow anywhere widens the whole result to float, which
 /// is what the per-prefix reduction would also produce.
-fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Option<Data> {
+fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool, left: bool) -> Option<Data> {
     use ScalarDyad::*;
     if !matches!(op, Add | Sub | Mul | Min | Max) {
         return None;
@@ -15320,12 +15336,13 @@ fn scan_typed(op: ScalarDyad, d: &Data, n: usize, m: usize, back: bool) -> Optio
         match scan_i64(op, v, n, m, back) {
             Some(out) => Data::I64(out.into()),
             None => Data::F64(
-                scan_f64(op, v, n, m, back).expect("the float scan cannot overflow").into(),
+                // Only an overflowing sum or product retries; an extremum never does.
+                scan_f64(op, v, n, m, back, false).expect("the float scan cannot overflow").into(),
             ),
         }
     }
     match d {
-        Data::F64(v) => Some(Data::F64(scan_f64(op, v.as_slice(), n, m, back)?.into())),
+        Data::F64(v) => Some(Data::F64(scan_f64(op, v.as_slice(), n, m, back, left)?.into())),
         Data::Complex(v) => Some(Data::Complex(scan_cx(op, v, n, m, back)?.into())),
         Data::I64(v) => Some(ints(op, v.as_slice(), n, m, back)),
         Data::Bool(v) => Some(ints(op, v.as_slice(), n, m, back)),
@@ -15792,6 +15809,7 @@ fn window_f64<S: Widen<f64>>(
     n: usize,
     m: usize,
     w: usize,
+    left: bool,
 ) -> Option<Vec<f64>> {
     use ScalarDyad::*;
     let assoc = is_associative(op);
@@ -15799,8 +15817,8 @@ fn window_f64<S: Widen<f64>>(
         Add => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| block_f64(a + b)),
         Sub => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| block_f64(a - b)),
         Mul => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| block_f64(a * b)),
-        Min => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| (a.min(b), false)),
-        Max => windowed!(assoc, swap, v, n, m, w, |a: f64, b: f64| (a.max(b), false)),
+        Min => windowed!(assoc, swap, v, n, m, w, move |a: f64, b: f64| extremum_step(Min, left, a, b)),
+        Max => windowed!(assoc, swap, v, n, m, w, move |a: f64, b: f64| extremum_step(Max, left, a, b)),
         _ => None,
     }
 }
@@ -15809,7 +15827,15 @@ fn window_f64<S: Widen<f64>>(
 /// means this path does not apply: the arithmetic it covers is the
 /// arithmetic [`reduce_typed`] covers, and every other operation, every
 /// non-scalar verb and the exact types go the general way.
-fn window_typed(op: ScalarDyad, swap: bool, d: &Data, n: usize, m: usize, w: usize) -> Option<Data> {
+fn window_typed(
+    op: ScalarDyad,
+    swap: bool,
+    d: &Data,
+    n: usize,
+    m: usize,
+    w: usize,
+    left: bool,
+) -> Option<Data> {
     use ScalarDyad::*;
     if !matches!(op, Add | Sub | Mul | Min | Max) {
         return None;
@@ -15827,12 +15853,13 @@ fn window_typed(op: ScalarDyad, swap: bool, d: &Data, n: usize, m: usize, w: usi
         match window_i64(op, swap, v, n, m, w) {
             Some(out) => Data::I64(out.into()),
             None => Data::F64(
-                window_f64(op, swap, v, n, m, w).expect("the float fold cannot overflow").into(),
+                // Only an overflowing sum or product retries; an extremum never does.
+                window_f64(op, swap, v, n, m, w, false).expect("the float fold cannot overflow").into(),
             ),
         }
     }
     match d {
-        Data::F64(v) => Some(Data::F64(window_f64(op, swap, v.as_slice(), n, m, w)?.into())),
+        Data::F64(v) => Some(Data::F64(window_f64(op, swap, v.as_slice(), n, m, w, left)?.into())),
         Data::Complex(v) => Some(Data::Complex(window_cx(op, swap, v, n, m, w)?.into())),
         Data::I64(v) => Some(ints(op, swap, v.as_slice(), n, m, w)),
         Data::Bool(v) => Some(ints(op, swap, v.as_slice(), n, m, w)),
@@ -16213,7 +16240,7 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         // Folding from the right is the insert's own order, so it holds
         // for any step; folding from the left needs associativity.
         if (back || is_associative(op))
-            && let Some(d) = scan_typed(op, base.row_major_data(), n, m, back)
+            && let Some(d) = scan_typed(op, base.row_major_data(), n, m, back, ties_left(ctx))
         {
             return Ok(Array::new(base.shape.clone(), d));
         }
@@ -16374,7 +16401,7 @@ fn infix(u: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
     let count = n - w + 1;
     if w > 0 && base.dtype().is_numeric()
         && let Some((op, swap)) = folded_step(u)
-        && let Some(d) = window_typed(op, swap, &base.data, n, m, w)
+        && let Some(d) = window_typed(op, swap, &base.data, n, m, w, ties_left(ctx))
     {
         let mut shape = base.shape.clone();
         shape[0] = count;
@@ -16463,7 +16490,7 @@ fn nwise(f: &Verb, x: &Array, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Resul
         && base.dtype().is_numeric()
         && let Some(op) = scalar_dyad_of(inner)
         && (k > 0 || is_associative(op))
-        && let Some(d) = window_typed(op, commuted, base.row_major_data(), n, m, w)
+        && let Some(d) = window_typed(op, commuted, base.row_major_data(), n, m, w, ties_left(ctx))
     {
         let mut shape = base.shape.clone();
         shape[0] = count;
@@ -16695,12 +16722,14 @@ fn fold_pass_f64(
             false => (at(i), acc),
             true => (acc, at(i)),
         };
+        // One pair of atoms, whose base is the right operand: see
+        // [`extremum_f64`].
         acc = match op {
-            Add => a + b,
-            Sub => a - b,
-            Mul => a * b,
-            Min => a.min(b),
-            _ => a.max(b),
+            Add => scalar::add(a, b),
+            Sub => scalar::sub(a, b),
+            Mul => scalar::mul(a, b),
+            Min => scalar::min(a, b),
+            _ => scalar::max(a, b),
         };
         // The operands were finite, so only an overflow lands here — and
         // where the arithmetic leaves the ordinary numbers the general dyad

@@ -1441,3 +1441,14 @@ p.@:^.@;"1 0 _ (2 # ((_2 0 2) e. 2))
 ~ cause=differ:val:vector/num|differ:val:table/num|differ:val:atom/num verb=! with=#. also=&.,&.:,x:,^:,",@,@:,/,\\,\\.,+,-,*,%,|,<.,>.,j.,r.,!.,L:,S:
 #.^:_1 (! 54)
 ? the same bits, written without the under; reason: proven-wrong
+
+// AN INSERT OF `<.` OR `>.` OVER THREE OR MORE FLOATS WHOSE EXTREMUM IS A
+// ZERO OF BOTH SIGNS. The reference's dyad keeps the base operand of a tie
+// (the right, for one pair), and its insert over two items agrees, but
+// over three or more it answers whichever zero one lane of its own loop
+// kept: `% <./ (% __) , (% _) , (% __)` is `_` there, where
+// `% (% __) <. (% _) <. (% __)`, the same insert written out, is `__`.
+// libjay answers the written-out insert wherever its fold runs in order;
+// a long run folded in lanes keeps whichever zero its own lanes kept.
+% <./ 3 $ (% __) , (% _)
+? the insert written out as dyads keeps the other zero; reason: self-contradiction

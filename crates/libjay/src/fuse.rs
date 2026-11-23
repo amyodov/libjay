@@ -26,6 +26,7 @@ use crate::dtype::DType;
 use crate::error::Span;
 use crate::ir::{Expr, Program, Scope};
 use crate::par;
+use crate::scalar;
 use crate::simd::multiversioned;
 use crate::verb::{
     tol_cmp, windows_into, DyadOp, MonadOp, ScalarDyad, ScalarMonad, Tol, Verb, WindowKind,
@@ -2075,15 +2076,27 @@ macro_rules! zip {
     }};
 }
 
+/// [`zip!`] for an extremum: false where a pair holds a NaN or the two
+/// zeros, whose answer is not the block's to give.
+macro_rules! extremum {
+    ($a:expr, $b:expr, $dst:expr, $f:expr) => {{
+        let f = $f;
+        let mut odd = false;
+        for ((slot, &x), &y) in $dst.iter_mut().zip($a).zip($b) {
+            odd |= x.is_nan() | y.is_nan() | scalar::signed_zero_tie(x, y);
+            *slot = f(x, y);
+        }
+        return !odd;
+    }};
+}
+
 #[inline(always)]
 fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64], tol: Tol) -> bool {
     use ScalarMonad::*;
     match op {
         Conj => each!(a, dst, |x: f64| x),
-        Neg => each!(a, dst, |x: f64| -x),
-        // The magnitude selects a sign rather than clearing one, exactly as
-        // unfused: a negative zero is not below zero and travels on.
-        Abs => each!(a, dst, |x: f64| if x < 0.0 { -x } else { x }),
+        Neg => each!(a, dst, scalar::neg),
+        Abs => each!(a, dst, scalar::abs),
         // A magnitude the dialect's tolerance reads as zero has no sign,
         // exactly as unfused.
         Signum => each!(a, dst, |x: f64| if tol.is_zero(x) {
@@ -2102,19 +2115,19 @@ fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64], tol: Tol) -> bool
             if !tol.is_j() && a.contains(&0.0) {
                 return false;
             }
-            each!(a, dst, |x: f64| if x == 0.0 { f64::INFINITY } else { 1.0 / x })
+            each!(a, dst, scalar::recip)
         }
         // Reached only through an integer chain, where they are the
         // identity: rounding a float narrows its dtype, which is declined.
         Floor => each!(a, dst, f64::floor),
         Ceil => each!(a, dst, f64::ceil),
-        Inc => each!(a, dst, |x: f64| x + 1.0),
-        Dec => each!(a, dst, |x: f64| x - 1.0),
-        Double => each!(a, dst, |x: f64| x + x),
-        Halve => each!(a, dst, |x: f64| x / 2.0),
-        Square => each!(a, dst, |x: f64| x * x),
-        OneMinus => each!(a, dst, |x: f64| 1.0 - x),
-        Exp => each!(a, dst, f64::exp),
+        Inc => each!(a, dst, scalar::inc),
+        Dec => each!(a, dst, scalar::dec),
+        Double => each!(a, dst, scalar::double),
+        Halve => each!(a, dst, scalar::halve),
+        Square => each!(a, dst, scalar::square),
+        OneMinus => each!(a, dst, scalar::one_minus),
+        Exp => each!(a, dst, scalar::exp),
         _ => false,
     }
 }
@@ -2123,24 +2136,18 @@ fn monad_f64_body(op: ScalarMonad, a: &[f64], dst: &mut [f64], tol: Tol) -> bool
 fn dyad_f64_body(op: ScalarDyad, a: &[f64], b: &[f64], dst: &mut [f64], tol: Tol) -> bool {
     use ScalarDyad::*;
     match op {
-        Add => zip!(a, b, dst, |x: f64, y: f64| x + y),
-        Sub => zip!(a, b, dst, |x: f64, y: f64| x - y),
-        Mul => zip!(a, b, dst, |x: f64, y: f64| x * y),
-        Min => zip!(a, b, dst, f64::min),
-        Max => zip!(a, b, dst, f64::max),
-        // A NEGATIVE zero divisor turns the infinity over, exactly as
-        // unfused: `1 % (% __)` is `__`.
-        DivJ => zip!(a, b, dst, |x: f64, y: f64| if y == 0.0 {
-            if x == 0.0 {
-                0.0
-            } else if y.is_sign_negative() {
-                -f64::INFINITY.copysign(x)
-            } else {
-                f64::INFINITY.copysign(x)
-            }
-        } else {
-            x / y
-        }),
+        Add => zip!(a, b, dst, scalar::add),
+        Sub => zip!(a, b, dst, scalar::sub),
+        Mul => zip!(a, b, dst, scalar::mul),
+        // On a NaN or a tie of the two zeros the languages answer by the
+        // operand's POSITION, and which position depends on the shapes and
+        // types of the pass, which the unfused verb knows and a block does
+        // not. A block holding either declines.
+        Min => extremum!(a, b, dst, scalar::min),
+        Max => extremum!(a, b, dst, scalar::max),
+        // A NEGATIVE zero divisor turns the infinity over, and a NaN
+        // dividend stays a NaN, exactly as unfused: `1 % (% __)` is `__`.
+        DivJ => zip!(a, b, dst, scalar::div),
         // The quotient is rounded with the dialect's tolerance, exactly as
         // unfused: the fused answer must not differ from the plain one.
         Residue => zip!(a, b, dst, |x: f64, y: f64| tol.residue(x, y)),
@@ -2190,6 +2197,16 @@ fn finite_block(dst: &[f64]) -> bool {
 #[inline(always)]
 fn block_f64(r: f64) -> (f64, bool) {
     (r, r.is_nan())
+}
+
+/// One step of a blockwise float fold, scan or window of `<.` or `>.`,
+/// `a` the earlier item and `b` the later: a NaN never wins, as unfused,
+/// and a tie of the two zeros abandons the block, since which of them the
+/// language keeps is the unfused verb's to say.
+#[inline(always)]
+fn extremum_step(op: ScalarDyad, a: f64, b: f64) -> (f64, bool) {
+    let r = if op == ScalarDyad::Min { scalar::min_num(a, b) } else { scalar::max_num(a, b) };
+    (r, scalar::signed_zero_tie(a, b))
 }
 
 /// Integer passes fold overflow into a flag instead of branching out of the
@@ -2350,8 +2367,8 @@ fn window_pass_f64(op: ScalarDyad, k: usize, v: &[f64], first: usize, dst: &mut 
     match op {
         Add => windows_into(v, k, first, dst, &|a: f64, b: f64| block_f64(a + b)),
         Mul => windows_into(v, k, first, dst, &|a: f64, b: f64| block_f64(a * b)),
-        Min => windows_into(v, k, first, dst, &|a: f64, b: f64| (a.min(b), false)),
-        Max => windows_into(v, k, first, dst, &|a: f64, b: f64| (a.max(b), false)),
+        Min => windows_into(v, k, first, dst, &|a: f64, b: f64| extremum_step(Min, a, b)),
+        Max => windows_into(v, k, first, dst, &|a: f64, b: f64| extremum_step(Max, a, b)),
         _ => false,
     }
 }
@@ -2372,8 +2389,8 @@ fn scan_pass_f64(op: ScalarDyad, v: &[f64], carry: Option<f64>, dst: &mut [f64])
     match op {
         Add => scan_block(v, carry, dst, &|a: f64, b: f64| block_f64(a + b)),
         Mul => scan_block(v, carry, dst, &|a: f64, b: f64| block_f64(a * b)),
-        Min => scan_block(v, carry, dst, &|a: f64, b: f64| (a.min(b), false)),
-        Max => scan_block(v, carry, dst, &|a: f64, b: f64| (a.max(b), false)),
+        Min => scan_block(v, carry, dst, &|a: f64, b: f64| extremum_step(Min, a, b)),
+        Max => scan_block(v, carry, dst, &|a: f64, b: f64| extremum_step(Max, a, b)),
         _ => None,
     }
 }
@@ -2418,8 +2435,10 @@ fn step_f64(op: ScalarDyad, a: f64, b: f64) -> Option<f64> {
         // fused fold does not take them in the language's order.
         Add => (a.is_finite() && b.is_finite()).then_some(a + b).filter(|r| !r.is_nan()),
         Mul => (a.is_finite() && b.is_finite()).then_some(a * b).filter(|r| !r.is_nan()),
-        Min => Some(a.min(b)),
-        Max => Some(a.max(b)),
+        Min | Max => match extremum_step(op, a, b) {
+            (r, false) => Some(r),
+            (_, true) => None,
+        },
         _ => None,
     }
 }

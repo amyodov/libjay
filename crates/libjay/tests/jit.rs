@@ -146,6 +146,57 @@ fn compiled_and_interpreted_agree(#[case] src: String, #[case] y: Array, #[case]
     assert_eq!(ran, compiled, "{src}: compiled road taken = {ran}");
 }
 
+/// `n` floats cycling through `pattern`.
+fn cycle(pattern: &[f64], n: usize) -> Array {
+    let v: Vec<f64> = pattern.iter().copied().cycle().take(n).collect();
+    Array::new(vec![n], Data::F64(v.into()))
+}
+
+const NZ: f64 = -0.0;
+
+#[rstest]
+// The two zeros side by side, which the extrema answer by position.
+#[case::min_zeros("(] F:. ([ <. ])) {y}", cycle(&[NZ, 0.0, 0.0, NZ, NZ], 2000), true)]
+#[case::min_zeros_swapped("(] F:. (] <. [)) {y}", cycle(&[NZ, 0.0, 0.0, NZ, NZ], 2000), true)]
+#[case::max_zeros("(] F:. ([ >. ])) {y}", cycle(&[0.0, NZ, NZ, 0.0, NZ], 2000), true)]
+#[case::max_zeros_swapped("(] F:. (] >. [)) {y}", cycle(&[0.0, NZ, NZ, 0.0, NZ], 2000), true)]
+// A bare primitive step takes the interpreter's typed fold, never the
+// compiled one.
+#[case::extrema_bare("(] F:. <.) {y}", cycle(&[NZ, 0.0, 1.0, NZ, -1.0], 2000), false)]
+#[case::extrema_explicit(
+    "(] F.. (4 : '0 >. y <. x')) {y}", cycle(&[NZ, 0.0, NZ, 2.0, -3.0], 2000), true
+)]
+#[case::abs_zeros("(] F:. ([: | [ <. ])) {y}", cycle(&[NZ, 0.0, -1.5, NZ, 2.0], 2000), true)]
+#[case::abs_negated("(] F:. ([: | [: - [)) {y}", cycle(&[NZ, 0.0, -1.5, 3.0], 2000), true)]
+#[case::insert_zeros("([ <. ])/ {y}", cycle(&[0.0, NZ, NZ, 0.0], 2001), true)]
+#[case::suffix_scan_zeros("([ >. ])/\\. {y}", cycle(&[NZ, 0.0, 0.0], 2000), true)]
+// A NaN or an infinity stops the compiled loop; the interpreter answers.
+#[case::min_nan(
+    "(] F:. ([ <. ])) {y}", with(&mut floats(50, 30), &[(9, f64::NAN)]), false
+)]
+#[case::max_nan_first(
+    "(] F:. ([ >. ])) {y}", with(&mut floats(50, 31), &[(0, f64::NAN)]), false
+)]
+#[case::abs_nan("(] F:. ([: | [ + ])) {y}", with(&mut floats(50, 32), &[(5, f64::NAN)]), false)]
+#[case::min_infinity(
+    "(] F:. ([ <. ])) {y}", with(&mut floats(50, 33), &[(4, f64::NEG_INFINITY)]), false
+)]
+#[case::max_infinity(
+    "(] F:. ([ >. ])) {y}", with(&mut floats(50, 34), &[(4, f64::INFINITY)]), false
+)]
+#[case::abs_infinity(
+    "(] F:. ([: | [ - ])) {y}", with(&mut floats(50, 35), &[(4, f64::NEG_INFINITY)]), false
+)]
+fn extrema_and_magnitude_agree_on_zeros_nan_and_infinities(
+    #[case] src: &str,
+    #[case] y: Array,
+    #[case] compiled: bool,
+) {
+    let (off, on, ran) = both(src, std::slice::from_ref(&y));
+    assert_eq!(off, on, "{src}");
+    assert_eq!(ran, compiled, "{src}: compiled road taken = {ran}");
+}
+
 #[rstest]
 #[case::integers("(] F:. ([ + 2 * ])) {y}", Data::I64((0..100).collect::<Vec<i64>>().into()))]
 #[case::booleans("(] F:. ([ + 2 * ])) {y}", Data::Bool(vec![1u8, 0, 1, 1].into()))]

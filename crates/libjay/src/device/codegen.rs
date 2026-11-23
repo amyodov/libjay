@@ -135,6 +135,7 @@ struct Needs {
     recip: bool,
     divj: bool,
     residue: bool,
+    selects: bool,
 }
 
 /// The shader for this kernel, or the name of the operation that has no
@@ -148,7 +149,10 @@ pub(crate) fn wgsl(
     let body = chain_body(k, splat, p, &mut needs)?;
     let reduce = match k.reduce() {
         None => None,
-        Some(op) => Some(fold_expr(op)?),
+        Some(op) => {
+            needs.selects |= matches!(op, ScalarDyad::Min | ScalarDyad::Max);
+            Some(fold_expr(op)?)
+        }
     };
 
     let t = p.ty();
@@ -278,7 +282,10 @@ fn monad_expr(
     Ok(match op {
         Conj => format!("({a})"),
         Neg => format!("-({a})"),
-        Abs => format!("abs({a})"),
+        Abs => {
+            needs.selects = true;
+            format!("jabs({a})")
+        }
         Signum => format!("sign({a})"),
         Recip => {
             needs.recip = true;
@@ -317,8 +324,14 @@ fn dyad_expr(
         Add => format!("({a}) + ({b})"),
         Sub => format!("({a}) - ({b})"),
         Mul => format!("({a}) * ({b})"),
-        Min => format!("min({a}, {b})"),
-        Max => format!("max({a}, {b})"),
+        Min => {
+            needs.selects = true;
+            format!("jmin({a}, {b})")
+        }
+        Max => {
+            needs.selects = true;
+            format!("jmax({a}, {b})")
+        }
         DivJ => {
             needs.divj = true;
             format!("divj({a}, {b})")
@@ -361,8 +374,8 @@ fn fold_expr(op: ScalarDyad) -> Result<fn(&str, &str) -> String, &'static str> {
     Ok(match op {
         Add => |a: &str, b: &str| format!("{a} + {b}"),
         Mul => |a: &str, b: &str| format!("{a} * {b}"),
-        Min => |a: &str, b: &str| format!("min({a}, {b})"),
-        Max => |a: &str, b: &str| format!("max({a}, {b})"),
+        Min => |a: &str, b: &str| format!("jmin({a}, {b})"),
+        Max => |a: &str, b: &str| format!("jmax({a}, {b})"),
         _ => return Err("this reduction"),
     })
 }
@@ -390,6 +403,16 @@ fn helpers(needs: &Needs, tol: Tol, p: Precision) -> String {
     if needs.tol_le {
         s.push_str(&format!(
             "fn tle(a: {t}, b: {t}) -> bool {{ return a <= b || teq(a, b); }}\n"
+        ));
+    }
+    if needs.selects {
+        // `scalar::min`, `scalar::max` and `scalar::abs`: a compare and a
+        // select each, where the builtins leave a tie of the two zeros
+        // unspecified or clear the sign of a negative zero.
+        s.push_str(&format!("fn jmin(a: {t}, b: {t}) -> {t} {{ return select(b, a, a < b); }}\n"));
+        s.push_str(&format!("fn jmax(a: {t}, b: {t}) -> {t} {{ return select(b, a, a > b); }}\n"));
+        s.push_str(&format!(
+            "fn jabs(a: {t}) -> {t} {{ return select(a, -a, a < {zero}); }}\n"
         ));
     }
     if needs.recip {

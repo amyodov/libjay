@@ -7014,3 +7014,33 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   structures; then those scalar functions shipped as bitcode so LLVM
   inlines them. A release after the second and third steps is a JIT
   preview.
+
+- 2026-11-24 — ONE HOME FOR THE SCALAR ARITHMETIC; A TIE OF THE TWO ZEROS
+  KEEPS THE BASE (delegated). `src/scalar.rs` defines the float operation
+  behind each primitive the compiled fold and the fused kernels lower, as
+  `extern "C"` functions, and the interpreter, `fuse.rs` and `jit.rs` all
+  take them from there, so the bit-identity between the roads no longer
+  rests on copies agreeing. What a language adds to the arithmetic
+  (tolerance, J's NaN and infinity rules, APL's refusals, narrowing) stays
+  with the caller. Two copies had already drifted: the fused reciprocal
+  sent `% _0` to `_` where the interpreter answers `__`, and the fused `%`
+  sent `_. % 0` to an infinity. The extrema are a compare and a select,
+  `a < b ? a : b`, because `f64::min` leaves a tie unspecified. jconsole
+  settles a tie of `_0` and `0` exactly as it settles a NaN: the strict
+  comparison fails and the pass's base operand stands — the right of one
+  pair, an integer beside a float, a broadcast atom, otherwise the right —
+  so `extremum_base_is_left` now governs both. Its insert over two items,
+  its scans and its windows follow the dyad pair by pair; its insert over
+  three or more answers whichever zero one lane of its loop kept, which
+  contradicts the insert written out and is pinned. GNU APL keeps the LEFT
+  operand of a tie in every pass, dyad and reduction alike (seen through
+  the phase `12○x×0J1`), so APL takes the left; Dyalog never makes a
+  negative zero, so has nothing to say. The language decides it and the
+  Dialect needs no field. The typed folds take a flag for the side; a
+  fused block holding a NaN or the two zeros declines, since the base
+  depends on shapes and types a block does not see. The compiled step
+  lowers `<.` `>.` `|` inline as the same select and calls `^` `^.`:
+  over five million floats, compiled, the cusum
+  `0 (] F:. (4 : '0 >. y + x - 0.5'))` went from 43 ms to 33 and the
+  bucket `0 (] F:. (4 : '10 <. 0 >. y + x'))` from 59 to 31. A long typed
+  `<./` folded in lanes keeps whichever zero its lanes kept.

@@ -10,9 +10,12 @@
 //! instead.
 //!
 //! The compiled loop answers exactly what the interpreter answers, bit for
-//! bit: it performs the same IEEE operations on the same operands in the
-//! same order, and the transcendental functions call the same Rust
-//! functions the interpreter does. Everywhere the language's own rules
+//! bit: every operation is the one [`crate::scalar`] defines for the
+//! primitive, which the interpreter uses too, on the same operands in the
+//! same order. The arithmetic is emitted as the IEEE instruction the
+//! definition consists of, `<.` `>.` and `|` as the same compare and
+//! select, and `^` and `^.` call the definitions themselves. Everywhere
+//! the language's own rules
 //! differ from plain IEEE arithmetic — a NaN, an infinity, `0 % 0` — the
 //! value involved is not finite, so the loop checks every value it makes
 //! and stops at the first that is not. The caller then runs the
@@ -41,6 +44,7 @@ use cranelift_module::{default_libcall_names, Linkage, Module};
 
 use crate::array::{Array, Data};
 use crate::ir::{ExplicitDef, Expr, Scope};
+use crate::scalar;
 use crate::verb::{DyadOp, MonadOp, ScalarDyad, ScalarMonad, Verb, RANK_INF};
 
 /// When the fold's step is compiled.
@@ -526,22 +530,6 @@ fn cache() -> &'static Mutex<HashMap<Step, Option<Kernel>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-extern "C" fn call_exp(a: f64) -> f64 {
-    a.exp()
-}
-
-extern "C" fn call_ln(a: f64) -> f64 {
-    a.ln()
-}
-
-extern "C" fn call_min(a: f64, b: f64) -> f64 {
-    a.min(b)
-}
-
-extern "C" fn call_max(a: f64, b: f64) -> f64 {
-    a.max(b)
-}
-
 /// Compile a step's loop. None where the host has no Cranelift backend or
 /// the compilation fails for any reason.
 fn compile(step: &Step) -> Option<Kernel> {
@@ -576,13 +564,6 @@ fn compile_inner(step: &Step) -> Option<Kernel> {
         let mut b = FunctionBuilder::new(&mut ctx.func, &mut fctx);
         let unary = {
             let mut s = Signature::new(call_conv);
-            s.params.push(AbiParam::new(types::F64));
-            s.returns.push(AbiParam::new(types::F64));
-            b.import_signature(s)
-        };
-        let binary = {
-            let mut s = Signature::new(call_conv);
-            s.params.push(AbiParam::new(types::F64));
             s.params.push(AbiParam::new(types::F64));
             s.returns.push(AbiParam::new(types::F64));
             b.import_signature(s)
@@ -640,9 +621,8 @@ fn compile_inner(step: &Step) -> Option<Kernel> {
                     let v = match op {
                         Un::Neg => b.ins().fneg(a),
                         Un::Abs => {
-                            // The negative of a value below zero and the
-                            // value itself otherwise: a negative zero keeps
-                            // its sign, as the interpreter's magnitude does.
+                            // `scalar::abs`: the negative of a value below
+                            // zero and the value itself otherwise.
                             let z = b.ins().f64const(0.0);
                             let below = b.ins().fcmp(FloatCC::LessThan, a, z);
                             let neg = b.ins().fneg(a);
@@ -653,8 +633,8 @@ fn compile_inner(step: &Step) -> Option<Kernel> {
                             b.ins().fadd(a, one)
                         }
                         Un::Dec => {
-                            let one = b.ins().f64const(-1.0);
-                            b.ins().fadd(a, one)
+                            let one = b.ins().f64const(1.0);
+                            b.ins().fsub(a, one)
                         }
                         Un::Double => b.ins().fadd(a, a),
                         Un::Halve => {
@@ -673,7 +653,7 @@ fn compile_inner(step: &Step) -> Option<Kernel> {
                         Un::Sqrt => b.ins().sqrt(a),
                         Un::Exp | Un::Ln => {
                             let f: extern "C" fn(f64) -> f64 =
-                                if op == Un::Exp { call_exp } else { call_ln };
+                                if op == Un::Exp { scalar::exp } else { scalar::ln };
                             let callee = b.ins().iconst(ptr, f as usize as i64);
                             let call = b.ins().call_indirect(unary, callee, &[a]);
                             b.inst_results(call)[0]
@@ -688,13 +668,21 @@ fn compile_inner(step: &Step) -> Option<Kernel> {
                         Bin::Add => b.ins().fadd(l, r),
                         Bin::Sub => b.ins().fsub(l, r),
                         Bin::Mul => b.ins().fmul(l, r),
+                        // `scalar::div` differs from IEEE only at `0 % 0`,
+                        // whose NaN stops the loop.
                         Bin::Div => b.ins().fdiv(l, r),
-                        Bin::Min | Bin::Max => {
-                            let f: extern "C" fn(f64, f64) -> f64 =
-                                if op == Bin::Min { call_min } else { call_max };
-                            let callee = b.ins().iconst(ptr, f as usize as i64);
-                            let call = b.ins().call_indirect(binary, callee, &[l, r]);
-                            b.inst_results(call)[0]
+                        // `scalar::min` and `scalar::max`: the left operand
+                        // where the strict comparison picks it, otherwise
+                        // the right, which is how the interpreter reads one
+                        // pair of atoms. A NaN operand stops the loop
+                        // before the answer is used.
+                        Bin::Min => {
+                            let lt = b.ins().fcmp(FloatCC::LessThan, l, r);
+                            b.ins().select(lt, l, r)
+                        }
+                        Bin::Max => {
+                            let gt = b.ins().fcmp(FloatCC::GreaterThan, l, r);
+                            b.ins().select(gt, l, r)
                         }
                     };
                     finite(&mut b, v, &mut ok);

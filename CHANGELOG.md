@@ -17,7 +17,28 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- ONE DEFINITION OF EACH FLOAT PRIMITIVE'S ARITHMETIC. `src/scalar.rs`
+  holds the scalar operation behind `+ - * % <. >.` and the monads
+  `- | >: <: +: -: *: -. % %: ^ ^.`, as `extern "C"` functions; the
+  interpreter, the fused kernels and the compiled fold step all take them
+  from there, and the shaders spell the extrema and the magnitude the same
+  way. The compiled step now lowers `<.` and `>.` inline as a compare and
+  a select instead of calling out.
+
 ### Fixed
+
+- A TIE OF THE TWO ZEROS IN `<.` AND `>.` IS SETTLED AS A NaN IS: the base
+  operand of the pass stands. `(% __) <. (% _)` is `0`, `(% _) <. (% __)`
+  is `_0`, a broadcast atom wins (`(% __) <. 2 # % _` is `_0 _0`) and so
+  does an integer beside a float, exactly as jconsole answers. libjay
+  answered whatever `f64::min` gave, which was the left operand of one
+  pair and a positive zero over lists. Inserts, scans, windows and the
+  fold follow the same rule pair by pair. APL keeps the left operand of a
+  tie, as GNU APL does.
+- The fused reciprocal kept `% _0` positive and the fused `%` turned
+  `_. % 0` into an infinity; both now answer as unfused (`% - 3 # % _` is
+  `__ __ __`). A fused `<.` or `>.` over a NaN or the two zeros declines
+  to the unfused verb, which knows the base operand.
 
 ## 0.4.99 — 2026-09-18
 
