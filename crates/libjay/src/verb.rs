@@ -15062,6 +15062,9 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     if ctx.cfg.rules.lang == crate::Lang::Apl {
         return item_fold(v, y, ctx, span);
     }
+    if let Some(a) = crate::jit::insert(v, y, &|n| ctx.env.verb(n).cloned()) {
+        return Ok(a);
+    }
     let mut acc = y.item(n - 1);
     for i in (0..n - 1).rev() {
         acc = v.dyad(&y.item(i), &acc, ctx, span)?;
@@ -16229,6 +16232,9 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         // fold in general, and it is the direction `|. u/\. |. y` reverses
         // twice to reach.
         if back && u.is_pure() {
+            if let Some(a) = crate::jit::suffix_scan(inner, base, &|n| ctx.env.verb(n).cloned()) {
+                return Ok(a);
+            }
             let mut acc = base.item(n - 1);
             let mut cells = Vec::with_capacity(n);
             cells.push(acc.clone());
@@ -16773,6 +16779,24 @@ fn fold_family(
         _ => y.cell_at(1, if reverse { n - 1 - i } else { i }),
     };
     if let Some(answer) = fold_typed(u, v, kind, x, y) {
+        return Ok(answer);
+    }
+    // A step written as a name is the verb the name stands for now, which
+    // is what applying it would look up.
+    let named;
+    let step = match v {
+        Verb::Named(n) => {
+            named = ctx.env.verb(n).cloned();
+            named.as_ref()
+        }
+        v => Some(v),
+    };
+    if matches!(u, Verb::Prim(p) if p.monad == MonadOp::Same)
+        && let Some(step) = step
+        && let Some(answer) = crate::jit::fold(step, multiple, reverse, x, y, &mut |a, b| {
+            step.dyad(a, b, ctx, span).ok()
+        })
+    {
         return Ok(answer);
     }
     let (mut acc, from) = match (x, n) {

@@ -107,7 +107,8 @@ rustfmt.toml; a blanket format rewrites the whole codebase.
   python/jay/_jay.abi3.so — rebuild `maturin develop --release` before
   benchmarking. LIBJAY_THREADS caps the pool; LIBJAY_CPU_LEVEL pins the CPU
   feature level (`baseline`, `v2`, `v3`, `v4`, `native`), read once per
-  process. Toolchain: rust-toolchain.toml pins 1.89, which is the MSRV.
+  process; LIBJAY_JIT (`0`, `force`, default auto) does the same for the
+  Cranelift-compiled fold steps. Toolchain: rust-toolchain.toml pins 1.89, which is the MSRV.
 - Phases (original roadmap): 1–6 done (frontends, IR, Arrow, parallelism,
   time series, SIMD dispatch) + C ABI, fusion, dual oracles, boxes,
   explicit definitions and control structures, complex numbers, bigints

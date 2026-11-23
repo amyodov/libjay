@@ -18,6 +18,7 @@ pub mod frontend;
 pub mod fuse;
 pub mod gerund;
 pub mod ir;
+pub mod jit;
 pub mod limits;
 mod par;
 mod rng;

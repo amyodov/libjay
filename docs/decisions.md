@@ -6950,3 +6950,40 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   guard rather than the definition of the release. J's own standard
   library and addon scripts stay out of the real-code corpus: they ship as
   part of the J system.
+
+- 2026-11-23 — CODEGEN BACKEND: CRANELIFT, FIRST FOR THE STEP OF A FOLD
+  (delegated). The 2026-08-20 entry deferred code generation until a
+  profile justified it; this is the profile. A fold whose step is a train
+  or an explicit definition — KAMA's `4 : 'y + ({. x) * ({: x) - y'`, the
+  `([ + c * ])/` family — was interpreted at about 1.4 µs a step, which
+  made KAMA over a million bars 1608 ms against numba's 27 and jconsole's
+  591, all of it dispatch rather than arithmetic. The fused kernels and
+  the typed reductions are bound by memory traffic already and had nothing
+  comparable to gain. Cranelift 0.127 (the last line whose rust-version is
+  the pinned 1.89; Apache-2.0 WITH LLVM-exception) is pure Rust and builds
+  into the one artifact: no system compiler, no LLVM. `src/jit.rs` lowers
+  the step to a scalar expression — the dyads `+ - * % <. >.`, the monads
+  `- | >: <: +: -: *: -. % %: ^ ^.`, `[ ] {. {: m {` over a row item,
+  forks, hooks, atops, bonds, `~`, rank wrappers, and explicit bodies of
+  expressions and local assignments — and compiles the whole loop over the
+  items with the running value in a register. It serves `] F.. v` and its
+  three relatives, J's insert `v/` over a float list, and the suffix scan
+  `v/\.`. Bit-identity with the interpreter is the contract and holds by
+  construction: the same IEEE operations in the same order, `^ ^. <. >.`
+  called through the Rust functions the interpreter itself uses, `|` kept
+  as a select so a negative zero survives, and every value the loop makes
+  checked to be finite. Wherever the language's rules part from IEEE (a
+  NaN, an infinity, `0 % 0`) some value is not finite, so the loop stops
+  and the interpreter runs the fold from the start. Only float data is
+  compiled, and an integer seed takes its first step in the interpreter
+  so that the running value's type stays its decision. `LIBJAY_JIT`
+  (`0`/`off`, `force`, otherwise automatic) is read once per process, and
+  `jit::with_mode` overrides it per thread for tests. Automatic compiles
+  from 1024 steps — a compile costs about 0.45 ms, which is that many
+  interpreted steps — and uses a cached loop from 16. Loops are cached by
+  the expression they compute, so a train and a definition that lower
+  alike share one; at most 1024 are compiled per process. `tests/jit.rs`
+  runs targeted cases and the whole J corpus with the compiler off and
+  forced, comparing bits, and asserts which cases took the compiled road.
+  KAMA 1608 → 61 ms (the fold alone 1411 → 6.3); the extension grows by
+  about 5 MB.

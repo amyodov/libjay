@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A FOLD'S STEP IS COMPILED TO NATIVE CODE with Cranelift where it is
+  arithmetic on floats: `] F.. v` and its relatives, the insert `v/` and
+  the suffix scan `v/\.` with a train or an explicit step. Answers are
+  bit-identical to the interpreter, which still runs wherever the loop
+  meets a value that is not finite. KAMA over a million bars, 1608 ms to
+  61. `LIBJAY_JIT=0` turns it off and `LIBJAY_JIT=force` compiles however
+  short the fold.
+
 ### Changed
 
 ### Fixed
