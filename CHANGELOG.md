@@ -39,6 +39,25 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   Compiling a map costs 15–22 ms; the automatic policy compiles from 2^27
   items × instructions and uses a cached map from 2^14. `LIBJAY_JIT=0` and
   `=cranelift` turn it off; `=llvm` and `=force` compile every map.
+- A RANK-0 APPLICATION OF A SCALAR BODY IS COMPILED: `u"0 y` and
+  `x u"0 y` over float, integer or boolean data, where u is arithmetic,
+  the comparisons `< <: = >: > ~:` (tolerant, as the interpreter compares),
+  `<.` `>.` `|`, an agenda `` u0`u1`u2@.v ``, a power `u^:n`, or an
+  explicit definition whose body uses `if.`/`elseif.`/`else.`, `while.`
+  and `for.`/`for_i. i. n` over local names. Both generators compile the
+  same program, with real branches and loops, and the answers are
+  bit-identical to the interpreter's, their type included: a body that
+  answers `0` on one path and a float on another frames to floats, or to
+  booleans where no cell took the float path. A NaN or an infinity, an
+  agenda index out of range, an integer past 2^44, a loop count that is
+  not a whole number, or a `while.` loop past 2^24 iterations stops the
+  loop, and the interpreter computes the whole application as before,
+  errors included. The cells are split across the thread pool. Over a
+  million points a Mandelbrot escape count with a `while.` loop runs in
+  145 ms with Cranelift and 61 with LLVM, where the interpreter takes
+  about 160 s; a three-way piecewise `@.` over five million floats 2.8 s
+  → 28 / 17 ms, and six Newton steps `^:6` 7.3 s → 43 / 33 ms. The
+  automatic policy compiles from 1024 cells, with LLVM from two million.
 
 ### Changed
 

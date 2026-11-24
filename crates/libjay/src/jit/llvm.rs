@@ -22,17 +22,17 @@ use llvm_sys::transforms::pass_builder::*;
 use llvm_sys::{LLVMAttributeFunctionIndex, LLVMIntPredicate, LLVMRealPredicate};
 
 use super::map::{Input, Map, MapRaw, Op};
-use super::{Bin, Kernel, Node, Raw, Step, Un};
+use super::{Bin, Cmp, Ins, Out, Prog, Repr, Shape, Un, CAP, WHOLE_BOUND};
 use crate::scalar;
 
-/// Compile a step's loop. None where LLVM has no backend for the host or
-/// any stage of the compilation fails.
-pub(super) fn compile(step: &Step) -> Option<Kernel> {
+/// Compile a program's loop; the entry point's address. None where LLVM
+/// has no backend for the host or any stage of the compilation fails.
+pub(super) fn compile(shape: Shape, prog: &Prog) -> Option<usize> {
     let jit = jit()?;
     let mut jit = jit.lock().ok()?;
     // SAFETY: the LLJIT instance and its target machine are used only
     // under this lock.
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { jit.compile(step) }))
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { jit.compile(shape, prog) }))
         .ok()
         .flatten()
 }
@@ -129,13 +129,10 @@ impl Jit {
         }
     }
 
-    unsafe fn compile(&mut self, step: &Step) -> Option<Kernel> {
-        // SAFETY: the symbol is the function `build` defines with exactly
-        // [`Raw`]'s signature under the C calling convention.
-        unsafe {
-            let addr = self.add("libjay_fold", |ctx, m, name| build(ctx, m, step, name))?;
-            Some(Kernel(std::mem::transmute::<usize, Raw>(addr)))
-        }
+    unsafe fn compile(&mut self, shape: Shape, prog: &Prog) -> Option<usize> {
+        // SAFETY: the symbol is the function `build` defines, with the
+        // signature its shape names under the C calling convention.
+        unsafe { self.add("libjay_loop", |ctx, m, name| build(ctx, m, shape, prog, name)) }
     }
 
     unsafe fn compile_map(&mut self, map: &Map) -> Option<MapRaw> {
@@ -247,7 +244,7 @@ impl Jit {
     }
 }
 
-/// What the loop body is emitted with.
+/// What the loops are emitted with.
 struct Em {
     b: LLVMBuilderRef,
     f64t: LLVMTypeRef,
@@ -255,15 +252,22 @@ struct Em {
     ptrt: LLVMTypeRef,
     fabs: (LLVMValueRef, LLVMTypeRef),
     sqrt: (LLVMValueRef, LLVMTypeRef),
+    floor: (LLVMValueRef, LLVMTypeRef),
+    ceil: (LLVMValueRef, LLVMTypeRef),
     unary: LLVMTypeRef,
     pure: Vec<LLVMAttributeRef>,
+    /// The comparison tolerance, and whether it scales by the smaller
+    /// magnitude.
+    ct: f64,
+    by_smaller: bool,
 }
 
 const NM: *const std::ffi::c_char = c"".as_ptr();
 
 impl Em {
-    /// An emitter writing with builder `b` into module `m`.
-    unsafe fn new(ctx: LLVMContextRef, m: LLVMModuleRef, b: LLVMBuilderRef) -> Em {
+    /// An emitter writing with builder `b` into module `m`, comparing with
+    /// tolerance `ct`.
+    unsafe fn new(ctx: LLVMContextRef, m: LLVMModuleRef, b: LLVMBuilderRef, ct: f64, by_smaller: bool) -> Em {
         unsafe {
             let f64t = LLVMDoubleTypeInContext(ctx);
             let attr = |nm: &str, v: u64| {
@@ -286,9 +290,13 @@ impl Em {
                 ptrt: LLVMPointerTypeInContext(ctx, 0),
                 fabs: intrinsic("llvm.fabs"),
                 sqrt: intrinsic("llvm.sqrt"),
+                floor: intrinsic("llvm.floor"),
+                ceil: intrinsic("llvm.ceil"),
                 unary: LLVMFunctionType(f64t, unary_params.as_mut_ptr(), 1, 0),
                 // memory(none) is the attribute "memory" with the value 0.
                 pure: vec![attr("memory", 0), attr("nounwind", 0), attr("willreturn", 0)],
+                ct,
+                by_smaller,
             }
         }
     }
@@ -305,15 +313,15 @@ impl Em {
         unsafe { LLVMBuildCall2(self.b, ty, f, args.as_mut_ptr(), args.len() as u32, NM) }
     }
 
-    /// The flag that `v` is finite, and-ed into `ok`.
-    unsafe fn finite(&self, v: LLVMValueRef, ok: &mut Option<LLVMValueRef>) {
+    unsafe fn fcmp(&self, p: LLVMRealPredicate, a: LLVMValueRef, c: LLVMValueRef) -> LLVMValueRef {
+        unsafe { LLVMBuildFCmp(self.b, p, a, c, NM) }
+    }
+
+    /// Whether `|v| < bound`: false for a NaN.
+    unsafe fn below(&self, v: LLVMValueRef, bound: f64) -> LLVMValueRef {
         unsafe {
             let m = self.call(self.fabs.1, self.fabs.0, &mut [v]);
-            let f = LLVMBuildFCmp(self.b, LLVMRealPredicate::LLVMRealOLT, m, self.cf(f64::INFINITY), NM);
-            *ok = Some(match *ok {
-                None => f,
-                Some(o) => LLVMBuildAnd(self.b, o, f, NM),
-            });
+            self.fcmp(LLVMRealPredicate::LLVMRealOLT, m, self.cf(bound))
         }
     }
 
@@ -328,6 +336,37 @@ impl Em {
                 LLVMAddCallSiteAttribute(c, LLVMAttributeFunctionIndex, at);
             }
             c
+        }
+    }
+
+    /// J's tolerant equality: equal, or apart by less than the tolerance
+    /// times the smaller magnitude (the larger, for APL's rule).
+    unsafe fn teq(&self, a: LLVMValueRef, c: LLVMValueRef) -> LLVMValueRef {
+        unsafe {
+            use LLVMRealPredicate::*;
+            let b = self.b;
+            let same = self.fcmp(LLVMRealOEQ, a, c);
+            let ma = self.call(self.fabs.1, self.fabs.0, &mut [a]);
+            let mc = self.call(self.fabs.1, self.fabs.0, &mut [c]);
+            let pick = if self.by_smaller { LLVMRealOLT } else { LLVMRealOGT };
+            let first = self.fcmp(pick, ma, mc);
+            let s = LLVMBuildSelect(b, first, ma, mc, NM);
+            let d = LLVMBuildFSub(b, a, c, NM);
+            let d = self.call(self.fabs.1, self.fabs.0, &mut [d]);
+            let lim = LLVMBuildFMul(b, self.cf(self.ct), s, NM);
+            let near = self.fcmp(LLVMRealOLT, d, lim);
+            LLVMBuildOr(b, same, near, NM)
+        }
+    }
+
+    /// J's tolerant floor, or with `up` its ceiling.
+    unsafe fn tfloor(&self, y: LLVMValueRef, up: bool) -> LLVMValueRef {
+        unsafe {
+            let fl = self.call(self.floor.1, self.floor.0, &mut [y]);
+            let ce = self.call(self.ceil.1, self.ceil.0, &mut [y]);
+            let (near, far) = if up { (fl, ce) } else { (ce, fl) };
+            let e = self.teq(y, near);
+            LLVMBuildSelect(self.b, e, near, far, NM)
         }
     }
 
@@ -354,6 +393,8 @@ impl Em {
                 Un::Sqrt => self.call(self.sqrt.1, self.sqrt.0, &mut [a]),
                 Un::Exp => self.call_by_address(scalar::exp, a),
                 Un::Ln => self.call_by_address(scalar::ln, a),
+                Un::Floor => self.tfloor(a, false),
+                Un::Ceil => self.tfloor(a, true),
             }
         }
     }
@@ -367,7 +408,7 @@ impl Em {
             match op {
                 Bin::Add => LLVMBuildFAdd(b, l, r, NM),
                 Bin::Sub => LLVMBuildFSub(b, l, r, NM),
-                Bin::Mul => LLVMBuildFMul(b, l, r, NM),
+                Bin::Mul | Bin::And => LLVMBuildFMul(b, l, r, NM),
                 // `scalar::div` differs from IEEE only at `0 % 0`, which
                 // IEEE makes a NaN.
                 Bin::Div => LLVMBuildFDiv(b, l, r, NM),
@@ -377,134 +418,374 @@ impl Em {
                     let lt = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOLT, l, r, NM);
                     LLVMBuildSelect(b, lt, l, r, NM)
                 }
-                Bin::Max => {
+                Bin::Max | Bin::Or => {
                     let gt = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOGT, l, r, NM);
                     LLVMBuildSelect(b, gt, l, r, NM)
+                }
+                Bin::Residue => {
+                    // `Tol::residue` over finite operands: y where x is
+                    // zero, otherwise y - x * <. y % x, or 0 where the
+                    // product is tolerantly y.
+                    let q = LLVMBuildFDiv(b, r, l, NM);
+                    let f = self.tfloor(q, false);
+                    let p = LLVMBuildFMul(b, l, f, NM);
+                    let e = self.teq(r, p);
+                    let d = LLVMBuildFSub(b, r, p, NM);
+                    let res = LLVMBuildSelect(b, e, self.cf(0.0), d, NM);
+                    let zero = self.fcmp(LLVMRealPredicate::LLVMRealOEQ, l, self.cf(0.0));
+                    LLVMBuildSelect(b, zero, r, res, NM)
                 }
             }
         }
     }
 
-    /// The step's nodes, the item read from `xs` at element `base`, the
-    /// running value `acc`. Answers the value of every node.
-    unsafe fn step(
-        &self,
-        step: &Step,
-        xs: LLVMValueRef,
-        base: LLVMValueRef,
-        acc: LLVMValueRef,
-        ok: &mut Option<LLVMValueRef>,
-    ) -> Vec<LLVMValueRef> {
+    /// The tolerant comparison `op` of `a` and `c`, as 1 or 0.
+    unsafe fn cmp(&self, op: Cmp, a: LLVMValueRef, c: LLVMValueRef) -> LLVMValueRef {
         unsafe {
+            use LLVMRealPredicate::*;
             let b = self.b;
-            let mut vals: Vec<LLVMValueRef> = Vec::with_capacity(step.nodes.len());
-            for node in &step.nodes {
-                let v = match *node {
-                    Node::X(k) => {
-                        let mut ix = [LLVMBuildNSWAdd(b, base, self.ci(i64::from(k)), NM)];
-                        let p = LLVMBuildInBoundsGEP2(b, self.f64t, xs, ix.as_mut_ptr(), 1, NM);
-                        let v = LLVMBuildLoad2(b, self.f64t, p, NM);
-                        self.finite(v, ok);
-                        v
-                    }
-                    Node::Y => acc,
-                    Node::Const(bits) => self.cf(f64::from_bits(bits)),
-                    Node::Un(op, a) => {
-                        let v = self.un(op, vals[a as usize]);
-                        self.finite(v, ok);
-                        v
-                    }
-                    Node::Bin(op, l, r) => {
-                        // A NaN operand of an extremum stops the loop before
-                        // the answer is used: every operand was checked.
-                        let v = self.bin(op, vals[l as usize], vals[r as usize]);
-                        self.finite(v, ok);
-                        v
-                    }
-                };
-                vals.push(v);
-            }
-            vals
+            let t = match op {
+                Cmp::Eq => self.teq(a, c),
+                Cmp::Ne => LLVMBuildNot(b, self.teq(a, c), NM),
+                Cmp::Lt | Cmp::Gt => {
+                    let (p, q) = if op == Cmp::Lt { (a, c) } else { (c, a) };
+                    let less = self.fcmp(LLVMRealOLT, p, q);
+                    LLVMBuildAnd(b, less, LLVMBuildNot(b, self.teq(p, q), NM), NM)
+                }
+                Cmp::Le | Cmp::Ge => {
+                    let (p, q) = if op == Cmp::Le { (a, c) } else { (c, a) };
+                    let le = self.fcmp(LLVMRealOLE, p, q);
+                    LLVMBuildOr(b, le, self.teq(p, q), NM)
+                }
+            };
+            LLVMBuildSelect(b, t, self.cf(1.0), self.cf(0.0), NM)
         }
     }
 }
 
-/// Define `name` in `m` as the loop of [`Raw`]'s contract over `step`.
-unsafe fn build(ctx: LLVMContextRef, m: LLVMModuleRef, step: &Step, name: &CStr) {
+/// A program's instructions emitted into a function: its variables are
+/// stack slots, which LLVM's optimiser turns into registers.
+struct Body<'e> {
+    em: &'e Em,
+    ctx: LLVMContextRef,
+    f: LLVMValueRef,
+    /// The builder positioned in the block that holds every stack slot.
+    slots: LLVMBuilderRef,
+    vars: Vec<LLVMValueRef>,
+    /// Where a check that fails goes.
+    bail: LLVMBasicBlockRef,
+    /// The checks since the last branch, and-ed.
+    ok: Option<LLVMValueRef>,
+}
+
+impl Body<'_> {
+    unsafe fn block(&self, name: &CStr) -> LLVMBasicBlockRef {
+        unsafe { LLVMAppendBasicBlockInContext(self.ctx, self.f, name.as_ptr()) }
+    }
+
+    unsafe fn slot(&self, ty: LLVMTypeRef) -> LLVMValueRef {
+        unsafe { LLVMBuildAlloca(self.slots, ty, NM) }
+    }
+
+    unsafe fn get(&self, v: u32) -> LLVMValueRef {
+        unsafe { LLVMBuildLoad2(self.em.b, self.em.f64t, self.vars[v as usize], NM) }
+    }
+
+    unsafe fn set(&self, v: u32, x: LLVMValueRef) {
+        unsafe {
+            LLVMBuildStore(self.em.b, x, self.vars[v as usize]);
+        }
+    }
+
+    unsafe fn check(&mut self, c: LLVMValueRef) {
+        unsafe {
+            self.ok = Some(match self.ok {
+                None => c,
+                Some(o) => LLVMBuildAnd(self.em.b, o, c, NM),
+            });
+        }
+    }
+
+    /// Branch on the pending checks: to the bail block where one failed.
+    unsafe fn flush(&mut self) {
+        unsafe {
+            if let Some(ok) = self.ok.take() {
+                let cont = self.block(c"cont");
+                LLVMBuildCondBr(self.em.b, ok, cont, self.bail);
+                LLVMPositionBuilderAtEnd(self.em.b, cont);
+            }
+        }
+    }
+
+    /// Emit `code`, `arg` supplying the arguments.
+    unsafe fn run(&mut self, code: &[Ins], arg: &mut dyn FnMut(&mut Self, u32) -> LLVMValueRef) {
+        unsafe {
+            use LLVMRealPredicate::*;
+            let em = self.em;
+            let b = em.b;
+            for ins in code {
+                match ins {
+                    Ins::Arg(v, k) => {
+                        let x = arg(self, *k);
+                        self.set(*v, x);
+                    }
+                    Ins::Const(v, bits) => self.set(*v, em.cf(f64::from_bits(*bits))),
+                    Ins::Copy(d, s) => self.set(*d, self.get(*s)),
+                    Ins::Un(d, op, a) => self.set(*d, em.un(*op, self.get(*a))),
+                    Ins::Bin(d, op, l, r) => self.set(*d, em.bin(*op, self.get(*l), self.get(*r))),
+                    Ins::Cmp(d, op, l, r) => self.set(*d, em.cmp(*op, self.get(*l), self.get(*r))),
+                    Ins::Select(d, c, a, e) => {
+                        let holds = em.fcmp(LLVMRealUNE, self.get(*c), em.cf(0.0));
+                        self.set(*d, LLVMBuildSelect(b, holds, self.get(*a), self.get(*e), NM));
+                    }
+                    Ins::Finite(v) => {
+                        let c = em.below(self.get(*v), f64::INFINITY);
+                        self.check(c);
+                    }
+                    Ins::Whole(v) => {
+                        let c = em.below(self.get(*v), WHOLE_BOUND);
+                        self.check(c);
+                    }
+                    Ins::If(c, then, other) => {
+                        self.flush();
+                        let holds = em.fcmp(LLVMRealUNE, self.get(*c), em.cf(0.0));
+                        let (tb, eb, join) = (self.block(c"then"), self.block(c"else"), self.block(c"join"));
+                        LLVMBuildCondBr(b, holds, tb, eb);
+                        for (blk, code) in [(tb, then), (eb, other)] {
+                            LLVMPositionBuilderAtEnd(b, blk);
+                            self.run(code, arg);
+                            self.flush();
+                            LLVMBuildBr(b, join);
+                        }
+                        LLVMPositionBuilderAtEnd(b, join);
+                    }
+                    Ins::Switch(sel, arms) => {
+                        self.flush();
+                        let s = self.get(*sel);
+                        let n = arms.len() as f64;
+                        let join = self.block(c"join");
+                        for (k, code) in arms.iter().enumerate() {
+                            let (here, next) = (self.block(c"arm"), self.block(c"next"));
+                            let k = k as f64;
+                            let e1 = em.fcmp(LLVMRealOEQ, s, em.cf(k));
+                            let e2 = em.fcmp(LLVMRealOEQ, s, em.cf(k - n));
+                            LLVMBuildCondBr(b, LLVMBuildOr(b, e1, e2, NM), here, next);
+                            LLVMPositionBuilderAtEnd(b, here);
+                            self.run(code, arg);
+                            self.flush();
+                            LLVMBuildBr(b, join);
+                            LLVMPositionBuilderAtEnd(b, next);
+                        }
+                        // An index that names no verb of the gerund.
+                        LLVMBuildBr(b, self.bail);
+                        LLVMPositionBuilderAtEnd(b, join);
+                    }
+                    Ins::While(test, cond, body) => {
+                        self.flush();
+                        let count = self.slot(em.i64t);
+                        LLVMBuildStore(b, em.ci(0), count);
+                        let (head, blk, exit) = (self.block(c"while"), self.block(c"do"), self.block(c"end"));
+                        LLVMBuildBr(b, head);
+                        LLVMPositionBuilderAtEnd(b, head);
+                        self.run(test, arg);
+                        self.flush();
+                        let holds = em.fcmp(LLVMRealUNE, self.get(*cond), em.cf(0.0));
+                        LLVMBuildCondBr(b, holds, blk, exit);
+                        LLVMPositionBuilderAtEnd(b, blk);
+                        self.run(body, arg);
+                        self.flush();
+                        let i = LLVMBuildLoad2(b, em.i64t, count, NM);
+                        let i1 = LLVMBuildNSWAdd(b, i, em.ci(1), NM);
+                        LLVMBuildStore(b, i1, count);
+                        let more = LLVMBuildICmp(b, LLVMIntPredicate::LLVMIntSLT, i1, em.ci(CAP as i64), NM);
+                        LLVMBuildCondBr(b, more, head, self.bail);
+                        LLVMPositionBuilderAtEnd(b, exit);
+                    }
+                    Ins::Repeat { count, index, body } => {
+                        self.flush();
+                        let n = self.get(*count);
+                        // A whole number from 0 to CAP, or the loop stops.
+                        let lo = em.fcmp(LLVMRealOGE, n, em.cf(0.0));
+                        let hi = em.fcmp(LLVMRealOLE, n, em.cf(CAP as f64));
+                        let fl = em.call(em.floor.1, em.floor.0, &mut [n]);
+                        let whole = em.fcmp(LLVMRealOEQ, fl, n);
+                        let ok = LLVMBuildAnd(b, LLVMBuildAnd(b, lo, hi, NM), whole, NM);
+                        self.check(ok);
+                        self.flush();
+                        let total = LLVMBuildFPToSI(b, n, em.i64t, NM);
+                        let i = self.slot(em.i64t);
+                        LLVMBuildStore(b, em.ci(0), i);
+                        let (head, blk, exit) = (self.block(c"repeat"), self.block(c"do"), self.block(c"end"));
+                        LLVMBuildBr(b, head);
+                        LLVMPositionBuilderAtEnd(b, head);
+                        let iv = LLVMBuildLoad2(b, em.i64t, i, NM);
+                        let more = LLVMBuildICmp(b, LLVMIntPredicate::LLVMIntSLT, iv, total, NM);
+                        LLVMBuildCondBr(b, more, blk, exit);
+                        LLVMPositionBuilderAtEnd(b, blk);
+                        let iv = LLVMBuildLoad2(b, em.i64t, i, NM);
+                        self.set(*index, LLVMBuildSIToFP(b, iv, em.f64t, NM));
+                        self.run(body, arg);
+                        self.flush();
+                        let iv = LLVMBuildLoad2(b, em.i64t, i, NM);
+                        LLVMBuildStore(b, LLVMBuildNSWAdd(b, iv, em.ci(1), NM), i);
+                        LLVMBuildBr(b, head);
+                        LLVMPositionBuilderAtEnd(b, exit);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Define `name` in `m` as the loop of `shape` over `prog`: `Raw`'s
+/// contract for a fold, `CellsRaw`'s for a rank-0 application.
+unsafe fn build(ctx: LLVMContextRef, m: LLVMModuleRef, shape: Shape, prog: &Prog, name: &CStr) {
     unsafe {
         let b = LLVMCreateBuilderInContext(ctx);
-        let f64t = LLVMDoubleTypeInContext(ctx);
-        let i64t = LLVMInt64TypeInContext(ctx);
-        let ptrt = LLVMPointerTypeInContext(ctx, 0);
+        let em = Em::new(ctx, m, b, f64::from_bits(prog.ct), prog.by_smaller);
+        let (f64t, i64t, ptrt) = (em.f64t, em.i64t, em.ptrt);
 
-        // (xs, xstride, n, seed, out, ostride, last) -> steps taken
-        let mut params = [ptrt, i64t, i64t, f64t, ptrt, i64t, ptrt];
+        let mut params = match shape {
+            // (xs, xstride, n, seed, out, ostride, last) -> steps taken
+            Shape::Fold { .. } => vec![ptrt, i64t, i64t, f64t, ptrt, i64t, ptrt],
+            // (ys, ystride, xs, xstride, n, out, kind) -> items computed
+            Shape::Cells { .. } => vec![ptrt, i64t, ptrt, i64t, i64t, ptrt, ptrt],
+        };
         let fty = LLVMFunctionType(i64t, params.as_mut_ptr(), params.len() as u32, 0);
         let f = LLVMAddFunction(m, name.as_ptr(), fty);
         let attr = |nm: &str, v: u64| {
             let kind = LLVMGetEnumAttributeKindForName(nm.as_ptr().cast(), nm.len());
             LLVMCreateEnumAttribute(ctx, kind, v)
         };
-        // The items, the running values written out and the last value
-        // reached are three separate buffers.
-        for i in [1, 5, 7] {
+        // The pointers are separate buffers: the items, the values written
+        // out and the one value written at the end.
+        let noalias: &[u32] = match shape {
+            Shape::Fold { .. } => &[1, 5, 7],
+            Shape::Cells { .. } => &[6, 7],
+        };
+        for &i in noalias {
             LLVMAddAttributeAtIndex(f, i, attr("noalias", 0));
         }
         LLVMAddAttributeAtIndex(f, LLVMAttributeFunctionIndex, attr("nounwind", 0));
-
-        let em = Em::new(ctx, m, b);
         let p = |i| LLVMGetParam(f, i);
-        let (xs, xstride, n, seed, out, ostride, last) = (p(0), p(1), p(2), p(3), p(4), p(5), p(6));
 
+        let slots_block = LLVMAppendBasicBlockInContext(ctx, f, c"slots".as_ptr());
         let entry = LLVMAppendBasicBlockInContext(ctx, f, c"entry".as_ptr());
         let head = LLVMAppendBasicBlockInContext(ctx, f, c"head".as_ptr());
         let body = LLVMAppendBasicBlockInContext(ctx, f, c"body".as_ptr());
-        let cont = LLVMAppendBasicBlockInContext(ctx, f, c"cont".as_ptr());
         let exit = LLVMAppendBasicBlockInContext(ctx, f, c"exit".as_ptr());
+        let slots = LLVMCreateBuilderInContext(ctx);
+        LLVMPositionBuilderAtEnd(slots, slots_block);
+        let vars = (0..prog.vars).map(|_| LLVMBuildAlloca(slots, f64t, NM)).collect();
+        let mut g = Body { em: &em, ctx, f, slots, vars, bail: exit, ok: None };
+        let i = g.slot(i64t);
 
         LLVMPositionBuilderAtEnd(b, entry);
-        LLVMBuildBr(b, head);
-
-        // head: the step index and the running value.
-        LLVMPositionBuilderAtEnd(b, head);
-        let i = LLVMBuildPhi(b, i64t, NM);
-        let acc = LLVMBuildPhi(b, f64t, NM);
-        let more = LLVMBuildICmp(b, LLVMIntPredicate::LLVMIntSLT, i, n, NM);
-        LLVMBuildCondBr(b, more, body, exit);
-
-        LLVMPositionBuilderAtEnd(b, body);
-        let base = LLVMBuildNSWMul(b, i, xstride, NM);
-        let mut ok = None;
-        let vals = em.step(step, xs, base, acc, &mut ok);
-        let new = vals[step.root as usize];
-        match ok {
-            Some(ok) => LLVMBuildCondBr(b, ok, cont, exit),
-            None => LLVMBuildBr(b, cont),
+        LLVMBuildStore(b, em.ci(0), i);
+        let more = |n: LLVMValueRef| {
+            let iv = LLVMBuildLoad2(b, i64t, i, NM);
+            LLVMBuildCondBr(b, LLVMBuildICmp(b, LLVMIntPredicate::LLVMIntSLT, iv, n, NM), body, exit);
         };
+        let gep = |base: LLVMValueRef, ty: LLVMTypeRef, at: LLVMValueRef| {
+            let mut ix = [at];
+            LLVMBuildInBoundsGEP2(b, ty, base, ix.as_mut_ptr(), 1, NM)
+        };
+        match shape {
+            Shape::Fold { store } => {
+                let (xs, xstride, n, seed, out, ostride, last) = (p(0), p(1), p(2), p(3), p(4), p(5), p(6));
+                let acc = g.slot(f64t);
+                LLVMBuildStore(b, seed, acc);
+                LLVMBuildBr(b, head);
 
-        LLVMPositionBuilderAtEnd(b, cont);
-        if step.store {
-            let mut ix = [LLVMBuildNSWMul(b, i, ostride, NM)];
-            let at = LLVMBuildInBoundsGEP2(b, f64t, out, ix.as_mut_ptr(), 1, NM);
-            LLVMBuildStore(b, new, at);
+                LLVMPositionBuilderAtEnd(b, head);
+                more(n);
+
+                LLVMPositionBuilderAtEnd(b, body);
+                let iv = LLVMBuildLoad2(b, i64t, i, NM);
+                let base = LLVMBuildNSWMul(b, iv, xstride, NM);
+                g.run(&prog.code, &mut |g, k| {
+                    if k == 0 {
+                        return LLVMBuildLoad2(b, f64t, acc, NM);
+                    }
+                    let at = LLVMBuildNSWAdd(b, base, em.ci(i64::from(k) - 1), NM);
+                    let v = LLVMBuildLoad2(b, f64t, gep(xs, f64t, at), NM);
+                    g.check(em.below(v, f64::INFINITY));
+                    v
+                });
+                g.flush();
+                let new = g.get(prog.result);
+                if store {
+                    let iv = LLVMBuildLoad2(b, i64t, i, NM);
+                    LLVMBuildStore(b, new, gep(out, f64t, LLVMBuildNSWMul(b, iv, ostride, NM)));
+                }
+                LLVMBuildStore(b, new, acc);
+                let iv = LLVMBuildLoad2(b, i64t, i, NM);
+                LLVMBuildStore(b, LLVMBuildNSWAdd(b, iv, em.ci(1), NM), i);
+                LLVMBuildBr(b, head);
+
+                // exit: from the head when every step is taken, from the
+                // body at the first step that could not be completed.
+                LLVMPositionBuilderAtEnd(b, exit);
+                LLVMBuildStore(b, LLVMBuildLoad2(b, f64t, acc, NM), last);
+                LLVMBuildRet(b, LLVMBuildLoad2(b, i64t, i, NM));
+            }
+            Shape::Cells { y, x } => {
+                let (ys, ystride, xs, xstride, n, out, kind_out) = (p(0), p(1), p(2), p(3), p(4), p(5), p(6));
+                let top = g.slot(f64t);
+                LLVMBuildStore(b, em.cf(0.0), top);
+                LLVMBuildBr(b, head);
+
+                LLVMPositionBuilderAtEnd(b, head);
+                more(n);
+
+                LLVMPositionBuilderAtEnd(b, body);
+                let iv = LLVMBuildLoad2(b, i64t, i, NM);
+                let atom = |g: &mut Body<'_>, base: LLVMValueRef, stride: LLVMValueRef, repr: Repr| {
+                    let at = LLVMBuildNSWMul(b, iv, stride, NM);
+                    match repr {
+                        Repr::F64 => {
+                            let v = LLVMBuildLoad2(b, f64t, gep(base, f64t, at), NM);
+                            g.check(em.below(v, f64::INFINITY));
+                            v
+                        }
+                        Repr::I64 => {
+                            let w = LLVMBuildLoad2(b, i64t, gep(base, i64t, at), NM);
+                            let v = LLVMBuildSIToFP(b, w, f64t, NM);
+                            g.check(em.below(v, WHOLE_BOUND));
+                            v
+                        }
+                        Repr::Bool => {
+                            let i8t = LLVMInt8TypeInContext(ctx);
+                            let w = LLVMBuildLoad2(b, i8t, gep(base, i8t, at), NM);
+                            LLVMBuildUIToFP(b, w, f64t, NM)
+                        }
+                    }
+                };
+                let yv = atom(&mut g, ys, ystride, y);
+                let xv = x.map(|r| atom(&mut g, xs, xstride, r));
+                g.run(&prog.code, &mut |_, k| if k == 0 { yv } else { xv.expect("a dyad's left argument") });
+                g.flush();
+                let r = g.get(prog.result);
+                let iv = LLVMBuildLoad2(b, i64t, i, NM);
+                LLVMBuildStore(b, r, gep(out, f64t, iv));
+                let k = match prog.out {
+                    Out::Static(k) => em.cf(k.code()),
+                    Out::Dyn(v) => g.get(v),
+                };
+                let t = LLVMBuildLoad2(b, f64t, top, NM);
+                let gt = em.fcmp(LLVMRealPredicate::LLVMRealOGT, k, t);
+                LLVMBuildStore(b, LLVMBuildSelect(b, gt, k, t, NM), top);
+                LLVMBuildStore(b, LLVMBuildNSWAdd(b, iv, em.ci(1), NM), i);
+                LLVMBuildBr(b, head);
+
+                LLVMPositionBuilderAtEnd(b, exit);
+                LLVMBuildStore(b, LLVMBuildLoad2(b, f64t, top, NM), kind_out);
+                LLVMBuildRet(b, LLVMBuildLoad2(b, i64t, i, NM));
+            }
         }
-        let i1 = LLVMBuildNSWAdd(b, i, em.ci(1), NM);
-        LLVMBuildBr(b, head);
-
-        let add = |phi: LLVMValueRef, v: LLVMValueRef, from: LLVMBasicBlockRef| {
-            let (mut vs, mut bs) = ([v], [from]);
-            LLVMAddIncoming(phi, vs.as_mut_ptr(), bs.as_mut_ptr(), 1);
-        };
-        add(i, em.ci(0), entry);
-        add(i, i1, cont);
-        add(acc, seed, entry);
-        add(acc, new, cont);
-
-        // exit: from the head when every step is taken, from the body at
-        // the first step that made a value that is not finite.
-        LLVMPositionBuilderAtEnd(b, exit);
-        LLVMBuildStore(b, acc, last);
-        LLVMBuildRet(b, i);
+        // Every stack slot is made; the slots block falls into the entry.
+        LLVMBuildBr(slots, entry);
+        LLVMDisposeBuilder(slots);
         LLVMDisposeBuilder(b);
     }
 }
@@ -529,7 +810,7 @@ pub(super) fn compile_map(map: &Map) -> Option<MapRaw> {
 unsafe fn build_map(ctx: LLVMContextRef, m: LLVMModuleRef, map: &Map, name: &CStr) {
     unsafe {
         let b = LLVMCreateBuilderInContext(ctx);
-        let em = Em::new(ctx, m, b);
+        let em = Em::new(ctx, m, b, 0.0, true);
         let (f64t, i64t, ptrt) = (em.f64t, em.i64t, em.ptrt);
         let i1t = LLVMInt1TypeInContext(ctx);
         let i8t = LLVMInt8TypeInContext(ctx);

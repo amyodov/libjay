@@ -886,9 +886,19 @@ corpora are for breadth; these are for intent.
 `tests/jit.rs` runs every case, and then the whole J corpus, once with the
 compiler off and once more for each code generator built in, that
 generator forced: every answer is held bit for bit to the interpreter's,
-each case asserts whether the compiled road was taken, and a case one
-generator compiles must be compiled by the other as well. Which generators
-are built in is a matter of Cargo features on the `libjay` crate:
+type included, each case asserts whether the compiled road was taken, and
+a case one generator compiles must be compiled by the other as well. The
+same holds for a rank-0 application `u"0 y` or `x u"0 y` whose verb the
+lowering takes — an agenda, a power, an explicit definition with `if.`,
+`while.` or `for.` — and the cases there include the ones that must hand
+back to the interpreter: a NaN or an infinity in the data or made inside
+the loop, an agenda index out of range or not whole, an integer past
+2^44, a loop count that is not a whole number. `{{ }}` cases name their
+counters `k` rather than `n`, since `n` makes a direct definition a
+conjunction. The J spellings of those cases are in
+`corpus/j/rank0-bodies.txt`, so the reference pins what they mean. Which
+generators are built in is a matter of Cargo features on the `libjay`
+crate:
 
 ```
 cargo test -p libjay                          # Cranelift, the default

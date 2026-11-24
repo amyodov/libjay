@@ -3749,6 +3749,16 @@ impl Verb {
                 (None, None) => framed,
             });
         }
+        // A scalar body over pairs of atoms runs as one compiled loop.
+        if er_l == 0
+            && er_r == 0
+            && ctx.cfg.rules.lang == crate::Lang::J
+            && let Verb::Rank(u, _) = self
+            && let Some(a) =
+                crate::jit::cells(u, Some(x), y, ctx.cfg.tol, &|n| ctx.env.verb(n).cloned())
+        {
+            return Ok(a);
+        }
         let work = x.count().max(y.count());
         // A SCALAR PRIMITIVE UNDER A RANK IS STILL ONE PASS. The rank moves
         // which cells pair with which; it does not make each pair a pass of
@@ -4452,6 +4462,13 @@ fn rank_monad(
         return empty_frame(&frame, y.dtype(), cell, conform, false, false, true, false, Refused::NOTHING, ctx, |cell, _n, c| {
             v.monad(cell, c, span)
         });
+    }
+    // A scalar body over the atoms of numbers runs as one compiled loop.
+    if eff == 0
+        && ctx.cfg.rules.lang == crate::Lang::J
+        && let Some(a) = crate::jit::cells(v, None, y, ctx.cfg.tol, &|n| ctx.env.verb(n).cloned())
+    {
+        return Ok(a);
     }
     let cells = each_cell(n, y.count(), pure, ctx, |i, c| {
         cycled(v, i).monad(&y.cell_at(frame_rank, i), c, span)
@@ -15077,7 +15094,7 @@ fn reduce(v: &Verb, y: &Array, ctx: &mut Ctx<'_>, span: Span) -> Result<Array> {
     if ctx.cfg.rules.lang == crate::Lang::Apl {
         return item_fold(v, y, ctx, span);
     }
-    if let Some(a) = crate::jit::insert(v, y, &|n| ctx.env.verb(n).cloned()) {
+    if let Some(a) = crate::jit::insert(v, y, ctx.cfg.tol, &|n| ctx.env.verb(n).cloned()) {
         return Ok(a);
     }
     let mut acc = y.item(n - 1);
@@ -16259,7 +16276,7 @@ fn runs(u: &Verb, y: &Array, back: bool, ctx: &mut Ctx<'_>, span: Span) -> Resul
         // fold in general, and it is the direction `|. u/\. |. y` reverses
         // twice to reach.
         if back && u.is_pure() {
-            if let Some(a) = crate::jit::suffix_scan(inner, base, &|n| ctx.env.verb(n).cloned()) {
+            if let Some(a) = crate::jit::suffix_scan(inner, base, ctx.cfg.tol, &|n| ctx.env.verb(n).cloned()) {
                 return Ok(a);
             }
             let mut acc = base.item(n - 1);
@@ -16822,7 +16839,7 @@ fn fold_family(
     };
     if matches!(u, Verb::Prim(p) if p.monad == MonadOp::Same)
         && let Some(step) = step
-        && let Some(answer) = crate::jit::fold(step, multiple, reverse, x, y, &mut |a, b| {
+        && let Some(answer) = crate::jit::fold(step, multiple, reverse, x, y, ctx.cfg.tol, &mut |a, b| {
             step.dyad(a, b, ctx, span).ok()
         })
     {

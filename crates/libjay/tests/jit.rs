@@ -1,18 +1,20 @@
-//! The compiled fold step against the interpreter, bit for bit.
+//! The compiled loops against the interpreter, bit for bit.
 //!
 //! Every program here runs in one thread once with the compiler off, and
 //! once more for each code generator built in, with that generator forced
-//! on for every fold it can lower however short. Every answer must be the
-//! same array with the same bits, or the same refusal with the same
-//! message. The cases name whether the compiled road is expected to be the
-//! one taken, so a case cannot pass by quietly falling back; the cases that
-//! must fall back — a NaN, an infinity, `0 % 0`, integer data — are here
-//! for the opposite reason. The generators lower the same expression, so
-//! one compiles a case exactly when the other does, and every case checks
-//! that too.
+//! on for every fold and rank-0 application it can lower however short.
+//! Every answer must be the same array with the same bits and type, or the
+//! same refusal with the same message. The cases name whether the compiled
+//! road is expected to be the one taken, so a case cannot pass by quietly
+//! falling back; the cases that must fall back — a NaN, an infinity,
+//! `0 % 0`, an agenda index out of range, an integer out of bounds — are
+//! here for the opposite reason. The generators compile the same program,
+//! so one compiles a case exactly when the other does, and every case
+//! checks that too.
 //!
 //! The J corpus is replayed the same way, file by file: whatever a corpus
-//! sentence folds, every road must answer it identically.
+//! sentence folds or applies at rank 0, every road must answer it
+//! identically.
 
 use std::path::PathBuf;
 
@@ -221,6 +223,185 @@ fn what_is_not_arithmetic_on_floats_is_interpreted(#[case] src: &str, #[case] d:
     check(src, std::slice::from_ref(&y), false);
 }
 
+/// `n` floats spread over `lo .. hi`.
+fn spread(n: usize, seed: u64, lo: f64, hi: f64) -> Array {
+    let v: Vec<f64> = floats(n, seed).iter().map(|x| lo + (x + 0.5) * (hi - lo)).collect();
+    Array::new(vec![n], Data::F64(v.into()))
+}
+
+fn ints(v: Vec<i64>) -> Array {
+    Array::new(vec![v.len()], Data::I64(v.into()))
+}
+
+fn bools(v: Vec<u8>) -> Array {
+    Array::new(vec![v.len()], Data::Bool(v.into()))
+}
+
+/// A real part and an imaginary part for every point of a `side` by
+/// `side` grid over the Mandelbrot set's neighbourhood, as two lists.
+fn grid(side: usize) -> [Array; 2] {
+    let (mut re, mut im) = (Vec::new(), Vec::new());
+    for i in 0..side {
+        for j in 0..side {
+            re.push(-2.0 + 2.5 * j as f64 / side as f64);
+            im.push(-1.25 + 2.5 * i as f64 / side as f64);
+        }
+    }
+    let n = re.len();
+    [Array::new(vec![n], Data::F64(re.into())), Array::new(vec![n], Data::F64(im.into()))]
+}
+
+const MANDEL: &str = "mandel =: {{
+zr =. 0
+zi =. 0
+k =. 0
+while. (k < 64) *. 4 >: (zr * zr) + zi * zi do.
+  t =. ((zr * zr) - zi * zi) + x
+  zi =. (2 * zr * zi) + y
+  zr =. t
+  k =. k + 1
+end.
+k
+}}
+";
+
+const COLLATZ: &str = "collatz =: {{
+k =. 0
+while. y > 1 do.
+  if. 2 | y do. y =. 1 + 3 * y else. y =. <. -: y end.
+  k =. k + 1
+end.
+k
+}}
+";
+
+const PIECEWISE: &str = "(-`*:`(1 + %:)@.((0&<) + (1&<)))\"0 {y}";
+const NEWTON: &str = "(-:@(] + 2 % ]))^:6\"0 {y}";
+
+#[rstest]
+// Agenda: the selector picks a verb per atom.
+#[case::piecewise(PIECEWISE.to_string(), vec![spread(3000, 50, -2.0, 2.0)], true)]
+#[case::piecewise_ints(PIECEWISE.to_string(), vec![ints((-1000..1000).collect())], true)]
+#[case::agenda_constant_arm(
+    "(0:`]@.(0&<))\"0 {y}".to_string(), vec![spread(2000, 51, -1.0, 1.0)], true
+)]
+#[case::agenda_constant_arm_alone(
+    "(0:`]@.(0&<))\"0 {y}".to_string(), vec![spread(2000, 52, -2.0, -1.0)], true
+)]
+#[case::agenda_dyad(
+    "{a} (+`-`*@.(<.@(3 * |@-)))\"0 {b}".to_string(),
+    vec![vector(2000, 53), vector(2000, 54)], true
+)]
+#[case::agenda_explicit_selector(
+    "sel =: {{ y > 0 }}\n(+:`-@.sel)\"0 {y}".to_string(), vec![vector(2000, 55)], true
+)]
+#[case::agenda_negative_index(
+    "(+:`-:@.(_1 * 0&<))\"0 {y}".to_string(), vec![vector(2000, 56)], true
+)]
+// Power: a counted loop.
+#[case::newton(NEWTON.to_string(), vec![spread(3000, 57, 0.5, 3.0)], true)]
+#[case::newton_dyad(
+    "{a} (4 : '-: y + x % y')^:6\"0 {b}".to_string(),
+    vec![spread(2000, 58, 1.0, 10.0), spread(2000, 59, 1.0, 3.0)], true
+)]
+#[case::power_types(
+    "(3 : 'y + 1')^:3\"0 {y}".to_string(), vec![bools(vec![0, 1, 1, 0, 1])], true
+)]
+#[case::power_atom_left(
+    "2 (4 : 'y * x')^:3\"0 {y}".to_string(), vec![vector(2000, 60)], true
+)]
+// Explicit definitions with control structures.
+#[case::mandelbrot(format!("{MANDEL}{{a}} mandel\"0 {{b}}"), grid(40).to_vec(), true)]
+#[case::collatz(format!("{COLLATZ}collatz\"0 {{y}}"), vec![ints((1..3000).collect())], true)]
+#[case::collatz_floats(
+    format!("{COLLATZ}collatz\"0 {{y}}"),
+    vec![Array::new(vec![500], Data::F64((1..501).map(|k| k as f64).collect::<Vec<_>>().into()))],
+    true
+)]
+#[case::collatz_ones(format!("{COLLATZ}collatz\"0 {{y}}"), vec![ints(vec![1; 50])], true)]
+#[case::if_else(
+    "{{ if. y > 0 do. y else. 0 end. }}\"0 {y}".to_string(), vec![vector(2000, 61)], true
+)]
+#[case::if_else_no_float(
+    "{{ if. y > 0 do. y else. 0 end. }}\"0 {y}".to_string(),
+    vec![spread(100, 62, -3.0, -1.0)], true
+)]
+#[case::if_elseif(
+    "{{ if. y < _0.25 do. - y elseif. y < 0.25 do. *: y else. %: y end. }}\"0 {y}".to_string(),
+    vec![vector(2000, 63)], true
+)]
+#[case::if_dyad(
+    "{a} {{ if. x < y do. x else. y - x end. }}\"0 {b}".to_string(),
+    vec![vector(2000, 64), vector(2000, 65)], true
+)]
+#[case::if_assigns(
+    "{{\na =. 1\nif. y < 0 do. a =. 2 * y end.\na + y\n}}\"0 {y}".to_string(),
+    vec![vector(2000, 66)], true
+)]
+#[case::for_index(
+    "{{\ns =. 0\nfor_i. i. 5 do. s =. s + i * y end.\ns\n}}\"0 {y}".to_string(),
+    vec![vector(2000, 67)], true
+)]
+#[case::for_counted_by_data(
+    "{{\ns =. 1\nfor. i. y do. s =. s * 2 end.\ns\n}}\"0 {y}".to_string(),
+    vec![ints((0..40).collect())], true
+)]
+// Two names swapped in a loop: the copies back are one parallel copy.
+#[case::loop_swaps(
+    "{{\na =. y\nb =. 1\nfor. i. 3 do.\n  t =. a\n  a =. b\n  b =. t\nend.\na - 10 * b\n}}\"0 {y}"
+        .to_string(),
+    vec![vector(2000, 75)], true
+)]
+#[case::comparisons(
+    "{a} {{ (x < y) + (x <: y) + (x = y) + (x ~: y) + (x >: y) + x > y }}\"0 {b}".to_string(),
+    vec![cycle(&[1.0, 2.0, 3.0, 1.0 + 1e-15, -0.0], 1000), cycle(&[1.0, 2.5, 3.0, 1.0, 0.0], 1000)],
+    true
+)]
+#[case::floor_residue(
+    "{a} {{ (<. y) + (>. y) + x | y }}\"0 {b}".to_string(),
+    vec![spread(2000, 68, -3.0, 3.0), spread(2000, 69, -10.0, 10.0)], true
+)]
+#[case::residue_ints(
+    "{a} {{ x | y }}\"0 {b}".to_string(),
+    vec![ints((-500..500).map(|k| k % 7).collect()), ints((-500..500).collect())], true
+)]
+// Where the compiled loop must stop and leave the answer to the interpreter.
+#[case::nan_input(
+    "{{ if. y > 0 do. y else. 0 end. }}\"0 {y}".to_string(),
+    vec![with(&mut floats(50, 70), &[(9, f64::NAN)])], false
+)]
+#[case::infinity_input(
+    "{{ if. y > 0 do. y else. 0 end. }}\"0 {y}".to_string(),
+    vec![with(&mut floats(50, 71), &[(9, f64::NEG_INFINITY)])], false
+)]
+#[case::infinity_mid_loop(
+    "{{\nk =. 0\nwhile. k < 100 do.\n  y =. y * 1e10\n  k =. k + 1\nend.\ny\n}}\"0 {y}".to_string(),
+    vec![spread(50, 72, 1.0, 2.0)], false
+)]
+#[case::infinity_mid_power("{{ y * y }}^:12\"0 {y}".to_string(), vec![spread(50, 73, 2.0, 3.0)], false)]
+#[case::agenda_out_of_range(
+    "(+`-@.(2&*))\"0 {y}".to_string(), vec![bools(vec![0, 0, 1, 0])], false
+)]
+#[case::agenda_not_whole(
+    "(+`-@.(0.5&*))\"0 {y}".to_string(), vec![ints(vec![0, 2, 1, 0])], false
+)]
+#[case::integer_out_of_bounds(
+    format!("{COLLATZ}collatz\"0 {{y}}"), vec![ints(vec![7, 1 << 45, 9])], false
+)]
+#[case::for_count_not_whole(
+    "{{\ns =. 1\nfor. i. y do. s =. s * 2 end.\ns\n}}\"0 {y}".to_string(),
+    vec![spread(20, 74, 1.0, 3.0)], false
+)]
+fn rank0_compiled_and_interpreted_agree(
+    #[case] src: String,
+    #[case] args: Vec<Array>,
+    #[case] compiled: bool,
+) {
+    let off = with_mode(JitMode::Off, || answer(Lang::J, &src, &args));
+    assert!(!off.starts_with("compile error"), "{src}: {off}");
+    check(&src, &args, compiled);
+}
+
 #[rstest]
 fn the_corpus_answers_the_same(#[files("tests/corpus/j/*.txt")] path: PathBuf) {
     let mut differ = Vec::new();
@@ -236,14 +417,16 @@ fn the_corpus_answers_the_same(#[files("tests/corpus/j/*.txt")] path: PathBuf) {
     assert!(differ.is_empty(), "{}:\n{}", path.display(), differ.join("\n"));
 }
 
-/// Without a forced generator, a fold long enough to compile but short of
-/// LLVM's threshold takes Cranelift's loop where Cranelift is built in;
-/// `force` takes the best generator built in, and once that is LLVM, its
-/// cached loop serves the automatic policy too. The step is one no other
-/// case uses, since the cache is shared by the whole process.
-#[test]
-fn the_policy_picks_the_generator() {
-    let src = "(] F:. ([ + 0.375 * ])) {y}";
+/// Without a forced generator, a fold or a rank-0 application long enough
+/// to compile but short of LLVM's threshold takes Cranelift's loop where
+/// Cranelift is built in; `force` takes the best generator built in, and
+/// once that is LLVM, its cached loop serves the automatic policy too. The
+/// verbs are ones no other case uses, since the cache is shared by the
+/// whole process.
+#[rstest]
+#[case::fold("(] F:. ([ + 0.375 * ])) {y}")]
+#[case::rank0("{{ if. y < 0.125 do. y * 0.375 else. y end. }}\"0 {y}")]
+fn the_policy_picks_the_generator(#[case] src: &str) {
     let y = vector(5000, 40);
     let road = |m: JitMode| {
         let before: Vec<u64> = backends().iter().map(|&b| runs_by(b)).collect();

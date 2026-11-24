@@ -7126,3 +7126,71 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   The threshold follows: the loop saves 0.3–0.45 ns a unit of work on one
   thread and 0.04–0.08 on the pool, so 2^27 units repay a compilation in
   one run on one thread and in two or three on the pool.
+
+- 2026-11-24 — RANK-0 BODIES WITH CONTROL FLOW ARE COMPILED; ONE PROGRAM
+  FOR EVERY LOOP (delegated). The 2026-11-23 owner decision's third step.
+  A rank-0 application `u"0 y` or `x u"0 y` was the next interpreter
+  cliff: each cell builds an array, dispatches through every node of u,
+  and for an explicit definition runs its sentences one by one. The
+  lowering, now `src/jit/lower.rs`, produces a program with blocks — an
+  `if` of two blocks, a `switch` over an agenda's verbs, a `while` with a
+  test block, and a counted `repeat` — over float variables, and
+  `clif.rs` and `llvm.rs` compile it with real branches and loops (a
+  Cranelift variable or an LLVM stack slot per variable, which LLVM
+  promotes to registers). The fold step is the same program without the
+  blocks, so the folds and the cells share one lowering and one emitter
+  per generator, and coverage parity between the generators still holds
+  by construction. What lowers: the arithmetic the fold step already
+  had; `<.` `>.` monadic (J's tolerant floor and ceiling); `|` (J's
+  residue over finite operands, with its tolerant floor and equality);
+  the comparisons `< <: = >: > ~:`, emitted as the interpreter's `Tol::eq`
+  and its derived tests, compare for compare, so nothing is approximated;
+  `*.` and `+.` of two booleans; an agenda with a constant gerund; a
+  power with a constant count; and explicit definitions over local names
+  with `if.`/`elseif.`/`else.`, `while.` and `for.`/`for_name.` over
+  `i. n`. TYPES are tracked because the answer's type is part of
+  bit-identity: every value carries the set of types the interpreter
+  could give it (boolean, integer, float) under the interpreter's own
+  rules — `*` `|` `<.` `>.` keep two booleans boolean, `+` and `-` of two
+  of them are integers, `%:` of a boolean stays boolean, `<.` of a float
+  is an integer — and where a join of branches or a loop makes the set
+  larger than one, a variable holds the type's code at run time, computed
+  by the same rules (the larger code, at least an integer for a sum). The
+  cells loop writes the largest code it met, and the answer frames to
+  that type, as the interpreter's framing promotes. `zr =. 0` before a
+  loop that makes it a float is the common case; Mandelbrot's escape
+  count is one. INTEGERS are held as the floats they equal and kept below
+  2^44: there every sum, difference and product of two of them is exact,
+  none overflows, and a tolerant comparison of two of them is the exact
+  one, so one comparison serves every pair of types; a larger integer
+  stops the loop, and so does an integer product's negative zero, which
+  is made positive instead. THE BAIL CONTRACT is the fold's: a value that
+  is not finite, an integer past the bound, an agenda index that is not a
+  whole number naming a verb of the gerund, a loop count that is not a
+  whole number from 0 to 2^24, or a `while.` loop past 2^24 iterations
+  stops the loop, and the interpreter computes the whole application,
+  answering, refusing (`@.` out of range is an error there and in
+  jconsole, as the corpus pins) or running for ever as it would have. The
+  checks of a straight run of code are and-ed and branched on once,
+  before the next branch or loop edge. THREADS: the cells are split
+  across the pool, explicit definitions included, although the
+  interpreter runs those in order — it does because a definition may
+  touch the name table, and a body that lowers reads and writes local
+  names alone, so its cells are independent and the split cannot change
+  a bit. Policy: Cranelift from 1024 cells, LLVM from 2^21 (both built
+  in), a cached LLVM loop for any length from 16; the cache cap of 1024
+  loops is now per generator. Measured (i7-7920HQ, release, best of
+  three; the interpreter extrapolated from a tenth to a hundredth of the
+  data), full pool / one thread: a Mandelbrot escape count over a
+  1000×1000 grid with at most 64 iterations, written as a `while.` body,
+  interpreter about 164 s / 190 s, Cranelift 145 / 556 ms, LLVM 61 / 161
+  ms; a three-way `@.` over five million floats 2.8 s / 5.8 s, 28 / 113
+  ms, 17 / 78 ms; six Newton steps `(-:@(] + 2 % ]))^:6"0` over five
+  million floats 7.3 s / 21.5 s, 43 / 199 ms, 33 / 134 ms, where the
+  same power applied to the whole list without `"0` takes 322 / 476 ms in
+  the interpreter. Compilation took 0.7–5.7 ms with Cranelift and 10–31
+  ms with LLVM after its one-time setup. numba 0.61, one thread, for
+  reference: 66, 39 and 55 ms. LLVM's loops keep their exits, so nothing
+  here vectorises; a body with no data-dependent loop could take the map's
+  deferred check instead, which is where the remaining distance to numba on
+  the Newton and piecewise kernels lies.
