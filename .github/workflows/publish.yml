@@ -6,7 +6,12 @@
 #
 # Unlike a pure-Python project, one release is a matrix of native wheels:
 # abi3-py310, one wheel per platform, users never invoke rustc. The sdist is
-# the fallback for platforms outside the matrix.
+# the fallback for platforms outside the matrix; it builds with Cranelift
+# alone unless the builder supplies LLVM (docs/testing.md).
+#
+# The wheel and C bundle jobs fetch a static LLVM that llvm-build.yml
+# published and .github/llvm/SHA256SUMS pins; that workflow runs first,
+# once per LLVM version.
 name: Publish
 
 on:
@@ -22,6 +27,11 @@ on:
     - cron: "0 6 * * 1"
 
 jobs:
+  # Every wheel and C bundle links LLVM 21 statically (the `llvm` feature
+  # beside the default Cranelift), from the archives llvm-build.yml
+  # published and .github/llvm/SHA256SUMS pins. Each target builds on its
+  # own architecture: llvm-sys runs the target's llvm-config at build time,
+  # which a cross build could not.
   wheels:
     strategy:
       fail-fast: false
@@ -29,49 +39,66 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
-            smoke: true
-          - os: ubuntu-latest
-            target: aarch64 # cross-compiled; cannot run here
-            smoke: false
-          - os: macos-14 # Intel wheel, cross-compiled from the arm runner
-            target: x86_64 # (GitHub's Intel macOS runners are being retired)
-            smoke: false
-          - os: macos-14 # Apple Silicon
+            triple: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
             target: aarch64
-            smoke: true
+            triple: aarch64-unknown-linux-gnu
+          - os: macos-15-intel # GitHub's last Intel image
+            target: x86_64
+            triple: x86_64-apple-darwin
+            macos: "10.12"
+          - os: macos-15 # Apple Silicon
+            target: aarch64
+            triple: aarch64-apple-darwin
+            macos: "11.0"
           - os: windows-latest
             target: x64
-            smoke: true
+            triple: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # Inside the workspace, because the manylinux container mounts only
+      # that, at the same path.
+      - name: Fetch static LLVM
+        shell: bash
+        run: |
+          prefix=$(bash .github/llvm/fetch.sh ${{ matrix.triple }} .llvm)
+          echo "LLVM_SYS_211_PREFIX=$prefix" >> "$GITHUB_ENV"
+      # The deployment target LLVM was built for, so the wheel's tag and the
+      # objects inside it agree.
+      - if: matrix.macos
+        run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos }}" >> "$GITHUB_ENV"
       - uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
-          manylinux: auto
+          args: --release --out dist --features llvm
+          manylinux: "2014"
+          docker-options: -e LLVM_SYS_211_PREFIX
           # The same compiler as everything else, named rather than left to
           # the action's default: a wheel built on a different one is not the
           # artifact CI vouched for. Matches rust-toolchain.toml.
           rust-toolchain: "1.89"
-      # Cold-import the wheel we just built (native targets only).
-      - if: matrix.smoke
+      # Cold-import the wheel just built and hold its LLVM to the
+      # interpreter. Every target builds natively, so every wheel runs here.
+      - name: Smoke test and LLVM check
         shell: bash
         run: |
-          pip install dist/*.whl
+          ls -l dist
+          python .github/llvm/check_wheel.py --contents dist/*.whl
+          python -m pip install dist/*.whl
           python -c "import jay; assert jay.j('(+/ % #) 1 2 3 4') == 2.5"
           libjay -e "echo 'wheel ok'"
+          python .github/llvm/check_wheel.py
       - uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.target }}
           path: dist
 
   # The C ABI has no registry; its bundles ship as GitHub release assets.
-  # Native targets only (plus the mac Intel cross, which Apple toolchains
-  # handle natively); linux-aarch64 C users build from source.
+  # linux-aarch64 C users build from source.
   capi:
     strategy:
       fail-fast: false
@@ -80,12 +107,14 @@ jobs:
           - os: ubuntu-latest
             triple: x86_64-unknown-linux-gnu
             libs: libjay.so libjay.a
-          - os: macos-14
+          - os: macos-15
             triple: aarch64-apple-darwin
             libs: libjay.dylib libjay.a
-          - os: macos-14
+            macos: "11.0"
+          - os: macos-15-intel
             triple: x86_64-apple-darwin
             libs: libjay.dylib libjay.a
+            macos: "10.12"
           - os: windows-latest
             triple: x86_64-pc-windows-msvc
             libs: jay.dll jay.lib
@@ -96,16 +125,44 @@ jobs:
         with:
           toolchain: "1.89"
           targets: ${{ matrix.triple }}
-      - run: cargo build --release -p libjay-capi --target ${{ matrix.triple }}
+      - name: Fetch static LLVM
+        shell: bash
+        run: |
+          prefix=$(bash .github/llvm/fetch.sh ${{ matrix.triple }} "$RUNNER_TEMP/llvm")
+          echo "LLVM_SYS_211_PREFIX=$prefix" >> "$GITHUB_ENV"
+      - if: matrix.macos
+        run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos }}" >> "$GITHUB_ENV"
+      - run: cargo build --release -p libjay-capi --features llvm --target ${{ matrix.triple }}
+      # LLVM is inside each library (its pass names are, which nothing else
+      # in libjay carries), and the shared one does not load it from outside.
+      - name: LLVM check
+        shell: bash
+        run: |
+          cd "target/${{ matrix.triple }}/release"
+          for f in ${{ matrix.libs }}; do
+            grep -a -q loop-vectorize "$f" || { echo "no LLVM in $f" >&2; exit 1; }
+            echo "$f: $(wc -c < "$f") bytes, LLVM inside"
+          done
+          case "${{ runner.os }}" in
+            Linux) deps=$(readelf -d libjay.so | grep NEEDED) ;;
+            macOS) deps=$(otool -L libjay.dylib) ;;
+            *) deps= ;;
+          esac
+          echo "$deps"
+          if echo "$deps" | grep -qi llvm; then
+            echo "the shared library loads LLVM from outside" >&2
+            exit 1
+          fi
       - name: Bundle
         shell: bash
         run: |
           mkdir -p bundle
-          cp crates/libjay-capi/include/jay.h bundle/
+          cp crates/libjay-capi/include/jay.h LICENSE LICENSE-LLVM bundle/
           for f in ${{ matrix.libs }}; do
             cp "target/${{ matrix.triple }}/release/$f" bundle/
           done
           cd bundle && tar czf "../libjay-capi-${{ matrix.triple }}.tar.gz" *
+          ls -l ../libjay-capi-*.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: capi-${{ matrix.triple }}

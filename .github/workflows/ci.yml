@@ -28,6 +28,47 @@ jobs:
       # broken `exclude` before a release tries to publish for real.
       - run: cargo publish -p libjay --dry-run
 
+  # The `llvm` feature, linked against the static LLVM the wheels link
+  # (.github/llvm/fetch.sh; llvm-build.yml made it). Every suite runs with
+  # both generators built in, then the compiled-code suites again with LLVM
+  # forced for the whole process.
+  llvm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.89"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/llvm
+          key: llvm-${{ runner.os }}-${{ hashFiles('.github/llvm/SHA256SUMS', '.github/llvm/fetch.sh') }}
+      - name: Fetch static LLVM
+        run: |
+          prefix=$(bash .github/llvm/fetch.sh x86_64-unknown-linux-gnu "$RUNNER_TEMP/llvm")
+          echo "LLVM_SYS_211_PREFIX=$prefix" >> "$GITHUB_ENV"
+      - run: cargo test -p libjay --features llvm
+      - run: cargo test -p libjay --features llvm --test jit --test fuse --test oracle
+        env:
+          LIBJAY_JIT: llvm
+      - run: cargo build -p libjay-capi --features llvm && cargo test -p libjay-capi --features llvm
+      - run: cargo clippy -p libjay -p libjay-capi --features llvm --all-targets -- -D warnings
+
+  # The interpreter alone: no code generator built in.
+  interpreter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.89"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p libjay --no-default-features
+      - run: cargo clippy -p libjay --no-default-features --all-targets -- -D warnings
+
   supply-chain:
     runs-on: ubuntu-latest
     steps:

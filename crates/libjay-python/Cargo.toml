@@ -12,6 +12,12 @@ repository.workspace = true
 name = "_jay"
 crate-type = ["cdylib"]
 
+[features]
+# LLVM as the optimising code generator beside Cranelift. Off here, so that
+# a build from source needs no LLVM; the published wheels turn it on
+# (`maturin build --features llvm`, .github/workflows/publish.yml).
+llvm = ["libjay/llvm"]
+
 [dependencies]
 arrow-array = { version = "59.2.0", default-features = false, features = ["ffi"] }
 arrow-buffer = "59.2.0"

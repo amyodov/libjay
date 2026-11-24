@@ -15,5 +15,11 @@ name = "jay"
 # shared target directory. Integration tests include src/lib.rs by path.
 crate-type = ["cdylib", "staticlib"]
 
+[features]
+# LLVM as the optimising code generator beside Cranelift. Off here, so that
+# a build from source needs no LLVM; the released bundles turn it on
+# (`cargo build --features llvm`, .github/workflows/publish.yml).
+llvm = ["libjay/llvm"]
+
 [dependencies]
 libjay = { path = "../libjay" }

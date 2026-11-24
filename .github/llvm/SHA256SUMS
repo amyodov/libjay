@@ -1,0 +1,3 @@
+# SHA-256 of each static LLVM archive fetch.sh accepts, one "<hash>  <file>"
+# line per target, copied from the SHA256SUMS asset of the release that
+# llvm-build.yml published (tag llvm-21.1.8-libjay-1).

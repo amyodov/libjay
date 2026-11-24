@@ -29,6 +29,14 @@ builds from source with the command above. The Python wheels cover
 linux-aarch64 (and every other platform above) regardless — this gap is C
 ABI only.
 
+The bundles are built with the `llvm` feature: LLVM 21 is linked into both
+libraries statically, and its licence ships in the bundle as
+`LICENSE-LLVM`. The shared library needs nothing more. A program linking
+the static library also links the C++ runtime LLVM was built against:
+`-lstdc++` on Linux, `-lc++` on macOS, nothing extra on Windows. A build
+from source has Cranelift alone unless asked for LLVM:
+`LLVM_SYS_211_PREFIX=<prefix> cargo build -p libjay-capi --release --features llvm`.
+
 The header, `crates/libjay-capi/include/jay.h`, is hand-written C99 and is
 the contract; every declaration carries a one-line comment.
 
