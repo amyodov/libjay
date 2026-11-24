@@ -13,6 +13,10 @@
 name: LLVM
 
 on:
+  # TEMPORARY: lets the branch run the builds before the workflow exists on
+  # main (dispatch needs it there). Removed before landing.
+  push:
+    branches: [worktree-agent-a6356eeacd9590a84]
   workflow_dispatch:
     inputs:
       version:
@@ -57,7 +61,7 @@ jobs:
             export PATH=/opt/python/cp312-cp312/bin:$PATH
             python -m pip install --quiet cmake ninja
             gcc --version | head -1
-            bash .github/llvm/build.sh "${{ inputs.version }}" "${{ matrix.triple }}" out
+            bash .github/llvm/build.sh "${{ inputs.version || '21.1.8' }}" "${{ matrix.triple }}" out
           '
       - uses: actions/setup-python@v7
         if: runner.os != 'Linux'
@@ -72,7 +76,7 @@ jobs:
         shell: bash
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos }}
-        run: bash .github/llvm/build.sh "${{ inputs.version }}" "${{ matrix.triple }}" out
+        run: bash .github/llvm/build.sh "${{ inputs.version || '21.1.8' }}" "${{ matrix.triple }}" out
       - uses: actions/upload-artifact@v7
         with:
           name: llvm-${{ matrix.triple }}
