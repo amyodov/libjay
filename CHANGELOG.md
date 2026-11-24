@@ -14,6 +14,18 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   meets a value that is not finite. KAMA over a million bars, 1608 ms to
   61. `LIBJAY_JIT=0` turns it off and `LIBJAY_JIT=force` compiles however
   short the fold.
+- LLVM COMPILES THE FOLD STEP TOO, behind the crate's new `llvm` feature
+  (off by default; it needs LLVM 21 at build time). Cranelift moves behind
+  a `cranelift` feature, which is the default; with neither the engine is
+  the interpreter alone. Both generators lower the same expression and are
+  held to the interpreter bit for bit. With both built in, the automatic
+  policy compiles with Cranelift and turns to LLVM for a fold of four
+  million steps or more; `LIBJAY_JIT=cranelift` and `LIBJAY_JIT=llvm`
+  force one, and `force` takes LLVM where it is built in. The Python
+  wheels and the C library do not include LLVM yet. Over five million
+  floats LLVM's loop is up to a fifth faster (cusum 35 → 29 ms, KAMA
+  40 → 39, bucket 36 → 35) and takes 6–9 ms to compile against
+  Cranelift's 0.5.
 
 ### Changed
 

@@ -12,4 +12,7 @@ publish = false
 name = "libjay_testkit"
 
 [dependencies]
-libjay = { path = "../libjay" }
+# Without the default features, so that `cargo test -p libjay
+# --no-default-features` builds the engine without a code generator: the
+# features a dev-dependency asks for would otherwise switch them back on.
+libjay = { path = "../libjay", default-features = false }

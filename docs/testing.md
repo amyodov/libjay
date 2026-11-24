@@ -881,6 +881,31 @@ hand, parametrised over data, never asserting on call wiring. They are the
 place for a primitive's edge cases and for the exact text of a diagnostic. The
 corpora are for breadth; these are for intent.
 
+## The compiled fold step and its two generators
+
+`tests/jit.rs` runs every case, and then the whole J corpus, once with the
+compiler off and once more for each code generator built in, that
+generator forced: every answer is held bit for bit to the interpreter's,
+each case asserts whether the compiled road was taken, and a case one
+generator compiles must be compiled by the other as well. Which generators
+are built in is a matter of Cargo features on the `libjay` crate:
+
+```
+cargo test -p libjay                          # Cranelift, the default
+cargo test -p libjay --no-default-features    # the interpreter alone
+LLVM_SYS_211_PREFIX=/usr/local/opt/llvm \
+    cargo test -p libjay --features llvm      # Cranelift and LLVM
+```
+
+The `llvm` feature needs LLVM 21 at build time: `llvm-sys` finds it
+through `llvm-config` on the `PATH` or through `LLVM_SYS_211_PREFIX`, the
+installation's prefix (Homebrew's `llvm` formula, while it is version 21,
+is at `/usr/local/opt/llvm` on Intel and `/opt/homebrew/opt/llvm` on Apple
+silicon; `llvm-config --version` says which). The prefix is the developer's environment, never the
+repository's configuration. A local build links LLVM's shared library
+where the installation has one. `LIBJAY_JIT=cranelift` or `=llvm` forces
+one generator for a whole process, e.g. over `--test jit`.
+
 ## The usage stress suite
 
 The corpora ask what a sentence means. The stress suite asks what happens

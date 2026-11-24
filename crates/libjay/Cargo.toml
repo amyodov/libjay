@@ -19,14 +19,21 @@ repository.workspace = true
 name = "jay"
 
 [dependencies]
-# Native code for the scalar step of a fold (src/jit.rs). Pure Rust, built
-# into the one artifact like everything else: no system compiler, no LLVM.
-# 0.127 is the last line whose rust-version is the pinned 1.89.
-cranelift-codegen = { version = "0.127.4", default-features = false, features = ["std", "host-arch"] }
-cranelift-frontend = "0.127.4"
-cranelift-jit = "0.127.4"
-cranelift-module = "0.127.4"
-cranelift-native = "0.127.4"
+# Native code for the scalar step of a fold (src/jit/). Two code
+# generators, each behind a feature; with neither, the interpreter runs
+# every step. Cranelift is pure Rust and builds into the one artifact like
+# everything else: no system compiler, no LLVM. 0.127 is the last line whose
+# rust-version is the pinned 1.89.
+cranelift-codegen = { version = "0.127.4", default-features = false, features = ["std", "host-arch"], optional = true }
+cranelift-frontend = { version = "0.127.4", optional = true }
+cranelift-jit = { version = "0.127.4", optional = true }
+cranelift-module = { version = "0.127.4", optional = true }
+cranelift-native = { version = "0.127.4", optional = true }
+# LLVM 21 through its C API, the optimising tier. It needs an LLVM
+# installation at build time, found through `llvm-config` or
+# LLVM_SYS_211_PREFIX (docs/testing.md), and links its shared library where
+# the installation has one.
+llvm-sys = { version = "211.1.1", features = ["prefer-dynamic"], optional = true }
 multiversion = "0.8"
 # Arbitrary-precision integers: the carrier for J's extended type and for
 # the two halves of a rational. The rational itself is ours — see
@@ -49,6 +56,19 @@ wgpu = { version = "30", default-features = false, features = [
     "vulkan",
     "dx12",
 ] }
+
+[features]
+default = ["cranelift"]
+# The fold step compiled with Cranelift.
+cranelift = [
+    "dep:cranelift-codegen",
+    "dep:cranelift-frontend",
+    "dep:cranelift-jit",
+    "dep:cranelift-module",
+    "dep:cranelift-native",
+]
+# The fold step compiled with LLVM; needs LLVM 21 at build time.
+llvm = ["dep:llvm-sys"]
 
 [dev-dependencies]
 # Validating generated WGSL without an adapter: the f64 path cannot be run

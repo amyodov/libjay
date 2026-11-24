@@ -7044,3 +7044,40 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   `0 (] F:. (4 : '0 >. y + x - 0.5'))` went from 43 ms to 33 and the
   bucket `0 (] F:. (4 : '10 <. 0 >. y + x'))` from 59 to 31. A long typed
   `<./` folded in lanes keeps whichever zero its lanes kept.
+
+- 2026-11-24 — TWO GENERATORS FOR THE FOLD STEP; LLVM FROM FOUR MILLION
+  STEPS (delegated). The 2026-11-23 owner decision's second step, local
+  half. `src/jit.rs` became `src/jit/`: `mod.rs` holds the policy, the
+  cache, the lowered step and the fold entry points, `clif.rs` the
+  Cranelift loop behind the `cranelift` feature (the default), `llvm.rs`
+  the LLVM loop behind `llvm` (off by default). Both compile the same
+  lowered step to the same function signature, so coverage parity holds by
+  construction, and `tests/jit.rs` asserts it case by case besides holding
+  each generator bit for bit to the interpreter and replaying the corpus
+  once per generator. LLVM is reached through `llvm-sys` 211 (MIT,
+  rust-version 1.65, the C API of LLVM 21) rather than a safe wrapper: the
+  experiment had already written the C-API code, `inkwell` would add a
+  layer and its own MSRV for one module, and `llvm-sys` is what B2's static
+  linking will configure anyway. Locally it links the shared library
+  (`prefer-dynamic`); the installation is found through `llvm-config` or
+  LLVM_SYS_211_PREFIX in the developer's environment, never in the
+  repository. The IR has no fast-math flags and the target machine is
+  created with the defaults, which fuse only contractable operations, so
+  there is no FMA contraction; a unit test holds a product-plus-sum loop to
+  Rust's two roundings. The module runs `default<O3>` for the host CPU and
+  its features; the extrema and the magnitude are the select of
+  `scalar.rs`, `^` and `^.` call it by address. `LIBJAY_JIT` gains
+  `cranelift` and `llvm`; one not built in is reported once on standard
+  error and the automatic policy applies; `force` takes LLVM where it is
+  built in. The cache key includes the generator. The tier: measured over
+  five million floats, LLVM compiles in 6–9 ms against Cranelift's 0.5
+  (the first LLVM compilation of a process pays 8 ms more to set up the
+  JIT, and up to 70 when LLVM is not yet in memory) and its loop is
+  faster by 0 to about 2 ns a step — cusum 35 → 29 ms, KAMA 40 → 39,
+  bucket 36 → 35, bit-identical throughout. The extra
+  compilation pays for itself after about four million steps on the steps
+  that gain most, so automatic mode compiles with LLVM from `1 << 22`
+  steps and with Cranelift below; an LLVM loop already in the cache serves
+  any length. With LLVM alone, it compiles from 8192 steps. No background
+  compilation. The Python binding and the C ABI do not enable `llvm` in
+  this round; static LLVM in the wheels and bundles is the next one.

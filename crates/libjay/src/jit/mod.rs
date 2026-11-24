@@ -1,4 +1,4 @@
-//! Native code for the step of a fold, compiled at run time with Cranelift.
+//! Native code for the step of a fold, compiled at run time.
 //!
 //! A fold whose step is a verb the interpreter has no typed loop for — a
 //! train such as `([ + 0.5 * ])` or an explicit definition such as
@@ -9,76 +9,147 @@
 //! compiles the whole loop over the items to machine code, and runs that
 //! instead.
 //!
+//! Two code generators compile the same lowered step to the same loop,
+//! each behind a Cargo feature: Cranelift (`cranelift`, the default), which
+//! compiles in a fraction of a millisecond, and LLVM (`llvm`), which takes
+//! a few milliseconds and optimises harder. With neither, every step is
+//! interpreted.
+//!
 //! The compiled loop answers exactly what the interpreter answers, bit for
-//! bit: every operation is the one [`crate::scalar`] defines for the
-//! primitive, which the interpreter uses too, on the same operands in the
-//! same order. The arithmetic is emitted as the IEEE instruction the
-//! definition consists of, `<.` `>.` and `|` as the same compare and
-//! select, and `^` and `^.` call the definitions themselves. Everywhere
-//! the language's own rules
-//! differ from plain IEEE arithmetic — a NaN, an infinity, `0 % 0` — the
-//! value involved is not finite, so the loop checks every value it makes
-//! and stops at the first that is not. The caller then runs the
-//! interpreter over the whole fold, which is free to answer or refuse as
-//! it always did. Only float data takes this road; the integer types keep
-//! their overflow rules in the interpreter.
+//! bit, whichever generator made it: every operation is the one
+//! [`crate::scalar`] defines for the primitive, which the interpreter uses
+//! too, on the same operands in the same order. The arithmetic is emitted
+//! as the IEEE instruction the definition consists of, with no
+//! reassociation and no fused multiply-add; `<.` `>.` and `|` are the same
+//! compare and select, and `^` and `^.` call the definitions themselves.
+//! Everywhere the language's own rules differ from plain IEEE arithmetic —
+//! a NaN, an infinity, `0 % 0` — the value involved is not finite, so the
+//! loop checks every value it makes and stops at the first that is not.
+//! The caller then runs the interpreter over the whole fold, which is free
+//! to answer or refuse as it always did. Only float data takes this road;
+//! the integer types keep their overflow rules in the interpreter.
 //!
 //! `LIBJAY_JIT` chooses the policy once per process: `0` (or `off`) never
-//! compiles, `force` compiles every step it can lower whatever the fold's
-//! length, and anything else — the default — compiles where the fold is
-//! long enough for the compilation to pay. [`with_mode`] overrides it on
-//! one thread, which is how the differential tests run both roads in one
+//! compiles; `force` compiles every step it can lower whatever the fold's
+//! length, with the best generator built in; `cranelift` and `llvm` do the
+//! same with that generator alone; anything else — the default — compiles
+//! with Cranelift where the fold is long enough for the compilation to
+//! pay, and with LLVM where it is long enough for LLVM's longer
+//! compilation to pay too. [`with_mode`] overrides the policy on one
+//! thread, which is how the differential tests run every road in one
 //! process. Compiled loops are cached by the expression they compute and
-//! live as long as the process.
+//! the generator that compiled them, and live as long as the process.
+
+#[cfg(feature = "cranelift")]
+mod clif;
+#[cfg(feature = "llvm")]
+mod llvm;
 
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use cranelift_codegen::ir::condcodes::FloatCC;
-use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlags, Signature, Value};
-use cranelift_codegen::settings::{self, Configurable};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{default_libcall_names, Linkage, Module};
-
 use crate::array::{Array, Data};
 use crate::ir::{ExplicitDef, Expr, Scope};
-use crate::scalar;
 use crate::verb::{DyadOp, MonadOp, ScalarDyad, ScalarMonad, Verb, RANK_INF};
 
-/// When the fold's step is compiled.
+/// A code generator for the fold loop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Backend {
+    /// Cranelift: compiles in a fraction of a millisecond.
+    Cranelift,
+    /// LLVM: compiles in a few milliseconds and optimises harder.
+    Llvm,
+}
+
+impl Backend {
+    /// Whether this generator is built into the library.
+    pub const fn available(self) -> bool {
+        match self {
+            Backend::Cranelift => cfg!(feature = "cranelift"),
+            Backend::Llvm => cfg!(feature = "llvm"),
+        }
+    }
+}
+
+/// The generators built into the library, the faster-compiling first.
+pub fn backends() -> Vec<Backend> {
+    [Backend::Cranelift, Backend::Llvm].into_iter().filter(|b| b.available()).collect()
+}
+
+/// When the fold's step is compiled, and by which generator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JitMode {
     /// Never: every step is interpreted.
     Off,
     /// Where the fold is long enough for compiling to pay for itself.
     Auto,
-    /// Wherever the step can be lowered, however short the fold.
+    /// Wherever the step can be lowered, however short the fold, with the
+    /// best generator built in: LLVM where it is, otherwise Cranelift.
     Force,
+    /// Wherever the step can be lowered, with Cranelift alone. Nothing is
+    /// compiled where Cranelift is not built in.
+    Cranelift,
+    /// Wherever the step can be lowered, with LLVM alone. Nothing is
+    /// compiled where LLVM is not built in.
+    Llvm,
+}
+
+impl JitMode {
+    /// The mode that forces generator `b`.
+    pub fn forcing(b: Backend) -> JitMode {
+        match b {
+            Backend::Cranelift => JitMode::Cranelift,
+            Backend::Llvm => JitMode::Llvm,
+        }
+    }
 }
 
 thread_local! {
     static OVERRIDE: Cell<Option<JitMode>> = const { Cell::new(None) };
-    static RUNS: Cell<u64> = const { Cell::new(0) };
+    static RUNS: [Cell<u64>; 2] = const { [Cell::new(0), Cell::new(0)] };
 }
 
-/// How many folds this thread has answered with compiled code: what a
-/// test reads to know that the compiled road was the one taken.
+/// How many folds this thread has answered with compiled code, by either
+/// generator: what a test reads to know that the compiled road was the one
+/// taken.
 pub fn runs() -> u64 {
-    RUNS.with(Cell::get)
+    RUNS.with(|r| r[0].get() + r[1].get())
 }
 
-/// The policy `LIBJAY_JIT` names, read once per process.
+/// How many folds this thread has answered with code generator `b` made.
+pub fn runs_by(b: Backend) -> u64 {
+    RUNS.with(|r| r[b as usize].get())
+}
+
+/// The policy `LIBJAY_JIT` names, read once per process. A generator that
+/// is named but not built in is reported on standard error, once, and the
+/// automatic policy runs instead.
 fn process_mode() -> JitMode {
     static MODE: OnceLock<JitMode> = OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var("LIBJAY_JIT") {
-        Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
+    *MODE.get_or_init(|| {
+        let Ok(v) = std::env::var("LIBJAY_JIT") else { return JitMode::Auto };
+        let name = v.trim().to_ascii_lowercase();
+        let m = match name.as_str() {
             "0" | "off" | "false" | "no" => JitMode::Off,
             "force" | "always" => JitMode::Force,
+            "cranelift" => JitMode::Cranelift,
+            "llvm" => JitMode::Llvm,
             _ => JitMode::Auto,
-        },
-        Err(_) => JitMode::Auto,
+        };
+        let missing = match m {
+            JitMode::Cranelift => !Backend::Cranelift.available(),
+            JitMode::Llvm => !Backend::Llvm.available(),
+            _ => false,
+        };
+        if missing {
+            eprintln!(
+                "libjay: LIBJAY_JIT={name}: this build has no {name} code generator \
+                 (the `{name}` feature is off); the automatic policy applies"
+            );
+            return JitMode::Auto;
+        }
+        m
     })
 }
 
@@ -88,7 +159,8 @@ pub fn mode() -> JitMode {
 }
 
 /// Run `f` with the policy set to `m` on this thread, whatever
-/// `LIBJAY_JIT` says. The previous setting is restored afterwards.
+/// `LIBJAY_JIT` says. The previous setting is restored afterwards. Forcing
+/// a generator that is not built in compiles nothing.
 pub fn with_mode<R>(m: JitMode, f: impl FnOnce() -> R) -> R {
     struct Restore(Option<JitMode>);
     impl Drop for Restore {
@@ -105,10 +177,25 @@ pub fn with_mode<R>(m: JitMode, f: impl FnOnce() -> R) -> R {
 /// interpreted steps do.
 const USE_STEPS: usize = 16;
 
-/// Fewest steps for which a loop is compiled under [`JitMode::Auto`].
-/// Compiling one costs a few hundred microseconds, which is a few hundred
-/// interpreted steps of the cheapest train.
+/// Fewest steps for which Cranelift compiles a loop under
+/// [`JitMode::Auto`]. Compiling one costs a few hundred microseconds, which
+/// is a few hundred interpreted steps of the cheapest train.
 const COMPILE_STEPS: usize = 1024;
+
+/// Fewest steps for which LLVM compiles a loop under [`JitMode::Auto`]
+/// where Cranelift is built in too. LLVM compiles a fold step in 6–9 ms
+/// against Cranelift's half millisecond, and its loop is faster by 0 to
+/// about 2 ns a step (measured over five million floats: a cusum gained
+/// 1.2–1.9 ns, a clamped bucket about 0.25, KAMA up to 1.4). The extra
+/// compilation is repaid after roughly four million steps on the steps
+/// that gain most, so that is where LLVM starts; once compiled, its loop
+/// also serves shorter folds of the same step.
+const LLVM_STEPS: usize = 1 << 22;
+
+/// Fewest steps for which LLVM compiles a loop under [`JitMode::Auto`]
+/// where it is the only generator. Its compilation costs 6–9 ms, which is
+/// five or six thousand interpreted steps of about 1.4 µs.
+const LLVM_ALONE_STEPS: usize = 8192;
 
 /// The most loops one process compiles. Each is a few hundred bytes of
 /// code that is never freed; past this, steps are interpreted.
@@ -522,237 +609,100 @@ fn lower(
 /// answers the number of steps taken.
 type Raw = unsafe extern "C" fn(*const f64, i64, i64, f64, *mut f64, i64, *mut f64) -> i64;
 
+/// A compiled loop, by whichever generator.
 #[derive(Clone, Copy)]
 struct Kernel(Raw);
 
-fn cache() -> &'static Mutex<HashMap<Step, Option<Kernel>>> {
-    static CACHE: OnceLock<Mutex<HashMap<Step, Option<Kernel>>>> = OnceLock::new();
+/// Every loop compiled so far, by the step and the generator, None where
+/// the compilation failed.
+type Cache = HashMap<(Step, Backend), Option<Kernel>>;
+
+fn cache() -> &'static Mutex<Cache> {
+    static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Compile a step's loop. None where the host has no Cranelift backend or
-/// the compilation fails for any reason.
-fn compile(step: &Step) -> Option<Kernel> {
-    std::panic::catch_unwind(|| compile_inner(step)).ok().flatten()
+/// Compile a step's loop with generator `b`. None where `b` is not built
+/// in, the host has no backend for it, or the compilation fails.
+fn compile(step: &Step, b: Backend) -> Option<Kernel> {
+    match b {
+        #[cfg(feature = "cranelift")]
+        Backend::Cranelift => clif::compile(step),
+        #[cfg(feature = "llvm")]
+        Backend::Llvm => llvm::compile(step),
+        #[allow(unreachable_patterns)]
+        _ => {
+            let _ = step;
+            None
+        }
+    }
 }
 
-fn compile_inner(step: &Step) -> Option<Kernel> {
-    let mut flags = settings::builder();
-    flags.set("opt_level", "speed").ok()?;
-    flags.set("use_colocated_libcalls", "false").ok()?;
-    flags.set("is_pic", "false").ok()?;
-    let isa = cranelift_native::builder().ok()?.finish(settings::Flags::new(flags)).ok()?;
-    let ptr = isa.pointer_type();
-    let call_conv = isa.default_call_conv();
-    let mut module = JITModule::new(JITBuilder::with_isa(isa, default_libcall_names()));
-
-    let mut sig = module.make_signature();
-    sig.params.push(AbiParam::new(ptr)); // xs
-    sig.params.push(AbiParam::new(types::I64)); // xstride
-    sig.params.push(AbiParam::new(types::I64)); // n
-    sig.params.push(AbiParam::new(types::F64)); // seed
-    sig.params.push(AbiParam::new(ptr)); // out
-    sig.params.push(AbiParam::new(types::I64)); // ostride
-    sig.params.push(AbiParam::new(ptr)); // last
-    sig.returns.push(AbiParam::new(types::I64));
-
-    let id = module.declare_function("fold", Linkage::Local, &sig).ok()?;
-    let mut ctx = module.make_context();
-    ctx.func.signature = sig;
-    let mut fctx = FunctionBuilderContext::new();
-    {
-        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fctx);
-        let unary = {
-            let mut s = Signature::new(call_conv);
-            s.params.push(AbiParam::new(types::F64));
-            s.returns.push(AbiParam::new(types::F64));
-            b.import_signature(s)
-        };
-
-        let entry = b.create_block();
-        let head = b.create_block();
-        let body = b.create_block();
-        let exit = b.create_block();
-        b.append_block_params_for_function_params(entry);
-        // head(i, acc, xp, op)
-        let hi = b.append_block_param(head, types::I64);
-        let hacc = b.append_block_param(head, types::F64);
-        let hxp = b.append_block_param(head, ptr);
-        let hop = b.append_block_param(head, ptr);
-        // exit(i, acc)
-        let ei = b.append_block_param(exit, types::I64);
-        let eacc = b.append_block_param(exit, types::F64);
-
-        b.switch_to_block(entry);
-        let p = b.block_params(entry).to_vec();
-        let (xs, xstride, n, seed, out, ostride, last) = (p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
-        let xstep = b.ins().ishl_imm(xstride, 3);
-        let ostep = b.ins().ishl_imm(ostride, 3);
-        let zero = b.ins().iconst(types::I64, 0);
-        b.ins().jump(head, &[zero.into(), seed.into(), xs.into(), out.into()]);
-
-        b.switch_to_block(head);
-        let more = b.ins().icmp(cranelift_codegen::ir::condcodes::IntCC::SignedLessThan, hi, n);
-        b.ins().brif(more, body, &[], exit, &[hi.into(), hacc.into()]);
-
-        b.switch_to_block(body);
-        let inf = b.ins().f64const(f64::INFINITY);
-        let mut vals: Vec<Value> = Vec::with_capacity(step.nodes.len());
-        let mut ok: Option<Value> = None;
-        let finite = |b: &mut FunctionBuilder, v: Value, ok: &mut Option<Value>| {
-            let m = b.ins().fabs(v);
-            let f = b.ins().fcmp(FloatCC::LessThan, m, inf);
-            *ok = Some(match *ok {
-                None => f,
-                Some(o) => b.ins().band(o, f),
-            });
-        };
-        for node in &step.nodes {
-            let v = match *node {
-                Node::X(k) => {
-                    let v = b.ins().load(types::F64, MemFlags::trusted(), hxp, (k * 8) as i32);
-                    finite(&mut b, v, &mut ok);
-                    v
-                }
-                Node::Y => hacc,
-                Node::Const(bits) => b.ins().f64const(f64::from_bits(bits)),
-                Node::Un(op, a) => {
-                    let a = vals[a as usize];
-                    let v = match op {
-                        Un::Neg => b.ins().fneg(a),
-                        Un::Abs => {
-                            // `scalar::abs`: the negative of a value below
-                            // zero and the value itself otherwise.
-                            let z = b.ins().f64const(0.0);
-                            let below = b.ins().fcmp(FloatCC::LessThan, a, z);
-                            let neg = b.ins().fneg(a);
-                            b.ins().select(below, neg, a)
-                        }
-                        Un::Inc => {
-                            let one = b.ins().f64const(1.0);
-                            b.ins().fadd(a, one)
-                        }
-                        Un::Dec => {
-                            let one = b.ins().f64const(1.0);
-                            b.ins().fsub(a, one)
-                        }
-                        Un::Double => b.ins().fadd(a, a),
-                        Un::Halve => {
-                            let two = b.ins().f64const(2.0);
-                            b.ins().fdiv(a, two)
-                        }
-                        Un::Square => b.ins().fmul(a, a),
-                        Un::OneMinus => {
-                            let one = b.ins().f64const(1.0);
-                            b.ins().fsub(one, a)
-                        }
-                        Un::Recip => {
-                            let one = b.ins().f64const(1.0);
-                            b.ins().fdiv(one, a)
-                        }
-                        Un::Sqrt => b.ins().sqrt(a),
-                        Un::Exp | Un::Ln => {
-                            let f: extern "C" fn(f64) -> f64 =
-                                if op == Un::Exp { scalar::exp } else { scalar::ln };
-                            let callee = b.ins().iconst(ptr, f as usize as i64);
-                            let call = b.ins().call_indirect(unary, callee, &[a]);
-                            b.inst_results(call)[0]
-                        }
-                    };
-                    finite(&mut b, v, &mut ok);
-                    v
-                }
-                Node::Bin(op, l, r) => {
-                    let (l, r) = (vals[l as usize], vals[r as usize]);
-                    let v = match op {
-                        Bin::Add => b.ins().fadd(l, r),
-                        Bin::Sub => b.ins().fsub(l, r),
-                        Bin::Mul => b.ins().fmul(l, r),
-                        // `scalar::div` differs from IEEE only at `0 % 0`,
-                        // whose NaN stops the loop.
-                        Bin::Div => b.ins().fdiv(l, r),
-                        // `scalar::min` and `scalar::max`: the left operand
-                        // where the strict comparison picks it, otherwise
-                        // the right, which is how the interpreter reads one
-                        // pair of atoms. A NaN operand stops the loop
-                        // before the answer is used.
-                        Bin::Min => {
-                            let lt = b.ins().fcmp(FloatCC::LessThan, l, r);
-                            b.ins().select(lt, l, r)
-                        }
-                        Bin::Max => {
-                            let gt = b.ins().fcmp(FloatCC::GreaterThan, l, r);
-                            b.ins().select(gt, l, r)
-                        }
-                    };
-                    finite(&mut b, v, &mut ok);
-                    v
-                }
-            };
-            vals.push(v);
-        }
-        let new = vals[step.root as usize];
-        let cont = b.create_block();
-        match ok {
-            Some(ok) => {
-                b.ins().brif(ok, cont, &[], exit, &[hi.into(), hacc.into()]);
-            }
-            None => {
-                b.ins().jump(cont, &[]);
-            }
-        }
-        b.switch_to_block(cont);
-        if step.store {
-            b.ins().store(MemFlags::trusted(), new, hop, 0);
-        }
-        let i1 = b.ins().iadd_imm(hi, 1);
-        let xp1 = b.ins().iadd(hxp, xstep);
-        let op1 = b.ins().iadd(hop, ostep);
-        b.ins().jump(head, &[i1.into(), new.into(), xp1.into(), op1.into()]);
-
-        b.switch_to_block(exit);
-        b.ins().store(MemFlags::trusted(), eacc, last, 0);
-        b.ins().return_(&[ei]);
-
-        b.seal_all_blocks();
-        b.finalize();
+/// The loop for `step` from generator `b`, compiled now if it is not cached
+/// and `may_compile` allows it.
+fn cached_or_compiled(
+    cache: &mut Cache,
+    step: &Step,
+    b: Backend,
+    may_compile: bool,
+) -> Option<Kernel> {
+    if let Some(k) = cache.get(&(step.clone(), b)) {
+        return *k;
     }
-    module.define_function(id, &mut ctx).ok()?;
-    module.clear_context(&mut ctx);
-    module.finalize_definitions().ok()?;
-    let code = module.get_finalized_function(id);
-    // The code lives as long as the module's memory, which is never freed:
-    // the cache hands the loop out for the rest of the process.
-    std::mem::forget(module);
-    // SAFETY: the function was declared with exactly this signature, under
-    // the host's default calling convention, which `extern "C"` is.
-    Some(Kernel(unsafe { std::mem::transmute::<*const u8, Raw>(code) }))
+    if !may_compile || !b.available() || cache.len() >= MAX_KERNELS {
+        return None;
+    }
+    let k = compile(step, b);
+    cache.insert((step.clone(), b), k);
+    k
 }
 
 /// The compiled loop for `x v y` over items of `width` floats, under the
-/// policy in force for a fold of `steps` steps.
+/// policy in force for a fold of `steps` steps, and the generator that
+/// made it.
+///
+/// Under [`JitMode::Auto`], with both generators built in, a fold of
+/// [`LLVM_STEPS`] steps or more is compiled by LLVM and a shorter one of
+/// [`COMPILE_STEPS`] or more by Cranelift; a loop LLVM has already
+/// compiled serves any fold of [`USE_STEPS`] or more. With one generator
+/// built in, it compiles from its own threshold.
 fn kernel(
     v: &Verb,
     width: usize,
     store: bool,
     steps: usize,
     resolve: &dyn Fn(&str) -> Option<Verb>,
-) -> Option<Kernel> {
+) -> Option<(Kernel, Backend)> {
     let m = mode();
     if m == JitMode::Off || (m == JitMode::Auto && steps < USE_STEPS) {
         return None;
     }
     let step = lower(v, width, store, resolve)?;
     let mut cache = cache().lock().ok()?;
-    if let Some(k) = cache.get(&step) {
-        return *k;
+    let forced = match m {
+        JitMode::Off => return None,
+        JitMode::Force => backends().pop(),
+        JitMode::Cranelift => Some(Backend::Cranelift),
+        JitMode::Llvm => Some(Backend::Llvm),
+        JitMode::Auto => None,
+    };
+    if let Some(b) = forced {
+        return cached_or_compiled(&mut cache, &step, b, true).map(|k| (k, b));
     }
-    if (m == JitMode::Auto && steps < COMPILE_STEPS) || cache.len() >= MAX_KERNELS {
-        return None;
+    let (cl, ll) = (Backend::Cranelift, Backend::Llvm);
+    let llvm_from = if cl.available() { LLVM_STEPS } else { LLVM_ALONE_STEPS };
+    let from = |b: Backend| if b == ll { llvm_from } else { COMPILE_STEPS };
+    let (want, other) = if !cl.available() || steps >= llvm_from { (ll, cl) } else { (cl, ll) };
+    // LLVM's loop, once compiled, serves a fold of any length.
+    if want == cl
+        && let Some(Some(k)) = cache.get(&(step.clone(), ll))
+    {
+        return Some((*k, ll));
     }
-    let k = compile(&step);
-    cache.insert(step, k);
-    k
+    if let Some(k) = cached_or_compiled(&mut cache, &step, want, steps >= from(want)) {
+        return Some((k, want));
+    }
+    cached_or_compiled(&mut cache, &step, other, steps >= from(other)).map(|k| (k, other))
 }
 
 /// The floats of a dense row-major float array, or None.
@@ -799,7 +749,7 @@ fn run(
             return None;
         }
     }
-    let k = kernel(v, width, out.is_some(), n, resolve)?;
+    let (k, backend) = kernel(v, width, out.is_some(), n, resolve)?;
     let xs = ys[first * w..].as_ptr();
     let (op, ostride) = match out {
         Some((o, s)) if s < 0 => (o[n - 1..].as_mut_ptr(), s),
@@ -814,7 +764,7 @@ fn run(
     if taken != n as i64 {
         return None;
     }
-    RUNS.with(|r| r.set(r.get() + 1));
+    RUNS.with(|r| r[backend as usize].set(r[backend as usize].get() + 1));
     Some(last)
 }
 
@@ -950,13 +900,58 @@ mod tests {
             root: 2,
             store: false,
         };
-        let k = compile(&step).expect("the host has a backend");
-        let xs = [1.0, 0.0, 2.0];
-        let mut last = 0.0;
-        // 1 % 4, then 0 % 0.25, then 2 % 0: the third is not finite.
-        let taken = unsafe { (k.0)(xs.as_ptr(), 1, 3, 4.0, std::ptr::null_mut(), 0, &mut last) };
-        assert_eq!(taken, 2);
-        assert_eq!(last, 0.0);
+        for b in backends() {
+            let k = compile(&step, b).expect("the host has a backend");
+            let xs = [1.0, 0.0, 2.0];
+            let mut last = 0.0;
+            // 1 % 4, then 0 % 0.25, then 2 % 0: the third is not finite.
+            let taken =
+                unsafe { (k.0)(xs.as_ptr(), 1, 3, 4.0, std::ptr::null_mut(), 0, &mut last) };
+            assert_eq!(taken, 2, "{b:?}");
+            assert_eq!(last, 0.0, "{b:?}");
+        }
         let _ = no_names("");
+    }
+
+    /// `x * y + x`, stored at every step, against the same arithmetic in
+    /// Rust: a generator that fused the product and the sum into one
+    /// multiply-add would round once where Rust rounds twice.
+    #[test]
+    fn a_product_and_a_sum_stay_two_roundings() {
+        let step = Step {
+            nodes: vec![Node::X(0), Node::Y, Node::Bin(Bin::Mul, 0, 1), Node::Bin(Bin::Add, 2, 0)],
+            root: 3,
+            store: true,
+        };
+        let mut s = 0x2545_f491_4f6c_dd1du64;
+        let xs: Vec<f64> = (0..4096)
+            .map(|_| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                (s >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+            })
+            .collect();
+        let mut want = Vec::with_capacity(xs.len());
+        let mut fused = Vec::with_capacity(xs.len());
+        let (mut acc, mut facc) = (0.3f64, 0.3f64);
+        for &x in &xs {
+            acc = std::hint::black_box(x * acc) + x;
+            want.push(acc.to_bits());
+            facc = x.mul_add(facc, x);
+            fused.push(facc.to_bits());
+        }
+        // The data tells the two apart.
+        assert!(want != fused);
+        for b in backends() {
+            let k = compile(&step, b).expect("the host has a backend");
+            let mut out = vec![0.0; xs.len()];
+            let mut last = 0.0;
+            let n = xs.len() as i64;
+            let taken = unsafe { (k.0)(xs.as_ptr(), 1, n, 0.3, out.as_mut_ptr(), 1, &mut last) };
+            assert_eq!(taken, n, "{b:?}");
+            let got: Vec<u64> = out.iter().map(|v| v.to_bits()).collect();
+            assert!(got == want, "{b:?}: the loop rounds differently from Rust");
+        }
     }
 }
