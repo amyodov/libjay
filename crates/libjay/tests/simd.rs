@@ -12,6 +12,7 @@
 //! 1e-12 relative instead, since the §5.9 contract already allows an
 //! associative float fold to be regrouped.
 
+use jay::jit::{with_mode, Backend, JitMode};
 use jay::simd::{available, detected, level, set_level, Level};
 use jay::{compile, Array, Data, DType, Dialect, Lang, Program};
 
@@ -67,11 +68,29 @@ fn program(lang: Lang, src: &str) -> Program {
         .unwrap_or_else(|e| panic!("compile failed:\n{}", e.render(src)))
 }
 
+/// Run `p` with the compiled map off, which is the block interpreter, and,
+/// where LLVM is built in, once more with it forced: LLVM compiles for the
+/// host whatever the level, and must answer the same bits as the blocks.
 fn run(p: &Program, args: &[Array]) -> Array {
-    let mut sink = |_: &str| {};
-    p.run(args, &mut sink)
-        .unwrap_or_else(|e| panic!("run failed:\n{}", p.render_error(&e)))
-        .expect("the program yielded no value")
+    let once = || {
+        let mut sink = |_: &str| {};
+        p.run(args, &mut sink)
+            .unwrap_or_else(|e| panic!("run failed:\n{}", p.render_error(&e)))
+            .expect("the program yielded no value")
+    };
+    let off = with_mode(JitMode::Off, once);
+    if Backend::Llvm.available() {
+        let on = with_mode(JitMode::Llvm, once);
+        let bits = |a: &Array| match &a.data {
+            Data::F64(v) => format!("{:?}", v.iter().map(|x| x.to_bits()).collect::<Vec<_>>()),
+            d => format!("{d:?}"),
+        };
+        assert!(
+            off.shape == on.shape && off.dtype() == on.dtype() && bits(&off) == bits(&on),
+            "the compiled map differs from the blocks"
+        );
+    }
+    off
 }
 
 /// What two levels are allowed to differ by: nothing at all, except for a

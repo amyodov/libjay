@@ -21,6 +21,7 @@ use llvm_sys::target_machine::*;
 use llvm_sys::transforms::pass_builder::*;
 use llvm_sys::{LLVMAttributeFunctionIndex, LLVMIntPredicate, LLVMRealPredicate};
 
+use super::map::{Input, Map, MapRaw, Op};
 use super::{Bin, Kernel, Node, Raw, Step, Un};
 use crate::scalar;
 
@@ -129,16 +130,41 @@ impl Jit {
     }
 
     unsafe fn compile(&mut self, step: &Step) -> Option<Kernel> {
+        // SAFETY: the symbol is the function `build` defines with exactly
+        // [`Raw`]'s signature under the C calling convention.
+        unsafe {
+            let addr = self.add("libjay_fold", |ctx, m, name| build(ctx, m, step, name))?;
+            Some(Kernel(std::mem::transmute::<usize, Raw>(addr)))
+        }
+    }
+
+    unsafe fn compile_map(&mut self, map: &Map) -> Option<MapRaw> {
+        // SAFETY: the symbol is the function `build_map` defines with
+        // exactly [`MapRaw`]'s signature under the C calling convention.
+        unsafe {
+            let addr = self.add("libjay_map", |ctx, m, name| build_map(ctx, m, map, name))?;
+            Some(std::mem::transmute::<usize, MapRaw>(addr))
+        }
+    }
+
+    /// A fresh module for the host, holding the one function `define` adds
+    /// under the name it is handed, verified and optimised. None where
+    /// either fails.
+    unsafe fn module(
+        &mut self,
+        prefix: &str,
+        define: impl FnOnce(LLVMContextRef, LLVMModuleRef, &CStr),
+    ) -> Option<(LLVMContextRef, LLVMModuleRef, CString)> {
         unsafe {
             self.count += 1;
-            let name = CString::new(format!("libjay_fold_{}", self.count)).ok()?;
+            let name = CString::new(format!("{prefix}_{}", self.count)).ok()?;
             let ctx = LLVMContextCreate();
             let m = LLVMModuleCreateWithNameInContext(c"libjay".as_ptr(), ctx);
             LLVMSetTarget(m, self.triple.as_ptr());
             let dl = LLVMCreateTargetDataLayout(self.tm);
             LLVMSetModuleDataLayout(m, dl);
             LLVMDisposeTargetData(dl);
-            build(ctx, m, step, &name);
+            define(ctx, m, &name);
             let mut msg = null_mut();
             let broken = LLVMVerifyModule(
                 m,
@@ -159,6 +185,19 @@ impl Jit {
                 LLVMContextDispose(ctx);
                 return None;
             }
+            Some((ctx, m, name))
+        }
+    }
+
+    /// Compile the function `define` adds and link it into the process;
+    /// its address.
+    unsafe fn add(
+        &mut self,
+        prefix: &str,
+        define: impl FnOnce(LLVMContextRef, LLVMModuleRef, &CStr),
+    ) -> Option<usize> {
+        unsafe {
+            let (ctx, m, name) = self.module(prefix, define)?;
             let tsctx = LLVMOrcCreateNewThreadSafeContextFromLLVMContext(ctx);
             let tsm = LLVMOrcCreateNewThreadSafeModule(m, tsctx);
             LLVMOrcDisposeThreadSafeContext(tsctx);
@@ -168,12 +207,42 @@ impl Jit {
             ok(LLVMOrcLLJITAddLLVMIRModule(self.jit, LLVMOrcLLJITGetMainJITDylib(self.jit), tsm))?;
             let mut addr = 0;
             ok(LLVMOrcLLJITLookup(self.jit, &mut addr, name.as_ptr()))?;
-            if addr == 0 {
-                return None;
-            }
-            // SAFETY: the symbol is the function `build` defined with
-            // exactly this signature under the C calling convention.
-            Some(Kernel(std::mem::transmute::<usize, Raw>(addr as usize)))
+            (addr != 0).then_some(addr as usize)
+        }
+    }
+
+    /// A map's loop, optimised, as IR and as the host's assembly, without
+    /// linking it.
+    #[cfg(test)]
+    unsafe fn map_listing(&mut self, map: &Map) -> Option<(String, String)> {
+        unsafe {
+            let (ctx, m, _) =
+                self.module("libjay_map", |ctx, m, name| build_map(ctx, m, map, name))?;
+            let p = LLVMPrintModuleToString(m);
+            let ir = CStr::from_ptr(p).to_string_lossy().into_owned();
+            LLVMDisposeMessage(p);
+            let mut buf = null_mut();
+            let mut err = null_mut();
+            let asm = if LLVMTargetMachineEmitToMemoryBuffer(
+                self.tm,
+                m,
+                LLVMCodeGenFileType::LLVMAssemblyFile,
+                &mut err,
+                &mut buf,
+            ) == 0
+            {
+                let start = llvm_sys::core::LLVMGetBufferStart(buf).cast::<u8>();
+                let len = llvm_sys::core::LLVMGetBufferSize(buf);
+                let s = String::from_utf8_lossy(std::slice::from_raw_parts(start, len)).into_owned();
+                llvm_sys::core::LLVMDisposeMemoryBuffer(buf);
+                s
+            } else {
+                LLVMDisposeMessage(err);
+                String::new()
+            };
+            LLVMDisposeModule(m);
+            LLVMContextDispose(ctx);
+            Some((ir, asm))
         }
     }
 }
@@ -193,6 +262,37 @@ struct Em {
 const NM: *const std::ffi::c_char = c"".as_ptr();
 
 impl Em {
+    /// An emitter writing with builder `b` into module `m`.
+    unsafe fn new(ctx: LLVMContextRef, m: LLVMModuleRef, b: LLVMBuilderRef) -> Em {
+        unsafe {
+            let f64t = LLVMDoubleTypeInContext(ctx);
+            let attr = |nm: &str, v: u64| {
+                let kind = LLVMGetEnumAttributeKindForName(nm.as_ptr().cast(), nm.len());
+                LLVMCreateEnumAttribute(ctx, kind, v)
+            };
+            let intrinsic = |nm: &str| {
+                let id = LLVMLookupIntrinsicID(nm.as_ptr().cast(), nm.len());
+                let mut tys = [f64t];
+                (
+                    LLVMGetIntrinsicDeclaration(m, id, tys.as_mut_ptr(), 1),
+                    LLVMIntrinsicGetType(ctx, id, tys.as_mut_ptr(), 1),
+                )
+            };
+            let mut unary_params = [f64t];
+            Em {
+                b,
+                f64t,
+                i64t: LLVMInt64TypeInContext(ctx),
+                ptrt: LLVMPointerTypeInContext(ctx, 0),
+                fabs: intrinsic("llvm.fabs"),
+                sqrt: intrinsic("llvm.sqrt"),
+                unary: LLVMFunctionType(f64t, unary_params.as_mut_ptr(), 1, 0),
+                // memory(none) is the attribute "memory" with the value 0.
+                pure: vec![attr("memory", 0), attr("nounwind", 0), attr("willreturn", 0)],
+            }
+        }
+    }
+
     unsafe fn cf(&self, v: f64) -> LLVMValueRef {
         unsafe { LLVMConstReal(self.f64t, v) }
     }
@@ -231,6 +331,60 @@ impl Em {
         }
     }
 
+    /// The monad `op` of `a`, as `scalar` defines it.
+    unsafe fn un(&self, op: Un, a: LLVMValueRef) -> LLVMValueRef {
+        unsafe {
+            let b = self.b;
+            match op {
+                Un::Neg => LLVMBuildFNeg(b, a, NM),
+                Un::Abs => {
+                    // `scalar::abs`: the negative of a value below zero and
+                    // the value itself otherwise.
+                    let below = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOLT, a, self.cf(0.0), NM);
+                    let neg = LLVMBuildFNeg(b, a, NM);
+                    LLVMBuildSelect(b, below, neg, a, NM)
+                }
+                Un::Inc => LLVMBuildFAdd(b, a, self.cf(1.0), NM),
+                Un::Dec => LLVMBuildFSub(b, a, self.cf(1.0), NM),
+                Un::Double => LLVMBuildFAdd(b, a, a, NM),
+                Un::Halve => LLVMBuildFDiv(b, a, self.cf(2.0), NM),
+                Un::Square => LLVMBuildFMul(b, a, a, NM),
+                Un::OneMinus => LLVMBuildFSub(b, self.cf(1.0), a, NM),
+                Un::Recip => LLVMBuildFDiv(b, self.cf(1.0), a, NM),
+                Un::Sqrt => self.call(self.sqrt.1, self.sqrt.0, &mut [a]),
+                Un::Exp => self.call_by_address(scalar::exp, a),
+                Un::Ln => self.call_by_address(scalar::ln, a),
+            }
+        }
+    }
+
+    /// The dyad `op` of `l` and `r`, as `scalar` defines it wherever no
+    /// operand is a NaN and the operation is not `0 % 0`. A caller makes
+    /// sure neither case reaches an answer it keeps.
+    unsafe fn bin(&self, op: Bin, l: LLVMValueRef, r: LLVMValueRef) -> LLVMValueRef {
+        unsafe {
+            let b = self.b;
+            match op {
+                Bin::Add => LLVMBuildFAdd(b, l, r, NM),
+                Bin::Sub => LLVMBuildFSub(b, l, r, NM),
+                Bin::Mul => LLVMBuildFMul(b, l, r, NM),
+                // `scalar::div` differs from IEEE only at `0 % 0`, which
+                // IEEE makes a NaN.
+                Bin::Div => LLVMBuildFDiv(b, l, r, NM),
+                // `scalar::min` and `scalar::max`: the left operand where
+                // the strict comparison picks it, otherwise the right.
+                Bin::Min => {
+                    let lt = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOLT, l, r, NM);
+                    LLVMBuildSelect(b, lt, l, r, NM)
+                }
+                Bin::Max => {
+                    let gt = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOGT, l, r, NM);
+                    LLVMBuildSelect(b, gt, l, r, NM)
+                }
+            }
+        }
+    }
+
     /// The step's nodes, the item read from `xs` at element `base`, the
     /// running value `acc`. Answers the value of every node.
     unsafe fn step(
@@ -256,53 +410,14 @@ impl Em {
                     Node::Y => acc,
                     Node::Const(bits) => self.cf(f64::from_bits(bits)),
                     Node::Un(op, a) => {
-                        let a = vals[a as usize];
-                        let v = match op {
-                            Un::Neg => LLVMBuildFNeg(b, a, NM),
-                            Un::Abs => {
-                                // `scalar::abs`: the negative of a value
-                                // below zero and the value itself otherwise.
-                                let below =
-                                    LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOLT, a, self.cf(0.0), NM);
-                                let neg = LLVMBuildFNeg(b, a, NM);
-                                LLVMBuildSelect(b, below, neg, a, NM)
-                            }
-                            Un::Inc => LLVMBuildFAdd(b, a, self.cf(1.0), NM),
-                            Un::Dec => LLVMBuildFSub(b, a, self.cf(1.0), NM),
-                            Un::Double => LLVMBuildFAdd(b, a, a, NM),
-                            Un::Halve => LLVMBuildFDiv(b, a, self.cf(2.0), NM),
-                            Un::Square => LLVMBuildFMul(b, a, a, NM),
-                            Un::OneMinus => LLVMBuildFSub(b, self.cf(1.0), a, NM),
-                            Un::Recip => LLVMBuildFDiv(b, self.cf(1.0), a, NM),
-                            Un::Sqrt => self.call(self.sqrt.1, self.sqrt.0, &mut [a]),
-                            Un::Exp => self.call_by_address(scalar::exp, a),
-                            Un::Ln => self.call_by_address(scalar::ln, a),
-                        };
+                        let v = self.un(op, vals[a as usize]);
                         self.finite(v, ok);
                         v
                     }
                     Node::Bin(op, l, r) => {
-                        let (l, r) = (vals[l as usize], vals[r as usize]);
-                        let v = match op {
-                            Bin::Add => LLVMBuildFAdd(b, l, r, NM),
-                            Bin::Sub => LLVMBuildFSub(b, l, r, NM),
-                            Bin::Mul => LLVMBuildFMul(b, l, r, NM),
-                            // `scalar::div` differs from IEEE only at
-                            // `0 % 0`, whose NaN stops the loop.
-                            Bin::Div => LLVMBuildFDiv(b, l, r, NM),
-                            // `scalar::min` and `scalar::max`: the left
-                            // operand where the strict comparison picks it,
-                            // otherwise the right. A NaN operand stops the
-                            // loop before the answer is used.
-                            Bin::Min => {
-                                let lt = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOLT, l, r, NM);
-                                LLVMBuildSelect(b, lt, l, r, NM)
-                            }
-                            Bin::Max => {
-                                let gt = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOGT, l, r, NM);
-                                LLVMBuildSelect(b, gt, l, r, NM)
-                            }
-                        };
+                        // A NaN operand of an extremum stops the loop before
+                        // the answer is used: every operand was checked.
+                        let v = self.bin(op, vals[l as usize], vals[r as usize]);
                         self.finite(v, ok);
                         v
                     }
@@ -337,26 +452,7 @@ unsafe fn build(ctx: LLVMContextRef, m: LLVMModuleRef, step: &Step, name: &CStr)
         }
         LLVMAddAttributeAtIndex(f, LLVMAttributeFunctionIndex, attr("nounwind", 0));
 
-        let intrinsic = |nm: &str| {
-            let id = LLVMLookupIntrinsicID(nm.as_ptr().cast(), nm.len());
-            let mut tys = [f64t];
-            (
-                LLVMGetIntrinsicDeclaration(m, id, tys.as_mut_ptr(), 1),
-                LLVMIntrinsicGetType(ctx, id, tys.as_mut_ptr(), 1),
-            )
-        };
-        let mut unary_params = [f64t];
-        let em = Em {
-            b,
-            f64t,
-            i64t,
-            ptrt,
-            fabs: intrinsic("llvm.fabs"),
-            sqrt: intrinsic("llvm.sqrt"),
-            unary: LLVMFunctionType(f64t, unary_params.as_mut_ptr(), 1, 0),
-            // memory(none) is the attribute "memory" with the value 0.
-            pure: vec![attr("memory", 0), attr("nounwind", 0), attr("willreturn", 0)],
-        };
+        let em = Em::new(ctx, m, b);
         let p = |i| LLVMGetParam(f, i);
         let (xs, xstride, n, seed, out, ostride, last) = (p(0), p(1), p(2), p(3), p(4), p(5), p(6));
 
@@ -410,5 +506,192 @@ unsafe fn build(ctx: LLVMContextRef, m: LLVMModuleRef, step: &Step, name: &CStr)
         LLVMBuildStore(b, acc, last);
         LLVMBuildRet(b, i);
         LLVMDisposeBuilder(b);
+    }
+}
+
+/// Compile a map's loop. None where LLVM has no backend for the host or any
+/// stage of the compilation fails.
+pub(super) fn compile_map(map: &Map) -> Option<MapRaw> {
+    let jit = jit()?;
+    let mut jit = jit.lock().ok()?;
+    // SAFETY: as in `compile`.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { jit.compile_map(map) }))
+        .ok()
+        .flatten()
+}
+
+/// Define `name` in `m` as the loop of [`MapRaw`]'s contract over `map`.
+///
+/// The flag that an item is not to be trusted is or-ed into a value the
+/// loop carries rather than branched on, so the loop has one exit and
+/// LLVM's vectoriser can take it: the flag becomes a vector of flags,
+/// reduced once after the loop.
+unsafe fn build_map(ctx: LLVMContextRef, m: LLVMModuleRef, map: &Map, name: &CStr) {
+    unsafe {
+        let b = LLVMCreateBuilderInContext(ctx);
+        let em = Em::new(ctx, m, b);
+        let (f64t, i64t, ptrt) = (em.f64t, em.i64t, em.ptrt);
+        let i1t = LLVMInt1TypeInContext(ctx);
+        let i8t = LLVMInt8TypeInContext(ctx);
+
+        // (ptrs, splats, n, out) -> untrusted
+        let mut params = [ptrt, ptrt, i64t, ptrt];
+        let fty = LLVMFunctionType(i64t, params.as_mut_ptr(), params.len() as u32, 0);
+        let f = LLVMAddFunction(m, name.as_ptr(), fty);
+        let attr = |nm: &str, v: u64| {
+            let kind = LLVMGetEnumAttributeKindForName(nm.as_ptr().cast(), nm.len());
+            LLVMCreateEnumAttribute(ctx, kind, v)
+        };
+        // The result is a fresh buffer nothing else reads or writes during
+        // the call, and the two tables are only read.
+        for i in [1, 2, 4] {
+            LLVMAddAttributeAtIndex(f, i, attr("noalias", 0));
+        }
+        for i in [1, 2] {
+            LLVMAddAttributeAtIndex(f, i, attr("readonly", 0));
+        }
+        LLVMAddAttributeAtIndex(f, LLVMAttributeFunctionIndex, attr("nounwind", 0));
+        let p = |i| LLVMGetParam(f, i);
+        let (ptrs, splats, n, out) = (p(0), p(1), p(2), p(3));
+
+        let entry = LLVMAppendBasicBlockInContext(ctx, f, c"entry".as_ptr());
+        let head = LLVMAppendBasicBlockInContext(ctx, f, c"head".as_ptr());
+        let body = LLVMAppendBasicBlockInContext(ctx, f, c"body".as_ptr());
+        let exit = LLVMAppendBasicBlockInContext(ctx, f, c"exit".as_ptr());
+
+        // entry: each input's buffer, or its one value, read once.
+        LLVMPositionBuilderAtEnd(b, entry);
+        let at = |base: LLVMValueRef, ty: LLVMTypeRef, i: LLVMValueRef| {
+            let mut ix = [i];
+            LLVMBuildInBoundsGEP2(b, ty, base, ix.as_mut_ptr(), 1, NM)
+        };
+        let cols: Vec<LLVMValueRef> = map
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(j, kind)| {
+                let j = em.ci(j as i64);
+                match kind {
+                    Input::Splat => LLVMBuildLoad2(b, f64t, at(splats, f64t, j), NM),
+                    _ => LLVMBuildLoad2(b, ptrt, at(ptrs, ptrt, j), NM),
+                }
+            })
+            .collect();
+        LLVMBuildBr(b, head);
+
+        // head: the item index and the flag so far.
+        LLVMPositionBuilderAtEnd(b, head);
+        let i = LLVMBuildPhi(b, i64t, NM);
+        let bad = LLVMBuildPhi(b, i1t, NM);
+        let more = LLVMBuildICmp(b, LLVMIntPredicate::LLVMIntSLT, i, n, NM);
+        LLVMBuildCondBr(b, more, body, exit);
+
+        LLVMPositionBuilderAtEnd(b, body);
+        let mut flag = bad;
+        let mut raise = |c: LLVMValueRef| flag = LLVMBuildOr(b, flag, c, NM);
+        let not_finite = |v: LLVMValueRef| {
+            let mag = em.call(em.fabs.1, em.fabs.0, &mut [v]);
+            // Unordered or equal: a NaN, or an infinity.
+            LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealUGE, mag, em.cf(f64::INFINITY), NM)
+        };
+        let mut stack: Vec<LLVMValueRef> = Vec::new();
+        let mut lets: Vec<LLVMValueRef> = Vec::new();
+        for op in &map.ops {
+            match *op {
+                Op::Load(j) => {
+                    let col = cols[j as usize];
+                    let v = match map.inputs[j as usize] {
+                        Input::Splat => col,
+                        Input::F64 => LLVMBuildLoad2(b, f64t, at(col, f64t, i), NM),
+                        Input::I64 => {
+                            let x = LLVMBuildLoad2(b, i64t, at(col, i64t, i), NM);
+                            LLVMBuildSIToFP(b, x, f64t, NM)
+                        }
+                        Input::Bool => {
+                            let x = LLVMBuildLoad2(b, i8t, at(col, i8t, i), NM);
+                            LLVMBuildUIToFP(b, x, f64t, NM)
+                        }
+                    };
+                    stack.push(v);
+                }
+                Op::Un(u) => {
+                    let a = stack.pop().expect("a lowered map is well formed");
+                    let v = em.un(u, a);
+                    if u == Un::Recip {
+                        raise(not_finite(v));
+                    }
+                    stack.push(v);
+                }
+                Op::Bin(o) => {
+                    let r = stack.pop().expect("a lowered map is well formed");
+                    let l = stack.pop().expect("a lowered map is well formed");
+                    if matches!(o, Bin::Min | Bin::Max) {
+                        // A NaN on either side, or the two zeros: equal
+                        // values whose bits differ.
+                        let uno = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealUNO, l, r, NM);
+                        let eq = LLVMBuildFCmp(b, LLVMRealPredicate::LLVMRealOEQ, l, r, NM);
+                        let lb = LLVMBuildBitCast(b, l, i64t, NM);
+                        let rb = LLVMBuildBitCast(b, r, i64t, NM);
+                        let differ = LLVMBuildICmp(b, LLVMIntPredicate::LLVMIntNE, lb, rb, NM);
+                        raise(uno);
+                        raise(LLVMBuildAnd(b, eq, differ, NM));
+                    }
+                    stack.push(em.bin(o, l, r));
+                }
+                Op::Store(_) => lets.push(stack.pop().expect("a lowered map is well formed")),
+                Op::Let(k) => stack.push(lets[k as usize]),
+            }
+        }
+        let v = stack.pop().expect("a lowered map is well formed");
+        raise(not_finite(v));
+        LLVMBuildStore(b, v, at(out, f64t, i));
+        let i1 = LLVMBuildNSWAdd(b, i, em.ci(1), NM);
+        let body_end = LLVMGetInsertBlock(b);
+        LLVMBuildBr(b, head);
+
+        let add = |phi: LLVMValueRef, v: LLVMValueRef, from: LLVMBasicBlockRef| {
+            let (mut vs, mut bs) = ([v], [from]);
+            LLVMAddIncoming(phi, vs.as_mut_ptr(), bs.as_mut_ptr(), 1);
+        };
+        add(i, em.ci(0), entry);
+        add(i, i1, body_end);
+        add(bad, LLVMConstInt(i1t, 0, 0), entry);
+        add(bad, flag, body_end);
+
+        LLVMPositionBuilderAtEnd(b, exit);
+        LLVMBuildRet(b, LLVMBuildZExt(b, bad, i64t, NM));
+        LLVMDisposeBuilder(b);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The map loop vectorises: LLVM's optimised IR computes on vectors of
+    /// floats, and the host's assembly holds packed instructions.
+    #[test]
+    fn a_map_loop_vectorises() {
+        let map = Map {
+            // ((x * w) + 0.5) <. 3, a product, a sum and an extremum.
+            ops: vec![
+                Op::Load(0),
+                Op::Load(1),
+                Op::Bin(Bin::Mul),
+                Op::Load(2),
+                Op::Bin(Bin::Add),
+                Op::Load(3),
+                Op::Bin(Bin::Min),
+            ],
+            inputs: vec![Input::F64, Input::F64, Input::Splat, Input::Splat],
+        };
+        let jit = jit().expect("the host has a backend");
+        let mut jit = jit.lock().unwrap();
+        let (ir, asm) = unsafe { jit.map_listing(&map) }.expect("the map compiles");
+        // Shown with `--nocapture`.
+        eprintln!("{ir}\n{asm}");
+        assert!(ir.contains(" x double>"), "the loop was not vectorised:\n{ir}");
+        #[cfg(target_arch = "x86_64")]
+        assert!(asm.contains("mulpd"), "no packed multiply in the loop:\n{asm}");
     }
 }

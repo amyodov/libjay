@@ -19,7 +19,7 @@
 //! the pass moves such a value into the sentences that read it — see
 //! `inline_once` for the rules that keep that sound.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::array::{Array, Data, Layout};
 use crate::dtype::DType;
@@ -1868,13 +1868,20 @@ fn release(free: &mut Vec<usize>, lets: &[usize], s: Slot) {
     }
 }
 
-/// The whole mapped result, one block at a time. None on integer overflow.
+/// Compiled code for a kernel's whole map: `fill(start, out)` writes result
+/// items `start .. start + out.len()` into `out`, or answers false, leaving
+/// nothing of use there, where the range is the interpreter's to compute.
+type Fill<'a, T> = Option<&'a (dyn Fn(usize, &mut [T]) -> bool + Sync)>;
+
+/// The whole mapped result, one block at a time, or one range at a time by
+/// `fill` where it is given and answers. None on integer overflow.
 fn map_pass<T, M, D, W, S>(
     k: &FusedKernel,
     srcs: &Sources<'_, T>,
     n: usize,
     wide: usize,
     steps: &Steps<M, D, W, S>,
+    fill: Fill<'_, T>,
 ) -> Option<Vec<T>>
 where
     T: FromNarrow + Default + Send + Sync,
@@ -1884,6 +1891,9 @@ where
     S: Fn(ScalarDyad, &[T], Option<T>, &mut [T]) -> Option<T> + Sync + Send,
 {
     let run = |start: usize, part: &mut [T]| {
+        if fill.is_some_and(|f| f(start, part)) {
+            return true;
+        }
         let w = BLOCK.min(part.len()).max(1);
         let mut sc = Scratch::new(k, w);
         let width = sc.width;
@@ -1965,6 +1975,7 @@ multiversioned! {
 }
 
 /// Fold the mapped values of `lo .. hi` right to left, block by block.
+#[allow(clippy::too_many_arguments)]
 fn fold_range<T, M, D, W, C, S>(
     k: &FusedKernel,
     srcs: &Sources<'_, T>,
@@ -1973,6 +1984,7 @@ fn fold_range<T, M, D, W, C, S>(
     wide: usize,
     steps: &Steps<M, D, W, C>,
     step: &S,
+    fill: Fill<'_, T>,
 ) -> Option<T>
 where
     T: FromNarrow + Default,
@@ -1986,6 +1998,7 @@ where
     let mut sc = Scratch::new(k, w);
     let width = sc.width;
     let mut stage = vec![T::default(); srcs.staged * width];
+    let mut mapped = vec![T::default(); if fill.is_some() { w } else { 0 }];
     let mut acc: Option<T> = None;
     // Blocks run backwards and the accumulator carries across them, so the
     // fold is the insert's own right-to-left order over the whole range.
@@ -1995,11 +2008,16 @@ where
         let start = lo + b * w;
         let len = (hi - start).min(w);
         let at = Extent::of(start, len, k.window, wide);
-        let slot = srcs
-            .with_block(&at, &mut stage, width, |loaded| {
+        // The compiled map writes the block the interpreter would have, and
+        // the same fold folds it.
+        let block = if fill.is_some_and(|f| f(start, &mut mapped[..len])) {
+            fold_block(&mapped[..len], step)?
+        } else {
+            let slot = srcs.with_block(&at, &mut stage, width, |loaded| {
                 exec_block(k, loaded, &at, &mut sc, None, steps)
             })?;
-        let block = fold_block(&sc.cells[slot * sc.width..slot * sc.width + len], step)?;
+            fold_block(&sc.cells[slot * sc.width..slot * sc.width + len], step)?
+        };
         acc = Some(match acc {
             None => block,
             Some(a) => step(block, a)?,
@@ -2016,6 +2034,7 @@ fn reduce_pass<T, M, D, W, C, S>(
     wide: usize,
     steps: &Steps<M, D, W, C>,
     step: S,
+    fill: Fill<'_, T>,
 ) -> Option<T>
 where
     T: FromNarrow + Default + Send + Sync,
@@ -2027,11 +2046,11 @@ where
 {
     let chunks = par::chunks(n, n * k.code.len());
     if chunks < 2 {
-        return fold_range(k, srcs, 0, n, wide, steps, &step);
+        return fold_range(k, srcs, 0, n, wide, steps, &step, fill);
     }
     let per = n.div_ceil(chunks);
     let parts = par::map_indexed(n.div_ceil(per), |c| {
-        fold_range(k, srcs, c * per, ((c + 1) * per).min(n), wide, steps, &step)
+        fold_range(k, srcs, c * per, ((c + 1) * per).min(n), wide, steps, &step, fill)
     });
     // The chunks combine right to left, the order they were folded in. That
     // regroups an associative float fold, which is the §5.9 contract; only
@@ -2644,13 +2663,29 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
         };
         let owned: Vec<Option<Vec<f64>>> = inputs.iter().map(|a| splat_f64(a, w)).collect();
         let srcs = sources(inputs, &owned, &on, narrow_f64);
-        match k.reduce() {
+        // A map compiled to native code, where the policy wants one. A range
+        // it does not trust is computed by the blocks below instead, and
+        // then the kernel does not count as answered by compiled code.
+        let compiled = crate::jit::map::bind(k, inputs, n);
+        let declined = AtomicBool::new(false);
+        let fill = |start: usize, out: &mut [f64]| {
+            let ok = compiled.as_ref().is_some_and(|c| c.fill(start, out));
+            if !ok {
+                declined.store(true, Ordering::Relaxed);
+            }
+            ok
+        };
+        let fill: Fill<'_, f64> = match compiled {
+            Some(_) => Some(&fill),
+            None => None,
+        };
+        let data = match k.reduce() {
             None => {
-                let out = map_pass(k, &srcs, n, wide, &steps)?;
+                let out = map_pass(k, &srcs, n, wide, &steps, fill)?;
                 float_result(out, root)
             }
             Some(op) => {
-                let v = reduce_pass(k, &srcs, n, wide, &steps, |a, b| step_f64(op, a, b))?;
+                let v = reduce_pass(k, &srcs, n, wide, &steps, |a, b| step_f64(op, a, b), fill)?;
                 // A comparison at the root maps to exact 0 and 1, which the
                 // fold keeps exact; the reduction of booleans is integer.
                 match root {
@@ -2658,7 +2693,11 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
                     _ => Data::I64(vec![v as i64].into()),
                 }
             }
+        };
+        if fill.is_some() && !declined.load(Ordering::Relaxed) {
+            crate::jit::map::note_map_run();
         }
+        data
     } else {
         let steps = Steps {
             monad: monad_i64,
@@ -2670,11 +2709,11 @@ pub(crate) fn run(k: &FusedKernel, inputs: &[Array]) -> Option<Array> {
         let srcs = sources(inputs, &owned, &on, narrow_i64);
         match k.reduce() {
             None => {
-                let out = map_pass(k, &srcs, n, wide, &steps)?;
+                let out = map_pass(k, &srcs, n, wide, &steps, None)?;
                 int_result(out, root)
             }
             Some(op) => {
-                let v = reduce_pass(k, &srcs, n, wide, &steps, |a, b| step_i64(op, a, b))?;
+                let v = reduce_pass(k, &srcs, n, wide, &steps, |a, b| step_i64(op, a, b), None)?;
                 Data::I64(vec![v].into())
             }
         }

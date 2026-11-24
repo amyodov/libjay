@@ -5,6 +5,7 @@
 use std::sync::{RwLock, RwLockReadGuard};
 
 use jay::fuse::{fallback_count, is_fused, is_inlined, unfused};
+use jay::jit::{map_runs, with_mode, Backend, JitMode};
 use jay::{compile, Array, Data, DType, Dialect, Lang, Program};
 
 // ---------------------------------------------------------------- fixtures
@@ -86,9 +87,37 @@ fn run(p: &Program, args: &[Array]) -> Result<Option<Array>, String> {
 }
 
 /// A run by a caller that holds the lock already.
+///
+/// Every program runs with the compiled map off, which is the block
+/// interpreter, and, where LLVM is built in, once more with it forced: the
+/// two answers must have the same bits, or be the same refusal.
 fn run_alone(p: &Program, args: &[Array]) -> Result<Option<Array>, String> {
-    let mut sink = |_: &str| {};
-    p.run(args, &mut sink).map_err(|e| p.render_error(&e))
+    let once = || {
+        let mut sink = |_: &str| {};
+        p.run(args, &mut sink).map_err(|e| p.render_error(&e))
+    };
+    let off = with_mode(JitMode::Off, once);
+    if Backend::Llvm.available() {
+        let on = with_mode(JitMode::Llvm, once);
+        assert_eq!(spelled(&off), spelled(&on), "the compiled map differs from the blocks");
+    }
+    off
+}
+
+/// An answer written so that two are equal exactly when their shapes,
+/// types and bits are, a NaN and the sign of a zero included.
+fn spelled(r: &Result<Option<Array>, String>) -> String {
+    match r {
+        Ok(Some(a)) => {
+            let d = match &a.data {
+                Data::F64(v) => format!("{:?}", v.iter().map(|x| x.to_bits()).collect::<Vec<_>>()),
+                d => format!("{d:?}"),
+            };
+            format!("{:?} {:?} {d}", a.shape, a.dtype())
+        }
+        Ok(None) => "no value".into(),
+        Err(e) => format!("error: {e}"),
+    }
 }
 
 /// Run `f` with the fallback counter to ourselves, and report both what it
@@ -926,3 +955,239 @@ fn integer_chains_are_exact_however_they_split() {
 }
 
 
+
+// ------------------------------------------------------- the compiled map
+
+/// A float vector with `special` written over it at the given places.
+fn floats_with(n: usize, seed: u64, special: &[(usize, f64)]) -> Array {
+    let mut rng = Rng::new(seed);
+    let mut v: Vec<f64> = (0..n).map(|_| rng.unit() * 4.0 - 2.0).collect();
+    for &(i, x) in special {
+        v[i] = x;
+    }
+    Array::from_f64(v)
+}
+
+/// `n` floats cycling through `pattern`.
+fn cycle(pattern: &[f64], n: usize) -> Array {
+    Array::from_f64(pattern.iter().copied().cycle().take(n).collect())
+}
+
+/// Run `src` over `args` with the compiled map off and forced, and hold
+/// the two to the same bits; the forced run must have been answered by
+/// compiled code exactly when `compiled` says. Without LLVM built in only
+/// the interpreter runs, and nothing is compiled.
+fn check_map(lang: Lang, src: &str, named: &[(&str, &Array)], compiled: bool) {
+    let p = program(lang, src);
+    assert!(is_fused(&p), "`{src}` did not fuse");
+    let args: Vec<Array> = p
+        .params
+        .iter()
+        .map(|s| named.iter().find(|(n, _)| *n == s.name).expect("an argument").1.clone())
+        .collect();
+    let args = &args[..];
+    let _shared = shared_runs();
+    let once = || {
+        let mut sink = |_: &str| {};
+        p.run(args, &mut sink).map_err(|e| p.render_error(&e))
+    };
+    let off = with_mode(JitMode::Off, once);
+    let before = map_runs();
+    let on = with_mode(JitMode::Llvm, once);
+    let ran = map_runs() > before;
+    assert_eq!(spelled(&off), spelled(&on), "`{src}`: the compiled map differs");
+    let want = compiled && Backend::Llvm.available();
+    assert_eq!(ran, want, "`{src}`: compiled road taken = {ran}");
+    // Neither the default policy nor Cranelift's takes a road of its own.
+    let before = map_runs();
+    let cl = with_mode(JitMode::Cranelift, once);
+    assert_eq!(map_runs(), before, "`{src}`: Cranelift has no map loop");
+    assert_eq!(spelled(&off), spelled(&cl), "`{src}`");
+}
+
+const NZ: f64 = -0.0;
+const INF: f64 = f64::INFINITY;
+
+#[test]
+fn the_compiled_map_answers_ordinary_data() {
+    let n = 100_003;
+    let x = floats_with(n, 1, &[]);
+    let w = floats_with(n, 2, &[]);
+    let a = Array::from_i64((0..n as i64).map(|i| i % 97 - 48).collect());
+    let p = Array::new(vec![n], Data::Bool((0..n).map(|i| (i % 3 == 0) as u8).collect()));
+    let xw = [("x", &x), ("w", &w)];
+    for src in [
+        "(2 * {x}) + 1",
+        "{x} * {w} + {x}",
+        "| {x} - {w}",
+        "*: {x} % 1.5 + | {w}",
+        "{x} <. {w} >. 0.25",
+        ">: <: -: +: {x} - {w}",
+        "-. - {x} + {w}",
+        "% 3 + | {x} * {w}",
+        "^ - *: {x} * {w}",
+        "+/ {w} * {x}",
+        "*/ 1 + {x} % 100 + {w}",
+        "<./ {x} + {w}",
+        ">./ {x} * {w}",
+        "d =. {x} - {w}\n+/ d * d",
+    ] {
+        check_map(Lang::J, src, &xw, true);
+    }
+    // An integer or a boolean argument widens to the floats it holds.
+    check_map(Lang::J, "{a} * {x} + 0.5", &[("a", &a), ("x", &x)], true);
+    check_map(Lang::J, "{p} + {x} * 2", &[("p", &p), ("x", &x)], true);
+    check_map(Lang::J, "+/ {a} * 0.5 + {p}", &[("a", &a), ("p", &p)], true);
+    // The other frontend reaches the same kernels.
+    check_map(Lang::Apl, "+/ {w} × {x} + 1", &xw, true);
+    check_map(Lang::Apl, "{x} ⌈ {w} ⌊ 0", &xw, true);
+    // Over a matrix the map is elementwise all the same.
+    let m = Array::new(vec![1000, 100], floats_with(100_000, 18, &[]).data);
+    check_map(Lang::J, "1 + 2 * {m}", &[("m", &m)], true);
+}
+
+#[test]
+fn what_the_compiled_map_does_not_cover_runs_in_the_blocks() {
+    let n = 10_000;
+    let x = floats_with(n, 3, &[]);
+    let w = floats_with(n, 4, &[]);
+    let a = Array::from_i64((0..n as i64).map(|i| i % 97 - 48).collect());
+    let b = Array::from_i64((0..n as i64).map(|i| i % 13 - 6).collect());
+    let xw = [("x", &x), ("w", &w)];
+    // Comparisons, the residue and the sign read the tolerance.
+    for src in ["1 + {x} < {w}", "1 + 3 | {x} * {w}", "1 + * {x} - {w}", "+/ {x} > {w}"] {
+        check_map(Lang::J, src, &xw, false);
+    }
+    // Windows and running folds carry state from item to item.
+    check_map(Lang::J, "1 + 5 +/\\ {x} * {w}", &xw, false);
+    check_map(Lang::J, "1 + +/\\ {x} * {w}", &xw, false);
+    // Integers keep their overflow rules.
+    check_map(Lang::J, "{a} * {b} + 1", &[("a", &a), ("b", &b)], false);
+}
+
+#[test]
+fn a_value_the_languages_treat_specially_hands_the_map_back() {
+    let n = 50_000;
+    let w = floats_with(n, 5, &[]);
+    let case = |src: &str, x: Array, compiled: bool| {
+        check_map(Lang::J, src, &[("x", &x), ("w", &w)], compiled)
+    };
+    // A NaN anywhere it reaches the answer, or an extremum.
+    case("({x} * {w}) + 1", floats_with(n, 6, &[(17, f64::NAN)]), false);
+    case("+/ {x} * {w}", floats_with(n, 7, &[(n - 1, f64::NAN)]), false);
+    case("1 + {x} <. {w}", floats_with(n, 8, &[(9, f64::NAN)]), false);
+    // An infinity that reaches the answer.
+    case("({x} * {w}) + 1", floats_with(n, 9, &[(40_000, INF)]), false);
+    case("({x} * {w}) - 1", floats_with(n, 10, &[(3, -INF)]), false);
+    case("+/ {x} + {w}", floats_with(n, 11, &[(3, INF), (4, -INF)]), false);
+    // An infinity an extremum leaves behind is an ordinary value.
+    case("1 + 0.5 <. {x} + {w}", floats_with(n, 12, &[(3, INF)]), true);
+    case("1 + _0.5 >. {x} + {w}", floats_with(n, 13, &[(3, -INF)]), true);
+    // `0 % 0` is 0 in J and a NaN in IEEE.
+    case("1 + ({x} * 0) % {w} * 0", floats_with(n, 14, &[]), false);
+    // A zero divisor makes an infinity.
+    case("1 + % {x} - {w}", floats_with(n, 15, &[]), true);
+    let zeroed = w.to_f64_vec().unwrap();
+    case("1 + % {x} - {w}", Array::from_f64(zeroed), false);
+    // The two zeros side by side, which the extrema answer by position.
+    let zeros = cycle(&[NZ, 0.0, 0.0, NZ, 1.0], n);
+    check_map(Lang::J, "1 + {x} <. - {x}", &[("x", &zeros)], false);
+    check_map(Lang::J, "1 + {x} >. - {x}", &[("x", &zeros)], false);
+    // One zero alone keeps its sign through a magnitude and a negation.
+    check_map(Lang::J, "- | {x} * 1", &[("x", &cycle(&[NZ, 0.0, -1.5, 2.0], n))], true);
+    // APL refuses `÷ 0`, which the map hands back to be refused.
+    let zero_at = floats_with(n, 16, &[(77, 0.0)]);
+    check_map(Lang::Apl, "1 + ÷ {x}", &[("x", &zero_at)], false);
+    check_map(Lang::Apl, "1 + ÷ {x}", &[("x", &floats_with(n, 16, &[]))], true);
+}
+
+/// The automatic policy compiles a map only for enough work, uses one
+/// already compiled for less, and `0` turns it off. The chain is one no
+/// other test uses, since the cache is shared by the whole process.
+#[test]
+fn the_policy_decides_when_a_map_is_compiled() {
+    let src = "0.375 + {x} * 0.625 - {x}";
+    let p = program(Lang::J, src);
+    let x = floats_with(20_000, 17, &[]);
+    let _shared = shared_runs();
+    let road = |m: JitMode| {
+        let before = map_runs();
+        let mut sink = |_: &str| {};
+        with_mode(m, || p.run(std::slice::from_ref(&x), &mut sink).unwrap());
+        map_runs() > before
+    };
+    let llvm = Backend::Llvm.available();
+    assert!(!road(JitMode::Auto), "too little work to compile for");
+    assert!(!road(JitMode::Off));
+    assert!(!road(JitMode::Cranelift));
+    assert_eq!(road(JitMode::Llvm), llvm);
+    assert_eq!(road(JitMode::Auto), llvm, "a compiled map serves the automatic policy");
+    assert_eq!(road(JitMode::Force), llvm);
+    assert!(!road(JitMode::Off));
+}
+
+/// A random chain of the verbs the compiled map covers, and now and then
+/// one it does not.
+fn covered(rng: &mut Rng, depth: u32) -> String {
+    const MONADS: &[&str] = &["+", "-", "|", "%", ">:", "<:", "+:", "-:", "*:", "-.", "^"];
+    const DYADS: &[&str] = &["+", "-", "*", "%", "<.", ">.", "+", "*", "<"];
+    const LEAVES: &[&str] = &["{x}", "{w}", "2", "_0.5", "0"];
+    if depth == 0 || rng.next() % 5 == 0 {
+        return LEAVES[(rng.next() % LEAVES.len() as u64) as usize].to_string();
+    }
+    if rng.next() % 3 == 0 {
+        let op = MONADS[(rng.next() % MONADS.len() as u64) as usize];
+        return format!("({op} {})", covered(rng, depth - 1));
+    }
+    let op = DYADS[(rng.next() % DYADS.len() as u64) as usize];
+    format!("({} {op} {})", covered(rng, depth - 1), covered(rng, depth - 1))
+}
+
+/// Random chains over floats salted with NaNs, infinities and both zeros:
+/// whatever the compiled map makes of them, the answer is the blocks'.
+#[test]
+fn random_chains_over_special_values_agree_with_the_blocks() {
+    let mut rng = Rng::new(20_261_124);
+    let specials = [f64::NAN, INF, -INF, 0.0, NZ, 1.0, -1.0];
+    // One item in `rate` is special: half the chains are salted heavily,
+    // half so lightly that many see no special value at all.
+    let salted = |rng: &mut Rng, n: usize, rate: u64| {
+        let v: Vec<f64> = (0..n)
+            .map(|_| match rng.next() % rate {
+                0 => specials[(rng.next() % specials.len() as u64) as usize],
+                _ => (rng.unit() * 8.0 - 4.0).round() / 4.0,
+            })
+            .collect();
+        Array::from_f64(v)
+    };
+    let before = map_runs();
+    for i in 0..300 {
+        let body = covered(&mut rng, 4);
+        let src = if i % 4 == 0 { format!("+/ {body}") } else { body };
+        let p = program(Lang::J, &src);
+        // Long enough, every third one, to split across threads and blocks.
+        let n = if i % 3 == 0 { 70_001 } else { 97 };
+        let rate = if i % 2 == 0 { 8 } else { 200_000 };
+        let args: Vec<Array> = p.params.iter().map(|_| salted(&mut rng, n, rate)).collect();
+        let _shared = shared_runs();
+        let once = || {
+            let mut sink = |_: &str| {};
+            p.run(&args, &mut sink).map_err(|e| p.render_error(&e))
+        };
+        let off = spelled(&with_mode(JitMode::Off, once));
+        let on = spelled(&with_mode(JitMode::Llvm, once));
+        // A refusal is compared by its kind: over a long argument split
+        // across threads, which of several offending pairs the message
+        // quotes depends on which thread met one first, on either road.
+        let kind = |s: &str| s.split('`').next().unwrap_or_default().to_string();
+        if off.starts_with("error") && n > 97 {
+            assert_eq!(kind(&off), kind(&on), "`{src}`");
+        } else {
+            assert_eq!(off, on, "`{src}`");
+        }
+    }
+    // Some of them, salted lightly enough, the compiled map answered.
+    let compiled = map_runs() - before;
+    println!("special-value chains: {compiled} of 300 answered by the compiled map");
+    assert!(compiled > 10 || !Backend::Llvm.available());
+}

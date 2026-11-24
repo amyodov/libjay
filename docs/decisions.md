@@ -7081,3 +7081,48 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   any length. With LLVM alone, it compiles from 8192 steps. No background
   compilation. The Python binding and the C ABI do not enable `llvm` in
   this round; static LLVM in the wheels and bundles is the next one.
+
+- 2026-11-24 — LLVM COMPILES THE FUSED FLOAT MAP; FROM 2^27 UNITS OF WORK
+  (delegated). The 2026-11-23 owner decision's second step, the speed
+  proof. `src/jit/map.rs` lowers a fused kernel whose working type is f64
+  and whose program is arithmetic alone — `+ - * % <. >.` and the monads
+  `+ - | % >: <: +: -: *: -. ^`, with loads, lets and splatted scalars —
+  to one loop over a range, which `llvm.rs` compiles with the arithmetic
+  of the fold step (one emitter now serves both). Integer and boolean
+  arguments are widened inside the loop, so nothing is staged. Windows,
+  running folds, comparisons, the residue and the sign stay with the
+  blocks: the last three read the tolerance, the first two carry state
+  from item to item. The check is deferred: the loop or-s into a carried
+  flag wherever the answer is not finite, an extremum sees a NaN or the
+  two zeros, or a reciprocal is not finite, and branches on none of it,
+  so it has one exit and vectorises — the optimised IR computes on
+  `<4 x double>` and the AVX2 assembly is `vmulpd`/`vaddpd`/`vminpd` on
+  ymm registers, interleaved by two, with the flags reduced once after
+  the loop (a unit test asserts the vector IR and, on x86-64, a packed
+  multiply). Every other value the loop computes is the one the blocks
+  compute, since a NaN survives every operation it performs except an
+  extremum and `0 % 0` is its only finite disagreement with IEEE; a
+  raised flag hands the range to the block interpreter, which answers or
+  declines as before, so the map is bit-identical by construction. A
+  map is called once per thread's range; under a reduction it fills one
+  block at a time and the same lanes fold it, so reductions are exact
+  too and needed no compiled fold. Cache key: the lowered program and the
+  input kinds (float, integer, boolean, splat). Policy through
+  `LIBJAY_JIT`: off and `cranelift` never compile a map, `llvm` and
+  `force` always do, automatic compiles from 2^27 items × instructions
+  and uses a cached map from 2^14. Measured over five and twenty million
+  floats (i7-7920HQ, AVX2, release; block interpreter → LLVM): on one
+  thread, `2 * x + 1` 15.7 → 8.6 ms, `+/ w * x` 17.3 → 15.4, a Bollinger
+  z-score map over precomputed moving sums 45 → 14 (236 → 96 at 20M), a
+  12-term Horner polynomial 97 → 13 (451 → 116), a `<.`/`>.` clamp chain
+  63 → 12 (296 → 105), `^ - *: x` 42 → 44; on the full pool of eight,
+  1.05×, 1.1–1.2×, 1.3×, 2.3–3.3× (28 → 8.5, 108 → 46), 1.6–1.9× (19 →
+  10, 77 → 48) and 1.1×. Compiling a map takes 15–22 ms, and the first
+  LLVM compilation of a process 60–100 ms more. Against the owner's kill
+  criterion — long chains at least 2× over the blocks — the polynomial
+  clears it everywhere, the clamp and the z-score clear it on one thread
+  (3–5×) but not on the pool (1.3–1.9×), where both roads stream memory
+  at the machine's bandwidth; `^` gains nothing, being a call per item.
+  The threshold follows: the loop saves 0.3–0.45 ns a unit of work on one
+  thread and 0.04–0.08 on the pool, so 2^27 units repay a compilation in
+  one run on one thread and in two or three on the pool.

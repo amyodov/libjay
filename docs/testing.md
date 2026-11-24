@@ -906,6 +906,16 @@ repository's configuration. A local build links LLVM's shared library
 where the installation has one. `LIBJAY_JIT=cranelift` or `=llvm` forces
 one generator for a whole process, e.g. over `--test jit`.
 
+LLVM also compiles the element-wise map of a fused float kernel. Where it
+is built in, `tests/fuse.rs` and `tests/simd.rs` run every program twice,
+the map off (the block interpreter) and the map forced (`JitMode::Llvm`),
+and hold the two to the same bits or the same refusal; `tests/jit.rs`
+replays the corpus under `JitMode::Llvm` too, which forces the map along
+with the fold step. The cases in `tests/fuse.rs` that name the road assert
+through `jay::jit::map_runs` whether the compiled map answered, including
+NaN, infinity, `0 % 0`, both zeros and APL's `÷ 0`, where it must hand the
+range back. Without the feature the same suites run the blocks alone.
+
 ## The usage stress suite
 
 The corpora ask what a sentence means. The stress suite asks what happens

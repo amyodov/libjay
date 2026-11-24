@@ -26,6 +26,19 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   floats LLVM's loop is up to a fifth faster (cusum 35 → 29 ms, KAMA
   40 → 39, bucket 36 → 35) and takes 6–9 ms to compile against
   Cranelift's 0.5.
+- LLVM COMPILES A FUSED FLOAT MAP, where the `llvm` feature is built in:
+  a fused chain of `+ - * % <. >.` and the monads `+ - | % >: <: +: -: *:
+  -. ^` over float, integer or boolean arguments becomes one vectorised
+  loop per thread's range, and an absorbed `+/ */ <./ >./` folds its
+  blocks exactly as before. A NaN, an infinity reaching the answer, `0 % 0`
+  or the two zeros under an extremum raise a flag instead of a branch, and
+  the range is then computed by the block interpreter as before, so
+  answers stay bit-identical. Over five million floats on one thread a
+  12-term polynomial runs 97 → 13 ms and a clamp chain 63 → 12; on the
+  full pool, where memory bandwidth bounds both, 28 → 8.5 and 19 → 10.
+  Compiling a map costs 15–22 ms; the automatic policy compiles from 2^27
+  items × instructions and uses a cached map from 2^14. `LIBJAY_JIT=0` and
+  `=cranelift` turn it off; `=llvm` and `=force` compile every map.
 
 ### Changed
 

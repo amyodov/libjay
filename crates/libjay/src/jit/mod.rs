@@ -29,6 +29,10 @@
 //! to answer or refuse as it always did. Only float data takes this road;
 //! the integer types keep their overflow rules in the interpreter.
 //!
+//! The same policy governs a second kind of compiled code, LLVM's alone:
+//! the element-wise map of a fused float kernel, in `map.rs`. [`map_runs`]
+//! counts the kernels it answered.
+//!
 //! `LIBJAY_JIT` chooses the policy once per process: `0` (or `off`) never
 //! compiles; `force` compiles every step it can lower whatever the fold's
 //! length, with the best generator built in; `cranelift` and `llvm` do the
@@ -44,6 +48,9 @@
 mod clif;
 #[cfg(feature = "llvm")]
 mod llvm;
+pub(crate) mod map;
+
+pub use map::map_runs;
 
 use std::cell::Cell;
 use std::collections::HashMap;
