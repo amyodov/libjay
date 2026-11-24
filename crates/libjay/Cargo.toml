@@ -31,9 +31,10 @@ cranelift-module = { version = "0.127.4", optional = true }
 cranelift-native = { version = "0.127.4", optional = true }
 # LLVM 21 through its C API, the optimising tier. It needs an LLVM
 # installation at build time, found through `llvm-config` or
-# LLVM_SYS_211_PREFIX (docs/testing.md), and links its shared library where
-# the installation has one.
-llvm-sys = { version = "211.1.1", features = ["prefer-dynamic"], optional = true }
+# LLVM_SYS_211_PREFIX (docs/testing.md). The installation's static libraries
+# are linked where it has them, so the library carries LLVM inside it; an
+# installation with only a shared library is linked dynamically.
+llvm-sys = { version = "211.1.1", features = ["prefer-static"], optional = true }
 multiversion = "0.8"
 # Arbitrary-precision integers: the carrier for J's extended type and for
 # the two halves of a rational. The rational itself is ours — see

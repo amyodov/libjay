@@ -19,6 +19,7 @@ __all__ = [
     "compile",
     "devices",
     "extensions",
+    "jit_backends",
     "Kernel",
     "Device",
     "DeviceArray",
@@ -69,6 +70,17 @@ def devices() -> list[Device]:
     else changes, since every expression already runs on the CPU.
     """
     return [Device(*d) for d in _jay.devices()]
+
+
+def jit_backends() -> tuple[str, ...]:
+    """The native code generators built into this installation.
+
+    Some of ``"cranelift"`` and ``"llvm"``, the faster-compiling first. The
+    published wheels have both; a build from source has Cranelift alone
+    unless it was built with the ``llvm`` feature. ``LIBJAY_JIT`` chooses
+    among them; an empty tuple means the interpreter runs everything.
+    """
+    return tuple(_jay.jit_backends())
 
 _HAVE_TSTRINGS = sys.version_info >= (3, 14)
 

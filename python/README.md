@@ -199,6 +199,22 @@ kernel ran or handed the work back to the chain, and why. With a parameter
 missing, the structure is printed alone. `libjay --explain -e '...'` is the
 same thing from the shell.
 
+## Native code
+
+Long loops — a fold's step, a rank-0 body, a fused element-wise chain —
+are compiled to machine code at run time, with answers identical to the
+interpreter's. The wheels carry two code generators: Cranelift, which
+compiles quickly, and LLVM, which optimises harder and takes the largest
+work. `LIBJAY_JIT` chooses (`0` off, `cranelift`, `llvm`, `force`;
+automatic otherwise), read once per process.
+
+```python
+jay.jit_backends()                   # ('cranelift', 'llvm')
+```
+
+A build from the sdist has Cranelift alone unless built with LLVM 21
+(`MATURIN_PEP517_ARGS="--features llvm"` and `LLVM_SYS_211_PREFIX`).
+
 ## Device placement
 
 Where an expression runs is separate from what it is bound to. `bind` gives

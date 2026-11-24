@@ -1002,6 +1002,20 @@ fn layouts_made() -> u64 {
     jay::layouts_made()
 }
 
+/// The code generators built into this extension, the faster-compiling
+/// first: some of "cranelift" and "llvm". Empty means the interpreter runs
+/// everything.
+#[pyfunction]
+fn jit_backends() -> Vec<&'static str> {
+    jay::jit::backends()
+        .into_iter()
+        .map(|b| match b {
+            jay::jit::Backend::Cranelift => "cranelift",
+            jay::jit::Backend::Llvm => "llvm",
+        })
+        .collect()
+}
+
 #[pymodule]
 fn _jay(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -1013,6 +1027,7 @@ fn _jay(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compile_parts, m)?)?;
     m.add_function(wrap_pyfunction!(devices, m)?)?;
     m.add_function(wrap_pyfunction!(extensions, m)?)?;
+    m.add_function(wrap_pyfunction!(jit_backends, m)?)?;
     m.add_function(wrap_pyfunction!(joins_made, m)?)?;
     m.add_function(wrap_pyfunction!(layouts_made, m)?)?;
     Ok(())

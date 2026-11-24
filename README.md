@@ -53,6 +53,12 @@ uv run libjay -e '(+/ % #) 3 1 4 1 5'                   # 2.8
 uv run libjay examples/hello.apl                        # or run a file
 ```
 
+The published wheels compile hot loops with two code generators, Cranelift
+and LLVM, the latter linked in statically. A build from source has
+Cranelift alone, unless LLVM 21 is installed and asked for:
+`LLVM_SYS_211_PREFIX=<prefix> uv run maturin develop --release --features llvm`
+(docs/testing.md). `jay.jit_backends()` says which an installation has.
+
 ## Where next
 
 | | |
