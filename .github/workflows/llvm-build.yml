@@ -13,10 +13,6 @@
 name: LLVM
 
 on:
-  # TEMPORARY: lets the branch run the builds before the workflow exists on
-  # main (dispatch needs it there). Removed before landing.
-  push:
-    branches: [worktree-agent-a6356eeacd9590a84]
   workflow_dispatch:
     inputs:
       version:
