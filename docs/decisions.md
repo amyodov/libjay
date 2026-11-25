@@ -7118,11 +7118,12 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   63 → 12 (296 → 105), `^ - *: x` 42 → 44; on the full pool of eight,
   1.05×, 1.1–1.2×, 1.3×, 2.3–3.3× (28 → 8.5, 108 → 46), 1.6–1.9× (19 →
   10, 77 → 48) and 1.1×. Compiling a map takes 15–22 ms, and the first
-  LLVM compilation of a process 60–100 ms more. Against the owner's kill
-  criterion — long chains at least 2× over the blocks — the polynomial
-  clears it everywhere, the clamp and the z-score clear it on one thread
-  (3–5×) but not on the pool (1.3–1.9×), where both roads stream memory
-  at the machine's bandwidth; `^` gains nothing, being a call per item.
+  LLVM compilation of a process 60–100 ms more. A design review had
+  proposed dropping the path unless long chains gained 2× over the
+  blocks; the owner set no such bar, and the path stays. The polynomial
+  gains at least 2× everywhere, the clamp and the z-score 3–5× on one
+  thread but 1.3–1.9× on the pool, where both roads stream memory at the
+  machine's bandwidth; `^` gains nothing, being a call per item.
   The threshold follows: the loop saves 0.3–0.45 ns a unit of work on one
   thread and 0.04–0.08 on the pool, so 2^27 units repay a compilation in
   one run on one thread and in two or three on the pool.
