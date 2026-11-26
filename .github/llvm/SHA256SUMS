@@ -1,0 +1,8 @@
+# SHA-256 of each static LLVM archive fetch.sh accepts, one "<hash>  <file>"
+# line per target, copied from the SHA256SUMS asset of the release that
+# llvm-build.yml published (tag llvm-21.1.8-libjay-1).
+4efdc616a56bf215a0b0e1a90428e6b99b8ddf02c95249610d1b19aa391f31ee  llvm-21.1.8-aarch64-apple-darwin.tar.xz
+c60edefbe8a61fa096ba27406bd28ab2dd484120a5f5329de5f5f3cb5b5b1103  llvm-21.1.8-aarch64-unknown-linux-gnu.tar.xz
+3af1a5d8fea0c1ba4580fbd13fc56cd449fdbe5cb4a60a8d1c2bcea309c1f588  llvm-21.1.8-x86_64-apple-darwin.tar.xz
+a2b5b27a2976792e14a1c10623bb58581f408720411f010eef6e3f70998be137  llvm-21.1.8-x86_64-pc-windows-msvc.tar.xz
+ad1d891aa36d015cd1d9028267f39acd384c7be85bd0222ed33dad0cda12c485  llvm-21.1.8-x86_64-unknown-linux-gnu.tar.xz

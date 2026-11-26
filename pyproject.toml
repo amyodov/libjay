@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.7,<2.0"]
+requires = ["maturin>=1.9.3,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -7,6 +7,9 @@ name = "libjay"
 description = "Independent, modern implementations of the J and APL array languages: parallel and vectorized, embeddable from Rust, Python, and C"
 readme = "python/README.md"
 license = "MIT"
+# The published wheels link LLVM statically, so they carry its licence
+# (Apache-2.0 WITH LLVM-exception) beside libjay's own.
+license-files = ["LICENSE", "LICENSE-LLVM"]
 authors = [{ name = "Alex Myodov", email = "amyodov@gmail.com" }]
 requires-python = ">=3.10"
 # PyPI ranks search on the summary and these; "libjay" itself carries no
@@ -66,11 +69,11 @@ libjay = "jay._cli:main"
 manifest-path = "crates/libjay-python/Cargo.toml"
 module-name = "jay._jay"
 python-source = "python"
+# LLVM is not among these: a build from source needs no LLVM and compiles
+# with Cranelift alone. The published wheels add `--features llvm`; a source
+# build can too, with LLVM_SYS_211_PREFIX naming an LLVM 21 installation and
+# MATURIN_PEP517_ARGS="--features llvm" (docs/testing.md).
 features = ["pyo3/extension-module"]
-# An sdist is assembled from what cargo needs plus the Python source, and
-# neither reaches the repository root, so the licence PKG-INFO promises has
-# to be named. The wheel picks it up on its own.
-include = [{ path = "LICENSE", format = "sdist" }]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

@@ -912,9 +912,50 @@ through `llvm-config` on the `PATH` or through `LLVM_SYS_211_PREFIX`, the
 installation's prefix (Homebrew's `llvm` formula, while it is version 21,
 is at `/usr/local/opt/llvm` on Intel and `/opt/homebrew/opt/llvm` on Apple
 silicon; `llvm-config --version` says which). The prefix is the developer's environment, never the
-repository's configuration. A local build links LLVM's shared library
-where the installation has one. `LIBJAY_JIT=cranelift` or `=llvm` forces
-one generator for a whole process, e.g. over `--test jit`.
+repository's configuration. `llvm-sys` is built with `prefer-static`: it
+links the installation's static libraries where it has them (Homebrew's
+does) and its shared library otherwise. `LIBJAY_JIT=cranelift` or `=llvm`
+forces one generator for a whole process, e.g. over `--test jit`.
+
+The Python binding and the C ABI crates have an `llvm` feature of their
+own that turns on the core's; it is off in their manifests, so that
+`cargo build` of the workspace, `pip install` from the sdist and
+`uv build` need no LLVM. A source build of the extension with LLVM:
+
+```
+LLVM_SYS_211_PREFIX=/usr/local/opt/llvm maturin build --release --features llvm
+LLVM_SYS_211_PREFIX=/usr/local/opt/llvm MATURIN_PEP517_ARGS="--features llvm" \
+    pip install libjay --no-binary libjay
+```
+
+A release build without the feature says so in a build warning, and
+`jay.jit_backends()` tells an installation which generators it has.
+
+### Where CI's LLVM comes from
+
+The published wheels and C bundles link LLVM 21 statically. LLVM's own
+release archives do not fit: there is none for macOS on Intel, the Linux
+ones are built against a C++ runtime newer than manylinux2014 allows, and
+each is one to two gigabytes. So `.github/workflows/llvm-build.yml`, run by
+hand, builds LLVM once per target with `.github/llvm/build.sh` (static
+libraries, headers and `llvm-config` only; the host's target alone; no
+assertions; no zlib, zstd, libxml2, libedit or libpfm; `/MD` on Windows;
+Linux inside the manylinux2014 image the wheels are built in; macOS for
+the wheels' deployment targets) and publishes the archives under a
+release tag of their own, `llvm-<version>-libjay-<n>`. Its `SHA256SUMS`
+asset is committed as `.github/llvm/SHA256SUMS`, and
+`.github/llvm/fetch.sh` refuses any archive that does not match it. A new
+LLVM version or configuration takes a new tag; an asset is never replaced.
+
+CI's `llvm` job runs the core suite with both generators built in, then
+`--test jit`, `--test fuse` and `--test oracle` again under
+`LIBJAY_JIT=llvm`, and clippy with the feature; its `interpreter` job runs
+the suite and clippy with `--no-default-features`. The publish workflow
+builds every target natively, runs `.github/llvm/check_wheel.py` on each
+wheel (both generators present, LLVM forced over a fold, a rank-0 body
+and a fused map answering what the interpreter answers, LLVM's licence
+inside, no LLVM shared library), and checks that each C library holds LLVM
+and does not load it from outside.
 
 LLVM also compiles the element-wise map of a fused float kernel. Where it
 is built in, `tests/fuse.rs` and `tests/simd.rs` run every program twice,

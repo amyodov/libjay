@@ -1,0 +1,112 @@
+# Builds the static LLVM that the wheels and C bundles link, once per
+# target, and publishes the archives as assets of a dedicated release. Run
+# by hand only: a new LLVM version or configuration gets a new tag, and the
+# SHA256SUMS asset it publishes is committed to .github/llvm/SHA256SUMS,
+# which is what .github/llvm/fetch.sh (CI and publish) checks every
+# download against. An existing tag is never overwritten.
+#
+# Linux builds inside the manylinux2014 image the wheels are built in, so
+# the C++ runtime LLVM is compiled against is the one the wheel links
+# (devtoolset's libstdc++, which keeps to the manylinux2014 symbol set).
+# macOS builds on each architecture's own runner for the deployment target
+# the wheels declare; Windows builds with MSVC and the /MD runtime.
+name: LLVM
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: LLVM release to build
+        default: "21.1.8"
+      tag:
+        description: Release tag to publish the archives under (must not exist yet)
+        default: llvm-21.1.8-libjay-1
+      publish:
+        description: Publish the release (off builds and uploads workflow artifacts only)
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            image: quay.io/pypa/manylinux2014_x86_64
+          - os: ubuntu-24.04-arm
+            triple: aarch64-unknown-linux-gnu
+            image: quay.io/pypa/manylinux2014_aarch64
+          - os: macos-15
+            triple: aarch64-apple-darwin
+            macos: "11.0"
+          - os: macos-15-intel
+            triple: x86_64-apple-darwin
+            macos: "10.12"
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build in the manylinux image
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" ${{ matrix.image }} bash -euc '
+            export PATH=/opt/python/cp312-cp312/bin:$PATH
+            python -m pip install --quiet cmake ninja
+            gcc --version | head -1
+            bash .github/llvm/build.sh "${{ inputs.version || '21.1.8' }}" "${{ matrix.triple }}" out
+          '
+      - uses: actions/setup-python@v7
+        if: runner.os != 'Linux'
+        with:
+          python-version: "3.12"
+      - if: runner.os != 'Linux'
+        run: python -m pip install cmake ninja
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Build
+        if: runner.os != 'Linux'
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos }}
+        run: bash .github/llvm/build.sh "${{ inputs.version || '21.1.8' }}" "${{ matrix.triple }}" out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: llvm-${{ matrix.triple }}
+          path: out/*
+
+  release:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: out
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd out
+          cat *.tar.xz.sha256 | tr -d '\r' | sort -k2 > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          rm *.tar.xz.sha256
+          ls -l
+          echo "Commit this as .github/llvm/SHA256SUMS:"
+          cat SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "release ${{ inputs.tag }} exists; a new build takes a new tag" >&2
+            exit 1
+          fi
+          gh release create "${{ inputs.tag }}" out/* --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Static LLVM ${{ inputs.version }} for libjay builds" \
+            --notes "LLVM ${{ inputs.version }} built by .github/workflows/llvm-build.yml at $GITHUB_SHA: static libraries, headers and llvm-config, one target per archive, for linking into libjay's wheels and C bundles. Not a libjay release. Apache-2.0 WITH LLVM-exception (LICENSE.TXT inside each archive)."

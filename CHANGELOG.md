@@ -21,8 +21,7 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   held to the interpreter bit for bit. With both built in, the automatic
   policy compiles with Cranelift and turns to LLVM for a fold of four
   million steps or more; `LIBJAY_JIT=cranelift` and `LIBJAY_JIT=llvm`
-  force one, and `force` takes LLVM where it is built in. The Python
-  wheels and the C library do not include LLVM yet. Over five million
+  force one, and `force` takes LLVM where it is built in. Over five million
   floats LLVM's loop is up to a fifth faster (cusum 35 → 29 ms, KAMA
   40 → 39, bucket 36 → 35) and takes 6–9 ms to compile against
   Cranelift's 0.5.
@@ -58,8 +57,25 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
   about 160 s; a three-way piecewise `@.` over five million floats 2.8 s
   → 28 / 17 ms, and six Newton steps `^:6` 7.3 s → 43 / 33 ms. The
   automatic policy compiles from 1024 cells, with LLVM from two million.
+- EVERY WHEEL AND C BUNDLE CARRIES LLVM 21, linked statically beside
+  Cranelift, with no choice to make at install time; the wheels and
+  bundles carry LLVM's licence (Apache-2.0 WITH LLVM-exception) as
+  `LICENSE-LLVM`. `jay.jit_backends()` names the generators an
+  installation has. The sdist and `cargo add libjay` still need no LLVM:
+  a build from source compiles with Cranelift alone and says so in a
+  build warning, and takes LLVM with `--features llvm` and
+  `LLVM_SYS_211_PREFIX` (docs/testing.md). The `libjay` crate keeps
+  `llvm` off by default. The C static library now holds LLVM too, so a C
+  program linking `libjay.a` also links the C++ runtime (`-lstdc++` on
+  Linux, `-lc++` on macOS).
 
 ### Changed
+
+- EVERY WHEEL IS BUILT ON ITS OWN ARCHITECTURE. The linux-aarch64 wheel
+  builds on an Arm runner instead of cross-compiling, and the macOS Intel
+  wheel and bundle on GitHub's Intel image instead of the retired
+  `macos-14`, so every wheel is installed and run before it is published.
+  The Linux wheels stay manylinux2014.
 
 - ONE DEFINITION OF EACH FLOAT PRIMITIVE'S ARITHMETIC. `src/scalar.rs`
   holds the scalar operation behind `+ - * % <. >.` and the monads

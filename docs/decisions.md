@@ -7195,3 +7195,59 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   here vectorises; a body with no data-dependent loop could take the map's
   deferred check instead, which is where the remaining distance to numba on
   the Newton and piecewise kernels lies.
+
+- 2026-11-24 — STATIC LLVM IN EVERY WHEEL AND BUNDLE, BUILT BY OUR OWN
+  WORKFLOW (delegated). The 2026-11-23 owner decision's packaging half.
+  WHERE THE LLVM COMES FROM, per target, was weighed three ways. LLVM's
+  own 21.1.8 release assets cover Linux x86-64 and Arm64, macOS Arm64 and
+  Windows x64 but not macOS on Intel; each is 0.9–2 GB; the Linux ones are
+  built on a current Ubuntu, against a libstdc++ newer than manylinux2014
+  allows, and with zlib, zstd and libxml2 linked in; the Windows archive's
+  C runtime is not ours to choose. conda-forge's `llvmdev` has static
+  libraries for all five targets, but against conda's own C++ runtime and
+  sysroot, with zstd and zlib as dependencies, which is the same mismatch
+  in another place. So one workflow, `llvm-build.yml`, run by hand, builds
+  LLVM 21.1.8 from the release's source tarball (its SHA-256 pinned in
+  `.github/llvm/build.sh`) on every target the same way: static libraries,
+  headers and `llvm-config` and nothing else, the host's target alone,
+  Release, no assertions, no compression or XML libraries, so
+  `llvm-config --system-libs` names the platform's own libraries only.
+  Linux x86-64 and Arm64 build inside `quay.io/pypa/manylinux2014_*`,
+  the image the wheels are built in, so LLVM is compiled with the
+  devtoolset compiler whose libstdc++ keeps to the manylinux2014 symbol
+  set and auditwheel's check holds; Arm64 on GitHub's Arm runner. macOS
+  Arm64 builds on `macos-15` for 11.0, macOS Intel on `macos-15-intel`
+  for 10.12, the deployment targets the wheels declare. Windows x64
+  builds with MSVC and the `/MD` runtime Rust's MSVC targets use, the DIA
+  SDK off so that no absolute library path reaches the link line. The
+  archives are assets of a prerelease tagged `llvm-21.1.8-libjay-1`, never
+  replaced; their checksums are committed in `.github/llvm/SHA256SUMS`,
+  which `fetch.sh` holds every download to. This is what llvmlite does for
+  numba's wheels, for the same reasons. LINKING: `llvm-sys` moves from
+  `prefer-dynamic` to `prefer-static`, which takes the static libraries
+  where an installation has them and the shared one otherwise, so a
+  Homebrew build still links. THE FEATURE: `libjay-python` and
+  `libjay-capi` each have an `llvm` feature that turns on the core's, off
+  in their manifests and on only in the publish workflow
+  (`maturin build --features llvm`, `cargo build --features llvm`), so
+  `cargo build` of the workspace, the sdist and `cargo add libjay` stay
+  hermetic. A build from source cannot probe for LLVM and choose a feature
+  — Cargo features are fixed before any build script runs, and `llvm-sys`
+  fails outright when it finds nothing — so the fallback the owner
+  decision asks for is the default: a source build has Cranelift alone,
+  its release build warns so and says how to add LLVM
+  (`LLVM_SYS_211_PREFIX` and `MATURIN_PEP517_ARGS="--features llvm"`).
+  `jay.jit_backends()` reports what an installation has. EVERY TARGET
+  BUILDS NATIVELY: `llvm-sys` runs the target's `llvm-config` at build
+  time, so the cross-compiled linux-aarch64 wheel and macOS Intel wheel
+  and bundle went to their own runners — which also retires `macos-14`,
+  gone since 2026-11-02 and failing the weekly dry run since — and every
+  wheel is now installed and run before it is published: both generators
+  present, a fold, a rank-0 body and a fused map forced through LLVM
+  answering what the interpreter answers. LICENCES: `LICENSE-LLVM` is
+  LLVM 21.1.8's `LICENSE.TXT`, listed in `license-files` beside `LICENSE`
+  (maturin from 1.9.3 puts both in the wheel's `licenses/` and the sdist)
+  and copied into each C bundle; `deny.toml` already allowed
+  Apache-2.0 WITH LLVM-exception. The wheel's licence expression stays
+  `MIT`, as it was while Cranelift, under the same LLVM licence, was
+  already linked in.
