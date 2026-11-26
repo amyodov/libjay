@@ -705,7 +705,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libjay"
-version = "0.4.99"
+version = "0.5.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -727,14 +727,14 @@ dependencies = [
 
 [[package]]
 name = "libjay-capi"
-version = "0.4.99"
+version = "0.5.0"
 dependencies = [
  "libjay",
 ]
 
 [[package]]
 name = "libjay-devtools"
-version = "0.4.99"
+version = "0.5.0"
 dependencies = [
  "libc",
  "libjay",
@@ -744,7 +744,7 @@ dependencies = [
 
 [[package]]
 name = "libjay-python"
-version = "0.4.99"
+version = "0.5.0"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "libjay-testkit"
-version = "0.4.99"
+version = "0.5.0"
 dependencies = [
  "libjay",
 ]

@@ -7251,3 +7251,10 @@ written as a rational: `(0.5) % 0` and `(0.5) % (0x)` are `_` there and
   Apache-2.0 WITH LLVM-exception. The wheel's licence expression stays
   `MIT`, as it was while Cranelift, under the same LLVM licence, was
   already linked in.
+
+- 2026-11-26 — THE JIT PREVIEW IS 0.5.0; DYNAMIC J MOVES TO 0.6.0 (owner
+  decision). The compiled loops, both code generators and LLVM in every
+  wheel change what the engine is more than any coverage wave, so they take
+  the new minor version. The milestone the 2026-09-22 entry named 0.5.0,
+  J code that builds J code, keeps its plan and becomes 0.6.0, and the
+  Dyalog line after it 0.7.0.

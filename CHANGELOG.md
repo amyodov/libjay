@@ -7,6 +7,14 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## 0.5.0 — 2026-11-26
+
+### Added
+
 - A FOLD'S STEP IS COMPILED TO NATIVE CODE with Cranelift where it is
   arithmetic on floats: `] F.. v` and its relatives, the insert `v/` and
   the suffix scan `v/\.` with a train or an explicit step. Answers are
